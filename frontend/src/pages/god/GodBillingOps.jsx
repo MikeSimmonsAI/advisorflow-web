@@ -128,6 +128,12 @@ export default function GodBillingOps() {
   // The differences a refresh WOULD make, waiting to be approved. Nothing has
   // been written while this is set.
   const [resyncPreview, setResyncPreview] = useState(null);
+  // The assisted plan change: the form being filled in, the preview awaiting
+  // approval, and the last outcome. Nothing is written while either is set.
+  const [changeForm, setChangeForm] = useState(null);
+  const [changePreview, setChangePreview] = useState(null);
+  const [changing, setChanging] = useState(null);
+  const [changeNote, setChangeNote] = useState('');
 
   useEffect(() => {
     api.get('/god/billing/brands')
@@ -194,6 +200,81 @@ export default function GodBillingOps() {
       setResyncNote(`${row.name}: ${e?.detail || e?.message || 'could not read from Stripe. Nothing was changed.'}`);
     } finally {
       setResyncing(null);
+    }
+  }
+
+  // ── CHANGE A CUSTOMER'S PLAN FOR THEM ──────────────────────────────────
+  //
+  // Same two steps, same reasoning, and behind it the SAME functions the
+  // customer's own Billing page calls — so an operator cannot produce an
+  // outcome the customer could not have produced themselves.
+  //
+  // This is here because a customer provisioned from a signed deal has a live
+  // subscription and, until somebody is invited, no user account at all.
+  // Nobody can log in to change it, and the only other route is the Stripe
+  // dashboard, which writes nothing back here.
+  // Open the form. Its plan list comes from the customer's OWN brand, so one
+  // brand's operator view cannot offer another brand's tiers.
+  async function handleAssistedChange(row) {
+    setChangeNote(''); setChangePreview(null);
+    setChanging(row.organization_id);
+    try {
+      const detail = await api.get(
+        `/god/billing/brands/${encodeURIComponent(row.platform_id)}`);
+      setChangeForm({
+        row,
+        plans: (detail.plans || []).filter(p => p.is_active),
+        planKey: row.plan_key || '',
+        // Blank means KEEP the commitment they are on. Offered explicitly so
+        // an operator can also change it on purpose.
+        commitmentKey: '',
+      });
+    } catch (e) {
+      setChangeNote(`${row.name}: ${e?.detail || e?.message || 'the brand catalogue could not be loaded.'}`);
+    } finally {
+      setChanging(null);
+    }
+  }
+
+  // Ask the server what would happen. Read-only; touches neither Stripe nor
+  // the database.
+  async function previewAssistedChange() {
+    if (!changeForm) return;
+    const { row, planKey, commitmentKey } = changeForm;
+    setChangeNote('');
+    setChanging(row.organization_id);
+    try {
+      const preview = await api.post(
+        `/god/billing/customers/${row.organization_id}/change-plan`,
+        { plan: planKey, commitment: commitmentKey || null, apply: false });
+      setChangePreview({ row, planKey, commitmentKey: commitmentKey || null,
+                         preview });
+      setChangeForm(null);
+    } catch (e) {
+      setChangeNote(`${row.name}: ${e?.detail || e?.message || 'the change could not be previewed. Nothing was changed.'}`);
+    } finally {
+      setChanging(null);
+    }
+  }
+
+  async function applyAssistedChange() {
+    if (!changePreview) return;
+    const { row, planKey, commitmentKey } = changePreview;
+    setChanging(row.organization_id);
+    try {
+      const r = await api.post(
+        `/god/billing/customers/${row.organization_id}/change-plan`,
+        { plan: planKey, commitment: commitmentKey, apply: true });
+      setChangePreview(null);
+      setChangeNote(
+        r.pending_plan
+          ? `${row.name}: change accepted and scheduled — they keep their current plan until the end of this billing period, then move to ${r.pending_plan}.`
+          : `${row.name}: change applied ${r.effective || 'immediately'}.`);
+      await load();
+    } catch (e) {
+      setChangeNote(`${row.name}: ${e?.detail || e?.message || 'the change failed. Nothing was charged.'}`);
+    } finally {
+      setChanging(null);
     }
   }
 
@@ -346,6 +427,140 @@ export default function GodBillingOps() {
                         background: '#2fb6ff11',
                         borderBottom: '1px solid #2a2a4a' }}>
             {resyncNote}
+          </div>
+        )}
+
+        {changeNote && (
+          <div style={{ padding: '10px 20px', fontSize: 13, color: '#2fb6ff',
+                        background: '#2fb6ff11',
+                        borderBottom: '1px solid #2a2a4a' }}>
+            {changeNote}
+          </div>
+        )}
+
+        {/* STEP 1 — WHICH PLAN, AND ON WHAT TERMS.
+            The commitment defaults to blank, meaning KEEP the one they are on:
+            an operator moving somebody between tiers must not move them
+            between rates by accident. */}
+        {changeForm && (
+          <div style={{ padding: '14px 20px', background: '#2fb6ff0e',
+                        borderBottom: '1px solid #2a2a4a' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
+              Change plan — {changeForm.row.name}
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
+                          alignItems: 'center', marginBottom: 10 }}>
+              <select
+                value={changeForm.planKey}
+                onChange={e => setChangeForm(f => ({ ...f, planKey: e.target.value }))}
+                style={{ background: '#14142b', color: '#e8e8f0',
+                         border: '1px solid #2a2a4a', borderRadius: 6,
+                         padding: '6px 10px', fontSize: 13 }}
+              >
+                <option value="">Select a plan…</option>
+                {changeForm.plans.map(p => (
+                  <option key={p.key} value={p.key}>{p.name || p.key}</option>
+                ))}
+              </select>
+              <select
+                value={changeForm.commitmentKey}
+                onChange={e => setChangeForm(f => ({ ...f, commitmentKey: e.target.value }))}
+                style={{ background: '#14142b', color: '#e8e8f0',
+                         border: '1px solid #2a2a4a', borderRadius: 6,
+                         padding: '6px 10px', fontSize: 13 }}
+              >
+                <option value="">Keep their commitment
+                  {changeForm.row.commitment_label
+                    ? ` (${changeForm.row.commitment_label})` : ''}</option>
+                <option value="month_to_month">Month-to-month</option>
+                <option value="term_agreement">Committed term</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={previewAssistedChange}
+                disabled={!changeForm.planKey || Boolean(changing)}
+                style={{ background: changeForm.planKey ? '#2fb6ff' : '#2a2a4a',
+                         color: changeForm.planKey ? '#04121c' : '#666',
+                         border: 'none', borderRadius: 6, padding: '6px 14px',
+                         fontSize: 12, fontWeight: 700,
+                         cursor: changeForm.planKey && !changing ? 'pointer' : 'default' }}
+              >
+                {changing ? 'Checking…' : 'Preview change'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setChangeForm(null)}
+                style={{ background: 'transparent', color: '#aaa',
+                         border: '1px solid #2a2a4a', borderRadius: 6,
+                         padding: '6px 14px', fontSize: 12, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 2 — WHAT IT WOULD DO, from the brand's own configuration. */}
+        {changePreview && (
+          <div style={{ padding: '14px 20px', background: '#f59e0b0e',
+                        borderBottom: '1px solid #2a2a4a' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+              {changePreview.row.name} — {changePreview.preview.direction}
+            </div>
+            <table style={{ fontSize: 12, borderCollapse: 'collapse',
+                            marginBottom: 12 }}>
+              <tbody>
+                {[
+                  ['From', `${changePreview.preview.from_plan_name || '—'} · ${money(changePreview.preview.from_cents, changePreview.preview.currency) || '—'}/mo`],
+                  ['To', `${changePreview.preview.to_plan_name} · ${money(changePreview.preview.to_cents, changePreview.preview.currency) || '—'}/mo`],
+                  ['Commitment', changePreview.preview.commitment_label || 'Not recorded'],
+                  ['Takes effect', changePreview.preview.effective_at
+                    ? `${changePreview.preview.effective} (${when(changePreview.preview.effective_at)})`
+                    : changePreview.preview.effective],
+                ].map(([k, v]) => (
+                  <tr key={k}>
+                    <td style={{ padding: '3px 16px 3px 0', color: '#888' }}>{k}</td>
+                    <td style={{ padding: '3px 0', fontWeight: 600 }}>{v}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {changePreview.preview.commitment_changed && (
+              <div style={{ fontSize: 12, color: '#f59e0b', fontWeight: 600,
+                            marginBottom: 8 }}>
+                This also changes their commitment.
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 10,
+                          maxWidth: 620, lineHeight: 1.5 }}>
+              {changePreview.preview.proration_note}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={applyAssistedChange}
+                disabled={Boolean(changing)}
+                style={{ background: '#1ef0a8', color: '#04120c', border: 'none',
+                         borderRadius: 6, padding: '6px 14px', fontSize: 12,
+                         fontWeight: 700,
+                         cursor: changing ? 'default' : 'pointer' }}
+              >
+                {changing ? 'Applying…' : 'Apply change'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setChangePreview(null)}
+                disabled={Boolean(changing)}
+                style={{ background: 'transparent', color: '#aaa',
+                         border: '1px solid #2a2a4a', borderRadius: 6,
+                         padding: '6px 14px', fontSize: 12,
+                         cursor: changing ? 'default' : 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 
@@ -566,6 +781,22 @@ export default function GodBillingOps() {
                             re-read. On a customer who has never subscribed the
                             endpoint refuses, and a button that always errors
                             teaches an operator to ignore the errors. */}
+                        {c.has_subscription && (
+                          <button
+                            type="button"
+                            onClick={() => handleAssistedChange(c)}
+                            disabled={changing === c.organization_id}
+                            title="Move this customer to a different plan, through the same path their own Billing page uses."
+                            style={{ background: 'transparent', color: '#7a7a95',
+                                     border: '1px solid #2a2a4a', borderRadius: 6,
+                                     padding: '4px 10px', fontSize: 12,
+                                     marginRight: 8,
+                                     cursor: changing === c.organization_id
+                                       ? 'default' : 'pointer' }}
+                          >
+                            Change plan
+                          </button>
+                        )}
                         {c.has_subscription && (
                           <button
                             type="button"

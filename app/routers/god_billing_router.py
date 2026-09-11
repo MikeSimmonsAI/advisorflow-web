@@ -1487,3 +1487,105 @@ def resync_customer(organization_id: str, body: ResyncIn = ResyncIn(),
                                  for c in result["changed"]}})
     db.commit()
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CHANGE A CUSTOMER'S PLAN ON THEIR BEHALF
+# ═══════════════════════════════════════════════════════════════════════════
+
+class AssistedChangeIn(BaseModel):
+    plan: str
+    interval: str = "month"
+    # Omitted CARRIES OVER the commitment the customer is already on. An
+    # operator moving somebody between tiers must not silently move them
+    # between rates as well — the same rule the customer's own screen follows.
+    commitment: Optional[str] = None
+    apply: bool = False
+
+
+@router.post("/customers/{organization_id}/change-plan")
+def assisted_change_plan(organization_id: str, body: AssistedChangeIn,
+                         db: Session = Depends(get_db),
+                         user: User = Depends(require_god)):
+    """Move a customer's subscription for them, through the customer's own path.
+
+    THIS IS NOT A SECOND BILLING ENGINE. It resolves with `_resolve_change` and
+    performs with `apply_change` — the exact functions behind
+    POST /billing/change-plan. Same Stripe operations, same brand-configured
+    timing and proration, same refusals, same webhook authority. An operator
+    doing it for a customer and the customer doing it themselves cannot produce
+    different outcomes, because there is only one implementation.
+
+    IT EXISTS BECAUSE SOME CUSTOMERS CANNOT DO IT THEMSELVES. A customer whose
+    workspace has no user account — one provisioned from a signed deal before
+    anybody was invited, which is the normal state between Won and onboarding —
+    has a live subscription and nobody who can log in to change it. Until now
+    the only way to move that subscription was the Stripe dashboard, which
+    writes nothing back to this platform and leaves the two disagreeing.
+
+    PREVIEW FIRST, like every other write on this screen: `apply` defaults to
+    false and returns what WOULD happen without touching Stripe or the
+    database.
+    """
+    org = db.query(Organization).filter(
+        Organization.id == organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="No such organization.")
+
+    from app.routers.billing_router import (ChangePlanRequest, apply_change,
+                                            preview_change_plan)
+    from app.routers import billing_router as _billing
+
+    req = ChangePlanRequest(plan=body.plan, interval=body.interval,
+                            commitment=body.commitment)
+
+    if not body.apply:
+        # The customer-facing preview reads the CALLER's organization, so it
+        # cannot be reused directly. `_resolve_change` can: it takes the org
+        # explicitly, which is what keeps this a projection of the same
+        # decision rather than a second opinion about it.
+        r = _billing._resolve_change(db, org, req)
+        target, current = r["target"], r["current"]
+        commitment = r["commitment"]
+        deferred = r["behavior"]["timing"] == ChangeTiming.PERIOD_END
+        from_cents = (billing_catalog.price_cents_for(
+            current, r["current_interval"] or BillingInterval.MONTH,
+            r["current_commitment"]) if current else None)
+        to_cents = billing_catalog.price_cents_for(
+            target, body.interval, commitment)
+        return {
+            "dry_run": True,
+            "direction": r["direction"],
+            "timing": r["behavior"]["timing"],
+            "proration": r["behavior"]["proration"],
+            "from_plan_name": getattr(current, "name", None),
+            "from_cents": from_cents,
+            "to_plan_name": target.name,
+            "to_cents": to_cents,
+            "currency": getattr(target, "currency", None) or "usd",
+            "interval": body.interval,
+            "commitment": commitment,
+            "commitment_label": (billing_catalog.commitment_label(commitment)
+                                 if commitment else None),
+            "commitment_changed": r["commitment_changed"],
+            "effective": ("at the end of the current billing period"
+                          if deferred else "immediately"),
+            "effective_at": (getattr(org, "billing_current_period_end", None)
+                             if deferred else None),
+            "proration_note": _billing._proration_note(r["behavior"], deferred),
+        }
+
+    # `actor` is the god user, so the audit row on the CUSTOMER's organization
+    # names who actually did it. A plan change with no attributable actor is
+    # the kind of record that cannot be answered for later.
+    result = apply_change(db, org, req, actor=user)
+    _audit(db, user, "billing.plan_change_assisted", "organization",
+           organization_id,
+           before={"plan": result.get("current_plan")},
+           after={"to": body.plan, "interval": body.interval,
+                  "commitment": result.get("commitment"),
+                  "direction": result.get("direction"),
+                  "timing": result.get("timing"),
+                  "pending_plan": result.get("pending_plan")})
+    db.commit()
+    return result

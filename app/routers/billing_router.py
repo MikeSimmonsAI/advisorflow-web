@@ -757,33 +757,18 @@ def _proration_note(behavior: dict, deferred: bool) -> str:
             "calculated by the payment processor from the time remaining.")
 
 
-@router.post("/change-plan")
-def change_plan(
-    req: ChangePlanRequest,
-    current_user: User = Depends(_require_admin),
-    db: Session = Depends(get_db),
-):
-    """Move an EXISTING subscription to a different plan, in place.
+def apply_change(db: Session, org: Organization, req: "ChangePlanRequest",
+                 actor: Optional[User] = None) -> dict:
+    """PERFORM a resolved plan change. The only code that moves a subscription.
 
-    Modifies the subscription rather than creating a second one - see the note
-    on /checkout for what the previous behaviour cost.
+    Separated from the endpoint so an ADMIN-ASSISTED change runs this exact
+    path rather than a parallel one. A customer changing their own plan and an
+    operator doing it for them must produce the same Stripe operations, the
+    same refusals and the same local state — the alternative is two billing
+    engines that agree right up until the day they do not.
 
-    TIMING AND PRORATION COME FROM BRAND CONFIGURATION, NOT FROM THIS CODE.
-    The decided EvoSys policy is: an upgrade applies immediately with
-    proration; a downgrade applies at the end of the period already paid for,
-    with no credit or refund. Both are stored on the brand's billing config so
-    a second brand can choose differently without a code change. If a brand has
-    not configured the direction being requested, this endpoint REFUSES rather
-    than picking a timing - applying a plan change on a guessed schedule either
-    bills someone early or gives away a tier.
+    WHO is allowed to ask is the caller's problem, not this function's.
     """
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
-
-    # THE SAME RESOLUTION THE PREVIEW SHOWED. Sharing it is what guarantees the
-    # dialog the customer agreed to and the change that is applied are the same
-    # decision, refused for the same reasons and priced the same way.
     r = _resolve_change(db, org, req)
     sub_id = r["sub_id"]
     target = r["target"]
@@ -875,7 +860,7 @@ def change_plan(
     # subscription.updated webhook is the authoritative record of what Stripe
     # actually did, and writing the outcome optimistically from this side is
     # how a UI ends up showing a plan the customer is not on.
-    _audit(db, org, current_user, "billing.plan_change_requested", {
+    _audit(db, org, actor, "billing.plan_change_requested", {
         "from": getattr(org, "billing_plan_key", None) or org.plan,
         "to": target.key,
         "interval": req.interval,
@@ -907,6 +892,33 @@ def change_plan(
         "commitment_label": (billing_catalog.commitment_label(commitment)
                              if commitment else None),
     }
+
+
+@router.post("/change-plan")
+def change_plan(
+    req: ChangePlanRequest,
+    current_user: User = Depends(_require_admin),
+    db: Session = Depends(get_db),
+):
+    """Move THIS CUSTOMER'S subscription to a different plan, in place.
+
+    Modifies the subscription rather than creating a second one - see the note
+    on /checkout for what the previous behaviour cost.
+
+    TIMING AND PRORATION COME FROM BRAND CONFIGURATION, NOT FROM THIS CODE.
+    The decided EvoSys policy is: an upgrade applies immediately with
+    proration; a downgrade applies at the end of the period already paid for,
+    with no credit or refund. Both are stored on the brand's billing config so
+    a second brand can choose differently without a code change. If a brand has
+    not configured the direction being requested, this REFUSES rather than
+    picking a timing - applying a plan change on a guessed schedule either
+    bills someone early or gives away a tier.
+    """
+    org = db.query(Organization).filter(
+        Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return apply_change(db, org, req, actor=current_user)
 
 
 @router.post("/cancel-pending-change")
