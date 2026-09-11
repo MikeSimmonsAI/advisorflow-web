@@ -124,7 +124,26 @@ export default function BrandCatalogue({ platformId }) {
     }
   }
 
-  if (!platformId) return null;
+  // A CATALOGUE BELONGS TO A BRAND, so with no brand selected there is nothing
+  // truthful to list. Say that, rather than rendering nothing: a section that
+  // silently disappears on the default view is a section an operator concludes
+  // does not exist. The tier catalogue above picks a brand for you; this one
+  // cannot, because creating an item needs an unambiguous owner.
+  if (!platformId) {
+    return (
+      <div style={CARD}>
+        <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>
+          PRODUCTS &amp; SERVICES
+        </h2>
+        <p style={{ color: '#888', margin: '8px 0 0', fontSize: 13,
+                    maxWidth: 640 }}>
+          Recurring add-ons and one-time services sold alongside the
+          subscription. Choose a brand above to configure its catalogue — these
+          items belong to one brand, so there is no estate-wide view of them.
+        </p>
+      </div>
+    );
+  }
 
   const items = data?.items || [];
   const counts = data?.counts || {};
