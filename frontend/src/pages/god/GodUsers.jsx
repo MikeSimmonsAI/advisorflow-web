@@ -8,8 +8,9 @@
  * operator that they are three people, which is the exact mistake the
  * centralized identity model exists to prevent.
  *
- * So the columns are: identity · platform · organization · memberships · roles
- * · status. The contexts are the row's contents, never its multiplicity.
+ * So the columns are: user · platform role · brand · customer · access ·
+ * last login · status · actions. The contexts are the row's contents, never
+ * its multiplicity.
  *
  * Data: GET /god/users?scope=... — every context resolved in grouped queries
  * server-side, so this page is a constant number of requests at any user count.
@@ -31,8 +32,27 @@
  * the platform's most privileged set, and the platform-owner count is a health
  * condition on the Command Center. It belongs behind a deliberate screen, not
  * a dropdown in a table.
+ *
+ * ── THE LAYOUT CORRECTION (Sep 11 2026) ───────────────────────────────────
+ * This table used to render one full-width pill per membership and four
+ * equally weighted buttons per row, on top of the shared command table's
+ * content-driven sizing. The real width ran past 1700px, so reaching STATUS
+ * or DEACTIVATE on a normal desktop meant dragging a horizontal scrollbar —
+ * on the screen whose entire job is status and deactivation.
+ *
+ * NOTHING WAS REMOVED TO FIX IT, and no type was shrunk. ACCESS now states
+ * how many contexts an identity holds and the full list opens in an
+ * expandable row underneath; MANAGE ACCESS and DEACTIVATE / REACTIVATE stay
+ * visible on every row at every width, with only RESET PASSWORD and OPEN IN
+ * CUSTOMER moved into a keyboard-reachable overflow. The budget per column
+ * lives in `.gm-idtable` in GodStyles.jsx, which is also where the order the
+ * columns drop in at narrower widths is written down.
+ *
+ * AUTHORITY IS UNTOUCHED BY ALL OF THAT. Every endpoint, every guard and
+ * every rule about who may do what to whom is exactly what it was; this file
+ * changed where things are drawn and nothing about what they do.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../../api/client'
 import GodStyles from './GodStyles'
@@ -59,6 +79,283 @@ function when(iso) {
   return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString()
 }
 
+function whenFull(iso) {
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleString()
+}
+
+function roleWords(role) {
+  return String(role || '').replace(/_/g, ' ').toUpperCase()
+}
+
+/**
+ * The row's overflow menu.
+ *
+ * A real <button> list rather than a styled <select>: every item is keyboard
+ * reachable, Escape closes it, and a click anywhere else closes it. The
+ * trigger carries an accessible name that includes the person, because "…"
+ * twenty-four times over is not a name.
+ *
+ * IT IS POSITIONED AGAINST THE VIEWPORT. The table region is a scroll
+ * container and the card around it clips its overflow, so a menu positioned
+ * against its own cell is cut off the moment it is taller than one row —
+ * which is how an action ends up unreachable without anyone having hidden it.
+ */
+function RowMenu({ items, label }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const btn = useRef(null)
+  const menu = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const el = btn.current
+    if (el) {
+      const r = el.getBoundingClientRect()
+      setPos({ top: Math.round(r.bottom + 6),
+               right: Math.max(8, Math.round(window.innerWidth - r.right)) })
+    }
+    function onDoc(e) {
+      if (btn.current && btn.current.contains(e.target)) return
+      if (menu.current && menu.current.contains(e.target)) return
+      setOpen(false)
+    }
+    function onKey(e) { if (e.key === 'Escape') setOpen(false) }
+    const close = () => setOpen(false)
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [open])
+
+  if (!items.length) return null
+
+  return (
+    <span className="gm-menuwrap">
+      <button ref={btn} className="gm-act gm-ghost" aria-haspopup="menu" aria-expanded={open}
+              aria-label={'More actions for ' + label}
+              onClick={() => setOpen(o => !o)}>…</button>
+      {open && pos && (
+        <div ref={menu} className="gm-menu gm-menu-fixed" role="menu"
+             style={{ top: pos.top, right: pos.right }}>
+          {items.map((it, i) => it.sep
+            ? <div key={'s' + i} className="gm-menu-sep" />
+            : (
+              <button key={it.label} role="menuitem"
+                      className={it.danger ? 'gm-danger-item' : ''}
+                      disabled={!!it.disabled}
+                      onClick={() => { setOpen(false); it.onClick() }}>
+                {it.label}
+              </button>
+            ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
+function Field({ label, children }) {
+  return (
+    <div className="gm-idfield">
+      <h5>{label}</h5>
+      <p>{children}</p>
+    </div>
+  )
+}
+
+/**
+ * ONE IDENTITY, one compact row, and the whole of it one click below.
+ *
+ * The expanded panel is not a second data source — it is the same fields the
+ * row is already carrying, restated in full where they have room to be read.
+ * That matters at narrow widths, where a column drops out of the row: what it
+ * held is never lost, it is here and it is also summarised under the name.
+ */
+function IdentityRow({
+  u, isMe, busy, open, onToggle,
+  onManage, onAskToggle, onReset, onCustomer,
+}) {
+  const mems = u.memberships || []
+  const n = mems.length
+  const role = roleWords(u.role)
+  const who = u.full_name || u.email
+  const orgWords = u.organization_name || 'Control plane'
+
+  // RESET PASSWORD is offered only on accounts that can currently sign in.
+  // Setting a password on a deactivated account would read as restoring
+  // access when it restores nothing — reactivate first, deliberately.
+  const menu = []
+  if (!isMe && u.is_active) {
+    menu.push({ label: 'Reset password…', onClick: () => onReset(u) })
+  }
+  if (u.organization_id) {
+    menu.push({ label: 'Open in customer', onClick: () => onCustomer(u) })
+  }
+  if (menu.length) menu.push({ sep: true })
+  menu.push({
+    label: open ? 'Hide access detail' : 'Show access detail',
+    onClick: () => onToggle(u.id),
+  })
+
+  return (
+    <>
+      <tr>
+        <td className="c-user">
+          <div className="gm-idhead">
+            <button className="gm-idtoggle" aria-expanded={open}
+                    aria-label={(open ? 'Hide' : 'Show') + ' access detail for ' + who}
+                    onClick={() => onToggle(u.id)}>{open ? '▾' : '▸'}</button>
+            <div className="gm-idnames">
+              <div className="gm-orgname" title={u.full_name || 'no name recorded'}>
+                {u.full_name || <span style={{ color: T.ghost }}>no name recorded</span>}
+                {isMe ? <span className="gm-pill blue" style={{ marginLeft: 7 }}>YOU</span> : null}
+              </div>
+              <div className="gm-orgsub" title={u.email}>{u.email}</div>
+              {/* Carries whatever the current width has dropped. Always true,
+                  so it is never a second version of the row to reconcile. */}
+              <div className="gm-idmeta">
+                {role}{u.platform_name ? ' · ' + u.platform_name : ''} · {orgWords}
+              </div>
+            </div>
+          </div>
+        </td>
+
+        <td className="c-role">
+          <span className={'gm-pill ' + (ROLE_TONE[u.role] || 'off')}>{role}</span>
+        </td>
+
+        <td className="c-brand" title={u.platform_name || undefined}>
+          {u.platform_name || <span style={{ color: T.ghost }}>—</span>}
+        </td>
+
+        <td className="c-org">
+          {u.organization_name
+            ? <button className="gm-act" title={u.organization_name}
+                      onClick={() => onCustomer(u)}>
+                {u.organization_name}
+              </button>
+            : <span className="gm-pill off"
+                    title="organization_id IS NULL — this architecture's positive assertion that somebody belongs to the control plane and to no tenant">
+                CONTROL PLANE
+              </span>}
+        </td>
+
+        {/* ACCESS — a count, not a wall. Every context is one click away in
+            the row below and every one of them is also in Manage Access. */}
+        <td className="c-access">
+          {n === 0
+            ? <span className="gm-idaccess none"
+                    title="No memberships beyond the platform role above">
+                NO MEMBERSHIPS
+              </span>
+            : <button className="gm-idaccess" aria-expanded={open}
+                      title={'Show every access context ' + who + ' holds'}
+                      onClick={() => onToggle(u.id)}>
+                {n} ACCESS ROLE{n === 1 ? '' : 'S'}
+              </button>}
+        </td>
+
+        <td className="c-last" style={{ whiteSpace: 'nowrap', color: T.dim }}>
+          {when(u.last_login_at) || <NoSource>never</NoSource>}
+        </td>
+
+        <td className="c-status">
+          {u.is_active
+            ? (u.must_change_password
+                ? <StatusBadge tone="warn" title="Account created, setup link not used yet">PENDING SETUP</StatusBadge>
+                : <StatusBadge tone="ok">ACTIVE</StatusBadge>)
+            : <StatusBadge tone="bad">DEACTIVATED</StatusBadge>}
+        </td>
+
+        <td className="c-act">
+          <div className="gm-acts">
+            {/* MANAGE ACCESS is available for EVERY row, including the
+                operator's own, because reading a footprint is a read — and an
+                owner who cannot see their own contexts is the one person who
+                most needs to. The server refuses the writes that would matter.
+                It never moves into the overflow at any width. */}
+            <button className="gm-act gm-primary" onClick={() => onManage(u)}>
+              MANAGE ACCESS
+            </button>
+            {isMe
+              ? <span className="gm-idself" title="Your own account">YOUR ACCOUNT</span>
+              : <button className={'gm-act ' + (u.is_active ? 'gm-danger' : '')}
+                        disabled={busy} onClick={() => onAskToggle(u)}>
+                  {busy ? '…' : (u.is_active ? 'DEACTIVATE' : 'REACTIVATE')}
+                </button>}
+            <RowMenu items={menu} label={who} />
+          </div>
+        </td>
+      </tr>
+
+      {/* colSpan is a CONSTANT EIGHT and must stay one: the stylesheet keeps
+          all eight columns in the layout at every width, collapsing the dropped
+          ones to zero rather than removing them, precisely so this number never
+          has to be measured. */}
+      {open && (
+        <tr className="gm-iddetail">
+          <td colSpan={8}>
+            <div className="gm-iddetail-in">
+              <Field label="Platform role">
+                <span className={'gm-pill ' + (ROLE_TONE[u.role] || 'off')}>{role}</span>
+              </Field>
+              <Field label="Brand">
+                {u.platform_name || <span style={{ color: T.ghost }}>no brand context</span>}
+              </Field>
+              <Field label="Customer / workspace">
+                {u.organization_name
+                  ? <button className="gm-act" onClick={() => onCustomer(u)}>
+                      {u.organization_name}
+                    </button>
+                  : 'Control plane — belongs to no tenant organization.'}
+              </Field>
+              <Field label={'Access contexts (' + n + ')'}>
+                {n === 0
+                  ? <span style={{ color: T.ghost }}>
+                      None. This identity holds its platform role and nothing else.
+                    </span>
+                  : (
+                    <span className="gm-idmem">
+                      {mems.map(m => (
+                        <span key={m.id} className={'gm-pill ' + (m.is_active ? 'purple' : 'off')}
+                              title={m.scope_type + ' · ' + m.scope_id}>
+                          {String(m.role || '').replace(/_/g, ' ')}
+                          {m.scope_name ? ' @ ' + m.scope_name : ''}
+                          {m.is_active ? '' : ' (inactive)'}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+              </Field>
+              <Field label="Last login">
+                {whenFull(u.last_login_at) || <NoSource>has never signed in</NoSource>}
+              </Field>
+              <Field label="Account">
+                {u.is_active ? 'Active. ' : 'Deactivated — cannot sign in anywhere. '}
+                {u.must_change_password
+                  ? 'Setup link not used yet; a password must be chosen at next sign-in. '
+                  : ''}
+                {when(u.created_at) ? 'Created ' + when(u.created_at) + '.' : ''}
+              </Field>
+              <Field label="Changing any of this">
+                This panel is a read. Roles and memberships are edited on the
+                MANAGE ACCESS screen, where the authority checks live.
+              </Field>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
 export default function GodUsers() {
   const navigate = useNavigate()
   const me = getCurrentUser()
@@ -72,6 +369,7 @@ export default function GodUsers() {
   const [confirm, setConfirm] = useState(null)
   const [resetting, setResetting] = useState(null)
   const [notice, setNotice] = useState('')
+  const [expanded, setExpanded] = useState(() => new Set())
 
   const load = useCallback(async () => {
     setLoading(true); setErr('')
@@ -102,6 +400,18 @@ export default function GodUsers() {
     () => ((data && data.users) || []).filter(u => u.role === 'god_admin' && u.is_active),
     [data]
   )
+
+  const toggleRow = useCallback(id => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }, [])
+
+  const goManage = useCallback(u => navigate('/god/access/' + u.id), [navigate])
+  const goCustomer = useCallback(
+    u => navigate('/god/customers/' + u.organization_id + '?tab=people'), [navigate])
 
   function askToggle(u) {
     const off = u.is_active
@@ -213,11 +523,19 @@ export default function GodUsers() {
           <div className="gm-seg">
             {SCOPES.map(s => (
               <button key={s.key} className={scope === s.key ? 'on' : ''}
+                      aria-pressed={scope === s.key}
                       onClick={() => setScope(s.key)}>{s.label}</button>
             ))}
           </div>
           <button className="gm-btn" onClick={load} disabled={loading}>
             {loading ? '…' : '↻ REFRESH'}
+          </button>
+          {/* Expand-all is the answer to "I need to audit every context at
+              once" without the table having to carry them all by default. */}
+          <button className="gm-btn" disabled={loading || users.length === 0}
+                  onClick={() => setExpanded(prev =>
+                    prev.size ? new Set() : new Set(users.map(u => u.id)))}>
+            {expanded.size ? 'COLLAPSE ALL' : 'EXPAND ALL'}
           </button>
           <span style={{ color: T.dim, fontSize: 10, marginLeft: 'auto' }}>
             {loading ? 'loading…' : `${users.length} of ${data?.total ?? users.length}`}
@@ -230,17 +548,17 @@ export default function GodUsers() {
 
         <div className="gm-card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="gm-tablewrap">
-            <table className="gm-table">
+            <table className="gm-table gm-idtable">
               <thead>
                 <tr>
-                  <th>IDENTITY</th>
-                  <th>PLATFORM ROLE</th>
-                  <th>BRAND</th>
-                  <th>ORGANIZATION</th>
-                  <th>MEMBERSHIPS</th>
-                  <th>LAST SIGN-IN</th>
-                  <th>STATUS</th>
-                  <th>ACTIONS</th>
+                  <th className="c-user">USER</th>
+                  <th className="c-role">PRIMARY ROLE</th>
+                  <th className="c-brand">BRAND</th>
+                  <th className="c-org">CUSTOMER / WORKSPACE</th>
+                  <th className="c-access">ACCESS</th>
+                  <th className="c-last">LAST LOGIN</th>
+                  <th className="c-status">STATUS</th>
+                  <th className="c-act">ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
@@ -249,103 +567,18 @@ export default function GodUsers() {
                   <tr><td colSpan={8} className="gm-empty">No identity matches this filter.</td></tr>
                 )}
                 {!loading && users.map(u => (
-                  <tr key={u.id}>
-                    <td>
-                      <div className="gm-orgname">
-                        {u.full_name || <span style={{ color: T.ghost }}>no name recorded</span>}
-                        {me && me.email === u.email
-                          ? <span className="gm-pill blue" style={{ marginLeft: 7 }}>YOU</span> : null}
-                      </div>
-                      <div className="gm-orgsub">{u.email}</div>
-                    </td>
-                    <td>
-                      <span className={'gm-pill ' + (ROLE_TONE[u.role] || 'off')}>
-                        {String(u.role || '').replace(/_/g, ' ').toUpperCase()}
-                      </span>
-                    </td>
-                    <td>{u.platform_name || <span style={{ color: T.ghost }}>—</span>}</td>
-                    <td>
-                      {u.organization_name
-                        ? <button className="gm-act"
-                                  onClick={() => navigate('/god/customers/' + u.organization_id)}>
-                            {u.organization_name}
-                          </button>
-                        : <span className="gm-pill off"
-                                title="organization_id IS NULL — this architecture's positive assertion that somebody belongs to the control plane and to no tenant">
-                            CONTROL PLANE
-                          </span>}
-                    </td>
-                    <td>
-                      {(u.memberships || []).length === 0
-                        ? <span style={{ color: T.ghost }}>none</span>
-                        : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {u.memberships.map(m => (
-                              <span key={m.id} className={'gm-pill ' + (m.is_active ? 'purple' : 'off')}
-                                    title={m.scope_type + ' · ' + m.scope_id}>
-                                {String(m.role || '').replace(/_/g, ' ')}
-                                {m.scope_name ? ' @ ' + m.scope_name : ''}
-                                {m.is_active ? '' : ' (inactive)'}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap', color: T.dim }}>
-                      {when(u.last_login_at) || <NoSource>never</NoSource>}
-                    </td>
-                    <td>
-                      {u.is_active
-                        ? (u.must_change_password
-                            ? <StatusBadge tone="warn" title="Account created, setup link not used yet">PENDING SETUP</StatusBadge>
-                            : <StatusBadge tone="ok">ACTIVE</StatusBadge>)
-                        : <StatusBadge tone="bad">DEACTIVATED</StatusBadge>}
-                    </td>
-                    <td>
-                      <div className="gm-acts">
-                        {/* MANAGE ACCESS is available for EVERY row, including
-                            the operator's own, because reading a footprint is
-                            a read — and an owner who cannot see their own
-                            contexts is the one person who most needs to. The
-                            server refuses the writes that would matter. */}
-                        <button className="gm-act gm-primary"
-                                onClick={() => navigate('/god/access/' + u.id)}>
-                          MANAGE ACCESS
-                        </button>
-                        {me && me.email === u.email ? (
-                          <span style={{ color: T.ghost, fontSize: 8.5 }}>
-                            your own account
-                          </span>
-                        ) : (
-                          <>
-                            <button
-                              className={'gm-act ' + (u.is_active ? 'gm-danger' : '')}
-                              disabled={busy === u.id}
-                              onClick={() => askToggle(u)}
-                            >
-                              {busy === u.id ? '…' : (u.is_active ? 'DEACTIVATE' : 'REACTIVATE')}
-                            </button>
-                            {/* Offered only on accounts that can currently sign
-                                in. Setting a password on a deactivated account
-                                would read as restoring access when it restores
-                                nothing — reactivate first, deliberately. */}
-                            {u.is_active && (
-                              <button className="gm-act" disabled={busy === u.id}
-                                      onClick={() => { setNotice(''); setResetting(u) }}>
-                                RESET PASSWORD
-                              </button>
-                            )}
-                          </>
-                        )}
-                        {u.organization_id ? (
-                          <button className="gm-act"
-                                  onClick={() => navigate('/god/customers/' + u.organization_id + '?tab=people')}>
-                            IN CUSTOMER
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
+                  <IdentityRow
+                    key={u.id}
+                    u={u}
+                    isMe={!!(me && me.email === u.email)}
+                    busy={busy === u.id}
+                    open={expanded.has(u.id)}
+                    onToggle={toggleRow}
+                    onManage={goManage}
+                    onAskToggle={askToggle}
+                    onReset={x => { setNotice(''); setResetting(x) }}
+                    onCustomer={goCustomer}
+                  />
                 ))}
               </tbody>
             </table>

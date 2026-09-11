@@ -435,6 +435,173 @@ table.gm-table tbody tr.gm-group:hover td{background:var(--gm-row-lvl0)}
   .gm-stat.gm-click:hover,.gm-metric.gm-click:hover{transition:none;transform:none}
 }
 
+/* ── IDENTITY TABLE — Users & Identity ─────────────────────────────────────
+   THE DEFECT THIS CORRECTS. The shared command table carries min-width:1080px
+   and otherwise sizes itself to its contents, which is right for a five-column
+   list and wrong for this one. Eight columns, a MEMBERSHIPS cell that rendered
+   one full-width pill per access context, and an ACTIONS cell carrying four
+   equally weighted buttons pushed the real width well past 1700px, so a god
+   admin had to drag a horizontal scrollbar to reach STATUS and DEACTIVATE —
+   the two things the screen exists for.
+
+   The correction is layout, not subtraction. Nothing was taken off the page:
+   every access context and every action is still here, one click away rather
+   than one scroll away, and no type size was reduced to buy the room.
+
+     - table-layout:fixed with a budget per column, so one long customer name
+       can no longer widen the table for every other row.
+     - ACCESS summarises ("3 ACCESS ROLES"); the full list opens in an
+       expandable row underneath. Same data, off the critical path.
+     - MANAGE ACCESS and DEACTIVATE / REACTIVATE stay visible on every row at
+       every width. Only RESET PASSWORD and OPEN IN CUSTOMER move into the
+       overflow, which is a real keyboard-reachable button list.
+     - USER freezes to the left edge and ACTIONS to the right, so on the rare
+       width that still scrolls the region, the identity and its actions are
+       both on screen the whole time.
+     - Below the widths where everything fits, columns drop in order of
+       importance and what they carried reappears under the name. USER, STATUS
+       and ACTIONS never drop. */
+table.gm-table.gm-idtable{table-layout:fixed;min-width:1180px}
+/* box-sizing:border-box is load-bearing, not tidiness. Without it a column's
+   width is its CONTENT box and the 20px of padding lands on top, so every
+   budget below would silently be 20px bigger than it reads and the floors that
+   the breakpoints are computed from would all be wrong. */
+table.gm-table.gm-idtable th,
+table.gm-table.gm-idtable td{box-sizing:border-box;padding:10px;
+  overflow:hidden;text-overflow:ellipsis}
+/* The shared 214px floor on the first column is what this table replaces with
+   a real budget — left in place it fights table-layout:fixed. */
+table.gm-table.gm-idtable th:first-child,
+table.gm-table.gm-idtable td:first-child{min-width:0}
+/* Every column is budgeted, and USER is budgeted as EVERYTHING ELSE TAKEN AWAY.
+   Two things go wrong without that. An unsized column in a fixed layout is
+   handed the leftover, which at 1280 was a column two characters wide; and
+   sizing it in px instead leaves the slack stranded after the last column as a
+   dead strip the frozen ACTIONS cell no longer reaches the edge of. So the
+   non-USER budgets are summed into --gm-idfixed, restated at each breakpoint
+   as columns drop, and USER takes the rest. --gm-idfixed and the table's
+   min-width are the same number plus 210 — change one, change both. */
+.gm-idtable{--gm-idfixed:970px}
+.gm-idtable .c-user{width:calc(100% - var(--gm-idfixed))}
+.gm-idtable .c-role{width:110px}
+.gm-idtable .c-brand{width:118px}
+.gm-idtable .c-org{width:150px}
+.gm-idtable .c-access{width:140px}
+.gm-idtable .c-last{width:100px}
+.gm-idtable .c-status{width:112px}
+.gm-idtable .c-act{width:240px}
+
+/* Frozen identity and frozen actions. Both need an opaque fill of their own —
+   a transparent sticky cell shows the scrolled row through it. */
+.gm-idtable th.c-user,.gm-idtable td.c-user{position:sticky;left:0;z-index:1;
+  background:var(--gm-card);box-shadow:1px 0 0 var(--gm-row-line)}
+.gm-idtable th.c-act,.gm-idtable td.c-act{position:sticky;right:0;z-index:1;
+  background:var(--gm-card);box-shadow:-1px 0 0 var(--gm-row-line)}
+.gm-idtable th.c-user,.gm-idtable th.c-act{z-index:3;background:var(--gm-thead)}
+table.gm-table.gm-idtable tbody tr:hover td.c-user,
+table.gm-table.gm-idtable tbody tr:hover td.c-act{background:var(--gm-row-hover-flat)}
+
+.gm-idhead{display:flex;align-items:flex-start;gap:2px;min-width:0}
+.gm-idnames{min-width:0;flex:1 1 auto}
+.gm-idtable .gm-orgname,
+.gm-idtable .gm-orgsub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gm-idtoggle{flex:none;background:none;border:0;margin:0;padding:2px 6px 0 0;cursor:pointer;
+  font:inherit;font-size:11px;line-height:1.25;color:var(--gm-dim)}
+.gm-idtoggle:hover{color:var(--gm-blue)}
+/* What a dropped column was carrying, restated under the name. Hidden at the
+   widths where the columns themselves are present. */
+.gm-idmeta{display:none;margin-top:3px;color:var(--gm-dim);font-size:10.5px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* The customer cell is a link to that customer and has to survive a 40-character
+   name inside a 132px budget. */
+.gm-idtable .c-org .gm-act{display:inline-block;max-width:100%;padding:5px 8px;
+  font-size:11.5px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+
+/* ACCESS — the compact summary. Reads as a pill, behaves as a disclosure. */
+.gm-idaccess{max-width:100%;border-radius:999px;padding:3px 9px;font:inherit;font-size:10px;
+  font-weight:700;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;cursor:pointer;
+  overflow:hidden;text-overflow:ellipsis;
+  background:var(--gm-pill-purple-bg);border:1px solid var(--gm-pill-purple-bd);
+  color:var(--gm-pill-purple-fg)}
+.gm-idaccess:hover{border-color:var(--gm-purple)}
+.gm-idaccess.none{cursor:default;background:var(--gm-pill-off-bg);
+  border-color:var(--gm-pill-off-bd);color:var(--gm-pill-off-fg)}
+
+.gm-idtable td.c-act .gm-acts{justify-content:flex-start;flex-wrap:nowrap;gap:5px}
+.gm-idtable td.c-act .gm-act{padding:6px 9px;font-size:11px}
+.gm-idself{flex:none;color:var(--gm-dim);font-size:10px;font-weight:600;letter-spacing:.05em;
+  white-space:nowrap}
+/* The overflow menu is positioned against the VIEWPORT, not the cell: the table
+   region is a scroll container, and an absolutely positioned menu inside it is
+   clipped the moment it is taller than the row. */
+.gm-menu.gm-menu-fixed{position:fixed}
+
+/* The expanded detail. Everything the compact row summarises, in full, without
+   leaving the page — and the full access management is still one button away. */
+.gm-idtable tr.gm-iddetail>td{padding:0;background:var(--gm-panel-2);
+  border-bottom:1px solid var(--gm-row-line-strong)}
+table.gm-table.gm-idtable tbody tr.gm-iddetail:hover>td{background:var(--gm-panel-2)}
+.gm-iddetail-in{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+  gap:14px 22px;padding:14px 16px 16px}
+.gm-idfield{min-width:0}
+.gm-idfield h5{margin:0 0 6px;font-size:9.5px;letter-spacing:.10em;text-transform:uppercase;
+  font-weight:700;color:var(--gm-dim)}
+.gm-idfield p{margin:0;font-size:12.5px;line-height:1.5;color:var(--gm-text);word-break:break-word}
+.gm-idmem{display:flex;flex-direction:column;align-items:flex-start;gap:5px}
+.gm-idmem .gm-pill{white-space:normal;text-align:left}
+
+/* Progressive disclosure. Each step drops the least load-bearing column still
+   present AND lowers the table's floor by exactly that column's budget, so the
+   region keeps fitting instead of merely keeping a scrollbar.
+
+   A DROPPED COLUMN IS COLLAPSED TO ZERO, NOT display:none, AND THAT IS NOT A
+   STYLE CHOICE. The expanded detail row spans the table with a colSpan, and a
+   table's column count is the widest row in it — so the moment a header cell
+   stops generating a box, the colSpan is larger than the header and the table
+   grows a phantom, unbudgeted, auto-width column. The spare width then splits
+   between USER and the phantoms (at 1366 that made USER a third of its budget
+   and opened a 208px dead strip past the frozen ACTIONS cell). Keeping the
+   cell in the layout at zero width keeps the column count at eight forever, so
+   the colSpan is a constant and no JavaScript has to measure anything.
+
+   The selectors below are written the long way — table.gm-table.gm-idtable
+   th.c-x — because the padding they have to beat is set by a three-class
+   selector. A two-class ".gm-idtable .c-brand" loses to it, and a
+   "collapsed" column then keeps its 20px of padding: five of those is a
+   hundred pixels of nothing, and every floor below is wrong by that much. */
+@media(max-width:1490px){
+  table.gm-table.gm-idtable th.c-brand,table.gm-table.gm-idtable td.c-brand{
+    width:0;min-width:0;padding-left:0;padding-right:0;visibility:hidden;overflow:hidden}
+  table.gm-table.gm-idtable{min-width:1062px}
+  .gm-idtable{--gm-idfixed:852px}
+  .gm-idtable .gm-idmeta{display:block}
+}
+@media(max-width:1370px){
+  table.gm-table.gm-idtable th.c-last,table.gm-table.gm-idtable td.c-last{
+    width:0;min-width:0;padding-left:0;padding-right:0;visibility:hidden;overflow:hidden}
+  table.gm-table.gm-idtable{min-width:962px}
+  .gm-idtable{--gm-idfixed:752px}
+}
+@media(max-width:1270px){
+  table.gm-table.gm-idtable th.c-org,table.gm-table.gm-idtable td.c-org{
+    width:0;min-width:0;padding-left:0;padding-right:0;visibility:hidden;overflow:hidden}
+  table.gm-table.gm-idtable{min-width:812px}
+  .gm-idtable{--gm-idfixed:602px}
+}
+@media(max-width:1120px){
+  table.gm-table.gm-idtable th.c-role,table.gm-table.gm-idtable td.c-role{
+    width:0;min-width:0;padding-left:0;padding-right:0;visibility:hidden;overflow:hidden}
+  table.gm-table.gm-idtable{min-width:702px}
+  .gm-idtable{--gm-idfixed:492px}
+}
+@media(max-width:1010px){
+  table.gm-table.gm-idtable th.c-access,table.gm-table.gm-idtable td.c-access{
+    width:0;min-width:0;padding-left:0;padding-right:0;visibility:hidden;overflow:hidden}
+  table.gm-table.gm-idtable{min-width:562px}
+  .gm-idtable{--gm-idfixed:352px}
+}
+
 /* ── responsive ────────────────────────────────────────────────────────────
    Desktop density is preserved; narrow widths reflow rather than lose anything.
    No action is hidden at any width. */
