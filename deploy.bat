@@ -1,136 +1,154 @@
 @echo off
 REM ============================================================
-REM AdvisorFlow Deploy  v3.0
+REM AdvisorFlow Deploy  v4.0
 REM
-REM WHAT CHANGED IN v3.0, AND WHY
+REM THIS SCRIPT DOES NOT DECIDE WHAT GOES INTO A COMMIT.
 REM
-REM 1. THE RENDER API KEY IS GONE FROM THIS FILE. It was written here in
-REM    plaintext and committed, so anyone who could read the repository could
-REM    read the key. It is now taken from RENDER_API_KEY in the environment.
-REM    Removing it from HEAD does NOT revoke it - the old key is still in git
-REM    history and MUST be rotated in the Render dashboard. See
-REM    docs/DEPLOYMENT.md.
+REM You stage. You commit. Then you run this. It checks, pushes, and lets
+REM Render deploy. It never runs `git add` in any form.
 REM
-REM 2. `git add .` IS GONE. It staged every change in the working tree,
-REM    including other people's work-in-progress, throwaway probe databases,
-REM    scratch output and any file that happened to contain a credential. A
-REM    deploy script must ship what somebody decided to ship. This version
-REM    stages tracked modifications only and REFUSES to continue when there
-REM    are untracked files, naming them, so a new file reaches production
-REM    because somebody added it rather than because a wildcard swept it up.
+REM WHY v4.0 STOPPED STAGING AT ALL
 REM
-REM 3. THE DEPLOY TRIGGER IS NOW OPTIONAL, because it always was. Both Render
-REM    services auto-deploy on a push to main; the API call is a nudge, not
-REM    the mechanism. With no key set, this script still deploys - it just
-REM    says so instead of failing.
+REM v3.0 had already dropped `git add .` for `git add -u`, which stages every
+REM modified TRACKED file. That is narrower, but it is the same mistake: the
+REM deploy script was still the thing choosing the contents of a commit, and
+REM it chose by wildcard. With several worktrees and threads live at once,
+REM "everything I happen to have edited" is not a change set - it is whatever
+REM state the tree was in when somebody typed deploy. A half-finished edit in
+REM another file ships alongside the fix, under the fix's message, and the
+REM commit history stops describing the work.
+REM
+REM So the rule is now absolute: no `git add .`, no `-A`, no `-u`, no
+REM equivalent. A human or an agent selects the files, stages them by path,
+REM writes a message, and commits. This script refuses to run until that has
+REM happened.
+REM
+REM THE RENDER API KEY IS NOT IN THIS FILE and never will be. It comes from
+REM RENDER_API_KEY in the environment. The key that used to live here is in
+REM git history; removing it from HEAD did NOT revoke it. See
+REM docs/DEPLOYMENT.md.
+REM
+REM THE API CALL IS A NUDGE, NOT THE MECHANISM. Both Render services
+REM auto-deploy on a push to main. With no key set this script still deploys.
 REM ============================================================
 
 setlocal enabledelayedexpansion
 
 echo.
 echo ===================================
-echo   AdvisorFlow Deploy v3.0
+echo   AdvisorFlow Deploy v4.0
 echo ===================================
 echo.
 
 git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 (
     echo ERROR: This folder is not a git repository.
-    echo Run deploy.bat from inside your advisorflow-web folder.
+    echo Run deploy.bat from inside the worktree you mean to deploy.
     echo.
     pause
     exit /b 1
 )
 
-REM ── Refuse to ship a credential ──────────────────────────────────────────
-REM Runs BEFORE anything is staged, so the answer to "did we just commit a
-REM key" is never "yes, and it is already on GitHub".
+echo Repository:
+git rev-parse --show-toplevel
+echo Branch:
+git rev-parse --abbrev-ref HEAD
+echo.
+
+REM -- Refuse to ship a credential -----------------------------------------
+REM Runs first, so the answer to "did we just push a key" is never
+REM "yes, and it is already on GitHub".
 where python >nul 2>&1
 if not errorlevel 1 (
     python scripts\_secret_audit.py
     if errorlevel 1 (
         echo.
         echo REFUSING TO DEPLOY: a live-shaped credential is in a tracked file.
-        echo Remove it, move it to an environment variable, and rotate it.
+        echo Remove it, move it to an environment variable, and ROTATE it -
+        echo taking it out of HEAD does not revoke it.
         echo.
         pause
         exit /b 1
     )
+) else (
+    echo WARNING: python not found, so the credential audit did not run.
+    echo.
 )
 
-REM ── What is actually going to be committed ───────────────────────────────
-echo Tracked files you have changed:
-echo -----------------------------------
-git diff --name-status
-echo -----------------------------------
-echo.
-
-REM Untracked files stop the deploy rather than riding along with it.
+REM -- The working tree must be clean ---------------------------------------
+REM
+REM NAMES ONLY. Nothing here stages, commits, resets, checks out or stashes
+REM anything. A deploy script that "helpfully" tidies a dirty tree is a deploy
+REM script that can destroy work, and one that silently includes a dirty tree
+REM is how another thread's half-finished file reaches production.
+git diff --quiet
+set DIRTY=%errorlevel%
+git diff --cached --quiet
+set STAGED=%errorlevel%
 git ls-files --others --exclude-standard > "%TEMP%\af_untracked.txt"
 for %%A in ("%TEMP%\af_untracked.txt") do set UNTRACKEDSIZE=%%~zA
-if not "%UNTRACKEDSIZE%"=="0" (
-    echo These files are NOT tracked by git and will NOT be deployed:
-    echo -----------------------------------
-    type "%TEMP%\af_untracked.txt"
-    echo -----------------------------------
-    echo.
-    echo If any of them belong in this deploy, stage them deliberately:
-    echo     git add ^<path^>
-    echo If they are scratch files, add them to .gitignore.
-    echo Then run deploy.bat again.
-    echo.
-    del "%TEMP%\af_untracked.txt"
-    pause
-    exit /b 1
-)
+
+if not "%DIRTY%"=="0"  goto :notready
+if not "%STAGED%"=="0" goto :notready
+if not "%UNTRACKEDSIZE%"=="0" goto :notready
+goto :ready
+
+:notready
+echo -----------------------------------
+echo The working tree is not clean:
+git status --short
+echo -----------------------------------
+echo.
+echo This script deploys a commit you have already made. It will not stage,
+echo commit or discard any of the above.
+echo.
+echo   Belongs in this deploy:   git add ^<path^> [^<path^> ...]
+echo                             git commit -m "what changed"
+echo   Scratch:                  add it to .gitignore
+echo   Not ready:                leave it; deploy after it is committed
+echo.
+echo Then run deploy.bat again.
+echo.
+del "%TEMP%\af_untracked.txt" >nul 2>&1
+pause
+exit /b 1
+
+:ready
 del "%TEMP%\af_untracked.txt" >nul 2>&1
 
-git diff --quiet
-if not errorlevel 1 (
-    git diff --cached --quiet
-    if not errorlevel 1 (
-        echo No changes to deploy.
+REM -- There has to be something to push ------------------------------------
+for /f %%B in ('git rev-parse --abbrev-ref HEAD') do set BRANCH=%%B
+git rev-parse --verify --quiet "origin/%BRANCH%" >nul 2>&1
+if errorlevel 1 (
+    echo Branch %BRANCH% has no upstream on origin yet. It will be created.
+) else (
+    for /f %%C in ('git rev-list --count "origin/%BRANCH%..HEAD"') do set AHEAD=%%C
+    if "!AHEAD!"=="0" (
+        echo Nothing to push: %BRANCH% is not ahead of origin/%BRANCH%.
+        echo.
+        echo If you want Render to rebuild the code that is already on main,
+        echo that is deploy_force.bat.
         echo.
         pause
         exit /b 0
     )
-)
-
-set /p COMMITMSG="Describe what changed: "
-if "%COMMITMSG%"=="" (
-    echo A deploy with no description is a deploy nobody can explain later.
-    echo.
-    pause
-    exit /b 1
+    echo Commits to push: !AHEAD!
 )
 
 echo.
-echo Staging tracked changes only...
-REM -u stages modifications and deletions of files git already knows about.
-REM It cannot pick up an untracked file, which is the whole point.
-git add -u
-if errorlevel 1 (
-    echo ERROR: staging failed.
-    pause
-    exit /b 1
-)
-
-echo Committing...
-git commit -m "%COMMITMSG%"
-if errorlevel 1 (
-    echo.
-    echo Nothing was committed.
-    pause
-    exit /b 0
-)
-
+echo This is what will deploy:
+echo -----------------------------------
+git log --oneline -5
+echo -----------------------------------
 echo.
+
 echo Pushing to GitHub...
 git push
 if errorlevel 1 (
     echo.
-    echo ERROR: git push failed. Your commit is safe locally - fix the
-    echo connection or credentials and push again.
+    echo ERROR: git push failed. Your commits are safe locally - fix the
+    echo connection or credentials, reconcile with origin, and push again.
+    echo Do NOT force-push to get around this.
     pause
     exit /b 1
 )
@@ -142,12 +160,12 @@ echo   services from main.
 echo ===================================
 echo.
 
-REM ── Optional nudge ───────────────────────────────────────────────────────
+REM -- Optional nudge -------------------------------------------------------
 if "%RENDER_API_KEY%"=="" (
     echo RENDER_API_KEY is not set, so no deploy was triggered by hand.
     echo That is fine: the push above is what deploys. To set it once:
     echo     setx RENDER_API_KEY "your-key-here"
-    echo See docs/DEPLOYMENT.md.
+    echo Then open a new terminal. See docs/DEPLOYMENT.md.
     echo.
     pause
     exit /b 0

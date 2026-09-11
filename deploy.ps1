@@ -1,28 +1,47 @@
 # deploy.ps1 -- AdvisorFlow one-command deploy
 # Run this from the repo root on your machine (any branch is fine).
-# Flow: staging changes -> main -> GitHub -> Render -> live
+# COMMIT YOUR WORK FIRST. This script ships a commit; it does not make one.
+# Flow: clean-tree check -> main -> gates -> frontend build -> GitHub -> Render
 #
 # Usage:  .\deploy.ps1
-#         .\deploy.ps1 -Message "custom commit message"
+#         .\deploy.ps1 -Message "message for the frontend/dist commit"
 #         .\deploy.ps1 -SkipSmoke        (not recommended)
+#
+# -Message names the commit this script may create for a REBUILT frontend/dist
+# and nothing else. Your own commit keeps the message you gave it.
 #
 # ---------------------------------------------------------------------------
 # FIXED 2026-08-25 -- DATA LOSS BUG
 # The old step 2 ran `git reset --hard origin/main` unconditionally. When you
 # were ALREADY on main (the normal case), that threw away the auto-save commit
 # step 1 had just made, silently deploying stale code while reporting success.
-# It cost a full session of backend work. The reset now only ever runs on a
-# throwaway checkout of main, never on a branch holding your commits, and
-# step 4 verifies the push actually contains your changes before claiming
-# victory. Do not "simplify" this back.
+# It cost a full session of backend work.
+#
+# There is no `git reset --hard` anywhere in this file now, on any branch. Both
+# paths in step 2 fast-forward and stop if they cannot, and step 5 verifies the
+# push actually contains the intended commit before claiming victory. Do not
+# "simplify" either back.
 # ---------------------------------------------------------------------------
 
 param(
     [string]$Message = "",
-    [switch]$SkipSmoke,
-    # Stage files git does not yet track. OFF by default - see step 1.
-    [switch]$IncludeNew
+    [switch]$SkipSmoke
 )
+
+# ---------------------------------------------------------------------------
+# THIS SCRIPT DOES NOT DECIDE WHAT GOES INTO A COMMIT.
+#
+# Step 1 used to run `git add -u` and auto-commit whatever it found, so the
+# deploy script chose the change set - by wildcard - and then shipped it. That
+# is how a half-finished edit in another file rides to production under someone
+# else's commit message. It is gone. Step 1 now REQUIRES a clean tree and an
+# already-prepared commit, and if the tree is dirty it prints the names and
+# stops without staging, committing or discarding anything.
+#
+# The one `git add` left in this file is step 5's `git add -f frontend/dist`:
+# an explicit path, holding output this script generated itself moments
+# earlier in step 4. It is not a wildcard and it cannot pick up source.
+# ---------------------------------------------------------------------------
 
 $ErrorActionPreference = "Continue"
 $REPO = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -76,69 +95,45 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  Clean"
 
-# -- Step 1: Save any uncommitted work on the current branch -------------------
-Write-Host "[1/6] Saving current work..."
+# -- Step 1: The tree must be clean and the commit already made ----------------
+Write-Host "[1/6] Checking the working tree..."
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
 
-# `git add -u`, NOT `git add -A`.
+# NAMES ONLY, AND NOTHING IS TOUCHED.
 #
-# -u stages modifications and deletions of files git ALREADY TRACKS. It cannot
-# pick up an untracked file, and that is the point: -A swept the entire working
-# tree into a deploy commit - another worktree's work-in-progress, throwaway
-# probe databases, scratch output, and any file that happened to hold a
-# credential. The .gitignore already carries a comment about `.probe_*.db`
-# being committed by exactly this mechanism, which is the tell that it had
-# already happened at least once.
+# The previous version staged tracked modifications and auto-committed them as
+# "wip: auto-save before deploy". It was written as a safety net and it behaved
+# like one right up until it did not: because step 1 had already committed
+# everything, step 5 had nothing left to stage, its `git commit -m $Message`
+# was skipped, and the deploy shipped under the wip message with the real
+# explanation discarded. Two production commits landed that way.
 #
-# The auto-save safety net this step exists for is UNHARMED: every file you
-# have edited is still saved and still deploys. What changed is that a file
-# git has never seen now requires somebody to add it on purpose.
-git add -u
-
-# A NEW FILE STOPS THE DEPLOY RATHER THAN BEING SILENTLY LEFT BEHIND.
-#
-# The alternative - warn and carry on - is the failure this script's own header
-# warns about in another form: shipping stale code while reporting success. A
-# new router that never reaches production is not a smaller bug than a new
-# scratch file that does.
-$untracked = git ls-files --others --exclude-standard
-if ($untracked) {
-    if ($IncludeNew) {
-        Write-Host "  Adding new files (-IncludeNew):"
-        $untracked | ForEach-Object { Write-Host "    + $_"; git add -- $_ }
-    } else {
-        Write-Host ""
-        Write-Host "  These files are not tracked by git and will NOT deploy:"
-        $untracked | ForEach-Object { Write-Host "    ? $_" }
-        Write-Host ""
-        Write-Host "  If they belong in this deploy:   git add <path>"
-        Write-Host "  If they are scratch:             add them to .gitignore"
-        Write-Host "  If they all belong:              .\deploy.ps1 -IncludeNew"
-        Write-Host ""
-        Write-Host "REFUSING TO DEPLOY with unreviewed files in the tree."
-        exit 1
-    }
-}
-
-$staged = git diff --cached --name-only
-# Remembered so step 5 can give this commit the real message. The auto-save is
-# a SAFETY NET, not a description of the work, and it was quietly becoming the
-# permanent record: step 1 committed everything, so by step 5 there was nothing
-# left to stage, the `git commit -m $Message` there was skipped, and the deploy
-# shipped under "wip: auto-save before deploy" with the actual explanation
-# discarded. Two production commits landed that way before it was noticed.
-$WIP_COMMITTED = $false
-if ($staged) {
-    git commit -m "wip: auto-save before deploy [$ts]" | Out-Null
-    $WIP_COMMITTED = $true
-    Write-Host "  Committed uncommitted changes on $branch"
-} else {
-    Write-Host "  Nothing to commit on $branch"
+# The deeper problem was never the message. It was that a deploy script was
+# choosing the contents of a commit, by wildcard, from whatever state the tree
+# happened to be in. So it does not choose any more. It reports and stops:
+# nothing here stages, commits, resets, checks out or stashes.
+$dirty     = git status --porcelain --untracked-files=all
+if ($dirty) {
+    Write-Host ""
+    Write-Host "  The working tree is not clean:"
+    $dirty | ForEach-Object { Write-Host "    $_" }
+    Write-Host ""
+    Write-Host "  This script deploys a commit you have already made. It will"
+    Write-Host "  not stage, commit or discard any of the above."
+    Write-Host ""
+    Write-Host "    Belongs in this deploy:  git add <path> [<path> ...]"
+    Write-Host "                             git commit -m ""what changed"""
+    Write-Host "    Scratch:                 add it to .gitignore"
+    Write-Host "    Not ready:               leave it and deploy later"
+    Write-Host ""
+    Write-Host "REFUSING TO DEPLOY from a dirty working tree."
+    exit 1
 }
 
 # Remember exactly what we intend to ship, so step 5 can verify it landed.
 $SHIP_SHA = (git rev-parse HEAD).Trim()
-Write-Host "  Shipping commit: $SHIP_SHA"
+Write-Host "  Clean. Shipping commit: $SHIP_SHA"
+Write-Host ("  " + (git log --oneline -1))
 
 # -- Step 2: Get main up to date WITHOUT destroying local commits --------------
 Write-Host "[2/6] Syncing main branch..."
@@ -157,8 +152,25 @@ if ($branch -eq "main") {
     }
     Write-Host "  main fast-forwarded (local commits preserved)"
 } else {
+    # NO `git reset --hard`. It was here as "safe: main holds no unpushed work",
+    # which is an assumption, not a fact - and when it is wrong the work is
+    # gone with no way back. Fast-forward instead: if local main cannot
+    # fast-forward to origin/main it is carrying commits somebody has not
+    # pushed, and that is a person's decision, not a deploy script's.
     git checkout main | Out-Null
-    git reset --hard origin/main | Out-Null   # safe: main holds no unpushed work here
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Could not switch to main. Nothing was changed."
+        exit 1
+    }
+    git merge --ff-only origin/main 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "  Local main has commits that are not on origin/main."
+        Write-Host "  Refusing to discard them. Reconcile by hand:"
+        Write-Host "    git log --oneline origin/main..main"
+        git checkout $branch | Out-Null
+        exit 1
+    }
     Write-Host "  Merging $branch into main..."
     git merge $branch --no-edit
     if ($LASTEXITCODE -ne 0) {
@@ -390,12 +402,15 @@ Write-Host "  Build OK"
 
 # -- Step 5: Commit dist + push, then VERIFY the push contains our work ---------
 Write-Host "[5/6] Pushing to GitHub..."
-# `-f` because frontend/dist is gitignored and is deliberately shipped; `-u`
-# for everything else, for the reason given in step 1. Anything new was either
-# added by hand or by -IncludeNew before we got here, so nothing legitimate is
-# missed and nothing unreviewed is swept in.
+# THE ONLY `git add` IN THIS SCRIPT, AND IT NAMES ONE PATH.
+#
+# frontend/dist is gitignored and deliberately shipped - the static site serves
+# the committed build rather than building on Render - so `-f` is required. It
+# holds output step 4 generated seconds ago from source that was already
+# committed and already passed the gates; it is not somebody's work in
+# progress, and this path cannot pick up source even if it were dirty, because
+# step 1 refused to run with a dirty tree at all.
 git add -f frontend/dist
-git add -u
 $staged2 = git diff --cached --name-only
 # THE MESSAGE GOES THROUGH A FILE, NOT THROUGH -m.
 #
@@ -416,24 +431,21 @@ $MSG_FILE = Join-Path $REPO ".deploy_commit_msg.txt"
 [System.IO.File]::WriteAllText($MSG_FILE, $Message,
     (New-Object System.Text.UTF8Encoding $false))
 if ($staged2) {
+    # The rebuilt bundle differs from the committed one. Commit just that.
     git commit -F $MSG_FILE | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "COMMIT FAILED - refusing to push a deploy with no record of what it is."
-        exit 1
-    }
-} elseif ($WIP_COMMITTED) {
-    # Nothing new to stage because step 1 already committed it all. Give that
-    # auto-save commit its real message rather than shipping "wip". Amending is
-    # safe here and needs no force-push: this commit was created moments ago in
-    # step 1 and has not been pushed yet - the push is the next line.
-    git commit --amend -F $MSG_FILE | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "REWORD FAILED - refusing to push a deploy with no record of what it is."
+        Remove-Item -Force -ErrorAction SilentlyContinue $MSG_FILE
         exit 1
     }
     $SHIP_SHA = (git rev-parse HEAD).Trim()
-    Write-Host "  Auto-save commit reworded with the deploy message"
+    Write-Host "  Committed rebuilt frontend/dist"
+} else {
+    # A byte-identical rebuild. Nothing to commit, and nothing to invent: the
+    # commit the operator prepared is what ships.
+    Write-Host "  Frontend bundle unchanged - shipping the prepared commit as is"
 }
+Remove-Item -Force -ErrorAction SilentlyContinue $MSG_FILE
 git push origin main
 if ($LASTEXITCODE -ne 0) {
     Write-Host "PUSH FAILED - check git credentials. Your work is in $SHIP_SHA."

@@ -70,8 +70,10 @@ cp6check.db
 # SQLite rollback journals / WAL from local test runs
 # Throwaway SQLite files created by the deploy gates. Each probe deletes its
 # own on exit, but Windows can still hold the handle after engine.dispose(),
-# and deploy.ps1 runs `git add -A` — so a leaked one would otherwise be
-# committed. A pattern beats listing filenames one at a time.
+# and deploy.ps1 used to run `git add -A` — so a leaked one WAS committed by
+# exactly this route. No deploy script stages by wildcard any more, but the
+# pattern stays: it also keeps a leaked probe database from showing up as an
+# untracked file that now blocks the deploy's clean-tree check.
 .probe_*.db
 *.db-journal
 *.db-wal
