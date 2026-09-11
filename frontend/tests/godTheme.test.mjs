@@ -193,6 +193,41 @@ test('every selector in the God sheet is anchored inside the God scope', () => {
   }
 })
 
+test('no God file paints from a tenant or white-label token', () => {
+  // THE BUG THIS CATCHES, which a hex-literal search cannot.
+  //
+  // Workspaces.jsx painted from `--bg-panel`, `--text-primary`,
+  // `--border-subtle` and friends. Those are the TENANT palette. God Mode does
+  // not declare them - correctly, that is the boundary - so inside the control
+  // plane they resolved to whatever the owner's tenant preference happened to
+  // be, and the owner's is dark. That screen rendered navy panels on a white
+  // page while containing no colour literal at all: every value was already a
+  // variable, it was just the wrong one.
+  //
+  // Reading a tenant token here is also the leak in the other direction: it
+  // couples the control plane to a customer's branding.
+  const TENANT = [
+    '--bg-base', '--bg-panel', '--bg-card', '--bg-card-hover', '--bg-elevated',
+    '--bg-glass', '--bg-field', '--bg-field-soft', '--bg-row', '--bg-row-hover',
+    '--text-primary', '--text-secondary', '--text-tertiary', '--text-inverse',
+    '--border-subtle', '--border-strong', '--border-danger',
+    '--signal-green', '--signal-blue', '--signal-red', '--signal-amber',
+    '--signal-purple', '--brand-platform-accent',
+  ]
+  const offenders = []
+  for (const f of godFiles()) {
+    if (f.endsWith('godTokens.css')) continue      // names it to ban them
+    const body = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    for (const name of TENANT) {
+      if (new RegExp(`var\\(\\s*${name}\\b`).test(body)) offenders.push(`${f}: ${name}`)
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'God components reading the tenant palette. Inside the control plane these '
+    + 'resolve to the TENANT appearance, which is how a light God screen ends '
+    + 'up with navy panels. Use the --gm-* equivalent.')
+})
+
 test('the tenant appearance system is untouched and still has both modes', () => {
   // God Mode dropping dark must not have removed the choice from the TENANT
   // app, where it is a real preference somebody may be relying on.

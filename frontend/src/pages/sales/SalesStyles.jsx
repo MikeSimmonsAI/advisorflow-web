@@ -75,7 +75,14 @@ const CSS = `
    The palette sits in the same navy family as God Mode on purpose: the
    Compensation Command Center renders embedded inside that shell, and a
    second blue would look like a screenshot pasted into the page. */
-[data-appearance="dark"] .sw-scope{
+/* NOT INSIDE THE GOD SHELL. The Compensation Command Center renders embedded at
+   /god/compensation, and God Mode is permanently light as of Sep 11 2026 - so
+   with the owner's tenant preference set to dark, this block was painting a
+   36-element dark island into the middle of a light control plane. Standalone,
+   at /sales/*, the dark workspace is unchanged and still the person's choice.
+   The exclusion says the rule out loud: inside the control plane, follow the
+   control plane. */
+[data-appearance="dark"] .sw-scope:not(.gm-shell *){
   --sw-nav1:#060e18; --sw-nav2:#08131f; --sw-navline:#18293a;
   --sw-canvas:#0a1320;
   --sw-surface:#111e2d; --sw-surface2:#0d1826; --sw-surface3:#18293b;
@@ -99,13 +106,13 @@ const CSS = `
 /* A primary button is teal in both appearances, so its LABEL has to stay
    readable against teal - not against the page. Left as an explicit literal
    rather than a token for exactly that reason. */
-[data-appearance="dark"] .sw-scope .sw-btn.sw-primary,
-[data-appearance="dark"] .sw-scope .sw-tiny.sw-primary{color:#04201c}
+[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-btn.sw-primary,
+[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-tiny.sw-primary{color:#04201c}
 /* The rail is already dark in light mode, where it is the one dark element on
    a pale page. In dark mode it must stay distinguishable from the canvas
    rather than merging into it, which is why nav1/nav2 above go DARKER than
    the canvas instead of lighter. */
-[data-appearance="dark"] .sw-scope .sw-topbar{background:var(--sw-surface)}
+[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-topbar{background:var(--sw-surface)}
 
 /* Keyboard focus, both appearances. The prototype had none, which is an
    accessibility failure on a screen that settles payments. */
@@ -589,7 +596,7 @@ const CSS = `
 /* PAYABLE NOW is the only figure anybody acts on today, so it is the only one
    that gets extra weight and the accent. */
 .sw-tile.is-lead .sw-tile-value{font-size:34px;color:var(--sw-teal-deep)}
-[data-appearance="dark"] .sw-scope .sw-tile.is-lead .sw-tile-value{color:var(--sw-teal2)}
+[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-tile.is-lead .sw-tile-value{color:var(--sw-teal2)}
 /* A FORECAST LOOKS LIKE A FORECAST. Dashed, muted, no shadow: it is not
    sitting on the ledger with the others. */
 .sw-tile.is-forecast{border-style:dashed;background:transparent;box-shadow:none;
@@ -709,7 +716,7 @@ const CSS = `
   color:var(--sw-ink3);font-weight:800}
 .sw-cmd-fact b{display:block;font-size:12px;margin-top:3px;word-break:break-word}
 .sw-cmd-fact.is-strong b{color:var(--sw-teal-deep)}
-[data-appearance="dark"] .sw-scope .sw-cmd-fact.is-strong b{color:var(--sw-teal2)}
+[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-cmd-fact.is-strong b{color:var(--sw-teal2)}
 
 /* a stage, as a section that knows where the deal is */
 .sw-sec{background:var(--sw-surface);border:1px solid var(--sw-line);
@@ -783,7 +790,7 @@ const CSS = `
 .sw-opt:hover:not(:disabled){border-color:var(--sw-line-strong);color:var(--sw-ink)}
 .sw-opt.is-on{background:var(--sw-accent-bg);border-color:var(--sw-teal);
   color:var(--sw-teal-deep);font-weight:700}
-[data-appearance="dark"] .sw-scope .sw-opt.is-on{color:var(--sw-teal2)}
+[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-opt.is-on{color:var(--sw-teal2)}
 .sw-opt:disabled{opacity:.55;cursor:default}
 .sw-mini-input{margin-top:7px;max-width:420px}
 .sw-addnote{margin-top:7px;background:none;border:0;padding:0;cursor:pointer;

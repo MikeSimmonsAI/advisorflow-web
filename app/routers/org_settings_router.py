@@ -1,5 +1,5 @@
-"""
-Org Settings Router — white labeling, tier config, industry settings.
+﻿"""
+Org Settings Router â€” white labeling, tier config, industry settings.
 Super admin can pass ?org_id= to manage any org's settings.
 """
 import json
@@ -23,7 +23,7 @@ def _validate_url(url: Optional[str], field: str) -> Optional[str]:
     return url
 
 from app.deps import get_db, get_current_user, require_admin, load_org_in_scope
-from app.models.models import Organization, User
+from app.models.models import Organization, Platform, User
 # The SAME writer the god-side Features screen uses. Importing it rather than
 # reimplementing it is the point of this import: one column, one set of rules.
 from app.services.entitlements import set_features
@@ -34,60 +34,19 @@ from app.services.capabilities import require_capability
 
 router = APIRouter(prefix="/org-settings", tags=["org-settings"])
 
-DEFAULT_TIERS = {
-    "funeral": [
-        {"value": "pre_need", "label": "Pre-Need", "color": "blue", "description": "Planning ahead"},
-        {"value": "at_need", "label": "At-Need", "color": "red", "description": "Immediate need"},
-        {"value": "imminent", "label": "Imminent", "color": "red", "description": "Within 90 days"},
-        {"value": "contract_sold", "label": "Contract Sold", "color": "green", "description": "Closed"},
-        {"value": "email_only", "label": "Email Only", "color": "purple", "description": "No phone"},
-        {"value": "partial", "label": "Needs Review", "color": "amber", "description": "Incomplete info"},
-    ],
-    "roofing": [
-        {"value": "estimate_requested", "label": "Estimate Requested", "color": "blue", "description": "New lead"},
-        {"value": "estimate_given", "label": "Estimate Given", "color": "amber", "description": "Quote sent"},
-        {"value": "follow_up", "label": "Follow Up", "color": "amber", "description": "Waiting on decision"},
-        {"value": "contract_signed", "label": "Contract Signed", "color": "green", "description": "Closed"},
-        {"value": "email_only", "label": "Email Only", "color": "purple", "description": "No phone"},
-    ],
-    "insurance": [
-        {"value": "prospect", "label": "Prospect", "color": "blue", "description": "Initial contact"},
-        {"value": "quoted", "label": "Quoted", "color": "amber", "description": "Quote sent"},
-        {"value": "application", "label": "Application", "color": "amber", "description": "App in progress"},
-        {"value": "policy_sold", "label": "Policy Sold", "color": "green", "description": "Closed"},
-        {"value": "email_only", "label": "Email Only", "color": "purple", "description": "No phone"},
-    ],
-    "real_estate": [
-        {"value": "buyer_lead", "label": "Buyer Lead", "color": "blue", "description": "Looking to buy"},
-        {"value": "seller_lead", "label": "Seller Lead", "color": "amber", "description": "Looking to sell"},
-        {"value": "showing_scheduled", "label": "Showing Scheduled", "color": "amber", "description": "Active"},
-        {"value": "under_contract", "label": "Under Contract", "color": "green", "description": "Pending close"},
-        {"value": "closed", "label": "Closed", "color": "green", "description": "Deal done"},
-        {"value": "email_only", "label": "Email Only", "color": "purple", "description": "No phone"},
-    ],
-    "dental": [
-        {"value": "new_patient", "label": "New Patient", "color": "blue", "description": "First contact"},
-        {"value": "consultation", "label": "Consultation", "color": "amber", "description": "Consult booked"},
-        {"value": "treatment_plan", "label": "Treatment Plan", "color": "amber", "description": "Plan presented"},
-        {"value": "active_patient", "label": "Active Patient", "color": "green", "description": "Ongoing care"},
-        {"value": "email_only", "label": "Email Only", "color": "purple", "description": "No phone"},
-    ],
-    "custom": [
-        {"value": "tier_1", "label": "Tier 1", "color": "blue", "description": ""},
-        {"value": "tier_2", "label": "Tier 2", "color": "amber", "description": ""},
-        {"value": "tier_3", "label": "Tier 3", "color": "green", "description": ""},
-        {"value": "email_only", "label": "Email Only", "color": "purple", "description": "No phone"},
-    ],
-    "fiber": [
-        {"value": "prospect", "label": "Prospect", "color": "blue", "description": "New inquiry, not yet contacted"},
-        {"value": "quoted", "label": "Quoted", "color": "amber", "description": "Service options presented"},
-        {"value": "scheduled_install", "label": "Scheduled Install", "color": "orange", "description": "Install date set"},
-        {"value": "active_customer", "label": "Active Customer", "color": "green", "description": "Service live"},
-        {"value": "churned", "label": "Churned", "color": "red", "description": "Cancelled or lost"},
-        {"value": "email_only", "label": "Email Only", "color": "purple", "description": "No phone"},
-    ],
-}
-
+# THE INDUSTRY TAXONOMY LIVES IN ONE PLACE NOW.
+#
+# This dict used to be declared here, a second copy lived in settings_router
+# for appointment types, and a third in tier_config_service for the
+# TierDefinition rows. Three copies is why a new customer in an unrelated
+# industry still ended up with funeral vocabulary: whichever map did not
+# recognise the industry fell back to the one it knew.
+#
+# The name is kept so nothing that imports it has to change; the data now has
+# exactly one home, and an unknown industry resolves to a neutral
+# service-business set rather than to any vertical.
+from app.services import industry_migration, industry_templates
+from app.services.industry_templates import DEFAULT_TIERS  # noqa: F401  (re-export)
 
 def _resolve_org(current_user: User, org_id: Optional[str], db: Session) -> Organization:
     """
@@ -145,6 +104,64 @@ class IndustryUpdate(BaseModel):
     industry: str
 
 
+# ── who this organization belongs to ────────────────────────────────────────
+#
+# THREE THINGS, AND THEY ARE NOT THE SAME THING:
+#
+#   THE ENGINE      AdvisorFlow. The platform underneath everything. A customer
+#                   never sees it and it is not a brand anyone is sold.
+#   THE BRAND       the white-label product this customer bought — resolved
+#                   from the organization's OWN platform row, never from a
+#                   constant. This is what the customer sees in the shell, in
+#                   their emails and on their support page.
+#   THE ORGANIZATION the customer's own company. It owns its name, its logo,
+#                   its public contact details and its booking-page identity —
+#                   and it does not own, replace or redefine the brand above it.
+#
+# Those were conflated: the settings page told every customer that its brand
+# name "replaces BookaBoost in the sidebar and emails", which is one brand's
+# name shown to another brand's customer as if it were the platform itself.
+
+ENGINE_NAME = "AdvisorFlow"
+
+
+def _platform_identity(db: Session, org: Organization) -> dict:
+    """The brand that owns this organization, from its own platform row."""
+    from app.services import brand_config
+
+    platform = None
+    if getattr(org, "platform_id", None):
+        platform = (db.query(Platform)
+                    .filter(Platform.id == org.platform_id).first())
+
+    cfg = brand_config.config_for_slug(db, getattr(platform, "slug", None))
+    brand_display = (getattr(platform, "name", None)
+                     or cfg.get("display_name")
+                     or None)
+
+    return {
+        "engine": ENGINE_NAME,
+        "platform_id": getattr(platform, "id", None),
+        "slug": getattr(platform, "slug", None),
+        # None rather than a guess. A screen that has no brand name shows the
+        # organization's own name, which is always true, instead of a brand
+        # that may belong to somebody else.
+        "brand_name": brand_display,
+        "brand_known": bool(platform is not None),
+        "support_email": (getattr(platform, "support_email", None)
+                          or cfg.get("support_email")),
+        "website_url": cfg.get("website_url"),
+        "app_base_url": cfg.get("app_base_url"),
+        "logo_url": cfg.get("logo_url"),
+        "accent_color": cfg.get("accent_color"),
+        "hierarchy": [
+            {"level": "engine", "label": ENGINE_NAME, "customer_visible": False},
+            {"level": "brand", "label": brand_display, "customer_visible": True},
+            {"level": "organization", "label": org.name, "customer_visible": True},
+        ],
+    }
+
+
 class TierConfigUpdate(BaseModel):
     tiers: list[dict]
 
@@ -164,14 +181,24 @@ def get_org_settings(
         except Exception:
             pass
     if not tier_config:
-        tier_config = DEFAULT_TIERS.get(org.industry or "funeral", DEFAULT_TIERS["funeral"])
+        # No funeral fallback. An org whose industry this platform does not
+        # recognise is shown a neutral set, flagged as unmatched, rather than
+        # another vertical's vocabulary presented as its own.
+        tier_config = industry_templates.lead_tiers(org.industry)
 
     return {
         "id": org.id,
         "name": org.name,
         "slug": org.slug,
         "plan": org.plan,
-        "industry": org.industry or "funeral",
+        "industry": industry_templates.normalize(org.industry),
+        "industry_raw": org.industry,
+        "industry_label": industry_templates.resolve(org.industry)["label"],
+        "industry_matched": industry_templates.is_known(org.industry),
+        # The parent white-label brand, resolved from this org's own platform.
+        # Present so no screen has to guess, and so none of them can fall back
+        # to a brand name typed into a JSX file.
+        "platform": _platform_identity(db, org),
         "brand_name": org.brand_name,
         "brand_logo_url": org.brand_logo_url,
         "brand_color_primary": org.brand_color_primary,
@@ -184,9 +211,9 @@ def get_org_settings(
         "instagram_url": getattr(org, "instagram_url", None),
         "linkedin_url": getattr(org, "linkedin_url", None),
         "enabled_features": json.loads(org.enabled_features) if getattr(org, "enabled_features", None) else None,
-        # Org-level email sender — each brand sends from its own verified domain.
+        # Org-level email sender â€” each brand sends from its own verified domain.
         "from_email": getattr(org, "from_email", None),
-        # Never return the raw API key to the UI — only signal whether it's set.
+        # Never return the raw API key to the UI â€” only signal whether it's set.
         "resend_api_key_set": bool(getattr(org, "resend_api_key", None)),
         "reply_to_email": getattr(org, "reply_to_email", None),
         "cc_email": getattr(org, "cc_email", None),
@@ -197,9 +224,170 @@ def get_org_settings(
     }
 
 
+@router.get("/platform-identity")
+def platform_identity(org_id: Optional[str] = Query(None),
+                      db: Session = Depends(get_db),
+                      current_user: User = Depends(get_current_user)) -> dict:
+    """Engine, brand and organization, each named from its own row."""
+    org = _resolve_org(current_user, org_id, db)
+    return _platform_identity(db, org)
+
+
+# ── ownership of every setting on this page ─────────────────────────────────
+#
+# The settings screen had grown into one undifferentiated list in which an
+# organization's social links sat next to the Twilio account that bills and
+# sends. Those are not the same kind of thing and they do not belong to the
+# same people.
+#
+# This classification is DESCRIPTIVE, not a second permission system. Each
+# section names the guard that already enforces it, and `can_edit` is computed
+# from the caller's existing role and capabilities — the endpoints below are
+# still the things that refuse. A screen reads this to decide what to show and
+# what to mark read-only; it is not what makes a write safe.
+
+OWNER_CUSTOMER = "customer"
+OWNER_BRAND    = "brand"
+OWNER_PLATFORM = "platform"
+
+_SECTIONS = [
+    {
+        "key": "organization_profile",
+        "label": "Organization profile",
+        "description": "Who this company is, as its own customers see it.",
+        "owner": OWNER_CUSTOMER,
+        "risk": "low",
+        "fields": ["name", "org_address", "org_phone", "brand_logo_url",
+                   "member_label", "members_label", "facebook_url",
+                   "google_review_url", "instagram_url", "linkedin_url"],
+        "endpoints": ["PATCH /org-settings/contact",
+                      "PATCH /org-settings/social-links",
+                      "PATCH /org-settings/branding"],
+        "guard": "require_admin",
+    },
+    {
+        "key": "business_configuration",
+        "label": "Business configuration",
+        "description": "What kind of business this is, and the vocabulary that "
+                       "follows from it.",
+        "owner": OWNER_CUSTOMER,
+        "risk": "medium",
+        "fields": ["industry", "tier_config", "appointment_types",
+                   "crm_stages", "custom_fields"],
+        "endpoints": ["PATCH /org-settings/industry",
+                      "POST /org-settings/industry/preview",
+                      "POST /org-settings/industry/apply",
+                      "PATCH /org-settings/tiers",
+                      "PUT /settings/appointment-types"],
+        "guard": "require_admin",
+        "note": "Changing the industry replaces inherited defaults only. "
+                "Anything this organization customized is preserved.",
+    },
+    {
+        "key": "communications",
+        "label": "Communications and integrations",
+        "description": "How this organization sends, and what it is connected "
+                       "to.",
+        "owner": OWNER_CUSTOMER,
+        "risk": "high",
+        "fields": ["from_email", "reply_to_email", "cc_email",
+                   "resend_api_key", "calendar_provider"],
+        "endpoints": ["PATCH /org-settings/email-sender",
+                      "PATCH /org-settings/calendar-provider"],
+        "guard": "require_admin",
+    },
+    {
+        "key": "platform_brand",
+        "label": "Platform and brand",
+        "description": "The white-label brand this customer belongs to. Owned "
+                       "by the brand, never by the customer.",
+        "owner": OWNER_PLATFORM,
+        "risk": "high",
+        "fields": ["platform.brand_name", "platform.support_email",
+                   "platform.logo_url", "platform.accent_color",
+                   "platform.app_base_url"],
+        "endpoints": ["God Mode brand configuration"],
+        "guard": "god_admin",
+        "note": "An organization's own name and logo do not replace the brand "
+                "above it.",
+    },
+    {
+        "key": "advanced",
+        "label": "Advanced and sensitive operations",
+        "description": "Sending infrastructure, entitlements, demo data and "
+                       "anything destructive.",
+        "owner": OWNER_BRAND,
+        "risk": "critical",
+        "fields": ["twilio_account_sid", "twilio_auth_token", "twilio_phone",
+                   "enabled_features", "demo_data", "reset_to_defaults"],
+        "endpoints": ["PUT /org-settings/twilio",
+                      "PATCH /org-settings/features",
+                      "POST /org-settings/industry/apply (replace_customized)"],
+        "guard": "capability: twilio / god_admin",
+    },
+]
+
+
+@router.get("/sections")
+def settings_sections(org_id: Optional[str] = Query(None),
+                      db: Session = Depends(get_db),
+                      current_user: User = Depends(get_current_user)) -> dict:
+    """Every settings surface, who owns it, and whether THIS caller may edit it."""
+    org = _resolve_org(current_user, org_id, db)
+    role = getattr(current_user, "role", None)
+    is_god = role == "god_admin"
+    is_operator = role in ("super_admin", "god_admin")
+    is_org_admin = role in ("org_admin", "admin", "owner") or is_operator
+
+    def editable(section) -> bool:
+        if section["owner"] == OWNER_PLATFORM:
+            return is_god
+        if section["risk"] == "critical":
+            return is_operator
+        return is_org_admin
+
+    return {
+        "organization_id": org.id,
+        "platform": _platform_identity(db, org),
+        "sections": [{**section, "can_edit": editable(section)}
+                     for section in _SECTIONS],
+        "note": "Ownership is descriptive. Each endpoint enforces its own "
+                "guard; this is what a screen reads to decide what to show.",
+    }
+
+
 @router.get("/default-tiers")
 def get_default_tiers():
     return DEFAULT_TIERS
+
+
+@router.get("/industries")
+def list_industries() -> dict:
+    """Every business type a customer can be, and what each one starts with.
+
+    The settings screen and the customer-creation screen both read this, so
+    neither of them carries its own list — which is how the lists drifted apart
+    in the first place.
+    """
+    return {"industries": industry_templates.choices(),
+            "generic_key": industry_templates.GENERIC_KEY}
+
+
+@router.get("/industry-template")
+def get_industry_template(industry: Optional[str] = Query(None),
+                          org_id: Optional[str] = Query(None),
+                          db: Session = Depends(get_db),
+                          current_user: User = Depends(require_admin)) -> dict:
+    """What a given industry configures, without applying anything.
+
+    `matched: false` means the industry string did not resolve to a template
+    and the generic set is being shown — which the screen says out loud rather
+    than presenting neutral defaults as somebody's decision.
+    """
+    if industry is None:
+        org = _resolve_org(current_user, org_id, db)
+        industry = getattr(org, "industry", None)
+    return industry_templates.summary(industry)
 
 
 @router.patch("/branding")
@@ -234,7 +422,7 @@ def update_contact_info(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Update org name, address and phone — shown on the booking page header and confirmation emails."""
+    """Update org name, address and phone â€” shown on the booking page header and confirmation emails."""
     org = _resolve_org(current_user, org_id, db)
     if req.name is not None and req.name.strip():
         org.name = req.name.strip()
@@ -253,11 +441,77 @@ def update_industry(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    """Set the organization's business type.
+
+    THIS USED TO OVERWRITE THE TIER CONFIGURATION UNCONDITIONALLY. Changing an
+    industry on an organization that had renamed its own tiers silently
+    destroyed that work, which is why the change now runs through
+    `industry_migration`: inherited defaults are replaced, anything a person
+    actually customized is preserved and reported back.
+
+    Replacing customized configuration is still possible and is a different
+    request — POST /org-settings/industry/apply with replace_customized, which
+    demands a reason and writes an audit entry naming what it overwrote.
+    """
     org = _resolve_org(current_user, org_id, db)
-    org.industry = req.industry
-    org.tier_config = json.dumps(DEFAULT_TIERS.get(req.industry, DEFAULT_TIERS["custom"]))
+    result = industry_migration.apply(
+        db, org, current_user, req.industry,
+        reason="Industry set from organization settings.",
+        replace_customized=False)
     db.commit()
-    return {"updated": True, "tiers": json.loads(org.tier_config)}
+    return {"updated": True,
+            "industry": result["industry"],
+            "industry_label": result["industry_label"],
+            "tiers": industry_templates.lead_tiers(result["industry"]),
+            "replaced": result["applied"],
+            "preserved": result["preserved"]}
+
+
+class IndustryMigrationRequest(BaseModel):
+    industry: str
+    reason: Optional[str] = None
+    replace_customized: bool = False
+
+
+@router.post("/industry/preview")
+def preview_industry_change(
+    req: IndustryMigrationRequest,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """What changing this organization's industry would do. Writes nothing."""
+    org = _resolve_org(current_user, org_id, db)
+    return industry_migration.preview(db, org, req.industry,
+                                      replace_customized=req.replace_customized)
+
+
+@router.post("/industry/apply")
+def apply_industry_change(
+    req: IndustryMigrationRequest,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Apply an industry template to an existing organization.
+
+    The repair path for a customer that was provisioned with the wrong
+    business type. Inherited defaults are replaced; customized configuration is
+    preserved unless `replace_customized` explicitly says otherwise, and either
+    way the reason and the exact surfaces touched are audited.
+    """
+    org = _resolve_org(current_user, org_id, db)
+    if req.replace_customized and current_user.role != "god_admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Overwriting configuration this organization customized "
+                   "requires platform-owner authority.")
+    result = industry_migration.apply(
+        db, org, current_user, req.industry,
+        reason=(req.reason or ""),
+        replace_customized=req.replace_customized)
+    db.commit()
+    return result
 
 
 @router.patch("/tiers")
@@ -313,20 +567,20 @@ def update_email_sender(
 ):
     """
     Saves the org-level Resend API key and from-address. The key is stored
-    plaintext (it's an outbound service key, not a user secret — same
+    plaintext (it's an outbound service key, not a user secret â€” same
     threat model as an SMTP password stored in env vars). Only updates
     resend_api_key if a non-empty string is provided, so admins can update
     the from_email alone without having to re-enter the key.
     """
     org = _resolve_org(current_user, org_id, db)
     if req.from_email is not None:
-        org.from_email = req.from_email or None  # empty string → clear
+        org.from_email = req.from_email or None  # empty string â†’ clear
     if req.resend_api_key:  # only update when a non-empty value is explicitly provided
         org.resend_api_key = req.resend_api_key
     if req.reply_to_email is not None:
-        org.reply_to_email = req.reply_to_email or None  # empty string → clear
+        org.reply_to_email = req.reply_to_email or None  # empty string â†’ clear
     if req.cc_email is not None:
-        org.cc_email = req.cc_email or None              # empty string → clear
+        org.cc_email = req.cc_email or None              # empty string â†’ clear
     db.commit()
     return {"updated": True, "from_email": org.from_email,
             "reply_to_email": org.reply_to_email, "cc_email": org.cc_email,
@@ -443,11 +697,11 @@ class OrgTwilioRead(BaseModel):
 
 class OrgTwilioUpdate(BaseModel):
     org_twilio_account_sid:    str
-    org_twilio_auth_token:     str                    # plaintext — encrypted before storage
+    org_twilio_auth_token:     str                    # plaintext â€” encrypted before storage
     # OPTIONAL as of the org-credential model. The organization holds the Twilio
     # account and the A2P brand; the numbers underneath it are assigned to
     # individual advisors. A shared org-wide number is a deliberate extra, not a
-    # prerequisite — requiring one here is what previously forced every customer
+    # prerequisite â€” requiring one here is what previously forced every customer
     # to nominate some number as "the org number" before anything would send.
     # Sending an empty string CLEARS it.
     org_twilio_phone_number:   Optional[str] = None   # E.164, e.g. "+18005550100"
@@ -456,19 +710,19 @@ class OrgTwilioUpdate(BaseModel):
 
 
 class OrgTwilioPhoneUpdate(BaseModel):
-    """Lightweight update — change phone/caller-id without re-entering the auth token."""
+    """Lightweight update â€” change phone/caller-id without re-entering the auth token."""
     org_twilio_phone_number:   Optional[str] = None   # "" or null clears the shared number
     org_twilio_caller_id_name: Optional[str] = None
     org_twilio_number_type:    Optional[str] = None
 
 
-# ── Sending-number assignment ────────────────────────────────────────────────
+# â”€â”€ Sending-number assignment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 #
 # A sending number identifies exactly one mailbox in the inbound webhook
 # (app/routers/sms_router.py looks the inbound `To` up against
 # users.twilio_phone_number, then organizations.org_twilio_phone_number). Two
 # rows holding the same number would make that lookup pick whichever the
-# database returned first, and a family's reply — a STOP included — would land
+# database returned first, and a family's reply â€” a STOP included â€” would land
 # in the wrong advisor's thread or the wrong tenant entirely. So assignment is
 # checked for collisions across ALL users and ALL organizations, not just this
 # one. That check is a correctness requirement of inbound routing, not a
@@ -615,7 +869,7 @@ def update_org_twilio_phone(
     current_user: User = Depends(require_admin),
     _cap: User = Depends(require_capability("twilio_numbers")),
 ):
-    """Update the shared phone number / caller ID only — no auth token re-entry.
+    """Update the shared phone number / caller ID only â€” no auth token re-entry.
 
     An empty phone number CLEARS the shared sender, which is a supported state:
     the organization keeps its credentials and A2P registration, and every send
@@ -635,7 +889,7 @@ def update_org_twilio_phone(
 
 
 # ---------------------------------------------------------------------------
-# Per-advisor sending numbers — the org holds the credentials, each advisor
+# Per-advisor sending numbers â€” the org holds the credentials, each advisor
 # holds only the local number assigned to them.
 # ---------------------------------------------------------------------------
 
@@ -688,7 +942,7 @@ def assign_org_sending_number(
     """Assign (or clear) one advisor's sending number.
 
     This writes a NUMBER ONLY. It never writes an Account SID or Auth Token to
-    a user row — the credentials stay on the organization, which is the whole
+    a user row â€” the credentials stay on the organization, which is the whole
     point of the model: one Twilio account and one A2P registration per
     customer, with the numbers underneath it handed out to staff.
 
@@ -726,7 +980,7 @@ def assign_org_sending_number(
         "full_name": target.full_name,
         "twilio_phone_number": target.twilio_phone_number,
         # Echo the resolved sender so the UI reports exactly what a send would
-        # do, rather than assuming the assignment is sufficient on its own —
+        # do, rather than assuming the assignment is sufficient on its own â€”
         # it is not, if the organization has no credentials yet.
         "sender": describe_sms_sender(target, db),
     }

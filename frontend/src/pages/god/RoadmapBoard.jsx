@@ -26,30 +26,20 @@ const BOARD_STYLES = `
   --rm-tab-sel:  var(--god-accent, #3b82f6);
 }
 
-[data-appearance="dark"] .rm-board {
-    --rm-bg:       #131c2b;
-    --rm-bg2:      #0d1524;
-    --rm-border:   #1e2e44;
-    --rm-ink:      #d4dfef;
-    --rm-muted:    #7a9cbf;
-    --rm-faint:    #4a6680;
-    --rm-row-sep:  #172236;
-    --rm-input-bg: #0c1726;
-    --rm-tab-sel:  #3b82f6;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-appearance="light"]) .rm-board {
-    --rm-bg:       #131c2b;
-    --rm-bg2:      #0d1524;
-    --rm-border:   #1e2e44;
-    --rm-ink:      #d4dfef;
-    --rm-muted:    #7a9cbf;
-    --rm-faint:    #4a6680;
-    --rm-row-sep:  #172236;
-    --rm-input-bg: #0c1726;
-    --rm-tab-sel:  #3b82f6;
-  }
-}
+/* NO DARK BRANCH. This board used to carry its own data-appearance="dark"
+   block and a prefers-color-scheme fallback, both inherited from when it was
+   built as a standalone surface. God Mode is permanently light now, and the
+   owner's TENANT preference is dark - so those two blocks were still firing and
+   painting #131c2b summary cards onto the Command Center and the Roadmap page.
+   A sweep of every God route found them; they were the only dark panels left.
+
+   The light tokens above are the whole palette, and they read the shared
+   --god-* names, so this board follows the control plane instead of holding a
+   twelfth private copy of it.
+
+   NOTE FOR WHOEVER EDITS THIS COMMENT: it lives inside a JS template literal.
+   A backtick here terminates the string and breaks the build - which is exactly
+   what the first version of this comment did. */
 
 /* ── layout pieces ── */
 .rm-section { margin-bottom:18px; border:1px solid var(--rm-border); border-radius:10px; background:var(--rm-bg); overflow:hidden; }
@@ -69,8 +59,7 @@ const BOARD_STYLES = `
 .rm-alert { border-radius:6px; padding:6px 10px; margin-bottom:6px; }
 .rm-alert-warn { background:#fffbeb; border:1px solid #fcd34d; color:#92400e; }
 .rm-alert-err  { background:#fef2f2; border:1px solid #fca5a5; color:#991b1b; }
-[data-appearance="dark"] .rm-alert-warn { background:#1c1600; border-color:#6b4c00; color:#fbbf24; }
-[data-appearance="dark"] .rm-alert-err  { background:#1a0505; border-color:#7f1d1d; color:#fca5a5; }
+/* The dark counterparts of these two are gone with the rest of the dark branch. */
 
 /* ── filter tabs ── */
 .rm-tabs { display:flex; gap:4px; }
@@ -124,12 +113,12 @@ const FILTER_TABS = [
   { key: 'complete', label: 'Complete'     },
 ]
 
-// Dark mode: check data-appearance on root (same pattern as rest of app)
-function useDark() {
-  return document.documentElement.getAttribute('data-appearance') === 'dark' ||
-    (!document.documentElement.getAttribute('data-appearance') &&
-     window.matchMedia('(prefers-color-scheme: dark)').matches)
-}
+// GOD MODE IS PERMANENTLY LIGHT, so this board no longer asks the document what
+// appearance the TENANT app is in. It used to - `data-appearance="dark"` on the
+// root, which is the owner's own current setting - and then picked the `d*`
+// half of every badge palette below, which is how a light Command Center ended
+// up with dark status chips on it. The light half is the only half now.
+function useDark() { return false }
 
 function StatusBadge({ status }) {
   const dark = useDark()

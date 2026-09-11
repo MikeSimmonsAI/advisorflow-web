@@ -162,8 +162,18 @@ GENERIC_TIERS = [
 
 def _seed_industry_tiers(db: Session, org: Organization):
     """Seed TierDefinition rows for an org based on their industry. Safe to call on existing orgs — only adds missing tiers."""
-    industry = (org.industry or "general").lower()
-    presets = INDUSTRY_TIERS.get(industry, GENERIC_TIERS)
+    # Resolved through the one industry registry, so "Energy / Energy
+    # Procurement", "energy" and "utilities" all find the same preset instead
+    # of three different ones falling through to the generic set. An industry
+    # with no preset here still lands on GENERIC_TIERS — neutral, which is the
+    # correct answer for a business this map does not describe.
+    from app.services import industry_templates as _industry_templates
+
+    industry = _industry_templates.normalize(org.industry)
+    presets = INDUSTRY_TIERS.get(industry, None)
+    if presets is None:
+        presets = INDUSTRY_TIERS.get(
+            (org.industry or "").strip().lower(), GENERIC_TIERS)
     existing_keys = {t.tier_key for t in db.query(TierDefinition).filter(TierDefinition.organization_id == org.id).all()}
     for tier_key, tier_label, track_key, track_label, ai_tone_context, sort_order in presets:
         if tier_key not in existing_keys:
@@ -1975,8 +1985,12 @@ def fix_lead_contact_info(
 
 class ProvisionClientRequest(BaseModel):
     org_name: str
-    org_slug: str           # url-safe identifier e.g. "acme-funeral"
-    industry: str = "funeral"
+    org_slug: str           # url-safe identifier e.g. "acme-services"
+    # NOT "funeral". A provisioning request that does not state a business type
+    # must not silently assert one: the organization is created neutral and the
+    # industry is set when somebody actually knows it. See
+    # app/services/industry_templates.py.
+    industry: Optional[str] = None
     plan: str = "trial"
     supervisor_full_name: str
     supervisor_email: EmailStr
@@ -2039,10 +2053,14 @@ def provision_client(
                 raise HTTPException(status_code=404, detail="Platform not found")
 
     # Create org
+    from app.services import industry_templates as _industry_templates
+
     new_org = Organization(
         name=req.org_name,
         slug=req.org_slug,
-        industry=req.industry,
+        # Canonicalised, so "Energy / Energy Procurement" and "energy" are the
+        # same stored value and every reader resolves it the same way.
+        industry=_industry_templates.normalize(req.industry),
         plan=req.plan,
         is_active=True,
         platform_id=_resolved_platform_id,

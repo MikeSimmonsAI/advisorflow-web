@@ -42,12 +42,20 @@ const INDUSTRIES = [
   { value: 'financial_services', label: '💰 Financial Services', group: 'Real Estate & Finance' },
   // Funeral & Cemetery
   { value: 'funeral', label: '⚰️ Funeral & Cemetery', group: 'Funeral & Cemetery' },
+  // Energy / procurement. Added with the industry template registry — an
+  // energy customer previously had no entry here at all, so its industry
+  // resolved through a fallback and it inherited another vertical's defaults.
+  { value: 'energy', label: 'Energy & Procurement', group: 'Energy' },
   // Other
   { value: 'legal', label: '⚖️ Legal', group: 'Other' },
   { value: 'fitness', label: '💪 Fitness', group: 'Other' },
   { value: 'education', label: '📚 Education', group: 'Other' },
   { value: 'auto_repair', label: '🚗 Auto Repair', group: 'Other' },
   { value: 'custom', label: '⚙️ Custom / Other', group: 'Other' },
+  // What the server calls an organization whose business type nobody has
+  // stated. Listed so the read-only display can name it instead of printing
+  // the raw key, and so it is visibly a real choice rather than a gap.
+  { value: 'generic', label: '⚙️ General Service Business', group: 'Other' },
 ]
 
 const COLOR_OPTIONS = [
@@ -81,7 +89,20 @@ export default function OrgSettings() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  // Branding
+  // THE PARENT BRAND, RESOLVED FROM THE SERVER.
+  //
+  // This page used to name one brand in two places — a hint reading
+  // 'Replaces "BookaBoost" in the sidebar and emails' and a preview bar that
+  // fell back to the same string. Both were shown to every customer of every
+  // brand, so a customer of one white-label product was told its settings
+  // controlled a different company's product. The brand now comes from
+  // `/org-settings/` (resolved from this organization's own platform row) and
+  // is never guessed on the client.
+  const [platform, setPlatform] = useState(null)
+  const [industryLabel, setIndustryLabel] = useState('')
+  const [industryMatched, setIndustryMatched] = useState(true)
+
+  // Organization profile
   const [brandName, setBrandName] = useState('')
   const [brandLogoUrl, setBrandLogoUrl] = useState('')
   const [brandColorPrimary, setBrandColorPrimary] = useState('#2fb6ff')
@@ -90,7 +111,10 @@ export default function OrgSettings() {
   const [membersLabel, setMembersLabel] = useState('')
 
   // Industry
-  const [industry, setIndustry] = useState('funeral')
+  // Neutral until the server says otherwise. It used to start as 'funeral',
+  // so for the moment before the request returned, every organization's
+  // settings page showed one vertical's tiers.
+  const [industry, setIndustry] = useState('generic')
   const [changingIndustry, setChangingIndustry] = useState(false)
 
   // Tiers
@@ -162,7 +186,10 @@ export default function OrgSettings() {
         setBrandColorAccent(data.brand_color_accent || '#1ef0a8')
         setMemberLabel(data.member_label || '')
         setMembersLabel(data.members_label || '')
-        setIndustry(data.industry || 'funeral')
+        setIndustry(data.industry || 'generic')
+        setIndustryLabel(data.industry_label || '')
+        setIndustryMatched(data.industry_matched !== false)
+        setPlatform(data.platform || null)
         setTiers(data.tier_config || [])
         setFacebookUrl(data.facebook_url || '')
         setGoogleReviewUrl(data.google_review_url || '')
@@ -216,17 +243,29 @@ export default function OrgSettings() {
   }
 
   async function changeIndustry(newIndustry) {
+    // THE WARNING USED TO BE TRUE AND IS NOT ANY MORE.
+    //
+    // This said "tier labels will be reset to defaults", because the endpoint
+    // overwrote them unconditionally — including tiers somebody had renamed
+    // for their own business. The server now replaces only what it can prove
+    // was inherited, so the prompt says what will actually happen and the
+    // result reports what it kept.
     const isReset = newIndustry === industry
     const msg = isReset
-      ? `Reset tier configuration to ${newIndustry} defaults? Current tiers will be replaced.`
-      : `Switching to ${newIndustry} will reset tier labels to defaults. Continue?`
+      ? `Re-apply the ${newIndustry} defaults? Inherited settings are replaced; anything customized here is kept.`
+      : `Switch this organization to ${newIndustry}? Inherited defaults are replaced; anything customized here is kept.`
     if (!window.confirm(msg)) return
     setChangingIndustry(true)
     try {
       const result = await api.patch(`/org-settings/industry${orgQuery}`, { industry: newIndustry })
-      setIndustry(newIndustry)
+      setIndustry(result.industry || newIndustry)
+      setIndustryLabel(result.industry_label || '')
+      setIndustryMatched(true)
       setTiers(result.tiers || [])
-      setSuccess(isReset ? 'Tiers reset to industry defaults.' : 'Industry updated and tiers reset to defaults.')
+      const kept = (result.preserved || []).length
+      setSuccess(kept
+        ? `Business type updated. ${kept} customized setting${kept === 1 ? '' : 's'} left untouched.`
+        : 'Business type updated and defaults applied.')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -407,13 +446,34 @@ export default function OrgSettings() {
         <>
           <div className="os-grid">
             <section className="panel os-section">
-              <div className="panel-header"><h2 className="panel-title">Branding</h2></div>
-              <p className="os-hint">Customize how this organization appears in the platform.</p>
+              <div className="panel-header"><h2 className="panel-title">Organization profile</h2></div>
+              <p className="os-hint">
+                How this organization presents itself — its own name, logo and
+                colours.
+                {platform?.brand_name
+                  ? ` It sits inside ${platform.brand_name} and does not change it.`
+                  : ''}
+              </p>
+
+              {platform && (
+                <div className="os-hint" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', margin: '2px 0 10px' }}>
+                  <span style={{ opacity: 0.55 }}>{platform.engine}</span>
+                  <span style={{ opacity: 0.35 }}>›</span>
+                  <span style={{ opacity: 0.8 }}>{platform.brand_name || 'Brand not set'}</span>
+                  <span style={{ opacity: 0.35 }}>›</span>
+                  <span style={{ fontWeight: 600 }}>{orgName || settings?.name}</span>
+                </div>
+              )}
 
               <label className="os-label">
-                Brand name
+                Organization display name
                 <input className="os-input" value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder="e.g. Acme Roofing Co." />
-                <span className="os-hint">Replaces "BookaBoost" in the sidebar and emails</span>
+                <span className="os-hint">
+                  What this organization's own people and customers see.
+                  {platform?.brand_name
+                    ? ` It does not replace ${platform.brand_name}, the platform this workspace runs on.`
+                    : ' It does not replace the platform this workspace runs on.'}
+                </span>
               </label>
 
               <label className="os-label">
@@ -502,7 +562,12 @@ export default function OrgSettings() {
               </label>
 
               <div className="os-preview-bar" style={{ background: brandColorPrimary }}>
-                <span style={{ color: '#fff', fontWeight: 700 }}>{brandName || 'BookaBoost'}</span>
+                {/* The organization's own name, never a brand constant. This
+                    fell back to one brand's name, so a customer of a different
+                    brand previewed somebody else's company. */}
+                <span style={{ color: '#fff', fontWeight: 700 }}>
+                  {brandName || orgName || settings?.name || 'Your organization'}
+                </span>
                 <span style={{ color: brandColorAccent, fontWeight: 600, fontSize: 13 }}>● Live</span>
               </div>
 
@@ -512,8 +577,28 @@ export default function OrgSettings() {
             </section>
 
             <section className="panel os-section">
-              <div className="panel-header"><h2 className="panel-title">Industry</h2></div>
-              <p className="os-hint">Determines default tier labels and cadence templates.</p>
+              <div className="panel-header"><h2 className="panel-title">Business type</h2></div>
+              <p className="os-hint">
+                Drives the starting lead tiers, appointment types and AI
+                vocabulary for this organization. Changing it replaces
+                inherited defaults only — anything edited here is kept.
+              </p>
+
+              {/* SAYS SO WHEN IT IS GUESSING. An organization whose business
+                  type was never stated is shown neutral defaults, and the
+                  screen admits that rather than presenting them as somebody's
+                  decision. Before this, it presented one vertical's. */}
+              {!industryMatched && (
+                <div className="os-hint" style={{
+                  marginTop: 4, padding: '8px 10px', borderRadius: 8,
+                  background: 'rgba(240,192,64,0.08)',
+                  border: '1px solid rgba(240,192,64,0.28)',
+                }}>
+                  No business type has been set for this organization, so it is
+                  using neutral service-business defaults. Pick the right one to
+                  replace them.
+                </div>
+              )}
 
               {isSuperAdmin ? (
                 // Super admin only — org admins cannot change their own industry

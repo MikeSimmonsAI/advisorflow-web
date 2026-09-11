@@ -278,7 +278,12 @@ def no_real_twilio_calls(monkeypatch):
 @pytest.fixture()
 def sample_org(db_session):
     from app.utils.crypto import encrypt_value
+    # `industry` is STATED, not inherited. It used to come from the column
+    # default, which was "funeral" — so every organization in the platform
+    # silently claimed to be one. The default is neutral now, and a funeral
+    # home says so, here and everywhere else.
     org = Organization(name="Restland Cemetery & Funeral Home", slug="restland", plan="standard",
+                       industry="funeral",
                        org_twilio_account_sid=TEST_TWILIO_ACCOUNT_SID,
                        org_twilio_auth_token_encrypted=encrypt_value(TEST_TWILIO_AUTH_TOKEN),
                        org_twilio_phone_number=TEST_ORG_TWILIO_NUMBER)

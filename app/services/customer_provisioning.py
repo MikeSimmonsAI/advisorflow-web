@@ -38,6 +38,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+# The one industry registry. A customer created without a stated business type
+# resolves through here to neutral defaults rather than inheriting whichever
+# vertical happened to be the platform's first.
+from app.services import industry_templates as _industry_templates
+
 from app.models.models import Organization, Platform, User
 from app.models.location_models import Location, UserLocation
 from app.routers.audit_log_router import log_action
@@ -78,7 +83,7 @@ def unique_slug(db: Session, base: str) -> str:
 # ── STEP 1: the company ─────────────────────────────────────────────────────
 
 def create_customer(db: Session, actor: User, *, name: str, platform_id: str,
-                    slug: Optional[str] = None, industry: str = "funeral",
+                    slug: Optional[str] = None, industry: Optional[str] = None,
                     plan: str = "trial", timezone: str = "America/Chicago",
                     legal_name: Optional[str] = None,
                     phone: Optional[str] = None, address: Optional[str] = None,
@@ -87,6 +92,15 @@ def create_customer(db: Session, actor: User, *, name: str, platform_id: str,
 
     Does NOT commit — the router commits, so a half-made customer cannot
     survive a later failure in the same request.
+
+    INDUSTRY DEFAULTED TO "funeral" AND THAT WAS THE BUG. Every caller that did
+    not name a business type — which is the ordinary case when an operator
+    creates a customer — produced an organization carrying a funeral home's
+    lead tiers, appointment types and AI vocabulary, in whatever business the
+    customer actually operates. It now resolves through the industry template
+    registry, whose fallback is a neutral service-business configuration, and
+    the resolved key is STORED so the org's configuration is explicit rather
+    than implied by a default that may change.
     """
     name = (name or "").strip()
     if not name:
@@ -112,7 +126,7 @@ def create_customer(db: Session, actor: User, *, name: str, platform_id: str,
         name=name,
         slug=final_slug,
         platform_id=platform_id,
-        industry=industry,
+        industry=_industry_templates.normalize(industry),
         plan=plan,
         is_active=True,
         org_phone=phone,

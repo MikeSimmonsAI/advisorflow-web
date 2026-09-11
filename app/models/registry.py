@@ -215,6 +215,13 @@ import app.models.ai_deployment_models  # noqa: F401  (side effects)
 # the same failure shape the qualification_rules note above records. Added to
 # BOTH blocks in this file, per the merge-artifact note above.
 import app.models.workforce_intelligence_models  # noqa: F401  (side effects)
+# Custom commercial agreements — the arrangements that are not a catalogue
+# subscription (revenue share, hybrid, quoted), their terms, parties,
+# allocations, collection records and settlements, plus onboarding milestone
+# overrides. Dropping this line makes every one of those tables silently never
+# appear, and an agreement that cannot be stored becomes an onboarding that
+# cannot start. Same reason, same consequence, as every import above it.
+import app.models.commercial_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -419,3 +426,10 @@ import app.models.ai_deployment_models  # noqa: F401  (side effects)
 # the same failure shape the qualification_rules note above records. Added to
 # BOTH blocks in this file, per the merge-artifact note above.
 import app.models.workforce_intelligence_models  # noqa: F401  (side effects)
+# Custom commercial agreements — the arrangements that are not a catalogue
+# subscription (revenue share, hybrid, quoted), their terms, parties,
+# allocations, collection records and settlements, plus onboarding milestone
+# overrides. Dropping this line makes every one of those tables silently never
+# appear, and an agreement that cannot be stored becomes an onboarding that
+# cannot start. Same reason, same consequence, as every import above it.
+import app.models.commercial_models  # noqa: F401  (imported for side effects)

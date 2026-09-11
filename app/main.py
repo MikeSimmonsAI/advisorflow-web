@@ -120,6 +120,12 @@ from app.routers.platform_context_router import router as platform_context_route
 # Customer provisioning: create, locate, staff, entitle, review, activate.
 from app.routers.customers_router import router as customers_router
 from app.routers.launch_router import router as launch_router
+# Custom commercial agreements: the arrangements a catalogue cannot express
+# (revenue share, hybrid, quoted), their terms and settlement readiness, and
+# the onboarding milestone overrides that let a step completed before this
+# workflow existed be recorded honestly. T2 stays authoritative commerce; this
+# references it and never restates it.
+from app.routers.commercial_router import router as commercial_router
 # Deal → billing: the join between what was sold and what gets charged.
 from app.routers.deal_billing_router import router as deal_billing_router
 # Seller-assisted catalogue sales. Sits on the SALES surface for the same
@@ -684,6 +690,10 @@ app.include_router(customer_360_router)  # Customer 360 + customer lifecycle —
 app.include_router(compensation_router)  # Compensation Command Center + ledger + settlement
 app.include_router(platform_context_router)   # Platform overview + brand/customer context selection
 app.include_router(customers_router)          # Customer provisioning engine
+# Custom commercial agreements. Mounted beside the launch engine because that
+# is what it serves: a customer whose commercial structure is still being
+# negotiated has to be able to onboard anyway.
+app.include_router(commercial_router)         # /commercial - custom agreements, terms, overrides
 # Launch Engine — the customer's onboarding intake, and the staff view of it.
 # NOT mounted under /onboarding: that prefix belongs to public self-serve
 # signup and has nothing to do with customer implementation despite the name.

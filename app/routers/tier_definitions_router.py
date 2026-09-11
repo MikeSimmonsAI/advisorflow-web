@@ -185,8 +185,10 @@ def seed_default_tiers(
     if not industry:
         from app.models.models import Organization
         org = db.query(Organization).filter(Organization.id == target_org_id).first()
-        industry = org.industry if org else "funeral"
-    created = seed_default_tier_definitions(db, target_org_id, industry=industry or "funeral")
+        industry = org.industry if org else None
+    # No funeral fallback. An unstated industry resolves through the industry
+    # template registry to a neutral set — see tier_config_service.
+    created = seed_default_tier_definitions(db, target_org_id, industry=industry)
     if created:
         return {"seeded": len(created), "message": f"Created {len(created)} {industry} tier definitions."}
     return {"seeded": 0, "message": "Tiers already configured — no changes made."}
@@ -207,6 +209,6 @@ def reset_default_tiers(
     if not industry:
         from app.models.models import Organization
         org = db.query(Organization).filter(Organization.id == target_org_id).first()
-        industry = org.industry if org else "funeral"
-    created = clear_and_reseed_tier_definitions(db, target_org_id, industry or "funeral")
+        industry = org.industry if org else None
+    created = clear_and_reseed_tier_definitions(db, target_org_id, industry)
     return {"reset": len(created), "industry": industry, "message": f"Reset to {len(created)} {industry} industry defaults."}
