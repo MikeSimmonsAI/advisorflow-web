@@ -40,14 +40,24 @@ FE = os.path.join(ROOT, "frontend", "src")
 
 # Every file that makes up the engine and its surfaces. Listed by location
 # rather than by name so a file added tomorrow is covered the day it lands.
-ENGINE_DIRS = [os.path.join(APP, "services", "workforce")]
+# T8's deployment layer joined this list the day it landed. The rule is the
+# same and the risk is higher: a commercial layer is where a real brand's name
+# is most tempting to write down, because the person writing it is thinking
+# about a particular deal.
+ENGINE_DIRS = [os.path.join(APP, "services", "workforce"),
+               os.path.join(APP, "services", "ai_deployment")]
 ENGINE_FILES = [
     os.path.join(APP, "models", "workforce_models.py"),
     os.path.join(APP, "routers", "workforce_router.py"),
     os.path.join(APP, "routers", "god_workforce_router.py"),
+    os.path.join(APP, "models", "ai_deployment_models.py"),
+    os.path.join(APP, "routers", "ai_deployment_router.py"),
+    os.path.join(APP, "routers", "god_ai_deployment_router.py"),
     os.path.join(FE, "pages", "AITeam.jsx"),
     os.path.join(FE, "pages", "AIEmployeeDetail.jsx"),
+    os.path.join(FE, "pages", "AIWorkforce.jsx"),
     os.path.join(FE, "pages", "god", "GodWorkforce.jsx"),
+    os.path.join(FE, "pages", "god", "GodAIWorkforceBuilder.jsx"),
 ]
 
 # Each entry states what it is, because a bare blocklist invites somebody to

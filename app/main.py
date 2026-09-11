@@ -199,6 +199,23 @@ from app.routers.god_workforce_router import router as god_workforce_router
 # which is the arrangement T7 was written for, not a new one.
 from app.routers.ai_operations_router import god_router as ai_operations_god_router
 from app.routers.ai_operations_router import router as ai_operations_router
+# AI Workforce DEPLOYMENT (T8) — how a brand OFFERS an AI employee and a
+# customer HIRES, CONFIGURES, ACTIVATES, PAUSES and RETIRES one.
+#
+# T6 is the engine, T7 is its reach, and T8 is the product wrapped around both.
+# It creates nothing that can act: an employee it provisions starts `draft` and
+# `off`, the enclosing scopes are off, and the commercial gate it consults is
+# T2's own — so a deployment can be prepared without anything becoming
+# reachable. It adds no environment switch of its own, which is what keeps the
+# dark-launch assertions T6 and T7 shipped describing the whole system.
+#
+# `ai_deployment_router` (/ai-workforce) is the CUSTOMER surface and takes no
+# organization id, for the same reason `workforce_router` does not.
+# `god_ai_deployment_router` (/god/ai-workforce) EXTENDS GOD MODE — every route
+# is `require_god`, and it administers brand terms and deployment state rather
+# than any customer's own configuration.
+from app.routers.ai_deployment_router import router as ai_deployment_router
+from app.routers.god_ai_deployment_router import router as god_ai_deployment_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -778,6 +795,20 @@ app.include_router(workforce_router)
 # lose the ability to stop an AI employee that is already running.
 app.include_router(ai_operations_router)
 app.include_router(ai_operations_god_router)
+
+# AI WORKFORCE DEPLOYMENT (T8) — the product layer over the two above.
+#
+# `/ai-workforce` is the customer's own hiring and deployment surface and
+# accepts no organization id; `/god/ai-workforce` extends God Mode with brand
+# commercial terms, deployment state across organizations, reconciliation, the
+# orphan sweep and the synthetic proofs.
+#
+# Deliberately NOT behind require_feature(), for the same reason the two
+# routers above are not: these routes PAUSE AND RETIRE AI employees as well as
+# create them, and a customer whose plan flag lapsed must not thereby lose the
+# ability to stop one that is already running.
+app.include_router(ai_deployment_router)
+app.include_router(god_ai_deployment_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

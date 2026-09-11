@@ -70,6 +70,13 @@ const NAV_GROUPS = [
       // Whether an AI employee may actually act is decided at execution time
       // by activation + entitlement on the server; this link decides nothing.
       { to: '/ai-team', label: 'Your AI Team', icon: 'users' },
+      // ADMIN ONLY, and NO featureKey. Hiring, configuring and asking for an
+      // AI employee to be started are administrative acts, which is what the
+      // routes behind this enforce. No feature key, for the reason the line
+      // above gives: the workforce's own entitlement is answered per employee
+      // by the server, and a key this platform has never heard of would hide
+      // the screen for everyone.
+      { to: '/ai-workforce', label: 'My AI Workforce', icon: 'package', adminOnly: true },
       { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
       { to: '/campaigns', label: 'Campaigns', icon: 'target', adminOnly: true, featureKey: 'campaigns' },
       // NO featureKey. `proposals` is not a key in app/services/entitlements.py,
@@ -189,6 +196,10 @@ function Icon({ name }) {
     search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
     'life-buoy': <><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /><line x1="4.93" y1="4.93" x2="9.17" y2="9.17" /><line x1="14.83" y1="14.83" x2="19.07" y2="19.07" /><line x1="14.83" y1="9.17" x2="19.07" y2="4.93" /><line x1="4.93" y1="19.07" x2="9.17" y2="14.83" /></>,
     upload: <><polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" /></>,
+    // ADDED WITH THE NAV ITEM THAT USES IT. A name this map does not hold
+    // renders an EMPTY svg rather than failing, so a nav entry with an unknown
+    // icon looks like a broken link and nothing anywhere says why.
+    package: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></>,
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

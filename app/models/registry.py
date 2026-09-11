@@ -190,6 +190,19 @@ import app.models.oauth_models  # noqa: F401  (imported for side effects)
 # screen rather than the quiet nothing the other modules degrade to. Added to
 # BOTH blocks in this file, per the merge-artifact note above.
 import app.models.workforce_models  # noqa: F401  (imported for side effects)
+# AI Workforce DEPLOYMENT (ai_offering_terms / ai_employee_deployments /
+# ai_deployment_events). The commercial and operational record of a HIRED AI
+# employee, which is a different thing from the employee itself: the
+# deployment exists before the actor is created and outlives it after
+# retirement, which is why it has its own tables rather than columns on
+# `ai_employees`.
+#
+# Dropping this line has a specific consequence of its own: the unique index
+# `uq_ai_deployment_provisioning_key` is what makes provisioning idempotent,
+# and no table means no index means a double-click creates two AI employees on
+# one entitlement. Added to BOTH blocks in this file, per the merge-artifact
+# note above.
+import app.models.ai_deployment_models  # noqa: F401  (side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -378,3 +391,7 @@ import app.models.oauth_models  # noqa: F401  (imported for side effects)
 # support line above it. Same tables, same ownership, same consequence if it
 # is ever dropped from one block and not the other.
 import app.models.workforce_models  # noqa: F401  (imported for side effects)
+# AI Workforce Deployment — the SECOND copy of this line, same tables and same
+# reason as the first. Without it there is no unique index behind idempotent
+# provisioning, and a retried hire creates a second AI employee.
+import app.models.ai_deployment_models  # noqa: F401  (side effects)

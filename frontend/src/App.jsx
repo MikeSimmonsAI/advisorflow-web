@@ -218,6 +218,18 @@ import AIEmployeeDetail from './pages/AIEmployeeDetail'
 // characters that open a block comment makes GATE 29's stripper swallow every
 // line to the next close, and it fails a check about something else entirely.
 import GodWorkforce from './pages/god/GodWorkforce'
+// AI WORKFORCE DEPLOYMENT (T8). Two screens, two authorities, one product.
+//
+// The customer surface is hiring and setting up: what this business could
+// hire, what it has hired, what each one still needs, and a request to start
+// it. The God surface is brand commercial terms, deployment state across every
+// customer, and completing an activation with a reason on it.
+//
+// Registered BEFORE the God catch-all route below, for the same reason
+// GodWorkforce is: a route added after it renders the Command Center and looks
+// like a broken link rather than a routing mistake.
+import AIWorkforce from './pages/AIWorkforce'
+import GodAIWorkforceBuilder from './pages/god/GodAIWorkforceBuilder'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
          clearWorkspaceContext } from './api/client'
@@ -894,6 +906,13 @@ export default function App() {
             registered after the list so the list is not read as an id. */}
         <Route path="/ai-team" element={<ProtectedRoute><AITeam /></ProtectedRoute>} />
         <Route path="/ai-team/:employeeId" element={<ProtectedRoute><AIEmployeeDetail /></ProtectedRoute>} />
+        {/* MY AI WORKFORCE (T8). requireAdmin because every write behind it is
+            an administrative act — hiring, configuring, asking for an employee
+            to be switched on. No organization id in the path, for the same
+            reason as the team route above: ai_deployment_router.py resolves
+            the workspace from the caller's own context, so a bookmarked URL
+            cannot point at another customer's workforce. */}
+        <Route path="/ai-workforce" element={<ProtectedRoute requireAdmin><AIWorkforce /></ProtectedRoute>} />
         {/* NOT requireAdmin. app/routers/availability_router.py scopes every
             endpoint to the calling advisor (_assert_can_read_advisor,
             _resolve_advisor) and requires no admin role — this is where an
@@ -1088,6 +1107,13 @@ export default function App() {
             configuration control and an incident read on one page and make
             both harder to trust. Same catch-all rule as Support above. */}
         <Route path="/god/ai-operations"         element={<GodRoute><GodModeLayout><GodAIOperations /></GodModeLayout></GodRoute>} />
+        {/* AI WORKFORCE DEPLOYMENT (T8) — what each brand sells, to which
+            packages, and where every customer's hired employee has got to.
+            A THIRD SCREEN RATHER THAN A TAB ON EITHER OF THE TWO ABOVE: this
+            one is about the commercial arrangement and the deployment, which
+            is a different question from "what may this employee do" and from
+            "what did it try to do". Same catch-all rule as the two above. */}
+        <Route path="/god/ai-deployment"         element={<GodRoute><GodModeLayout><GodAIWorkforceBuilder /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}
