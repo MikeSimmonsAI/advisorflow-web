@@ -2,6 +2,7 @@
 
 **Branch:** `feat/ai-workforce-deployment` · **Worktree:** `C:\Dev\advisorflow-ai-deploy`
 **Cut from:** `origin/main` @ `9f197f6` (T2 + T6 + T7 already landed)
+**Shipped:** `0db9370`, fast-forwarded onto `main` and live in production.
 **State on delivery:** built, proven synthetically, attacked, merged, deployed, fully dark.
 No real outreach occurred and none is reachable — T8 adds no environment switch of
 its own, so the dark-launch assertions T6 and T7 shipped still describe the whole
@@ -15,7 +16,7 @@ system.
 | Full backend regression | **3278 passed, 14 skipped, 0 failed** |
 | Deploy gates (`scripts/run_gates.py`) | 25 passed, 7 failed — **all seven identical on a clean `origin/main`** |
 | Frontend build | clean, 305 modules |
-| Production health | **PLACEHOLDER_PROD** |
+| Production health | **`/health` reports `commit_short: 0db9370`**; all ten T8 routes answer 401 unauthenticated, unknown paths 404 |
 | Real outreach | **none** — no SMS, no email, no voice call, no appointment |
 
 ---
@@ -400,3 +401,25 @@ python -m pytest tests/test_ai_deployment_proofs.py tests/test_ai_deployment_lif
 
 The two proofs are also reachable from God Mode → **AI Deployment → Proof**,
 which runs them inside a savepoint against the live database and rolls it back.
+
+---
+
+## 14. LIVE VERIFICATION, AFTER THE DEPLOY
+
+`/health` reports `commit_short: 0db9370`. A successful deploy is itself
+evidence the migration ran — `python -m app.migrate` is the backend's
+preDeployCommand and a non-zero exit would have aborted the deploy with the
+previous instance still serving — so the three new tables exist.
+
+| Check | Result |
+|---|---|
+| `/ai-workforce/overview`, `/catalog`, `/deployments`, `/catalog/{job}/questions` | 401 unauthenticated |
+| `/god/ai-workforce/overview`, `/templates`, `/deployments`, `/orphans` | 401 unauthenticated |
+| `/ai-workforce/not-a-route`, `/god/ai-workforce/not-a-route` | 404 |
+| T6's `/workforce/*` and `/god/workforce/*` | unchanged — 401 |
+| T7's `/god/ai-operations/*` | unchanged — 401 |
+| T2's `/billing/*` | unchanged — 401 |
+| Served frontend bundle | carries both screens and both route prefixes |
+
+Mounted, and closed. A route that 404s is a route nobody deployed; a route that
+200s unauthenticated is a great deal worse.
