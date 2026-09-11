@@ -63,6 +63,13 @@ const NAV_GROUPS = [
     label: 'Engagement',
     items: [
       { to: '/ai-hub', label: 'AI Hub', icon: 'cpu' },
+      // NO featureKey and NO adminOnly, on purpose. /workforce/team is
+      // require_tenant_user and answers honestly for a customer who has hired
+      // nobody — an empty team is a real answer, and a hidden link would tell
+      // an advisor the product does not exist rather than that it is off.
+      // Whether an AI employee may actually act is decided at execution time
+      // by activation + entitlement on the server; this link decides nothing.
+      { to: '/ai-team', label: 'Your AI Team', icon: 'users' },
       { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
       { to: '/campaigns', label: 'Campaigns', icon: 'target', adminOnly: true, featureKey: 'campaigns' },
       // NO featureKey. `proposals` is not a key in app/services/entitlements.py,

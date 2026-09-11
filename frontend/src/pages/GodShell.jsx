@@ -54,6 +54,10 @@ const ICONS = {
   briefcase: 'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16',
   globe:     'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z',
   external:  'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3',
+  // ICONS[icon] has no fallback at the call sites below — a key that is not
+  // here renders `d={undefined}`, i.e. an invisible glyph and a nav row that
+  // looks half-drawn. Add the key here rather than reusing an unrelated one.
+  cpu:       'M4 4h16v16H4zM9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3',
 }
 
 /**
@@ -194,6 +198,22 @@ const NAV = [
     hint: 'Back-office prospecting — import into a chosen customer' },
   { label: 'Lead Browser',     path: '/god/lead-browser',     icon: 'users',
     hint: 'Search and browse all leads across every organization' },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // AI WORKFORCE
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // Its own group, above SECURITY & PLATFORM, because during the dark launch
+  // the question it answers — how many AI employees on this platform could
+  // actually reach a person right now — is the one somebody should be able to
+  // find without hunting. It administers PLATFORM CAPABILITY only: the job
+  // library, the tool registry, activation staging and the kill switch. Each
+  // customer's own configuration stays on the customer's screen, because a
+  // second place to edit one setting is a second place for it to be wrong.
+  { group: 'AI WORKFORCE' },
+  { label: 'AI Workforce',     path: '/god/workforce',         icon: 'cpu',
+    hint: 'Job library, tool gateway, activation staging, kill switch, '
+        + 'evaluation and simulation' },
 
   // ══════════════════════════════════════════════════════════════════════
   // SECURITY & PLATFORM

@@ -154,6 +154,24 @@ import app.models.exec_workspace_models  # noqa: F401  (imported for side effect
 # this line makes every support table silently never appear, which the support
 # product would report as "no tickets" rather than as an error.
 import app.models.support_models  # noqa: F401  (imported for side effects)
+# AI Workforce (ai_employee_templates / ai_brand_offerings / ai_employees /
+# ai_employee_authorities / ai_work_items / ai_work_item_events /
+# ai_employee_runs / ai_tool_executions / ai_eligibility_results /
+# ai_employee_memory / ai_handoffs / ai_performance_entries /
+# ai_supervisor_events / ai_workforce_activations /
+# ai_shadow_recommendations / ai_evaluation_runs / ai_evaluation_results).
+# Same Base, same reason as every line above, and this module is the ONLY
+# owner of those tables - none of them appear in auto_migrate's
+# TABLES_TO_CREATE, because two owners is how crm_contacts drifted.
+#
+# Dropping this line has a specific and bad consequence: `ai_workforce_
+# activations` is where the platform's OFF state is stored, and
+# activation.resolve() treats a missing row as OFF. With no table at all the
+# read raises instead, so every workforce route fails loudly rather than
+# silently running - which is the correct direction, but it is an outage on a
+# screen rather than the quiet nothing the other modules degrade to. Added to
+# BOTH blocks in this file, per the merge-artifact note above.
+import app.models.workforce_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -330,3 +348,7 @@ import app.models.training_models  # noqa: F401  (imported for side effects)
 # launch_intake_models comment above); an import added to only one copy looks
 # correct in a diff and half-works. Same tables, same reason as the first copy.
 import app.models.support_models  # noqa: F401  (imported for side effects)
+# AI Workforce — the SECOND copy of this line, for the same reason as the
+# support line above it. Same tables, same ownership, same consequence if it
+# is ever dropped from one block and not the other.
+import app.models.workforce_models  # noqa: F401  (imported for side effects)

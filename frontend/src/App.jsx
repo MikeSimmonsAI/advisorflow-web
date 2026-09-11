@@ -181,6 +181,16 @@ import GodTraining from './pages/god/GodTraining'
 // because hiding a route is not access control.
 import DemoSuite from './pages/demo/DemoSuite'
 import Training from './pages/training/Training'
+// YOUR AI TEAM — the customer's own view of the AI employees they have hired,
+// and one employee's detail. Ordinary authenticated routes: every endpoint
+// behind them resolves the workspace organization server-side and re-checks
+// entitlement and activation, because hiding a route is not access control.
+import AITeam from './pages/AITeam'
+import AIEmployeeDetail from './pages/AIEmployeeDetail'
+// GOD MODE -> AI WORKFORCE. Platform capability: the job library, the tool
+// registry, activation staging and the kill switch. Registered BEFORE the
+// /god/* catch-all below, or it would silently render the Command Center.
+import GodWorkforce from './pages/god/GodWorkforce'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
          clearWorkspaceContext } from './api/client'
@@ -850,6 +860,13 @@ export default function App() {
         <Route path="/provision-client" element={<ProtectedRoute requireSuperAdmin><ProvisionClient /></ProtectedRoute>} />
         <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
         <Route path="/ai-hub" element={<ProtectedRoute><AIHub /></ProtectedRoute>} />
+        {/* YOUR AI TEAM. NOT requireAdmin, and no organization id in the path:
+            workforce_router.py resolves the workspace organization from the
+            caller's own context on every request, so a typed or bookmarked
+            URL cannot point at somebody else's team. The detail route is
+            registered after the list so the list is not read as an id. */}
+        <Route path="/ai-team" element={<ProtectedRoute><AITeam /></ProtectedRoute>} />
+        <Route path="/ai-team/:employeeId" element={<ProtectedRoute><AIEmployeeDetail /></ProtectedRoute>} />
         {/* NOT requireAdmin. app/routers/availability_router.py scopes every
             endpoint to the calling advisor (_assert_can_read_advisor,
             _resolve_advisor) and requires no admin role — this is where an
@@ -1031,6 +1048,11 @@ export default function App() {
         {/* Support Intelligence. MUST stay above the /god/* catch-all below,
             or it silently renders the Command Center instead. */}
         <Route path="/god/support"               element={<GodRoute><GodModeLayout><GodSupport /></GodModeLayout></GodRoute>} />
+        {/* AI WORKFORCE. MUST stay above the /god/* catch-all below, or it
+            silently renders the Command Center instead. GodRoute here is
+            convenience only — every endpoint behind it is require_god, so a
+            typed URL is refused by the server, not by a missing link. */}
+        <Route path="/god/workforce"             element={<GodRoute><GodModeLayout><GodWorkforce /></GodModeLayout></GodRoute>} />
         <Route path="/god/*" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         {/* A mistyped or dead URL silently became Overview, which hid genuinely
             broken links from everyone including us. Say what happened. */}

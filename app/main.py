@@ -164,6 +164,27 @@ from app.routers.god_support_router import router as god_support_router
 # Mobile device support: push registration and the upload capability probe.
 # Additive only — it adds routes under /me and changes none.
 from app.routers.device_router import router as device_router
+# THE AI WORKFORCE. Two routers, two authorities, ONE engine — the same shape
+# Support Intelligence uses, and for the same reason.
+#
+# `workforce_router` (/workforce) is the CUSTOMER surface: Your AI Team, the
+# work queue, handoffs, performance. No route accepts an organization id, so
+# the tenant boundary is a property of the signatures rather than a filter
+# every route has to remember.
+#
+# `god_workforce_router` (/god/workforce) EXTENDS GOD MODE and is not a second
+# root — every route is `require_god`, the same guard the rest of the control
+# plane uses. It administers PLATFORM CAPABILITY: the job library, the tool
+# registry, activation staging, the kill switch, brand offerings, evaluation
+# and simulation. It deliberately does not operate each customer's business
+# configuration, which belongs on the customer's own screen.
+#
+# Deliberately NOT behind require_feature(): the workforce's own entitlement is
+# answered per employee inside the engine, and a customer whose plan is missing
+# a flag must still be able to see that their AI team is switched off rather
+# than meet a 402 on the page that would tell them.
+from app.routers.workforce_router import router as workforce_router
+from app.routers.god_workforce_router import router as god_workforce_router
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -723,6 +744,10 @@ app.include_router(god_support_router)
 # Mobile device support (/me/devices, /me/uploads). Registered last, so its
 # routes cannot shadow anything and its absence cannot break anything.
 app.include_router(device_router)
+# AI Workforce. `/god/workforce` is registered BEFORE `/workforce` only for
+# readability — the prefixes do not overlap, and neither can shadow the other.
+app.include_router(god_workforce_router)
+app.include_router(workforce_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────

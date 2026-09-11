@@ -54,6 +54,29 @@ EXEMPT = {
     # simulated message and book an appointment, and cannot conjure a person.
     "services/demo_environment.py": "Demo Suite seeder; writes only into is_demo tenants, which have no plan and no billable seats",
 
+    # THE AI WORKFORCE SYNTHETIC PROFILES. Same category as the Demo Suite
+    # seeder above, and the reason is stated rather than inherited.
+    #
+    # `_organization` OWNS the tenants it writes into: it looks them up by two
+    # fixed slugs this module defines, creates them when absent, and sets
+    # `is_demo = True` on EVERY call rather than only on creation — so a
+    # profile rebuilt after somebody cleared the flag by hand comes back safe.
+    # No caller can hand it an organization, so there is no argument that
+    # steers a synthetic population into a paying customer's tenant. The
+    # advisor it creates is `is_active=False`, which `get_current_user`
+    # refuses, so it is not a seat anybody can occupy; every lead carries a
+    # 555-01xx number and an `example.invalid` address, so it is not a person
+    # anybody can reach. Counting either against a plan would be counting a
+    # seat nobody can sit in and a prospect nobody can contact.
+    "services/workforce/profiles.py": "synthetic AI-workforce profiles; writes only into the two is_demo tenants it owns, with unusable logins and unroutable addresses",
+
+    # THE SIMULATOR'S WORLD. Stricter than any exemption above it: every
+    # scenario builds its own brand, its own `is_demo` organization and its
+    # own population inside a SAVEPOINT that is rolled back in a `finally`,
+    # so none of these rows outlive the scenario that made them. They are not
+    # a customer's leads before the rollback and they do not exist after it.
+    "services/workforce/simulator.py": "simulator world builder; every row is created inside a savepoint that is always rolled back, in an is_demo tenant it creates itself",
+
     # Brand-sales staff live at SCOPE_BRAND_SALES_ORG with organization_id
     # NULL. They are not seats in any customer's plan.
     "services/sales_staff.py": "brand sales-org staff; organization_id is NULL, not a customer seat",
