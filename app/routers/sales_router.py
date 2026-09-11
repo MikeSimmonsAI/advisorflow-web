@@ -1819,10 +1819,22 @@ def demo_build_workspace(opp_id: str,
         seen.add(key)
         rendered = _discovery.render(key, (state["fields"] or {}).get(key))
         text = (legacy_text.get(key) or "").strip() if legacy_text.get(key) else ""
-        # Both, when both exist: the structured answer is the checklist and the
-        # long-form note is what the seller actually heard. Dropping either one
-        # loses something the builder needs.
-        value = "\n".join([v for v in (rendered, text) if v]) or None
+        # Both, when both genuinely differ: the structured answer is the
+        # checklist and the long-form note is what the seller actually heard.
+        # Dropping either one loses something the builder needs.
+        #
+        # NOT BOTH WHEN THEY ARE THE SAME ANSWER. The discovery save path
+        # writes the rendered text into the legacy column as well, so joining
+        # the two unconditionally printed every answer on this screen twice —
+        # which reads as a rendering fault and buries a long brief in its own
+        # duplicate. Verified against a live deal: nine questions, eighteen
+        # paragraphs.
+        parts = []
+        if rendered:
+            parts.append(rendered)
+        if text and text not in (rendered or ""):
+            parts.append(text)
+        value = "\n".join(parts) or None
         handoff.append({
             "key": key,
             "label": spec.get("label") or field_labels.get(key, key),

@@ -454,3 +454,52 @@ class TestTheWholeFlow:
         job = client.get("/sales/demo-queue?brand_sales_org_id=" + brand.id,
                          headers=_h(rep, db_session)).json()["jobs"][0]
         assert job["demo_status"] == DEMO_IN_PROGRESS
+
+
+class TestTheHandoffReadsOnce:
+    """Found by opening a real deal, not by reading the code.
+
+    The discovery save path writes the RENDERED text into the legacy column as
+    well as keeping the structured answer, so joining the two unconditionally
+    printed every answer twice — nine questions, eighteen paragraphs, and a
+    brief nobody would read to the bottom of.
+    """
+
+    def test_an_answer_stored_in_both_places_appears_once(
+            self, client, db_session, brand, rep):
+        same = "Facebook and word of mouth"
+        opp = _opp(db_session, brand, rep, stage=STAGE_DISCOVERY)
+        db_session.add(DiscoveryRecord(
+            opportunity_id=opp.id,
+            lead_sources=same,
+            structured_json=ds.dump({"fields": {}, "legacy": {}}),
+        ))
+        db_session.commit()
+        _request_demo(client, db_session, rep, opp)
+
+        body = client.get("/sales/opportunities/" + opp.id + "/demo-build",
+                          headers=_h(rep, db_session)).json()
+        row = next(h for h in body["discovery"]["handoff"]
+                   if h["key"] == "lead_sources")
+        assert row["value"].count(same) == 1, row["value"]
+
+    def test_a_note_that_adds_something_is_still_kept(
+            self, client, db_session, brand, rep):
+        """De-duplicating must not become "drop the seller's own words"."""
+        opp = _opp(db_session, brand, rep, stage=STAGE_DISCOVERY)
+        db_session.add(DiscoveryRecord(
+            opportunity_id=opp.id,
+            lead_sources="They also buy lists twice a year",
+            structured_json=ds.dump({
+                "fields": {"lead_sources": {"choices": ["facebook"]}},
+                "legacy": {},
+            }),
+        ))
+        db_session.commit()
+        _request_demo(client, db_session, rep, opp)
+
+        body = client.get("/sales/opportunities/" + opp.id + "/demo-build",
+                          headers=_h(rep, db_session)).json()
+        row = next(h for h in body["discovery"]["handoff"]
+                   if h["key"] == "lead_sources")
+        assert "buy lists twice a year" in (row["value"] or "")
