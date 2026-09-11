@@ -422,12 +422,48 @@ def test_appearance_is_initialised_before_react_renders():
         "would win and the light theme would never apply")
 
 
-def test_the_appearance_control_is_reachable_from_both_shells():
-    """Mike must be able to switch it without developer tools."""
-    assert "AppearanceToggle" in _read(GOD_SHELL), (
-        "no appearance control in the God shell")
+def test_the_appearance_control_is_reachable_where_it_still_means_something():
+    """Mike must be able to switch it without developer tools - WHERE THERE IS
+    STILL SOMETHING TO SWITCH.
+
+    THIS TEST USED TO REQUIRE THE CONTROL IN THE GOD SHELL. It was right until
+    Sep 11 2026, when God Mode became permanently light as a product decision:
+    the near-black control plane was rejected outright rather than kept as an
+    option. A light/dark control inside a surface with one appearance switches
+    between one state and itself, and a control that does nothing is worse than
+    no control - it invites the user to conclude the setting is broken.
+
+    So the assertion inverts for the God shell and is UNCHANGED everywhere else.
+    The preference itself is untouched: the tenant app still has both
+    appearances, appearance.js still stores the choice, and Settings still
+    offers all three. What went away is one mount point.
+    """
+    assert "AppearanceToggle" not in _read(GOD_SHELL), (
+        "the light/dark control is back in the God shell. God Mode is "
+        "permanently light - see frontend/src/pages/god/godTokens.css - so this "
+        "control has nothing to switch between there")
     assert "AppearanceToggle" in _read(os.path.join(FE, "pages", "Settings.jsx")), (
         "no appearance control in customer Settings")
+
+
+def test_god_mode_does_not_consult_the_appearance_preference():
+    """The tenant preference must not reach the control plane.
+
+    The owner's own tenant app is currently set to dark. God Mode has to be
+    light anyway, and `color-scheme` has to be pinned light inside the God scope
+    or the NATIVE widgets - the open <select> list, the date picker, the
+    scrollbars - keep following the document root and drop a black dropdown over
+    a white God form.
+    """
+    tokens = _css_no_comments(_read(os.path.join(
+        FE, "pages", "god", "godTokens.css")))
+    assert "[data-appearance" not in tokens, (
+        "the God token sheet varies on the appearance attribute, which brings "
+        "the rejected dark control plane back through the side door")
+    assert "color-scheme: light" in tokens, (
+        "the God scope does not pin color-scheme, so native controls will "
+        "follow the tenant preference")
+    assert "color-scheme: dark" not in tokens
 
 
 def test_the_control_offers_all_three_choices_as_radios():
