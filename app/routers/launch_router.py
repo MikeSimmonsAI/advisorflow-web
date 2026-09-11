@@ -462,6 +462,7 @@ def staff_list(db: Session = Depends(get_db),
     exactly the ones somebody needs to call.
     """
     from app.services import implementation_service as impl_svc
+    from app.services import launch_invitation as _invite
 
     impls = db.query(Implementation).all()
 
@@ -578,6 +579,12 @@ def staff_list(db: Session = Depends(get_db),
             # This customer HAS a launch. The rows appended below do not, and
             # the flag is what lets one screen show both honestly.
             "launch_started": True,
+            # HAS THE CUSTOMER ACTUALLY BEEN GIVEN THEIR ONBOARDING?
+            # Derived from the invitation and login records, never declared —
+            # see launch_invitation.status. An operator looking at a launch at
+            # 0% needs to know whether the customer is slow or was never sent
+            # anything, and those are opposite problems.
+            "delivery": _invite.status(db, org, impl) if org else None,
         })
 
     # ── THE CUSTOMERS WITH NO LAUNCH AT ALL ─────────────────────────────────
@@ -629,6 +636,9 @@ def staff_list(db: Session = Depends(get_db),
             "blockers": ["Onboarding has not been started for this customer"],
             "warnings": [],
             "launch_started": False,
+            # No launch means nothing to deliver yet, and the row says that
+            # rather than implying nobody was invited.
+            "delivery": None,
         })
 
     # Not-yet-started customers sort last within their group rather than
@@ -688,6 +698,70 @@ def staff_start_launch(organization_id: str, body: StartLaunchBody,
         "billing_configured": False,
         "data_seeded": False,
     }
+
+
+# ── sending the customer their own onboarding ───────────────────────────────
+#
+# THE PREVIEW IS NOT DELIVERY. `/launch/preview/{id}` is the internal read; a
+# customer must never receive it. These two routes are the real door, and they
+# are deliberately two: one that says what WOULD happen, and one that does it
+# only when the operator has confirmed the recipient.
+
+
+@god_router.get("/{organization_id}/onboarding-recipient")
+def staff_onboarding_recipient(organization_id: str,
+                               db: Session = Depends(get_db),
+                               actor: User = Depends(require_god)) -> dict:
+    """Who would receive this customer's onboarding, and under which brand.
+
+    Creates nothing, sends nothing, mints nothing. It exists so the operator
+    sees the address and the brand together before committing — the failure
+    worth preventing here is not technical, it is inviting a real person into
+    the wrong company's workspace.
+    """
+    from app.services import launch_invitation
+
+    org = load_org_in_scope(db, actor, organization_id)
+    impl = _impl_for_org(db, org.id)
+    return launch_invitation.recipient_preview(db, org, impl)
+
+
+class SendOnboardingBody(BaseModel):
+    email: str
+    # Typed twice on purpose. See launch_invitation.send.
+    confirm_email: str
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    base_url: Optional[str] = None
+    location_ids: List[str] = []
+
+
+@god_router.post("/{organization_id}/send-onboarding")
+def staff_send_onboarding(organization_id: str, body: SendOnboardingBody,
+                          db: Session = Depends(get_db),
+                          actor: User = Depends(require_god)) -> dict:
+    """Give a named person access to THIS customer's real onboarding.
+
+    Reuses the existing identity and invitation machinery: an email that
+    already has an identity here is reused rather than duplicated, and issuing
+    again REVOKES the outstanding link instead of adding a second valid one.
+
+    The person gets a customer-workspace role and nothing else — a
+    control-plane role is not expressible through this path.
+
+    The platform does not send the message. The operator receives the link,
+    shown exactly once, and decides how it travels.
+    """
+    from app.services import launch_invitation
+
+    org = load_org_in_scope(db, actor, organization_id)
+    impl = _impl_for_org(db, org.id)
+    return launch_invitation.send(
+        db, org, impl, actor,
+        email=body.email, confirm_email=body.confirm_email,
+        full_name=body.full_name or "",
+        role=(body.role or launch_invitation.DEFAULT_ROLE),
+        base_url=body.base_url, location_ids=body.location_ids)
 
 
 @god_router.get("/{organization_id}")
