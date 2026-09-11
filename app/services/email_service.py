@@ -30,7 +30,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
-FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@bookaboost.com")
+
+# NO BRAND NAME IN A DEFAULT. EVER.
+#
+# This read `os.environ.get("EMAIL_FROM_ADDRESS", "noreply@bookaboost.com")`,
+# so any caller that did not resolve an identity sent mail as BookaBoost —
+# whatever brand the customer actually belongs to. That is how an EvoSys Pro
+# support ticket produced a BookaBoost email: nothing chose it, a literal in a
+# `.get()` default did.
+#
+# The environment variable still answers, because a single-brand deployment
+# configures exactly that and there is nothing wrong with it. What is gone is
+# the fallback BEHIND the environment: unset now means unset, a send with no
+# resolved identity and no configured address returns a refusal that names the
+# problem, and no deployment can leak one brand's address into another's mail
+# by forgetting a variable.
+FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "").strip() or None
 
 # One subject+body template per track, matching the same tier-based
 # message-track logic used for SMS, so email-only leads still get the
@@ -177,6 +192,21 @@ def send_email_via_provider(
                       "address in Org Settings -> Email Sender, or the "
                       "platform's support email. Refusing to send under another "
                       "brand's address."),
+        }
+
+    # NOTHING RESOLVED AND NOTHING CONFIGURED. Previously impossible, because
+    # the module default named a brand; now it is a real state and it is a
+    # refusal rather than a send with an empty From. Saying which of the two
+    # places to fix is the whole value of the message.
+    if not from_addr:
+        return {
+            "success": False,
+            "provider_message_id": None,
+            "error": ("No sending address is configured. Set the "
+                      "organization's From address in Org Settings -> Email "
+                      "Sender, the platform's support email, or "
+                      "EMAIL_FROM_ADDRESS for this deployment. Refusing to "
+                      "send without a verified sender."),
         }
 
     if not api_key:

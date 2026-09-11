@@ -501,7 +501,17 @@ def test_the_portal_returns_the_customer_to_their_own_brands_domain(
     created = MagicMock(return_value=MagicMock(url="https://p/fake"))
     with patch.object(stripe.billing_portal.Session, "create", created):
         client.post("/billing/portal", headers=_admin_headers(db_session, org))
-    assert created.call_args.kwargs["return_url"].endswith("/billing")
+    return_url = created.call_args.kwargs["return_url"]
+    # THE BILLING SCREEN, ON THE CUSTOMER'S OWN BRAND, and never an
+    # infrastructure hostname. `?returned=portal` was added with
+    # `stripe_return`: it is what lets the page acknowledge the round trip
+    # instead of looking identical to a plain reload. The path assertion is
+    # kept, it just no longer assumes the URL ends there.
+    assert return_url.startswith("https://")
+    assert "/billing" in return_url
+    assert return_url.endswith("/billing?returned=portal")
+    for infra in ("onrender.com", "vercel.app", "localhost"):
+        assert infra not in return_url
 
 
 # ═══════════════════════════════════════════════════════════════════════════

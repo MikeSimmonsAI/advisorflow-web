@@ -10,8 +10,12 @@ product feature.
 WHAT IS SEEDED, AND WHAT IS DELIBERATELY NOT
 
   SEEDED    the three purchasable SaaS tiers and their monthly prices
-  SEEDED    the Enterprise tier, listed and quoted, NOT self-serve
+  SEEDED    their settled capacity: users, active leads, emails/mo, SMS/mo
+  SEEDED    the Custom tier, listed and quoted, NOT self-serve
   SEEDED    upgrade timing/proration and downgrade timing/proration
+
+  NOT SEEDED  term_months                      NOT DECIDED (see below)
+  NOT SEEDED  voice / AI usage allowances      not a plan dimension
 
   NOT SEEDED  failed-payment consequence      POLICY REQUIRED
   NOT SEEDED  subscription cancellation timing POLICY REQUIRED
@@ -70,6 +74,44 @@ log = logging.getLogger(__name__)
 # earned by a term agreement; `month_to_month_cents` is the same tier's price
 # for a customer who committed to nothing. The customer buys Starter either
 # way — the commitment is a property of the deal, not a different product.
+#
+# ════════════════════════════════════════════════════════════════════════════
+# THE FEATURES LISTS ARE EMPTY, AND THAT IS THE FIX (2026-09-11)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# They used to carry the whole customer-facing plan card as prose:
+#
+#     Starter       "Up to 2 users"                  WRONG — settled at 1
+#     Growth        "AI email + SMS 1,000/mo"        WRONG — settled at 1,500
+#     Growth        "AI voice 300 min/mo"            GONE  — AI Voice is now a
+#                                                            separate add-on
+#     Professional  "AI voice 750 min/mo"            GONE  — likewise
+#     Professional  "Up to 5 users / 3 locations"    capacity, not prose
+#     Professional  "Priority support + 24-month
+#                    price lock"                     WRONG — nobody configured
+#                                                            a 24-month term,
+#                                                            and support is the
+#                                                            support product's
+#                                                            own entitlement
+#     (max_leads)   Professional 7,500               WRONG — settled at 10,000
+#
+# Every one of those was a sentence a person typed, rendered to a paying
+# customer as though it were configuration, and correctable only by a deploy.
+# Capacity now lives in COLUMNS (`max_users`, `max_leads`,
+# `email_monthly_allowance`, `sms_monthly_allowance`, `max_locations`) and
+# support lives in `support_entitlement_configs`, both of which God Mode
+# edits and the customer's card reads. So the features list is emptied rather
+# than rewritten: a second place to state capacity is how the first one got
+# out of date.
+#
+# WHAT IS DELIBERATELY NOT SEEDED HERE:
+#   term_months          Nobody has decided the committed term's length. NULL
+#                        makes the label read "Term agreement", which is true.
+#                        Writing 24 to match the old string would be inventing
+#                        the very commitment that was wrong.
+#   voice allowances     AI Voice is a catalogue add-on. It has no plan column
+#                        on purpose.
+#   AI usage limits      Not settled. Not guessed.
 EVOSYS_PLANS = [
     {
         "key": "starter",
@@ -78,13 +120,12 @@ EVOSYS_PLANS = [
         "monthly_cents": 50000,          # $500 / month, committed
         "month_to_month_cents": 59700,   # $597 / month, no commitment
         "max_leads": 2500,
-        "max_users": 2,
+        "max_users": 1,
+        "max_locations": None,
+        "email_monthly_allowance": 2500,
+        "sms_monthly_allowance": 500,
         "is_purchasable": True,
-        "features": [
-            "AI email cadence (8 emails / 14 days)",
-            "Up to 2 users",
-            "Up to 2,500 leads",
-        ],
+        "features": [],
     },
     {
         "key": "growth",
@@ -94,13 +135,11 @@ EVOSYS_PLANS = [
         "month_to_month_cents": 129700,  # $1,297 / month, no commitment
         "max_leads": 5000,
         "max_users": 3,
+        "max_locations": None,
+        "email_monthly_allowance": 5000,
+        "sms_monthly_allowance": 1500,
         "is_purchasable": True,
-        "features": [
-            "AI email + SMS 1,000/mo",
-            "AI voice 300 min/mo",
-            "Up to 3 users",
-            "Up to 5,000 leads",
-        ],
+        "features": [],
     },
     {
         "key": "professional",
@@ -108,32 +147,42 @@ EVOSYS_PLANS = [
         "sort_order": 30,
         "monthly_cents": 200000,         # $2,000 / month, committed
         "month_to_month_cents": 259700,  # $2,597 / month, no commitment
-        "max_leads": 7500,
+        "max_leads": 10000,
         "max_users": 5,
+        "max_locations": None,
+        "email_monthly_allowance": 10000,
+        "sms_monthly_allowance": 3000,
         "is_purchasable": True,
-        "features": [
-            "AI email + SMS 3,000/mo",
-            "AI voice 750 min/mo",
-            "Up to 5 users / 3 locations",
-            "Priority support + 24-month price lock",
-        ],
+        "features": [],
     },
     {
+        # THE KEY STAYS `enterprise`; THE NAME BECOMES `Custom`.
+        #
+        # The settled tier list names this one Custom, and "Enterprise" on a
+        # customer card is a product name nobody sells any more. The KEY is
+        # not renamed: it is written into `organizations.billing_plan_key`,
+        # into Stripe subscription metadata and into every historical
+        # entitlement snapshot, and renaming it would orphan all three to
+        # correct a display string. `deal_billing`'s custom-pricing path is
+        # the mechanism behind this tier and is untouched.
         "key": "enterprise",
-        "name": "Enterprise",
+        "name": "Custom",
         "sort_order": 40,
         "monthly_cents": None,           # quoted, never self-serve
         "month_to_month_cents": None,    # likewise — a quote, not a rate card
-        "max_leads": None,               # NULL = unlimited
+        # NULL everywhere: a Custom deal's ceilings are recorded on its own
+        # CustomerEntitlementSnapshot when the deal is written, which is where
+        # `plan_limits` reads them from. A number here would be a rate card
+        # for a tier that does not have one.
+        "max_leads": None,
         "max_users": None,
+        "max_locations": None,
+        "email_monthly_allowance": None,
+        "sms_monthly_allowance": None,
         # is_purchasable False is what makes the checkout guard refuse this
         # tier with a clear reason instead of tripping over a NULL price.
         "is_purchasable": False,
-        "features": [
-            "Everything in Professional",
-            "Unlimited leads, users, and locations",
-            "White-label available",
-        ],
+        "features": [],
     },
 ]
 
@@ -184,7 +233,16 @@ def seed(db: Session, platform_id: str, *, apply: bool = False) -> dict:
             "month_to_month_cents": spec["month_to_month_cents"],
             "max_leads": spec["max_leads"],
             "max_users": spec["max_users"],
+            # The capacity that used to be prose. Included in the diff the God
+            # preview shows, so applying this seed is a change an operator can
+            # read line by line before it reaches a customer's plan card.
+            "max_locations": spec["max_locations"],
+            "email_monthly_allowance": spec["email_monthly_allowance"],
+            "sms_monthly_allowance": spec["sms_monthly_allowance"],
             "is_purchasable": spec["is_purchasable"],
+            # An EMPTY list, written deliberately: this clears the stale
+            # marketing sentences off every existing row rather than leaving
+            # them beside the columns that now say the same thing correctly.
             "features_json": json.dumps(spec["features"]),
         }
 
@@ -252,6 +310,16 @@ def seed(db: Session, platform_id: str, *, apply: bool = False) -> dict:
             "annual_cents": "Not decided - the previous annual discount was "
                             "described three different ways and none of them "
                             "agreed. Set a real number once it is decided.",
+            "term_months": "NOT DECIDED. The plan cards said '24-month price "
+                           "lock' because that string was typed into a "
+                           "features list, not because a term was configured. "
+                           "Left NULL, so the customer-facing label reads "
+                           "'Term agreement' until somebody decides.",
+            "voice / AI usage allowances":
+                "Deliberately absent. AI Voice is a separate catalogue "
+                "add-on, Lead Scraper likewise, and no AI usage limit has "
+                "been settled. There is no plan column for any of them, so "
+                "none can be advertised by accident.",
             "stripe_product_id / stripe_price_id_*":
                 "Created in Stripe, then recorded here. This seed never writes "
                 "them, so re-running it cannot blank the mapping.",

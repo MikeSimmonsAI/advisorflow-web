@@ -48,12 +48,73 @@ def get_branding(request: Request, db: Session = Depends(get_db)):
     than from a literal compiled into the bundle.
     """
     from app.services.brand_config import public_payload
-    host = (request.headers.get("host") or "").split(":")[0].lower()
+
+    # ══════════════════════════════════════════════════════════════════════
+    # THE HOST THAT MATTERS IS THE BROWSER'S, NOT THIS SERVICE'S.
+    # ══════════════════════════════════════════════════════════════════════
+    #
+    # FOUND LIVE, 2026-09-11. This read `Host` only. The frontend is a static
+    # site on `app.evosyspro.live` and it calls the API at
+    # `advisorflow-backend.onrender.com`, so the Host header this endpoint saw
+    # was always the BACKEND's — which contains the substring "advisorflow"
+    # and therefore matched the AdvisorFlow platform row. Production returned:
+    #
+    #     {"brand":"advisorflow","displayName":"AdvisorFlow",
+    #      "supportEmail":"mike@simmonsstrong.com", ...}
+    #
+    # for every brand. `theme.js` caches that answer in localStorage and
+    # applies it synchronously on the NEXT load, so an EvoSys Pro customer's
+    # app chrome adopted AdvisorFlow's name, accent and support address from
+    # their second page load onward. AdvisorFlow is the engine underneath and
+    # a customer must never see it; this was it, on every screen.
+    #
+    # `Origin` IS THE RIGHT SIGNAL AND IT IS NOT CLIENT-CHOSEN. A browser sets
+    # Origin on a cross-origin fetch itself, from the page's real address, and
+    # page script cannot forge it. That makes it a statement about WHERE THE
+    # CUSTOMER ACTUALLY IS, which is exactly the question this endpoint asks —
+    # unlike a `?brand=` parameter, which would let anybody pick.
+    #
+    # `Referer` is the same information with weaker guarantees and is used only
+    # when Origin is absent (a plain navigation rather than a fetch). `Host`
+    # remains the last resort, so a same-origin deployment behaves exactly as
+    # it always did.
+    def _host_of(value):
+        if not value:
+            return ""
+        v = str(value).strip()
+        if "//" in v:
+            v = v.split("//", 1)[1]
+        return v.split("/")[0].split(":")[0].strip().lower()
+
+    candidates = [
+        _host_of(request.headers.get("origin")),
+        _host_of(request.headers.get("referer")),
+        _host_of(request.headers.get("host")),
+    ]
+
     slug = os.environ.get("PLATFORM_SLUG", "").strip().lower() or None
-    payload = public_payload(db, host, slug=None)
-    # An explicit PLATFORM_SLUG wins only when the host told us nothing useful.
+
+    payload = None
+    for host in candidates:
+        if not host:
+            continue
+        candidate = public_payload(db, host, slug=None)
+        # A host that resolved to a real platform row is an answer. A host
+        # that only matched the frozen fallback is not, so the next candidate
+        # is tried before settling — which is what stops the backend's own
+        # hostname from answering for somebody else's customer.
+        if candidate.get("source") == "database":
+            payload = candidate
+            break
+        if payload is None:
+            payload = candidate
+
+    if payload is None:
+        payload = public_payload(db, "", slug=None)
+
+    # An explicit PLATFORM_SLUG wins only when no host told us anything useful.
     if slug and payload.get("source") == "frozen" and payload.get("brand") != slug:
-        payload = public_payload(db, host, slug=slug)
+        payload = public_payload(db, candidates[-1] or "", slug=slug)
     return payload
 
 

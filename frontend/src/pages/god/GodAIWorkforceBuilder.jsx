@@ -49,7 +49,7 @@ const MODES = [
 function Sec ({ children, top = 0 }) {
   return (
     <div style={{
-      color: '#5d7186', fontSize: 10, letterSpacing: '.14em',
+      color: 'var(--gm-blue)', fontSize: 10, letterSpacing: '.14em',
       textTransform: 'uppercase', margin: `${top}px 0 8px`,
     }}>{children}</div>
   )
@@ -66,7 +66,7 @@ function Stat ({ k, v, s, tone }) {
 }
 
 function Pill ({ tone, children }) {
-  const colour = { ok: T.green, warn: T.amber, bad: T.red, off: '#758ba4' }[tone] || '#758ba4'
+  const colour = { ok: T.green, warn: T.amber, bad: T.red, off: 'var(--gm-blue)' }[tone] || 'var(--gm-blue)'
   return (
     <span style={{
       display: 'inline-block', padding: '2px 9px', borderRadius: 999,
@@ -79,7 +79,7 @@ function Pill ({ tone, children }) {
 function Row ({ label, children }) {
   return (
     <div style={{ marginBottom: 10 }}>
-      <div style={{ color: '#758ba4', fontSize: 11, marginBottom: 4 }}>{label}</div>
+      <div style={{ color: 'var(--gm-blue)', fontSize: 11, marginBottom: 4 }}>{label}</div>
       {children}
     </div>
   )
@@ -194,10 +194,10 @@ export default function GodAIWorkforceBuilder () {
           <button className="gm-btn" style={{ marginBottom: 12 }} onClick={() => navigate('/god')}>
             ← COMMAND CENTER
           </button>
-          <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
+          <h1 style={{ margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
             AI Workforce Deployment
           </h1>
-          <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 880 }}>
+          <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 880 }}>
             What each brand sells, to which packages, and where every
             customer&apos;s AI employee has got to. No price is set here — an AI
             employee is sold by a catalogue item, in Billing, like everything
@@ -206,7 +206,7 @@ export default function GodAIWorkforceBuilder () {
         </div>
 
         {err && (
-          <div className="gm-card" style={{ borderColor: 'rgba(255,93,125,.35)', marginBottom: 16 }}>
+          <div className="gm-card" style={{ borderColor: 'var(--gm-pill-red-bd)', marginBottom: 16 }}>
             <div style={{ color: T.red, fontSize: 12 }}>{err}</div>
           </div>
         )}
@@ -233,14 +233,14 @@ export default function GodAIWorkforceBuilder () {
           <>
             <div className="gm-card" style={{ marginBottom: 16 }}>
               <Sec>Platform state</Sec>
-              <pre style={{ color: '#9db3c8', fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
+              <pre style={{ color: 'var(--gm-blue)', fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
                 {JSON.stringify(overview?.platform || {}, null, 2)}
               </pre>
             </div>
 
             <div className="gm-card" style={{ marginBottom: 16 }}>
               <Sec>Stop what should have stopped</Sec>
-              <p style={{ color: '#758ba4', fontSize: 12, marginTop: 0 }}>
+              <p style={{ color: 'var(--gm-blue)', fontSize: 12, marginTop: 0 }}>
                 Reconciling only ever stops something. An entitlement arriving
                 never starts an AI employee — a person does that, with a reason.
               </p>
@@ -299,15 +299,15 @@ export default function GodAIWorkforceBuilder () {
 
             {brand && (
               <>
-                <p style={{ color: '#758ba4', fontSize: 12 }}>
+                <p style={{ color: 'var(--gm-blue)', fontSize: 12 }}>
                   {brand.brand?.name} — {brand.note}
                 </p>
                 {(brand.catalog || []).map(row => (
                   <div key={row.template_key} className="gm-card" style={{ marginBottom: 10 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                       <div>
-                        <div style={{ color: '#fff', fontSize: 14 }}>{row.display_name}</div>
-                        <div style={{ color: '#5d7186', fontSize: 11 }}>
+                        <div style={{ color: 'var(--gm-head)', fontSize: 14 }}>{row.display_name}</div>
+                        <div style={{ color: 'var(--gm-blue)', fontSize: 11 }}>
                           {row.template_key} · {row.depth}
                           {row.advanced_capability ? ' · management capability' : ''}
                         </div>
@@ -335,13 +335,13 @@ export default function GodAIWorkforceBuilder () {
                     </div>
 
                     {!!(row.blockers || []).length && (
-                      <ul style={{ margin: '8px 0 0', paddingLeft: 18, color: '#758ba4', fontSize: 11 }}>
+                      <ul style={{ margin: '8px 0 0', paddingLeft: 18, color: 'var(--gm-blue)', fontSize: 11 }}>
                         {row.blockers.map((b, i) => <li key={i}>{b}</li>)}
                       </ul>
                     )}
 
                     {draft?.key === row.template_key && (
-                      <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 14 }}>
+                      <div style={{ marginTop: 14, borderTop: '1px solid var(--gm-card-line)', paddingTop: 14 }}>
                         <Row label="How it is acquired">
                           <select className="gm-input" value={draft.commercial_mode}
                             onChange={e => setDraft({ ...draft, commercial_mode: e.target.value })}>
@@ -365,12 +365,12 @@ export default function GodAIWorkforceBuilder () {
                             value={draft.max_per_customer}
                             onChange={e => setDraft({ ...draft, max_per_customer: e.target.value })} />
                         </Row>
-                        <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#9db3c8', fontSize: 12, marginBottom: 8 }}>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--gm-blue)', fontSize: 12, marginBottom: 8 }}>
                           <input type="checkbox" checked={draft.requires_controlled_first}
                             onChange={e => setDraft({ ...draft, requires_controlled_first: e.target.checked })} />
                           Must run in the controlled stage before full capacity
                         </label>
-                        <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#9db3c8', fontSize: 12, marginBottom: 12 }}>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--gm-blue)', fontSize: 12, marginBottom: 12 }}>
                           <input type="checkbox" checked={draft.is_available}
                             onChange={e => setDraft({ ...draft, is_available: e.target.checked })} />
                           Available to this brand&apos;s customers
@@ -421,15 +421,15 @@ export default function GodAIWorkforceBuilder () {
 
             {detail && (
               <div className="gm-card" style={{ marginTop: 16 }}>
-                <div style={{ color: '#fff', fontSize: 15 }}>{detail.name}</div>
-                <div style={{ color: '#5d7186', fontSize: 11, marginBottom: 12 }}>
+                <div style={{ color: 'var(--gm-head)', fontSize: 15 }}>{detail.name}</div>
+                <div style={{ color: 'var(--gm-blue)', fontSize: 11, marginBottom: 12 }}>
                   {detail.template_key} · {detail.state_label} · {detail.commerce?.commercial_label}
                 </div>
 
                 <Sec>Readiness — decided by code, every time</Sec>
                 <ul style={{ margin: '4px 0 14px', paddingLeft: 18, fontSize: 12 }}>
                   {(detail.readiness?.checks || []).map(c => (
-                    <li key={c.key} style={{ color: c.passed ? '#9db3c8' : T.amber, marginBottom: 3 }}>
+                    <li key={c.key} style={{ color: c.passed ? 'var(--gm-blue)' : T.amber, marginBottom: 3 }}>
                       {c.passed ? 'OK' : c.severity.toUpperCase()} — {c.label}. {c.detail}
                       {!c.passed && c.fix ? ` ${c.fix}` : ''}
                     </li>
@@ -478,7 +478,7 @@ export default function GodAIWorkforceBuilder () {
         {tab === 'Proof' && (
           <div className="gm-card">
             <Sec>Proof</Sec>
-            <p style={{ color: '#758ba4', fontSize: 12, marginTop: 0 }}>
+            <p style={{ color: 'var(--gm-blue)', fontSize: 12, marginTop: 0 }}>
               Both runs build synthetic organizations inside a savepoint and roll
               it back. Every contact is a reserved fictional number at an
               unresolvable domain, and no live channel adapter is reachable.
@@ -502,7 +502,7 @@ export default function GodAIWorkforceBuilder () {
                     {proof.passed} / {proof.total} passed
                   </Pill>
                 </div>
-                <pre style={{ color: '#9db3c8', fontSize: 11, whiteSpace: 'pre-wrap', margin: 0, maxHeight: 520, overflow: 'auto' }}>
+                <pre style={{ color: 'var(--gm-blue)', fontSize: 11, whiteSpace: 'pre-wrap', margin: 0, maxHeight: 520, overflow: 'auto' }}>
                   {JSON.stringify(proof, null, 2)}
                 </pre>
               </>

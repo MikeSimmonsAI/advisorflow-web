@@ -31,7 +31,7 @@ const S = {
   head:   { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px',
             borderBottom: '1px solid var(--border-subtle)' },
   mark:   { width: 40, height: 40, borderRadius: 9, display: 'grid', placeItems: 'center',
-            fontWeight: 700, fontSize: 15, color: '#fff', flex: 'none' },
+            fontWeight: 700, fontSize: 15, color: 'var(--gm-head)', flex: 'none' },
   name:   { fontWeight: 700, fontSize: 16, lineHeight: 1.2 },
   slug:   { fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'ui-monospace, monospace' },
   body:   { padding: '12px 18px 16px', display: 'flex', flexDirection: 'column', gap: 10 },

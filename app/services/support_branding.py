@@ -129,6 +129,104 @@ def brand_for_org(db: Optional[Session],
                               if org is not None else None)
 
 
+def brand_for_ticket(db: Optional[Session], ticket: Any) -> Dict[str, Any]:
+    """The brand a TICKET belongs to. Its own platform, then its org's.
+
+    `SupportTicket.platform_id` is stamped when the ticket is created and is
+    the authoritative statement of whose support product this conversation
+    happened inside. It is read FIRST, and the organization's platform is only
+    a repair path for a ticket written before the column was populated.
+
+    Never a default brand, never the first brand in the table, never the
+    environment.
+    """
+    platform_id = getattr(ticket, "platform_id", None)
+    if not platform_id and db is not None:
+        org_id = getattr(ticket, "organization_id", None)
+        if org_id:
+            try:
+                org = (db.query(Organization)
+                       .filter(Organization.id == org_id).first())
+                platform_id = getattr(org, "platform_id", None)
+            except Exception:                                  # noqa: BLE001
+                log.exception("support_branding: org lookup failed for ticket "
+                              "%s", getattr(ticket, "ticket_number", None))
+    return brand_for_platform(db, platform_id)
+
+
+class SupportSendingIdentity(object):
+    """WHO A SUPPORT EMAIL COMES FROM. Duck-types `send_email_via_provider`.
+
+    THE BUG THIS EXISTS TO CLOSE. `support_tickets._notify` called
+    `send_email_via_provider(to, subject, html)` with no `org=` at all. With
+    no org that function falls straight through to the module-level
+    `FROM_EMAIL`, which defaulted to `noreply@bookaboost.com` — so a support
+    ticket raised inside EvoSys Pro produced an email that announced itself as
+    BookaBoost. Nothing in the support engine chose that; a shared default
+    filled a gap nobody had noticed was empty, exactly as it did for booking
+    mail before `public_identity` was written.
+
+    WHY NOT `public_identity.sending_identity_for_org`. That resolver's first
+    level is `Organization.from_email` — the CUSTOMER's own verified sending
+    domain, which is the right answer for mail the customer's business sends
+    to a family, and the wrong one here. A support acknowledgement comes FROM
+    THE BRAND that sells them the software; sending it from the funeral home's
+    own domain would mean Restland emailing Restland about a ticket EvoSys Pro
+    is answering.
+
+    So this walks the BRAND only:
+
+        1. `Platform.support_email`      the brand's configured support address
+        2. the brand registry / frozen defaults, keyed on that platform's slug
+        3. nothing — and `resolved = True` says so, which makes
+           `send_email_via_provider` refuse rather than substitute.
+
+    `resolved` is the flag that turns an unresolved brand into a refusal. A
+    support email that fails to send is a ticket somebody chases; a support
+    email delivered under another brand's name is a customer being told their
+    vendor is a company they have never heard of.
+    """
+
+    __slots__ = ("from_email", "reply_to_email", "cc_email", "resend_api_key",
+                 "resolved", "platform_id", "display_name", "source")
+
+    def __init__(self, *, from_email=None, reply_to_email=None,
+                 platform_id=None, display_name=None, source="unresolved"):
+        self.from_email = from_email
+        self.reply_to_email = reply_to_email
+        # No CC on support mail, ever. Copying a customer's support thread to
+        # an address nobody chose is the same class of mistake as the default
+        # sender this class exists to remove.
+        self.cc_email = None
+        # The brand sends through the platform's own Resend account. There is
+        # no per-brand key column, so this stays None and the env key applies —
+        # which is correct: one Resend account, several verified domains.
+        self.resend_api_key = None
+        self.resolved = True
+        self.platform_id = platform_id
+        self.display_name = display_name
+        self.source = source
+
+
+def sending_identity_for_ticket(db: Optional[Session],
+                                ticket: Any) -> SupportSendingIdentity:
+    """The FROM and REPLY-TO for every email this ticket generates."""
+    brand = brand_for_ticket(db, ticket)
+    address = brand.get("support_email") or None
+    source = "unresolved"
+    if address:
+        source = "brand"
+    return SupportSendingIdentity(
+        from_email=address,
+        # Replies land in the brand's own support inbox, which is the address
+        # the ticket already belongs to. Nothing here invents a mailbox.
+        reply_to_email=address,
+        platform_id=brand.get("platform_id"),
+        display_name=brand.get("display_name"),
+        source=source,
+    )
+
+
 def upsert_settings(db: Session, *, platform_id: str,
                     values: Dict[str, Any]) -> SupportBrandSettings:
     """God writes a brand's support identity and hours.

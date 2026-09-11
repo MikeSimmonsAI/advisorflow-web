@@ -29,12 +29,12 @@ const money = (cents, currency) => {
 };
 
 const CARD = {
-  background: '#1a1a2e', border: '1px solid #2a2a4a',
+  background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-blue)',
   borderRadius: 12, padding: 24, marginBottom: 24,
 };
 
 const INPUT = {
-  background: '#14142b', color: '#e8e8f0', border: '1px solid #2a2a4a',
+  background: 'var(--gm-pill-blue-bg)', color: 'var(--gm-blue)', border: '1px solid var(--gm-blue)',
   borderRadius: 6, padding: '6px 10px', fontSize: 13, minWidth: 0,
 };
 
@@ -135,7 +135,7 @@ export default function BrandCatalogue({ platformId }) {
         <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>
           PRODUCTS &amp; SERVICES
         </h2>
-        <p style={{ color: '#888', margin: '8px 0 0', fontSize: 13,
+        <p style={{ color: 'var(--gm-dim)', margin: '8px 0 0', fontSize: 13,
                     maxWidth: 640 }}>
           Recurring add-ons and one-time services sold alongside the
           subscription. Choose a brand above to configure its catalogue — these
@@ -156,7 +156,7 @@ export default function BrandCatalogue({ platformId }) {
           <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>
             PRODUCTS &amp; SERVICES
           </h2>
-          <p style={{ color: '#888', margin: '6px 0 0', fontSize: 13,
+          <p style={{ color: 'var(--gm-dim)', margin: '6px 0 0', fontSize: 13,
                       maxWidth: 640 }}>
             Recurring add-ons and one-time services this brand sells alongside
             the subscription. Nothing here is sellable until it is priced and
@@ -167,7 +167,7 @@ export default function BrandCatalogue({ platformId }) {
           key: '', name: '', kind: 'recurring_addon', pricing_mode: 'fixed',
           amount: '', billing_interval: 'month', category: '',
           customer_description: '' }); }}
-          style={{ background: '#2fb6ff', color: '#04121c', border: 'none',
+          style={{ background: 'var(--gm-blue)', color: 'var(--gm-blue)', border: 'none',
                    borderRadius: 6, padding: '8px 16px', fontSize: 13,
                    fontWeight: 700, cursor: 'pointer' }}>
           {adding ? 'Close' : '+ Add item'}
@@ -176,15 +176,15 @@ export default function BrandCatalogue({ platformId }) {
 
       {(err || note) && (
         <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8,
-                      fontSize: 13, background: '#ef444418',
-                      border: '1px solid #ef444455', color: '#ef8a8a' }}>
+                      fontSize: 13, background: 'var(--gm-pill-red-bg)',
+                      border: '1px solid var(--gm-pill-red-bd)', color: 'var(--gm-red)' }}>
           {err || note}
         </div>
       )}
 
       {adding && draft && (
-        <div style={{ marginTop: 16, padding: 16, background: '#2fb6ff0e',
-                      border: '1px solid #2a2a4a', borderRadius: 8 }}>
+        <div style={{ marginTop: 16, padding: 16, background: 'var(--gm-pill-blue-bg)',
+                      border: '1px solid var(--gm-blue)', borderRadius: 8 }}>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <input style={{ ...INPUT, flex: '1 1 150px' }} placeholder="key (extra_users)"
               value={draft.key}
@@ -218,15 +218,15 @@ export default function BrandCatalogue({ platformId }) {
               value={draft.category}
               onChange={e => setDraft(d => ({ ...d, category: e.target.value }))} />
           </div>
-          <div style={{ color: '#888', fontSize: 12, margin: '10px 0' }}>
+          <div style={{ color: 'var(--gm-dim)', fontSize: 12, margin: '10px 0' }}>
             Created enabled for nobody. Price it and switch on an audience when
             you are ready — leaving the price blank is fine and says plainly
             that it cannot be sold yet.
           </div>
           <button type="button" onClick={createItem}
             disabled={!draft.key || !draft.name || busy === 'new'}
-            style={{ background: draft.key && draft.name ? '#1ef0a8' : '#2a2a4a',
-                     color: draft.key && draft.name ? '#04120c' : '#666',
+            style={{ background: draft.key && draft.name ? 'var(--gm-teal)' : 'var(--gm-blue)',
+                     color: draft.key && draft.name ? 'var(--gm-teal)' : 'var(--gm-ghost)',
                      border: 'none', borderRadius: 6, padding: '7px 16px',
                      fontSize: 13, fontWeight: 700,
                      cursor: draft.key && draft.name ? 'pointer' : 'default' }}>
@@ -236,22 +236,22 @@ export default function BrandCatalogue({ platformId }) {
       )}
 
       {loading ? (
-        <div style={{ padding: 30, textAlign: 'center', color: '#888' }}>Loading…</div>
+        <div style={{ padding: 30, textAlign: 'center', color: 'var(--gm-dim)' }}>Loading…</div>
       ) : items.length === 0 ? (
-        <div style={{ padding: 30, textAlign: 'center', color: '#888', fontSize: 14 }}>
+        <div style={{ padding: 30, textAlign: 'center', color: 'var(--gm-dim)', fontSize: 14 }}>
           This brand has no catalogue items yet.
         </div>
       ) : (
         <>
           <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap',
-                        margin: '18px 0 10px', fontSize: 12, color: '#888' }}>
+                        margin: '18px 0 10px', fontSize: 12, color: 'var(--gm-dim)' }}>
             <span>{counts.total} item{counts.total === 1 ? '' : 's'}</span>
-            <span style={{ color: '#1ef0a8' }}>{counts.sellable} sellable</span>
+            <span style={{ color: 'var(--gm-teal)' }}>{counts.sellable} sellable</span>
             {counts.blocked > 0 && (
-              <span style={{ color: '#f59e0b' }}>{counts.blocked} blocked</span>
+              <span style={{ color: 'var(--gm-amber)' }}>{counts.blocked} blocked</span>
             )}
             {counts.needs_stripe_mapping > 0 && (
-              <span style={{ color: '#f59e0b' }}>
+              <span style={{ color: 'var(--gm-amber)' }}>
                 {counts.needs_stripe_mapping} need a Stripe price
               </span>
             )}
@@ -260,7 +260,7 @@ export default function BrandCatalogue({ platformId }) {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ color: '#888', textAlign: 'left', fontSize: 12 }}>
+                <tr style={{ color: 'var(--gm-dim)', textAlign: 'left', fontSize: 12 }}>
                   <th style={{ padding: '8px 12px 8px 0' }}>Item</th>
                   <th style={{ padding: '8px 12px' }}>Type</th>
                   <th style={{ padding: '8px 12px', textAlign: 'right' }}>Price</th>
@@ -272,16 +272,16 @@ export default function BrandCatalogue({ platformId }) {
               </thead>
               <tbody>
                 {items.map(it => (
-                  <tr key={it.id} style={{ borderTop: '1px solid #2a2a4a',
+                  <tr key={it.id} style={{ borderTop: '1px solid var(--gm-blue)',
                                            opacity: it.is_active ? 1 : 0.55 }}>
                     <td style={{ padding: '10px 12px 10px 0' }}>
                       <div style={{ fontWeight: 600 }}>{it.name}</div>
-                      <div style={{ fontSize: 11, color: '#7a7a95' }}>
+                      <div style={{ fontSize: 11, color: 'var(--gm-dim)' }}>
                         {it.key}{it.category ? ` · ${it.category}` : ''}
                       </div>
                       {/* WHY THIS ROW CANNOT BE SOLD, in the row itself. */}
                       {it.blockers?.length > 0 && (
-                        <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 3,
+                        <div style={{ fontSize: 11, color: 'var(--gm-amber)', marginTop: 3,
                                       maxWidth: 420 }}>
                           {it.blockers.join(' ')}
                         </div>
@@ -290,7 +290,7 @@ export default function BrandCatalogue({ platformId }) {
                     <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                       {it.kind_label}
                       {it.billing_interval && (
-                        <div style={{ fontSize: 11, color: '#7a7a95' }}>
+                        <div style={{ fontSize: 11, color: 'var(--gm-dim)' }}>
                           per {it.billing_interval}
                         </div>
                       )}
@@ -298,16 +298,16 @@ export default function BrandCatalogue({ platformId }) {
                     <td style={{ padding: '10px 12px', textAlign: 'right',
                                  whiteSpace: 'nowrap' }}>
                       {it.is_quoted || it.pricing_mode === 'quoted'
-                        ? <span style={{ color: '#7a7a95' }}>Quoted</span>
+                        ? <span style={{ color: 'var(--gm-dim)' }}>Quoted</span>
                         : money(it.amount_cents, it.currency)
-                          ?? <span style={{ color: '#f59e0b' }}>Not priced</span>}
+                          ?? <span style={{ color: 'var(--gm-amber)' }}>Not priced</span>}
                     </td>
                     <td style={{ padding: '10px 12px', fontSize: 12 }}>
                       {it.stripe_mapped
-                        ? <span style={{ color: '#1ef0a8' }}>Mapped</span>
+                        ? <span style={{ color: 'var(--gm-teal)' }}>Mapped</span>
                         : it.needs_stripe_mapping
-                          ? <span style={{ color: '#f59e0b' }}>Needed</span>
-                          : <span style={{ color: '#555' }}>—</span>}
+                          ? <span style={{ color: 'var(--gm-amber)' }}>Needed</span>
+                          : <span style={{ color: 'var(--gm-ghost)' }}>—</span>}
                     </td>
                     {[['self_service', it.self_service],
                       ['seller_assisted', it.seller_assisted],
@@ -327,25 +327,25 @@ export default function BrandCatalogue({ platformId }) {
       )}
 
       {/* ── Stripe provisioning, preview first ──────────────────────────── */}
-      <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #2a2a4a' }}>
+      <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--gm-blue)' }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center',
                       flexWrap: 'wrap' }}>
           <button type="button" onClick={() => runProvision(false)}
             disabled={busy === 'provision'}
-            style={{ background: 'transparent', color: '#2fb6ff',
-                     border: '1px solid #2fb6ff55', borderRadius: 6,
+            style={{ background: 'transparent', color: 'var(--gm-blue)',
+                     border: '1px solid var(--gm-pill-blue-bd)', borderRadius: 6,
                      padding: '7px 14px', fontSize: 13, cursor: 'pointer' }}>
             {busy === 'provision' ? 'Checking…' : 'Preview Stripe sync'}
           </button>
-          <span style={{ color: '#888', fontSize: 12 }}>
+          <span style={{ color: 'var(--gm-dim)', fontSize: 12 }}>
             Creates only what is missing. An already-mapped price is reused,
             never duplicated. Quoted and unpriced items are skipped.
           </span>
         </div>
 
         {provision && (
-          <div style={{ marginTop: 14, padding: 14, background: '#f59e0b0e',
-                        border: '1px solid #2a2a4a', borderRadius: 8 }}>
+          <div style={{ marginTop: 14, padding: 14, background: 'var(--gm-pill-amber-bg)',
+                        border: '1px solid var(--gm-blue)', borderRadius: 8 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
               Would create {provision.summary?.products_created} product(s) and{' '}
               {provision.summary?.prices_created} price(s) · reuse{' '}
@@ -356,13 +356,13 @@ export default function BrandCatalogue({ platformId }) {
               <tbody>
                 {(provision.items || []).map(r => (
                   <tr key={r.key}>
-                    <td style={{ padding: '3px 14px 3px 0', color: '#888' }}>
+                    <td style={{ padding: '3px 14px 3px 0', color: 'var(--gm-dim)' }}>
                       {r.key}
                     </td>
                     <td style={{ padding: '3px 0' }}>
                       {r.skipped
-                        ? <span style={{ color: '#7a7a95' }}>skipped — {r.reason}</span>
-                        : <span style={{ color: '#1ef0a8' }}>
+                        ? <span style={{ color: 'var(--gm-dim)' }}>skipped — {r.reason}</span>
+                        : <span style={{ color: 'var(--gm-teal)' }}>
                             {r.price?.action?.replace(/_/g, ' ')}
                           </span>}
                     </td>
@@ -373,14 +373,14 @@ export default function BrandCatalogue({ platformId }) {
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" onClick={() => runProvision(true)}
                 disabled={busy === 'provision'}
-                style={{ background: '#1ef0a8', color: '#04120c', border: 'none',
+                style={{ background: 'var(--gm-teal)', color: 'var(--gm-teal)', border: 'none',
                          borderRadius: 6, padding: '6px 14px', fontSize: 12,
                          fontWeight: 700, cursor: 'pointer' }}>
                 {busy === 'provision' ? 'Syncing…' : 'Apply sync'}
               </button>
               <button type="button" onClick={() => setProvision(null)}
-                style={{ background: 'transparent', color: '#aaa',
-                         border: '1px solid #2a2a4a', borderRadius: 6,
+                style={{ background: 'transparent', color: 'var(--gm-text)',
+                         border: '1px solid var(--gm-blue)', borderRadius: 6,
                          padding: '6px 14px', fontSize: 12, cursor: 'pointer' }}>
                 Cancel
               </button>

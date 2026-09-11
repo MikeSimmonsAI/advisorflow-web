@@ -103,7 +103,7 @@ export default function GodExecutiveAccess() {
       </SectionLabel>
 
       {listErr ? (
-        <div className="gm-card gm-empty" style={{ color: '#ff8299' }}>{listErr}</div>
+        <div className="gm-card gm-empty" style={{ color: 'var(--gm-red)' }}>{listErr}</div>
       ) : null}
 
       {!list && !listErr ? (
@@ -136,8 +136,8 @@ export default function GodExecutiveAccess() {
               {list.executives.map(row => (
                 <tr key={row.user_id + row.platform_id}>
                   <td>
-                    <b style={{ color: '#eaf4ff' }}>{row.name}</b>
-                    <span style={{ display: 'block', fontSize: 9.5, color: '#5e7796' }}>
+                    <b style={{ color: 'var(--gm-blue)' }}>{row.name}</b>
+                    <span style={{ display: 'block', fontSize: 9.5, color: 'var(--gm-blue)' }}>
                       {row.email}
                     </span>
                   </td>
@@ -169,7 +169,7 @@ export default function GodExecutiveAccess() {
           </SectionLabel>
 
           {detailErr ? (
-            <div className="gm-card gm-empty" style={{ color: '#ff8299' }}>
+            <div className="gm-card gm-empty" style={{ color: 'var(--gm-red)' }}>
               {detailErr}
             </div>
           ) : null}
@@ -184,8 +184,8 @@ export default function GodExecutiveAccess() {
                             alignItems: 'flex-start', gap: 16, flexWrap: 'wrap',
                             marginBottom: 14 }}>
                 <div>
-                  <b style={{ fontSize: 13, color: '#eaf4ff' }}>{detail.user.name}</b>
-                  <span style={{ display: 'block', fontSize: 10, color: '#5e7796' }}>
+                  <b style={{ fontSize: 13, color: 'var(--gm-blue)' }}>{detail.user.name}</b>
+                  <span style={{ display: 'block', fontSize: 10, color: 'var(--gm-blue)' }}>
                     {detail.user.email} · {detail.platform.name}
                   </span>
                 </div>
@@ -196,13 +196,13 @@ export default function GodExecutiveAccess() {
 
               {/* WITHOUT THE BRAND GRANT, TICKING BOXES ACHIEVES NOTHING. */}
               {!detail.has_brand_grant ? (
-                <div style={{ border: '1px solid rgba(114,49,66,.9)',
-                              background: '#2a1017', borderRadius: 10,
+                <div style={{ border: '1px solid var(--gm-red)',
+                              background: 'var(--gm-pill-red-bg)', borderRadius: 10,
                               padding: '12px 14px', marginBottom: 14 }}>
-                  <b style={{ fontSize: 11, color: '#ff829b', display: 'block' }}>
+                  <b style={{ fontSize: 11, color: 'var(--gm-red)', display: 'block' }}>
                     NO EXECUTIVE GRANT ON THIS BRAND
                   </b>
-                  <p style={{ margin: '5px 0 0', fontSize: 10, color: '#a9c0d6',
+                  <p style={{ margin: '5px 0 0', fontSize: 10, color: 'var(--gm-blue)',
                               lineHeight: 1.6 }}>
                     Assignments made here are stored, but this person cannot
                     open {detail.platform.name}'s Executive Suite until they are
@@ -212,7 +212,7 @@ export default function GodExecutiveAccess() {
                 </div>
               ) : null}
 
-              <p style={{ margin: '0 0 12px', fontSize: 10, color: '#68829f',
+              <p style={{ margin: '0 0 12px', fontSize: 10, color: 'var(--gm-blue)',
                           lineHeight: 1.65, maxWidth: '78ch' }}>
                 {detail.assigned_count} of {detail.organizations.length}{' '}
                 {detail.organizations.length === 1 ? 'customer' : 'customers'} on
@@ -229,19 +229,19 @@ export default function GodExecutiveAccess() {
                                   padding: '10px 12px', borderRadius: 9,
                                   cursor: busy ? 'default' : 'pointer',
                                   border: '1px solid ' + (org.assigned
-                                    ? 'rgba(23,111,88,.85)' : 'rgba(27,58,90,.9)'),
+                                    ? 'var(--gm-teal)' : 'var(--gm-blue)'),
                                   background: org.assigned
-                                    ? 'rgba(10,43,34,.5)' : 'rgba(10,26,46,.6)',
+                                    ? 'var(--gm-pill-teal-bg)' : 'var(--gm-pill-blue-bg)',
                                   opacity: busy === org.id ? 0.5 : 1 }}>
                     <input type="checkbox" checked={org.assigned}
                            disabled={!!busy}
                            onChange={() => toggle(org)} />
                     <span style={{ minWidth: 0 }}>
-                      <b style={{ fontSize: 11.5, color: '#eaf4ff', display: 'block' }}>
+                      <b style={{ fontSize: 11.5, color: 'var(--gm-blue)', display: 'block' }}>
                         {org.name}
                       </b>
                       {!org.is_active ? (
-                        <span style={{ fontSize: 9, color: '#f4c652' }}>suspended</span>
+                        <span style={{ fontSize: 9, color: 'var(--gm-amber)' }}>suspended</span>
                       ) : null}
                     </span>
                   </label>
@@ -249,7 +249,7 @@ export default function GodExecutiveAccess() {
               </div>
 
               {!detail.organizations.length ? (
-                <p style={{ fontSize: 11, color: '#68829f', margin: 0 }}>
+                <p style={{ fontSize: 11, color: 'var(--gm-blue)', margin: 0 }}>
                   This brand has no customer organizations yet, so there is
                   nothing to assign.
                 </p>

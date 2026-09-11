@@ -220,6 +220,32 @@ COLUMNS_TO_ADD = [
     ("brand_billing_plans", "month_to_month_cents", "INTEGER"),
     ("brand_billing_plans", "stripe_price_id_month_to_month", "VARCHAR"),
 
+    # ── Capacity a plan card may state, as CONFIGURATION (2026-09-11) ──────
+    #
+    # THE STALE-PACKAGE-CARD FIX. The customer Change Plan screen was showing
+    # "AI voice 300 min/mo", "Up to 2 users" and "Priority support + 24-month
+    # price lock" — sentences typed into a features list, several of them no
+    # longer true, none of them changeable without a deploy. The capacity a
+    # tier sells is DATA, so it gets columns: God Mode edits them and the card
+    # changes with them.
+    #
+    # EVERY ONE NULLABLE, and NULL means NOT CONFIGURED rather than zero. The
+    # card omits a dimension it has no number for instead of printing "0
+    # emails" or inventing one — an honest gap beats a confident wrong figure
+    # on a screen somebody buys from.
+    #
+    # NO VOICE COLUMN. AI Voice is a separate add-on in the catalogue, and a
+    # `voice_minutes` column on the plan is exactly how the stale "300 min/mo"
+    # line would grow back.
+    ("brand_billing_plans", "max_locations", "INTEGER"),
+    ("brand_billing_plans", "email_monthly_allowance", "INTEGER"),
+    ("brand_billing_plans", "sms_monthly_allowance", "INTEGER"),
+    # HOW LONG THE COMMITTED TERM ACTUALLY IS. The screen said "24-month"
+    # because a human typed 24 into a marketing string. With a column, the
+    # commitment label reads whatever the brand configured and says
+    # "Term agreement" — not a number — when nobody has configured one.
+    ("brand_billing_plans", "term_months", "INTEGER"),
+
     # ── Import batch options (2026-09-07) ──────────────────────────────────
     # POST /leads/upload/confirm accepted all four of these as multipart form
     # fields and then handed none of them to the pipeline, so a "Source year"

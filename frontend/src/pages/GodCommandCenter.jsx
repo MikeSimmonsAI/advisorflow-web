@@ -183,22 +183,22 @@ export default function GodCommandCenter() {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24,
                       alignItems: 'flex-start', padding: '8px 2px 20px', flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 9, letterSpacing: '.19em', color: '#6083a5', fontWeight: 800, marginBottom: 8 }}>
+            <div style={{ fontSize: 9, letterSpacing: '.19em', color: 'var(--gm-blue)', fontWeight: 800, marginBottom: 8 }}>
               ADVISORFLOW / OWNER CONTROL PLANE
             </div>
-            <h1 style={{ margin: 0, color: '#fff', fontSize: 31, letterSpacing: '-.04em', lineHeight: 1 }}>
+            <h1 style={{ margin: 0, color: 'var(--gm-head)', fontSize: 31, letterSpacing: '-.04em', lineHeight: 1 }}>
               God Mode Command Center
             </h1>
-            <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 780 }}>
+            <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 780 }}>
               System-wide health, revenue risk, customer operations and owner
               interventions from one surface.
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <div style={{
-              border: `1px solid ${criticalCount ? 'rgba(255,93,125,.3)' : 'rgba(35,239,178,.25)'}`,
-              background: criticalCount ? 'rgba(63,12,24,.45)' : 'rgba(9,49,38,.40)',
-              color: criticalCount ? '#ff8299' : '#63f2c6',
+              border: `1px solid ${criticalCount ? 'var(--gm-pill-red-bd)' : 'var(--gm-pill-teal-bd)'}`,
+              background: criticalCount ? 'var(--gm-red-wash)' : 'var(--gm-teal-wash)',
+              color: criticalCount ? 'var(--gm-red)' : 'var(--gm-teal)',
               padding: '7px 10px', borderRadius: 999, fontSize: 9, fontWeight: 800, letterSpacing: '.08em',
             }}>
               <span style={{
@@ -220,7 +220,7 @@ export default function GodCommandCenter() {
 
         {err && (
           <div className="gm-card" style={{ padding: '12px 14px', marginBottom: 16,
-                                            borderColor: 'rgba(255,93,125,.35)', color: '#ff8299', fontSize: 11 }}>
+                                            borderColor: 'var(--gm-pill-red-bd)', color: 'var(--gm-red)', fontSize: 11 }}>
             {err}
           </div>
         )}
@@ -281,7 +281,7 @@ export default function GodCommandCenter() {
           />
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 10, color: T.dim, margin: '4px 0 22px' }}>
             <span><i style={{ width: 9, height: 9, borderRadius: 2, background: T.teal, display: 'inline-block', marginRight: 6 }} />live from your database</span>
-            <span><i style={{ width: 9, height: 9, borderRadius: 2, background: '#243a52', display: 'inline-block', marginRight: 6 }} />no source yet — needs the billing build</span>
+            <span><i style={{ width: 9, height: 9, borderRadius: 2, background: 'var(--gm-blue)', display: 'inline-block', marginRight: 6 }} />no source yet — needs the billing build</span>
             <span><i style={{ width: 9, height: 9, borderRadius: 2, background: T.amber, display: 'inline-block', marginRight: 6 }} />real, and needs your decision</span>
           </div>
           <div id="product-status">

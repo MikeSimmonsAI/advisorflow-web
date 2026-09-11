@@ -83,8 +83,14 @@ def fake_stripe(monkeypatch):
     fake.of = lambda name: [kw for c, kw in calls if c == name]
 
     monkeypatch.setattr(catalog_purchase, "_stripe", lambda: fake)
-    monkeypatch.setattr(catalog_purchase, "_brand_base_url",
-                        lambda db, org: "https://app.example")
+    # Return targets are resolved by `stripe_return` now, not by a base string
+    # this module concatenated itself. Same shape the real resolver produces.
+    monkeypatch.setattr(
+        catalog_purchase, "_return_targets",
+        lambda db, org, part: {
+            "success_url": "https://app.example/billing?part=%s&success=1" % part,
+            "cancel_url": "https://app.example/billing?canceled=1&part=%s" % part,
+        })
     import app.routers.billing_router as br
     monkeypatch.setattr(br, "_get_or_create_customer", lambda org, db: "cus_zz")
     monkeypatch.setattr(br, "_brand_display_name", lambda db, org: "EvoSys Pro")

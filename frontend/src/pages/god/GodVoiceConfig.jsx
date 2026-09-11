@@ -25,14 +25,14 @@ const PROVIDERS = ['retell']
 
 function ReadinessChip({ ready, why }) {
   if (ready === null || ready === undefined) return (
-    <span style={{ fontSize: 11, color: '#9ca3af' }}>checking…</span>
+    <span style={{ fontSize: 11, color: 'var(--gm-text)' }}>checking…</span>
   )
   return (
     <span style={{
       fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 100,
-      background: ready ? '#f0fdf4' : '#fef2f2',
-      color: ready ? '#166534' : '#991b1b',
-      border: `1px solid ${ready ? '#86efac' : '#fca5a5'}`,
+      background: ready ? 'var(--gm-pill-teal-bg)' : 'var(--gm-pill-red-bg)',
+      color: ready ? 'var(--gm-teal)' : 'var(--gm-red)',
+      border: `1px solid ${ready ? 'var(--gm-teal)' : 'var(--gm-pill-red-bd)'}`,
     }}>
       {ready ? '✓ Ready' : `✗ ${why || 'Not ready'}`}
     </span>
@@ -88,56 +88,56 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
 
   const fieldStyle = {
     fontSize: 12, padding: '4px 8px', borderRadius: 6,
-    border: '1px solid #e5e7eb', width: 90,
+    border: '1px solid var(--gm-card-line)', width: 90,
   }
-  const btnStyle = (color = '#3b82f6') => ({
+  const btnStyle = (color = 'var(--gm-blue)') => ({
     fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: 'pointer',
-    background: color, color: '#fff', border: 'none', fontWeight: 600,
+    background: color, color: 'var(--gm-head)', border: 'none', fontWeight: 600,
   })
   const ghostBtn = {
     fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: 'pointer',
-    background: 'transparent', color: '#6b7280',
-    border: '1px solid #e5e7eb',
+    background: 'transparent', color: 'var(--gm-dim)',
+    border: '1px solid var(--gm-card-line)',
   }
 
   return (
     <div style={{
-      border: '1px solid #e5e7eb', borderRadius: 10, padding: '18px 22px',
-      marginBottom: 14, background: '#fff',
+      border: '1px solid var(--gm-card-line)', borderRadius: 10, padding: '18px 22px',
+      marginBottom: 14, background: 'var(--gm-panel)',
     }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>
             {agent.organization_name || agent.organization_id}
           </div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: 'var(--gm-dim)', marginTop: 2 }}>
             {agent.provider} · {USE_CASE_LABELS[agent.use_case] || agent.use_case}
             {agent.label && <span> · {agent.label}</span>}
           </div>
-          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#9ca3af', marginTop: 4 }}>
+          <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--gm-text)', marginTop: 4 }}>
             agent: {agent.agent_id}
             {' · '}from: {agent.from_number}
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
           <ReadinessChip ready={agent.provider_ready} why={agent.provider_not_ready_reason} />
-          <span style={{ fontSize: 11, color: agent.is_active ? '#22c55e' : '#ef4444' }}>
+          <span style={{ fontSize: 11, color: agent.is_active ? 'var(--gm-teal)' : 'var(--gm-red)' }}>
             {agent.is_active ? '● active' : '○ inactive'}
           </span>
-          <span style={{ fontSize: 11, color: agent.org_api_key_override ? '#3b82f6' : '#9ca3af' }}>
+          <span style={{ fontSize: 11, color: agent.org_api_key_override ? 'var(--gm-blue)' : 'var(--gm-text)' }}>
             API key: {agent.org_api_key_override ? 'custom' : 'platform default'}
           </span>
         </div>
       </div>
 
       {/* Version section */}
-      <div style={{ marginTop: 14, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>
+      <div style={{ marginTop: 14, borderTop: '1px solid var(--gm-card-line)', paddingTop: 12 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: '#6b7280', minWidth: 100 }}>Agent version</span>
+          <span style={{ fontSize: 12, color: 'var(--gm-dim)', minWidth: 100 }}>Agent version</span>
           {!versionEdit ? (
             <>
               <span style={{ fontSize: 13, fontWeight: 600,
-                             color: agent.version_pinned ? '#1f2937' : '#f59e0b' }}>
+                             color: agent.version_pinned ? 'var(--gm-blue)' : 'var(--gm-amber)' }}>
                 {agent.version_pinned ? `v${agent.agent_version}` : 'unpinned — cannot call'}
               </span>
               <button style={ghostBtn} onClick={() => { setVersionVal(String(agent.agent_version ?? '')); setVersionEdit(true) }}>
@@ -159,12 +159,12 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
       </div>
 
       {/* Attempt policy section */}
-      <div style={{ marginTop: 10, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>
+      <div style={{ marginTop: 10, borderTop: '1px solid var(--gm-card-line)', paddingTop: 12 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: '#6b7280', minWidth: 100 }}>Attempt policy</span>
+          <span style={{ fontSize: 12, color: 'var(--gm-dim)', minWidth: 100 }}>Attempt policy</span>
           {!policyEdit ? (
             <>
-              <span style={{ fontSize: 12, color: '#6b7280' }}>
+              <span style={{ fontSize: 12, color: 'var(--gm-dim)' }}>
                 max calls: {agent.max_call_attempts ?? 'default'} ·
                 max dials: {agent.max_dial_attempts ?? 'default'}
               </span>
@@ -172,10 +172,10 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
             </>
           ) : (
             <>
-              <label style={{ fontSize: 12, color: '#6b7280' }}>max calls</label>
+              <label style={{ fontSize: 12, color: 'var(--gm-dim)' }}>max calls</label>
               <input type="number" min={1} value={maxCall} onChange={e => setMaxCall(e.target.value)}
                      style={fieldStyle} placeholder="default" />
-              <label style={{ fontSize: 12, color: '#6b7280' }}>max dials</label>
+              <label style={{ fontSize: 12, color: 'var(--gm-dim)' }}>max dials</label>
               <input type="number" min={1} value={maxDial} onChange={e => setMaxDial(e.target.value)}
                      style={fieldStyle} placeholder="default" />
               <button style={btnStyle()} onClick={savePolicy} disabled={policySaving}>
@@ -188,9 +188,9 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
       </div>
 
       {/* Test call section */}
-      <div style={{ marginTop: 10, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>
+      <div style={{ marginTop: 10, borderTop: '1px solid var(--gm-card-line)', paddingTop: 12 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: '#6b7280', minWidth: 100 }}>Test call</span>
+          <span style={{ fontSize: 12, color: 'var(--gm-dim)', minWidth: 100 }}>Test call</span>
           {!testConfirm ? (
             <button style={ghostBtn} onClick={() => setTestConfirm(true)}
                     disabled={!agent.version_pinned}>
@@ -202,7 +202,7 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
                      onChange={e => setTestLeadId(e.target.value)}
                      placeholder="Lead ID"
                      style={{ ...fieldStyle, width: 200, fontFamily: 'monospace' }} />
-              <button style={btnStyle('#dc2626')} onClick={placeCall} disabled={testCalling}>
+              <button style={btnStyle('var(--gm-red)')} onClick={placeCall} disabled={testCalling}>
                 {testCalling ? 'Calling…' : 'Confirm call'}
               </button>
               <button style={ghostBtn} onClick={() => { setTestConfirm(false); setTestResult(null) }}>
@@ -214,8 +214,8 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
         {testResult && (
           <div style={{
             marginTop: 8, fontSize: 12, padding: '8px 12px', borderRadius: 6,
-            background: testResult.ok ? '#f0fdf4' : '#fef2f2',
-            color: testResult.ok ? '#166534' : '#991b1b',
+            background: testResult.ok ? 'var(--gm-teal)' : 'var(--gm-red)',
+            color: testResult.ok ? 'var(--gm-teal)' : 'var(--gm-red)',
             fontFamily: 'monospace', whiteSpace: 'pre-wrap',
           }}>
             {testResult.ok
@@ -255,15 +255,15 @@ function CreateAgentForm({ orgs, onCreated }) {
   }
 
   const fieldRow = { display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }
-  const lbl = { fontSize: 12, color: '#6b7280', minWidth: 120 }
-  const inp = { fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid #e5e7eb', flex: 1, minWidth: 200 }
+  const lbl = { fontSize: 12, color: 'var(--gm-dim)', minWidth: 120 }
+  const inp = { fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--gm-card-line)', flex: 1, minWidth: 200 }
   const sel = { ...inp, flex: 'none', minWidth: 140 }
 
   return (
-    <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '18px 22px',
-                  background: '#fafafa', marginBottom: 20 }}>
+    <div style={{ border: '1px solid var(--gm-card-line)', borderRadius: 10, padding: '18px 22px',
+                  background: 'var(--gm-panel)', marginBottom: 20 }}>
       <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Add Voice Agent Mapping</div>
-      {err && <div style={{ background: '#fef2f2', color: '#dc2626', borderRadius: 6,
+      {err && <div style={{ background: 'var(--gm-pill-red-bg)', color: 'var(--gm-red)', borderRadius: 6,
                             padding: '8px 12px', fontSize: 12, marginBottom: 12 }}>{err}</div>}
       <div style={fieldRow}>
         <span style={lbl}>Organization</span>
@@ -299,7 +299,7 @@ function CreateAgentForm({ orgs, onCreated }) {
       </div>
       <button onClick={submit} disabled={saving} style={{
         fontSize: 13, padding: '7px 20px', borderRadius: 7, border: 'none',
-        background: '#3b82f6', color: '#fff', cursor: 'pointer', fontWeight: 600,
+        background: 'var(--gm-blue)', color: 'var(--gm-head)', cursor: 'pointer', fontWeight: 600,
       }}>
         {saving ? 'Creating…' : 'Create mapping'}
       </button>
@@ -353,7 +353,7 @@ export default function GodVoiceConfig() {
 
   const page = { padding: '24px 32px', maxWidth: 960,
                   fontFamily: 'var(--god-font, system-ui, sans-serif)',
-                  color: 'var(--god-text, #1f2937)' }
+                  color: 'var(--god-text, var(--gm-blue))' }
 
   return (
     <div style={page}>
@@ -361,20 +361,20 @@ export default function GodVoiceConfig() {
                     alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Voice Configuration</h1>
-          <p style={{ margin: '6px 0 0', color: '#6b7280', fontSize: 14 }}>
+          <p style={{ margin: '6px 0 0', color: 'var(--gm-dim)', fontSize: 14 }}>
             Agent mappings, version pins, attempt policy, and test calls — god-only
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowCreate(s => !s)} style={{
             fontSize: 12, padding: '6px 14px', borderRadius: 6,
-            border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer',
+            border: 'none', background: 'var(--gm-blue)', color: 'var(--gm-head)', cursor: 'pointer',
           }}>
             {showCreate ? '✕ Cancel' : '+ Add mapping'}
           </button>
           <button onClick={load} disabled={loading} style={{
             fontSize: 12, padding: '6px 14px', borderRadius: 6,
-            border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer',
+            border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel)', cursor: 'pointer',
           }}>
             ↻ Refresh
           </button>
@@ -382,8 +382,8 @@ export default function GodVoiceConfig() {
       </div>
 
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8,
-                      padding: 16, color: '#dc2626', marginBottom: 20 }}>
+        <div style={{ background: 'var(--gm-pill-red-bg)', border: '1px solid var(--gm-pill-red-bd)', borderRadius: 8,
+                      padding: 16, color: 'var(--gm-red)', marginBottom: 20 }}>
           {error}
         </div>
       )}
@@ -391,17 +391,17 @@ export default function GodVoiceConfig() {
       {showCreate && <CreateAgentForm orgs={orgs} onCreated={handleCreated} />}
 
       {loading && !agents.length && (
-        <div style={{ color: '#9ca3af', padding: 24 }}>Loading…</div>
+        <div style={{ color: 'var(--gm-text)', padding: 24 }}>Loading…</div>
       )}
 
       {!loading && agents.length === 0 && !showCreate && (
-        <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '32px 24px',
-                      textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>
+        <div style={{ border: '1px solid var(--gm-card-line)', borderRadius: 10, padding: '32px 24px',
+                      textAlign: 'center', color: 'var(--gm-text)', fontSize: 14 }}>
           No voice agent mappings yet.
           <br />
           <button onClick={() => setShowCreate(true)} style={{
             marginTop: 12, fontSize: 13, padding: '7px 18px', borderRadius: 7,
-            border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer',
+            border: 'none', background: 'var(--gm-blue)', color: 'var(--gm-head)', cursor: 'pointer',
           }}>
             Add first mapping
           </button>
@@ -417,7 +417,7 @@ export default function GodVoiceConfig() {
       ))}
 
       {refreshed && (
-        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: 'var(--gm-text)', marginTop: 8 }}>
           As of {refreshed.toLocaleTimeString()} · {agents.length} mapping{agents.length !== 1 ? 's' : ''}
         </div>
       )}

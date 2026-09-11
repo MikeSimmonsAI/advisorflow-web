@@ -241,12 +241,84 @@ def stripe_price_id_for(plan: BrandBillingPlan, interval: str,
 
 
 def commitment_label(commitment: Optional[str], term_months: Optional[int] = None) -> str:
-    """How the commitment reads to a person, on a screen or an invoice line."""
+    """How the commitment reads to a person, on a screen or an invoice line.
+
+    `term_months` comes from the PLAN'S OWN COLUMN and nowhere else. The live
+    Change Plan screen advertised a "24-month price lock" because a human
+    typed 24 into a marketing string; an unconfigured term now reads the
+    neutral "Term agreement", which is true, instead of a number nobody set.
+    """
     if commitment == BillingCommitment.MONTH_TO_MONTH:
         return "Month-to-month"
     if term_months:
         return "%d-month agreement" % int(term_months)
     return "Term agreement"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CAPACITY — what a tier actually includes, as data
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# ORDER IS DISPLAY ORDER, and it is here rather than in the React bundle so a
+# second surface cannot list the same tier's capacity in a different order or
+# under a different name.
+#
+# `enforced` says whether anything in the platform actually refuses at this
+# ceiling today. `plan_limits.require_capacity` reads users and leads; nothing
+# reads the other three yet. That flag is the honest answer to "is this a
+# promise or a number on a card", and it is why NULL means two different
+# things below:
+#
+#   ENFORCED dimension, NULL   -> UNLIMITED. The brand's own rate card says
+#                                 there is no ceiling, and the guard agrees:
+#                                 `plan_limits.limit_for` returns None and
+#                                 refuses nothing.
+#   UNENFORCED dimension, NULL -> NOT CONFIGURED, and the card OMITS it.
+#                                 Printing "unlimited SMS" because a column is
+#                                 empty would be inventing a commercial term;
+#                                 printing "0" would be worse.
+CAPACITY_DIMENSIONS = (
+    {"key": "max_users", "label": "Users", "unit": None, "enforced": True},
+    {"key": "max_leads", "label": "Active leads", "unit": None, "enforced": True},
+    {"key": "email_monthly_allowance", "label": "Emails", "unit": "per month",
+     "enforced": False},
+    {"key": "sms_monthly_allowance", "label": "SMS", "unit": "per month",
+     "enforced": False},
+    {"key": "max_locations", "label": "Locations", "unit": None,
+     "enforced": False},
+)
+
+
+def capacity_for(plan: BrandBillingPlan) -> List[dict]:
+    """What this tier includes, from its own columns. Never a sentence.
+
+    Returns only dimensions this brand has actually decided. A tier with no
+    configured SMS allowance produces no SMS line at all, which is what lets
+    the card be silent about something rather than wrong about it.
+    """
+    out: List[dict] = []
+    for spec in CAPACITY_DIMENSIONS:
+        raw = getattr(plan, spec["key"], None)
+        if raw is None:
+            if not spec["enforced"]:
+                continue                       # not configured — say nothing
+            out.append({"key": spec["key"], "label": spec["label"],
+                        "unit": spec["unit"], "value": None,
+                        "unlimited": True, "enforced": True})
+            continue
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value <= 0:
+            # Zero is not a tier anybody sells. Treated as unset rather than
+            # advertised, for the same reason `plan_limits.limit_for` refuses
+            # to enforce a non-positive ceiling.
+            continue
+        out.append({"key": spec["key"], "label": spec["label"],
+                    "unit": spec["unit"], "value": value,
+                    "unlimited": False, "enforced": bool(spec["enforced"])})
+    return out
 
 
 def features_for(plan: BrandBillingPlan) -> List[str]:

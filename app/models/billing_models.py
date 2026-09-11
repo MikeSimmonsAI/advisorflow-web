@@ -237,6 +237,35 @@ class BrandBillingPlan(Base):
     # between "advertised" and "enforced" is visible in one place.
     max_leads = Column(Integer, nullable=True)     # NULL = unlimited
     max_users = Column(Integer, nullable=True)     # NULL = unlimited
+
+    # ── The rest of the capacity a plan card states ───────────────────────
+    #
+    # WHY THESE ARE COLUMNS AND NOT SENTENCES. They used to be sentences, in
+    # `features_json`: "AI email + SMS 1,000/mo", "AI voice 300 min/mo",
+    # "Up to 2 users", "Priority support + 24-month price lock". Three of
+    # those four were out of date on the live Change Plan screen, and none of
+    # them could be corrected without a deploy — a marketing card pretending
+    # to be configuration. Capacity a customer is sold is DATA; God Mode
+    # writes it here and the customer-facing card changes with it.
+    #
+    # NULL MEANS NOT CONFIGURED, NOT ZERO. `_plan_public` omits a dimension
+    # with no number rather than rendering "0 emails/month", which would be a
+    # confident lie on the one screen where a customer decides what to pay.
+    max_locations = Column(Integer, nullable=True)
+    email_monthly_allowance = Column(Integer, nullable=True)
+    sms_monthly_allowance = Column(Integer, nullable=True)
+
+    # NO VOICE ALLOWANCE COLUMN, DELIBERATELY. AI Voice is sold as a separate
+    # catalogue add-on. A `voice_minutes_monthly` column here is precisely how
+    # the stale "AI voice 300 min/mo" line would grow back, this time with a
+    # database row to make it look authoritative.
+
+    # HOW LONG A COMMITTED TERM RUNS, where the brand has decided. The screen
+    # said "24-month price lock" because somebody typed 24 into a string; with
+    # a column the label reads what is configured, and reads the neutral "Term
+    # agreement" when nothing is.
+    term_months = Column(Integer, nullable=True)
+
     features_json = Column(Text, nullable=True)    # JSON list of display strings
 
     # Self-serve purchasable. An Enterprise tier is listed and quoted, never

@@ -183,7 +183,12 @@ def deal_billing_checkout(
     import stripe
 
     customer_id = br._get_or_create_customer(org, db)
-    base_url = br._brand_base_url(db, org)
+    # SERVER-BUILT, ALLOWLISTED, BRANDED. `_return_targets` is the billing
+    # router's own wrapper over `stripe_return`, so a seller-assisted checkout
+    # returns the customer to exactly the same place their own checkout would
+    # — and refuses for the same reason if the brand has no domain.
+    sub_targets = br._return_targets(db, org, part="subscription")
+    setup_targets = br._return_targets(db, org, part="setup")
 
     # Metadata is how the webhook reconnects money to the deal. org_id is what
     # the existing handlers key on; opportunity_id and proposal_id are added so
@@ -270,11 +275,12 @@ def deal_billing_checkout(
                 "line_items": [line_item],
                 "metadata": {**meta, "interval": "month"},
                 "subscription_data": {"metadata": sub_meta},
-                # BRANDED, NEVER A PLATFORM HOSTNAME. `_brand_base_url` resolves
+                # BRANDED, NEVER A PLATFORM HOSTNAME. `stripe_return` resolves
                 # the customer's own brand domain first; the environment is only
-                # a fallback for an org whose platform row has none.
-                "success_url": "%s/billing?success=1&part=subscription" % base_url,
-                "cancel_url": "%s/billing?canceled=1&part=subscription" % base_url,
+                # a fallback for an org whose platform row has none, and an
+                # infrastructure host is refused from either source.
+                "success_url": sub_targets["success_url"],
+                "cancel_url": sub_targets["cancel_url"],
             }
             # NO SETUP FEE ON THIS SESSION. It used to be appended here as a
             # second line item so one payment covered both — Growth billed
@@ -310,8 +316,8 @@ def deal_billing_checkout(
                 # subscription's, which is how the webhook attributes it to the
                 # deal without a second lookup.
                 payment_intent_data={"metadata": meta},
-                success_url="%s/billing?success=1&part=setup" % base_url,
-                cancel_url="%s/billing?canceled=1&part=setup" % base_url,
+                success_url=setup_targets["success_url"],
+                cancel_url=setup_targets["cancel_url"],
             )
     except HTTPException:
         raise

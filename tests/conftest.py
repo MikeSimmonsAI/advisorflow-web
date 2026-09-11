@@ -86,6 +86,17 @@ os.environ.setdefault("JWT_SECRET", "test-secret-do-not-use-in-prod-32chars!!")
 # `"" in anything` is True. A branded host here means the tests exercise the
 # real URL-building path instead of the refusal path.
 os.environ.setdefault("BOOKING_BASE_URL", "https://book.restland.com")
+# A BRANDED APP HOST, for exactly the same reason as the line above.
+#
+# `stripe_return` resolves where a customer comes back to after Stripe and
+# REFUSES an infrastructure host from any source - the hard-coded
+# "https://advisorflow-frontend.onrender.com" that used to end that chain is
+# the leak it exists to close. With APP_BASE_URL unset, every checkout test
+# whose org has no platform domain would take the refusal path (409) instead
+# of exercising the URL it is actually asserting about. A branded value here
+# means the fallback level is real and testable; the refusal path has its own
+# tests in test_stripe_return_paths.py, which clear it deliberately.
+os.environ.setdefault("APP_BASE_URL", "https://app.evosyspro.live")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-google-client-id")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-google-client-secret")
 if "ENCRYPTION_KEY" not in os.environ:

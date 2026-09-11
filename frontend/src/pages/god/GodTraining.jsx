@@ -61,10 +61,10 @@ export default function GodTraining () {
           <button className="gm-btn" style={{ marginBottom: 12 }} onClick={() => navigate('/god')}>
             ← COMMAND CENTER
           </button>
-          <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
+          <h1 style={{ margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
             Training &amp; Readiness
           </h1>
-          <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 760 }}>
+          <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 760 }}>
             Who has been asked to learn what, and where they stopped. Assign a
             path from a person's Manage Access screen — the same place their
             brand, workspace and Demo Suite access is granted.
@@ -72,7 +72,7 @@ export default function GodTraining () {
         </div>
 
         {err && (
-          <div className="gm-card" style={{ borderColor: 'rgba(255,93,125,.35)', marginBottom: 16 }}>
+          <div className="gm-card" style={{ borderColor: 'var(--gm-pill-red-bd)', marginBottom: 16 }}>
             <div style={{ color: T.red, fontSize: 12 }}>{err}</div>
           </div>
         )}
@@ -173,7 +173,7 @@ export default function GodTraining () {
           <div className="gm-card" key={p.key} style={{ marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <span className="gm-pill blue">{p.audience_label}</span>
-              <strong style={{ color: '#fff', fontSize: 14 }}>{p.name}</strong>
+              <strong style={{ color: 'var(--gm-head)', fontSize: 14 }}>{p.name}</strong>
               <span style={{ color: T.dim, fontSize: 11 }}>
                 {p.total_steps} steps · about {p.minutes} min
               </span>
@@ -196,7 +196,7 @@ export default function GodTraining () {
                       {s.practice_scenario &&
                         ' · practised in the Demo Suite (' + s.practice_scenario + ')'}
                     </div>
-                    <div style={{ color: '#fff', fontSize: 12.5, marginTop: 2 }}>{s.title}</div>
+                    <div style={{ color: 'var(--gm-head)', fontSize: 12.5, marginTop: 2 }}>{s.title}</div>
                   </div>
                 ))}
               </div>

@@ -81,10 +81,10 @@ export default function GodDemoSuite () {
           <button className="gm-btn" style={{ marginBottom: 12 }} onClick={() => navigate('/god')}>
             ← COMMAND CENTER
           </button>
-          <h1 style={{ margin: 0, color: '#fff', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
+          <h1 style={{ margin: 0, color: 'var(--gm-head)', fontSize: 27, letterSpacing: '-.04em', lineHeight: 1 }}>
             Demo Suite
           </h1>
-          <p style={{ margin: '9px 0 0', color: '#758ba4', fontSize: 12, maxWidth: 760 }}>
+          <p style={{ margin: '9px 0 0', color: 'var(--gm-blue)', fontSize: 12, maxWidth: 760 }}>
             One demonstration environment per brand: an isolated customer
             workspace and an isolated sales organization, both flagged as
             demonstrations, seeded with believable fictional data. A demo action
@@ -95,12 +95,12 @@ export default function GodDemoSuite () {
         </div>
 
         {err && (
-          <div className="gm-card" style={{ borderColor: 'rgba(255,93,125,.35)', marginBottom: 16 }}>
+          <div className="gm-card" style={{ borderColor: 'var(--gm-pill-red-bd)', marginBottom: 16 }}>
             <div style={{ color: T.red, fontSize: 12 }}>{err}</div>
           </div>
         )}
         {notice && (
-          <div className="gm-card" style={{ borderColor: 'rgba(35,239,178,.35)', marginBottom: 16 }}>
+          <div className="gm-card" style={{ borderColor: 'var(--gm-pill-teal-bd)', marginBottom: 16 }}>
             <div style={{ color: T.teal, fontSize: 12 }}>✓ {notice}</div>
           </div>
         )}

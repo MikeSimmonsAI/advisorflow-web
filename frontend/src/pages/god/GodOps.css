@@ -8,21 +8,36 @@
  * most days and from a phone on the days it matters most, so tables become
  * cards below 900px rather than scrolling sideways. Nothing is hidden at any
  * width - every action survives the collapse.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * WHERE THE COLOURS WENT
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * The `--go-*` block that used to open this file pinned eleven dark literals
+ * onto `.go-scope`, and `color-scheme: dark` beside them. God Mode is
+ * permanently light now, so those values live in `godTokens.css` as one
+ * palette. The NAMES are unchanged - every rule below still says
+ * `var(--go-panel)` - which is why moving the values cost no rule rewrites.
+ *
+ * TWO THINGS THAT WERE ACTUALLY BROKEN, not just dark:
+ *
+ * 1. The tokens were declared on `.go-scope` ONLY, and six screens that use
+ *    `go-` classes never render that class - Create Customer among them. Every
+ *    `var(--go-*)` on those pages resolved to nothing, and an unresolvable
+ *    var() invalidates its WHOLE declaration: `border: 1px solid var(--go-line)`
+ *    became no border at all. That is why the Create Customer fields had no
+ *    visible boundary. The tokens are now declared on `.gm-shell` as well, which
+ *    every God route renders, so a page cannot fall off the palette by omitting
+ *    a wrapper class.
+ *
+ * 2. Ten class names used by those screens were never defined here at all -
+ *    `go-wrap`, `go-card`, `go-h1`, `go-h2`, `go-sub`, `go-err`, `go-pill`,
+ *    `go-live`, `go-btn-primary`, `go-check--off`. They are defined at the
+ *    bottom of this file now. Create Customer was rendering unstyled markup,
+ *    not a dark form.
  */
 
 .go-scope {
-  --go-bg: #0d1117;
-  --go-panel: #151b24;
-  --go-panel-2: #1b232e;
-  --go-line: #26303d;
-  --go-text: #e6edf3;
-  --go-dim: #8b98a8;
-  --go-amber: #f5b942;
-  --go-green: #3fb950;
-  --go-blue: #58a6ff;
-  --go-red: #f85149;
-  --go-purple: #bc8cff;
-
   color: var(--go-text);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   padding: 20px;
@@ -53,8 +68,8 @@
 .go-kpi.alert .v { color: var(--go-amber); }
 .go-kpi.good  .v { color: var(--go-green); }
 .go-kpi.clickable { cursor: pointer; transition: box-shadow 0.15s, transform 0.1s; }
-.go-kpi.clickable:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); transform: translateY(-1px); }
-.go-kpi.clickable:focus-visible { outline: 2px solid var(--go-blue,#2563eb); outline-offset: 2px; }
+.go-kpi.clickable:hover { box-shadow: var(--go-shadow); transform: translateY(-1px); }
+.go-kpi.clickable:focus-visible { outline: 2px solid var(--gm-focus-ring); outline-offset: 2px; }
 
 /* ── panels ──────────────────────────────────────────────────────────────── */
 
@@ -67,7 +82,7 @@
 .go-panel > h2 .count { background: var(--go-panel-2); color: var(--go-dim);
                         border-radius: 20px; padding: 1px 9px; font-size: 11px;
                         letter-spacing: 0; }
-.go-panel > h2 .count.hot { background: rgba(245,185,66,.15); color: var(--go-amber); }
+.go-panel > h2 .count.hot { background: var(--gm-pill-gold-bg); color: var(--go-amber); }
 .go-body { padding: 14px 15px; }
 
 .go-empty { padding: 22px 15px; color: var(--go-dim); font-size: 13px; text-align: center; }
@@ -82,7 +97,7 @@
                vertical-align: middle; }
 .go-table tr:last-child td { border-bottom: none; }
 .go-table tr.clickable { cursor: pointer; }
-.go-table tr.clickable:hover td { background: var(--go-panel-2); }
+.go-table tr.clickable:hover td { background: var(--go-hover); }
 .go-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 @media (max-width: 900px) {
@@ -125,23 +140,32 @@
             font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
             background: var(--go-panel-2); color: var(--go-dim);
             border: 1px solid var(--go-line); white-space: nowrap; }
-.go-badge.live    { background: rgba(63,185,80,.14);  color: var(--go-green);  border-color: rgba(63,185,80,.3); }
-.go-badge.blocked { background: rgba(248,81,73,.14);  color: var(--go-red);    border-color: rgba(248,81,73,.3); }
-.go-badge.ready   { background: rgba(88,166,255,.14); color: var(--go-blue);   border-color: rgba(88,166,255,.3); }
-.go-badge.warn    { background: rgba(245,185,66,.14); color: var(--go-amber);  border-color: rgba(245,185,66,.3); }
-.go-badge.new     { background: rgba(188,140,255,.14);color: var(--go-purple); border-color: rgba(188,140,255,.3); }
+/* A badge never carries its meaning in colour alone - the word inside it is
+   the signal and the tint is the reinforcement. */
+.go-badge.live    { background: var(--gm-pill-teal-bg);   color: var(--gm-pill-teal-fg);   border-color: var(--gm-pill-teal-bd); }
+.go-badge.blocked { background: var(--gm-pill-red-bg);    color: var(--gm-pill-red-fg);    border-color: var(--gm-pill-red-bd); }
+.go-badge.ready   { background: var(--gm-pill-blue-bg);   color: var(--gm-pill-blue-fg);   border-color: var(--gm-pill-blue-bd); }
+.go-badge.warn    { background: var(--gm-pill-gold-bg);   color: var(--gm-pill-gold-fg);   border-color: var(--gm-pill-gold-bd); }
+.go-badge.new     { background: var(--gm-pill-purple-bg); color: var(--gm-pill-purple-fg); border-color: var(--gm-pill-purple-bd); }
 
 /* ── buttons ─────────────────────────────────────────────────────────────── */
 
-.go-btn { background: var(--go-blue); color: #06121f; border: none;
-          border-radius: 7px; padding: 8px 14px; font-size: 13px; font-weight: 650;
-          cursor: pointer; }
+.go-btn { background: var(--go-primary); color: var(--go-on-primary);
+          border: 1px solid var(--go-primary);
+          border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 650;
+          font-family: inherit; cursor: pointer; box-shadow: var(--gm-shadow-card); }
 .go-btn:hover { filter: brightness(1.1); }
-.go-btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
-.go-btn.ghost { background: none; border: 1px solid var(--go-line); color: var(--go-text); }
-.go-btn.ghost:hover { border-color: var(--go-blue); }
+.go-btn:disabled { cursor: not-allowed; filter: none;
+                   background: var(--go-panel-2); color: var(--go-dim);
+                   border: 1px solid var(--go-line); }
+/* The secondary. Its border is a CONTROL boundary, not a divider, so it uses
+   the button token rather than the hairline one - at --go-line weight a white
+   button on a white card had no edge at all. */
+.go-btn.ghost { background: var(--gm-btn); border: 1px solid var(--gm-btn-line);
+                color: var(--gm-btn-fg); font-weight: 600; }
+.go-btn.ghost:hover { border-color: var(--gm-btn-hover-line); background: var(--gm-btn-hover); }
 .go-btn.go { background: var(--go-green); }
-.go-btn.danger { background: var(--go-red); color: #fff; }
+.go-btn.danger { background: var(--go-red); color: var(--gm-ink-on-accent); }
 .go-btn.sm { padding: 5px 10px; font-size: 12px; }
 .go-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -151,7 +175,8 @@
              grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 .go-field label { display: block; font-size: 11px; text-transform: uppercase;
                   letter-spacing: 0.5px; color: var(--go-dim); margin-bottom: 5px; }
-/* EVERY SELECTOR IN THIS BLOCK IS PREFIXED WITH .go-scope ON PURPOSE.
+/* EVERY SELECTOR IN THIS BLOCK IS PREFIXED WITH .go-scope OR .gm-shell ON
+ * PURPOSE, AND CARRIES BOTH.
  *
  * `index.css` carries a site-wide tenant theme rule:
  *
@@ -169,34 +194,59 @@
  *
  * `color-scheme: dark` is separate and also needed: it is what makes the OPEN
  * dropdown list, the date picker's calendar and the scrollbars render dark. */
-.go-scope { color-scheme: dark; }
+/* `color-scheme` is NOT pinned here any more. It was `dark`, unconditionally,
+   which is what kept dropping a black <option> list and black scrollbars over a
+   light form. It now follows `data-appearance` in godTokens.css. */
 
 .go-scope .go-field input,
+.gm-shell .go-field input,
 .go-scope .go-field select,
-.go-scope .go-field textarea {
-  width: 100%; background-color: var(--go-bg); border: 1px solid var(--go-line);
+.gm-shell .go-field select,
+.go-scope .go-field textarea,
+.gm-shell .go-field textarea {
+  width: 100%; background-color: var(--go-field); border: 1px solid var(--go-field-line);
   border-radius: 7px; padding: 8px 10px; color: var(--go-text);
   font-size: 13px; font-family: inherit; box-sizing: border-box;
   appearance: none; -webkit-appearance: none;
 }
 .go-scope .go-field select,
+.gm-shell .go-field select,
 .go-scope .go-ms select,
-.go-scope .go-filters select {
+.gm-shell .go-ms select,
+.go-scope .go-filters select,
+.gm-shell .go-filters select {
   /* The caret has to be drawn back on once appearance is removed. */
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b98a8' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-image: var(--gm-caret);
   background-repeat: no-repeat;
   background-position: right 8px center;
   background-size: 14px;
   padding-right: 28px;
 }
-/* The open list, which is an <option> and inherits nothing from its <select>. */
-.go-scope select option {
-  background-color: var(--go-panel);
+/* The open list, which is an <option> and inherits nothing from its <select>.
+   The `.gm-shell` twin is deliberately narrowed to this sheet's own controls
+   rather than to every <select> in the shell: the Compensation Command Center
+   renders INSIDE the God shell and carries its own `--sw-*` palette, and a
+   blanket `.gm-shell select option` would reach into it. Isolation between
+   surfaces is the rule that keeps a customer workspace from being repainted by
+   a control-plane sheet; it applies to our own embedded surfaces too. */
+.go-scope select option,
+.gm-shell .go-field select option,
+.gm-shell .go-filters select option,
+.gm-shell .go-ms select option,
+.gm-shell select.go-input option {
+  background-color: var(--go-field);
   color: var(--go-text);
 }
-.go-scope .go-field input:focus, .go-scope .go-field select:focus,
-.go-scope .go-field textarea:focus {
-  outline: none; border-color: var(--go-blue);
+/* Focus is a RING, not a recolour. Changing the border hue alone is a
+   colour-only signal and, at one pixel, is easy to miss on a dense form. */
+.go-scope .go-field input:focus,
+.gm-shell .go-field input:focus,
+.go-scope .go-field select:focus,
+.gm-shell .go-field select:focus,
+.go-scope .go-field textarea:focus,
+.gm-shell .go-field textarea:focus {
+  outline: none; border-color: var(--gm-field-line-focus);
+  box-shadow: 0 0 0 3px var(--gm-focus-halo);
 }
 .go-field .hint { font-size: 11px; color: var(--go-dim); margin-top: 4px; }
 .go-field.full { grid-column: 1 / -1; }
@@ -219,7 +269,8 @@
 .go-ms li:last-child { border-bottom: none; }
 .go-ms .lab { flex: 1; min-width: 150px; font-size: 13px; }
 .go-ms .lab small { display: block; color: var(--go-dim); font-size: 11px; margin-top: 2px; }
-.go-scope .go-ms select { background-color: var(--go-bg); border: 1px solid var(--go-line);
+.go-scope .go-ms select,
+.gm-shell .go-ms select { background-color: var(--go-field); border: 1px solid var(--go-field-line);
                 border-radius: 6px; color: var(--go-text); padding: 5px 8px; font-size: 12px;
                 appearance: none; -webkit-appearance: none; }
 
@@ -231,17 +282,17 @@
 
 .go-note { border-radius: 9px; padding: 11px 13px; font-size: 13px;
            margin-bottom: 14px; line-height: 1.5; }
-.go-note.warn { background: rgba(245,185,66,.1); border: 1px solid rgba(245,185,66,.32);
-                color: var(--go-amber); }
-.go-note.err  { background: rgba(248,81,73,.1);  border: 1px solid rgba(248,81,73,.32);
-                color: var(--go-red); }
-.go-note.ok   { background: rgba(63,185,80,.1);  border: 1px solid rgba(63,185,80,.32);
-                color: var(--go-green); }
+.go-note.warn { background: var(--gm-pill-gold-bg); border: 1px solid var(--gm-pill-gold-bd);
+                color: var(--gm-pill-gold-fg); }
+.go-note.err  { background: var(--gm-pill-red-bg);  border: 1px solid var(--gm-pill-red-bd);
+                color: var(--gm-pill-red-fg); }
+.go-note.ok   { background: var(--gm-pill-teal-bg); border: 1px solid var(--gm-pill-teal-bd);
+                color: var(--gm-pill-teal-fg); }
 .go-note ul { margin: 7px 0 0; padding-left: 18px; }
 
 /* The one-time activation link. Deliberately loud: it is shown once and the
    operator has to notice that before navigating away. */
-.go-secret { background: var(--go-bg); border: 1px dashed var(--go-amber);
+.go-secret { background: var(--gm-pill-gold-bg); border: 1px dashed var(--go-amber);
              border-radius: 8px; padding: 11px; margin-top: 10px;
              font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
              font-size: 12px; word-break: break-all; color: var(--go-text); }
@@ -252,14 +303,17 @@
    Mode's dropdowns white. */
 
 .go-scope .go-modal-back,
+.gm-shell .go-modal-back,
 .go-modal-back { position: fixed; inset: 0; z-index: 80;
-                 background: rgba(3, 7, 12, .72);
+                 background: var(--go-scrim);
                  display: flex; align-items: flex-start; justify-content: center;
                  padding: 48px 16px; overflow-y: auto; }
+/* A modal that keeps its own palette is the classic theme mismatch - a dark
+   dialog over a light page. It reads the same tokens as everything else. */
 .go-modal { background: var(--go-panel); border: 1px solid var(--go-line);
             border-radius: 12px; width: 100%; max-width: 620px;
             color: var(--go-text);
-            box-shadow: 0 26px 70px rgba(0, 0, 0, .6); }
+            box-shadow: var(--gm-shadow-modal); }
 .go-modal-h { display: flex; align-items: center; gap: 12px;
               padding: 14px 16px; border-bottom: 1px solid var(--go-line); }
 .go-modal-h h3 { margin: 0; font-size: 14px; letter-spacing: .02em; }
@@ -269,17 +323,22 @@
             letter-spacing: .07em; text-transform: uppercase;
             color: var(--go-dim); margin: 0 0 5px; }
 .go-input { width: 100%; padding: 9px 10px; font-size: 13px;
-            color: var(--go-text); background: var(--go-bg);
-            border: 1px solid var(--go-line); border-radius: 7px; }
-.go-input:focus { outline: none; border-color: var(--go-blue); }
+            color: var(--go-text); background: var(--go-field);
+            border: 1px solid var(--go-field-line); border-radius: 7px;
+            font-family: inherit; box-sizing: border-box; }
+.go-input::placeholder { color: var(--gm-placeholder); }
+.go-input:focus { outline: none; border-color: var(--gm-field-line-focus);
+                  box-shadow: 0 0 0 3px var(--gm-focus-halo); }
+.go-input:disabled { background: var(--go-panel-2); color: var(--go-dim);
+                     cursor: not-allowed; }
 .go-input.sm { padding: 4px 6px; font-size: 12px; width: auto; min-width: 104px; }
-.go-input option { background: var(--go-bg); color: var(--go-text); }
+.go-input option { background: var(--go-field); color: var(--go-text); }
 .go-hint { margin: 6px 0 0; font-size: 11px; color: var(--go-dim); line-height: 1.6; }
 
 .go-radio { display: flex; gap: 9px; align-items: flex-start; cursor: pointer;
-            border: 1px solid var(--go-line); border-radius: 9px;
-            padding: 10px 12px; margin-top: 8px; background: var(--go-bg); }
-.go-radio:hover { border-color: var(--go-blue); }
+            border: 1px solid var(--go-field-line); border-radius: 9px;
+            padding: 10px 12px; margin-top: 8px; background: var(--go-panel-2); }
+.go-radio:hover { border-color: var(--go-blue); background: var(--go-hover); }
 .go-radio input { margin-top: 3px; flex: 0 0 auto; }
 .go-radio strong { display: block; font-size: 13px; }
 .go-radio small { display: block; font-size: 11px; color: var(--go-dim);
@@ -294,8 +353,11 @@
 .go-tl .who { color: var(--go-blue); }
 
 .go-filters { display: flex; gap: 9px; flex-wrap: wrap; margin-bottom: 14px; }
-.go-scope .go-filters select, .go-scope .go-filters input {
-  background-color: var(--go-panel); border: 1px solid var(--go-line); border-radius: 7px;
+.go-scope .go-filters select,
+.gm-shell .go-filters select,
+.go-scope .go-filters input,
+.gm-shell .go-filters input {
+  background-color: var(--go-field); border: 1px solid var(--go-field-line); border-radius: 7px;
   color: var(--go-text); padding: 7px 10px; font-size: 12px;
   appearance: none; -webkit-appearance: none;
 }
@@ -310,19 +372,19 @@
 
 .go-back {
   background: none; border: none; padding: 0 0 6px;
-  color: var(--go-muted, #94a3b8); font-size: 13px; cursor: pointer;
+  color: var(--go-muted); font-size: 13px; cursor: pointer;
 }
-.go-back:hover { color: var(--go-fg, #e2e8f0); }
+.go-back:hover { color: var(--go-fg); }
 
 .go-stats { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 22px; }
 .go-stat {
   flex: 1 1 120px; padding: 14px 16px; border-radius: 10px;
-  background: var(--go-card, #111827); border: 1px solid var(--go-line, #1f2937);
+  background: var(--go-card); border: 1px solid var(--go-line);
 }
 .go-stat-v { font-size: 26px; font-weight: 700; line-height: 1.1; }
 .go-stat-l {
   font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
-  color: var(--go-muted, #94a3b8); margin-top: 4px;
+  color: var(--go-muted); margin-top: 4px;
 }
 
 .go-card-list { display: flex; flex-direction: column; gap: 12px; }
@@ -336,14 +398,14 @@
 }
 .go-card-title { font-weight: 600; font-size: 15px; }
 .go-card-body { padding: 0 18px 14px; display: flex; flex-direction: column; gap: 6px; }
-.go-chev { color: var(--go-muted, #94a3b8); font-size: 14px; }
+.go-chev { color: var(--go-muted); font-size: 14px; }
 
 .go-row-btn {
   display: flex; align-items: center; gap: 12px; width: 100%;
   padding: 10px 12px; border-radius: 8px; border: 1px solid transparent;
   background: none; color: inherit; cursor: pointer; text-align: left;
 }
-.go-row-btn:hover { background: rgba(148, 163, 184, .08); border-color: var(--go-line, #1f2937); }
+.go-row-btn:hover { background: var(--go-hover); border-color: var(--go-line); }
 .go-row-name { flex: 1 1 auto; font-weight: 500; }
 
 .go-two { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
@@ -353,11 +415,14 @@
 
 .go-tabs { display: flex; gap: 4px; margin: 18px 0 16px; flex-wrap: wrap; }
 .go-tab {
-  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--go-line, #1f2937);
-  background: none; color: var(--go-muted, #94a3b8); font-size: 13px;
+  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--go-line);
+  background: none; color: var(--go-muted); font-size: 13px;
   text-transform: capitalize; cursor: pointer;
 }
-.go-tab.on { background: var(--go-card, #111827); color: var(--go-fg, #e2e8f0); }
+/* The selected tab is marked by weight and border as well as fill, so the
+   selection survives for anyone who cannot separate the two backgrounds. */
+.go-tab.on { background: var(--gm-pill-blue-bg); color: var(--gm-pill-blue-fg);
+             border-color: var(--go-primary); font-weight: 650; }
 
 .go-check { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; font-size: 14px; }
 .go-check input { margin-top: 3px; }
@@ -367,48 +432,133 @@
 
 .go-warn {
   padding: 12px 16px; border-radius: 10px; margin-bottom: 16px;
-  background: rgba(180, 83, 9, .14); border: 1px solid rgba(180, 83, 9, .4);
-  font-size: 14px;
+  background: var(--gm-pill-gold-bg); border: 1px solid var(--gm-pill-gold-bd);
+  color: var(--gm-pill-gold-fg); font-size: 14px;
 }
 .go-note {
   padding: 10px 14px; border-radius: 8px; margin: 10px 0;
-  background: rgba(14, 116, 144, .14); border: 1px solid rgba(14, 116, 144, .4);
-  font-size: 13px;
+  background: var(--gm-pill-blue-bg); border: 1px solid var(--gm-pill-blue-bd);
+  color: var(--gm-pill-blue-fg); font-size: 13px;
 }
 .go-dismiss { cursor: pointer; }
 
 .go-code {
   display: block; margin-top: 8px; padding: 10px 12px; border-radius: 8px;
-  background: rgba(148, 163, 184, .1); font-family: ui-monospace, Menlo, monospace;
+  background: var(--go-panel-2); border: 1px solid var(--go-line);
+  color: var(--go-text); font-family: ui-monospace, Menlo, monospace;
   font-size: 12px; word-break: break-all;
 }
 
-/* ── drilldown pages ── */
-.god-page { padding: 24px 32px; }
+/* ── drilldown pages ────────────────────────────────────────────────────────
+   THESE WERE THE WORST OFFENDERS AND THEY WERE BROKEN IN *DARK*, NOT LIGHT.
+
+   Every colour in this block used to be `var(--name, #literal)` against names
+   that are not declared anywhere in the app - `--border`, `--surface`,
+   `--primary`, `--hover`, `--muted`. So the fallbacks always won, and the
+   fallbacks are a LIGHT palette: white table surfaces, #e5e7eb rules, #6b7280
+   text. On the near-black God shell that rendered the Implementations,
+   Customers, Proposals and Meetings tables as white islands with grey-on-grey
+   text - "tables reverting light" is the same bug as "tables reverting dark",
+   seen from the other side.
+
+   They are on the real tokens now, so they are correct in both appearances. */
+.god-page { padding: 24px 32px; color: var(--go-text); }
 .god-page-header { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
-.god-page-header h1 { margin: 0; font-size: 1.5rem; font-weight: 700; flex: 1; }
+.god-page-header h1 { margin: 0; font-size: 1.5rem; font-weight: 700; flex: 1; color: var(--go-fg); }
 .god-filter-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.god-filter-bar select { height: 32px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border,#d1d5db); background: var(--surface,#fff); font-size: 0.875rem; cursor: pointer; }
+.god-filter-bar select {
+  height: 32px; padding: 0 8px; border-radius: 6px;
+  border: 1px solid var(--go-field-line); background: var(--go-field);
+  color: var(--go-text); font-size: 0.875rem; font-family: inherit; cursor: pointer;
+}
+.god-filter-bar select:focus-visible { outline: 2px solid var(--gm-focus-ring); outline-offset: 2px; }
 .god-filter-tabs { display: flex; gap: 4px; }
-.god-filter-tab { padding: 5px 14px; border-radius: 16px; border: 1px solid var(--border,#d1d5db); background: transparent; font-size: 0.8125rem; cursor: pointer; transition: background 0.15s, color 0.15s; }
-.god-filter-tab.active { background: var(--primary,#2563eb); color: #fff; border-color: var(--primary,#2563eb); }
+.god-filter-tab {
+  padding: 5px 14px; border-radius: 16px; border: 1px solid var(--go-line);
+  background: transparent; color: var(--go-muted); font-size: 0.8125rem;
+  font-family: inherit; cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.god-filter-tab:hover { background: var(--go-hover); color: var(--go-text); }
+.god-filter-tab.active {
+  background: var(--go-primary); color: var(--go-on-primary);
+  border-color: var(--go-primary); font-weight: 650;
+}
 .god-table-wrap { overflow-x: auto; }
-.god-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-.god-table th { text-align: left; padding: 8px 12px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid var(--border,#e5e7eb); white-space: nowrap; }
-.god-table td { padding: 10px 12px; border-bottom: 1px solid var(--border,#f3f4f6); vertical-align: middle; }
+.god-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; color: var(--go-text); }
+.god-table th {
+  text-align: left; padding: 8px 12px; font-size: 0.75rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--go-muted);
+  background: var(--gm-thead);
+  border-bottom: 2px solid var(--go-line); white-space: nowrap;
+}
+.god-table td { padding: 10px 12px; border-bottom: 1px solid var(--go-line); vertical-align: middle; }
 .god-tr-link { cursor: pointer; transition: background 0.1s; }
-.god-tr-link:hover { background: var(--hover,#f0f7ff); }
-.god-td-primary { font-weight: 600; }
+.god-tr-link:hover { background: var(--go-hover); }
+.god-td-primary { font-weight: 600; color: var(--go-fg); }
 .god-td-num { font-variant-numeric: tabular-nums; text-align: right; }
-.god-td-mono { font-family: monospace; font-size: 0.8125rem; }
-.god-error { background: #fee2e2; color: #991b1b; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
-.god-loading { padding: 32px; text-align: center; color: var(--muted,#6b7280); }
-.god-link { color: var(--primary,#2563eb); text-decoration: none; }
-.god-link:hover { text-decoration: underline; }
-.god-flag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; margin-right: 4px; }
-.god-flag.stalled { background: #fef3c7; color: #92400e; }
-.god-flag.overdue { background: #fee2e2; color: #991b1b; }
-.god-prop-status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; background: #dbeafe; color: #1e40af; }
-.god-prop-status.proposal_sent { background: #dbeafe; color: #1e40af; }
-.god-prop-status.proposal_viewed { background: #fef9c3; color: #854d0e; }
-.god-prop-status.change_requested { background: #fee2e2; color: #991b1b; }
+.god-td-mono { font-family: ui-monospace, Menlo, monospace; font-size: 0.8125rem; }
+.god-error {
+  background: var(--gm-pill-red-bg); color: var(--gm-pill-red-fg);
+  border: 1px solid var(--gm-pill-red-bd);
+  padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;
+}
+.god-loading { padding: 32px; text-align: center; color: var(--go-muted); }
+.god-link { color: var(--go-primary); text-decoration: none; }
+/* Underlined on hover AND focus - a link that is only a colour is a link that
+   somebody cannot find. */
+.god-link:hover, .god-link:focus-visible { text-decoration: underline; }
+.god-flag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; margin-right: 4px; border: 1px solid transparent; }
+.god-flag.stalled { background: var(--gm-pill-gold-bg); color: var(--gm-pill-gold-fg); border-color: var(--gm-pill-gold-bd); }
+.god-flag.overdue { background: var(--gm-pill-red-bg); color: var(--gm-pill-red-fg); border-color: var(--gm-pill-red-bd); }
+.god-prop-status {
+  display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem;
+  font-weight: 600; border: 1px solid var(--gm-pill-blue-bd);
+  background: var(--gm-pill-blue-bg); color: var(--gm-pill-blue-fg);
+}
+.god-prop-status.proposal_sent   { background: var(--gm-pill-blue-bg);   color: var(--gm-pill-blue-fg);   border-color: var(--gm-pill-blue-bd); }
+.god-prop-status.proposal_viewed { background: var(--gm-pill-gold-bg);   color: var(--gm-pill-gold-fg);   border-color: var(--gm-pill-gold-bd); }
+.god-prop-status.change_requested{ background: var(--gm-pill-red-bg);    color: var(--gm-pill-red-fg);    border-color: var(--gm-pill-red-bd); }
+
+/* ── classes that six screens use and this sheet never defined ──────────────
+   Create Customer, Customer Detail, Platform Overview, Add Sales User, Package
+   Pricing and the shared Ops helpers all render these. Until now they matched
+   nothing, so those screens were unstyled markup on a black page rather than
+   forms - which is most of what "the Create Customer screen is unreadable"
+   actually was. The shapes below follow the same panel/card vocabulary as the
+   rest of this sheet so those pages join the design rather than approximating
+   it. */
+.go-wrap { padding: 20px; min-height: 100%; color: var(--go-text);
+           font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+@media (max-width: 900px) { .go-wrap { padding: 12px; } }
+
+.go-h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px; color: var(--go-fg); }
+.go-h2 { margin: 0 0 14px; font-size: 13px; font-weight: 650; text-transform: uppercase;
+         letter-spacing: 0.7px; color: var(--go-fg); }
+.go-sub { margin: 5px 0 0; color: var(--go-dim); font-size: 13px; max-width: 62ch; }
+
+.go-card { background: var(--go-panel); border: 1px solid var(--go-line);
+           border-radius: 11px; margin-bottom: 16px; box-shadow: var(--go-shadow); }
+
+.go-err { background: var(--gm-pill-red-bg); border: 1px solid var(--gm-pill-red-bd);
+          color: var(--gm-pill-red-fg); border-radius: 9px; padding: 11px 13px;
+          font-size: 13px; margin-bottom: 14px; line-height: 1.5; }
+
+.go-btn-primary { background: var(--go-primary); color: var(--go-on-primary);
+                  border: 1px solid var(--go-primary); font-weight: 700; }
+.go-btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+
+.go-pill { display: inline-block; padding: 2px 9px; border-radius: 20px;
+           font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+           background: var(--gm-pill-off-bg); color: var(--gm-pill-off-fg);
+           border: 1px solid var(--gm-pill-off-bd); white-space: nowrap; }
+.go-pill.go-live { background: var(--gm-pill-teal-bg); color: var(--gm-pill-teal-fg);
+                   border-color: var(--gm-pill-teal-bd); }
+
+/* An unchecked item is marked by ink AND by the word beside it, never by a
+   colour the reader has to interpret on its own. */
+.go-check--off { color: var(--go-dim); }
+
+/* Labels on the forms that use `go-label` outside a `.go-field` wrapper. The
+   label is the thing Mike could not read; it is held at the same contrast as
+   body text rather than at a decorative dimness. */
+.go-label { color: var(--go-dim); }

@@ -5,6 +5,15 @@ import './index.css'
 // AFTER index.css, deliberately. Appearance redefines the neutral tokens that
 // index.css declares, so it has to come second or the defaults would win.
 import './styles/appearance.css'
+// THE GOD CONTROL PLANE'S PALETTE, third and last of the three colour layers.
+//
+// index.css declares the tenant tokens, appearance.css redefines the neutral
+// ones per light/dark, and this declares the `--gm-*` / `--go-*` set that God
+// Mode paints from. It is imported here rather than from a God component so the
+// order is explicit and cannot be changed by a page happening to import a sheet
+// first. Every selector inside is anchored to .gm-shell / .gm-scope / .go-scope,
+// so loading it app-wide paints nothing outside God Mode.
+import './pages/god/godTokens.css'
 import { initTheme, hydrateBrand } from './theme.js'
 import { initAppearance } from './appearance.js'
 

@@ -30,11 +30,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 
 const TONE = {
-  neutral: { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
-  warning: { bg: '#fffbeb', text: '#92400e', border: '#fcd34d' },
-  info: { bg: '#eff6ff', text: '#1d4ed8', border: '#93c5fd' },
-  positive: { bg: '#f0fdf4', text: '#166534', border: '#86efac' },
-  danger: { bg: '#fef2f2', text: '#b91c1c', border: '#fca5a5' },
+  neutral: { bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-dim)', border: 'var(--gm-card-line)' },
+  warning: { bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-amber)', border: 'var(--gm-amber)' },
+  info: { bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-blue)', border: 'var(--gm-blue)' },
+  positive: { bg: 'var(--gm-pill-teal-bg)', text: 'var(--gm-teal)', border: 'var(--gm-teal)' },
+  danger: { bg: 'var(--gm-pill-red-bg)', text: 'var(--gm-red)', border: 'var(--gm-pill-red-bd)' },
 }
 
 function Chip({ label, tone = 'neutral', title }) {
@@ -66,20 +66,20 @@ const CHECK_STATUSES = ['not_tested', 'pass', 'fail', 'retest']
 const PARTIES = ['customer', 'provider', 'partner', 'technical', 'approval']
 
 const box = {
-  background: 'var(--god-card, #fff)',
-  border: '1px solid var(--god-border, #e5e7eb)',
+  background: 'var(--god-card, var(--gm-panel))',
+  border: '1px solid var(--god-border, var(--gm-card-line))',
   borderRadius: 10, padding: '14px 16px', marginBottom: 12,
 }
 
 const label = {
   fontSize: 11, fontWeight: 700, letterSpacing: '.06em',
-  textTransform: 'uppercase', color: 'var(--god-muted, #6b7280)',
+  textTransform: 'uppercase', color: 'var(--god-muted, var(--gm-dim))',
 }
 
 const control = {
   fontSize: 12, padding: '5px 8px', borderRadius: 7,
-  border: '1px solid var(--god-border, #e5e7eb)',
-  background: 'var(--god-card, #fff)', color: 'var(--god-text, #1f2937)',
+  border: '1px solid var(--god-border, var(--gm-card-line))',
+  background: 'var(--god-card, var(--gm-panel))', color: 'var(--god-text, var(--gm-blue))',
 }
 
 const button = {
@@ -95,19 +95,19 @@ function GateLine({ item }) {
       opacity: muted ? 0.55 : 1,
     }}>
       <span style={{ width: 14, flex: '0 0 14px', fontWeight: 700,
-                     color: item.ok ? '#16a34a' : (item.required ? '#dc2626' : '#9ca3af') }}>
+                     color: item.ok ? 'var(--gm-teal)' : (item.required ? 'var(--gm-red)' : 'var(--gm-text)') }}>
         {item.ok ? '✓' : '·'}
       </span>
       <span style={{ fontSize: 13, fontWeight: item.required ? 600 : 400,
                      minWidth: 220 }}>
         {item.label}
         {!item.required ? (
-          <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 6 }}>
+          <span style={{ fontSize: 10, color: 'var(--gm-text)', marginLeft: 6 }}>
             not required by this brand
           </span>
         ) : null}
       </span>
-      <span style={{ fontSize: 12, color: 'var(--god-muted, #6b7280)' }}>
+      <span style={{ fontSize: 12, color: 'var(--god-muted, var(--gm-dim))' }}>
         {item.detail}
       </span>
     </div>
@@ -142,10 +142,10 @@ export default function GodLaunchDelivery({ orgId }) {
   }, [load])
 
   if (error && !data) {
-    return <p style={{ fontSize: 13, color: '#dc2626' }}>{error}</p>
+    return <p style={{ fontSize: 13, color: 'var(--gm-red)' }}>{error}</p>
   }
   if (!data) {
-    return <p style={{ fontSize: 13, color: '#9ca3af' }}>Loading delivery…</p>
+    return <p style={{ fontSize: 13, color: 'var(--gm-text)' }}>Loading delivery…</p>
   }
 
   const base = '/god/launch/' + orgId
@@ -157,13 +157,13 @@ export default function GodLaunchDelivery({ orgId }) {
   return (
     <div style={{ marginTop: 16 }}>
       {error ? (
-        <div style={{ ...box, background: '#fef2f2', borderColor: '#fca5a5',
-                      color: '#b91c1c', fontSize: 12 }}>{error}</div>
+        <div style={{ ...box, background: 'var(--gm-pill-red-bg)', borderColor: 'var(--gm-pill-red-bd)',
+                      color: 'var(--gm-red)', fontSize: 12 }}>{error}</div>
       ) : null}
 
       {readOnly ? (
-        <div style={{ ...box, background: '#fffbeb', borderColor: '#fcd34d',
-                      color: '#92400e', fontSize: 12 }}>
+        <div style={{ ...box, background: 'var(--gm-pill-amber-bg)', borderColor: 'var(--gm-amber)',
+                      color: 'var(--gm-amber)', fontSize: 12 }}>
           You can read this launch but not change it. Managing an
           implementation belongs to god or its assigned owner.
         </div>
@@ -171,7 +171,7 @@ export default function GodLaunchDelivery({ orgId }) {
 
       {/* ── WHAT IS OUTSTANDING, FIRST ────────────────────────────────── */}
       <div style={{ ...box, borderLeft: '3px solid '
-                    + (r.ready ? '#22c55e' : '#f59e0b') }}>
+                    + (r.ready ? 'var(--gm-teal)' : 'var(--gm-amber)') }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center',
                       marginBottom: 8, flexWrap: 'wrap' }}>
           <span style={label}>Go-live gate</span>
@@ -180,7 +180,7 @@ export default function GodLaunchDelivery({ orgId }) {
               : outstanding.length + ' outstanding'}
             tone={r.already_live ? 'info' : r.ready ? 'positive' : 'warning'} />
           <span style={{ flex: 1 }} />
-          <span style={{ fontSize: 11, color: 'var(--god-muted, #6b7280)' }}>
+          <span style={{ fontSize: 11, color: 'var(--god-muted, var(--gm-dim))' }}>
             Connections {p.integrations.required_done}/{p.integrations.required_total}
             {' · '}Checks {p.checks.required_done}/{p.checks.required_total}
             {' · '}Training {p.training.required_done}/{p.training.required_total}
@@ -193,7 +193,7 @@ export default function GodLaunchDelivery({ orgId }) {
         {data.access ? (
           <div style={{ display: 'flex', gap: 10, alignItems: 'center',
                         flexWrap: 'wrap', paddingBottom: 8, marginBottom: 4,
-                        borderBottom: '1px solid var(--god-border, #f3f4f6)' }}>
+                        borderBottom: '1px solid var(--god-border, var(--gm-card-line))' }}>
             <span style={{ fontSize: 13, fontWeight: 600, minWidth: 220 }}>
               Customer access
             </span>
@@ -208,7 +208,7 @@ export default function GodLaunchDelivery({ orgId }) {
                 accepted: 'positive', invited: 'info',
                 users_exist: 'warning', not_invited: 'danger',
               }[data.access.state] || 'neutral'} />
-            <span style={{ fontSize: 12, color: 'var(--god-muted, #6b7280)' }}>
+            <span style={{ fontSize: 12, color: 'var(--god-muted, var(--gm-dim))' }}>
               {data.access.active_users} active user
               {data.access.active_users === 1 ? '' : 's'}
               {data.access.invitations.length
@@ -230,20 +230,20 @@ export default function GodLaunchDelivery({ orgId }) {
       <div style={box}>
         <div style={{ ...label, marginBottom: 8 }}>Integrations</div>
         {(data.integrations || []).length === 0 ? (
-          <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>
+          <p style={{ fontSize: 12, color: 'var(--gm-text)', margin: 0 }}>
             This brand's launch template tracks no connections.
           </p>
         ) : data.integrations.map(i => (
           <div key={i.id} style={{ display: 'flex', gap: 10, alignItems: 'center',
                                    flexWrap: 'wrap', padding: '6px 0',
-                                   borderTop: '1px solid var(--god-border, #f3f4f6)' }}>
+                                   borderTop: '1px solid var(--god-border, var(--gm-card-line))' }}>
             <b style={{ fontSize: 13, flex: '1 1 200px' }}>
               {i.label}
               {i.provider ? (
-                <span style={{ fontWeight: 400, color: '#9ca3af' }}> · {i.provider}</span>
+                <span style={{ fontWeight: 400, color: 'var(--gm-text)' }}> · {i.provider}</span>
               ) : null}
               {!i.is_required ? (
-                <span style={{ fontSize: 10, color: '#9ca3af' }}> · optional</span>
+                <span style={{ fontSize: 10, color: 'var(--gm-text)' }}> · optional</span>
               ) : null}
             </b>
             <Chip label={i.status_label} tone={INTEGRATION_TONE[i.status] || 'neutral'} />
@@ -265,17 +265,17 @@ export default function GodLaunchDelivery({ orgId }) {
           Testing — our verdict, and the customer's
         </div>
         {(data.checks || []).length === 0 ? (
-          <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>
+          <p style={{ fontSize: 12, color: 'var(--gm-text)', margin: 0 }}>
             This brand's launch template defines no checks.
           </p>
         ) : data.checks.map(c => (
           <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center',
                                    flexWrap: 'wrap', padding: '6px 0',
-                                   borderTop: '1px solid var(--god-border, #f3f4f6)' }}>
+                                   borderTop: '1px solid var(--god-border, var(--gm-card-line))' }}>
             <b style={{ fontSize: 13, flex: '1 1 220px' }}>
               {c.label}
               {c.category ? (
-                <span style={{ fontWeight: 400, color: '#9ca3af' }}> · {c.category}</span>
+                <span style={{ fontWeight: 400, color: 'var(--gm-text)' }}> · {c.category}</span>
               ) : null}
             </b>
             <Chip label={c.status_label} tone={CHECK_TONE[c.status] || 'neutral'} />
@@ -299,13 +299,13 @@ export default function GodLaunchDelivery({ orgId }) {
       <div style={box}>
         <div style={{ ...label, marginBottom: 8 }}>Training</div>
         {(data.training || []).length === 0 ? (
-          <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>
+          <p style={{ fontSize: 12, color: 'var(--gm-text)', margin: 0 }}>
             This brand's launch template schedules no training.
           </p>
         ) : data.training.map(t => (
           <div key={t.id} style={{ display: 'flex', gap: 10, alignItems: 'center',
                                    flexWrap: 'wrap', padding: '6px 0',
-                                   borderTop: '1px solid var(--god-border, #f3f4f6)' }}>
+                                   borderTop: '1px solid var(--god-border, var(--gm-card-line))' }}>
             <b style={{ fontSize: 13, flex: '1 1 200px' }}>{t.title}</b>
             <input
               type="date" style={control} disabled={busy || readOnly}
@@ -324,7 +324,7 @@ export default function GodLaunchDelivery({ orgId }) {
             {t.customer_acknowledged_at
               ? <Chip label="Customer confirmed" tone="positive" />
               : <Chip label="Not confirmed" tone="neutral" />}
-            <span style={{ fontSize: 11, color: '#9ca3af' }}>
+            <span style={{ fontSize: 11, color: 'var(--gm-text)' }}>
               {(t.attendees || []).length} attendee
               {(t.attendees || []).length === 1 ? '' : 's'}
             </span>
@@ -386,20 +386,20 @@ export default function GodLaunchDelivery({ orgId }) {
         ) : null}
 
         {(data.blockers || []).length === 0 ? (
-          <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>
+          <p style={{ fontSize: 12, color: 'var(--gm-text)', margin: 0 }}>
             Nothing is blocked.
           </p>
         ) : data.blockers.map(b => (
           <div key={b.id} style={{ display: 'flex', gap: 10, alignItems: 'baseline',
                                    flexWrap: 'wrap', padding: '6px 0',
-                                   borderTop: '1px solid var(--god-border, #f3f4f6)',
+                                   borderTop: '1px solid var(--god-border, var(--gm-card-line))',
                                    opacity: b.status === 'resolved' ? 0.5 : 1 }}>
             <b style={{ fontSize: 13, flex: '1 1 220px' }}>{b.title}</b>
             <Chip label={b.party_label}
                   tone={b.status === 'resolved' ? 'neutral' : 'danger'} />
             {b.customer_visible
               ? <Chip label="Customer sees this" tone="info" /> : null}
-            <span style={{ fontSize: 11, color: '#9ca3af' }}>
+            <span style={{ fontSize: 11, color: 'var(--gm-text)' }}>
               {b.opened_at ? new Date(b.opened_at).toLocaleDateString() : ''}
             </span>
             {b.status !== 'resolved' && !readOnly ? (
@@ -412,7 +412,7 @@ export default function GodLaunchDelivery({ orgId }) {
             ) : null}
             {b.detail ? (
               <div style={{ flexBasis: '100%', fontSize: 12,
-                            color: 'var(--god-muted, #6b7280)' }}>{b.detail}</div>
+                            color: 'var(--god-muted, var(--gm-dim))' }}>{b.detail}</div>
             ) : null}
           </div>
         ))}
@@ -426,7 +426,7 @@ export default function GodLaunchDelivery({ orgId }) {
           return (
             <div key={kind} style={{ display: 'flex', gap: 10, alignItems: 'center',
                                      flexWrap: 'wrap', padding: '6px 0',
-                                     borderTop: '1px solid var(--god-border, #f3f4f6)' }}>
+                                     borderTop: '1px solid var(--god-border, var(--gm-card-line))' }}>
               <b style={{ fontSize: 13, flex: '1 1 240px' }}>
                 {kind === 'customer_signoff'
                   ? 'Customer approval to go live'
@@ -436,7 +436,7 @@ export default function GodLaunchDelivery({ orgId }) {
                 <>
                   <Chip label={'Given' + (a.given_name ? ' by ' + a.given_name : '')}
                         tone="positive" />
-                  <span style={{ fontSize: 11, color: '#9ca3af' }}>
+                  <span style={{ fontSize: 11, color: 'var(--gm-text)' }}>
                     {a.given_at ? new Date(a.given_at).toLocaleString() : ''}
                   </span>
                   {!readOnly ? (
@@ -463,7 +463,7 @@ export default function GodLaunchDelivery({ orgId }) {
             </div>
           )
         })}
-        <p style={{ fontSize: 11, color: '#9ca3af', margin: '10px 0 0' }}>
+        <p style={{ fontSize: 11, color: 'var(--gm-text)', margin: '10px 0 0' }}>
           Both signatures are recorded here, including the customer's — theirs
           usually arrives on a call or in an email, and a record that says who
           gave it and who wrote it down is more honest than one that pretends

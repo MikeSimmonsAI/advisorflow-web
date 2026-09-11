@@ -386,6 +386,20 @@ class TestCommitmentResolution:
         assert kw["line_items"][0]["price"] == "price_growth_m2m"
         assert kw["metadata"]["plan"] == "growth"
         assert kw["metadata"]["commitment"] == "month_to_month"
+        # SELLER-ASSISTED CHECKOUT RETURNS THE CUSTOMER TO THE SAME PLACE
+        # THEIR OWN CHECKOUT WOULD. Both URLs are built by
+        # `stripe_return` from this organization's own brand host and an
+        # allowlisted path — never an infrastructure hostname, and the cancel
+        # carries `part` so the page can say what was backed out of.
+        # (The `_brand_base_url` patch above is now inert: the resolver moved
+        # to `stripe_return`. It is left in place because this file never
+        # asserted on the base, and these assertions check the real thing.)
+        for key in ("success_url", "cancel_url"):
+            assert kw[key].startswith("https://")
+            assert "/billing?" in kw[key]
+            assert "part=subscription" in kw[key]
+            for infra in ("onrender.com", "vercel.app", "localhost"):
+                assert infra not in kw[key]
 
     def test_the_setup_fee_NEVER_rides_the_subscription_session(
             self, client, db_session, world):

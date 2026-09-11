@@ -20,7 +20,7 @@ import { api } from '../../api/client'
 function Label({ children }) {
   return (
     <label style={{ display: 'block', fontSize: 12, fontWeight: 600,
-                    color: 'var(--text-muted, #888)', textTransform: 'uppercase',
+                    color: 'var(--text-muted, var(--gm-dim))', textTransform: 'uppercase',
                     letterSpacing: '0.06em', marginBottom: 4 }}>
       {children}
     </label>
@@ -36,8 +36,8 @@ function Input({ value, onChange, placeholder, style = {} }) {
       style={{
         width: '100%', boxSizing: 'border-box',
         padding: '8px 12px', borderRadius: 6,
-        border: '1px solid var(--border, #d1d5db)',
-        background: 'var(--input-bg, #fff)',
+        border: '1px solid var(--border, var(--gm-card-line))',
+        background: 'var(--input-bg, var(--gm-panel))',
         color: 'var(--text, #111)',
         fontSize: 13, fontFamily: 'monospace',
         ...style,
@@ -47,17 +47,17 @@ function Input({ value, onChange, placeholder, style = {} }) {
 }
 
 function Btn({ onClick, disabled, children, variant = 'default' }) {
-  const bg = variant === 'danger'  ? '#dc2626'
-           : variant === 'primary' ? '#2563eb'
-           : '#374151'
+  const bg = variant === 'danger'  ? 'var(--gm-red)'
+           : variant === 'primary' ? 'var(--gm-blue)'
+           : 'var(--gm-panel-3)'
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       style={{
         padding: '8px 18px', borderRadius: 6, border: 'none',
-        background: disabled ? '#9ca3af' : bg,
-        color: '#fff', fontSize: 13, fontWeight: 600,
+        background: disabled ? 'var(--gm-panel-3)' : bg,
+        color: 'var(--gm-head)', fontSize: 13, fontWeight: 600,
         cursor: disabled ? 'not-allowed' : 'pointer',
       }}
     >
@@ -67,13 +67,13 @@ function Btn({ onClick, disabled, children, variant = 'default' }) {
 }
 
 function Well({ children, color = 'default' }) {
-  const border = color === 'green'  ? '#16a34a'
-               : color === 'yellow' ? '#d97706'
-               : color === 'red'    ? '#dc2626'
+  const border = color === 'green'  ? 'var(--gm-teal)'
+               : color === 'yellow' ? 'var(--gm-amber)'
+               : color === 'red'    ? 'var(--gm-red)'
                : 'var(--border, #d1d5db)'
-  const bg     = color === 'green'  ? 'rgba(22,163,74,.07)'
-               : color === 'yellow' ? 'rgba(217,119,6,.07)'
-               : color === 'red'    ? 'rgba(220,38,38,.07)'
+  const bg     = color === 'green'  ? 'var(--gm-teal-wash)'
+               : color === 'yellow' ? 'var(--gm-amber-wash)'
+               : color === 'red'    ? 'var(--gm-red-wash)'
                : 'var(--surface-2, #f9fafb)'
   return (
     <div style={{
@@ -150,8 +150,8 @@ function PhoneAuditTab() {
           style={{
             width: '100%', boxSizing: 'border-box',
             padding: '8px 12px', borderRadius: 6,
-            border: '1px solid var(--border, #d1d5db)',
-            background: 'var(--input-bg, #fff)',
+            border: '1px solid var(--border, var(--gm-card-line))',
+            background: 'var(--input-bg, var(--gm-panel))',
             color: 'var(--text, #111)',
             fontSize: 13, fontFamily: 'monospace', resize: 'vertical',
           }}
@@ -187,10 +187,10 @@ function PhoneAuditTab() {
                   <table style={{ width: '100%', borderCollapse: 'collapse',
                                   marginTop: 6, fontSize: 12 }}>
                     <thead>
-                      <tr style={{ background: 'var(--surface-3, #f3f4f6)' }}>
+                      <tr style={{ background: 'var(--surface-3, var(--gm-panel))' }}>
                         {['Name','Phone','Status','Org','Assigned To','Duplicate?','Source','Created'].map(h => (
                           <th key={h} style={{ padding: '4px 8px', textAlign: 'left',
-                                               borderBottom: '1px solid var(--border, #e5e7eb)' }}>
+                                               borderBottom: '1px solid var(--border, var(--gm-card-line))' }}>
                             {h}
                           </th>
                         ))}
@@ -212,7 +212,7 @@ function PhoneAuditTab() {
                     </tbody>
                   </table>
                 ) : (
-                  <span style={{ marginLeft: 8, color: 'var(--text-muted, #888)' }}>none found</span>
+                  <span style={{ marginLeft: 8, color: 'var(--text-muted, var(--gm-dim))' }}>none found</span>
                 )}
               </div>
 
@@ -231,7 +231,7 @@ function PhoneAuditTab() {
                     ))}
                   </ul>
                 ) : (
-                  <span style={{ marginLeft: 8, color: 'var(--text-muted, #888)' }}>none found</span>
+                  <span style={{ marginLeft: 8, color: 'var(--text-muted, var(--gm-dim))' }}>none found</span>
                 )}
               </div>
             </Well>
@@ -370,7 +370,7 @@ function BookingCleanupTab() {
 
           <Well>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>Will never do</div>
-            <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-muted, #666)' }}>
+            <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-muted, var(--gm-ghost))' }}>
               {(dryResult.will_never || []).map((s, i) => <li key={i}>{s}</li>)}
             </ul>
           </Well>
@@ -388,7 +388,7 @@ function BookingCleanupTab() {
           </Well>
           <Well>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>Never did</div>
-            <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-muted, #666)' }}>
+            <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-muted, var(--gm-ghost))' }}>
               {(applyResult.never_did || []).map((s, i) => <li key={i}>{s}</li>)}
             </ul>
           </Well>
@@ -402,16 +402,17 @@ function BookingCleanupTab() {
       {/* ── confirmation dialog ── */}
       {phase === CLEANUP_CONFIRM && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          position: 'fixed', inset: 0, background: 'var(--gm-scrim)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 9999,
         }}>
           <div style={{
-            background: 'var(--surface, #fff)', borderRadius: 10,
+            background: 'var(--gm-panel)', borderRadius: 'var(--gm-radius)',
+            border: '1px solid var(--gm-card-line)',
             padding: 28, maxWidth: 520, width: '90%',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+            boxShadow: 'var(--gm-shadow-modal)',
           }}>
-            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 12, color: '#dc2626' }}>
+            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 12, color: 'var(--gm-red)' }}>
               Apply booking cleanup?
             </div>
             <p style={{ fontSize: 13, lineHeight: 1.6, margin: '0 0 16px' }}>
@@ -454,7 +455,7 @@ export default function GodMaintenanceOps() {
           Maintenance Ops
         </h1>
         <p style={{ margin: '6px 0 0', fontSize: 13,
-                    color: 'var(--text-muted, #666)' }}>
+                    color: 'var(--text-muted, var(--gm-ghost))' }}>
           Targeted, auditable cleanup tools. Silent by design — no SMS, no email,
           no cadence restart. Everything defaults to dry-run.
         </p>
@@ -463,7 +464,7 @@ export default function GodMaintenanceOps() {
       {/* tab bar */}
       <div style={{
         display: 'flex', gap: 0, marginBottom: 24,
-        borderBottom: '2px solid var(--border, #e5e7eb)',
+        borderBottom: '2px solid var(--border, var(--gm-card-line))',
       }}>
         {TABS.map(t => (
           <button
@@ -472,7 +473,7 @@ export default function GodMaintenanceOps() {
             style={{
               padding: '8px 20px', border: 'none', background: 'none',
               fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              color: tab === t.key ? '#2563eb' : 'var(--text-muted, #888)',
+              color: tab === t.key ? 'var(--gm-blue)' : 'var(--text-muted, #888)',
               borderBottom: tab === t.key ? '2px solid #2563eb' : '2px solid transparent',
               marginBottom: -2,
             }}

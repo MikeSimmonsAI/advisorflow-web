@@ -40,11 +40,34 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 
 def _brand_base_url(db: Session, org: Organization) -> str:
-    """Return the customer to THEIR brand's domain, never a platform hostname."""
-    from app.services.public_identity import public_base_url as _public_base
-    return (_public_base(db, org.id)
-            or os.environ.get("APP_BASE_URL", "").strip()
-            or "https://advisorflow-frontend.onrender.com")
+    """Return the customer to THEIR brand's domain, never a platform hostname.
+
+    THE HARD-CODED RENDER HOSTNAME THAT USED TO END THIS CHAIN IS GONE. It
+    returned a paying EvoSys Pro customer to `advisorflow-frontend.onrender.com`
+    — a name they have never seen, on an origin their browser has no session
+    for. `stripe_return` resolves the brand's own host, refuses an
+    infrastructure host from any source, and raises rather than guessing.
+
+    A refusal is a 409 with the sentence an operator can act on. Fail closed:
+    a checkout that cannot say where the customer comes back to is a checkout
+    that should not start.
+    """
+    from app.services import stripe_return
+    try:
+        return stripe_return.base_url_for_org(db, org)
+    except stripe_return.ReturnTargetUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+def _return_targets(db: Session, org: Organization, part: Optional[str] = None,
+                    surface: str = "billing") -> dict:
+    """`success_url` / `cancel_url`, built server-side from the allowlist."""
+    from app.services import stripe_return
+    try:
+        return stripe_return.checkout_targets(db, org, part=part,
+                                              surface=surface)
+    except stripe_return.ReturnTargetUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 def _audit(db: Session, org: Organization, user: User, action: str, details: dict) -> None:
@@ -233,7 +256,7 @@ def get_plans(current_user: User = Depends(_require_admin),
 
     plans = billing_catalog.plans_for(db, platform_id)
     return {
-        "plans": [_plan_public(p) for p in plans],
+        "plans": [_plan_public(p, db) for p in plans],
         "configured": bool(plans),
         "current_plan": getattr(org, "billing_plan_key", None) or org.plan,
         "current_interval": getattr(org, "stripe_plan_interval", None) or "month",
@@ -266,7 +289,7 @@ def get_subscription(
         # the `month` interval, so the interval alone cannot say whether this
         # customer is on the committed price or the month-to-month one.
         "billing_commitment": getattr(org, "billing_commitment", None),
-        "plan_details": _plan_public(current_plan) if current_plan else None,
+        "plan_details": _plan_public(current_plan, db) if current_plan else None,
         # Read from the LOCAL MIRROR, which the webhook keeps current.
         #
         # This used to be a synchronous, uncached Stripe API call on every load
@@ -310,8 +333,14 @@ def get_subscription(
                                         result["stripe_plan_interval"],
                                         result["billing_commitment"])
         if current_plan else None)
+    # WITH THE TERM LENGTH THE PLAN ACTUALLY CARRIES. A customer on a term
+    # agreement reads the months their own tier is configured for, and reads
+    # the neutral "Term agreement" where the brand has not set one — rather
+    # than the "24-month" that used to be typed into a features string.
     result["commitment_label"] = (
-        billing_catalog.commitment_label(result["billing_commitment"])
+        billing_catalog.commitment_label(
+            result["billing_commitment"],
+            getattr(current_plan, "term_months", None))
         if result["billing_commitment"] else None)
     result["currency"] = getattr(current_plan, "currency", None) or "usd"
 
@@ -359,7 +388,56 @@ def get_subscription(
     return result
 
 
-def _plan_public(plan) -> dict:
+def _plan_support(db: Session, plan) -> Optional[dict]:
+    """The support entitlement this tier buys, for the customer's own card.
+
+    Reads `support_entitlements`, which is the support product's own
+    authority (a `support_entitlement_configs` row for this brand+plan, else
+    the frozen opening position) — NOT a sentence in the billing catalogue's
+    features list. That is the whole point: "Priority support" on a plan card
+    and the queue the ticket actually joins are now the same fact.
+
+    `configured` is carried through so the card can be honest about a brand
+    running on the default rather than presenting an assumption as a promise.
+    """
+    from app.services import support_entitlements
+    try:
+        rule = support_entitlements._frozen_rule(plan.key)
+        row = None
+        try:
+            from app.models.support_models import SupportEntitlementConfig
+            row = (db.query(SupportEntitlementConfig)
+                   .filter(SupportEntitlementConfig.platform_id == plan.platform_id,
+                           SupportEntitlementConfig.plan_key == plan.key,
+                           SupportEntitlementConfig.is_active.is_(True))
+                   .first())
+        except Exception:                                    # noqa: BLE001
+            logger.exception("billing: support entitlement lookup failed for "
+                             "plan %s", plan.key)
+        shaped = (support_entitlements.resolve_for_row(
+                      rule, row, plan.platform_id, plan.key)
+                  if row is not None
+                  else support_entitlements._shape(
+                      rule, plan_key=plan.key, platform_id=plan.platform_id,
+                      source="default"))
+        return {
+            "display_name": shaped.get("display_name"),
+            "queue_label": shaped.get("queue_label"),
+            "included_assistance_minutes":
+                shaped.get("included_assistance_minutes"),
+            "first_response_minutes": shaped.get("first_response_minutes"),
+            "configured": shaped.get("source") == "config",
+        }
+    except Exception:                                        # noqa: BLE001
+        # A support lookup must never take the Billing screen down. An absent
+        # block renders as "not configured", which is the truthful reading of
+        # "we could not tell you".
+        logger.exception("billing: could not resolve support entitlement for "
+                         "plan %s", getattr(plan, "key", None))
+        return None
+
+
+def _plan_public(plan, db: Optional[Session] = None) -> dict:
     """What a customer may see about a plan. No Stripe ids, no internals.
 
     BOTH MONTHLY RATES, because a tier genuinely has two and showing only one
@@ -373,6 +451,7 @@ def _plan_public(plan) -> dict:
     valid configuration, and the screen must render the missing one as
     unavailable rather than substituting the other.
     """
+    term_months = getattr(plan, "term_months", None)
     return {
         "key": plan.key,
         "name": plan.name,
@@ -383,6 +462,27 @@ def _plan_public(plan) -> dict:
         "currency": plan.currency,
         "max_leads": plan.max_leads,
         "max_users": plan.max_users,
+        # ── WHAT THE TIER INCLUDES, AS CONFIGURED DATA ────────────────────
+        #
+        # THE STALE-CARD FIX. This used to be `features` alone: a hand-typed
+        # list in `features_json` that the live screen rendered as gospel, and
+        # which had drifted into advertising an AI Voice allowance that is now
+        # a separate add-on, a user ceiling the engine does not enforce, and a
+        # "24-month price lock" nobody configured.
+        #
+        # `capacity` is read from the plan's own columns, so a God Mode edit
+        # changes the customer's card with no deploy, and an unconfigured
+        # dimension is ABSENT rather than invented. `features` survives for
+        # genuinely qualitative statements ("White-label available") and is
+        # now the exception rather than the whole card.
+        "capacity": billing_catalog.capacity_for(plan),
+        "term_months": term_months,
+        # THE SUPPORT A TIER BUYS, from the support entitlement authority
+        # rather than from a sentence on a marketing card. Resolved for THIS
+        # BRAND and this plan key, so a brand that has configured its own
+        # support shows its own, and a brand that has not is marked as running
+        # on the default instead of silently looking like a decision.
+        "support": _plan_support(db, plan) if db is not None else None,
         "features": billing_catalog.features_for(plan),
         "is_purchasable": bool(plan.is_purchasable),
         # WHICH COMMITMENTS THIS TIER CAN ACTUALLY BE SOLD ON, resolved here so
@@ -393,7 +493,11 @@ def _plan_public(plan) -> dict:
         "commitments": [
             {
                 "key": c,
-                "label": billing_catalog.commitment_label(c),
+                # THE TERM LENGTH COMES FROM THE PLAN'S OWN COLUMN. An
+                # unconfigured term reads "Term agreement" — never the
+                # "24-month" that was typed into a marketing string.
+                "label": billing_catalog.commitment_label(c, term_months),
+                "term_months": term_months if c != BillingCommitment.MONTH_TO_MONTH else None,
                 "monthly_cents": billing_catalog.price_cents_for(
                     plan, BillingInterval.MONTH, c),
             }
@@ -511,8 +615,9 @@ def create_checkout(
 
     # The customer paying is a funeral home on a white-label brand. Bouncing
     # them to an AdvisorFlow Render hostname after checkout tells them who
-    # their software really belongs to. Their own brand's domain first.
-    base_url = _brand_base_url(db, org)
+    # their software really belongs to. Their own brand's domain, resolved
+    # server-side, or a refusal — never an infrastructure host.
+    targets = _return_targets(db, org, part="subscription")
 
     line_item = _line_item_for(plan, req.interval, db, org, commitment)
 
@@ -532,12 +637,17 @@ def create_checkout(
                   "commitment": commitment or ""},
         subscription_data=subscription_data,
         # `part=subscription` so the confirmation page can say WHAT was bought.
-        # Without it this landed on the neutral "Payment received" wording — 
+        # Without it this landed on the neutral "Payment received" wording —
         # true, but needlessly vague about a subscription the customer just
         # started. The seller-driven links have carried `part` since the setup
         # and subscription obligations were split; this one was missed.
-        success_url=f"{base_url}/billing?success=1&part=subscription",
-        cancel_url=f"{base_url}/billing?canceled=1",
+        #
+        # BOTH URLS COME FROM `stripe_return`, which builds them from this
+        # organization's own brand host and an allowlisted path. A cancel now
+        # carries `part` too, so the customer who backed out lands on the same
+        # screen saying the same thing about the same purchase.
+        success_url=targets["success_url"],
+        cancel_url=targets["cancel_url"],
     )
     _audit(db, org, current_user, "billing.checkout_started",
            {"plan": plan.key, "interval": req.interval,
@@ -1135,17 +1245,47 @@ def create_portal(
     if not getattr(org, "stripe_customer_id", None):
         raise HTTPException(status_code=400, detail="No billing account. Please select a plan first.")
 
-    # Same reasoning as the checkout session above: return the customer to
-    # their own brand's domain, not to an AdvisorFlow deployment hostname.
-    from app.services.public_identity import public_base_url as _public_base
-    base_url = (_public_base(db, org.id)
-                or os.environ.get("APP_BASE_URL", "").strip()
-                or "https://advisorflow-frontend.onrender.com")
+    # Same reasoning as the checkout session above, and the same resolver.
+    # This copy of the fallback chain still ended in the Render hostname after
+    # the checkout path had been fixed — which is exactly why there is now one
+    # function and not two chains.
+    #
+    # `return_url` is what Stripe renders as the portal's own "Return to
+    # <business>" link. It is the only hook the portal gives us and it is
+    # small, so the Billing screen carries its own action either side of the
+    # hop as well — see `GET /billing/return-targets`.
+    from app.services import stripe_return
+    try:
+        return_url = stripe_return.portal_return_url(db, org)
+    except stripe_return.ReturnTargetUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     session = stripe.billing_portal.Session.create(
         customer=org.stripe_customer_id,
-        return_url=f"{base_url}/billing",
+        return_url=return_url,
     )
-    return {"portal_url": session.url}
+    return {"portal_url": session.url, "return_url": return_url}
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/return-targets
+#
+# WHERE THIS CUSTOMER COMES BACK TO, ANSWERED BY THE SAME CODE THAT TELLS
+# STRIPE. The Billing screen renders "Back to billing" and "Open account"
+# either side of every external handoff, and an invoice/receipt link is the
+# one hop Stripe gives us no return hook for at all. Serving those actions
+# from `stripe_return.describe` rather than from a string in the bundle is
+# what stops the button the customer sees from drifting away from the URL
+# Stripe was given.
+# ---------------------------------------------------------------------------
+@router.get("/return-targets")
+def get_return_targets(current_user: User = Depends(_require_admin),
+                       db: Session = Depends(get_db)):
+    org = db.query(Organization).filter(
+        Organization.id == current_user.organization_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    from app.services import stripe_return
+    return stripe_return.describe(db, org)
 
 
 # ---------------------------------------------------------------------------

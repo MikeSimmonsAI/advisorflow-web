@@ -59,9 +59,15 @@ def _stripe():
     return stripe
 
 
-def _brand_base_url(db: Session, org: Organization) -> str:
-    from app.routers.billing_router import _brand_base_url as _b
-    return _b(db, org)
+def _return_targets(db: Session, org: Organization, part: str) -> dict:
+    """Where an add-on or one-time service checkout returns to.
+
+    Same resolver as the subscription paths. A customer who has just bought an
+    add-on is returned to their own brand's Billing screen with `part` set, so
+    the confirmation says what they bought rather than "payment received".
+    """
+    from app.routers.billing_router import _return_targets as _t
+    return _t(db, org, part=part)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -435,7 +441,7 @@ def start_one_time_checkout(db: Session, org: Organization,
 
     from app.routers.billing_router import _get_or_create_customer
     customer_id = _get_or_create_customer(org, db)
-    base_url = _brand_base_url(db, org)
+    targets = _return_targets(db, org, "purchase")
 
     purchase = CatalogPurchase(
         organization_id=org.id, platform_id=getattr(org, "platform_id", None),
@@ -470,8 +476,8 @@ def start_one_time_checkout(db: Session, org: Organization,
                       "purpose": "catalog_purchase",
                       "catalog_purchase_id": purchase.id,
                       "catalog_key": item.key},
-            success_url="%s/billing?success=1&part=purchase" % base_url,
-            cancel_url="%s/billing?canceled=1" % base_url,
+            success_url=targets["success_url"],
+            cancel_url=targets["cancel_url"],
         )
     except Exception as exc:
         db.rollback()

@@ -59,14 +59,14 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
     }
   }
 
-  const line = 'rgba(255,217,104,.42)'
+  const line = 'var(--gm-pill-gold-bd)'
 
   return (
     <div
       role="dialog" aria-modal="true" aria-label="Reset password"
       onClick={() => { if (!busy) onCancel() }}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(1,4,9,.72)', zIndex: 400,
+        position: 'fixed', inset: 0, background: 'var(--gm-scrim)', zIndex: 400,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18,
       }}
     >
@@ -76,23 +76,23 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
         onSubmit={submit}
         style={{ borderColor: line, padding: 24, maxWidth: 460, width: '100%' }}
       >
-        <div style={{ color: '#ffd968', fontSize: 9, fontWeight: 800, letterSpacing: '.12em', marginBottom: 11 }}>
+        <div style={{ color: 'var(--gm-gold)', fontSize: 9, fontWeight: 800, letterSpacing: '.12em', marginBottom: 11 }}>
           ⚿ RESET PASSWORD
         </div>
-        <div style={{ color: '#f1f7ff', fontSize: 15, fontWeight: 600, marginBottom: 4 }}>
+        <div style={{ color: 'var(--gm-head)', fontSize: 17, fontWeight: 700, marginBottom: 4 }}>
           {user.full_name || user.email}
         </div>
-        <div style={{ color: '#758ba4', fontSize: 11, marginBottom: 14 }}>{user.email}</div>
+        <div style={{ color: 'var(--gm-dim)', fontSize: 12.5, marginBottom: 14 }}>{user.email}</div>
 
-        <div style={{ color: '#7f96ae', fontSize: 11.5, lineHeight: 1.65, marginBottom: 18 }}>
+        <div style={{ color: 'var(--gm-dim)', fontSize: 13, lineHeight: 1.65, marginBottom: 18 }}>
           Sets this account&rsquo;s password immediately. It is never shown back to
           you and never written to the audit log &mdash; only the fact that you
           reset it. Any session this person currently has signed in is ended, so
           they will sign in again with what you set here.
         </div>
 
-        <label style={{ display: 'block', color: '#8fb6cf', fontSize: 9.5, fontWeight: 800,
-                        letterSpacing: '.1em', marginBottom: 6 }}>
+        <label style={{ display: 'block', color: 'var(--gm-dim)', fontSize: 11, fontWeight: 700,
+                        letterSpacing: '.07em', marginBottom: 6 }}>
           NEW PASSWORD
         </label>
         <input
@@ -102,13 +102,13 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
           placeholder={`at least ${MIN_LENGTH} characters`}
         />
         {tooShort && (
-          <div style={{ color: '#ff8299', fontSize: 10, marginBottom: 12 }}>
+          <div style={{ color: 'var(--gm-red)', fontSize: 10, marginBottom: 12 }}>
             Must be at least {MIN_LENGTH} characters.
           </div>
         )}
 
-        <label style={{ display: 'block', color: '#8fb6cf', fontSize: 9.5, fontWeight: 800,
-                        letterSpacing: '.1em', marginBottom: 6 }}>
+        <label style={{ display: 'block', color: 'var(--gm-dim)', fontSize: 11, fontWeight: 700,
+                        letterSpacing: '.07em', marginBottom: 6 }}>
           CONFIRM NEW PASSWORD
         </label>
         <input
@@ -118,13 +118,13 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
           placeholder="type it again"
         />
         {mismatch && (
-          <div style={{ color: '#ff8299', fontSize: 10, marginBottom: 14 }}>
+          <div style={{ color: 'var(--gm-red)', fontSize: 10, marginBottom: 14 }}>
             The two passwords do not match.
           </div>
         )}
 
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer',
-                        marginBottom: 18, color: '#8fb6cf', fontSize: 11, lineHeight: 1.55 }}>
+                        marginBottom: 18, color: 'var(--gm-blue)', fontSize: 11, lineHeight: 1.55 }}>
           <input
             type="checkbox" checked={forceChange} disabled={busy}
             onChange={e => setForceChange(e.target.checked)}
@@ -132,7 +132,7 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
           />
           <div>
             Require them to choose their own password at next sign-in.
-            <div style={{ color: '#5f768e', fontSize: 10, marginTop: 3 }}>
+            <div style={{ color: 'var(--gm-blue)', fontSize: 10, marginTop: 3 }}>
               Leave this on when you are handing over a temporary password.
               Turn it off only when this password is meant to be permanent.
             </div>
@@ -140,7 +140,7 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
         </label>
 
         {err && (
-          <div style={{ color: '#ff8299', fontSize: 11, marginBottom: 14, lineHeight: 1.5 }}>
+          <div style={{ color: 'var(--gm-red)', fontSize: 11, marginBottom: 14, lineHeight: 1.5 }}>
             {err}
           </div>
         )}
@@ -156,9 +156,9 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
             disabled={!ready}
             style={{
               flex: 1, padding: '9px 0', fontWeight: 800,
-              color: ready ? '#ffd968' : '#5f768e',
-              borderColor: ready ? line : 'rgba(120,150,180,.22)',
-              background: ready ? '#1b1505' : 'transparent',
+              color: ready ? 'var(--gm-gold)' : 'var(--gm-blue)',
+              borderColor: ready ? line : 'var(--gm-pill-blue-bd)',
+              background: ready ? 'var(--gm-pill-amber-bg)' : 'transparent',
               cursor: ready ? 'pointer' : 'not-allowed',
             }}
           >

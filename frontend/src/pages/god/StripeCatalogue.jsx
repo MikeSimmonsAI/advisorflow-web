@@ -28,7 +28,7 @@ import { api } from '../../api/client';
 // of it in the React bundle, which had already drifted apart.
 
 const CARD = {
-  background: '#1a1a2e', border: '1px solid #2a2a4a',
+  background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-blue)',
   borderRadius: '12px', padding: '20px',
 };
 
@@ -48,7 +48,7 @@ function money(cents) {
 }
 
 function Dot({ ok, warn }) {
-  const color = ok ? '#1ef0a8' : warn ? '#f59e0b' : '#ef4444';
+  const color = ok ? 'var(--gm-teal)' : warn ? 'var(--gm-amber)' : 'var(--gm-red)';
   return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4,
                         background: color, marginRight: 8, flexShrink: 0 }} />;
 }
@@ -62,8 +62,8 @@ function EnvRow({ name, entry }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13,
                   padding: '5px 0' }}>
       <Dot ok={present && !ws} warn={present && ws} />
-      <code style={{ color: '#c8c8dd', fontSize: 12 }}>{name}</code>
-      <span style={{ marginLeft: 'auto', color: present ? '#9a9ab5' : '#ef4444' }}>
+      <code style={{ color: 'var(--gm-blue)', fontSize: 12 }}>{name}</code>
+      <span style={{ marginLeft: 'auto', color: present ? 'var(--gm-text)' : 'var(--gm-red)' }}>
         {!present ? 'not set'
           : ws ? 'set — has stray whitespace'
             : mode ? `set · ${mode.toUpperCase()} mode` : 'set'}
@@ -74,9 +74,9 @@ function EnvRow({ name, entry }) {
 
 function Pill({ tone, children }) {
   const colors = {
-    good: ['#1ef0a820', '#1ef0a8'], warn: ['#f59e0b20', '#f59e0b'],
-    bad: ['#ef444420', '#ef4444'], mute: ['#2a2a4a', '#9a9ab5'],
-  }[tone] || ['#2a2a4a', '#9a9ab5'];
+    good: ['var(--gm-teal-wash)', 'var(--gm-teal)'], warn: ['var(--gm-amber-wash)', 'var(--gm-amber)'],
+    bad: ['var(--gm-red-wash)', 'var(--gm-red)'], mute: ['var(--gm-blue)', 'var(--gm-text)'],
+  }[tone] || ['var(--gm-pill-off-bg)', 'var(--gm-pill-off-fg)'];
   return (
     <span style={{ background: colors[0], color: colors[1], borderRadius: 999,
                    padding: '2px 10px', fontSize: 11, fontWeight: 700,
@@ -145,7 +145,7 @@ export default function StripeCatalogue({ platformId, brands }) {
   }, [brand, load]);
 
   if (loading) {
-    return <div style={{ ...CARD, color: '#888', fontSize: 14 }}>Reading Stripe configuration…</div>;
+    return <div style={{ ...CARD, color: 'var(--gm-dim)', fontSize: 14 }}>Reading Stripe configuration…</div>;
   }
 
   const plans = (brand?.plans || []).filter(p => p.is_purchasable);
@@ -160,7 +160,7 @@ export default function StripeCatalogue({ platformId, brands }) {
           <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0, letterSpacing: '0.02em' }}>
             STRIPE &amp; CATALOGUE
           </h2>
-          <p style={{ color: '#888', margin: '6px 0 0', fontSize: 13 }}>
+          <p style={{ color: 'var(--gm-dim)', margin: '6px 0 0', fontSize: 13 }}>
             What this brand sells, and whether Stripe knows about it. Configuration —
             not the customer roster below.
           </p>
@@ -180,8 +180,8 @@ export default function StripeCatalogue({ platformId, brands }) {
       </div>
 
       {err && (
-        <div style={{ background: '#ef444420', border: '1px solid #ef4444', borderRadius: 8,
-                      padding: '12px 16px', margin: '16px 0', color: '#ef4444', fontSize: 13 }}>
+        <div style={{ background: 'var(--gm-pill-red-bg)', border: '1px solid var(--gm-red)', borderRadius: 8,
+                      padding: '12px 16px', margin: '16px 0', color: 'var(--gm-red)', fontSize: 13 }}>
           {err}
         </div>
       )}
@@ -190,7 +190,7 @@ export default function StripeCatalogue({ platformId, brands }) {
                     gap: 20, marginTop: 20 }}>
         {/* ── environment ────────────────────────────────────────────────── */}
         <div>
-          <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase',
+          <div style={{ fontSize: 11, color: 'var(--gm-dim)', textTransform: 'uppercase',
                         letterSpacing: '0.06em', marginBottom: 8 }}>
             Environment
           </div>
@@ -198,7 +198,7 @@ export default function StripeCatalogue({ platformId, brands }) {
           <EnvRow name="STRIPE_PUBLISHABLE_KEY" entry={env.STRIPE_PUBLISHABLE_KEY} />
           <EnvRow name="STRIPE_WEBHOOK_SECRET" entry={env.STRIPE_WEBHOOK_SECRET} />
           <EnvRow name="APP_BASE_URL" entry={env.APP_BASE_URL} />
-          <p style={{ color: '#7a7a95', fontSize: 11, margin: '10px 0 0', lineHeight: 1.5 }}>
+          <p style={{ color: 'var(--gm-dim)', fontSize: 11, margin: '10px 0 0', lineHeight: 1.5 }}>
             Presence and mode only. No key value is ever sent to this screen or
             stored in the database.
           </p>
@@ -206,12 +206,12 @@ export default function StripeCatalogue({ platformId, brands }) {
 
         {/* ── scope ──────────────────────────────────────────────────────── */}
         <div>
-          <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase',
+          <div style={{ fontSize: 11, color: 'var(--gm-dim)', textTransform: 'uppercase',
                         letterSpacing: '0.06em', marginBottom: 8 }}>
             Brand in scope
           </div>
           <div style={{ fontSize: 18, fontWeight: 700 }}>{brandName}</div>
-          <div style={{ fontSize: 12, color: '#9a9ab5', marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: 'var(--gm-text)', marginTop: 4 }}>
             {plans.length} purchasable {plans.length === 1 ? 'tier' : 'tiers'}
             {brand?.fully_mapped
               ? ' · every price mapped'
@@ -219,13 +219,13 @@ export default function StripeCatalogue({ platformId, brands }) {
                 : ''}
           </div>
           {!platformId && (
-            <div style={{ fontSize: 11, color: '#7a7a95', marginTop: 8 }}>
+            <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginTop: 8 }}>
               Showing the first brand with a catalogue. Use the brand selector above
               to switch.
             </div>
           )}
           {diag?.explanation && (
-            <div style={{ fontSize: 12, color: '#9a9ab5', marginTop: 12, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 12, color: 'var(--gm-text)', marginTop: 12, lineHeight: 1.5 }}>
               {diag.explanation}
             </div>
           )}
@@ -234,13 +234,13 @@ export default function StripeCatalogue({ platformId, brands }) {
 
       {/* ── the catalogue ──────────────────────────────────────────────────── */}
       <div style={{ marginTop: 24 }}>
-        <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase',
+        <div style={{ fontSize: 11, color: 'var(--gm-dim)', textTransform: 'uppercase',
                       letterSpacing: '0.06em', marginBottom: 10 }}>
           Billing catalogue
         </div>
 
         {!plans.length ? (
-          <div style={{ color: '#7a7a95', fontSize: 13, fontStyle: 'italic' }}>
+          <div style={{ color: 'var(--gm-dim)', fontSize: 13, fontStyle: 'italic' }}>
             This brand has no purchasable plans configured, so there is nothing to
             map into Stripe yet.
           </div>
@@ -248,7 +248,7 @@ export default function StripeCatalogue({ platformId, brands }) {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ color: '#888', textAlign: 'left', fontSize: 11,
+                <tr style={{ color: 'var(--gm-dim)', textAlign: 'left', fontSize: 11,
                              textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   <th style={{ padding: '8px 10px 8px 0' }}>Tier</th>
                   <th style={{ padding: '8px 10px' }}>Commitment</th>
@@ -264,22 +264,22 @@ export default function StripeCatalogue({ platformId, brands }) {
                   const mapped = !!p[c.mappedKey];
                   return (
                     <tr key={`${p.key}-${c.key}`}
-                        style={{ borderTop: i === 0 ? '1px solid #2a2a4a' : '1px solid #22223c' }}>
+                        style={{ borderTop: i === 0 ? '1px solid var(--gm-row-line-strong)' : '1px solid var(--gm-row-line)' }}>
                       <td style={{ padding: '10px 10px 10px 0', fontWeight: i === 0 ? 700 : 400,
-                                   color: i === 0 ? '#e8e8f0' : '#6a6a85' }}>
+                                   color: i === 0 ? 'var(--gm-blue)' : 'var(--gm-dim)' }}>
                         {i === 0 ? (p.name || p.key) : ''}
                       </td>
-                      <td style={{ padding: '10px', color: '#c8c8dd' }}>{c.label}</td>
+                      <td style={{ padding: '10px', color: 'var(--gm-blue)' }}>{c.label}</td>
                       <td style={{ padding: '10px', fontVariantNumeric: 'tabular-nums' }}>
-                        {cents ? <>{money(cents)}<span style={{ color: '#7a7a95' }}>/mo</span></>
-                          : <span style={{ color: '#7a7a95', fontStyle: 'italic' }}>
+                        {cents ? <>{money(cents)}<span style={{ color: 'var(--gm-dim)' }}>/mo</span></>
+                          : <span style={{ color: 'var(--gm-dim)', fontStyle: 'italic' }}>
                               not offered
                             </span>}
                       </td>
                       <td style={{ padding: '10px' }}>
                         {id
-                          ? <code style={{ fontSize: 11, color: '#9a9ab5' }}>{id}</code>
-                          : <span style={{ color: '#7a7a95' }}>—</span>}
+                          ? <code style={{ fontSize: 11, color: 'var(--gm-text)' }}>{id}</code>
+                          : <span style={{ color: 'var(--gm-dim)' }}>—</span>}
                       </td>
                       <td style={{ padding: '10px 0 10px 10px' }}>
                         {!cents ? <Pill tone="mute">n/a</Pill>
@@ -297,11 +297,11 @@ export default function StripeCatalogue({ platformId, brands }) {
 
       {/* ── the action ─────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
-                    marginTop: 20, paddingTop: 20, borderTop: '1px solid #2a2a4a' }}>
+                    marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--gm-blue)' }}>
         <button
           onClick={() => provision(false)}
           disabled={busy || !brand?.platform_id}
-          style={{ background: 'transparent', color: '#c8c8dd', border: '1px solid #2a2a4a',
+          style={{ background: 'transparent', color: 'var(--gm-blue)', border: '1px solid var(--gm-blue)',
                    borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 600,
                    cursor: busy ? 'default' : 'pointer' }}>
           {busy ? 'Working…' : 'Preview'}
@@ -310,32 +310,32 @@ export default function StripeCatalogue({ platformId, brands }) {
           onClick={() => provision(true)}
           disabled={busy || !brand?.platform_id || !credentialsReady}
           title={!credentialsReady ? 'Stripe credentials are not configured.' : undefined}
-          style={{ background: credentialsReady ? '#2fb6ff' : '#2a2a4a',
-                   color: credentialsReady ? '#04121f' : '#7a7a95',
+          style={{ background: credentialsReady ? 'var(--gm-blue)' : 'var(--gm-blue)',
+                   color: credentialsReady ? 'var(--gm-blue)' : 'var(--gm-dim)',
                    border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 13,
                    fontWeight: 800, cursor: busy || !credentialsReady ? 'default' : 'pointer' }}>
           Provision / sync Stripe TEST catalogue
         </button>
-        <span style={{ color: '#7a7a95', fontSize: 12 }}>
+        <span style={{ color: 'var(--gm-dim)', fontSize: 12 }}>
           Creates only what is missing. Safe to run repeatedly — an already-mapped
           price is reused, never duplicated.
         </span>
       </div>
 
       {result && (
-        <div style={{ marginTop: 16, background: '#12121f', border: '1px solid #2a2a4a',
+        <div style={{ marginTop: 16, background: 'var(--gm-pill-blue-bg)', border: '1px solid var(--gm-blue)',
                       borderRadius: 8, padding: '14px 16px' }}>
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
             {result.dry_run ? 'Preview — nothing was created' : 'Provisioning complete'}
-            <span style={{ color: '#7a7a95', fontWeight: 400 }}>
+            <span style={{ color: 'var(--gm-dim)', fontWeight: 400 }}>
               {' · '}{result.summary?.prices_created ?? 0} created
               {' · '}{result.summary?.prices_reused ?? 0} reused
               {' · '}{result.summary?.plans_skipped ?? 0} skipped
             </span>
           </div>
           {(result.plans || []).map(p => (
-            <div key={p.plan_key} style={{ fontSize: 12, color: '#9a9ab5', padding: '3px 0' }}>
-              <b style={{ color: '#c8c8dd' }}>{p.name || p.plan_key}</b>
+            <div key={p.plan_key} style={{ fontSize: 12, color: 'var(--gm-text)', padding: '3px 0' }}>
+              <b style={{ color: 'var(--gm-blue)' }}>{p.name || p.plan_key}</b>
               {p.skipped
                 ? <span style={{ fontStyle: 'italic' }}> — {p.skipped}</span>
                 : COMMITMENTS.map(c => {

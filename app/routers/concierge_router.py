@@ -47,11 +47,14 @@ COMING SOON:
 {pricing}
 
 HOW TO RECOMMEND A PLAN:
-- Under 2,500 leads, email only → Starter
-- 2,500–5,000 leads, wants voice and SMS → Growth
-- 5,000–7,500 leads, small team, up to 3 locations → Professional
-- More than 7,500 leads, more than 3 locations, or more than 5 users → Enterprise (book a call)
-- Anyone unsure → ask about their lead count, industry, and team size before recommending
+- Use ONLY the tiers, prices and capacity in the PRICING section above. It is
+  read from the live catalogue at request time.
+- Recommend the smallest tier whose stated capacity covers what the visitor
+  describes. If the PRICING section does not state a figure for something they
+  ask about, say it is quoted rather than guessing a number.
+- Anything above the largest listed tier → the Custom tier: book a call.
+- Anyone unsure → ask about their lead count, industry, and team size before
+  recommending.
 
 VS COMPETITORS:
 - GoHighLevel: broader marketing suite but built for agencies reselling to clients, not for the service business itself. Bloated, steep learning curve, hidden usage costs. BookaBoost is simpler and purpose-built.
@@ -74,14 +77,27 @@ TONE AND STYLE:
 # BILL-08: prices must never be hardcoded here. The single source of truth is
 # BrandBillingPlan. We cache the blurb for 60 s to avoid a DB hit per message.
 
-_STATIC_PRICING_FALLBACK = """PRICING (annual contract):
-- Starter: $500/mo + $1,500 one-time onboarding. Up to 2,500 leads, 1-2 users. AI email only. No SMS or voice.
-- Growth: $1,000/mo + $2,500 one-time onboarding. Up to 5,000 leads, 1-3 users. Email + SMS 1,000/mo + AI voice 300 min/mo.
-- Professional: $2,000/mo + $5,000 one-time onboarding. Up to 7,500 leads, up to 5 users, up to 3 locations. SMS 3,000/mo, voice 750 min/mo. Priority support + 24-month price lock.
-- Enterprise: Custom pricing + custom onboarding. Unlimited leads, users, locations. White-label available. Book a call to discuss.
-- Month-to-month adds 25% to monthly price.
-- Annual pay-in-full bonus: month 13 free + 24-month price lock guaranteed.
-- Voice overages: $0.15/min. SMS overages: $0.03/msg. Bulk call campaigns: $99/launch."""
+# WHAT A FALLBACK IS ALLOWED TO SAY WHEN IT DOES NOT KNOW THE PRICES.
+#
+# This used to be a full rate card typed in by hand: per-tier prices, lead
+# ceilings, "AI voice 300 min/mo", "voice 750 min/mo", "Priority support +
+# 24-month price lock", "month 13 free", overage rates. Several of those were
+# already wrong — AI Voice is a separate add-on now, Professional's ceiling is
+# not 7,500, and nobody ever configured a 24-month term — and the concierge
+# would recite them, confidently, to a prospect, whenever the catalogue lookup
+# failed for any reason.
+#
+# A FALLBACK THAT INVENTS COMMERCIAL TERMS IS WORSE THAN A FALLBACK THAT
+# ADMITS IT DOES NOT HAVE THEM. This one admits it. The live catalogue is the
+# only thing allowed to quote a price.
+_STATIC_PRICING_FALLBACK = """PRICING:
+- The live pricing catalogue could not be read for this request, so you do not
+  currently have prices, tier capacity, allowances or contract terms.
+- Do NOT state, estimate, or imply any price, lead limit, user limit, message
+  allowance, discount, overage rate or contract length. Say plainly that you
+  cannot pull current pricing right now and offer to have someone send it over
+  or book a short call.
+- Everything else you know about the product is still fine to discuss."""
 
 _pricing_cache: dict = {}  # {platform_id: (fetched_at, blurb)}
 _PRICING_TTL = 60          # seconds
@@ -123,17 +139,49 @@ def _pricing_blurb(db: Session) -> str:
     if not plans:
         return _STATIC_PRICING_FALLBACK
 
-    lines = ["PRICING (annual contract):"]
+    # EVERY LINE BELOW COMES OUT OF THE CATALOGUE ROW. The three summary
+    # lines that used to be appended here — "month-to-month adds 25%",
+    # "month 13 free + 24-month price lock guaranteed", "Enterprise: Custom
+    # pricing" — were hand-written commercial terms sitting underneath
+    # database-sourced prices, which is the worst of both: they READ as
+    # authoritative and nothing could correct them but a deploy. The
+    # month-to-month rate is a real column, so it is quoted from the column;
+    # the annual bonus and the price lock were never configured anywhere and
+    # are therefore not claimed.
+    from app.services import billing_catalog
+
+    lines = ["PRICING (from the live catalogue):"]
     for plan in plans:
-        mo = plan.monthly_cents
-        mo_str = f"${mo // 100}/mo" if mo else "custom pricing"
-        ann = plan.annual_cents
-        ann_note = f" (${ann // 100}/yr annual)" if ann else ""
-        desc = plan.description or ""
-        lines.append(f"- {plan.name}: {mo_str}{ann_note}. {desc}".rstrip(". ") + ".")
-    lines.append("- Month-to-month adds 25% to monthly price.")
-    lines.append("- Annual pay-in-full bonus: month 13 free + 24-month price lock guaranteed.")
-    lines.append("- Enterprise: Custom pricing. Book a call to discuss.")
+        bits = []
+        term = plan.monthly_cents
+        mtm = getattr(plan, "month_to_month_cents", None)
+        if term:
+            bits.append("$%d/mo on a term agreement" % (term // 100))
+        if mtm:
+            bits.append("$%d/mo month-to-month" % (mtm // 100))
+        if plan.annual_cents:
+            bits.append("$%d/yr annual" % (plan.annual_cents // 100))
+        if not bits:
+            bits.append("quoted — book a call")
+
+        capacity = []
+        for dim in billing_catalog.capacity_for(plan):
+            if dim.get("unlimited"):
+                capacity.append("unlimited %s" % dim["label"].lower())
+            else:
+                capacity.append("%s %s%s" % (
+                    format(dim["value"], ","), dim["label"].lower(),
+                    " " + dim["unit"] if dim.get("unit") else ""))
+
+        line = "- %s: %s" % (plan.name, "; ".join(bits))
+        if capacity:
+            line += ". Includes %s" % ", ".join(capacity)
+        if plan.description:
+            line += ". %s" % plan.description.rstrip(".")
+        lines.append(line + ".")
+    lines.append("- Setup/implementation fees and add-ons (including AI Voice "
+                 "and Lead Scraper) are quoted separately; do not state an "
+                 "amount for them.")
 
     blurb = "\n".join(lines)
     _pricing_cache[platform_id] = (now, blurb)
