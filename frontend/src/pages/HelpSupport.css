@@ -1,0 +1,273 @@
+/* Help & Support.
+ *
+ * Everything colour-bearing goes through the CSS custom properties
+ * applyBrandingCSS() already sets (--accent, --signal-blue, --border-subtle,
+ * …), so this page themes itself with the rest of the app and a new brand
+ * needs no edit here. */
+
+.help-page { padding-bottom: 48px; }
+
+.help-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .help-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Ask ─────────────────────────────────────────────────────────────── */
+
+.help-chat { display: flex; flex-direction: column; min-height: 420px; }
+
+.help-chat__log {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.help-bubble {
+  max-width: 86%;
+  padding: 10px 13px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, .08));
+}
+
+.help-bubble p { margin: 0 0 8px; }
+.help-bubble p:last-child { margin-bottom: 0; }
+
+.help-bubble--assistant {
+  align-self: flex-start;
+  background: rgba(127, 127, 127, .08);
+}
+
+.help-bubble--user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--accent, #1d4ed8) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #1d4ed8) 40%, transparent);
+}
+
+.help-evidence {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, .08));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.help-evidence__row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12.5px;
+}
+
+.help-chat__composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, .08));
+}
+
+.help-chat__composer .help-input { flex: 1; }
+
+.help-checks { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
+.help-check { display: flex; gap: 10px; align-items: flex-start; }
+.help-check__label { font-weight: 600; font-size: 13px; }
+.help-check__headline { font-size: 12.5px; opacity: .8; }
+.help-raise { margin-top: 4px; }
+
+/* ── Forms ───────────────────────────────────────────────────────────── */
+
+.help-input {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, .12));
+  background: rgba(127, 127, 127, .06);
+  color: inherit;
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.help-input:focus {
+  outline: none;
+  border-color: var(--accent, #1d4ed8);
+}
+
+.help-textarea { resize: vertical; line-height: 1.5; }
+
+.help-form { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+
+.help-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.help-hint { font-size: 12px; opacity: .7; font-weight: 400; margin: 2px 0 0; }
+
+.help-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0 16px 14px;
+}
+
+.help-form .help-actions { padding: 0; }
+
+.help-file { cursor: pointer; }
+
+.help-search { display: flex; gap: 8px; padding: 12px 16px; }
+.help-search .help-input { flex: 1; }
+
+/* ── Tickets ─────────────────────────────────────────────────────────── */
+
+.help-row { cursor: pointer; }
+.help-row:hover { background: rgba(127, 127, 127, .06); }
+
+.help-detail__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 14px 16px;
+}
+
+.help-fact { display: flex; flex-direction: column; gap: 2px; }
+.help-fact__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  opacity: .6;
+  font-weight: 600;
+}
+.help-fact__value { font-size: 13.5px; }
+
+.help-sla { margin: 0 16px 12px; display: inline-block; }
+
+.help-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px 14px;
+}
+
+.help-msg {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, .08));
+  background: rgba(127, 127, 127, .05);
+}
+
+.help-msg--customer {
+  border-color: color-mix(in srgb, var(--accent, #1d4ed8) 35%, transparent);
+}
+
+.help-msg__who {
+  font-size: 11.5px;
+  opacity: .65;
+  margin-bottom: 5px;
+}
+
+.help-msg__body { font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
+
+.help-attachments {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0 16px 12px;
+}
+
+.help-reply { padding: 0 16px 4px; display: flex; flex-direction: column; gap: 8px; }
+
+/* ── Help centre ─────────────────────────────────────────────────────── */
+
+.help-article-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, .07));
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.help-article-row:hover { background: rgba(127, 127, 127, .06); }
+.help-article-row__title { font-weight: 600; font-size: 13.5px; }
+.help-article-row__summary { font-size: 12.5px; opacity: .72; }
+
+.help-article__body { padding: 4px 16px 12px; font-size: 14px; line-height: 1.65; }
+.help-article__body p { margin: 0 0 12px; white-space: pre-wrap; }
+
+/* ── Status ──────────────────────────────────────────────────────────── */
+
+.help-incident {
+  margin: 12px 16px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  border: 1px solid color-mix(in srgb, #f59e0b 45%, transparent);
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+}
+
+.help-service {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, .08));
+  background: rgba(127, 127, 127, .05);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.help-service__head { display: flex; justify-content: space-between; gap: 10px; }
+.help-service__name { font-weight: 600; font-size: 13.5px; }
+.help-service__headline { font-size: 12.5px; opacity: .8; line-height: 1.45; }
+.help-service__link { font-size: 12.5px; color: var(--accent, #1d4ed8); }
+
+/* ── Plan ────────────────────────────────────────────────────────────── */
+
+.help-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, .18);
+  overflow: hidden;
+  margin: 6px 0;
+}
+
+.help-meter__fill {
+  height: 100%;
+  background: var(--accent, #1d4ed8);
+  transition: width .25s ease;
+}
+
+.help-features { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+.help-offering {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, .07));
+}
+
+.help-offering__name { font-weight: 600; font-size: 13.5px; }

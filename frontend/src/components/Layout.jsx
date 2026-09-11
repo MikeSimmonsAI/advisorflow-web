@@ -118,6 +118,29 @@ const NAV_GROUPS = [
       { to: '/billing', label: 'Billing', icon: 'credit-card', capability: 'platform_billing' },
     ],
   },
+  // ── HELP & SUPPORT ────────────────────────────────────────────────────
+  //
+  // NO adminOnly, NO featureKey, NO capability, and each omission is a
+  // decision rather than an oversight:
+  //
+  //   adminOnly   the person who notices the product is broken is whoever
+  //               was using it. Routing them through their administrator is
+  //               how a fault takes two days to reach us.
+  //   featureKey  a customer whose plan is missing a flag must still be able
+  //               to tell us the product is not working. Support is not one
+  //               of the things a package switches off.
+  //   capability  nothing here administers infrastructure. Reading your own
+  //               ticket is not a privileged act.
+  //
+  // Its own group at the bottom of the rail, because it is where somebody
+  // looks when something has gone wrong rather than something they use as
+  // part of the day.
+  {
+    label: 'Help',
+    items: [
+      { to: '/help', label: 'Help & Support', icon: 'life-buoy' },
+    ],
+  },
 ]
 
 // Platform Admin — super admin only, always visible
@@ -157,6 +180,7 @@ function Icon({ name }) {
     database: <><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>,
     'credit-card': <><rect x="1" y="4" width="22" height="16" rx="2" ry="2" /><line x1="1" y1="10" x2="23" y2="10" /></>,
     search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
+    'life-buoy': <><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /><line x1="4.93" y1="4.93" x2="9.17" y2="9.17" /><line x1="14.83" y1="14.83" x2="19.07" y2="19.07" /><line x1="14.83" y1="9.17" x2="19.07" y2="4.93" /><line x1="4.93" y1="19.07" x2="9.17" y2="14.83" /></>,
     upload: <><polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" /></>,
   }
   return (

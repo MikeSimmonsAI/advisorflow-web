@@ -182,6 +182,19 @@ CAPABILITIES: Dict[str, Capability] = dict([
          why="Administrative housekeeping Ã¢â‚¬â€ archive batches, purge old staging "
              "data. Separate from commit so batch management does not require "
              "commit authority."),
+
+    # ── Support Intelligence ────────────────────────────────────────────────
+    _cap("support_console",
+         "Operate the support queue for a brand",
+         requires_feature=None, delegable=False,
+         why="A support operator reads other people's tickets, their "
+             "diagnostics and their account state - across every customer of "
+             "one brand. That is a control-plane power, not something a "
+             "customer organization can delegate to its own staff, so it is "
+             "granted at BRAND scope by God and never by an org admin. It "
+             "does NOT carry the authority to run a remediation that needs "
+             "approval: that stays with God, which is the whole point of the "
+             "approval class."),
 ])
 
 # ONE NAME PER PERMISSION.
@@ -379,7 +392,13 @@ def grants_for(db: Session, user_id: str, org_id: str) -> List[str]:
 
 # The capabilities that MEAN something at brand scope. Deliberately short: this
 # list is the promise that a grant written here is a grant something enforces.
-BRAND_SCOPED_CAPABILITIES = ("sales_comp_view", "sales_comp_manage")
+BRAND_SCOPED_CAPABILITIES = ("sales_comp_view", "sales_comp_manage",
+                             # Support operators work for a BRAND, not for a
+                             # customer: `users.organization_id` is NULL for
+                             # them, so a customer-org grant could not exist.
+                             # Brand scope is the only shape that can hold
+                             # this, and `support_authority.py` is what reads it.
+                             "support_console")
 
 
 def brand_grants_for(db: Session, user_id: str,

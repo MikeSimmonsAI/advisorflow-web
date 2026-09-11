@@ -220,6 +220,19 @@ const NAV = [
     hint: 'Agent mappings, version pins, attempt policy, test calls' },
   { label: 'Maintenance Ops',    path: '/god/maintenance',           icon: 'tool',
     hint: 'Booking cleanup (dry-run), phone audit — silent, no SMS/email sent' },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // SUPPORT
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // Its own group rather than an entry under DIAGNOSTICS, because it is not
+  // a diagnostic: it is the queue, the fixer, the incident view and the
+  // brief. A diagnostic tells you what is wrong with one thing; this is
+  // where a person decides what to do about all of it.
+  { group: 'SUPPORT' },
+  { label: 'Support',            path: '/god/support',               icon: 'message',
+    hint: 'Every brand’s queue, what the platform repaired by itself, '
+        + 'cross-brand incidents, and the daily brief' },
 ]
 
 function LiveClock() {

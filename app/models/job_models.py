@@ -27,6 +27,13 @@ class JobName:
     CADENCE_LOOP      = "cadence_loop"
     AI_CONVERSATION   = "ai_conversation_loop"
     REVIEW_REQUEST    = "review_request_loop"
+    # Support Intelligence's nightly pass: refresh SLA states, correlate
+    # incidents across brands, scan for recurring-issue candidates, write the
+    # daily briefs. Named here rather than left anonymous for the reason the
+    # email poller comment below records — a loop with no constant is a loop
+    # nothing can report on, and the first anyone knows it stopped is a brief
+    # that quietly never appeared.
+    SUPPORT_INTELLIGENCE = "support_intelligence_loop"
 
     # Render cron SERVICES. Separate names on purpose, even where the work
     # overlaps a loop above: cadence runs hourly in the web dyno AND daily as a
@@ -53,6 +60,7 @@ LOOP_JOB_NAMES = (
     JobName.CADENCE_LOOP,
     JobName.AI_CONVERSATION,
     JobName.REVIEW_REQUEST,
+    JobName.SUPPORT_INTELLIGENCE,
 )
 
 ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES

@@ -492,8 +492,19 @@ def test_the_grant_screen_lists_members_and_anybody_already_granted(
     assert by_id[finance.id]["capabilities"] == ["sales_comp_manage"]
     assert by_id[finance.id]["is_brand_member"] is False
     assert by_id[a["manager"].id]["is_brand_member"] is True
+    # THE LIST IS DELIBERATELY SHORT, and this assertion is what keeps it
+    # short: a capability may only appear here once something actually READS
+    # it at brand scope, or the screen would show an administrator as
+    # authorised while every request they made was denied.
+    #
+    # `support_console` was added with Support Intelligence and is read by
+    # `support_authority.visible_platform_ids`, which resolves a brand grant
+    # to the platform ids the God support console filters on. A support
+    # operator works for a BRAND and has organization_id = NULL, so brand
+    # scope is the only shape that can hold this grant — the same reason the
+    # compensation capabilities are here.
     assert {c["key"] for c in d["available_capabilities"]} == {
-        "sales_comp_view", "sales_comp_manage"}
+        "sales_comp_view", "sales_comp_manage", "support_console"}
 
 
 def test_granting_is_audited_with_the_scope_it_applied_to(db_session, a, god):
