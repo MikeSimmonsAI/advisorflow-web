@@ -385,6 +385,22 @@ def _plan_public(plan) -> dict:
         "max_users": plan.max_users,
         "features": billing_catalog.features_for(plan),
         "is_purchasable": bool(plan.is_purchasable),
+        # WHICH COMMITMENTS THIS TIER CAN ACTUALLY BE SOLD ON, resolved here so
+        # the screen offers only what exists. FAIL CLOSED: a commitment with no
+        # configured price is absent from this list, the control for it is
+        # disabled, and `require_purchasable` refuses it server-side anyway.
+        # Neither side ever substitutes the other rate.
+        "commitments": [
+            {
+                "key": c,
+                "label": billing_catalog.commitment_label(c),
+                "monthly_cents": billing_catalog.price_cents_for(
+                    plan, BillingInterval.MONTH, c),
+            }
+            for c in BillingCommitment.ALL
+            if billing_catalog.price_cents_for(plan, BillingInterval.MONTH, c)
+            is not None
+        ],
     }
 
 
@@ -394,10 +410,10 @@ def _plan_public(plan) -> dict:
 class CheckoutRequest(BaseModel):
     plan: str
     interval: str = "month"  # month | year
-    # WHICH RATE THEY ARE BUYING. See the note in create_checkout: omitted
-    # resolves to the committed-term rate, which is what this endpoint has
-    # always done, and which is a live commercial question rather than a
-    # settled one.
+    # WHICH RATE THEY ARE BUYING — REQUIRED IN PRACTICE for a monthly plan.
+    # Typed Optional so the refusal can be a sentence the customer can act on
+    # rather than a Pydantic validation blob, but there is no default: see
+    # create_checkout. A missing commitment is refused, never resolved.
     commitment: Optional[str] = None
 
 
@@ -441,31 +457,13 @@ def create_checkout(
             status_code=409,
             detail="This organization is not attached to a brand, so no plan "
                    "catalogue applies. Contact support.")
-    #
-    # ⚠ WHICH COMMITMENT A SELF-SERVE PURCHASE GETS IS AN OPEN COMMERCIAL
-    #   QUESTION, DELIBERATELY LEFT AS IT WAS.
-    #
-    #   Omitting `commitment` resolves to the committed-term rate — the LOWER
-    #   of the two, earned by agreeing to a term. So a customer clicking a plan
-    #   card today buys the discounted rate and, implicitly, the commitment
-    #   behind it, without ever being shown a term to accept.
-    #
-    #   That is not a bug this endpoint may quietly fix. Defaulting the other
-    #   way would raise every self-serve price by the term discount, and no
-    #   brand configuration exists that says which is intended —
-    #   `PricingPolicy.min_term_months` governs what a SELLER may negotiate,
-    #   not what self-serve sells. Inventing an answer here would be inventing
-    #   commercial policy. The parameter is plumbed through so the choice can
-    #   be made explicitly and shown to the customer; the DEFAULT is unchanged
-    #   and is flagged for a decision.
-    commitment = req.commitment
-    try:
-        plan = billing_catalog.require_purchasable(
-            db, platform_id, req.plan, req.interval, commitment)
-    except billing_catalog.PlanNotAvailable as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
     # ── Refuse a second primary subscription ─────────────────────────────
+    #
+    # FIRST, before anything about what they are trying to buy. "You already
+    # have a subscription" is true regardless of plan, interval or commitment,
+    # and answering a different question first — asking somebody to choose
+    # terms for a purchase that cannot happen — is a worse error message than
+    # the real one.
     existing_status = (getattr(org, "billing_status", None) or "").lower()
     if getattr(org, "stripe_subscription_id", None) and existing_status in SubscriptionStatus.OCCUPIED:
         raise HTTPException(
@@ -473,6 +471,40 @@ def create_checkout(
             detail="This organization already has a subscription. Use "
                    "'change plan' to move between plans - starting a second "
                    "checkout would bill you twice.")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # THE CUSTOMER CHOOSES THE COMMITMENT. THIS ENDPOINT NEVER CHOOSES FOR
+    # THEM.
+    # ══════════════════════════════════════════════════════════════════════
+    #
+    # A monthly tier is sold at two rates: a committed-term rate, which is
+    # LOWER because it is earned by promising a term, and a month-to-month
+    # rate. Both are the `month` interval, so the interval cannot say which was
+    # bought — and this endpoint used to resolve a missing commitment through
+    # `price_cents_for`'s default, which is the term rate.
+    #
+    # That meant a customer clicking a plan card bought the discount AND the
+    # multi-month obligation behind it, having never been shown a term to
+    # accept. A commitment is a promise; a promise that nobody was asked to
+    # make is not a promise, it is a default nobody noticed.
+    #
+    # So it is REFUSED rather than resolved. The refusal names the choices, so
+    # the screen can render them and the customer can answer. Fail closed is
+    # the right failure here: the cost of refusing is one extra click, and the
+    # cost of guessing is a contract.
+    commitment = req.commitment
+    if not commitment and req.interval == BillingInterval.MONTH:
+        raise HTTPException(
+            status_code=400,
+            detail="Choose a billing commitment before checking out. A "
+                   "committed term is billed at the lower rate and runs for "
+                   "the agreed term; month-to-month has no commitment and is "
+                   "billed at the standard rate.")
+    try:
+        plan = billing_catalog.require_purchasable(
+            db, platform_id, req.plan, req.interval, commitment)
+    except billing_catalog.PlanNotAvailable as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     _stripe_client()
     customer_id = _get_or_create_customer(org, db)

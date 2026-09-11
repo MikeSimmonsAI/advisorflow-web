@@ -255,6 +255,11 @@ def test_a_browser_supplied_amount_is_ignored_and_the_catalogue_decides(
     with patch.object(stripe.checkout.Session, "create", created):
         response = client.post("/billing/checkout", json={
             "plan": "starter", "interval": "month",
+            # The commitment is now REQUIRED — a checkout that names none is
+            # refused rather than quietly sold a term. `_plan` configures only
+            # the committed-term rate, so that is the one to ask for; asking
+            # for month-to-month here would be correctly refused as unpriced.
+            "commitment": "term_agreement",
             # Everything below is a client trying to price its own subscription.
             "price": 1, "amount": 1, "unit_amount": 1, "monthly_cents": 1,
             "stripe_price_id": "price_attacker_owned",
@@ -284,6 +289,7 @@ def test_a_client_supplied_stripe_price_id_is_never_used(
     with patch.object(stripe.checkout.Session, "create", created):
         response = client.post("/billing/checkout", json={
             "plan": "mapped", "interval": "month",
+            "commitment": "term_agreement",
             "price": "price_attacker_owned",
             "stripe_price_id_monthly": "price_attacker_owned"},
             headers=headers)
@@ -324,7 +330,8 @@ def test_no_trial_is_given_away_when_no_trial_policy_is_configured(
     org = _org(db_session, brand)
     created = MagicMock(return_value=_checkout_session())
     with patch.object(stripe.checkout.Session, "create", created):
-        client.post("/billing/checkout", json={"plan": "starter"},
+        client.post("/billing/checkout",
+                    json={"plan": "starter", "commitment": "term_agreement"},
                     headers=_admin_headers(db_session, org))
     assert "trial_period_days" not in created.call_args.kwargs["subscription_data"]
 
@@ -393,9 +400,49 @@ def test_a_finished_subscription_does_not_block_a_new_one(
                billing_status=status, billing_plan_key="starter")
     created = MagicMock(return_value=_checkout_session())
     with patch.object(stripe.checkout.Session, "create", created):
-        response = client.post("/billing/checkout", json={"plan": "growth"},
-                               headers=_admin_headers(db_session, org))
+        response = client.post(
+            "/billing/checkout",
+            json={"plan": "growth", "commitment": "term_agreement"},
+            headers=_admin_headers(db_session, org))
     assert response.status_code == 200
+
+
+def test_a_monthly_checkout_without_a_commitment_is_refused_over_http(
+        client, db_session, brand):
+    """END TO END, because this is a behaviour change with a real cost.
+
+    A monthly tier has two rates and the lower one is a term agreement. This
+    endpoint used to resolve a missing commitment to that lower rate, selling
+    a multi-month obligation to somebody who had only clicked a price. It now
+    refuses, and Stripe is never called.
+    """
+    org = _org(db_session, brand)
+    created = MagicMock(return_value=_checkout_session())
+
+    with patch.object(stripe.checkout.Session, "create", created):
+        response = client.post("/billing/checkout", json={"plan": "starter"},
+                               headers=_admin_headers(db_session, org))
+
+    assert response.status_code == 400
+    detail = response.json()["detail"].lower()
+    assert "commitment" in detail
+    assert created.call_count == 0, (
+        "nothing may reach Stripe on a checkout that was refused")
+
+
+def test_the_duplicate_guard_answers_before_the_commitment_question(
+        client, db_session, brand):
+    """"You already have a subscription" is true whatever they chose, so it is
+    the refusal that must come first. Asking somebody to pick terms for a
+    purchase that cannot happen is a worse message than the real one."""
+    org = _org(db_session, brand, stripe_subscription_id="sub_live",
+               billing_status="active", billing_plan_key="starter")
+
+    response = client.post("/billing/checkout", json={"plan": "growth"},
+                           headers=_admin_headers(db_session, org))
+
+    assert response.status_code == 409
+    assert "twice" in response.json()["detail"]
 
 
 def test_the_duplicate_guard_needs_both_a_subscription_id_and_a_live_status(
@@ -405,8 +452,10 @@ def test_the_duplicate_guard_needs_both_a_subscription_id_and_a_live_status(
                billing_status="active")
     created = MagicMock(return_value=_checkout_session())
     with patch.object(stripe.checkout.Session, "create", created):
-        response = client.post("/billing/checkout", json={"plan": "starter"},
-                               headers=_admin_headers(db_session, org))
+        response = client.post(
+            "/billing/checkout",
+            json={"plan": "starter", "commitment": "term_agreement"},
+            headers=_admin_headers(db_session, org))
     assert response.status_code == 200
 
 
