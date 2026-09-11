@@ -30,6 +30,7 @@ from app.services import customer_provisioning as cp
 from app.services import customer_readiness as cr
 from app.services import entitlements
 from app.services import capabilities
+from app.services import industry_templates
 from app.services import platform_owner as po
 from app.services import staff_activation as _activation
 from app.models.staff_models import PURPOSE_SETUP as _PURPOSE_SETUP
@@ -150,7 +151,12 @@ class CustomerCreate(BaseModel):
     platform_id: str
     slug: Optional[str] = None
     legal_name: Optional[str] = None
-    industry: str = "funeral"
+    # NEUTRAL, NOT A VERTICAL. This defaulted to "funeral", so an operator who
+    # did not state a business type created an energy company, a roofer or a
+    # dental practice that the whole platform then treated as a funeral home —
+    # at-need vocabulary in their tiers, arrangement conferences in their
+    # calendar. An unstated industry is unstated; it is never somebody else's.
+    industry: str = industry_templates.GENERIC_KEY
     plan: str = "trial"
     timezone: str = "America/Chicago"
     phone: Optional[str] = None
@@ -168,10 +174,31 @@ def create_customer(req: CustomerCreate, db: Session = Depends(get_db),
         primary_location=(req.primary_location.model_dump()
                           if req.primary_location else None),
     )
+
+    # A CUSTOMER WHO EXISTS IS A CUSTOMER WITH A LAUNCH.
+    #
+    # Creating the organization used to be the whole of it, and the launch
+    # record came only from the Won → Provision path — so a customer created
+    # here could never be onboarded, never appeared in Customer Launches, and
+    # could not be previewed. The gap was invisible precisely because the
+    # customer was.
+    #
+    # This creates the checklist and nothing else: no user, no invitation, no
+    # message, no billing, no sample data, no progress. Inviting their people
+    # stays a separate authorized act. Same transaction as the organization,
+    # so a customer can never be half-created.
+    from app.services import implementation_service as impl_svc
+    started = impl_svc.start_for_organization(
+        db, org, user,
+        reason="Created through customer provisioning", commit=False)
+
     db.commit()
     db.refresh(org)
     return {"customer": _brief(db, org),
-            "primary_location": None if loc is None else cp.location_row(db, loc)}
+            "primary_location": None if loc is None else cp.location_row(db, loc),
+            "launch": {"implementation_id": started["implementation"].id,
+                       "created": started["created"],
+                       "invitation_sent": False}}
 
 
 @router.get("/{org_id}")

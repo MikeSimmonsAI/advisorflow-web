@@ -97,7 +97,7 @@ IMPLEMENTATION_OPEN_STATUSES = tuple(
 
 
 class Implementation(Base):
-    """One provisioned customer, from Won to Live.
+    """One customer's launch, from first day to Live.
 
     UNIQUE ON BOTH SIDES. `opportunity_id` and `organization_id` each carry a
     unique constraint, which is what makes provisioning idempotent at the
@@ -105,16 +105,49 @@ class Implementation(Base):
     cannot produce two customer organizations for one deal, because the second
     insert cannot commit. The service checks first and returns the original;
     the constraint is what makes that check trustworthy under a race.
+
+    NOT EVERY CUSTOMER CAME FROM A DEAL, AND THIS ROW USED TO INSIST THEY DID.
+    ========================================================================
+    `opportunity_id` was NOT NULL, on the reasoning that "an implementation
+    without a source deal is not a handoff". That reasoning described the
+    sales-to-delivery crossing correctly and then, by being a database
+    constraint, quietly became the platform's definition of a customer.
+
+    It is not. Customers are also provisioned directly by an operator, and
+    migrated tenants predate the pipeline entirely. For those, the constraint
+    did not record a missing fact — it made the fact unrecordable. A customer
+    created any way but Won → Provision could never hold a launch record, so
+    they never appeared in Customer Launches, could not be onboarded, and could
+    not be previewed. The control plane had already noticed the shape of this:
+    god_operations counts `customer_organizations_without_implementation`,
+    because "pretending every customer came from an opportunity is how a
+    control plane starts lying to its owner". Those customers were counted and
+    then locked out.
+
+    So the column is nullable, and NULL says exactly one thing: THIS CUSTOMER
+    DID NOT COME FROM A DEAL IN THIS PIPELINE. It is never a placeholder for a
+    deal somebody forgot to link, and nothing invents one to satisfy a foreign
+    key — a synthetic opportunity is a fake sale sitting in the pipeline,
+    counted in Won metrics, attributed to a rep who sold nothing.
+
+    The unique constraint is unaffected: SQL unique indexes permit many NULLs,
+    so one deal still maps to at most one implementation. The one query that
+    asks the inverse question — which Won deals are still awaiting provisioning
+    — already excludes NULLs explicitly, because `id NOT IN (… NULL …)` matches
+    nothing in SQL; every other reader loads the opportunity defensively and
+    handles its absence.
     """
     __tablename__ = "implementations"
 
     id = Column(String, primary_key=True, default=gen_uuid)
 
     # ── the crossing ──
-    # Both NOT NULL: an implementation without a source deal is not a handoff,
-    # and one without a customer is not an implementation.
+    # The CUSTOMER is required: one without a customer is not an
+    # implementation. The DEAL is not — see the class docstring. NULL means
+    # this customer did not come from a deal in this pipeline, which is a fact
+    # about them rather than a gap in the record.
     opportunity_id = Column(String, ForeignKey("opportunities.id"),
-                            nullable=False, unique=True, index=True)
+                            nullable=True, unique=True, index=True)
     organization_id = Column(String, ForeignKey("organizations.id"),
                              nullable=False, unique=True, index=True)
     # Denormalised so a god-level list can filter by brand without joining

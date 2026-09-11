@@ -157,6 +157,29 @@ export default function GodLaunches() {
     } finally { setBusy(false) }
   }
 
+  // START ONBOARDING FOR A CUSTOMER WHO HAS NO LAUNCH RECORD.
+  //
+  // These rows exist because the list now shows customers that have never
+  // been started, instead of omitting them — which is how a real customer sat
+  // in production invisible to the one screen that reports who has not been
+  // onboarded.
+  //
+  // This creates the checklist and nothing else. It does NOT invite the
+  // customer: their people are invited by a separate authorized action, and
+  // keeping those apart is what makes it safe to start a launch internally
+  // before anyone outside the company has been contacted.
+  const startLaunch = async orgId => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.post('/god/launch/' + orgId + '/start',
+                     { reason: 'Started from Customer Launches' })
+      load()
+    } catch (e) {
+      setError(e?.detail || 'Could not start onboarding for this customer.')
+    } finally { setBusy(false) }
+  }
+
   const brands = useMemo(() => {
     const set = new Map()
     for (const r of rows) if (r.brand_name) set.set(r.brand_name, true)
@@ -320,6 +343,23 @@ export default function GodLaunches() {
                         total={r.implementation_total} pct={r.implementation_pct} />
 
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {/* A CUSTOMER WITH NO LAUNCH GETS THE ACTION THAT FIXES THAT,
+                    not a Review button that opens an empty record. There is
+                    nothing to review yet — nobody has started them. */}
+                {r.launch_started === false ? (
+                  <button onClick={() => startLaunch(r.organization_id)}
+                          disabled={busy}
+                          title="Creates their onboarding checklist. Sends nothing and invites nobody."
+                          style={{
+                            fontSize: 12, padding: '7px 14px', borderRadius: 8,
+                            border: '1px solid var(--gm-teal)',
+                            background: 'var(--gm-pill-teal-bg)',
+                            color: 'var(--gm-teal)', fontWeight: 700,
+                            cursor: busy ? 'default' : 'pointer',
+                            opacity: busy ? 0.6 : 1 }}>
+                    Start onboarding
+                  </button>
+                ) : (
                 <button onClick={() => (isOpen ? setDetail(null) : open(r.organization_id))}
                         style={{
                           fontSize: 12, padding: '7px 14px', borderRadius: 8,
@@ -328,6 +368,7 @@ export default function GodLaunches() {
                           color: 'var(--god-text, var(--gm-blue))', fontWeight: 600 }}>
                   {isOpen ? 'Close' : 'Review'}
                 </button>
+                )}
                 {/* SEE IT BEFORE THEY DO.
                     "Review" reads the customer's answers; this opens the
                     customer's own onboarding experience exactly as they will
@@ -345,6 +386,7 @@ export default function GodLaunches() {
                     is composed by the same read-only function behind the
                     customer's own page, and the only thing it writes is the
                     audit note that somebody looked. */}
+                {r.launch_started === false ? null : (
                 <a href={'/launch/preview/' + encodeURIComponent(r.organization_id)}
                    target="_blank" rel="noopener noreferrer"
                    style={{
@@ -355,6 +397,7 @@ export default function GodLaunches() {
                      textDecoration: 'none', whiteSpace: 'nowrap' }}>
                   Preview their onboarding
                 </a>
+                )}
               </div>
             </div>
 

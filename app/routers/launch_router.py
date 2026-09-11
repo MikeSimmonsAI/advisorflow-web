@@ -575,9 +575,119 @@ def staff_list(db: Session = Depends(get_db),
                            if sub and sub.reviewed_at else None,
             "blockers": blockers,
             "warnings": warnings,
+            # This customer HAS a launch. The rows appended below do not, and
+            # the flag is what lets one screen show both honestly.
+            "launch_started": True,
         })
-    out.sort(key=lambda r: (r["intake_state"] != "submitted", r["organization_name"] or ""))
-    return {"launches": out, "total": len(out)}
+
+    # ── THE CUSTOMERS WITH NO LAUNCH AT ALL ─────────────────────────────────
+    #
+    # The same principle as the docstring, one level up. This list was built
+    # from implementations, so a customer who had never been given one was not
+    # shown as "not started" — they were not shown at all. That is how a real
+    # customer sat in production, invisible to the screen whose entire job is
+    # to say who has not been onboarded, while the operator reasonably
+    # concluded the customer did not exist.
+    #
+    # They cannot be omitted and they cannot be faked into looking started, so
+    # they appear with every progress figure at zero, `launch_started: False`,
+    # and a blocker saying what is actually true: nobody has begun.
+    launched_org_ids = {i.organization_id for i in impls}
+    unlaunched = (db.query(Organization)
+                  .filter(Organization.is_active.is_(True))
+                  .order_by(Organization.name).all())
+    missing_plat_ids = {o.platform_id for o in unlaunched
+                        if o.platform_id and o.platform_id not in plat_names}
+    if missing_plat_ids:
+        for p in db.query(Platform).filter(Platform.id.in_(missing_plat_ids)).all():
+            plat_names[p.id] = p.name
+
+    for org in unlaunched:
+        if org.id in launched_org_ids:
+            continue
+        out.append({
+            "implementation_id": None,
+            "organization_id": org.id,
+            "organization_name": org.name,
+            "platform_id": org.platform_id,
+            "brand_name": plat_names.get(org.platform_id),
+            "implementation_status": None,
+            "implementation_owner_id": None,
+
+            "intake_state": "not_started",
+            "intake_pct": 0, "intake_complete_steps": 0,
+            "intake_total_steps": len(launch_intake.STEP_SCHEMA),
+            "overall_pct": 0, "complete_steps": 0,
+            "total_steps": len(launch_intake.STEP_SCHEMA),
+
+            "implementation_pct": 0, "implementation_settled": 0,
+            "implementation_total": 0, "implementation_required_open": [],
+
+            "file_count": 0,
+            "target_launch_date": None,
+            "submitted_at": None, "reviewed_at": None,
+            "blockers": ["Onboarding has not been started for this customer"],
+            "warnings": [],
+            "launch_started": False,
+        })
+
+    # Not-yet-started customers sort last within their group rather than
+    # first: the operator's queue is led by somebody waiting on them, not by a
+    # customer nobody has begun. They are visible, which was the bug.
+    out.sort(key=lambda r: (r["intake_state"] != "submitted",
+                            not r["launch_started"],
+                            r["organization_name"] or ""))
+    return {
+        "launches": out,
+        "total": len(out),
+        "not_started_count": sum(1 for r in out if not r["launch_started"]),
+    }
+
+
+class StartLaunchBody(BaseModel):
+    reason: Optional[str] = None
+
+
+@god_router.post("/{organization_id}/start")
+def staff_start_launch(organization_id: str, body: StartLaunchBody,
+                       db: Session = Depends(get_db),
+                       actor: User = Depends(require_god)) -> dict:
+    """Begin onboarding for a customer who already exists.
+
+    The other door into the Launch Engine — see
+    `implementation_service.start_for_organization`. Until this existed, the
+    only way to hold a launch record was to have been converted from a Won
+    opportunity, so a customer provisioned directly by an operator could never
+    be onboarded.
+
+    IT CREATES A CHECKLIST AND NOTHING ELSE. No user, no invitation, no
+    message, no billing, no sample data, and not one milestone marked done. It
+    is explicitly NOT an invitation: inviting the customer's people remains a
+    separate, authorized act, and it stays that way precisely so that starting
+    a launch internally can never put a stranger's address into a send queue.
+
+    Idempotent: a customer who already has one gets theirs back untouched, so a
+    second click cannot reset somebody who is halfway through their intake.
+    """
+    from app.services import implementation_service as impl_svc
+
+    # 404s on anything outside the actor's scope, so this cannot enumerate.
+    org = load_org_in_scope(db, actor, organization_id)
+    result = impl_svc.start_for_organization(db, org, actor,
+                                             reason=body.reason)
+    impl = result["implementation"]
+    return {
+        "created": result["created"],
+        "implementation_id": impl.id,
+        "organization_id": org.id,
+        "organization_name": org.name,
+        "status": impl.status,
+        # Said out loud in the response, not just in the audit entry, so the
+        # screen can tell the operator what did not happen.
+        "invitation_sent": False,
+        "billing_configured": False,
+        "data_seeded": False,
+    }
 
 
 @god_router.get("/{organization_id}")
