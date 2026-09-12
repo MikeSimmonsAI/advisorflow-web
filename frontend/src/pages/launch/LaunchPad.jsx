@@ -5,7 +5,7 @@
  * WHAT THIS IS
  * ===========================================================================
  *
- *     ADVISORFLOW            the platform capability
+ *     THE PLATFORM           the underlying capability
  *          |
  *     LAUNCH ENGINE          onboarding, owned by the platform
  *          |
@@ -13,10 +13,17 @@
  *          |
  *     CUSTOMER ORGANIZATION  the customer being onboarded
  *
- * The customer sees the BRAND. AdvisorFlow powers this and is credited once,
- * in the rail footer. Nothing in this component knows any brand's or
- * customer's name — both arrive from GET /launch/me, which reads them from the
- * Platform and Organization rows behind the signed-in session.
+ * THE CUSTOMER SEES THE TOP TWO LAYERS AND NOT THE BOTTOM ONE. Their own name
+ * leads; the brand that delivers the implementation is named under it and once
+ * in the footer. The platform underneath is the BRAND's business relationship,
+ * not the customer's, and V2 removed its name from this surface entirely — a
+ * customer reading the name of a company they have never contracted with, in
+ * their own portal, is the white-label leak this engine exists to prevent.
+ * There is a test that fails if the name comes back.
+ *
+ * Nothing in this component knows any brand's or customer's name — both arrive
+ * from GET /launch/me, which reads them from the Platform and Organization
+ * rows behind the signed-in session.
  *
  * ===========================================================================
  * WHERE THE DATA COMES FROM, AND WHY NOT FROM HERE
@@ -362,17 +369,35 @@ export default function LaunchPad() {
     : reviewed ? 'reviewed'
       : overall > 0 ? 'in_progress' : 'not_started'
 
+  // THE SECTION COUNT, COUNTED THE ONE WAY. `pct` per step is the server's,
+  // computed from required fields actually answered, so a section is complete
+  // here for exactly the reason it is complete in the progress rail and in the
+  // hero — there is no second arithmetic anywhere on this surface.
+  const sectionsComplete = steps.filter(s => s.pct >= 100).length
+
+  // WHAT THE TOP BAR SAYS ABOUT SAVING, and only what is true. "No changes
+  // yet" is a statement about this section having never been written, not a
+  // promise that anything was; a preview says plainly that it never will be.
+  const saveState = preview ? 'Preview — nothing is saved'
+    : saving ? 'Saving…'
+      : saveErr ? 'Not saved'
+        : stepMeta?.updated_at
+          ? 'Saved ' + new Date(stepMeta.updated_at).toLocaleTimeString()
+          : 'No changes yet'
+
   return (
     <div className="lp-scope" data-surface="launch">
       <LaunchStyles />
       {preview ? <PreviewBanner context={launch.preview_context} /> : null}
       <div className="lp-shell">
-        <LaunchSidebar brand={brand} active="onboarding" open={railOpen}
-          presentation={presentation}
+        <LaunchSidebar brand={brand} customer={customer} active="onboarding"
+          open={railOpen} presentation={presentation}
+          sectionsComplete={sectionsComplete} sectionsTotal={steps.length}
           onToggle={() => setRailOpen(o => !o)} onSelect={() => setRailOpen(false)} />
 
         <div className="lp-body">
-          <LaunchHeader brand={brand} customer={customer} preview={preview} />
+          <LaunchHeader brand={brand} customer={customer} preview={preview}
+                        section={step.title} saveState={saveState} />
 
           {/* WHAT HAPPENS NEXT, not just that something happened. A locked
               form with no explanation reads as a bug; a locked form that says
@@ -407,13 +432,17 @@ export default function LaunchPad() {
             <LaunchHero brand={brand} customer={customer}
                         implementation={launch.implementation}
                         state={intakeStatusKey}
-                        presentation={presentation} />
+                        presentation={presentation}
+                        progress={{ pct: overall,
+                                    sectionsComplete,
+                                    sectionsTotal: steps.length }} />
             {/* The configured journey when the customer's experience resolves
                 one; the platform lifecycle otherwise. Same states either way. */}
             <LaunchProgress phases={journey || launch.lifecycle}
                             title={presentation.journey_title}
                             currentStatus={launch.implementation?.status}
                             intakePct={overall}
+                            brandName={brand.name}
                             openKey={openStage}
                             onSelect={setOpenStage} />
 
@@ -433,6 +462,7 @@ export default function LaunchPad() {
                   onContinue={next ? () => saveAndGo(next.key) : null}
                   continueLabel="Save & Continue"
                   preview={preview}
+                  brandName={brand.name}
                 >
                   <StepBody
                     v={answers}
@@ -467,6 +497,7 @@ export default function LaunchPad() {
                     brochure once a launch is under way. It renders nothing at
                     all until there is a programme to report. */}
                 <DeliveryPanel brand={brand}
+                               implementation={launch.implementation}
                                data={preview ? (launch.delivery ?? null) : null}
                                readOnly={preview} />
 
@@ -487,7 +518,8 @@ export default function LaunchPad() {
             </div>
           </main>
 
-          <LaunchFooter brand={brand} presentation={presentation} />
+          <LaunchFooter brand={brand} customer={customer}
+                        presentation={presentation} />
         </div>
       </div>
 

@@ -21,6 +21,21 @@
  * accidentally rearrange the page by editing a settings row.
  *
  * ===========================================================================
+ * V2: THE STATUS PANEL, AND WHY IT IS THE ONLY ASSERTION ON THE SCREEN
+ * ===========================================================================
+ *
+ * Everything to the left of the panel describes; the panel ASSERTS. It carries
+ * the launch state, the percentage and the section count, and all three come
+ * from the server's intake overview, which counts required fields actually
+ * answered. A customer who has clicked through every stage and typed nothing
+ * reads NOT STARTED and 0%, because that is what is true.
+ *
+ * Nothing in the configuration can move those numbers — the presentation
+ * layer supplies the words around them and the composer supplies the values —
+ * which is the property that lets an operator show this screen to a customer
+ * and stand behind what it says.
+ *
+ * ===========================================================================
  * TWO EARLIER BUGS, KEPT FIXED
  * ===========================================================================
  *
@@ -45,7 +60,7 @@ function dateLabel(iso) {
 }
 
 export default function LaunchHero({ brand, customer, implementation, state,
-                                     presentation = {} }) {
+                                     presentation = {}, progress = null }) {
   const golive = dateLabel(implementation && implementation.target_launch_date)
   const st = intakeState(state)
 
@@ -54,6 +69,14 @@ export default function LaunchHero({ brand, customer, implementation, state,
   const heroImage = p.hero_image_url || null
   const heroLogo = p.hero_logo_url || customer.logoUrl || null
   const tagline = p.customer_tagline || null
+
+  // The three numbers, defaulted to the honest zero rather than to nothing:
+  // a panel with a blank where the percentage goes reads as broken, and a
+  // panel that hides itself at 0% hides the state a new customer is actually
+  // in.
+  const pct = Math.max(0, Math.min(100, Number((progress || {}).pct) || 0))
+  const done = Number((progress || {}).sectionsComplete) || 0
+  const total = Number((progress || {}).sectionsTotal) || 0
 
   const cls = 'lp-hero'
     + (heroImage ? ' lp-hero--media' : '')
@@ -71,41 +94,62 @@ export default function LaunchHero({ brand, customer, implementation, state,
       <div className="lp-hero-in">
         <div className="lp-hero-top">
           <div className="lp-hero-id">
-            {heroImage ? null : <Mark src={heroLogo} label={customer.name} size="l" />}
+            <Mark src={heroLogo} label={customer.name} size="l" />
             <div className="lp-hero-words">
-              <p className="lp-eyebrow">
-                {p.eyebrow || ('Welcome to ' + brand.name)}
-              </p>
+              <p className="lp-eyebrow">{p.eyebrow || 'Client Onboarding & Launch'}</p>
               <h1>{title}</h1>
-              {p.subtitle ? <p className="lp-h2">{p.subtitle}</p> : null}
-              {p.intro ? <p className="lp-hero-intro">{p.intro}</p> : null}
+              {/* THE PROVIDER, NAMED UNDER THE CUSTOMER. This is the whole
+                  hierarchy of the page in one line: it is their portal, and
+                  the brand delivers it. */}
+              <p className="lp-h2">
+                {p.subtitle || 'Your launch portal'}
+                <span className="lp-poweredby"> · Delivered by {brand.name}</span>
+              </p>
+              {p.intro ? <p className="lp-hero-intro">{p.intro}</p> : (
+                <p className="lp-hero-intro">
+                  Everything you enter here tells {brand.name} what to build for
+                  you — your workspace, your connected systems, the testing and
+                  the training — and then we take you live. Work through it in
+                  any order and save as you go; nothing is final until you
+                  submit it.
+                </p>
+              )}
+              {tagline && !heroImage
+                ? <p className="lp-hero-quote">{tagline}</p> : null}
             </div>
           </div>
 
-          {/* The customer's own mark, at hero scale, over their own image.
-              Only when there is an image to put it on — floating a logo over
-              flat navy looks like a placeholder, because it is one. */}
-          {heroImage && heroLogo ? (
-            <div className="lp-hero-art">
-              <img src={heroLogo} alt={customer.name} />
-              {tagline ? <p className="lp-hero-quote">{tagline}</p> : null}
+          {/* WHERE THE LAUNCH ACTUALLY STANDS. Configured words, composed
+              numbers; see the header for why the two are kept apart. */}
+          <aside className="lp-hero-stat">
+            <p className="lp-hs-lab">Launch status</p>
+            <span className="lp-chip">{st.label}</span>
+            <div className="lp-hs-pctrow">
+              <b className="lp-hs-pct">{pct}%</b>
+              <span className="lp-hs-pcts">
+                complete{total ? ` · ${done} of ${total} sections` : ''}
+              </span>
             </div>
-          ) : null}
+            <div className="lp-hs-bar"><i style={{ width: pct + '%' }} /></div>
+            <p className="lp-hs-next">
+              <b>What happens next</b>
+              {st.customer}{' '}
+              {golive
+                ? `Your target launch date is ${golive}.`
+                : `${brand.name} begins the build once your onboarding is `
+                  + 'submitted and reviewed.'}
+            </p>
+          </aside>
         </div>
 
-        <div className="lp-hero-chips">
-          <span className="lp-chip">{st.label}</span>
-          {golive ? <span className="lp-chip blue">Target launch · {golive}</span> : null}
-          <span className="lp-poweredby">Delivered by {brand.name}</span>
-        </div>
-
-        {!p.intro ? (
-          <p className="lp-hero-intro">
-            {st.customer} This short guided process collects what {brand.name}
-            {' '}needs to build, integrate, test and launch your system. Work
-            through it in any order, save whenever you like, and come back to
-            finish. Nothing is sent until you sign off at the end.
-          </p>
+        {/* The customer's own mark over their own image, when they supplied
+            one. Only with an image — floating a logo over flat navy looks
+            like a placeholder, because it is one. */}
+        {heroImage && heroLogo ? (
+          <div className="lp-hero-art">
+            <img src={heroLogo} alt={customer.name} />
+            {tagline ? <p className="lp-hero-quote">{tagline}</p> : null}
+          </div>
         ) : null}
       </div>
     </section>

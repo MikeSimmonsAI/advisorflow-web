@@ -11,19 +11,28 @@
  * connections, the testing, the training — was invisible to the only person
  * waiting for it.
  *
- * So this panel answers two questions and nothing else:
- *
- *     WHAT ARE THEY DOING?     one sentence, derived from the phase
- *     WHAT DO YOU NEED FROM ME? a list, each item actionable here
- *
  * ===========================================================================
- * WHY THE ACTIONS ARE FIRST AND THE STATUS SECOND
+ * V2: FOUR GROUPS, AND NOT ONE INVENTED VALUE
  * ===========================================================================
  *
- * A status board people cannot act on becomes a status board people stop
- * opening. If the customer owes us something, that is the first thing on the
- * screen; the connections and testing lists sit under it as reassurance, not
- * as the point.
+ * The raw list became four cards — CONNECTIONS, TESTING, TRAINING, LAUNCH
+ * READINESS — because those are the four questions a customer has about an
+ * implementation, and a flat checklist made somebody read all of it to answer
+ * any of them.
+ *
+ * WHAT DID NOT CHANGE IS THE HONESTY, and it is the part to hold on to:
+ *
+ *   - every count is `done of total` straight from the payload
+ *   - a state chip is derived from those counts and nothing else: nothing is
+ *     "complete" unless the records say every required row is settled
+ *   - an unknown value renders as an em dash, an unscheduled session says
+ *     "Not scheduled", and a group with no rows says "Not started"
+ *   - no card fills a gap with a plausible-looking value, and no card claims
+ *     a stage has begun because the stage before it did
+ *
+ * THE ACTIONS STAY FIRST. A status board people cannot act on becomes a status
+ * board people stop opening. If the customer owes us something, that is above
+ * the four cards; the cards are reassurance, not the point.
  *
  * NOTHING INTERNAL REACHES HERE. The endpoint behind this builds its response
  * from the customer's entitlements rather than filtering a staff object, so
@@ -33,31 +42,42 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { api } from '../../api/client'
+import { Ico } from './LaunchUI'
+import { humanise } from './present'
 
-const DOT = {
-  verified: '#16a34a', not_applicable: '#9ca3af', blocked: '#dc2626',
-  testing: '#f59e0b', connected: '#3b82f6', configuring: '#3b82f6',
-  credentials_received: '#3b82f6', required: '#cbd5e1',
-  pass: '#16a34a', fail: '#dc2626', retest: '#f59e0b', not_tested: '#cbd5e1',
+const DASH = '—'
+
+/** done/total → the chip. Derived, never asserted: see the header. */
+function groupState(done, total) {
+  if (!total) return { label: 'Not started', cls: '' }
+  if (done >= total) return { label: 'Complete', cls: 'go' }
+  if (done > 0) return { label: 'In progress', cls: 'mid' }
+  return { label: 'Not started', cls: '' }
 }
 
-function Dot({ status }) {
+function Card({ icon, title, done, total, rows, foot }) {
+  const st = groupState(done, total)
   return (
-    <i style={{
-      width: 8, height: 8, borderRadius: 999, flex: '0 0 8px',
-      display: 'inline-block', background: DOT[status] || '#cbd5e1',
-    }} />
-  )
-}
-
-function Row({ status, children, right }) {
-  return (
-    <div style={{ display: 'flex', gap: 10, alignItems: 'center',
-                  padding: '7px 0', borderTop: '1px solid rgba(148,163,184,.22)' }}>
-      <Dot status={status} />
-      <span style={{ flex: 1, fontSize: 13, minWidth: 0 }}>{children}</span>
-      {right}
-    </div>
+    <article className="lp-icard">
+      <div className="lp-ih">
+        <span className="lp-ii"><Ico name={icon} size={14} /></span>
+        <b>{title}</b>
+      </div>
+      <span className={'lp-istate ' + st.cls}>{st.label}</span>
+      <div className="lp-ilist">
+        {rows.length
+          ? rows.map(r => (
+            <div className="lp-irow" key={r.key}>
+              <span className="lp-ilabel">{r.label}</span>
+              <span className="lp-ir">{r.value}</span>
+            </div>
+          ))
+          : <div className="lp-irow"><span className="lp-ilabel">
+              Nothing recorded yet</span><span className="lp-ir">{DASH}</span>
+            </div>}
+      </div>
+      {foot ? <p className="lp-ifoot">{foot}</p> : null}
+    </article>
   )
 }
 
@@ -71,7 +91,8 @@ function Row({ status, children, right }) {
  * the buttons away — a preview must not be able to approve anything on a
  * customer's behalf.
  */
-export default function DeliveryPanel({ brand, data = null, readOnly = false }) {
+export default function DeliveryPanel({ brand, data = null, readOnly = false,
+                                        implementation = null }) {
   const [fetched, setFetched] = useState(null)
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
@@ -111,132 +132,144 @@ export default function DeliveryPanel({ brand, data = null, readOnly = false }) 
 
   const btn = {
     fontSize: 12, fontWeight: 700, padding: '6px 12px', borderRadius: 8,
-    border: '1px solid rgba(148,163,184,.5)', background: 'transparent',
+    border: '1px solid var(--lp-cline-strong)', background: '#fff',
     color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
   }
 
+  const impl = implementation || {}
+  const outstanding = (d.actions || []).length + (d.blockers || []).length
+  const goLive = impl.target_launch_date
+    ? new Date(String(impl.target_launch_date).length <= 10
+        ? impl.target_launch_date + 'T00:00:00' : impl.target_launch_date)
+      .toLocaleDateString()
+    : null
+
+  // LAUNCH READINESS IS DERIVED FROM AFFIRMATIVE FACTS ONLY.
+  //
+  // The first version of this counted "nothing outstanding with you" as one of
+  // three settled facts, which made a launch where NOTHING had started read as
+  // IN PROGRESS — there was nothing outstanding because there was nothing at
+  // all. An absence is not an achievement, and a status card that rounds one
+  // up into the other is the invented completion this whole surface exists to
+  // avoid.
+  //
+  // So the count is three things that must each be positively true: a date
+  // somebody agreed, a programme whose every group is actually finished, and a
+  // live implementation. The rows still SHOW the outstanding count, because it
+  // is useful; it just does not earn progress.
+  const everyGroupSettled = Boolean(
+    c.connections_total && c.connections_done >= c.connections_total
+    && c.checks_total && c.checks_done >= c.checks_total
+    && c.training_total && c.training_done >= c.training_total)
+
+  const readyRows = [
+    { key: 'date', label: 'Target go-live date', value: goLive || 'Not set' },
+    { key: 'open', label: 'Outstanding with you',
+      value: outstanding ? String(outstanding) : 'None' },
+    { key: 'status', label: 'Implementation status',
+      value: impl.status ? humanise(impl.status) : DASH },
+  ]
+  const readyDone = (goLive ? 1 : 0) + (everyGroupSettled ? 1 : 0)
+                    + (impl.status === 'live' ? 1 : 0)
+
   return (
-    <article className="lp-doc" style={{ marginTop: 20 }}>
-      <div className="lp-doc-h">
-        <p className="lp-stepno">Your implementation</p>
+    <section className="lp-band">
+      <div className="lp-band-h">
         <h2>Where your launch stands</h2>
         <p>{d.activity}</p>
+        <span className="lp-bandnote">
+          Updated by {brand.name}, not by this form
+        </span>
       </div>
 
-      <div className="lp-doc-b" style={{ paddingBottom: 24 }}>
-        {error ? (
-          <p style={{ fontSize: 12, color: '#dc2626', marginTop: 0 }}>{error}</p>
-        ) : null}
+      {error ? (
+        <p style={{ fontSize: 12, color: '#b91c1c', margin: '0 0 12px' }}>
+          {error}
+        </p>
+      ) : null}
 
-        {d.actions.length ? (
-          <div style={{ border: '1px solid rgba(245,158,11,.5)',
-                        background: 'rgba(245,158,11,.08)', borderRadius: 10,
-                        padding: '12px 14px', marginBottom: 18 }}>
-            <b style={{ fontSize: 13 }}>What {brand.name} needs from you</b>
-            <div style={{ marginTop: 6 }}>
-              {d.actions.map(a => (
-                <div key={a.kind + a.id}
-                     style={{ display: 'flex', gap: 10, alignItems: 'center',
-                              padding: '6px 0', fontSize: 13 }}>
-                  <span style={{ flex: 1 }}>{a.label}</span>
-                  {a.kind === 'approve_check' ? (
-                    <button style={btn} disabled={busy === a.id}
-                            onClick={() => act(a.id,
-                              '/launch/me/checks/' + a.id + '/approve')}>
-                      Yes, this works
-                    </button>
-                  ) : null}
-                  {a.kind === 'acknowledge_training' ? (
-                    <button style={btn} disabled={busy === a.id}
-                            onClick={() => act(a.id,
-                              '/launch/me/training/' + a.id + '/acknowledge')}>
-                      Confirm
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {d.blockers.length ? (
-          <div style={{ marginBottom: 18 }}>
-            <p className="lp-stepno" style={{ margin: '0 0 4px' }}>Waiting on</p>
-            {d.blockers.map(b => (
-              <div key={b.id} style={{ fontSize: 13, padding: '4px 0' }}>
-                <b>{b.title}</b>
-                {b.action ? <span> — {b.action}</span> : null}
+      {/* What the customer owes us, above everything. */}
+      {d.actions.length ? (
+        <div className="lp-note warn" style={{ marginBottom: 16 }}>
+          <span className="lp-nicon"><Ico name="info" size={16} /></span>
+          <div className="lp-nb">
+            <b>What {brand.name} needs from you</b>
+            {d.actions.map(a => (
+              <div key={a.kind + a.id}
+                   style={{ display: 'flex', gap: 10, alignItems: 'center',
+                            padding: '6px 0', fontSize: 13 }}>
+                <span style={{ flex: 1 }}>{a.label}</span>
+                {a.kind === 'approve_check' ? (
+                  <button style={btn} disabled={readOnly || busy === a.id}
+                          title={readOnly ? 'Unavailable in preview' : undefined}
+                          onClick={() => act(a.id,
+                            '/launch/me/checks/' + a.id + '/approve')}>
+                    Yes, this works
+                  </button>
+                ) : null}
+                {a.kind === 'acknowledge_training' ? (
+                  <button style={btn} disabled={readOnly || busy === a.id}
+                          title={readOnly ? 'Unavailable in preview' : undefined}
+                          onClick={() => act(a.id,
+                            '/launch/me/training/' + a.id + '/acknowledge')}>
+                    Confirm
+                  </button>
+                ) : null}
               </div>
             ))}
           </div>
-        ) : null}
+        </div>
+      ) : null}
 
-        {c.connections_total ? (
-          <div style={{ marginBottom: 18 }}>
-            <p className="lp-stepno" style={{ margin: '0 0 2px' }}>
-              Connections · {c.connections_done} of {c.connections_total} verified
-            </p>
-            {d.connections.map(x => (
-              <Row key={x.label} status={x.status}
-                   right={<span style={{ fontSize: 12, opacity: .7 }}>
-                     {x.status_label}
-                   </span>}>{x.label}</Row>
-            ))}
-          </div>
-        ) : null}
+      <div className="lp-impl">
+        <Card icon="plug" title="Connections"
+              done={c.connections_done} total={c.connections_total}
+              rows={(d.connections || []).map(x => ({
+                key: x.label, label: x.label, value: x.status_label || DASH,
+              }))}
+              foot={c.connections_total
+                ? null
+                : 'Begins once your onboarding is submitted.'} />
 
-        {c.checks_total ? (
-          <div style={{ marginBottom: 18 }}>
-            <p className="lp-stepno" style={{ margin: '0 0 2px' }}>
-              Testing · {c.checks_done} of {c.checks_total} passing
-            </p>
-            {d.checks.map(x => (
-              <Row key={x.id} status={x.status}
-                   right={x.approved_at
-                     ? <span style={{ fontSize: 12, color: '#16a34a' }}>
-                         You approved this
-                       </span>
-                     : x.can_approve
-                       ? <button style={btn} disabled={busy === x.id}
-                                 onClick={() => act(x.id,
-                                   '/launch/me/checks/' + x.id + '/approve')}>
-                           Yes, this works
-                         </button>
-                       : <span style={{ fontSize: 12, opacity: .7 }}>
-                           {x.status_label}
-                         </span>}>
-                {x.label}
-              </Row>
-            ))}
-          </div>
-        ) : null}
+        <Card icon="check" title="Testing"
+              done={c.checks_done} total={c.checks_total}
+              rows={(d.checks || []).map(x => ({
+                key: x.id, label: x.label,
+                value: x.approved_at ? 'You approved this'
+                  : (x.status_label || DASH),
+              }))}
+              foot={c.checks_total ? null : 'Scheduled once the build is complete.'} />
 
-        {c.training_total ? (
-          <div>
-            <p className="lp-stepno" style={{ margin: '0 0 2px' }}>
-              Training · {c.training_done} of {c.training_total} delivered
-            </p>
-            {d.training.map(x => (
-              <Row key={x.id} status={x.completed_at ? 'pass' : 'not_tested'}
-                   right={x.acknowledged_at
-                     ? <span style={{ fontSize: 12, color: '#16a34a' }}>Confirmed</span>
-                     : x.can_acknowledge
-                       ? <button style={btn} disabled={busy === x.id}
-                                 onClick={() => act(x.id,
-                                   '/launch/me/training/' + x.id + '/acknowledge')}>
-                           Confirm
-                         </button>
-                       : <span style={{ fontSize: 12, opacity: .7 }}>
-                           {x.scheduled_at
-                             ? new Date(x.scheduled_at).toLocaleDateString()
-                             : 'Not scheduled yet'}
-                         </span>}>
-                {x.title}
-              </Row>
-            ))}
-          </div>
-        ) : null}
+        <Card icon="layers" title="Training"
+              done={c.training_done} total={c.training_total}
+              rows={(d.training || []).map(x => ({
+                key: x.id, label: x.title,
+                value: x.acknowledged_at ? 'Confirmed'
+                  : x.completed_at ? 'Delivered'
+                    : x.scheduled_at
+                      ? new Date(x.scheduled_at).toLocaleDateString()
+                      : 'Not scheduled',
+              }))}
+              foot={c.training_total ? null : 'Booked with you after testing.'} />
+
+        <Card icon="rocket" title="Launch readiness"
+              done={readyDone} total={3} rows={readyRows}
+              foot="Confirmed together before go-live." />
       </div>
-    </article>
+
+      {/* Waiting-on, kept as its own line rather than folded into a card: it
+          is the one thing here that is neither a count nor a date. */}
+      {d.blockers.length ? (
+        <div style={{ marginTop: 14 }}>
+          <p className="lp-stepno" style={{ margin: '0 0 4px' }}>Waiting on</p>
+          {d.blockers.map(b => (
+            <div key={b.id} style={{ fontSize: 13, padding: '4px 0' }}>
+              <b>{b.title}</b>
+              {b.action ? <span> — {b.action}</span> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
   )
 }

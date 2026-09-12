@@ -317,3 +317,49 @@ export function eventPhrase(entry) {
   }
   return `${base} — ${subject}`
 }
+
+
+/* ── support, and what may be promised about it ─────────────────────────────
+
+   A RESPONSE TIME IS AN ENTITLEMENT, NOT COPY.
+
+   The customer-facing shell used to carry the sentence "replies the same
+   business day" because somebody typed it into a component. That is a service
+   level no brand sold, shown to every customer of every brand, with nothing
+   behind it the day it was missed — and it would have been read, correctly, as
+   a commitment.
+
+   So the promise lives in the resolved launch-experience configuration
+   (`presentation.support.response_promise`), where it is set per platform, per
+   industry, per brand and per organization like everything else, and it is
+   null until somebody with the authority to promise it sets it. These two
+   helpers are the ONLY way the shell asks for it, which is what keeps the rule
+   enforceable: there is one place to look, and a grep for a hard-coded promise
+   has one legitimate answer.
+
+   With nothing configured the customer reads the neutral line — the brand is
+   here to help, on no stated clock. */
+
+export function supportBlock(presentation) {
+  const s = (presentation || {}).support || {}
+  return {
+    title: s.title || 'Your launch team',
+    body: s.body || null,
+    // Null unless a configuration layer set it. Never defaulted, never
+    // inferred from a plan name, never written here.
+    responsePromise: s.response_promise || null,
+  }
+}
+
+/**
+ * The one line of support copy the shell shows, in priority order:
+ * the configured response promise, then the configured body, then a neutral
+ * sentence that commits the brand to helping and to no timeframe.
+ */
+export function supportLine(presentation, brandName) {
+  const s = supportBlock(presentation)
+  if (s.responsePromise) return s.responsePromise
+  if (s.body) return s.body
+  const who = brandName ? brandName + ' implementation team' : 'implementation team'
+  return 'Your ' + who + ' is here to help.'
+}
