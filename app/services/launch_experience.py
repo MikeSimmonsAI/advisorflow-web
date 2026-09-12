@@ -86,6 +86,23 @@ DEFAULT_PRESENTATION: Dict[str, Any] = {
         # download that 404s.
         "url": None,
     },
+    # ── SUPPORT, AND WHAT MAY BE PROMISED ABOUT IT ──────────────────────────
+    #
+    # A RESPONSE TIME IS AN ENTITLEMENT, NOT COPY. The customer-facing surface
+    # used to be able to say "replies the same business day" because somebody
+    # typed it into a component — a service level no brand sold, shown to every
+    # customer of every brand, with nothing behind it if it were ever missed.
+    #
+    # So the promise lives HERE, where it is configured per platform, per
+    # industry, per brand and per organization like everything else, and it is
+    # None by default. The shell renders `response_promise` only when a layer
+    # above actually set one; with nothing configured the customer reads the
+    # neutral line below, which commits the brand to helping and to no clock.
+    "support": {
+        "title": "Your launch team",
+        "body": "Your {brand} implementation team is here to help.",
+        "response_promise": None,
+    },
     # What the seven-stage tracker is called on screen. A brand that runs
     # "implementations" and one that runs "onboarding" should not have to fork
     # a component to say so.
@@ -103,14 +120,28 @@ DEFAULT_PRESENTATION: Dict[str, Any] = {
 
 # The seven stages of the approved journey. Labels are configuration; the STATE
 # of each stage is not — it is derived from the implementation's own status.
+#
+# `owner` says WHO A STAGE WAITS ON — the single most common question a
+# customer has about a tracker, and one the shell must not guess at. It is
+# configuration like the label, because a brand that does its own data
+# migration and one that asks the customer to export it do not have the same
+# answer for the same stage. Three values only: "customer", "provider",
+# "both"; the shell turns those into words using the brand's own name.
 DEFAULT_JOURNEY: List[Dict[str, Any]] = [
-    {"key": "intake",       "label": "Complete", "sublabel": "Intake"},
-    {"key": "access",       "label": "Provide", "sublabel": "Access & Files"},
-    {"key": "build",        "label": "{brand}", "sublabel": "Builds"},
-    {"key": "integrations", "label": "Integrations", "sublabel": ""},
-    {"key": "review",       "label": "Review & Test", "sublabel": ""},
-    {"key": "training",     "label": "Training", "sublabel": ""},
-    {"key": "golive",       "label": "Go Live", "sublabel": ""},
+    {"key": "intake",       "label": "Complete", "sublabel": "Intake",
+     "owner": "customer"},
+    {"key": "access",       "label": "Provide", "sublabel": "Access & Files",
+     "owner": "customer"},
+    {"key": "build",        "label": "{brand}", "sublabel": "Builds",
+     "owner": "provider"},
+    {"key": "integrations", "label": "Integrations", "sublabel": "",
+     "owner": "provider"},
+    {"key": "review",       "label": "Review & Test", "sublabel": "",
+     "owner": "both"},
+    {"key": "training",     "label": "Training", "sublabel": "",
+     "owner": "both"},
+    {"key": "golive",       "label": "Go Live", "sublabel": "",
+     "owner": "both"},
 ]
 
 DEFAULT_FORM: Dict[str, Any] = {
@@ -266,6 +297,12 @@ def _journey_state(db: Session, journey: List[Dict[str, Any]],
             "n": index + 1,
             "label": stage.get("label") or stage["key"],
             "sublabel": stage.get("sublabel") or "",
+            # Who the stage waits on. Absent rather than guessed when a
+            # configured journey does not say — the shell renders no owner
+            # line at all rather than asserting the wrong party.
+            "owner": (stage.get("owner")
+                      if stage.get("owner") in ("customer", "provider", "both")
+                      else None),
             "state": state,
             "is_current": state == "now",
             "is_done": state == "done",

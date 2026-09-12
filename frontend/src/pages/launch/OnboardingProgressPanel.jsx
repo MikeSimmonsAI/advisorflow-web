@@ -1,13 +1,24 @@
 /**
  * OnboardingProgressPanel — the right rail.
  *
- * Four cards, in the order somebody stuck in a long form needs them: how far
- * am I, who do I ask, is there something I can read offline, and — last,
- * because it is decoration rather than help — the line the brand chose to
- * leave them with.
+ * ===========================================================================
+ * V2: TWO CARDS, NOT FOUR
+ * ===========================================================================
  *
- * The ring is drawn with two SVG circles rather than a library: one dependency
- * avoided for one shape, and it inherits the surface tokens.
+ * It used to be a progress ring, a help card, a guide card and a quote card
+ * stacked beside a form — four blocks competing with the one thing the
+ * customer came here to do, and heavy enough that the form looked like the
+ * secondary content on its own page.
+ *
+ * The rail now answers three questions and stops:
+ *
+ *     WHERE AM I?          the percentage, and the bar under it
+ *     WHAT REMAINS?        the eight sections, current one lit, rest quiet
+ *     WHAT HAPPENS NEXT?   one line, in the card's own foot
+ *
+ * The quote is gone from here. The checklist, when a brand has published one,
+ * is a link inside the support card rather than a card of its own — a
+ * download does not need a hundred square pixels to be findable.
  *
  * ===========================================================================
  * THE PERCENTAGE IS NOT A GUESS AND NOT A PAGE COUNT
@@ -18,56 +29,31 @@
  * through every step without typing sees 0%, because they have done nothing.
  * A ring driven by which screens somebody visited is a progress bar that lies
  * to the one person it is meant to orient.
- *
- * THE GUIDE CARD IS EITHER A DOCUMENT OR AN HONEST ABSENCE. When the brand
- * has configured a URL it is a real download; when it has not, the card says
- * the checklist is not published yet rather than offering a link that 404s.
  */
 import { Ico } from './LaunchUI'
-
-function Ring({ pct }) {
-  const r = 30, c = 2 * Math.PI * r
-  const on = Math.max(0, Math.min(100, pct)) / 100
-  return (
-    <svg width="76" height="76" viewBox="0 0 76 76" aria-hidden="true">
-      <circle cx="38" cy="38" r={r} fill="none" strokeWidth="7"
-        stroke="rgba(150,182,220,.16)" />
-      <circle cx="38" cy="38" r={r} fill="none" strokeWidth="7"
-        stroke="url(#lpring)" strokeLinecap="round"
-        strokeDasharray={c} strokeDashoffset={c * (1 - on)}
-        transform="rotate(-90 38 38)"
-        style={{ transition: 'stroke-dashoffset .45s ease' }} />
-      <defs>
-        <linearGradient id="lpring" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#caa155" />
-          <stop offset="100%" stopColor="#f5e0aa" />
-        </linearGradient>
-      </defs>
-    </svg>
-  )
-}
+import { supportBlock, supportLine } from './present'
 
 export default function OnboardingProgressPanel({ steps, activeKey, onSelect,
                                                   overallPct, brand,
                                                   presentation = {} }) {
   const done = steps.filter(s => s.pct >= 100).length
   const p = presentation || {}
-  const help = p.help || {}
   const guide = p.guide || {}
-  const quote = p.quote || null
+  const support = supportBlock(p)
+  const pct = Math.max(0, Math.min(100, Number(overallPct) || 0))
 
   return (
     <>
       <div className="lp-scard">
-        <div className="lp-scard-h"><h3>Your Onboarding Progress</h3></div>
+        <div className="lp-scard-h"><h3>Where you are</h3></div>
         <div className="lp-scard-b">
           <div className="lp-ring">
-            <Ring pct={overallPct} />
             <div className="lp-rt">
-              <b>{overallPct}%</b>
-              <span>{done} of {steps.length} sections complete</span>
+              <b>{pct}%</b>
+              <span>of your onboarding · {done} of {steps.length} sections</span>
             </div>
           </div>
+          <div className="lp-lbar"><i style={{ width: pct + '%' }} /></div>
 
           <ul className="lp-steps">
             {steps.map(s => {
@@ -83,24 +69,36 @@ export default function OnboardingProgressPanel({ steps, activeKey, onSelect,
                     <span className="lp-tick">{complete ? '✓' : s.n}</span>
                     <span className="lp-sn">{s.label}</span>
                     <span className="lp-sp">
-                      {complete ? 'Done' : s.pct > 0 ? s.pct + '%' : '—'}
+                      {complete ? 'Done'
+                        : s.key === activeKey ? 'Now'
+                          : s.pct > 0 ? s.pct + '%' : ''}
                     </span>
                   </button>
                 </li>
               )
             })}
           </ul>
+
+          {/* WHAT HAPPENS NEXT — the third question, answered in the card's
+              own foot rather than in a fifth card. It describes the process
+              and asserts no date, because nobody has committed to one. */}
+          <div className="lp-pfoot">
+            <b>What happens next</b>
+            Complete all {steps.length} sections and submit. {brand.name}
+            {' '}reviews your answers, then the build begins.
+          </div>
         </div>
       </div>
 
       <div className="lp-scard">
-        <div className="lp-scard-h"><h3>{help.title || 'Need Help?'}</h3></div>
+        <div className="lp-scard-h"><h3>{support.title}</h3></div>
         <div className="lp-scard-b lp-help">
-          <p>
-            {help.body || ('Your ' + brand.name + ' implementation team is on '
-              + 'this account. Ask us anything — including which of these '
-              + 'answers you can safely skip for now.')}
-          </p>
+          {/* The response line is whatever the configuration actually
+              promises. With nothing configured this commits the brand to
+              helping and to no timeframe — see present.js. There is no
+              response time written in this file. */}
+          <p>{supportLine(p, brand.name)}</p>
+
           {brand.supportEmail ? (
             <div className="lp-hrow">
               <Ico name="mail" size={15} />{brand.supportEmail}
@@ -112,42 +110,24 @@ export default function OnboardingProgressPanel({ steps, activeKey, onSelect,
             </div>
           ) : null}
           {brand.supportEmail ? (
-            <a className="lp-btn primary lp-cta"
-               href={'mailto:' + brand.supportEmail}>
-              {help.cta_label || ('Contact ' + brand.name)}
+            <a className="lp-btn lp-cta" href={'mailto:' + brand.supportEmail}>
+              Message your launch team
             </a>
+          ) : null}
+
+          {/* The checklist, when one exists. A link, not a card — and nothing
+              at all when the brand has not published one, rather than a
+              download that 404s. */}
+          {guide.url ? (
+            <div className="lp-hrow">
+              <Ico name="download" size={15} />
+              <a href={guide.url} target="_blank" rel="noopener noreferrer">
+                {guide.cta_label || guide.title || 'Onboarding checklist'}
+              </a>
+            </div>
           ) : null}
         </div>
       </div>
-
-      <div className="lp-scard">
-        <div className="lp-scard-h"><h3>{guide.title || 'Download Guide'}</h3></div>
-        <div className="lp-scard-b">
-          <p className="lp-gbody">
-            {guide.body || ('Need a copy of the required information and files? '
-              + 'Download the onboarding checklist.')}
-          </p>
-          {guide.url ? (
-            <a className="lp-btn primary lp-cta" href={guide.url}
-               target="_blank" rel="noopener noreferrer">
-              <Ico name="download" size={15} />
-              {guide.cta_label || 'Download PDF'}
-            </a>
-          ) : (
-            <p className="lp-gnone">
-              Your {brand.name} team has not published a checklist for this
-              launch yet. Everything asked for is on these screens.
-            </p>
-          )}
-        </div>
-      </div>
-
-      {quote && quote.text ? (
-        <div className="lp-quote">
-          <p>“{quote.text}”</p>
-          {quote.attribution ? <span>{quote.attribution}</span> : null}
-        </div>
-      ) : null}
     </>
   )
 }

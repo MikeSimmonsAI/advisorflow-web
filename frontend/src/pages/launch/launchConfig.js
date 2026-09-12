@@ -70,3 +70,52 @@ export const DELIVERABLES = [
   { t: 'Launch',
     d: 'Cutover on your target date, with us on the line for it.' },
 ]
+
+
+/* ── THE PLAN, IN THREE PARTS ───────────────────────────────────────────────
+
+   The nine deliverables above are unchanged and remain the single list. This
+   groups them for the customer, and the grouping is the point:
+
+   Nine equal tiles is a feature grid, and a feature grid is what a customer
+   reads when they are being SOLD something. They have already bought. What
+   they need from this section is the shape of the work they are now inside —
+   what goes out to their customers, what their own team gets, and what has to
+   be proved before any of it goes live — and which part of it their current
+   journey stage belongs to.
+
+   `stages` is the span of the seven-stage journey each part covers, so the
+   tracker at the top of the page and this section describe the same programme
+   rather than two unrelated lists. `from` names the intake sections whose
+   answers configure that part, which is the honest answer to "why are you
+   asking me all this?".
+
+   NOTHING HERE NAMES A CUSTOMER, A BRAND OR AN INDUSTRY. `items` are indices
+   into DELIVERABLES, so a brand that overrides the nine changes them in one
+   place and this keeps working. */
+export const DELIVERABLE_GROUPS = [
+  {
+    kicker: 'Part one',
+    stages: 'Stages 1–3',
+    title: 'What your customers will see',
+    blurb: 'The public face of your business, built from the first half of your onboarding.',
+    from: 'Configured from Sections 1–4',
+    items: [0, 1, 2],
+  },
+  {
+    kicker: 'Part two',
+    stages: 'Stages 3–4',
+    title: 'How your team will work',
+    blurb: 'The system behind it — your process, running, with the right people in it.',
+    from: 'Configured from Sections 5–7',
+    items: [3, 4, 5],
+  },
+  {
+    kicker: 'Part three',
+    stages: 'Stages 5–7',
+    title: 'Proving it, then going live',
+    blurb: 'Nothing goes live until you have seen it work and your team can run it.',
+    from: 'Signed off by you at go-live',
+    items: [6, 7, 8],
+  },
+]

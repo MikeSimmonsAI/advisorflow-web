@@ -792,6 +792,522 @@ select.lp-in{appearance:none;cursor:pointer;
   .lp-rrow .lp-rpct,.lp-rrow .lp-btn{grid-column:2}
   .lp-search{display:none}
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   V2 — THE APPROVED VISUAL DIRECTION
+   ═══════════════════════════════════════════════════════════════════════════
+
+   WHY THIS IS A LAYER AND NOT A REWRITE
+   -------------------------------------
+   Everything above is the vocabulary: tokens, the white document, the field
+   grid, the upload tiles, the review rows, the signature block. Eight intake
+   step components and the staff screens draw on those selectors by name, and
+   deleting any one of them to restyle the shell would be a visual change that
+   breaks a form.
+
+   So V2 changes the BALANCE, not the vocabulary. The same tokens, the same
+   class names, retuned:
+
+       navy stops being the page and becomes the CHROME — rail, ribbon, hero
+       the working canvas goes LIGHT, so the customer looks at their own work
+       the journey, the progress rail and the status cards move onto white
+       the hero becomes the customer's, with the provider named under it
+
+   It is placed last deliberately: CSS resolves ties by order, so every rule
+   here supersedes its V1 twin without either having to grow an ID or an
+   !important. The responsive rules at the FOOT of this block are the ones that
+   matter — an override placed after a media query would otherwise win at every
+   width, which is exactly how a desktop retune reintroduces a mobile bug.
+
+   NOTHING HERE IS CUSTOMER-SPECIFIC. There is no brand colour, no logo and no
+   name in this file; the accent is a token and the words arrive from the
+   resolved configuration. The first customer configured against it is not a
+   special case in it.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* ── the canvas ─────────────────────────────────────────────────────────── */
+[data-surface="launch"]{
+  /* The working surface. Not a new palette — the document tokens that were
+     already used for the intake card, promoted to the page itself. */
+  --lp-canvas:#f4f6fa;
+  --lp-shadow-soft:0 1px 2px rgba(16,26,45,.04),0 6px 20px rgba(16,26,45,.06);
+  background:var(--lp-canvas);
+}
+.lp-shell{background:var(--lp-canvas)}
+.lp-body{background:var(--lp-canvas);color:var(--lp-cink)}
+/* Full-bleed chrome, padded work. The hero and the journey run edge to edge
+   the way a portal header does; the columns below carry their own gutter. */
+.lp-main{padding:0 0 44px}
+
+/* ── preview ribbon — internal, slim, and never on the customer's page ───
+   It renders ONLY under the preview route: LaunchPad renders it when its
+   preview flag is set and nothing otherwise, so nothing in here can reach an
+   authenticated customer. What changed in V2 is its weight — it states the two
+   facts an operator needs and then gets out of the way, instead of competing
+   with the portal it is framing.
+   (No backticks in this file: the whole stylesheet is one template literal,
+   and a stray backtick in a comment ends it mid-rule.) */
+.lp-preview{position:sticky;top:0;z-index:60;display:flex;align-items:center;
+  gap:10px;flex-wrap:nowrap;padding:0 22px;height:30px;
+  background:#1b2739;border-bottom:1px solid rgba(255,255,255,.08);
+  color:#c8d4e6;font-size:11px;letter-spacing:.01em}
+.lp-preview-tag{flex:0 0 auto;font-size:10px;font-weight:800;letter-spacing:.14em;
+  text-transform:uppercase;border:0;border-radius:0;padding:0;
+  background:none;color:#f0dda8;display:inline-flex;align-items:center;gap:7px}
+.lp-preview-tag:before{content:"";width:5px;height:5px;border-radius:50%;
+  background:var(--lp-gold);flex:0 0 auto}
+.lp-preview-sep{flex:0 0 auto;width:1px;height:12px;
+  background:rgba(255,255,255,.15)}
+.lp-preview-words{min-width:0;flex:1 1 auto;font-size:11px;line-height:1.45;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lp-preview-words b{font-weight:700;color:#e6eefa}
+.lp-preview-words span{opacity:.85}
+.lp-preview-by{flex:0 0 auto;font-size:10.5px;opacity:.72;white-space:nowrap}
+.lp-preview-exit{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;
+  font-size:11px;color:#9fb2cc;text-decoration:none;background:none;border:0;
+  cursor:pointer;font-family:inherit;padding:0}
+.lp-preview-exit:hover{color:#e6eefa}
+
+/* ── top bar ────────────────────────────────────────────────────────────── */
+.lp-top{position:sticky;top:0;z-index:20;display:flex;align-items:center;
+  gap:16px;height:60px;padding:0 30px;background:#fff;backdrop-filter:none;
+  border-bottom:1px solid var(--lp-cline)}
+.lp-crumb{display:flex;align-items:center;gap:8px;min-width:0;
+  font-size:12.5px;color:var(--lp-cink3)}
+.lp-crumb b{color:var(--lp-cink);font-weight:650;white-space:nowrap}
+.lp-crumb .lp-crumbsep{color:var(--lp-cink4);display:grid;flex:0 0 auto}
+.lp-crumb .lp-crumbnow{min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.lp-search{flex:1 1 auto;min-width:0;max-width:300px;position:relative}
+.lp-search input{width:100%;padding:8px 12px 8px 33px;border-radius:9px;
+  border:1px solid var(--lp-cline);background:var(--lp-card2);
+  color:var(--lp-cink);font-size:12.5px}
+.lp-search input::placeholder{color:var(--lp-cink4)}
+.lp-search input:focus{border-color:var(--lp-cline-strong);outline:none;
+  box-shadow:0 0 0 3px rgba(226,192,120,.18)}
+.lp-search .lp-si{color:var(--lp-cink4)}
+.lp-savestate{display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;
+  font-size:11.5px;color:var(--lp-cink3);white-space:nowrap}
+.lp-savestate svg{color:var(--lp-cink4);flex:0 0 auto}
+.lp-iconbtn{border:1px solid var(--lp-cline);background:var(--lp-card2);
+  color:var(--lp-cink3)}
+.lp-iconbtn:hover{color:var(--lp-cink);border-color:var(--lp-cline-strong)}
+.lp-dot{box-shadow:0 0 0 2px #fff;background:#b99a52}
+.lp-user{border-left:1px solid var(--lp-cline)}
+.lp-user b{color:var(--lp-cink)}
+.lp-user span{color:var(--lp-cink3)}
+.lp-avatar{width:32px;height:32px;border-radius:9px;font-size:11px;
+  font-weight:750;color:var(--lp-cink2);background:var(--lp-card3);
+  border:1px solid var(--lp-cline)}
+
+/* ── the customer's hero ────────────────────────────────────────────────
+   Brand first, provider named beneath it, and a status panel carrying the
+   only two numbers on the screen that are asserted rather than described. */
+.lp-hero{border-radius:0;border-left:0;border-right:0;border-top:0;
+  border-bottom:1px solid rgba(10,20,35,.4);padding:32px 30px 30px;
+  background:
+    radial-gradient(700px 340px at 88% -30%,rgba(226,192,120,.14),transparent 62%),
+    radial-gradient(620px 300px at 8% 130%,rgba(90,169,255,.10),transparent 60%),
+    linear-gradient(120deg,var(--lp-navy) 0%,#10203a 58%,#0d1b2e 100%)}
+.lp-hero:after{border-radius:0}
+.lp-hero--media{min-height:0}
+.lp-hero--media .lp-hero-in,.lp-hero-in{padding:0}
+.lp-hero--media{padding:32px 30px 30px}
+.lp-hero-top{align-items:flex-start;gap:26px;flex-wrap:nowrap}
+.lp-hero-id{align-items:flex-start;gap:22px}
+.lp-eyebrow{font-size:9.5px;letter-spacing:.2em;margin:0 0 9px}
+.lp-hero h1{font-size:34px;letter-spacing:-.028em;line-height:1.1}
+.lp-hero .lp-h2{margin:7px 0 0;font-size:16px;font-weight:450;
+  color:#b9c9e0;letter-spacing:-.005em}
+.lp-hero-intro,.lp-hero p{margin:15px 0 0;font-size:13.5px;line-height:1.65;
+  color:#93a8c4;max-width:66ch}
+.lp-hero--media .lp-hero-intro{color:#93a8c4}
+.lp-mark.l{width:66px;height:66px;border-radius:16px;font-size:20px}
+
+/* the status panel — configured words, asserted numbers */
+.lp-hero-stat{margin-left:auto;flex:0 0 296px;max-width:296px;
+  padding:19px 20px 18px;border-radius:20px;
+  background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.12)}
+.lp-hs-lab{margin:0;font-size:9px;font-weight:800;letter-spacing:.17em;
+  text-transform:uppercase;color:var(--lp-ink3)}
+.lp-hero-stat .lp-chip{margin-top:10px;letter-spacing:.05em}
+.lp-hs-pctrow{margin-top:17px;display:flex;align-items:baseline;gap:8px}
+.lp-hs-pct{font-size:28px;font-weight:750;color:#fff;letter-spacing:-.03em;
+  line-height:1;font-variant-numeric:tabular-nums}
+.lp-hs-pcts{font-size:11.5px;color:var(--lp-ink3)}
+.lp-hs-bar{margin-top:11px;height:6px;border-radius:999px;
+  background:rgba(255,255,255,.10);overflow:hidden}
+.lp-hs-bar i{display:block;height:100%;border-radius:999px;
+  background:linear-gradient(90deg,var(--lp-gold),var(--lp-gold2));
+  transition:width .35s ease}
+.lp-hs-next{margin:14px 0 0;padding-top:13px;
+  border-top:1px solid rgba(255,255,255,.10);font-size:11.5px;line-height:1.5;
+  color:var(--lp-ink2)}
+.lp-hs-next b{display:block;font-size:9px;font-weight:800;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--lp-ink4);margin-bottom:6px}
+.lp-hero-chips{margin-top:18px}
+.lp-poweredby{color:var(--lp-ink4)}
+
+/* ── left rail — restrained, and quiet about what is not ready ───────────
+   The SOON chip is gone. It was applied to five of eight items, which turned
+   the customer's only navigation into a list of things they cannot have; the
+   same information now reads as weight — the live workflow is lit, everything
+   else is simply dimmer. */
+.lp-rail{width:236px;padding:22px 14px 18px;
+  background:linear-gradient(180deg,var(--lp-navy) 0%,#07101d 100%);
+  border-right:1px solid rgba(10,20,35,.5)}
+.lp-shell{grid-template-columns:236px minmax(0,1fr)}
+.lp-railbrand{padding:0 6px 18px;margin-bottom:0}
+.lp-railbrand b{font-size:14px}
+.lp-railbrand span{font-size:8px;letter-spacing:.16em}
+.lp-navgroup{font-size:8px;letter-spacing:.18em;padding:20px 10px 8px}
+.lp-nav{gap:1px}
+.lp-navitem{padding:9px 10px;font-size:13px;font-weight:500}
+.lp-navitem.quiet{color:var(--lp-ink3)}
+.lp-navitem.quiet .lp-ni{opacity:.6}
+.lp-navitem.on{background:linear-gradient(90deg,var(--lp-gold-bg),
+  rgba(226,192,120,.03));border-color:var(--lp-gold-bd);color:#fff;
+  font-weight:650;box-shadow:none}
+.lp-navitem .lp-navcount{margin-left:auto;font-size:10px;font-weight:700;
+  color:var(--lp-ink4);font-variant-numeric:tabular-nums}
+.lp-navitem.on .lp-navcount{color:var(--lp-gold2)}
+/* One support affordance in the rail, at the foot, where it stops competing
+   with the form. See §11 of the direction: help must be findable, not
+   duplicated into a third giant card. */
+.lp-railhelp{margin-top:0;padding:12px 12px 13px;border-radius:var(--lp-r);
+  background:rgba(255,255,255,.035);border:1px solid var(--lp-line);
+  align-items:flex-start;gap:0;flex-direction:column}
+.lp-railhelp .lp-rh-ico,.lp-railhelp .lp-rh-caret{display:none}
+.lp-rh-words b{font-size:12px;font-weight:650}
+.lp-rh-words span{margin-top:4px;font-size:11px;line-height:1.45}
+.lp-railfoot{border-top:1px solid var(--lp-line);padding:14px 4px 0;
+  font-size:9px;line-height:1.5;letter-spacing:.03em;color:var(--lp-ink4)}
+.lp-railfoot b{color:var(--lp-ink3);font-weight:650;font-size:9px;
+  display:inline}
+
+/* ── the seven-stage journey, on white ──────────────────────────────────
+   Still horizontal, still seven, still one row. What changed is legibility:
+   a connector line per stage rather than one rule behind all of them, the
+   state spelled out as a word, and the OWNER named — the single most common
+   question a customer has about a stage is whether it is waiting on them. */
+.lp-phases{margin-top:0;border-radius:0;border-left:0;border-right:0;
+  border-top:0;border-bottom:1px solid var(--lp-cline);background:#fff;
+  padding:20px 30px 22px}
+.lp-phases-h{margin-bottom:16px;align-items:baseline;justify-content:flex-start;
+  gap:12px}
+.lp-phases-h h2{font-size:13px;font-weight:700;letter-spacing:-.01em;
+  text-transform:none;color:var(--lp-cink)}
+.lp-phases-h span{font-size:11.5px;color:var(--lp-cink3)}
+.lp-phases-h .lp-phasesof{margin-left:auto;font-size:11px;font-weight:700;
+  letter-spacing:.04em;color:var(--lp-cink2);white-space:nowrap}
+.lp-phaserow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:0;
+  overflow:visible;padding-bottom:0}
+.lp-phase{flex:none;min-width:0;display:block;text-align:left;
+  padding:0 12px 0 0}
+.lp-phase:before{display:none}
+.lp-pline{position:relative;display:block;height:2px;border-radius:2px;
+  background:var(--lp-cline);margin-bottom:13px}
+.lp-phase.done .lp-pline{background:var(--lp-good-bd)}
+.lp-phase.now .lp-pline{background:linear-gradient(90deg,var(--lp-gold),
+  var(--lp-cline) 92%)}
+.lp-pnum{position:absolute;top:-8px;left:0;width:18px;height:18px;
+  border-radius:50%;background:#fff;border:2px solid var(--lp-cline-strong);
+  color:var(--lp-cink4);font-size:8.5px;font-weight:800;z-index:1}
+.lp-phase.done .lp-pnum{background:var(--lp-good);border-color:var(--lp-good);
+  color:#fff}
+.lp-phase.now .lp-pnum{background:var(--lp-gold);border-color:var(--lp-gold);
+  color:var(--lp-navy);box-shadow:0 0 0 4px rgba(226,192,120,.22)}
+/* The stage tile is a block in V2, not a flex column, so each line has to say
+   so for itself. Without this the state word and the stage name render on one
+   run and read as "IN PROGRESSComplete Intake". */
+.lp-pstate{display:block;margin-top:0;font-size:9px;letter-spacing:.14em;
+  color:var(--lp-cink4)}
+.lp-phase.now .lp-pstate{color:var(--lp-warn)}
+.lp-phase.done .lp-pstate{color:var(--lp-good)}
+.lp-plabel{display:block;margin-top:5px;font-size:12.5px;font-weight:600;
+  line-height:1.35;letter-spacing:-.008em;color:var(--lp-cink2);
+  padding-right:14px}
+.lp-phase.now .lp-plabel{color:var(--lp-cink);font-weight:700}
+.lp-phase.next .lp-plabel{color:var(--lp-cink4);font-weight:500}
+.lp-psub{margin-top:0;font-size:12.5px;font-weight:600;color:inherit;
+  max-width:none;display:inline}
+.lp-powner{display:block;margin-top:5px;font-size:10.5px;
+  color:var(--lp-cink4)}
+.lp-phase.now .lp-powner{color:var(--lp-warn);font-weight:650}
+.lp-phasebtn{align-items:flex-start;text-align:left;display:block}
+.lp-phasebtn:hover .lp-plabel{color:var(--lp-cink)}
+.lp-phaseinfo{margin-top:16px;padding:12px 15px;border-radius:10px;
+  border:1px solid var(--lp-warn-bd);background:var(--lp-warn-bg)}
+.lp-phaseinfo b{color:var(--lp-warn);font-size:12.5px}
+.lp-phaseinfo span{color:var(--lp-cink2);font-size:12px}
+
+/* ── the work area ──────────────────────────────────────────────────────── */
+.lp-work{margin-top:0;padding:26px 30px 0;
+  grid-template-columns:minmax(0,1fr) 300px;gap:24px}
+.lp-side{gap:16px;top:80px}
+
+/* ── the intake document, guided rather than administrative ─────────────
+   Same fields, same grid, same validation. The change is the reading order:
+   what this section is for and how long it takes BEFORE the first label, the
+   fields split into named groups with a line of plain English each, and the
+   required state stated once at the top instead of inferred from asterisks. */
+.lp-doc{border-radius:20px;box-shadow:var(--lp-shadow-soft)}
+.lp-doc-h{padding:24px 30px 22px;background:#fff}
+.lp-doc-kick{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.lp-stepno{margin:0;font-size:9.5px;letter-spacing:.16em;color:var(--lp-cink4)}
+.lp-reqchip{padding:3px 8px;border-radius:6px;font-size:9.5px;font-weight:750;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--lp-warn);
+  background:var(--lp-warn-bg);border:1px solid var(--lp-warn-bd)}
+.lp-reqchip.opt{color:var(--lp-cink3);background:var(--lp-card3);
+  border-color:var(--lp-cline)}
+.lp-doc-h h2{margin-top:10px;font-size:23px;letter-spacing:-.024em}
+.lp-doc-h p{margin:8px 0 0;font-size:13.5px;line-height:1.65;max-width:66ch}
+.lp-doc-b{padding:24px 30px 6px}
+.lp-doc-f{padding:18px 30px;background:var(--lp-card2);
+  border-radius:0 0 20px 20px}
+.lp-meter{min-width:150px}
+.lp-meter b{font-size:20px}
+
+/* field groups: numbered, spaced, explained */
+.lp-group{margin-bottom:28px;padding-top:24px;
+  border-top:1px solid var(--lp-cline2)}
+.lp-group:first-child{padding-top:0;border-top:0}
+.lp-group > h3{margin:0;font-size:13.5px;font-weight:700;letter-spacing:-.012em;
+  text-transform:none;color:var(--lp-cink);gap:11px}
+.lp-group > h3:after{display:none}
+/* THE GROUP NUMBERS ARE DRAWN BY CSS, NOT TYPED INTO EIGHT COMPONENTS.
+   A counter numbers the groups in the order they appear in the document, so a
+   step that adds, removes or reorders a group renumbers itself and nobody has
+   to remember to. Hand-numbered headings are how a form ends up with two
+   "Section 3"s after one refactor. */
+.lp-doc-b{counter-reset:lpgroup}
+.lp-group > h3:before{counter-increment:lpgroup;content:counter(lpgroup);
+  flex:0 0 auto;width:19px;height:19px;border-radius:6px;
+  display:grid;place-items:center;font-size:9.5px;font-weight:800;
+  color:var(--lp-cink3);background:var(--lp-card3)}
+.lp-group > .lp-gsub{margin:6px 0 17px 30px;font-size:12px;line-height:1.6;
+  color:var(--lp-cink3);max-width:62ch}
+.lp-group > h3 + .lp-fields{margin-top:17px}
+.lp-fields{gap:16px 20px}
+.lp-f > label{font-size:11.5px;font-weight:650;letter-spacing:.01em;
+  margin-bottom:7px}
+.lp-in{padding:11px 13px;border-color:var(--lp-cline-strong);font-size:13.5px}
+.lp-hint{font-size:11px;color:var(--lp-cink4)}
+
+/* ── the progress rail, lighter ─────────────────────────────────────────
+   One card instead of four. It answers where you are, what remains and what
+   happens next, and then stops; the guide and the quote moved to the footer
+   and out respectively, because a rail of four cards is a rail nobody reads. */
+.lp-scard{border:1px solid var(--lp-cline);border-radius:16px;background:#fff;
+  color:var(--lp-cink)}
+.lp-scard-h{padding:18px 18px 0;border-bottom:0}
+.lp-scard-h h3{font-size:11.5px;font-weight:750;letter-spacing:.02em;
+  text-transform:none;color:var(--lp-cink)}
+.lp-scard-b{padding:0 18px 8px}
+.lp-ring{display:block;margin-top:12px}
+.lp-ring svg{display:none}
+.lp-ring .lp-rt{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+.lp-ring .lp-rt b{font-size:20px;font-weight:750;color:var(--lp-cink);
+  letter-spacing:-.025em;display:inline}
+.lp-ring .lp-rt span{display:inline;margin-top:0;font-size:11px;
+  color:var(--lp-cink3)}
+.lp-lbar{margin-top:9px;height:5px;border-radius:999px;
+  background:var(--lp-card3);overflow:hidden}
+.lp-lbar i{display:block;height:100%;border-radius:999px;background:var(--lp-gold);
+  transition:width .35s ease}
+.lp-steps{margin-top:16px;gap:0}
+.lp-steplink{padding:9px 0;border-radius:0;border:0;
+  border-top:1px solid var(--lp-cline2);color:var(--lp-cink2);font-size:12.5px;
+  gap:10px}
+.lp-steps li:first-child .lp-steplink{border-top:0}
+.lp-steplink:hover{background:none;color:var(--lp-cink)}
+.lp-steplink.on{background:none;border-color:var(--lp-cline2);
+  color:var(--lp-cink);font-weight:650}
+.lp-steplink:not(.on):not(.done){color:var(--lp-cink4)}
+.lp-tick{width:18px;height:18px;border-radius:6px;font-size:9px;
+  border:1px solid var(--lp-cline);color:var(--lp-cink4);
+  background:var(--lp-card3)}
+.lp-steplink.on .lp-tick{background:var(--lp-gold);border-color:var(--lp-gold);
+  color:var(--lp-navy)}
+.lp-steplink.done .lp-tick{background:var(--lp-good-bg);
+  border-color:var(--lp-good-bd);color:var(--lp-good)}
+.lp-steplink .lp-sp{font-size:10px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--lp-cink4)}
+.lp-steplink.on .lp-sp{color:var(--lp-warn)}
+.lp-steplink.done .lp-sp{color:var(--lp-good)}
+.lp-pfoot{margin:12px -18px 0;padding:13px 18px;
+  border-top:1px solid var(--lp-cline2);background:var(--lp-card2);
+  border-radius:0 0 16px 16px;font-size:11.5px;line-height:1.55;
+  color:var(--lp-cink3)}
+.lp-pfoot b{display:block;font-size:9px;font-weight:800;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--lp-cink4);margin-bottom:5px}
+.lp-help p{font-size:11.5px;line-height:1.6;color:var(--lp-cink3)}
+.lp-help .lp-hrow{margin-top:11px;font-size:12px;color:var(--lp-cink2)}
+.lp-help .lp-hrow svg{color:var(--lp-cink4)}
+.lp-scard .lp-cta{margin-top:12px;height:34px;padding:0 14px;font-size:12px}
+
+/* ── implementation status, as four grouped cards ───────────────────────
+   THE STATUS IS STILL WHATEVER THE RECORDS SAY. Nothing here fills a gap: an
+   unknown value renders as an em dash and an unscheduled session says so. The
+   grouping is the change — connections, testing, training and launch
+   readiness are the four questions a customer actually has. */
+.lp-impl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.lp-icard{background:#fff;border:1px solid var(--lp-cline);border-radius:16px;
+  padding:17px 18px 16px;min-width:0}
+.lp-icard .lp-ih{display:flex;align-items:center;gap:9px}
+.lp-icard .lp-ih b{font-size:12.5px;font-weight:700;color:var(--lp-cink)}
+.lp-icard .lp-ii{flex:0 0 26px;width:26px;height:26px;border-radius:8px;
+  display:grid;place-items:center;background:var(--lp-card3);
+  color:var(--lp-cink2)}
+.lp-istate{margin-top:13px;display:inline-flex;align-items:center;gap:6px;
+  padding:4px 10px;border-radius:999px;font-size:10px;font-weight:750;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--lp-cink3);
+  background:var(--lp-card3);border:1px solid var(--lp-cline)}
+.lp-istate.go{color:var(--lp-good);background:var(--lp-good-bg);
+  border-color:var(--lp-good-bd)}
+.lp-istate.mid{color:var(--lp-warn);background:var(--lp-warn-bg);
+  border-color:var(--lp-warn-bd)}
+.lp-ilist{margin-top:14px;display:flex;flex-direction:column;gap:9px}
+.lp-irow{display:flex;align-items:center;gap:9px;font-size:12px;
+  color:var(--lp-cink2);min-width:0}
+.lp-irow .lp-ilabel{min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.lp-irow .lp-ir{margin-left:auto;flex:0 0 auto;font-size:10.5px;
+  color:var(--lp-cink4);white-space:nowrap}
+.lp-ifoot{margin-top:14px;padding-top:12px;
+  border-top:1px solid var(--lp-cline2);font-size:11px;line-height:1.55;
+  color:var(--lp-cink4)}
+
+/* ── what the provider will build: three parts, nine deliverables ───────
+   The nine are unchanged and still come from configuration. Grouping them
+   into three parts and stamping each part with the journey stages it covers
+   is what stops this reading as a feature grid — it is the plan, and the
+   customer can see which part of it their current stage belongs to. */
+.lp-plan{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.lp-bcard{position:relative;overflow:hidden;border-radius:16px;
+  padding:20px 22px 20px;border:1px solid var(--lp-cline);
+  background:linear-gradient(165deg,#fff 0%,var(--lp-card2) 100%);
+  box-shadow:var(--lp-shadow-soft);min-width:0}
+.lp-bcard:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--lp-gold),rgba(226,192,120,.16))}
+.lp-bk{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:8.5px;
+  font-weight:800;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--lp-cink4)}
+.lp-bk .lp-bs{padding:2px 7px;border-radius:5px;background:var(--lp-gold-bg);
+  border:1px solid var(--lp-gold-bd);color:#8a6a1f;letter-spacing:.1em}
+.lp-bcard h4{margin:10px 0 0;font-size:15px;font-weight:700;
+  letter-spacing:-.018em;color:var(--lp-cink)}
+.lp-bcard > p{margin:7px 0 0;font-size:12px;line-height:1.6;
+  color:var(--lp-cink3)}
+.lp-bl{margin-top:15px;padding-top:5px;border-top:1px solid var(--lp-cline2);
+  display:flex;flex-direction:column}
+.lp-bi{display:flex;gap:11px;padding:11px 0;
+  border-bottom:1px solid var(--lp-cline2)}
+.lp-bi:last-child{border-bottom:0;padding-bottom:2px}
+.lp-bi .lp-bn{flex:0 0 20px;width:20px;height:20px;border-radius:6px;
+  display:grid;place-items:center;font-size:9px;font-weight:800;
+  color:var(--lp-cink3);background:var(--lp-card3);
+  border:1px solid var(--lp-cline);margin-top:1px}
+.lp-bi .lp-bt{min-width:0}
+.lp-bi .lp-bt b{display:block;font-size:12.5px;font-weight:650;
+  letter-spacing:-.008em;color:var(--lp-cink);line-height:1.3}
+.lp-bi .lp-bt span{display:block;margin-top:4px;font-size:11.5px;
+  line-height:1.5;color:var(--lp-cink3)}
+
+/* a full-width band on the light canvas, for the two sections above */
+.lp-band{margin-top:26px}
+.lp-band-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+  margin-bottom:15px}
+.lp-band-h h2{margin:0;font-size:15px;font-weight:700;letter-spacing:-.018em;
+  color:var(--lp-cink)}
+.lp-band-h p{margin:0;font-size:12px;color:var(--lp-cink3)}
+.lp-band-h .lp-bandnote{margin-left:auto;font-size:11px;color:var(--lp-cink4)}
+
+/* ── footer: one support row, and the provider named once ───────────────── */
+.lp-foot{margin-top:30px;padding:22px 30px 26px;background:#fff;
+  border-top:1px solid var(--lp-cline);gap:22px;flex-wrap:wrap}
+.lp-foot-help{min-width:0}
+.lp-foot-help b{display:block;font-size:12.5px;font-weight:700;
+  color:var(--lp-cink)}
+.lp-foot-help span{display:block;margin-top:4px;font-size:11.5px;
+  color:var(--lp-cink3)}
+.lp-foot-links{margin-left:26px;gap:20px}
+.lp-foot-links a,.lp-foot-links span{font-size:12px;color:var(--lp-cink2)}
+.lp-foot-links a:hover{color:var(--lp-cink)}
+.lp-foot-links span{color:var(--lp-cink4)}
+.lp-foot-note{width:auto;margin-left:auto;text-align:right;font-size:11px;
+  line-height:1.6;color:var(--lp-cink4)}
+.lp-foot-note b{color:var(--lp-cink3);font-weight:650}
+
+/* ── the submitted / reviewed banner, on the light canvas ───────────────── */
+.lp-proto{padding:10px 30px;border-bottom:1px solid var(--lp-cline);
+  background:var(--lp-warn-bg)}
+.lp-proto b{color:var(--lp-warn);border-color:var(--lp-warn-bd);
+  background:#fff}
+.lp-proto span{color:var(--lp-cink2)}
+
+/* ═══ RESPONSIVE — LAST, SO NOTHING ABOVE OUTRANKS IT ══════════════════════
+   Desktop first, per the direction, and no fixed width anywhere: the shell is
+   a 236px rail plus minmax(0,1fr), and the work area a minmax(0,1fr) plus a
+   300px rail. minmax(0,…) rather than 1fr is the whole trick — a bare 1fr
+   track refuses to shrink below its content, which is what produced the
+   horizontal scrollbar the first time. */
+@media(max-width:1360px){
+  /* The four status cards go two-up before their rows start eliding. The
+     JOURNEY DOES NOT BREAK HERE — the approved design is one horizontal row
+     of seven, and it holds down to the point where the rail itself folds
+     away. A stage label wrapping to two lines is fine; seven stages split
+     across two rows stops reading as a sequence, which is the one thing the
+     tracker has to do. */
+  .lp-impl{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:1180px){
+  .lp-work{grid-template-columns:minmax(0,1fr);padding:22px 24px 0}
+  .lp-side{position:static;flex-direction:row;flex-wrap:wrap;top:auto}
+  .lp-side > *{flex:1 1 280px}
+  .lp-plan{grid-template-columns:minmax(0,1fr)}
+  .lp-hero-top{flex-wrap:wrap}
+  .lp-hero-stat{margin-left:0;flex:1 1 100%;max-width:none}
+  .lp-hero,.lp-hero--media{padding:26px 24px 24px}
+  .lp-phases{padding:18px 24px 20px}
+  .lp-foot{padding:20px 24px 24px}
+  .lp-proto{padding:10px 24px}
+  .lp-top{padding:0 20px}
+}
+@media(max-width:980px){
+  /* The rail becomes a strip; the shell is one column and the 236px track
+     must go with it or the body is pushed off screen. */
+  .lp-shell{grid-template-columns:minmax(0,1fr)}
+  .lp-rail{width:auto}
+  .lp-railfoot{display:none}
+  .lp-rail.open .lp-railhelp{display:flex}
+  /* Two-up, and the ROW GAP IS NOT OPTIONAL: each stage ends with its owner
+     line, and the next row starts with a connector and a node that sits 8px
+     ABOVE its own box. With no gap the two overlap and the tracker reads as
+     one smeared column. */
+  .lp-phaserow{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:24px}
+  .lp-impl{grid-template-columns:minmax(0,1fr)}
+  .lp-hero h1{font-size:28px}
+}
+@media(max-width:720px){
+  .lp-hero,.lp-hero--media{padding:22px 18px 20px}
+  .lp-hero-id{flex-wrap:wrap;gap:16px}
+  .lp-hero h1{font-size:25px}
+  .lp-phases{padding:16px 18px 18px}
+  .lp-phaserow{grid-template-columns:minmax(0,1fr);row-gap:22px}
+  .lp-phase{padding-right:0}
+  .lp-work{padding:18px 18px 0}
+  .lp-doc-h,.lp-doc-b,.lp-doc-f{padding-left:20px;padding-right:20px}
+  .lp-group > .lp-gsub{margin-left:0}
+  .lp-foot{padding:18px 18px 22px;flex-direction:column;
+    align-items:flex-start;gap:14px}
+  .lp-foot-links{margin-left:0}
+  .lp-foot-note{margin-left:0;text-align:left}
+  .lp-proto{padding:10px 18px}
+  .lp-top{padding:0 16px}
+  .lp-preview{padding:0 14px}
+  .lp-preview-words span,.lp-preview-by{display:none}
+}
 `
 
 let injected = false

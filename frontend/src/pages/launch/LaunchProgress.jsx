@@ -21,48 +21,83 @@
  * come from the implementation either way — a stage is "in progress" because
  * the record says so, never because the label was written that way — so a
  * brand renaming a stage for one industry changes the words and nothing else.
- * `sublabel` is where that renaming actually lands (a customer's own system
- * named under the stage that connects it), and it renders only when set.
- */
-/**
- * `onSelect` makes a stage INSPECTABLE, not actionable.
  *
- * Clicking a stage reveals what that stage involves; it cannot advance the
- * implementation, because a customer deciding they are in Training does not
- * make it so. Where no handler is supplied the stages render as the plain
- * labels they have always been — this is the rule about never showing an
- * active-looking control that does nothing, applied in the other direction:
- * an inert element must not invite a click either.
+ * ===========================================================================
+ * V2: STILL SEVEN, STILL HORIZONTAL, EASIER TO READ
+ * ===========================================================================
+ *
+ * The direction was explicit that this must not become seven heavy cards, so
+ * it did not. What changed is the hierarchy inside each stage:
+ *
+ *     a connector line and node per stage, so progress reads left to right
+ *     THE STATE FIRST, as a word — complete, in progress, upcoming
+ *     the stage name, weighted by state rather than coloured into a rainbow
+ *     THE OWNER, because "is this waiting on me?" is the question people have
+ *
+ * The owner is configuration (`stage.owner`: customer | provider | both) and
+ * renders only when the configured journey says so. A stage whose journey row
+ * is silent about ownership gets no owner line rather than an asserted one —
+ * telling a customer their launch is waiting on them when it is not is worse
+ * than telling them nothing.
+ *
+ * `onSelect` makes a stage INSPECTABLE, not actionable. Clicking reveals what
+ * the stage involves; it cannot advance the implementation, because a customer
+ * deciding they are in Training does not make it so. Where no handler is
+ * supplied the stages render as plain labels — the rule about never showing an
+ * active-looking control that does nothing, applied in the other direction.
  */
+function ownerLabel(owner, brandName) {
+  if (owner === 'customer') return 'You'
+  if (owner === 'provider') return brandName || 'Your launch team'
+  if (owner === 'both') return 'Together'
+  return null
+}
+
 export default function LaunchProgress({ phases, intakePct, title,
+                                         brandName = null,
                                          onSelect = null, openKey = null }) {
   const doneCount = phases.filter(p => p.state === 'done').length
   const current = phases.find(p => p.state === 'now')
+  const currentIndex = phases.findIndex(p => p.state === 'now')
   const open = openKey ? phases.find(p => p.key === openKey) : null
+
   return (
     <section className="lp-phases">
       <div className="lp-phases-h">
-        <h2>{title || 'Implementation Lifecycle'}</h2>
+        <h2>{title || 'Your onboarding journey'}</h2>
         <span>
           {current
-            ? <>Currently in <b style={{ color: 'var(--lp-gold2)' }}>
-                {current.label}</b> — {intakePct}% of your intake complete</>
-            : <>{doneCount} of {phases.length} phases complete</>}
+            ? <>Currently in <b>{current.label}
+                {current.sublabel ? ' ' + current.sublabel : ''}</b>
+                {' '}— {intakePct}% of your intake complete</>
+            : <>{doneCount} of {phases.length} stages complete</>}
+        </span>
+        <span className="lp-phasesof">
+          {currentIndex >= 0
+            ? 'STAGE ' + (currentIndex + 1) + ' OF ' + phases.length
+            : phases.length + ' STAGES'}
         </span>
       </div>
+
       <ol className="lp-phaserow">
         {phases.map((p, i) => {
+          const owner = ownerLabel(p.owner, brandName)
           const body = (
             <>
-              <span className="lp-pnum">
-                {p.state === 'done' ? '✓' : i + 1}
+              <span className="lp-pline">
+                <span className="lp-pnum">
+                  {p.state === 'done' ? '✓' : i + 1}
+                </span>
               </span>
-              <span className="lp-plabel">{p.label}</span>
-              {p.sublabel ? <span className="lp-psub">{p.sublabel}</span> : null}
               <span className="lp-pstate">
                 {p.state === 'done' ? 'Complete'
                   : p.state === 'now' ? 'In progress' : 'Upcoming'}
               </span>
+              <span className="lp-plabel">
+                {p.label}
+                {p.sublabel ? <span className="lp-psub"> {p.sublabel}</span> : null}
+              </span>
+              {owner ? <span className="lp-powner">{owner}</span> : null}
             </>
           )
           const cls = 'lp-phase ' + p.state
@@ -93,6 +128,9 @@ export default function LaunchProgress({ phases, intakePct, title,
               : open.state === 'now'
                 ? 'This is where your launch stands right now.'
                 : 'Not started yet — it begins once the stages before it are done.'}
+            {ownerLabel(open.owner, brandName)
+              ? ' Owner: ' + ownerLabel(open.owner, brandName) + '.'
+              : ''}
           </span>
         </div>
       ) : null}

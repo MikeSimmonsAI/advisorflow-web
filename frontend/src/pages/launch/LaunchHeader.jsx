@@ -1,13 +1,22 @@
 /**
  * LaunchHeader — the top bar.
  *
- * The ecosystem selector on the left is where a customer who belongs to more
- * than one brand relationship would switch between them. In Stage 1 it names
- * the one ecosystem this customer is in and is not a menu — an affordance that
- * opens an empty list is worse than one that clearly has nothing to open yet.
+ * ===========================================================================
+ * WHAT V2 TOOK OUT, AND WHY
+ * ===========================================================================
  *
- * Search and notifications are prototype furniture: present so the finished
- * shape can be judged, inert because there is nothing to search or notify.
+ * The bar used to open with an "Ecosystem" plate naming the PLATFORM. On a
+ * white-label customer portal that is the one name that should not be there:
+ * the customer bought an implementation from a brand, the platform underneath
+ * is infrastructure, and putting its name in the first element of the first
+ * row tells them they are a tenant of somebody they have never met. It is
+ * replaced by a breadcrumb — where in their own onboarding they are — which is
+ * the question the top-left of a portal is actually for.
+ *
+ * What took its place on the right is the save state. A twenty-field form
+ * whose only feedback lives at the bottom of the page is a form people scroll
+ * down to check; saying it up here, permanently, is what makes "can I close
+ * this?" answerable without scrolling.
  *
  * ===========================================================================
  * THERE IS NOT ALWAYS A PERSON
@@ -27,32 +36,42 @@
  * identity in the customer's own header is exactly what the preview exists to
  * avoid.
  */
-import { Mark, Ico } from './LaunchUI'
+import { Ico } from './LaunchUI'
 
-export default function LaunchHeader({ brand, customer, preview = false }) {
+export default function LaunchHeader({ brand, customer, preview = false,
+                                       section = null, saveState = null }) {
   const person = (customer && customer.user) || null
   return (
     <header className="lp-top">
-      <button type="button" className="lp-eco" disabled>
-        <Mark src={brand.logoUrl} label={brand.name} size="s" />
-        <span>
-          <span className="lp-ecolabel">Ecosystem</span>
-          <b>{brand.ecosystem}</b>
-        </span>
-      </button>
+      <div className="lp-crumb">
+        <b>Onboarding</b>
+        {section ? (
+          <>
+            <span className="lp-crumbsep" aria-hidden="true">
+              <Ico name="caret" size={13} />
+            </span>
+            <span className="lp-crumbnow">{section}</span>
+          </>
+        ) : null}
+      </div>
 
       <div className="lp-search">
         <span className="lp-si"><Ico name="search" size={15} /></span>
-        <input type="search" placeholder="Search your workspace…"
-          aria-label="Search your workspace" />
+        <input type="search" placeholder="Search your onboarding…"
+          aria-label="Search your onboarding" />
       </div>
 
       <div className="lp-topspace" />
 
-      <button type="button" className="lp-iconbtn" aria-label="Notifications">
-        <Ico name="bell" size={16} />
-        <span className="lp-dot" />
-      </button>
+      {/* The save state, stated where it can be read without scrolling. It
+          says what is true and nothing more — "No changes yet" is not a
+          promise that anything was written. */}
+      {saveState ? (
+        <span className="lp-savestate">
+          <Ico name="info" size={13} />
+          {saveState}
+        </span>
+      ) : null}
 
       <div className="lp-user">
         <div className="lp-un">
