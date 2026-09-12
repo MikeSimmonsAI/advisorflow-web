@@ -2287,6 +2287,13 @@ def video_status(verify: bool = Query(False),
     _ready, _reason = provider.is_ready() if provider is not None else (False, None)
     if provider is None or not _ready:
         return {
+            # `provider` is the MACHINE key and provider_label is the human
+            # one. Both are needed: a caller deciding behaviour must not have
+            # to string-match a display name, which is why the one that only
+            # shipped a label was a defect rather than a style choice.
+            "brand_sales_org_id": org.id,
+            "provider": PROVIDER_ZOOM,
+            "has_credentials": False,
             "state": "not_configured",
             "provider_label": "Zoom",
             "detail": None,
@@ -2318,6 +2325,10 @@ def video_status(verify: bool = Query(False),
                 db.commit()
                 last_verified_at = cfg_row.last_verified_at.isoformat()
             return {
+                "brand_sales_org_id": org.id,
+                "provider": PROVIDER_ZOOM,
+                "has_credentials": True,
+                "verified": True,
                 "state": "ready",
                 "provider_label": "Zoom Server-to-Server OAuth",
                 "detail": "Connected — host identity and API scope confirmed.",
@@ -2326,6 +2337,13 @@ def video_status(verify: bool = Query(False),
                 "meeting_types": type_out,
             }
         return {
+            "brand_sales_org_id": org.id,
+            "provider": PROVIDER_ZOOM,
+            # Credentials EXIST; they were rejected. Those are different
+            # answers and collapsing them sends a person to re-enter a secret
+            # that was never the problem.
+            "has_credentials": True,
+            "verified": False,
             "state": "error",
             "provider_label": "Zoom Server-to-Server OAuth",
             "detail": result.error_message or "Zoom API returned an error.",
@@ -2341,6 +2359,12 @@ def video_status(verify: bool = Query(False),
 
     # Credentials present but no live verify requested.
     return {
+        "brand_sales_org_id": org.id,
+        "provider": PROVIDER_ZOOM,
+        "has_credentials": True,
+        # NOT verified - nobody asked for a round-trip. None means unknown,
+        # which is the honest answer and not the same as False.
+        "verified": None,
         "state": "ready",
         "provider_label": "Zoom Server-to-Server OAuth",
         "detail": "Credentials present. Use 'Test connection' to verify scope.",
