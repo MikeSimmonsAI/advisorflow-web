@@ -405,3 +405,44 @@ def test_the_shell_has_no_fixed_content_width():
         if "repeat(" in rule or "minmax(0" in rule:
             continue
         assert "1fr" not in rule.replace("minmax(0,1fr)", ""), rule
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# the hero leads with the customer, not with the provider's ecosystem
+# ════════════════════════════════════════════════════════════════════════════
+
+def test_the_hero_eyebrow_names_the_work_not_the_providers_ecosystem():
+    """§1: the provider is present, and does not overpower.
+
+    This is the line that regressed the whole page. "Welcome to the {brand}
+    Ecosystem" sat in the largest small-caps type on the customer's own portal
+    and made it read as the provider's software with a customer dropped into
+    it. The eyebrow names the WORK; the title is the customer; the brand is
+    credited after the subtitle.
+    """
+    p = launch_experience.DEFAULT_PRESENTATION
+    assert "{brand}" not in p["eyebrow"], (
+        "The first line of the customer's hero must not be about the provider."
+    )
+    assert "ecosystem" not in p["eyebrow"].lower()
+    assert "welcome" not in p["eyebrow"].lower()
+    assert p["title"] == "{customer}", (
+        "The largest line on the page is the customer's own name."
+    )
+
+
+def test_the_hero_intro_says_what_the_answers_are_for(db):
+    """The paragraph before the first question earns the twenty fields."""
+    plat = _platform(db, "Intro V2")
+    org = _org(db, plat, "Intro Customer")
+    impl = _impl(db, org, plat)
+
+    intro = launch_experience.compose(db, impl, org)["presentation"]["intro"]
+    assert "Intro V2" in intro, "The provider is named as the one building it."
+    assert "{brand}" not in intro
+    # It has to say what happens to the answers, not merely that a form exists.
+    assert "build" in intro.lower()
+    assert "submit" in intro.lower(), (
+        "A customer part-way through a long form needs to know nothing is "
+        "final until they say so."
+    )

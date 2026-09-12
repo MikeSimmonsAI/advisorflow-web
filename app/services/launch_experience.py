@@ -57,11 +57,29 @@ from app.services import industry_templates
 # nobody asked for and a rendering bug nobody can find.
 
 DEFAULT_PRESENTATION: Dict[str, Any] = {
-    "eyebrow": "Welcome to the {brand} Ecosystem",
+    # ── THE HERO'S THREE LINES, AND WHOSE PAGE THIS IS ──────────────────────
+    #
+    # The eyebrow used to read "Welcome to the {brand} Ecosystem". That is the
+    # PROVIDER greeting the customer into the provider's world, in the largest
+    # small-caps line on the customer's own portal — and it is the single
+    # sentence that made this page read as generic software with a customer
+    # dropped into it rather than as that customer's launch portal.
+    #
+    # So the hierarchy is now: what this IS, then WHOSE it is, then WHO
+    # delivers it. The eyebrow names the work, the title is the customer, and
+    # the subtitle claims the portal for them with the brand credited after it
+    # (the shell appends "Delivered by {brand}"). The provider is present and
+    # not overpowering, which is the whole of direction §1.
+    "eyebrow": "Client Onboarding & Launch",
     "title": "{customer}",
-    "subtitle": "Client Onboarding & Integration",
-    "intro": ("This guided onboarding will help us get everything we need to "
-              "build, integrate, and launch your complete workspace."),
+    "subtitle": "Your launch portal",
+    # WHAT THE ANSWERS ARE FOR, said before the first question. A guided form
+    # with no stated purpose is a form; the same form with the build attached
+    # to it is an implementation questionnaire.
+    "intro": ("Everything you enter here tells {brand} what to build for you — "
+              "your workspace, your connected systems, the testing and the "
+              "training — and then we take you live. Work through it in any "
+              "order and save as you go; nothing is final until you submit it."),
     # Imagery. None by default: a shell that invents a hero picture for a
     # customer who has not supplied one is a shell that shows somebody else's
     # photograph on their launch page.
