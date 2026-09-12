@@ -472,9 +472,20 @@ def require_tenant_or_observer(request: Request = None,
     if _obs is not None and _obs.executive_user_id == user.id:
         return user
     from fastapi import HTTPException, status as http_status
+    # THE SAME SENTENCE require_tenant_user GIVES, because it is the same
+    # refusal to the same person. Whoever reaches here has no customer
+    # workspace and no observation grant, which in practice is a brand
+    # salesperson who followed a link into the tenant product. "This route
+    # requires an active customer workspace" is true and tells them nothing
+    # they can act on - it reads like their account is broken rather than like
+    # they are in the wrong half of the product. The sibling guard on
+    # /pipeline/stats already said the useful thing; /leads said this, so the
+    # same seller got two different explanations depending on which screen
+    # they landed on first.
     raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,
-        detail="This route requires an active customer workspace.",
+        detail="This is a customer workspace route. Your account belongs to a "
+               "brand sales organization, not a customer organization.",
     )
 
 
