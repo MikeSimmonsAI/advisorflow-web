@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-09-12T14:48:55Z",
+  "git_commit_sha": "a59d3c7d5314e9b64af409df074b45b26f204743",
+  "git_branch": "main",
+  "git_dirty": false,
+  "repository": "https://github.com/MikeSimmonsAI/advisorflow-web.git",
+  "generator": "scripts/generate_concierge_map.py",
+  "validator": "scripts/validate_concierge_map.py",
+  "record_count": 1730,
+  "record_counts_by_type": {
+    "api_endpoint": 983,
+    "action": 414,
+    "page": 141,
+    "navigation": 91,
+    "feature_gate": 51,
+    "permission": 29,
+    "workflow_edge": 15,
+    "integration": 6
+  },
+  "record_counts_by_surface": {
+    "customer_workspace": 583,
+    "god_mode": 501,
+    "sales_workspace": 197,
+    "shared_platform": 105,
+    "public_web": 77,
+    "ai_workforce": 63,
+    "executive": 49,
+    "finance_compensation": 46,
+    "support": 40,
+    "customer_launch": 24,
+    "authentication": 21,
+    "billing": 20,
+    "brand_sales": 4
+  },
+  "record_counts_by_status": {
+    "active": 1715,
+    "unresolved": 8,
+    "hidden": 5,
+    "incomplete": 1,
+    "legacy": 1
+  },
+  "surfaces": [
+    "ai_workforce",
+    "authentication",
+    "billing",
+    "brand_sales",
+    "customer_launch",
+    "customer_workspace",
+    "executive",
+    "finance_compensation",
+    "god_mode",
+    "public_web",
+    "sales_workspace",
+    "shared_platform",
+    "support"
+  ],
+  "source_of_truth": {
+    "frontend_routes": "frontend/src/App.jsx",
+    "navigation": [
+      "frontend/src/components/Layout.jsx",
+      "frontend/src/pages/GodShell.jsx",
+      "frontend/src/pages/executive/ExecutiveSuite.jsx",
+      "frontend/src/pages/sales/SalesShell.jsx"
+    ],
+    "backend_router_registration": "app/main.py",
+    "authorization": [
+      "app/deps.py",
+      "app/services/sales_access.py",
+      "app/services/capabilities.py",
+      "app/services/executive_authority.py",
+      "app/services/workspace_access.py"
+    ],
+    "entitlements": [
+      "app/services/entitlements.py",
+      "app/services/support_entitlements.py"
+    ]
+  },
+  "coverage": {
+    "frontend_routes_declared": 141,
+    "page_records": 141,
+    "pages_unresolved": 0,
+    "navigation_entries_declared": 91,
+    "navigation_records": 91,
+    "navigation_unresolved": 0,
+    "endpoints_registered": 983,
+    "endpoints_shadowed": 1,
+    "router_files_never_reached": 1,
+    "actions": 414,
+    "actions_with_resolved_api": 309,
+    "actions_unresolved": 8,
+    "endpoints_reached_by_a_page": 520,
+    "routes_with_no_navigation_entry": [
+      "/activate",
+      "/auto-send",
+      "/change-password",
+      "/commercial",
+      "/demo",
+      "/executive",
+      "/executive/customer-health",
+      "/god/access/new",
+      "/god/customer-app",
+      "/god/customers/new",
+      "/god/meetings",
+      "/god/opportunities",
+      "/god/proposals",
+      "/login",
+      "/onboarding",
+      "/pipeline",
+      "/scraper",
+      "/setup-integrations",
+      "/training",
+      "/workqueue",
+      "/workspaces"
+    ]
+  },
+  "generation_status": "complete",
+  "known_gaps": [
+    "action 'Find Team Time' (/sales/opportunities/:oppId) could not be bound to an API call or a destination from source: frontend/src/pages/sales/DealCommand.jsx:127",
+    "action 'Find Team Time' (/sales/opportunities/:oppId) delegates to a callback prop (onFind) supplied outside its own module; its effect is unproven here: frontend/src/pages/sales/OpportunityDetail.jsx:66",
+    "action 'Import leads' (/workspace/:organizationId) could not be bound to an API call or a destination from source: frontend/src/pages/Overview.jsx:306",
+    "action 'MANAGE ACCESS' (/god/users-all) delegates to a callback prop (onManage) supplied outside its own module; its effect is unproven here: frontend/src/pages/god/GodUsers.jsx:284",
+    "action 'Reject' (/import-batches/:batchId) could not be bound to an API call or a destination from source: frontend/src/pages/ImportBatchReview.jsx:117",
+    "action 'Save' (/god/voice) could not be bound to an API call or a destination from source: frontend/src/pages/god/GodVoiceConfig.jsx:152",
+    "action 'Save' (/god/voice) could not be bound to an API call or a destination from source: frontend/src/pages/god/GodVoiceConfig.jsx:181",
+    "action 'Save' (/proposals/:proposalId) could not be bound to an API call or a destination from source: frontend/src/pages/ProposalEditor.jsx:206",
+    "duplicate route registration GET /sales/video/status: app/routers/sales_scheduling_router.py:2257 is matched first and shadows app/routers/sales_proposal_router.py:1039",
+    "nav 'Reports' (sales_rail_my_team) is marked soon:true and has no route - deferred by decision and rendered disabled",
+    "router file present in app/routers but never reached from app/main.py, so none of its routes are served: app/routers/fiber_intake_router.py"
+  ]
+}
