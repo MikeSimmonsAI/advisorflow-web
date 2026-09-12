@@ -21,10 +21,12 @@ READ THE CONTRACT BEFORE CHANGING ANYTHING HERE:
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.models.models import User
@@ -149,6 +151,37 @@ def find_by_jti(db: Session, jti: str) -> Optional[UserSession]:
     return db.query(UserSession).filter(UserSession.jti == jti).first()
 
 
+def user_has_sessions(db: Session, user_id: str) -> bool:
+    """Has this user EVER had a row in this table — live, revoked or expired?
+
+    THIS IS THE GUARD ON THE LEGACY COLUMN, and it is narrower than it looks.
+
+    `deps.get_current_user` falls back to `users.session_token` when the
+    presented jti names no row, so that a token minted before this table
+    existed keeps working across the deploy. Left unqualified, that fallback
+    says: "any jti equal to the column authenticates, row or no row" — and a
+    jti can stop having a row in two ways that have nothing to do with being
+    pre-migration.
+
+      * A REFRESH RACE. Two rotations of one row interleave; the row keeps the
+        second jti while the column keeps the first. The first token then has
+        no row, matches the column, and authenticates — a second live
+        credential out of one session, and one that revoking the row does not
+        kill.
+      * A DELETED ROW. `demo_environment` deletes `user_sessions` rows when it
+        resets a demo, and any future retention sweep will delete expired and
+        revoked ones. Deleting a revoked row must not be the thing that brings
+        its token back to life.
+
+    So the column is honoured only for a user with NO rows at all, which is
+    exactly the pre-migration case it was added for. The moment a user has
+    signed in once since this table shipped, their sessions are rows and the
+    column is bookkeeping.
+    """
+    return db.query(UserSession.id).filter(
+        UserSession.user_id == user_id).first() is not None
+
+
 def live_sessions_for_user(db: Session, user_id: str) -> List[UserSession]:
     rows = (db.query(UserSession)
             .filter(UserSession.user_id == user_id,
@@ -268,6 +301,74 @@ def revoke_by_id(db: Session, user_id: str, session_id: str,
         return False
     revoke(db, row, reason)
     return True
+
+
+# ── retention ───────────────────────────────────────────────────────────────
+
+# How long a dead session stays readable before it is swept. Revoked rows are
+# the only record of WHY a device stopped working, and "my phone signed itself
+# out last week" is a support question whose answer is `revoked_reason`. Thirty
+# days keeps that answerable; keeping them forever turns an auth table into an
+# unbounded log.
+SESSION_RETENTION_DAYS = int(os.environ.get("SESSION_RETENTION_DAYS", "30"))
+
+# A ceiling per pass, so the sweep is a short bounded DELETE rather than one
+# that takes a lock proportional to however long nobody ran it.
+SESSION_PURGE_BATCH = int(os.environ.get("SESSION_PURGE_BATCH", "2000"))
+
+
+def purge_dead_sessions(db: Session, *, retain_days: Optional[int] = None,
+                        batch_limit: Optional[int] = None) -> int:
+    """Delete sessions that have been revoked or expired for long enough.
+
+    WHAT IT WILL NOT DO, AND WHY EACH ONE MATTERS:
+
+      * IT NEVER DELETES A LIVE ROW. The filter is positive — revoked before
+        the cutoff, or expired before the cutoff — not "everything except what
+        I think is live". A sweep that can sign somebody out is worse than a
+        table that grows.
+      * IT NEVER DELETES A RECENT ONE. `revoked_reason` is the only record of
+        why a device stopped working, so the retention window is the support
+        window.
+      * IT IS BOUNDED. At most `batch_limit` rows per pass, selected by id
+        first so the DELETE names its rows explicitly instead of scanning to
+        find them.
+
+    Deleting a row no longer resurrects its token: `deps` honours the legacy
+    column only for a user with no rows at all (see `user_has_sessions`). That
+    ordering is what makes this safe to run at all.
+    """
+    days = SESSION_RETENTION_DAYS if retain_days is None else int(retain_days)
+    limit = SESSION_PURGE_BATCH if batch_limit is None else int(batch_limit)
+    if days < 1 or limit < 1:
+        return 0
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    ids = [row[0] for row in
+           db.query(UserSession.id)
+           .filter(or_(and_(UserSession.revoked_at.isnot(None),
+                            UserSession.revoked_at < cutoff),
+                       and_(UserSession.revoked_at.is_(None),
+                            UserSession.expires_at < cutoff)))
+           .limit(limit).all()]
+    if not ids:
+        return 0
+
+    try:
+        from app.models.device_models import DevicePushToken
+        (db.query(DevicePushToken)
+         .filter(DevicePushToken.session_id.in_(ids))
+         .update({DevicePushToken.session_id: None},
+                 synchronize_session=False))
+    except Exception:                      # pragma: no cover - defensive
+        _log.debug("push token detach skipped during session purge",
+                   exc_info=True)
+
+    deleted = (db.query(UserSession)
+               .filter(UserSession.id.in_(ids))
+               .delete(synchronize_session=False))
+    db.commit()
+    return int(deleted or 0)
 
 
 def _deactivate_tokens_for_session(db: Session, session_id: str) -> None:
