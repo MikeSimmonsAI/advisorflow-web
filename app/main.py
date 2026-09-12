@@ -991,6 +991,54 @@ async def _cadence_loop():
         await asyncio.sleep(3600)  # 1 hour
 
 
+async def _session_cleanup_loop():
+    """Sweep long-dead `user_sessions` rows once a day.
+
+    WHY THIS LOOP EXISTS AT ALL. Per-device sessions made the session table the
+    first authentication table here that GROWS: a row per sign-in, and every
+    revoked and expired one kept afterwards. Nothing deleted from it, so its
+    only size limit was how long the platform had been running.
+
+    WHY A LOOP AND NOT A NEW JOB ENGINE. There is already a durable job ledger
+    (`record_job_run`) and four loops written against it. A retention sweep that
+    invented a fifth mechanism would be a second thing to monitor for no gain,
+    so this is the same shape as the others and reports through the same
+    ledger: if it stops, `job_runs` says so.
+
+    WHAT IT IS ALLOWED TO DELETE is decided in
+    `session_service.purge_dead_sessions`, not here — live rows never, recently
+    revoked ones never (the reason a device stopped working is a support
+    answer), and at most a bounded batch per pass. The daily interval plus that
+    ceiling is deliberately unhurried: a table that shrinks slowly is fine, a
+    sweep that takes a long lock on the authentication path is not.
+    """
+    from app.services import session_service
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("session_cleanup_loop")
+    await asyncio.sleep(300)  # startup delay — offset from every other loop
+    while True:
+        try:
+            async with record_job_run(JobName.SESSION_CLEANUP,
+                                      db_factory=SessionLocal) as _m:
+                db = SessionLocal()
+                try:
+                    removed = session_service.purge_dead_sessions(db)
+                    _m["sessions_purged"] = removed
+                    _m["retain_days"] = session_service.SESSION_RETENTION_DAYS
+                    if removed:
+                        _logger.info("session_cleanup: purged %d dead sessions",
+                                     removed)
+                finally:
+                    db.close()
+        except Exception as exc:                               # noqa: BLE001
+            # A retention sweep must never be the reason the web process dies.
+            _logger.error("session_cleanup error: %s", exc, exc_info=True)
+        await asyncio.sleep(24 * 3600)
+
+
 @app.on_event("startup")
 async def on_startup():
     # 0. THE ENVIRONMENT BOUNDARY. Before the database is touched, before a
@@ -1349,6 +1397,7 @@ async def on_startup():
     asyncio.create_task(_ai_conversation_loop())  # AI lead touches    — every 2 min
     asyncio.create_task(_cadence_loop())          # SMS cadence touches — every 1 hr
     asyncio.create_task(_support_intelligence_loop())  # support brief — every 6 hr
+    asyncio.create_task(_session_cleanup_loop())  # dead session sweep — daily
 
 
 def _build_metadata() -> dict:
