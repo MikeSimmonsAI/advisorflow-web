@@ -689,6 +689,45 @@ select.lp-in{appearance:none;cursor:pointer;
 .lp-preview-words span{opacity:.92}
 .lp-preview-by{flex:0 0 auto;font-size:10.5px;opacity:.85;white-space:nowrap}
 
+/* ── an inspectable journey stage ───────────────────────────────────────── */
+/* A stage is a button only where a handler exists, so nothing inert ever
+   invites a click. The button is transparent and inherits the tile's layout —
+   the approved design is unchanged, it just became reachable by keyboard. */
+.lp-phasebtn{display:flex;flex-direction:column;align-items:center;
+  width:100%;gap:0;padding:0;border:0;background:none;color:inherit;
+  cursor:pointer;font:inherit;text-align:center}
+.lp-phasebtn:hover .lp-plabel{color:var(--lp-ink)}
+.lp-phase.open .lp-pnum{box-shadow:0 0 0 4px rgba(226,192,120,.18)}
+.lp-phaseinfo{margin-top:14px;padding:11px 14px;border-radius:10px;
+  border:1px solid var(--lp-gold-bd);background:var(--lp-gold-bg)}
+.lp-phaseinfo b{display:block;font-size:12.5px;color:var(--lp-gold2)}
+.lp-phaseinfo span{display:block;margin-top:3px;font-size:12px;
+  line-height:1.55;color:var(--lp-ink2)}
+
+/* ── preview: simulated action, and actions that are genuinely off ─────── */
+/* THE ANSWER TO "DID THAT DO ANYTHING?" — see LaunchPad. A preview that
+   silently ignores a click is indistinguishable from a broken one, so every
+   simulated action lands here. Fixed to the bottom so it is visible wherever
+   the person is in a long form, and it is announced as a status region. */
+.lp-simnote{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+  z-index:120;max-width:calc(100vw - 32px);
+  display:flex;align-items:center;gap:9px;
+  padding:11px 18px;border-radius:999px;font-size:12.5px;font-weight:600;
+  color:#f5f3ff;background:linear-gradient(90deg,#6d28d9,#4c1d95);
+  border:1px solid rgba(196,181,253,.55);
+  box-shadow:0 12px 34px rgba(0,0,0,.42);
+  animation:lp-simin .18s ease-out}
+@keyframes lp-simin{
+  from{opacity:0;transform:translateX(-50%) translateY(8px)}
+  to{opacity:1;transform:translateX(-50%) translateY(0)}
+}
+
+/* A CONTROL THAT IS OFF MUST LOOK OFF. The rule this enforces: never render
+   an active-looking affordance that does nothing. */
+.lp-upload.lp-off{opacity:.55;filter:saturate(.25)}
+.lp-upload.lp-off:hover{border-color:var(--lp-cline);background:inherit}
+.lp-upload.lp-off .lp-utag{font-style:italic}
+
 /* ── mobile rail ────────────────────────────────────────────────────────── */
 .lp-railtoggle{display:none}
 

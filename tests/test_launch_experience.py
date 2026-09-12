@@ -745,6 +745,78 @@ class TestTheApprovedDesign:
             idx = app.index(route)
             assert "LaunchBoundary" in app[idx:idx + 600], route
 
+    def test_no_session_scoped_fetch_runs_inside_a_preview(self):
+        """THE LEAK CLASS, AS A RULE.
+
+        `/launch/me/...` resolves the workspace from the SESSION. Called from
+        a preview it answers for whoever is LOOKING — an error when no customer
+        is selected, and another customer's real data when one is. It has
+        happened twice: the delivery panel, then the review step's answer
+        summary. Every such call must sit behind a preview guard.
+        """
+        offenders = []
+        for path in sorted(FRONTEND.rglob("*.jsx")):
+            src = path.read_text(encoding="utf-8")
+            for m in re.finditer(r"api\.\w+\(\s*'/launch/me", src):
+                # The guard is the nearest `if (preview)` or `if (supplied)`
+                # above the call inside the same function body.
+                head = src[max(0, m.start() - 900):m.start()]
+                if "if (preview)" in head or "if (supplied)" in head:
+                    continue
+                line = src[src.rfind("\n", 0, m.start()) + 1:
+                           src.find("\n", m.start())]
+                offenders.append("%s: %s" % (path.name, line.strip()))
+        assert offenders == [], offenders
+
+    def test_a_preview_is_the_experience_minus_mutation_not_a_dead_page(self):
+        """Clicking through must WORK. The first version returned false from
+        `persist` in preview, so Save & Continue looked like a dead button and
+        the journey could not be walked at all."""
+        pad = (FRONTEND / "LaunchPad.jsx").read_text(encoding="utf-8")
+        start = pad.index("const persist")
+        body = pad[start:start + 1400]
+        # It acknowledges, and it returns truthy so `saveAndGo` advances.
+        assert "sayPreview(" in body
+        assert "return true" in body
+        # And the notice says the one thing that matters.
+        assert "Preview mode — no changes were saved." in pad
+
+        # Navigation is not gated on preview.
+        go = pad[pad.index("const goTo"):pad.index("const goTo") + 500]
+        assert "navigate(" in go
+
+    def test_actions_with_real_side_effects_look_disabled_and_say_why(self):
+        """Never an active-looking control that silently does nothing."""
+        ui = (FRONTEND / "LaunchUI.jsx").read_text(encoding="utf-8")
+        # The upload tile can be turned off, and says so on its face.
+        assert "disabledReason" in ui
+        assert "aria-disabled" in ui
+        assert "not-allowed" in ui
+
+        files = (FRONTEND / "steps" / "FilesDocumentsStep.jsx").read_text(
+            encoding="utf-8")
+        assert "disabled: preview" in files
+
+        review = (FRONTEND / "steps" / "ReviewSubmitStep.jsx").read_text(
+            encoding="utf-8")
+        assert "unavailable in preview" in review.lower()
+        # Submitting is off in preview, on the button itself.
+        assert "disabled={preview" in review
+
+        css = (FRONTEND / "LaunchStyles.jsx").read_text(encoding="utf-8")
+        assert ".lp-upload.lp-off" in css
+        assert ".lp-simnote" in css
+
+    def test_a_journey_stage_is_inspectable_but_never_actionable(self):
+        """A customer deciding they are in Training does not make it so."""
+        prog = (FRONTEND / "LaunchProgress.jsx").read_text(encoding="utf-8")
+        # It is a button only where a handler exists — nothing inert invites
+        # a click.
+        assert "onSelect ? (" in prog
+        # And nothing in it can move the implementation.
+        for banned in ("api.", "fetch(", "onAdvance", "setStatus"):
+            assert banned not in prog, banned
+
     def test_the_preview_turns_every_write_off(self):
         """Read the component, because this is the property a future edit is
         most likely to break by adding one more handler."""
@@ -752,7 +824,10 @@ class TestTheApprovedDesign:
         for handler in ("const persist", "const uploadFile",
                         "const removeFile", "const submit"):
             start = pad.index(handler)
-            body = pad[start:start + 700]
+            # Generous, because these handlers carry long explanations of WHY
+            # they refuse. The guard is what matters, not where in the comment
+            # block it falls.
+            body = pad[start:start + 1600]
             assert "if (preview)" in body, handler
 
 

@@ -31,12 +31,23 @@ import { buildSchemaIndex, presentAllSteps, SECRET_NOTE } from '../present'
  * accurate — Yes", a `not_requested` reads as "Not requested", and a saved
  * credential reads as "Stored securely" because there is no value to read.
  */
-function AnswerSummary() {
+function AnswerSummary({ preview = false }) {
   const [schema, setSchema] = useState(null)
   const [answers, setAnswers] = useState(null)
   const [err, setErr] = useState(null)
 
   useEffect(() => {
+    // A PREVIEW READS NOBODY'S ANSWERS.
+    //
+    // `/launch/me/summary` resolves the workspace from the SESSION, so inside
+    // a preview it answers for whoever is looking — a 409 when no customer is
+    // selected, and, far worse, ANOTHER CUSTOMER'S TYPED ANSWERS when one is.
+    // That is the same defect the delivery panel had: a session-scoped fetch
+    // on a page about somebody else.
+    //
+    // The preview payload deliberately carries no answers
+    // (`answers_included: false`), so this says so rather than fetching.
+    if (preview) return undefined
     let alive = true
     Promise.all([api.get('/launch/config'), api.get('/launch/me/summary')])
       .then(([cfg, sum]) => {
@@ -46,8 +57,17 @@ function AnswerSummary() {
       })
       .catch(e => { if (alive) setErr(e?.detail || 'Could not load your answers.') })
     return () => { alive = false }
-  }, [])
+  }, [preview])
 
+  if (preview) {
+    return (
+      <p className="lp-hint">
+        The customer&rsquo;s own answers are not shown in a preview. This is
+        where their completed sections appear for them to read back before
+        they submit.
+      </p>
+    )
+  }
   if (err) return <p className="lp-hint">{err}</p>
   if (!schema || !answers) return <p className="lp-hint">Loading your answers…</p>
 
@@ -92,7 +112,7 @@ function AnswerSummary() {
 
 export default function ReviewSubmitStep({
   v, set, steps, onGoTo, customer, blockers = [], onSubmit,
-  submission, readOnly = false,
+  submission, readOnly = false, preview = false,
 }) {
   const [mode, setMode] = useState('type')
   const [busy, setBusy] = useState(false)
@@ -185,7 +205,7 @@ export default function ReviewSubmitStep({
 
       <Collapse title="Everything you have told us"
                 meta="Read it through before you sign" open>
-        <AnswerSummary />
+        <AnswerSummary preview={preview} />
       </Collapse>
 
       <Group title="Acknowledgement"
@@ -242,18 +262,26 @@ export default function ReviewSubmitStep({
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
                     margin: '20px 0 6px', alignItems: 'center' }}>
+        {/* SUBMITTING IS THE CUSTOMER'S SIGNATURE, so it is off in a preview
+            and says so on the button itself rather than looking live and
+            doing nothing. */}
         <button type="button" className="lp-btn primary"
-          disabled={!affirmed || busy || readOnly || blockers.length > 0}
+          disabled={preview || !affirmed || busy || readOnly || blockers.length > 0}
+          title={preview ? 'Unavailable in preview' : undefined}
           onClick={submit}>
           <Ico name="check" size={15} stroke />
-          {busy ? 'Submitting…' : 'Submit Onboarding'}
+          {preview ? 'Submit Onboarding — unavailable in preview'
+            : busy ? 'Submitting…' : 'Submit Onboarding'}
         </button>
 
         {/* THE BUTTON NEVER REFUSES SILENTLY. Whenever it is disabled this
             line says which of the three reasons it is, and an outstanding
             item names the section to go and fix. */}
         <span className="lp-hint" style={{ margin: 0 }}>
-          {done
+          {preview
+            ? 'This is a preview. The customer submits from their own '
+              + 'onboarding; nothing here is sent.'
+            : done
             ? 'Submitted. Thank you — the implementation team has it.'
             : err
               ? <span style={{ color: '#b91c1c', fontWeight: 600 }}>{err}</span>

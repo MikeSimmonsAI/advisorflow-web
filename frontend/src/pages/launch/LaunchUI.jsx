@@ -140,7 +140,9 @@ export function Collapse({ title, meta, children, open: initial = false }) {
  * what is actually held rather than what was clicked.
  */
 export function Upload({ title, note, tag = 'Not provided', icon = 'upload',
-                         files, onUpload, onRemove }) {
+                         files, onUpload, onRemove,
+                         disabled = false,
+                         disabledReason = 'Unavailable in preview' }) {
   // REAL UPLOAD, SAME TILE. The prototype's version was a button that toggled
   // its own boolean — it looked exactly like this and stored nothing. The
   // classes and the markup are unchanged so the approved design is untouched;
@@ -166,11 +168,22 @@ export function Upload({ title, note, tag = 'Not provided', icon = 'upload',
     finally { setBusy(false) }
   }
 
+  // A DISABLED TILE MUST LOOK DISABLED AND SAY WHY.
+  // The failure this prevents is a tile that still looks clickable, opens
+  // nothing, and leaves the person wondering whether the upload silently
+  // worked. `aria-disabled` and the cursor carry it to assistive tech and to
+  // the pointer; the tag carries it to the eye.
   return (
-    <div className={'lp-upload' + (filled ? ' filled' : '')}
-         style={{ cursor: busy ? 'progress' : 'pointer' }}
-         onClick={() => { if (!busy && inputRef.current) inputRef.current.click() }}>
-      <input ref={inputRef} type="file" onChange={pick}
+    <div className={'lp-upload' + (filled ? ' filled' : '')
+                    + (disabled ? ' lp-off' : '')}
+         aria-disabled={disabled || undefined}
+         title={disabled ? disabledReason : undefined}
+         style={{ cursor: disabled ? 'not-allowed' : busy ? 'progress' : 'pointer' }}
+         onClick={() => {
+           if (disabled || busy) return
+           if (inputRef.current) inputRef.current.click()
+         }}>
+      <input ref={inputRef} type="file" onChange={pick} disabled={disabled}
              style={{ display: 'none' }} aria-label={title} />
       <span className="lp-ui"><Ico name={filled ? 'check' : icon} size={16}
         stroke={filled} /></span>
@@ -181,9 +194,10 @@ export function Upload({ title, note, tag = 'Not provided', icon = 'upload',
           ? <span>{mine.map(f => f.filename).join(', ')}</span>
           : note ? <span>{note}</span> : null}
       <span className="lp-utag">
-        {busy ? 'Uploading…' : filled ? 'Received' : tag}
+        {disabled ? disabledReason
+          : busy ? 'Uploading…' : filled ? 'Received' : tag}
       </span>
-      {filled && onRemove ? (
+      {filled && onRemove && !disabled ? (
         <button type="button" className="lp-ulink"
           onClick={ev => { ev.stopPropagation(); mine.forEach(f => onRemove(f.id)) }}
           style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer',

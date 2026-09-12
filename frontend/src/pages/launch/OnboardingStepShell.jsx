@@ -18,7 +18,15 @@ export default function OnboardingStepShell({
   onSaveDraft, onContinue, onBack,
   continueLabel = 'Save & Continue', saved,
   saving = false, error = null, savedAt = null, missing = [],
+  preview = false,
 }) {
+  // IN A PREVIEW BOTH ACTIONS STILL WORK — they navigate, they acknowledge,
+  // and they write nothing. What changes is the WORDING, because a button
+  // labelled "Save" that does not save is the dishonest half of a read-only
+  // screen. See LaunchPad.persist: the simulated action returns true so the
+  // journey is walkable end to end, and the notice says nothing was kept.
+  const draftLabel = preview ? 'Save Draft (preview)' : 'Save Draft'
+  const goLabel = preview ? 'Continue (preview)' : continueLabel
   return (
     <article className="lp-doc">
       <div className="lp-doc-h">
@@ -46,8 +54,9 @@ export default function OnboardingStepShell({
             </button>
           : null}
         <button type="button" className="lp-btn" onClick={onSaveDraft}
-                disabled={saving}>
-          {saving ? 'Saving…' : 'Save Draft'}
+                disabled={saving}
+                title={preview ? 'Preview mode — nothing is saved' : undefined}>
+          {saving ? 'Saving…' : draftLabel}
         </button>
         {saved ? <span className="lp-flash">✓ Saved</span> : null}
         <span className="lp-fspace" />
@@ -71,8 +80,10 @@ export default function OnboardingStepShell({
 
         {onContinue
           ? <button type="button" className="lp-btn primary" onClick={onContinue}
-                    disabled={saving}>
-              {saving ? 'Saving…' : continueLabel}
+                    disabled={saving}
+                    title={preview
+                      ? 'Preview mode — advances without saving' : undefined}>
+              {saving ? 'Saving…' : goLabel}
             </button>
           : null}
       </div>

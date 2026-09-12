@@ -24,9 +24,21 @@
  * `sublabel` is where that renaming actually lands (a customer's own system
  * named under the stage that connects it), and it renders only when set.
  */
-export default function LaunchProgress({ phases, intakePct, title }) {
+/**
+ * `onSelect` makes a stage INSPECTABLE, not actionable.
+ *
+ * Clicking a stage reveals what that stage involves; it cannot advance the
+ * implementation, because a customer deciding they are in Training does not
+ * make it so. Where no handler is supplied the stages render as the plain
+ * labels they have always been — this is the rule about never showing an
+ * active-looking control that does nothing, applied in the other direction:
+ * an inert element must not invite a click either.
+ */
+export default function LaunchProgress({ phases, intakePct, title,
+                                         onSelect = null, openKey = null }) {
   const doneCount = phases.filter(p => p.state === 'done').length
   const current = phases.find(p => p.state === 'now')
+  const open = openKey ? phases.find(p => p.key === openKey) : null
   return (
     <section className="lp-phases">
       <div className="lp-phases-h">
@@ -39,20 +51,51 @@ export default function LaunchProgress({ phases, intakePct, title }) {
         </span>
       </div>
       <ol className="lp-phaserow">
-        {phases.map((p, i) => (
-          <li key={p.key} className={'lp-phase ' + p.state}>
-            <span className="lp-pnum">
-              {p.state === 'done' ? '✓' : i + 1}
-            </span>
-            <span className="lp-plabel">{p.label}</span>
-            {p.sublabel ? <span className="lp-psub">{p.sublabel}</span> : null}
-            <span className="lp-pstate">
-              {p.state === 'done' ? 'Complete'
-                : p.state === 'now' ? 'In progress' : 'Upcoming'}
-            </span>
-          </li>
-        ))}
+        {phases.map((p, i) => {
+          const body = (
+            <>
+              <span className="lp-pnum">
+                {p.state === 'done' ? '✓' : i + 1}
+              </span>
+              <span className="lp-plabel">{p.label}</span>
+              {p.sublabel ? <span className="lp-psub">{p.sublabel}</span> : null}
+              <span className="lp-pstate">
+                {p.state === 'done' ? 'Complete'
+                  : p.state === 'now' ? 'In progress' : 'Upcoming'}
+              </span>
+            </>
+          )
+          const cls = 'lp-phase ' + p.state
+            + (openKey === p.key ? ' open' : '')
+          return (
+            <li key={p.key} className={cls}>
+              {onSelect ? (
+                <button type="button" className="lp-phasebtn"
+                        aria-expanded={openKey === p.key}
+                        onClick={() => onSelect(openKey === p.key ? null : p.key)}>
+                  {body}
+                </button>
+              ) : body}
+            </li>
+          )
+        })}
       </ol>
+
+      {/* WHAT THIS STAGE ACTUALLY MEANS, in the customer's own terms. It says
+          where the stage stands and nothing about when it will finish — this
+          module reports what HAS happened, never a date nobody committed to. */}
+      {open ? (
+        <div className="lp-phaseinfo">
+          <b>{open.label}{open.sublabel ? ' · ' + open.sublabel : ''}</b>
+          <span>
+            {open.state === 'done'
+              ? 'This stage is complete.'
+              : open.state === 'now'
+                ? 'This is where your launch stands right now.'
+                : 'Not started yet — it begins once the stages before it are done.'}
+          </span>
+        </div>
+      ) : null}
     </section>
   )
 }
