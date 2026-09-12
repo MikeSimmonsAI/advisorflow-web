@@ -52,6 +52,18 @@ from app.models.implementation_models import (                         # noqa: E
     INVITE_PENDING, INVITE_ACCEPTED, INVITE_REVOKED,
 )
 from app.services.auth_service import hash_password                    # noqa: E402
+# THE READINESS CONTRACT, IMPORTED RATHER THAN COPIED.
+#
+# The go-live gate is computed from the brand's template and the intake
+# schema, so the fixture below builds its evidence by READING those and
+# satisfying whatever they currently ask for. Restating the field list or the
+# integration keys here is how this gate went stale the first time: the
+# contract moved and the fixture went on asserting the old one.
+from app.services import launch_intake                                 # noqa: E402
+from app.services import launch_template                               # noqa: E402
+from app.models.launch_delivery_models import (                        # noqa: E402
+    INT_VERIFIED, CHECK_PASS, APPROVAL_CUSTOMER, APPROVAL_PROVIDER,
+)
 
 PW = "SmokeTest!2026"
 CHI = "America/Chicago"
@@ -211,6 +223,123 @@ def build():
 
 
 # ── §5-§8 provisioning ──────────────────────────────────────────────────────
+
+def _synthetic_answer(field):
+    """A plausible answer of the right shape for one intake field.
+
+    Shape matters and content does not: the gate is proving that a genuinely
+    completed intake satisfies the go-live contract, not that any particular
+    sentence does. Everything is obviously synthetic and lands on example.test
+    so no row here can be mistaken for a real customer's.
+    """
+    kind = field["kind"]
+    if kind == launch_intake.KIND_EMAIL:
+        return "onboarding@example.test"
+    if kind == launch_intake.KIND_PHONE:
+        return "+15550100"
+    if kind == launch_intake.KIND_URL:
+        return "https://example.test"
+    if kind == launch_intake.KIND_DATE:
+        return "2026-12-01"
+    if kind == launch_intake.KIND_CHECKBOX:
+        return True
+    if kind == launch_intake.KIND_SELECT:
+        opts = field.get("options") or []
+        return opts[0] if opts else "Other"
+    if kind == launch_intake.KIND_SECRET:
+        # Not a credential. Stored encrypted like any other secret field, and
+        # the point of writing one at all is that `access_received` counts
+        # secrets that are SET, so an empty string would not satisfy it.
+        return "synthetic-placeholder-value"
+    return "Synthetic %s" % field["label"]
+
+
+def make_genuinely_ready(c, god, cust, org_id, impl_id):
+    """Drive a customer from provisioned to actually ready, through the product.
+
+    NOTHING HERE FORCES A STATUS FIELD. Every item the go-live gate computes is
+    satisfied by doing the thing the gate measures - the customer fills in and
+    submits their intake, uploads a document, staff verify the connections,
+    pass the checks, complete the training and record both signatures - so a
+    green gate afterwards means the evidence exists, not that a flag was set.
+
+    Returns the list of steps that did not do what they were asked, so the
+    caller can report a setup failure as a setup failure rather than as a
+    mysterious readiness failure twenty lines later.
+    """
+    problems = []
+
+    def want(ok, what, detail=""):
+        if not ok:
+            problems.append("%s%s" % (what, (" -> %s" % detail) if detail else ""))
+
+    # ── the customer's half ────────────────────────────────────────────────
+    # Every field of every step, read from the schema itself.
+    for schema in launch_intake.STEP_SCHEMA:
+        answers = {f["key"]: _synthetic_answer(f) for f in schema["fields"]}
+        if not answers:
+            continue
+        r = c.put("/launch/me/steps/%s" % schema["key"],
+                  json={"answers": answers}, headers=cust)
+        want(r.status_code == 200, "save intake step %s" % schema["key"],
+             r.text[:160])
+
+    # A real document, because `files_received` counts uploads and there is no
+    # answer that can stand in for one.
+    r = c.post("/launch/me/files", headers=cust,
+               files={"file": ("brand-guidelines.txt",
+                               b"Synthetic onboarding document.\n", "text/plain")},
+               data={"step_key": "files", "label": "Brand guidelines"})
+    want(r.status_code == 200, "upload an intake document", r.text[:160])
+
+    r = c.post("/launch/me/submit", headers=cust)
+    want(r.status_code == 200, "submit the intake", r.text[:200])
+
+    # ── the implementation team's half ─────────────────────────────────────
+    # GET seeds the delivery programme from the brand template, which is also
+    # how the real screen gets its rows.
+    r = c.get("/god/launch/%s/delivery" % org_id, headers=god)
+    want(r.status_code == 200, "open the delivery programme", r.text[:160])
+    delivery = r.json() if r.status_code == 200 else {}
+
+    for row in delivery.get("integrations", []):
+        if not row.get("is_required"):
+            continue
+        rr = c.patch("/god/launch/%s/integrations/%s" % (org_id, row["id"]),
+                     json={"status": INT_VERIFIED}, headers=god)
+        want(rr.status_code == 200, "verify integration %s" % row.get("key"),
+             rr.text[:160])
+
+    for row in delivery.get("checks", []):
+        if not row.get("is_required"):
+            continue
+        rr = c.patch("/god/launch/%s/checks/%s" % (org_id, row["id"]),
+                     json={"status": CHECK_PASS}, headers=god)
+        want(rr.status_code == 200, "pass check %s" % row.get("key"),
+             rr.text[:160])
+
+    for row in delivery.get("training", []):
+        if not row.get("is_required"):
+            continue
+        rr = c.patch("/god/launch/%s/training/%s" % (org_id, row["id"]),
+                     json={"completed": True,
+                           "attendees": [{"name": "Synthetic Attendee",
+                                          "role": "Administrator"}]},
+                     headers=god)
+        want(rr.status_code == 200, "complete training %s" % row.get("key"),
+             rr.text[:160])
+
+    # Both signatures. Staff record the customer's too - see the route's own
+    # note on why that is the honest arrangement rather than a lax one.
+    for kind, name in ((APPROVAL_CUSTOMER, "Synthetic Customer Signatory"),
+                       (APPROVAL_PROVIDER, "Synthetic Implementation Lead")):
+        rr = c.post("/god/launch/%s/approvals/%s" % (org_id, kind),
+                    json={"given_name": name, "note": "Recorded by the smoke gate."},
+                    headers=god)
+        want(rr.status_code == 200, "record approval %s" % kind, rr.text[:160])
+
+    return problems
+
 
 def test_provisioning(c):
     section("Provisioning authority (§5, §32)")
@@ -385,6 +514,10 @@ def test_provisioning(c):
         o2 = db.query(Organization).filter(
             Organization.id == r.json()["implementation"]["organization_id"]).first()
         STATE["impl2_id"] = r.json()["implementation"]["implementation_id"]
+        # Kept for the warning-override scenario in the Launch section: a
+        # SECOND implementation that nobody has delivered any of, so it is
+        # genuinely not ready rather than made unready on purpose.
+        STATE["org2_id"] = r.json()["implementation"]["organization_id"]
         slugs = [x[0] for x in db.query(Organization.slug).all()]
         check("every customer organisation has a distinct slug",
               len(slugs) == len(set(slugs)), slugs)
@@ -739,11 +872,75 @@ def test_implementation(c):
                json={"acknowledge_warnings": True}, headers=rep)
     check("a rep cannot mark a customer Live", r.status_code == 403, r.status_code)
 
-    # Finish the last required milestone, then launch cleanly.
+    # ── SCENARIO 2: an implementation with open warnings ───────────────────
+    #
+    # Run on the SECOND provisioned customer, which nobody has delivered any
+    # of, so it is genuinely not ready rather than made unready on purpose.
+    # It is a separate subject because an acknowledged launch is still a
+    # launch: doing it to the first customer would leave nothing unlaunched to
+    # prove the clean path with.
+    impl2_id, org2_id = STATE.get("impl2_id"), STATE.get("org2_id")
+    r = c.get("/god/launch/%s/readiness" % org2_id, headers=god)
+    check("an undelivered customer is not ready",
+          r.status_code == 200 and r.json().get("ready") is False, r.text[:200])
+    unready = r.json() if r.status_code == 200 else {}
+    check("and the gate says which items are outstanding",
+          len(unready.get("outstanding") or []) > 0)
+
+    r = c.post("/god/ops/implementations/%s/launch" % impl2_id,
+               json={"acknowledge_warnings": False}, headers=god)
+    check("launching an unready customer is REFUSED, not warned-and-done",
+          r.status_code == 409, r.text[:200])
+    body2 = r.json().get("detail", {}) if r.status_code == 409 else {}
+    check("the refusal lists the real outstanding evidence",
+          isinstance(body2, dict) and len(body2.get("warnings") or []) > 0, body2)
+
+    r = c.post("/god/ops/implementations/%s/launch" % impl2_id,
+               json={"acknowledge_warnings": True,
+                     "note": "Launching early at the customer's written request."},
+               headers=god)
+    check("an explicit acknowledgement CAN launch despite warnings",
+          r.status_code == 200, r.text[:250])
+    db = SessionLocal()
+    i2 = db.query(Implementation).filter(Implementation.id == impl2_id).first()
+    check("the overridden launch really went Live", i2 is not None and i2.status == IMPL_LIVE,
+          i2.status if i2 else None)
+    ov_audit = (db.query(AuditLogEntry)
+                .filter(AuditLogEntry.action == "customer_marked_live",
+                        AuditLogEntry.target_id == impl2_id).count())
+    db.close()
+    check("the override is audited like any other launch", ov_audit == 1, ov_audit)
+
+    # ── SCENARIO 1: a genuinely READY implementation ───────────────────────
+    #
+    # THE POINT OF THIS GATE. Readiness is built by doing the work the go-live
+    # contract measures - intake completed and submitted, a document uploaded,
+    # required connections verified, required checks passed, required training
+    # completed, both signatures recorded - and never by writing a status
+    # field. If this section can be made to pass by forcing a flag, it has
+    # stopped testing anything.
     c.post("/god/ops/implementations/%s/milestones/lead_import" % impl_id,
            json={"status": "done"}, headers=god)
     c.post("/god/ops/implementations/%s/milestones/launch" % impl_id,
            json={"status": "done"}, headers=god)
+
+    setup_problems = make_genuinely_ready(c, god, STATE.get("cust") or {},
+                                          STATE["org_id"], impl_id)
+    check("the readiness evidence could be created through the product",
+          not setup_problems, setup_problems[:4])
+
+    r = c.get("/god/launch/%s/readiness" % STATE["org_id"], headers=god)
+    ready = r.json() if r.status_code == 200 else {}
+    check("every REQUIRED go-live item is satisfied",
+          ready.get("ready") is True,
+          [i["key"] + ": " + i["detail"] for i in (ready.get("outstanding") or [])])
+    # Not just "ready" - the individual items the brand marked required.
+    required_items = [i for i in (ready.get("items") or []) if i["required"]]
+    check("readiness reported a required item set at all", len(required_items) > 0)
+    check("and each one is individually ok",
+          all(i["ok"] for i in required_items),
+          [i["key"] for i in required_items if not i["ok"]])
+
     c.post("/god/ops/implementations/%s/status" % impl_id,
            json={"status": IMPL_READY_FOR_LAUNCH}, headers=god)
 
@@ -751,6 +948,9 @@ def test_implementation(c):
     check("no launch warnings remain", r.json().get("launch_warnings") == [],
           r.json().get("launch_warnings"))
 
+    # acknowledge_warnings STAYS FALSE. A ready customer must launch without
+    # anybody waving anything through; if this line ever needs the override to
+    # pass, the readiness above was not real.
     r = c.post("/god/ops/implementations/%s/launch" % impl_id,
                json={"acknowledge_warnings": False, "note": "Family trained Friday."},
                headers=god)
@@ -764,9 +964,20 @@ def test_implementation(c):
     check("implementation status is live", impl.status == IMPL_LIVE)
     check("opportunity stage advanced to live", opp.stage == STAGE_LIVE, opp.stage)
     check("opportunity is STILL status=won after launch", opp.status == "won")
+    # Scoped to THIS implementation. It used to count every customer_marked_live
+    # row in the database and assert one, which only held while the suite
+    # launched exactly one customer; the warning-override scenario launches a
+    # second. The assertion was always about one launch producing one entry
+    # rather than two, and that is what it now says.
     live_audit = db.query(AuditLogEntry).filter(
-        AuditLogEntry.action == "customer_marked_live").all()
-    check("launch is audited exactly once", len(live_audit) == 1)
+        AuditLogEntry.action == "customer_marked_live",
+        AuditLogEntry.target_id == impl_id).all()
+    check("launch is audited exactly once", len(live_audit) == 1, len(live_audit))
+    other_audit = db.query(AuditLogEntry).filter(
+        AuditLogEntry.action == "customer_marked_live",
+        AuditLogEntry.target_id == STATE.get("impl2_id")).all()
+    check("the acknowledged launch is audited separately, against its own customer",
+          len(other_audit) == 1, len(other_audit))
     db.close()
 
     r = c.post("/god/ops/implementations/%s/status" % impl_id,
@@ -872,7 +1083,12 @@ def test_god_surfaces(c):
     check("pipeline value is a real sum", t.get("pipeline_value") == 2495.0, t.get("pipeline_value"))
     check("won value counts every won deal", t.get("won_value") == 4995 + 1497 + 99,
           t.get("won_value"))
-    check("customers live is real", t.get("customers_live") == 1, t.get("customers_live"))
+    # TWO customers are live by this point, and both on purpose: the one that
+    # launched clean off a satisfied go-live gate, and the one the
+    # warning-override scenario launched with an explicit acknowledgement. The
+    # figure is asserted rather than the shape because the point of the check
+    # is that it counts rows instead of returning a constant.
+    check("customers live is real", t.get("customers_live") == 2, t.get("customers_live"))
     check("won awaiting provisioning excludes provisioned deals",
           t.get("won_awaiting_provisioning") == 1, t.get("won_awaiting_provisioning"))
     check("overdue next actions are counted", t.get("overdue_next_actions") == 1,
@@ -913,8 +1129,15 @@ def test_god_surfaces(c):
           all("billing_plan_key" in p for p in bd["configuration"]["packages"]))
 
     r = c.get("/god/ops/implementations", params={"live": True}, headers=god)
+    live_ids = ({i["implementation_id"] for i in r.json()["implementations"]}
+                if r.status_code == 200 else set())
     check("implementations filter by live", r.status_code == 200 and
-          len(r.json()["implementations"]) == 1, r.text[:200])
+          len(live_ids) == 2, r.text[:200])
+    # Named rather than counted, so this says WHICH customers the filter found
+    # instead of only how many - a filter returning the wrong two would
+    # otherwise pass.
+    check("the live filter returns both launched customers, and only those",
+          live_ids == {STATE["impl_id"], STATE["impl2_id"]}, sorted(live_ids))
     r = c.get("/god/ops/implementations", params={"brand_sales_org_id": "bso-bb"},
               headers=god)
     check("implementations filter by brand",
