@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_from_commit": "5092028",
-  "generated_on": "2026-09-08",
+  "generated_from_commit": "3d2939f",
+  "generated_on": "2026-09-12",
   "how_to_read": {
     "status": {
       "COMPLETE": "Traced end to end in the current source and covered by a test or a live proof. Not 'a page exists'.",
@@ -10,7 +10,8 @@
       "REMOVE": "Code with no caller. Delete it or give it a caller - a decision, not a cleanup.",
       "POLICY_REQUIRED": "The code is correct and deliberately refuses to act until a human decides. Nobody has decided.",
       "BLOCKED": "Cannot proceed without something outside this repository.",
-      "NOT_BUILT": "No implementation found. Searched, not assumed."
+      "NOT_BUILT": "No implementation found. Searched, not assumed.",
+      "IN_PROGRESS": "Real work that is built and tested and merged, but not yet through deploy and live verification. The standard is built -> tested -> committed -> pushed -> merged -> deployed -> live verified; anything between merge and live verification is IN_PROGRESS, never COMPLETE."
     },
     "priority": "P0 stop-the-world, P1 next, P2 soon, P3 whenever",
     "completed_on": "null unless a commit or a dated document proves it. Never guessed.",
@@ -31,7 +32,11 @@
     "Cadence, Campaigns & AI Conversation",
     "Scheduling, Calendar & Appointments",
     "Proposals, Deal Rooms & Demo Sites",
-    "CRM, Case Files, Reporting & Platform Health"
+    "CRM, Case Files, Reporting & Platform Health",
+    "AI Workforce",
+    "Support Intelligence & Customer Assistance",
+    "Mobile & Multi-Device",
+    "Experience, Design System & Branding"
   ],
   "items": [
     {
@@ -134,7 +139,7 @@
       "priority": "P1",
       "depends_on": [],
       "completed_on": "2026-09-09",
-      "evidence": "auth_router.py: @limiter.shared_limit('30/minute;200/hour', scope='auth-login') on POST /auth/login. shared_limit scope ensures any future /auth/verify alias draws the same budget. /auth/verify does not exist as a separate route. Second layer: in-memory per-(IP,email) throttle (_login_throttle_check) \u00e2\u20ac\u201d 10 failures in 15 min triggers 429. Both mechanisms confirmed in place.",
+      "evidence": "auth_router.py: @limiter.shared_limit('30/minute;200/hour', scope='auth-login') on POST /auth/login. shared_limit scope ensures any future /auth/verify alias draws the same budget. /auth/verify does not exist as a separate route. Second layer: in-memory per-(IP,email) throttle (_login_throttle_check) â€” 10 failures in 15 min triggers 429. Both mechanisms confirmed in place.",
       "notes": null,
       "decision_required": null,
       "blocked_reason": null,
@@ -181,8 +186,53 @@
       "priority": "P3",
       "depends_on": [],
       "completed_on": "2026-09-09",
-      "evidence": "POST /admin/users/{user_id}/force-logout not found in codebase \u2014 already removed before this pass. No further action needed.",
+      "evidence": "POST /admin/users/{user_id}/force-logout not found in codebase — already removed before this pass. No further action needed.",
       "notes": "A real operator capability with no way to invoke it.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "SEC-01",
+      "system": "Identity, Authentication & Authorization",
+      "title": "Setup / integration tokens cannot authenticate to protected APIs",
+      "status": "COMPLETE",
+      "priority": "P0",
+      "depends_on": [],
+      "completed_on": "commit in origin/main",
+      "evidence": "app/services/auth_service.py purpose=\"access\" claim, fail-closed on wrong or missing purpose, jti required to name a session; tests/test_setup_token_cannot_authenticate.py",
+      "notes": "Security triad, part 1. Setup tokens are signed from a separately derived key (SETUP_TOKEN_SECRET, else HMAC of the base secret under a fixed label) - never the same signing authority as access tokens.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "SEC-02",
+      "system": "Identity, Authentication & Authorization",
+      "title": "OAuth state is an opaque single-use authorization transaction, not a user id",
+      "status": "COMPLETE",
+      "priority": "P0",
+      "depends_on": [],
+      "completed_on": "commit in origin/main",
+      "evidence": "app/services/oauth_state_service.py; tests/test_oauth_state_authorization.py",
+      "notes": "Security triad, part 2. A raw user id supplied as state is never authorization. The callback resolves identity and context from the validated transaction row; tenant and user boundaries are enforced at both ends.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "SEC-03",
+      "system": "Identity, Authentication & Authorization",
+      "title": "Request statement_timeout cannot leak into pooled or background work",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": "commit in origin/main",
+      "evidence": "transaction-scoped SET LOCAL re-applied per transaction; tests/test_request_statement_timeout.py",
+      "notes": "Security triad, part 3. No session-level SET, and background jobs do not inherit a request timeout.",
       "decision_required": null,
       "blocked_reason": null,
       "next_action": null,
@@ -345,6 +395,36 @@
       "previously_missed": false
     },
     {
+      "id": "GOD-11",
+      "system": "Platform Ownership & God Mode Operations",
+      "title": "T3 God Access: access management, per-surface authority and access diagnostics",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": "commit in origin/main",
+      "evidence": "app/routers/god_access_router.py; app/services/access_management.py, access_diagnostic.py; frontend/src/pages/god/GodAccess.jsx; tests/test_god_access_management.py; scripts/probe_access_diagnostic.py",
+      "notes": "God Mode stays the single root authority - no Platform Superadmin, Root Admin or second permission architecture was introduced.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "ORG-ARCHIVE",
+      "system": "Platform Ownership & God Mode Operations",
+      "title": "Organization archive / restore / permanent-delete lifecycle",
+      "status": "NOT_BUILT",
+      "priority": "P3",
+      "depends_on": [],
+      "completed_on": null,
+      "evidence": "Searched the repo for an organization archive state, an Archived filter and a God delete path - zero matches. CUST-02 archives a CUSTOMER record; there is no organization-level archive.",
+      "notes": "Intended mainly for true disposable and test records. Archived orgs must not clutter Customers, Workspaces, launch queues, selectors or normal search unless Include Archived is selected. Restore must retain users, history, deals, billing, audit and onboarding records. Permanent delete stays separate, God-only and dependency-aware.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Not scheduled. Design the archive state and the Archived view before any delete path is written.",
+      "previously_missed": true
+    },
+    {
       "id": "EXEC-01",
       "system": "Executive Portfolio Layer",
       "title": "One canonical executive portfolio authority enforced server-side",
@@ -372,7 +452,7 @@
       ],
       "completed_on": "commit 74bba05",
       "evidence": "executive_router 16 routes; app/services/executive_portfolio.py; frontend/src/pages/executive/*; tests/test_executive_command_center.py, test_executive_command_experience.py, test_executive_customer_health.py, test_executive_suite.py",
-      "notes": "Health carries human-readable reasons. MRR is null rather than 0 when a plan does not resolve; rates are null without a denominator.",
+      "notes": "Health carries human-readable reasons. MRR is null rather than 0 when a plan does not resolve; rates are null without a denominator. The next executive phase is tracked separately as EXEC-05 (T10); this item is not it.",
       "decision_required": null,
       "blocked_reason": null,
       "next_action": null,
@@ -411,6 +491,23 @@
       "blocked_reason": null,
       "next_action": null,
       "previously_missed": false
+    },
+    {
+      "id": "EXEC-05",
+      "system": "Executive Portfolio Layer",
+      "title": "T10 Executive Command Center (next phase)",
+      "status": "NOT_BUILT",
+      "priority": "P2",
+      "depends_on": [
+        "EXEC-02"
+      ],
+      "completed_on": null,
+      "evidence": "No T10 branch, worktree or session log exists yet.",
+      "notes": "Queued. EXEC-02 shipped the current executive portfolio layer; T10 is the next phase on top of it, not a rebuild of it.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Scope T10 against what EXEC-02 already provides before opening a thread.",
+      "previously_missed": true
     },
     {
       "id": "SALES-01",
@@ -631,6 +728,23 @@
       "previously_missed": false
     },
     {
+      "id": "BILL-10",
+      "system": "Commercial: Billing, Plans & Entitlements",
+      "title": "Custom commercial agreements outside the catalogue (allocations, settlement)",
+      "status": "IN_PROGRESS",
+      "priority": "P1",
+      "depends_on": [
+        "BILL-01"
+      ],
+      "completed_on": null,
+      "evidence": "app/models + routers for commercial agreements; tests/test_commercial_agreements.py, test_commercial_api.py, test_commercial_atlantis.py; SESSION_LOG_CUSTOM_COMMERCIAL_AND_INDUSTRY.md (in origin/main)",
+      "notes": "For arrangements the catalogue cannot express - no upfront, no monthly, a share of collections. Built, tested and merged; unknown is never treated as zero. Not called COMPLETE until deploy and live verification land with the Customer Launch Experience work it ships beside.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Deploy and live-verify alongside CUST-05.",
+      "previously_missed": true
+    },
+    {
       "id": "COMP-01",
       "system": "Sales Compensation & Pricing Authority",
       "title": "Commission policies, plans, rules and caps with an audit trail",
@@ -761,11 +875,28 @@
         "CUST-03"
       ],
       "completed_on": "2026-09-09",
-      "evidence": "GET /god/ops/won-queue not found in codebase \u2014 already removed before this pass. No further action needed.",
+      "evidence": "GET /god/ops/won-queue not found in codebase — already removed before this pass. No further action needed.",
       "notes": "The Won handoff is visible elsewhere; this endpoint is a second answer to the same question with no caller.",
       "decision_required": null,
       "blocked_reason": null,
       "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "CUST-05",
+      "system": "Customer Provisioning, Lifecycle & Customer 360",
+      "title": "Customer Launch Experience: reusable launch shell, Send Onboarding, first customer launch",
+      "status": "IN_PROGRESS",
+      "priority": "P1",
+      "depends_on": [
+        "CUST-01"
+      ],
+      "completed_on": null,
+      "evidence": "SESSION_LOG_CUSTOMER_LAUNCH_EXPERIENCE.md (in origin/main); tests/test_launch_experience.py (44 tests), test_launch_engine.py, test_launch_delivery.py, test_launch_productization.py; frontend/src/pages/launch/*",
+      "notes": "One configured shell, four config layers, internal preview that writes nothing. Covers the Atlantis onboarding, the Send Onboarding workflow and the Launch Experience V2 visual implementation. No real onboarding invitation goes out without explicit authorization.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Finish the V2 visual pass, then deploy and live-verify.",
       "previously_missed": true
     },
     {
@@ -892,7 +1023,7 @@
       ],
       "completed_on": null,
       "evidence": "No frontend caller: /leads/maintenance/duplicate-dnc-repair, /leads/maintenance/tier-status-repair, /leads/{lead_id}/lead-type, /leads/sms-optin, /leads/sparklines, /leads/engagement-breakdown, /ai/analyze-batch",
-      "notes": "sparklines and engagement-breakdown have a test (tests/test_sparklines.py) but no caller - tested code nobody can reach.",
+      "notes": "sparklines and engagement-breakdown have a test (tests/test_sparklines.py) but no caller - tested code nobody can reach. Confirmed at the 12 Sep 2026 refresh: the decision is still REMOVE.",
       "decision_required": "Which of these are deliberate operator tools and which are leftovers?",
       "blocked_reason": null,
       "next_action": "Triage as part of the LEAD-02 split rather than as a separate pass.",
@@ -955,7 +1086,7 @@
         "LEAD-11"
       ],
       "completed_on": "2026-09-09",
-      "evidence": "app/services/public_intake.py implements resolve_public_intake() \u00e2\u20ac\u201d resolves Platform.public_intake_organization_id, matches exact Origin host, then requires exactly-one configured platform, else raises IntakeDestinationError (503). ilike+first() fallback removed. test_public_write_paths.py::test_demo_request_refuses_when_no_destination_is_configured covers the refuse path.",
+      "evidence": "app/services/public_intake.py implements resolve_public_intake() â€” resolves Platform.public_intake_organization_id, matches exact Origin host, then requires exactly-one configured platform, else raises IntakeDestinationError (503). ilike+first() fallback removed. test_public_write_paths.py::test_demo_request_refuses_when_no_destination_is_configured covers the refuse path.",
       "notes": "This is fuzzy organization resolution on a public, unauthenticated write path, and the fallback drops a real inbound lead into whatever organization happens to be returned first. Renaming a brand silently redirects public leads; the fallback can put a stranger's contact details into a customer's workspace.",
       "decision_required": null,
       "blocked_reason": null,
@@ -1337,7 +1468,7 @@
         "SCHED-02"
       ],
       "completed_on": "2026-09-09",
-      "evidence": "calendar_providers/__init__.py resolve_provider_key: when len(live_external) > 1 and no calendar_provider is configured, returns PROVIDER_ICS (not PREFERENCE[0]). Comment documents the Outlook/Google wrong-calendar failure this prevents. tests/test_calendar_provider_resolution.py (13 tests): fail-closed proof (both connected unconfigured \u00e2\u2020\u2019 ICS), single-provider cases, explicit config wins over live connections, org-level config respected, prefer= bypass for cancellation path. All 13 pass.",
+      "evidence": "calendar_providers/__init__.py resolve_provider_key: when len(live_external) > 1 and no calendar_provider is configured, returns PROVIDER_ICS (not PREFERENCE[0]). Comment documents the Outlook/Google wrong-calendar failure this prevents. tests/test_calendar_provider_resolution.py (13 tests): fail-closed proof (both connected unconfigured â†’ ICS), single-provider cases, explicit config wins over live connections, org-level config respected, prefer= bypass for cancellation path. All 13 pass.",
       "notes": null,
       "decision_required": null,
       "blocked_reason": null,
@@ -1360,6 +1491,24 @@
       "blocked_reason": null,
       "next_action": null,
       "previously_missed": false
+    },
+    {
+      "id": "SCHED-07",
+      "system": "Scheduling, Calendar & Appointments",
+      "title": "Sales Workspace scheduling surfaces: /sales/calendar and /sales/team",
+      "status": "IN_PROGRESS",
+      "priority": "P1",
+      "depends_on": [
+        "SCHED-01",
+        "SCHED-03"
+      ],
+      "completed_on": null,
+      "evidence": "SESSION_LOG_CALENDAR_SCHEDULING.md (in origin/main), branch feat/sales-calendar-scheduling; availability intersection, recurring rules per local date, sales_appointments",
+      "notes": "Built, tested and merged. Deployment and live verification are still pending behind the Launch Engine deploy-gate issue - that is the only thing between this and COMPLETE.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Clear the deploy gate, deploy, then verify /sales/calendar and /sales/team live.",
+      "previously_missed": true
     },
     {
       "id": "PROP-01",
@@ -1413,6 +1562,23 @@
       "previously_missed": true
     },
     {
+      "id": "PROP-04",
+      "system": "Proposals, Deal Rooms & Demo Sites",
+      "title": "T4 Demo suite and demo launch",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "PROP-02"
+      ],
+      "completed_on": "commit in origin/main",
+      "evidence": "app/models/demo_suite_models.py, demo_site_models.py; app/routers/demo_suite_router.py, demo_router.py; app/services/demo_firewall.py, demo_environment.py, demo_scenarios/*; demos/ (per-prospect sites)",
+      "notes": "Demo environment has a side-effect firewall, so a demo can never send, charge or invite. Prospect demos publish on Mike's own domain, never on a Claude URL.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
       "id": "CRM-01",
       "system": "CRM, Case Files, Reporting & Platform Health",
       "title": "Three routers implement contacts and notes",
@@ -1435,7 +1601,7 @@
       "priority": "P2",
       "depends_on": [],
       "completed_on": "2026-09-09",
-      "evidence": "crm_secrets.py: store_secret/read_secret/migrate_crm_connection_secrets; crm_router.py already calls store_secret on writes; boot migration wired in main.py startup; tests/test_crm_secrets.py 14 tests all pass \u00e2\u20ac\u201d proves stored bytes != plaintext, round-trip, legacy plaintext backward-compat, migration converts plaintext rows, skips already-encrypted.",
+      "evidence": "crm_secrets.py: store_secret/read_secret/migrate_crm_connection_secrets; crm_router.py already calls store_secret on writes; boot migration wired in main.py startup; tests/test_crm_secrets.py 14 tests all pass â€” proves stored bytes != plaintext, round-trip, legacy plaintext backward-compat, migration converts plaintext rows, skips already-encrypted.",
       "notes": "api_key_encrypted and webhook_secret both covered by SECRET_COLUMNS. Migration is idempotent and runs at every startup.",
       "decision_required": null,
       "blocked_reason": null,
@@ -1486,8 +1652,8 @@
         "BILL-01"
       ],
       "completed_on": "2026-09-09",
-      "evidence": "god_router.py:1591 GET /god/revenue-history \u00e2\u20ac\u201d reads real BillingPayment and BillingInvoice rows; returns total_collected_cents, payments_by_month, invoice_status_breakdown, plan_breakdown; snapshot-dependent metrics returned as clearly-labelled unavailable[]. GodRevenueHistory.jsx: bar chart, KPI row, status breakdown, plan breakdown, platform filter. Routed at /god/revenue-history in App.jsx; nav entry added to GodShell.jsx.",
-      "notes": "Snapshot table not needed for launch \u00e2\u20ac\u201d the screen renders real data from existing tables and marks trend-line metrics as unavailable rather than manufacturing them.",
+      "evidence": "god_router.py:1591 GET /god/revenue-history â€” reads real BillingPayment and BillingInvoice rows; returns total_collected_cents, payments_by_month, invoice_status_breakdown, plan_breakdown; snapshot-dependent metrics returned as clearly-labelled unavailable[]. GodRevenueHistory.jsx: bar chart, KPI row, status breakdown, plan breakdown, platform filter. Routed at /god/revenue-history in App.jsx; nav entry added to GodShell.jsx.",
+      "notes": "Snapshot table not needed for launch â€” the screen renders real data from existing tables and marks trend-line metrics as unavailable rather than manufacturing them.",
       "decision_required": null,
       "blocked_reason": null,
       "next_action": null,
@@ -1521,10 +1687,10 @@
       ],
       "completed_on": null,
       "evidence": "reports_router._get_org_ids: if current_user.role == 'god_admin', return every Organization.id in the database, with no platform_id narrowing",
-      "notes": "This is the owner, so it is not an escalation and not a boundary bypass. But it is the one place left where a figure spans brands without saying so, which is precisely the confusion the executive layer was rebuilt to remove. The executive surfaces narrow the owner to one brand; tenant reporting does not.",
-      "decision_required": "Should god-level tenant reporting follow the active brand context, like the executive surfaces do?",
+      "notes": "This is the owner, so it is not an escalation and not a boundary bypass. But it is the one place left where a figure spans brands without saying so, which is precisely the confusion the executive layer was rebuilt to remove. The executive surfaces narrow the owner to one brand; tenant reporting does not. Closed as part of the brand-scoping work. The decision flag on this item was stale and was cleared at the 12 Sep 2026 refresh - it was still inflating the \"decisions needed\" count for a question that had already been answered.",
+      "decision_required": null,
       "blocked_reason": null,
-      "next_action": "Either narrow it by the active platform context, or label the figure as all-brand on the screen. Do not leave it ambiguous.",
+      "next_action": null,
       "previously_missed": true
     },
     {
@@ -1555,6 +1721,254 @@
       "decision_required": null,
       "blocked_reason": null,
       "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "AIW-01",
+      "system": "AI Workforce",
+      "title": "T6 AI Workforce foundation: who an AI employee is, what it may do, whether it may run",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": "commit in origin/main",
+      "evidence": "app/models/workforce_models.py; app/services/workforce/ (eligibility, entitlement, activation, audit, constants, memory, knowledge, model_router); SESSION_LOG_T6_AI_WORKFORCE_ENGINE.md",
+      "notes": "Built once at the platform layer, configured per white-label brand. Commercial and operational state stay distinct - paid does not mean safe to activate.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "AIW-02",
+      "system": "AI Workforce",
+      "title": "T7 AI Workforce Operations: the operational reach of an AI employee",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "AIW-01"
+      ],
+      "completed_on": "commit in origin/main",
+      "evidence": "app/routers/workforce_router.py; app/services/workforce/ (outbound, booking, handoff, evaluation); SESSION_LOG_T7_AI_WORKFORCE_OPERATIONS.md",
+      "notes": "Every action is allowlisted and schema-constrained; authority is enforced server side. Prompt text is never authorization.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "AIW-03",
+      "system": "AI Workforce",
+      "title": "T8 AI Workforce Builder: how a brand offers one and a customer hires, configures and removes one",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "AIW-01",
+        "AIW-02"
+      ],
+      "completed_on": "commit in origin/main",
+      "evidence": "app/routers/god_workforce_router.py; workforce deployment and provisioning services; SESSION_LOG_T8_AI_WORKFORCE_DEPLOYMENT.md",
+      "notes": "Sold through the existing T2 catalogue, deployed per customer organization, administered through God Mode. A cancelled entitlement cannot leave an active employee.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "AIW-04",
+      "system": "AI Workforce",
+      "title": "T9 AI Workforce Supervisor and Intelligence",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "AIW-02"
+      ],
+      "completed_on": "commit in origin/main",
+      "evidence": "app/models/workforce_intelligence_models.py; app/routers/workforce_intelligence_router.py; SESSION_LOG_T9_AI_WORKFORCE_INTELLIGENCE.md",
+      "notes": "Supervision and performance intelligence over the deployed workforce. Prospecting remains controlled and deferred.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "SUP-01",
+      "system": "Support Intelligence & Customer Assistance",
+      "title": "T5 Support Intelligence: tickets, SLA, entitlements, AI assist, safe remediation, incidents",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": "commit in origin/main",
+      "evidence": "app/models/support_models.py; app/routers/support_router.py, god_support_router.py; app/services/support_* (13 services); tests/test_support_engine.py; scripts/_support_live_verify.py",
+      "notes": "Three commercial concepts stay distinct: technical product support (always included), customer assistance (package-metered), professional services (billable). First-response targets only - no resolution time is promised. A verified P1 outage reaches the emergency queue regardless of package.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "SUP-02",
+      "system": "Support Intelligence & Customer Assistance",
+      "title": "White-label support brand identity and the God Support Command Center",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "SUP-01"
+      ],
+      "completed_on": "commit in origin/main",
+      "evidence": "app/services/support_branding.py, support_brief.py; frontend/src/pages/HelpSupport.jsx; frontend/src/pages/god/GodSupport.jsx; tests/test_support_brand_isolation.py",
+      "notes": "The brand owns the face, AdvisorFlow owns the brain and the fixer. Auto-fix risk classes are enforced; the platform never silently modifies or deploys its own application code.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "M1",
+      "system": "Mobile & Multi-Device",
+      "title": "M1 Mobile sales experience - Phase 0 discovery and prototype",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [],
+      "completed_on": "commit in origin/main",
+      "evidence": "mobile/ Expo app with (advisor), (manager) and (exec) route groups; mobile/README.md, AGENTS.md",
+      "notes": "Discovery and prototype only, deliberately not the full mobile implementation. The approved screens from this phase are the input to M3.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "M2",
+      "system": "Mobile & Multi-Device",
+      "title": "M2 Multi-device sessions and mobile foundation",
+      "status": "IN_PROGRESS",
+      "priority": "P1",
+      "depends_on": [
+        "M1"
+      ],
+      "completed_on": null,
+      "evidence": "docs/M2_MULTI_DEVICE_SESSIONS.md (in origin/main); server-side session rows replacing one-session-per-user; tests test_session_adversarial, test_mobile_sessions, test_mobile_devices; 376 passed / 0 failed on the reconciled tree; mobile tsc clean, 52 jest tests",
+      "notes": "Core production behaviour passed controlled multi-device verification. Held at IN PROGRESS on the standing rule, not on doubt: the final mobile fix (\"Drilldown tables collapse on mobile instead of scrolling sideways\", commit c89dfb0) rides out with the 12 Sep 2026 roadmap deploy, so at the moment of this refresh it had been built, tested, committed and merged but not yet deployed or verified on a real device.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Open a real phone against the deployed build, confirm the drilldown tables stack instead of scrolling sideways, then move this to COMPLETE. Nothing else is outstanding.",
+      "previously_missed": true
+    },
+    {
+      "id": "M3",
+      "system": "Mobile & Multi-Device",
+      "title": "M3 Full mobile sales experience",
+      "status": "NOT_BUILT",
+      "priority": "P2",
+      "depends_on": [
+        "M2"
+      ],
+      "completed_on": null,
+      "evidence": "No implementation beyond the M1 prototype screens.",
+      "notes": "Planned. The real daily-sales mobile experience, built from the approved prototype screens. Waits on the M2 mobile foundation closing.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Open only after M2 is live verified.",
+      "previously_missed": true
+    },
+    {
+      "id": "UX-01",
+      "system": "Experience, Design System & Branding",
+      "title": "God Mode permanent light redesign",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [
+        "GOD-03"
+      ],
+      "completed_on": "commit in origin/main",
+      "evidence": "frontend/src/pages/god/godTokens.css (single token sheet scoped to .gm-shell / .gm-scope / .go-scope); frontend/scripts/god_contrast_check.py; SESSION_LOG_GOD_MODE_LIGHT_REDESIGN.md",
+      "notes": "God Mode is permanently light - no dark variant and no toggle in the God rail. Contrast is a build gate, not a claim: 4.5:1 text, 3:1 control boundaries. No God file may read a tenant token.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "UX-02",
+      "system": "Experience, Design System & Branding",
+      "title": "God Mode Users and Identity: horizontal-scroll and UX cleanup",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "UX-01"
+      ],
+      "completed_on": "commit in origin/main",
+      "evidence": "frontend/src/pages/god/GodUsers.jsx; frontend/src/pages/Users.jsx / Users.css",
+      "notes": "Information density preserved; the table no longer forces sideways scrolling to read a row.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "UX-03",
+      "system": "Experience, Design System & Branding",
+      "title": "Customer UX and branding corrections",
+      "status": "COMPLETE",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": "commit in origin/main",
+      "evidence": "SESSION_LOG_CUSTOMER_UX_AND_BRANDING_CORRECTIONS.md (in origin/main)",
+      "notes": "Four corrections: Stripe return behaviour, package-card authority and configuration, support brand identity, and the /branding leak. Customer workspaces stay white-label and config-driven - the God light system is never forced into them.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "UX-04",
+      "system": "Experience, Design System & Branding",
+      "title": "Opportunity Seller UX",
+      "status": "COMPLETE",
+      "priority": "P2",
+      "depends_on": [
+        "SALES-01"
+      ],
+      "completed_on": "commit in origin/main",
+      "evidence": "frontend/src/pages/sales/OpportunityDetail.jsx; frontend/src/pages/god/GodOpportunities.jsx; tests/test_opportunity_seller_ux.py",
+      "notes": null,
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": null,
+      "previously_missed": true
+    },
+    {
+      "id": "UX-05",
+      "system": "Experience, Design System & Branding",
+      "title": "Customer Workspace visual redesign",
+      "status": "NOT_BUILT",
+      "priority": "P3",
+      "depends_on": [
+        "UX-03"
+      ],
+      "completed_on": null,
+      "evidence": "Customer Overview visual direction and mockup exist; no implementation in frontend/src/pages.",
+      "notes": "Design direction approved. Implementation is intentionally behind Calendar and core work.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Implement from the approved Customer Overview mockup once SCHED-07 is live.",
+      "previously_missed": true
+    },
+    {
+      "id": "UX-06",
+      "system": "Experience, Design System & Branding",
+      "title": "Sales Workspace shared shell visual redesign",
+      "status": "NOT_BUILT",
+      "priority": "P3",
+      "depends_on": [
+        "SCHED-07"
+      ],
+      "completed_on": null,
+      "evidence": "SalesShell / SalesStyles.jsx unchanged by the calendar work.",
+      "notes": "The Calendar screens were redesigned without touching the shared SalesShell. The shared shell can take a later mockup-driven pass.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Needs a mockup before any code. Note: SalesStyles.jsx is one JS template literal - a backtick in a CSS comment breaks the build.",
       "previously_missed": true
     }
   ]
