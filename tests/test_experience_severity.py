@@ -588,6 +588,29 @@ def _stripped(text):
     return re.sub(r"^\s*//.*$", "", text, flags=re.M)
 
 
+#: The dark token block for the Sales Workspace. Matched by SHAPE, not by one
+#: exact selector string, because the selector legitimately grows qualifiers:
+#: the God-Mode-light work narrowed it to `:not(.gm-shell *)` so the workspace
+#: palette stops at the God shell's own border instead of repainting it. These
+#: two tests asserted the literal `[data-appearance="dark"] .sw-scope{` and so
+#: went red on main the day that qualifier landed — guarding a spelling rather
+#: than the invariant. The invariant is the one below: a dark block exists on
+#: .sw-scope, and the palette inside it stacks.
+_SW_DARK_BLOCK = re.compile(
+    r'\[data-appearance="dark"\]\s*\.sw-scope(?::not\([^)]*\)|[^\s{,])*\s*\{([^}]*)\}'
+)
+
+
+def _sw_dark_tokens(css):
+    """The body of the Sales Workspace dark token block."""
+    for body in _SW_DARK_BLOCK.findall(css):
+        if "--sw-surface:" in body:
+            return body
+    raise AssertionError(
+        "no [data-appearance=\"dark\"] .sw-scope block declaring --sw-surface"
+    )
+
+
 def test_the_sales_workspace_palette_follows_the_appearance_axis():
     """THE ROOT CAUSE OF THE WHITE RECTANGLES.
 
@@ -597,7 +620,7 @@ def test_the_sales_workspace_palette_follows_the_appearance_axis():
     background on one screen.
     """
     css = _src("pages/sales/SalesStyles.jsx")
-    assert '[data-appearance="dark"] .sw-scope{' in css
+    assert _sw_dark_tokens(css)
     assert "--sw-surface:" in css and "--sw-canvas:" in css
 
 
@@ -618,7 +641,7 @@ def test_the_dark_palette_is_designed_rather_than_inverted():
     """Surfaces must STACK. If the card is not lighter than the canvas the page
     reads as one flat sheet, which is what "just make it dark" produces."""
     css = _src("pages/sales/SalesStyles.jsx")
-    dark = css.split('[data-appearance="dark"] .sw-scope{', 1)[1].split("}", 1)[0]
+    dark = _sw_dark_tokens(css)
     def val(name):
         return re.search(r"--sw-%s:(#[0-9a-f]{6})" % name, dark).group(1)
     def lum(hexcolor):

@@ -25,8 +25,25 @@ from fastapi import HTTPException
 
 from app.models.models import Base, User, Organization, Platform, Lead
 import app.models.sales_models as sm
-from app.services.tenancy import (
-    has_tenant_context, tenant_org_id, assert_same_tenant, NoTenantContext,
+# app/services/tenancy.py was folded into platform_owner.py and then deleted in
+# 0fef68b ("delete 7 dead-code files"). This script kept importing it, so THIS
+# GATE HAS BEEN FAILING ON main EVER SINCE - the deploy stopped at "TENANCY
+# REGRESSION FAILED" on a ModuleNotFoundError, which reads like a tenancy
+# breach and was only a stale import. The six invariants Mike specified are
+# unchanged; only the names moved:
+#
+#   tenancy.has_tenant_context  -> platform_owner.has_tenant_context (identical)
+#   tenancy.tenant_org_id       -> platform_owner.tenant_write_org_id
+#   tenancy.NoTenantContext     -> plain HTTPException (409 rather than 403)
+#   tenancy.assert_same_tenant  -> no helper; cross-tenant reach is closed by
+#                                  org-scoped queries, and the owner is no
+#                                  longer EXEMPT from the write guard - it must
+#                                  select a customer first. Section 2 below
+#                                  asserts that stronger rule rather than
+#                                  dropping the coverage.
+from app.services.platform_owner import (
+    has_tenant_context, tenant_write_org_id, is_platform_pseudo_org,
+    GOD_PLATFORM_ORG_ID,
 )
 from app.services.test_records import (
     is_test_record, exclude_test_records, is_outreach_eligible, blocked_reason,
@@ -81,24 +98,46 @@ check("sales_org_ids resolves their brand", sales_org_ids(sales_user, db) == [bs
 print("\n--- 2. NULL-org user cannot write customer-tenant records ---")
 check("has_tenant_context is False", not has_tenant_context(sales_user))
 try:
-    tenant_org_id(sales_user)
-    check("tenant_org_id raises for NULL-org user", False, "did not raise")
-except NoTenantContext:
-    check("tenant_org_id raises for NULL-org user", True)
+    tenant_write_org_id(sales_user)
+    check("tenant_write_org_id raises for NULL-org user", False, "did not raise")
 except HTTPException:
-    check("tenant_org_id raises for NULL-org user", True)
-check("tenant_org_id returns the org for a real tenant user",
-      tenant_org_id(tenant_user) == cust.id)
+    check("tenant_write_org_id raises for NULL-org user", True)
+check("tenant_write_org_id returns the org for a real tenant user",
+      tenant_write_org_id(tenant_user) == cust.id)
+
+# The owner standing at platform level is NOT exempt. The old helper waved
+# god_admin through on the reasoning that it legitimately crosses tenants; the
+# current rule is that crossing tenants requires SAYING WHICH ONE, because a
+# write attributed to nobody is the failure this whole section exists to stop.
+check("platform owner has no tenant context until one is selected",
+      not has_tenant_context(god_user))
 try:
-    assert_same_tenant(sales_user, cust.id)
-    check("assert_same_tenant blocks NULL-org user", False, "did not raise")
+    tenant_write_org_id(god_user)
+    check("owner at platform level is refused a tenant write", False, "did not raise")
 except HTTPException:
-    check("assert_same_tenant blocks NULL-org user", True)
+    check("owner at platform level is refused a tenant write", True)
+
+# ...and once the owner HAS selected a customer (X-Org-Override, which
+# get_current_user resolves onto organization_id), the write is attributed to
+# that customer and nothing else.
+god_in_context = User(id="u-god-ctx", organization_id=cust.id,
+                      email="god2@example.test", full_name="Owner In Context",
+                      password_hash="x", role="god_admin")
+check("owner WITH a customer selected writes to that customer",
+      tenant_write_org_id(god_in_context) == cust.id)
+
+# The platform's own placeholder org is not a customer, so it can never be the
+# thing a tenant row is attributed to.
+god_on_pseudo = User(id="u-god-pseudo", organization_id=GOD_PLATFORM_ORG_ID,
+                     email="god3@example.test", full_name="Owner Pseudo",
+                     password_hash="x", role="god_admin")
+check("the platform pseudo-org is recognised as not-a-customer",
+      is_platform_pseudo_org(GOD_PLATFORM_ORG_ID))
 try:
-    assert_same_tenant(god_user, cust.id)
-    check("god_admin is exempt (operates across tenants)", True)
+    tenant_write_org_id(god_on_pseudo)
+    check("the platform pseudo-org is never a write target", False, "did not raise")
 except HTTPException:
-    check("god_admin is exempt (operates across tenants)", False)
+    check("the platform pseudo-org is never a write target", True)
 
 print("\n--- 3. test leads are excluded from production outreach ---")
 real_lead = Lead(id="l-real", organization_id=cust.id, first_name="Real",

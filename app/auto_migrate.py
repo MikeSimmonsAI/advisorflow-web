@@ -685,6 +685,48 @@ COLUMNS_TO_ADD = [
     ("calendar_connections", "busy_window_end", "TIMESTAMP"),
     ("calendar_connections", "busy_fetched_at", "TIMESTAMP"),
 
+    # ── Calendar + Sales Workspace scheduling (Sep 11 2026) ────────────────
+    #
+    # APPOINTMENT OUTCOME. T9 Intelligence reported appointment completion as
+    # UNKNOWN because nothing in the schema recorded whether a meeting actually
+    # happened — only what the calendar intended. These columns are where that
+    # fact now lives, written by the person who was in the room.
+    #
+    # Every one is NULLABLE with no default, deliberately. A historical
+    # appointment genuinely has no recorded outcome, and back-filling one would
+    # be fabricating evidence: defaulting to 'completed' would invent meetings
+    # that may never have taken place, and defaulting to 'no_show' would accuse
+    # prospects who did attend. NULL is the honest answer, and the
+    # pending-outcome queue is built on exactly that.
+    ("sales_appointments", "outcome",             "VARCHAR"),
+    ("sales_appointments", "outcome_notes",       "TEXT"),
+    ("sales_appointments", "outcome_recorded_at", "TIMESTAMP"),
+    ("sales_appointments", "outcome_recorded_by", "VARCHAR"),
+    ("sales_appointments", "occurred",            "BOOLEAN"),
+    ("sales_appointments", "completed_at",        "TIMESTAMP"),
+    ("sales_appointments", "followup_appointment_id", "VARCHAR"),
+
+    # EXTERNAL EDIT DETECTION. `pushed_*` is the state EvoSys last wrote to the
+    # provider; a later read that disagrees with it is a genuine outside edit
+    # rather than our own write echoing back. Without these there is nothing to
+    # compare against, which is why a provider-side MOVE was previously
+    # invisible while a provider-side DELETE was silently recreated.
+    ("sales_appointment_participants", "pushed_starts_at",      "TIMESTAMP"),
+    ("sales_appointment_participants", "pushed_ends_at",        "TIMESTAMP"),
+    ("sales_appointment_participants", "pushed_at",             "TIMESTAMP"),
+    ("sales_appointment_participants", "external_etag",         "VARCHAR"),
+    ("sales_appointment_participants", "external_last_seen_at", "TIMESTAMP"),
+    # DEFAULT FALSE, not NULL: every existing participant row is genuinely
+    # not in conflict, and a nullable boolean here would make the conflict
+    # queue's WHERE clause have to care about three states instead of two.
+    ("sales_appointment_participants", "sync_conflict",
+     "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("sales_appointment_participants", "sync_conflict_kind",   "VARCHAR"),
+    ("sales_appointment_participants", "sync_conflict_detail", "TEXT"),
+    ("sales_appointment_participants", "sync_conflict_at",     "TIMESTAMP"),
+    ("sales_appointment_participants", "conflict_provider_starts_at", "TIMESTAMP"),
+    ("sales_appointment_participants", "conflict_provider_ends_at",   "TIMESTAMP"),
+
     # ── Sales execution, Checkpoint 4 (Aug 26 2026) ────────────────────────
     # `proposals` and `sales_meeting_types` BOTH already exist in production, so
     # create_all() will never add a column to either. Every one of these is

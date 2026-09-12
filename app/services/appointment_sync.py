@@ -140,7 +140,7 @@ def _log(db: Session, appt_id: str, user_id: Optional[str], provider: str,
 
 
 def _apply_result(part: AppointmentParticipant, provider_key: str, result,
-                  now: datetime) -> str:
+                  now: datetime, appt: Optional[SalesAppointment] = None) -> str:
     """Write the outcome onto the participant row and return the status."""
     part.external_calendar_provider = provider_key
     part.sync_last_attempt = now
@@ -150,6 +150,28 @@ def _apply_result(part: AppointmentParticipant, provider_key: str, result,
         part.external_event_id = result.external_event_id or part.external_event_id
         part.external_synced_at = now
         part.sync_error = None
+        # ── the baseline drift detection compares against ───────────────────
+        #
+        # Recorded ONLY on success, and recorded as what we just sent rather
+        # than as what the appointment currently says. Those are the same thing
+        # right now and will not be after the next reschedule, which is the
+        # whole point: a later read-back that disagrees with `pushed_*` is a
+        # genuine outside edit, whereas one that disagrees with the
+        # appointment's live time is usually just our own in-flight write
+        # arriving a moment late. Comparing against the live time is how a
+        # reconciler starts reporting conflicts with itself.
+        if appt is not None:
+            part.pushed_starts_at = appt.starts_at
+            part.pushed_ends_at = appt.ends_at
+            part.pushed_at = now
+            # A successful push settles any previous disagreement: the
+            # provider now holds exactly what we intended it to.
+            part.sync_conflict = False
+            part.sync_conflict_kind = None
+            part.sync_conflict_detail = None
+            part.sync_conflict_at = None
+            part.conflict_provider_starts_at = None
+            part.conflict_provider_ends_at = None
         # The .ics path is honestly labelled as its own state. Calling it
         # 'synced' would claim a calendar connection that does not exist, and
         # the UI would stop offering to connect one.
@@ -218,7 +240,7 @@ def _sync_participant(db: Session, appt: SalesAppointment,
         action = "create"
         result = provider.create_event(payload)
 
-    status = _apply_result(part, key, result, now)
+    status = _apply_result(part, key, result, now, appt=appt)
     _log(db, appt.id, user.id, key, action, result, status,
          part.sync_attempts or 1, now)
     return {"user_id": user.id, "provider": key, "status": status,

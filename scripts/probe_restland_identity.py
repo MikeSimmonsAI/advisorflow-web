@@ -284,6 +284,19 @@ KNOWN_REMAINING = {
     # needs the same public-route work /book and /survey are getting, not a
     # string change. Tracked, not hidden.
     "app\\services\\appointment_invites.py",
+    # THE GUARD, NOT AN OFFENDER. stripe_return.py is the module that exists
+    # to stop a paying customer being returned to a Render hostname. The
+    # hostnames it contains are its own REJECTION LIST
+    # (_INFRASTRUCTURE_HOST_MARKERS) plus the docstring explaining which
+    # fallback it deleted and why. Neither is a destination, and this scanner
+    # skips `#` comments but not docstrings or list literals, so the file that
+    # fixes the leak trips the check that looks for it.
+    #
+    # Left in the ratchet rather than special-cased in the scanner: an
+    # allowlist a human reads is the point of this block, and teaching the
+    # regex about docstrings would quietly stop it catching a real offender
+    # that happens to sit in one.
+    "app\\services\\stripe_return.py",
 }
 found_files = {o.rsplit(":", 1)[0] for o in host_offenders}
 check("5. the set of remaining infrastructure hostnames has not grown",
