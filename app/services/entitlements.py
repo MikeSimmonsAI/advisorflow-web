@@ -189,7 +189,27 @@ def require_feature(key: str):
              db: Session = Depends(get_db)) -> User:
         if getattr(user, "role", None) == "god_admin":
             return user
-        org_id = getattr(user, "organization_id", None)
+
+        # WHICH CUSTOMER'S ENTITLEMENT — THE ONE SEAM, NOT A SECOND ONE.
+        #
+        # This read `users.organization_id` directly, which was the whole
+        # answer while that column WAS customer tenancy. It is not any more:
+        # a person can hold a customer_org membership and no column value at
+        # all. `require_tenant_user` already lets exactly that person through
+        # on the strength of a SELECTED workspace they hold a membership in,
+        # so a feature gate judging them by the column alone let them onto the
+        # route and then refused them the feature — the same request answered
+        # two different ways by two different notions of "which tenant".
+        #
+        # `active_workspace_org_id` is that seam, and it is the same function
+        # every lead query and `launch_router._caller_org_id` resolve through.
+        # Its order is: a workspace the caller SELECTED and holds an active
+        # membership in, then the legacy column. A selected id that is not
+        # backed by a membership is discarded by `workspace_access`, so this
+        # can never be widened by asserting a header — and single-context
+        # customer users, who select nothing, resolve exactly as before.
+        from app.services.lead_scope import active_workspace_org_id
+        org_id = active_workspace_org_id(user, db)
         if org_id is None:
             # Brand-sales staff and other non-tenant identities. They have no
             # entitlement because they have no tenant; require_tenant_user is

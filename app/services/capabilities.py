@@ -943,12 +943,29 @@ def require_feature_capability(key: str):
         if role in ("god_admin", "super_admin"):
             return user
 
-        # org_admin: allowed by role (no explicit grant needed for feature use)
+        # WHICH WORKSPACE, AND WHICH ROLE IN IT — the same seam require_feature
+        # and require_tenant_user use. Resolving from `users.organization_id`
+        # alone refused a person who holds this workspace by membership rather
+        # than by the column, on a route they had already been let onto, and
+        # asked for a grant scoped to an organization of None. Its order is
+        # selected-workspace-backed-by-membership, then the legacy column, so a
+        # single-context user resolves exactly as before and a selected id with
+        # no membership behind it is discarded.
+        from app.services.lead_scope import active_workspace_org_id
+        org_id = active_workspace_org_id(user, db)
+
+        # org_admin: allowed by role (no explicit grant needed for feature use).
+        # THE ROLE THAT COUNTS IS THE ROLE IN THIS WORKSPACE. A person seconded
+        # here as org_admin carries another platform role on their user row —
+        # that column is describing a different context, not this one.
         if role == "org_admin":
             return user
+        if org_id:
+            from app.services import workspace_access
+            if workspace_access.workspace_role(user, db, org_id) == "org_admin":
+                return user
 
         # Everyone else: must have an explicit UserCapabilityGrant
-        org_id = getattr(user, "organization_id", None)
         if org_id and user_has_grant(db, user.id, org_id, key):
             return user
 
