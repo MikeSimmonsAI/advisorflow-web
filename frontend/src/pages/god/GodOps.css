@@ -1,17 +1,17 @@
-/* God Mode — Checkpoint 6 operations surface.
+﻿/* God Mode â€” Checkpoint 6 operations surface.
  *
  * Scoped under .go-scope, matching the convention the other sheets already
  * follow: `gm-` God Mode shell, `sw-` Sales Workspace, `dc-` Demo Console,
  * `go-` this. A rule here cannot reach a tenant screen or the sales workspace.
  *
- * DENSE ON DESKTOP, STACKED ON MOBILE (§31). The owner runs this from a desk
+ * DENSE ON DESKTOP, STACKED ON MOBILE (Â§31). The owner runs this from a desk
  * most days and from a phone on the days it matters most, so tables become
  * cards below 900px rather than scrolling sideways. Nothing is hidden at any
  * width - every action survives the collapse.
  *
- * ───────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * WHERE THE COLOURS WENT
- * ───────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
  * The `--go-*` block that used to open this file pinned eleven dark literals
  * onto `.go-scope`, and `color-scheme: dark` beside them. God Mode is
@@ -55,7 +55,7 @@
            border-radius: 7px; padding: 6px 11px; font-size: 12px; cursor: pointer; }
 .go-back:hover { color: var(--go-text); border-color: var(--go-blue); }
 
-/* ── KPI tiles ───────────────────────────────────────────────────────────── */
+/* â”€â”€ KPI tiles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-kpis { display: grid; gap: 10px; margin-bottom: 20px;
            grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
@@ -71,7 +71,7 @@
 .go-kpi.clickable:hover { box-shadow: var(--go-shadow); transform: translateY(-1px); }
 .go-kpi.clickable:focus-visible { outline: 2px solid var(--gm-focus-ring); outline-offset: 2px; }
 
-/* ── panels ──────────────────────────────────────────────────────────────── */
+/* â”€â”€ panels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-panel { background: var(--go-panel); border: 1px solid var(--go-line);
             border-radius: 11px; margin-bottom: 16px; overflow: hidden; }
@@ -87,7 +87,7 @@
 
 .go-empty { padding: 22px 15px; color: var(--go-dim); font-size: 13px; text-align: center; }
 
-/* ── tables that become cards ────────────────────────────────────────────── */
+/* â”€â”€ tables that become cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .go-table th { text-align: left; font-size: 11px; text-transform: uppercase;
@@ -112,7 +112,7 @@
   .go-table .num { text-align: right; }
 }
 
-/* ── brand cards ─────────────────────────────────────────────────────────── */
+/* â”€â”€ brand cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-brands { display: grid; gap: 12px;
              grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); }
@@ -132,9 +132,9 @@
 .go-attn { margin: 12px 0 0; padding: 0; list-style: none; }
 .go-attn li { font-size: 12px; color: var(--go-amber); padding: 3px 0 3px 15px;
               position: relative; }
-.go-attn li::before { content: '▲'; position: absolute; left: 0; font-size: 9px; top: 5px; }
+.go-attn li::before { content: 'â–²'; position: absolute; left: 0; font-size: 9px; top: 5px; }
 
-/* ── badges ──────────────────────────────────────────────────────────────── */
+/* â”€â”€ badges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-badge { display: inline-block; padding: 2px 9px; border-radius: 20px;
             font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
@@ -148,7 +148,7 @@
 .go-badge.warn    { background: var(--gm-pill-gold-bg);   color: var(--gm-pill-gold-fg);   border-color: var(--gm-pill-gold-bd); }
 .go-badge.new     { background: var(--gm-pill-purple-bg); color: var(--gm-pill-purple-fg); border-color: var(--gm-pill-purple-bd); }
 
-/* ── buttons ─────────────────────────────────────────────────────────────── */
+/* â”€â”€ buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-btn { background: var(--go-primary); color: var(--go-on-primary);
           border: 1px solid var(--go-primary);
@@ -169,7 +169,7 @@
 .go-btn.sm { padding: 5px 10px; font-size: 12px; }
 .go-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-/* ── forms ───────────────────────────────────────────────────────────────── */
+/* â”€â”€ forms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-fields { display: grid; gap: 12px;
              grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
@@ -251,7 +251,7 @@
 .go-field .hint { font-size: 11px; color: var(--go-dim); margin-top: 4px; }
 .go-field.full { grid-column: 1 / -1; }
 
-/* ── read-only fact list ─────────────────────────────────────────────────── */
+/* â”€â”€ read-only fact list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-facts { display: grid; gap: 10px;
             grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
@@ -261,7 +261,7 @@
 .go-fact .v { font-size: 13px; margin-top: 3px; word-break: break-word; }
 .go-fact .v.none { color: var(--go-dim); font-style: italic; }
 
-/* ── milestones ──────────────────────────────────────────────────────────── */
+/* â”€â”€ milestones â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-ms { list-style: none; margin: 0; padding: 0; }
 .go-ms li { display: flex; align-items: center; gap: 11px; padding: 10px 15px;
@@ -278,7 +278,7 @@
           overflow: hidden; margin-top: 7px; }
 .go-bar i { display: block; height: 100%; background: var(--go-green); }
 
-/* ── warnings / notices ──────────────────────────────────────────────────── */
+/* â”€â”€ warnings / notices â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-note { border-radius: 9px; padding: 11px 13px; font-size: 13px;
            margin-bottom: 14px; line-height: 1.5; }
@@ -297,7 +297,7 @@
              font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
              font-size: 12px; word-break: break-all; color: var(--go-text); }
 
-/* ── add-sales-user dialog and its form controls ──────────────────────────
+/* â”€â”€ add-sales-user dialog and its form controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    Scoped under .go-scope like everything else in this sheet, so the tenant
    theme cannot reach in and repaint a control the way it once painted God
    Mode's dropdowns white. */
@@ -344,7 +344,7 @@
 .go-radio small { display: block; font-size: 11px; color: var(--go-dim);
                   margin-top: 3px; line-height: 1.55; }
 
-/* ── timeline ────────────────────────────────────────────────────────────── */
+/* â”€â”€ timeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .go-tl { list-style: none; margin: 0; padding: 0; }
 .go-tl li { padding: 10px 15px; border-bottom: 1px solid var(--go-line); font-size: 13px; }
@@ -362,7 +362,7 @@
   appearance: none; -webkit-appearance: none;
 }
 
-/* ── Platform separation + customer provisioning ─────────────────────────────
+/* â”€â”€ Platform separation + customer provisioning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    Same `go-` scope as the rest of God Ops. These are additions for the platform
    overview, the create-customer form and Customer 360; nothing above changed. */
 
@@ -449,7 +449,7 @@
   font-size: 12px; word-break: break-all;
 }
 
-/* ── drilldown pages ────────────────────────────────────────────────────────
+/* â”€â”€ drilldown pages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    THESE WERE THE WORST OFFENDERS AND THEY WERE BROKEN IN *DARK*, NOT LIGHT.
 
    Every colour in this block used to be `var(--name, #literal)` against names
@@ -483,7 +483,14 @@
   background: var(--go-primary); color: var(--go-on-primary);
   border-color: var(--go-primary); font-weight: 650;
 }
-.god-table-wrap { overflow-x: auto; }
+/* NO overflow-x HERE, DELIBERATELY.
+   This wrapper used to be `overflow-x: auto`, which is the coping mechanism
+   rather than the fix: on a phone the drilldown tables became a sideways
+   scroller with the first column stranded off-screen, while the older
+   `.go-table` beside them collapsed into labelled blocks properly. The
+   breakpoint at the end of this block now gives these tables the same
+   collapse, so there is nothing left to scroll. */
+.god-table-wrap { width: 100%; }
 .god-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; color: var(--go-text); }
 .god-table th {
   text-align: left; padding: 8px 12px; font-size: 0.75rem; font-weight: 600;
@@ -519,7 +526,7 @@
 .god-prop-status.proposal_viewed { background: var(--gm-pill-gold-bg);   color: var(--gm-pill-gold-fg);   border-color: var(--gm-pill-gold-bd); }
 .god-prop-status.change_requested{ background: var(--gm-pill-red-bg);    color: var(--gm-pill-red-fg);    border-color: var(--gm-pill-red-bd); }
 
-/* ── classes that six screens use and this sheet never defined ──────────────
+/* â”€â”€ classes that six screens use and this sheet never defined â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    Create Customer, Customer Detail, Platform Overview, Add Sales User, Package
    Pricing and the shared Ops helpers all render these. Until now they matched
    nothing, so those screens were unstyled markup on a black page rather than
@@ -562,3 +569,36 @@
    label is the thing Mike could not read; it is held at the same contrast as
    body text rather than at a decorative dimness. */
 .go-label { color: var(--go-dim); }
+
+/* â”€â”€ drilldown tables collapse on mobile, they do not scroll â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   The `.god-` drilldown block arrived with the drilldown layer and never got
+   the treatment `.go-table` has had since the beginning: at 900px the header
+   row is dropped and each cell becomes a labelled row of its own, reading its
+   label from `data-label`. Without this the only way to see the later columns
+   on a phone was to drag the table sideways, which is how a first column ends
+   up stranded off-screen.
+
+   Kept as a mirror of the `.go-table` rules above rather than merged with
+   them: the two families have different paddings and the drilldown tables
+   carry a clickable row, so sharing one selector list would mean one of them
+   quietly inheriting the other's spacing. */
+@media (max-width: 900px) {
+  .god-table thead { display: none; }
+  .god-table, .god-table tbody, .god-table tr, .god-table td {
+    display: block; width: 100%;
+  }
+  .god-table tr {
+    border-bottom: 1px solid var(--go-line); padding: 6px 0;
+  }
+  .god-table td {
+    border: none; padding: 6px 14px; display: flex;
+    justify-content: space-between; gap: 14px; align-items: baseline;
+  }
+  .god-table td::before {
+    content: attr(data-label); color: var(--go-dim);
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; flex-shrink: 0;
+  }
+  /* The primary cell is the row's identity, so it keeps its weight. */
+  .god-table td.god-td-primary { font-weight: 650; }
+}

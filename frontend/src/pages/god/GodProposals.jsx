@@ -81,14 +81,14 @@ export default function GodProposals() {
                         onClick={() => p.opportunity_id && navigate(`/sales/opportunities/${p.opportunity_id}`)}
                         title={p.opportunity_id ? 'View opportunity' : undefined}
                       >
-                        <td className="god-td-mono">{p.proposal_number}</td>
-                        <td className="god-td-primary">{p.client_company || '—'}</td>
-                        <td>{p.title || '—'}</td>
-                        <td>{p.brand_name}</td>
-                        <td><span className={`god-prop-status ${p.sales_status}`}>{p.sales_status_label}</span></td>
-                        <td className="god-td-num">{money(p.final_amount)}</td>
-                        <td>{when(p.sent_at)}</td>
-                        <td>{when(p.last_viewed_at)}</td>
+                        <td className="god-td-mono" data-label="#">{p.proposal_number}</td>
+                        <td className="god-td-primary" data-label="Client">{p.client_company || '—'}</td>
+                        <td data-label="Title">{p.title || '—'}</td>
+                        <td data-label="Brand">{p.brand_name}</td>
+                        <td data-label="Status"><span className={`god-prop-status ${p.sales_status}`}>{p.sales_status_label}</span></td>
+                        <td className="god-td-num" data-label="Amount">{money(p.final_amount)}</td>
+                        <td data-label="Sent">{when(p.sent_at)}</td>
+                        <td data-label="Last viewed">{when(p.last_viewed_at)}</td>
                       </tr>
                     ))}
                   </tbody>

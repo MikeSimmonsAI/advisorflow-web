@@ -80,13 +80,13 @@ export default function GodMeetings() {
                         onClick={() => a.opportunity_id && navigate(`/sales/opportunities/${a.opportunity_id}`)}
                         title={a.opportunity_id ? 'View opportunity' : undefined}
                       >
-                        <td className="god-td-primary">{a.title || '—'}</td>
-                        <td>{a.prospect_name || '—'}</td>
-                        <td>{a.prospect_company || '—'}</td>
-                        <td>{a.brand_name}</td>
-                        <td>{whenExact(a.starts_at)}</td>
-                        <td>{whenExact(a.ends_at)}</td>
-                        <td>
+                        <td className="god-td-primary" data-label="Title">{a.title || '—'}</td>
+                        <td data-label="Prospect">{a.prospect_name || '—'}</td>
+                        <td data-label="Company">{a.prospect_company || '—'}</td>
+                        <td data-label="Brand">{a.brand_name}</td>
+                        <td data-label="Starts">{whenExact(a.starts_at)}</td>
+                        <td data-label="Ends">{whenExact(a.ends_at)}</td>
+                        <td data-label="Join">
                           {a.meeting_url
                             ? <a href={a.meeting_url} target="_blank" rel="noreferrer"
                                 onClick={e => e.stopPropagation()}

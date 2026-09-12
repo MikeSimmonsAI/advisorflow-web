@@ -97,16 +97,21 @@ const BOARD_STYLES = `
 // ── colour tokens per status ──────────────────────────────────────────────────
 const STATUS_META = {
   COMPLETE:        { label: 'Complete',      bg: 'var(--gm-pill-teal-bg)', text: 'var(--gm-teal)', border: 'var(--gm-teal)', dbg: 'var(--gm-pill-teal-bg)', dtxt: 'var(--gm-teal)', dborder: 'var(--gm-teal)' },
+  // IN_PROGRESS is the honest middle of built -> tested -> committed -> pushed ->
+  // merged -> deployed -> live verified. Anything between merge and live
+  // verification lands here, and it counts as NEEDS ACTION below so active work
+  // shows on the default tab instead of hiding under "All items".
+  IN_PROGRESS:     { label: 'In progress',   bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-pill-blue-fg)', border: 'var(--gm-pill-blue-bd)', dbg: 'var(--gm-pill-blue-bg)', dtxt: 'var(--gm-pill-blue-fg)', dborder: 'var(--gm-blue)' },
   FINISH:          { label: 'Finish',        bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-amber)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-pill-amber-bd)' },
   CONSOLIDATE:     { label: 'Consolidate',   bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-red)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-red)' },
   REMOVE:          { label: 'Remove',        bg: 'var(--gm-pill-purple-bg)', text: 'var(--gm-purple)', border: 'var(--gm-pill-purple-bd)', dbg: 'var(--gm-pill-purple-bg)', dtxt: 'var(--gm-purple)', dborder: 'var(--gm-purple)' },
-  NOT_BUILT:       { label: 'Not built',     bg: 'var(--gm-pill-blue-bg)', text: 'var(--gm-blue)', border: 'var(--gm-blue)', dbg: 'var(--gm-pill-blue-bg)', dtxt: 'var(--gm-blue)', dborder: 'var(--gm-blue)' },
+  NOT_BUILT:       { label: 'Not built',     bg: 'var(--gm-pill-off-bg)', text: 'var(--gm-pill-off-fg)', border: 'var(--gm-pill-off-bd)', dbg: 'var(--gm-pill-off-bg)', dtxt: 'var(--gm-pill-off-fg)', dborder: 'var(--gm-pill-off-bd)' },
   POLICY_REQUIRED: { label: 'Policy needed', bg: 'var(--gm-pill-amber-bg)', text: 'var(--gm-amber)', border: 'var(--gm-amber)', dbg: 'var(--gm-pill-amber-bg)', dtxt: 'var(--gm-amber)', dborder: 'var(--gm-pill-amber-bd)' },
   BLOCKED:         { label: 'Blocked',       bg: 'var(--gm-pill-red-bg)', text: 'var(--gm-red)', border: 'var(--gm-pill-red-bd)', dbg: 'var(--gm-pill-red-bg)', dtxt: 'var(--gm-red)', dborder: 'var(--gm-red)' },
 }
 const PRIORITY_COLOR = { P0: 'var(--gm-red)', P1: 'var(--gm-amber)', P2: 'var(--gm-blue)', P3: 'var(--gm-text)' }
 
-const NEEDS_ACTION = new Set(['FINISH','CONSOLIDATE','REMOVE','NOT_BUILT','POLICY_REQUIRED','BLOCKED'])
+const NEEDS_ACTION = new Set(['IN_PROGRESS','FINISH','CONSOLIDATE','REMOVE','NOT_BUILT','POLICY_REQUIRED','BLOCKED'])
 const FILTER_TABS = [
   { key: 'action',   label: 'Needs action' },
   { key: 'all',      label: 'All items'    },
@@ -247,6 +252,7 @@ export default function RoadmapBoard() {
     return {
       all:      data.items.length,
       complete: byStatus.COMPLETE || 0,
+      progress: byStatus.IN_PROGRESS || 0,
       action:   data.items.filter(i => NEEDS_ACTION.has(i.status)).length,
       blocked:  byStatus.BLOCKED || 0,
       decision: data.items.filter(i => i.decision_required).length,
@@ -270,6 +276,10 @@ export default function RoadmapBoard() {
         <div className="rm-summary-card">
           <div className="rm-summary-n" style={{ color: 'var(--gm-teal)' }}>{pct}%</div>
           <div className="rm-summary-l">Complete</div>
+        </div>
+        <div className="rm-summary-card">
+          <div className="rm-summary-n" style={{ color: 'var(--gm-pill-blue-fg)' }}>{totals.progress}</div>
+          <div className="rm-summary-l">In progress</div>
         </div>
         <div className="rm-summary-card">
           <div className="rm-summary-n">{totals.action}</div>

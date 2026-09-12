@@ -31,13 +31,36 @@ def check(label, ok, detail=""):
         FAILURES.append(label)
 
 
+def _split(parts):
+    """Allow a SCREENS entry to carry its folder, e.g. "god/GodMeetings.jsx"."""
+    out = []
+    for p in parts:
+        out.extend(str(p).split("/"))
+    return out
+
+
 def read(*parts):
-    with open(os.path.join(SRC, *parts), encoding="utf-8-sig") as fh:
+    with open(os.path.join(SRC, *_split(parts)), encoding="utf-8-sig") as fh:
         return fh.read()
 
 
 def exists(*parts):
-    return os.path.exists(os.path.join(SRC, *parts))
+    return os.path.exists(os.path.join(SRC, *_split(parts)))
+
+
+def _no_comments(text):
+    """Source with comments removed.
+
+    EVERY ASSERTION LOOKING FOR THE ABSENCE OF SOMETHING HAS TO RUN ON THIS.
+    Two checks here failed against prose rather than code: a CSS comment
+    explaining which scroller had been deleted, and a JS comment recording that
+    the roadmap items were removed. In both cases the note describing the fix
+    tripped the check that looks for the problem, and the obvious way to make
+    them pass is to delete the explanation, which is the wrong trade every
+    time.
+    """
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"^\s*//.*$", "", text, flags=re.M)
 
 
 SCREENS = [
@@ -48,6 +71,18 @@ SCREENS = [
     ("GodImplementationDetail.jsx", "/god/implementations/:implId"),
     ("GodCustomers.jsx", "/god/customers"),
     ("GodControlAudit.jsx", "/god/audit"),
+    # THE DRILLDOWN LAYER, WHICH THIS LIST DID NOT KNOW ABOUT.
+    # These three shipped with tables whose cells carried no data-label and a
+    # wrapper that scrolled sideways instead of collapsing. The cell-label
+    # check below walks this list, so being absent from it is exactly why
+    # nobody found out. Listed now, so the next table added to them is held to
+    # the same rule.
+    # These three live under pages/god/ rather than pages/, so they carry their
+    # folder. `read()` takes path parts, so a name with a slash in it would not
+    # resolve - the entry is the relative path, split on the way in.
+    ("god/GodOpportunities.jsx", "/god/opportunities"),
+    ("god/GodProposals.jsx", "/god/proposals"),
+    ("god/GodMeetings.jsx", "/god/meetings"),
     ("SalesImplementations.jsx", "/sales/onboarding"),
     ("Activate.jsx", "/activate"),
 ]
@@ -133,8 +168,14 @@ def main():
           ".go-table thead { display: none; }" in css)
     check("cells carry their own label on mobile",
           "content: attr(data-label)" in css)
+    # Both table families, not just the original one. `.god-table` arrived with
+    # the drilldown layer coping via `overflow-x: auto` on its wrapper and no
+    # breakpoint at all, so on a phone it was a sideways scroller with the
+    # first column stranded off-screen. It now collapses the same way.
+    check("drilldown tables become blocks on mobile too",
+          ".god-table thead { display: none; }" in css)
     check("no horizontal scroll is used to cope",
-          "overflow-x" not in css)
+          "overflow-x" not in _no_comments(css))
     # Only the God Ops screens are governed by this sheet. The sales-side screen
     # uses the Sales Workspace's own shell and `sw-` responsive table, which has
     # its own mobile behaviour and is checked by that workspace's own rules.
@@ -174,11 +215,32 @@ def main():
             part = part.strip()
             if part and not part.startswith("@"):
                 selectors.append(part)
-    unscoped = [s_ for s_ in selectors if ".go-" not in s_]
-    check("every selector is scoped under .go-", not unscoped, unscoped[:5])
+    # `.god-` counts too. The drilldown layer added a second God Ops family
+    # alongside `.go-`, and this check read as "the sheet leaked" when the
+    # truth was "the sheet grew a prefix the check had not been told about".
+    # Both are God Ops namespaces, which is the property being guarded - that
+    # nothing here can paint the Sales Workspace, the God shell or the Demo
+    # Console. A selector under neither prefix is still a failure.
+    unscoped = [s_ for s_ in selectors
+                if ".go-" not in s_ and ".god-" not in s_]
+    check("every selector is scoped under .go- or .god-", not unscoped, unscoped[:5])
     check("the sheet actually has rules", len(selectors) > 40, len(selectors))
     for prefix in ("sw-", "gm-", "dc-"):
-        check("it defines no %s class" % prefix, ("." + prefix) not in css)
+        # DEFINES, not MENTIONS. `.gm-shell .go-field input` does not define a
+        # God Mode class - it says "when these God Ops fields are inside the
+        # God shell", which is how the light-theme work made this sheet inherit
+        # the shell's palette instead of fighting it, and the block says so in
+        # its own comment. The old test matched the raw string, so the
+        # deliberate scoping and even the comment describing it read as a
+        # violation. What would be a violation is a RULE WHOSE SUBJECT is a
+        # foreign class: that is this sheet styling somebody else's component.
+        defined = []
+        for sel in selectors:
+            subject = sel.split()[-1] if sel.split() else sel
+            subject = subject.split(">")[-1].split("+")[-1].split("~")[-1]
+            if ("." + prefix) in subject:
+                defined.append(sel)
+        check("it defines no %s class" % prefix, not defined, defined[:5])
 
     print("\n--- navigation tells the truth " + "-" * 40)
     shell = read("pages", "GodShell.jsx")
@@ -222,9 +284,15 @@ def main():
     status = read("pages", "god", "ProductStatus.jsx")
     check("unfinished modules are declared in PRODUCT STATUS",
           "COMING NEXT" in status and "live: false" in status)
+    # Counted on CODE, not on prose. The only `live: false` left in this file
+    # is the comment recording that GOD-04 removed the roadmap items - so the
+    # note saying "there are none" was itself counted as one, and the check
+    # demanded a `needs:` for a roadmap entry that does not exist.
+    status_code = _no_comments(status)
     check("...and every one of them names what it is waiting on",
-          status.count("needs:") >= status.count("live: false"),
-          "%d needs: for %d roadmap items" % (status.count("needs:"), status.count("live: false")))
+          status_code.count("needs:") >= status_code.count("live: false"),
+          "%d needs: for %d roadmap items"
+          % (status_code.count("needs:"), status_code.count("live: false")))
     sales_shell = read("pages", "sales", "SalesShell.jsx")
     m = [l for l in sales_shell.splitlines() if "/sales/onboarding" in l]
     check("the sales nav no longer marks Sold/Onboarding as 'soon'",
