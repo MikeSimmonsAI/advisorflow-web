@@ -10,6 +10,15 @@ written and grants nothing - two separate files say so in their own comments:
                              with SCOPE_CUSTOMER_ORG exists but grants nothing"
     customer_provisioning.py "there is no additive customer membership"
 
+BOTH OF THOSE COMMENTS ARE GONE NOW, and the second one took longer than it
+should have. `customer_activation.add_existing_user` was migrated when this
+module landed; `customer_provisioning.lookup_identity` was not, so it went on
+refusing brand-sales staff and anybody homed in another customer for a reason
+that had stopped being true. Every caller of `add_customer_user` inherited
+that refusal, which is how the Launch Engine came to tell an operator to
+invent a second email address for one human. Both now grant through
+`grant_workspace_membership` below.
+
 One column means one workspace per identity, forever. So D'Angelo, who sells
 BookaBoost AND administers We Epic Game, could be one or the other and never
 both: `add_existing_user` refuses outright with a 409 rather than move him, and
@@ -559,8 +568,18 @@ def selected_workspace_id(user: User, db: Session,
 def grant_workspace_membership(db: Session, user_id: str, organization_id: str,
                                role: str = DEFAULT_WORKSPACE_ROLE,
                                granted_by: Optional[str] = None,
-                               commit: bool = True) -> Membership:
+                               commit: bool = True,
+                               check_capacity: bool = True) -> Membership:
     """Create or reactivate ONE customer_org membership. IDEMPOTENT.
+
+    `check_capacity=False` is for the ONE case where the caller has already
+    reserved this exact seat: it created the `users` row for this person in the
+    same transaction, having called `plan_limits.require_capacity` first. By
+    the time this function runs, `usage_for(max_users)` counts that flushed row
+    as homed, so checking again with adding=1 asks for room for a second seat
+    that nobody is taking — and refuses the last permitted user of a plan.
+    Every other caller leaves it True, because for them a new membership really
+    is a new person with access.
 
     Idempotent by lookup on (user, scope_type, scope_id) WITHOUT the role, not
     by the table's unique constraint - that constraint includes `role`, so
@@ -608,9 +627,10 @@ def grant_workspace_membership(db: Session, user_id: str, organization_id: str,
     # workspace, and `plan_limits.usage_for` counts them for exactly that
     # reason. Guarding only `POST /admin/users` would have left this door -
     # the one a brand-sales operator actually walks through - wide open.
-    from app.services import plan_limits
-    plan_limits.require_capacity_for_org_id(
-        db, organization_id, plan_limits.LIMIT_USERS, adding=1)
+    if check_capacity:
+        from app.services import plan_limits
+        plan_limits.require_capacity_for_org_id(
+            db, organization_id, plan_limits.LIMIT_USERS, adding=1)
 
     m = Membership(
         user_id=user_id,

@@ -42,6 +42,17 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
   const [sent, setSent] = useState(null)
   const [copied, setCopied] = useState(false)
 
+  // WHO THIS ADDRESS ALREADY IS, ASKED BEFORE THE OPERATOR COMMITS.
+  //
+  // An existing identity is the NORMAL case for a customer that came through
+  // the pipeline — the person who signed is often the person who sold it, or
+  // somebody who already administers another customer. It used to surface as
+  // a red 409 after pressing the button, telling the operator to "use a
+  // different address", which is how a second account for one human gets
+  // created. The answer is shown up front and it is informational.
+  const [look, setLook] = useState(null)
+  const [looking, setLooking] = useState(false)
+
   useEffect(() => {
     let alive = true
     api.get('/god/launch/' + orgId + '/onboarding-recipient')
@@ -50,11 +61,37 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
     return () => { alive = false }
   }, [orgId])
 
+  // Debounced, and only once the address looks like one. Creates nothing —
+  // the endpoint is a read.
+  useEffect(() => {
+    const addr = email.trim().toLowerCase()
+    if (!addr || !addr.includes('@') || !addr.includes('.')) {
+      setLook(null)
+      return
+    }
+    let alive = true
+    setLooking(true)
+    const t = setTimeout(() => {
+      api.get('/god/customers/' + orgId + '/identity-lookup?email='
+              + encodeURIComponent(addr))
+        .then(d => { if (alive) setLook(d) })
+        .catch(() => { if (alive) setLook(null) })
+        .finally(() => { if (alive) setLooking(false) })
+    }, 400)
+    return () => { alive = false; clearTimeout(t) }
+  }, [email, orgId])
+
   // The exact rule the server enforces, mirrored here so the button is honest
   // about whether pressing it would work.
   const matches = email.trim().length > 0
     && email.trim().toLowerCase() === confirm.trim().toLowerCase()
-  const valid = matches && email.includes('@')
+  // `can_add === false` is now only ever a control-plane account, which the
+  // server refuses. An existing ordinary identity is addable.
+  const refused = !!(look && look.exists && look.can_add === false)
+  // A new person needs a name; an existing identity already has one, and the
+  // server does not ask for it again.
+  const needsName = !!(look && !look.exists) && !name.trim()
+  const valid = matches && email.includes('@') && !refused && !needsName
 
   const send = async () => {
     if (!valid || busy) return
@@ -113,18 +150,40 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
             {sent.identity_created ? ' (new account)' : ' (existing account reused)'}.
           </p>
 
-          {/* SAID PLAINLY. An operator who assumes the platform emailed it
-              will wait for a reply that is never coming. */}
-          <div style={{ border: '1px solid var(--gm-amber, #f59e0b)',
-                        background: 'rgba(245,158,11,.08)', borderRadius: 10,
-                        padding: '10px 12px', margin: '12px 0', fontSize: 12.5 }}>
-            <b>Nothing has been sent.</b> Copy this link and send it to them
-            yourself, from {sent.brand.name || 'your brand'}. It is shown once
-            and cannot be retrieved afterwards — if it is lost, send onboarding
-            again to issue a fresh one.
-          </div>
+          {/* AN EXISTING SIGN-IN IS NOT A SETUP LINK, AND MUST NOT BE
+              DESCRIBED AS ONE. Promising "shown once, cannot be retrieved"
+              about a plain /launch URL would teach the operator to treat a
+              recoverable address as a secret, and to re-issue onboarding to
+              get it back. */}
+          {sent.access_path === 'existing_login' ? (
+            <div style={{ border: '1px solid var(--gm-teal, #0d9488)',
+                          background: 'var(--gm-pill-teal-bg, rgba(13,148,136,.08))',
+                          borderRadius: 10, padding: '10px 12px', margin: '12px 0',
+                          fontSize: 12.5, lineHeight: 1.55 }}>
+              <b>They already sign in to AdvisorFlow.</b> No password setup
+              link was issued and nothing about their existing access was
+              changed — their other roles are intact. Send them this address;
+              they sign in as they always do and land on this customer&rsquo;s
+              onboarding.
+            </div>
+          ) : (
+            /* SAID PLAINLY. An operator who assumes the platform emailed it
+               will wait for a reply that is never coming. */
+            <div style={{ border: '1px solid var(--gm-amber, #f59e0b)',
+                          background: 'rgba(245,158,11,.08)', borderRadius: 10,
+                          padding: '10px 12px', margin: '12px 0', fontSize: 12.5 }}>
+              <b>Nothing has been sent.</b> Copy this link and send it to them
+              yourself, from {sent.brand.name || 'your brand'}. It is shown once
+              and cannot be retrieved afterwards — if it is lost, send onboarding
+              again to issue a fresh one.
+            </div>
+          )}
 
-          <label style={label}>One-time onboarding link</label>
+          <label style={label}>
+            {sent.access_path === 'existing_login'
+              ? 'Their onboarding address'
+              : 'One-time onboarding link'}
+          </label>
           <textarea readOnly value={sent.onboarding_url} rows={3}
                     style={{ ...field, fontFamily: 'monospace', fontSize: 11.5 }}
                     onFocus={e => e.target.select()} />
@@ -230,11 +289,56 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
           </p>
         </div>
 
+        {/* WHAT WILL HAPPEN TO THIS IDENTITY, IN THE OPERATOR'S LANGUAGE.
+            Nobody using this screen should need to know that customer tenancy
+            is a membership row rather than a column. */}
+        {look && look.exists && look.can_add && look.action === 'add_context' ? (
+          <div style={{ border: '1px solid var(--gm-teal, #0d9488)',
+                        background: 'var(--gm-pill-teal-bg, rgba(13,148,136,.08))',
+                        borderRadius: 10, padding: '10px 12px', marginBottom: 12,
+                        fontSize: 12.5, lineHeight: 1.55 }}>
+            <b>Existing AdvisorFlow identity found</b>
+            {look.user && look.user.full_name ? <> — {look.user.full_name}</> : null}.
+            Their current access stays exactly as it is;{' '}
+            <b>{orgName}</b> <b>{role}</b> access will be added as a separate
+            workspace membership. No second account is created.
+            {look.user && look.user.has_usable_login ? (
+              <div style={{ marginTop: 6 }}>
+                They already sign in to AdvisorFlow, so no password setup link
+                is issued and their password is not touched — they reach this
+                customer&rsquo;s onboarding with the credentials they have.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {look && look.exists && look.can_add && look.action === 'reuse' ? (
+          <div style={{ border: '1px solid var(--god-border, #e5e7eb)',
+                        borderRadius: 10, padding: '10px 12px', marginBottom: 12,
+                        fontSize: 12.5 }}>
+            Already at this customer. Their existing account is reused and
+            their access is confirmed, not duplicated.
+          </div>
+        ) : null}
+
+        {refused ? (
+          <div style={{ border: '1px solid #dc2626',
+                        background: 'rgba(220,38,38,.06)', borderRadius: 10,
+                        padding: '10px 12px', marginBottom: 12, fontSize: 12.5 }}>
+            {look.reason}
+          </div>
+        ) : null}
+
         {err ? (
           <p style={{ fontSize: 12.5, color: '#dc2626' }}>{err}</p>
         ) : null}
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {looking ? (
+            <span style={{ fontSize: 11.5, color: 'var(--gm-text, #94a3b8)' }}>
+              Checking this address…
+            </span>
+          ) : null}
           <span style={{ flex: 1 }} />
           <button style={btn} onClick={onClose} disabled={busy}>Cancel</button>
           <button onClick={send} disabled={!valid || busy}

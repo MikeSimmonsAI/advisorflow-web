@@ -642,7 +642,10 @@ function AddPerson({ orgId, locations, onAdded }) {
 
       {look && look.can_add && (
         <>
-          {look.action === 'reuse'
+          {/* `add_context` is an existing identity from elsewhere — brand
+              sales, or another customer. It is reused, not re-created, and it
+              needs no name: the note carries what will actually happen. */}
+          {look.action === 'reuse' || look.action === 'add_context'
             ? <div className="go-note">{look.reason}</div>
             : (
               <>

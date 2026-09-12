@@ -212,7 +212,26 @@ def readiness(db: Session, org: Organization) -> Dict[str, Any]:
 
 
 def customer_user_counts(db: Session, org_id: str) -> Dict[str, int]:
-    users = db.query(User).filter(User.organization_id == org_id).all()
+    # BOTH DOORS, exactly as plan_limits counts a seat. Somebody seconded into
+    # this customer by an active customer_org membership can log in and work
+    # here, so counting only `users.organization_id` would report "No active
+    # user account - nobody can log in" about a workspace that has an
+    # administrator, and hold it out of activation on that basis.
+    from app.services.customer_provisioning import customer_people
+    from app.models.sales_models import Membership, SCOPE_CUSTOMER_ORG
+
+    users = customer_people(db, org_id)
+    ws_roles = {
+        m.user_id: m.role for m in db.query(Membership)
+        .filter(Membership.scope_type == SCOPE_CUSTOMER_ORG,
+                Membership.scope_id == org_id,
+                Membership.is_active == True).all()}      # noqa: E712
+
+    def _role_here(u):
+        # The role IN THIS WORKSPACE. A sales_manager who administers this
+        # customer is an org_admin here, and `users.role` does not say so.
+        return ws_roles.get(u.id) or u.role
+
     return {
         "total": len(users),
         "active": sum(1 for u in users if u.is_active),
@@ -220,7 +239,8 @@ def customer_user_counts(db: Session, org_id: str) -> Dict[str, int]:
         # Observed from last_login_at, not from an invitation status somebody
         # forgot to update.
         "pending": sum(1 for u in users if u.is_active and u.last_login_at is None),
-        "admins": sum(1 for u in users if u.role == "org_admin" and u.is_active),
+        "admins": sum(1 for u in users
+                      if _role_here(u) == "org_admin" and u.is_active),
     }
 
 

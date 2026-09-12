@@ -59,6 +59,7 @@ from app.models.staff_models import (
 from app.routers.audit_log_router import log_action
 from app.services import customer_provisioning as cp
 from app.services import staff_activation as activation
+from app.services import workspace_access as _ws
 
 # The customer-side roles, and only those. A control-plane role is not
 # expressible through this path — see the module docstring.
@@ -84,9 +85,15 @@ STATE_LABELS = {
 
 
 def _people(db: Session, org: Organization) -> List[User]:
-    return (db.query(User)
-            .filter(User.organization_id == org.id)
-            .order_by(User.full_name).all())
+    """Everyone with access to this customer, by either route.
+
+    Asks `customer_provisioning` rather than re-querying the legacy column.
+    When this filtered on `users.organization_id` alone, sending onboarding to
+    a person whose home is elsewhere — a salesperson given org_admin access to
+    the customer he sold — left `status()` unable to see the recipient, so the
+    screen reported "Not sent" immediately after sending it.
+    """
+    return cp.customer_people(db, org.id)
 
 
 def _latest_activation(db: Session, user_ids: List[str]) -> Optional[StaffActivation]:
@@ -132,7 +139,12 @@ def recipient_preview(db: Session, org: Organization,
         # — inviting somebody who already exists — cannot accidentally create a
         # second account for the same human.
         "existing_people": [
-            {"id": u.id, "name": u.full_name, "email": u.email, "role": u.role,
+            {"id": u.id, "name": u.full_name, "email": u.email,
+             # The role in THIS customer, not the platform column.
+             "role": (_ws.workspace_role(u, db, org.id) or u.role),
+             "platform_role": u.role,
+             # Their home is elsewhere; they hold this customer additively.
+             "is_seconded": (u.organization_id != org.id),
              "has_signed_in": not bool(u.must_change_password)}
             for u in people
         ],
@@ -198,10 +210,36 @@ def send(db: Session, org: Organization, impl: Implementation, actor: User, *,
         db, org, actor, email=email, full_name=(full_name or "").strip(),
         role=role, location_ids=list(location_ids or []))
 
-    # THE ONE-TIME LINK. `issue` revokes any outstanding link for this person,
-    # so a resend cannot leave two valid ways in.
-    row, raw = activation.issue(db, target, actor, purpose=PURPOSE_SETUP)
-    url = activation.activation_url(base_url, raw)
+    # WHETHER A SETUP LINK IS THE RIGHT THING TO HAND THIS PERSON.
+    #
+    # A setup link is how somebody with NO password of their own gets one. For
+    # a person who already signs in here — a salesperson, a brand executive,
+    # somebody who already administers another customer — minting one is
+    # actively harmful in two ways that are easy to miss:
+    #
+    #   it REVOKES their outstanding links. `issue` supersedes every pending
+    #   activation for that user, so onboarding a colleague could quietly
+    #   cancel the sales access link they were waiting on.
+    #
+    #   accepting it REWRITES their password. `staff_activation.accept` sets
+    #   password_hash and clears the lockout counters. Sending "set your
+    #   password" to somebody who already has one is a password reset wearing
+    #   an invitation's clothes.
+    #
+    # They do not need one. The membership granted above is the access; their
+    # existing credentials already work, and `/launch` resolves which
+    # customer's intake they get from their own session. So they are sent to
+    # the Launch Pad and nothing about their authentication is touched.
+    needs_setup = bool(target.must_change_password)
+    row, raw = (None, None)
+    if needs_setup:
+        # THE ONE-TIME LINK. `issue` revokes any outstanding link for this
+        # person, so a resend cannot leave two valid ways in.
+        row, raw = activation.issue(db, target, actor, purpose=PURPOSE_SETUP)
+        url = activation.activation_url(base_url, raw)
+    else:
+        base = (base_url or "").rstrip("/")
+        url = ("%s/launch" % base) if base else "/launch"
 
     log_action(
         db, org.id, actor.id,
@@ -217,23 +255,44 @@ def send(db: Session, org: Organization, impl: Implementation, actor: User, *,
             "brand": brand["name"],
             # Stated in the record because the next reader will want to know.
             "message_sent_by_platform": False,
-            "send_count": row.send_count,
+            "send_count": (row.send_count if row is not None else 0),
+            "access_path": ("setup_link" if needs_setup else "existing_login"),
+            "credentials_touched": bool(needs_setup),
         },
         commit=False,
     )
     db.commit()
     db.refresh(target)
 
+    from app.services import workspace_access
     return {
         "recipient": {"id": target.id, "email": target.email,
-                      "name": target.full_name, "role": target.role},
+                      "name": target.full_name,
+                      # The role IN THIS CUSTOMER. `target.role` may be
+                      # describing another context entirely — the whole point
+                      # of the additive grant.
+                      "role": (workspace_access.workspace_role(target, db, org.id)
+                               or target.role),
+                      "platform_role": target.role},
         "identity_created": bool(created),
         "brand": brand,
-        # The only copy that will ever exist. Shown once and never stored.
+        # Either the one-time setup link, or the Launch Pad for somebody who
+        # already has credentials. `onboarding_url_is_one_time` says which, so
+        # a screen cannot promise "shown once, never retrievable" about a URL
+        # that is simply /launch.
         "onboarding_url": url,
-        "expires_at": row.expires_at,
-        "send_count": row.send_count,
+        "onboarding_url_is_one_time": bool(needs_setup),
+        "access_path": ("setup_link" if needs_setup else "existing_login"),
+        "expires_at": (row.expires_at if row is not None else None),
+        "send_count": (row.send_count if row is not None else 0),
         "message_sent_by_platform": False,
+        "note": ("A one-time link to set their password, then their own "
+                 "onboarding."
+                 if needs_setup else
+                 "This person already signs in to AdvisorFlow. Nothing about "
+                 "their password or existing access was changed — they now "
+                 "hold %s access to this customer and reach their onboarding "
+                 "at /launch with the credentials they already have." % role),
         "status": status(db, org, impl),
     }
 

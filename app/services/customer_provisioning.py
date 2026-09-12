@@ -267,13 +267,36 @@ def location_row(db: Session, l: Location) -> Dict[str, Any]:
 def lookup_identity(db: Session, email: str, org_id: str) -> Dict[str, Any]:
     """Email-first lookup, run BEFORE anything is created.
 
-    Reports what reuse is actually possible rather than assuming. Customer
-    tenancy in this schema is the single `users.organization_id` column - there
-    is no additive customer membership (Membership with SCOPE_CUSTOMER_ORG
-    exists but grants nothing and nothing writes it). So a human who already
-    belongs to a DIFFERENT customer cannot also belong to this one, and the
-    honest answer is to say that plainly. Creating a second row for the same
-    person to work around it would be the duplicate this whole design forbids.
+    ONE HUMAN IDENTITY, MANY AUTHORIZED CONTEXTS.
+    =============================================
+    This function used to refuse two perfectly legitimate people:
+
+      * brand-sales staff (`organization_id` IS NULL), on the grounds that
+        making them a customer user "would change what they are";
+      * anybody already in another customer, on the grounds that customer
+        tenancy is one column and so cannot hold two.
+
+    Both reasons described the schema as it was BEFORE `workspace_access`
+    moved customer tenancy onto `Membership` rows with `SCOPE_CUSTOMER_ORG`.
+    That module's own docstring names this file's stale comment as one of the
+    two it was written to close, and `customer_activation.add_existing_user`
+    was migrated at the same time. This one was not, so the Launch Engine
+    inherited a refusal the platform had already stopped meaning: a
+    salesperson who sold a deal could not be given onboarding access to the
+    customer he had just sold, and the screen told the operator to invent a
+    second email address for the same human.
+
+    Adding customer access is now ADDITIVE. It grants a membership; it does
+    not move, downgrade or overwrite what the person already is. Their
+    brand-sales membership, their platform role and any other workspace they
+    hold are all untouched — see `add_customer_user`.
+
+    WHAT STILL REFUSES, AND WHY IT IS NOT THE SAME THING
+    ----------------------------------------------------
+    A god_admin or super_admin is still refused. That is not a tenancy limit
+    that membership fixed; it is the standing rule that provisioning must
+    never be a door through which the control plane acquires a customer
+    tenancy. Root authority is not an ordinary multi-context case.
     """
     email = assert_email(email)
     user = db.query(User).filter(User.email == email).first()
@@ -281,16 +304,42 @@ def lookup_identity(db: Session, email: str, org_id: str) -> Dict[str, Any]:
         return {"email": email, "exists": False, "can_add": True,
                 "action": "create", "reason": None, "user": None}
 
-    from app.models.sales_models import Membership
+    from app.models.sales_models import (Membership, SCOPE_BRAND_SALES_ORG,
+                                         SCOPE_CUSTOMER_ORG, SCOPE_PLATFORM)
     memberships = db.query(Membership).filter(Membership.user_id == user.id).all()
+    active = [m for m in memberships if m.is_active]
+
+    # What this person already holds, named so an operator can see that it
+    # survives rather than having to trust that it does.
+    workspace_rows = [m for m in active if m.scope_type == SCOPE_CUSTOMER_ORG]
+    other_workspaces = [m for m in workspace_rows if m.scope_id != org_id]
+    org_names = {}
+    if other_workspaces:
+        ids = [m.scope_id for m in other_workspaces]
+        org_names = {o.id: o.name for o in db.query(Organization)
+                     .filter(Organization.id.in_(ids)).all()}
+    brand_sales_count = len([m for m in active
+                             if m.scope_type == SCOPE_BRAND_SALES_ORG])
+    platform_count = len([m for m in active if m.scope_type == SCOPE_PLATFORM])
+
     summary = {
         "id": user.id, "email": user.email, "full_name": user.full_name,
         "role": user.role, "is_active": bool(user.is_active),
         "organization_id": user.organization_id,
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+        "has_usable_login": not bool(user.must_change_password),
         "memberships": [
             {"scope_type": m.scope_type, "scope_id": m.scope_id, "role": m.role,
              "is_active": bool(m.is_active)} for m in memberships
+        ],
+        # The contexts that will still be there afterwards.
+        "brand_sales_memberships": brand_sales_count,
+        "platform_memberships": platform_count,
+        "other_workspaces": [
+            {"organization_id": m.scope_id,
+             "organization_name": org_names.get(m.scope_id, m.scope_id),
+             "role": m.role}
+            for m in other_workspaces
         ],
     }
 
@@ -300,35 +349,72 @@ def lookup_identity(db: Session, email: str, org_id: str) -> Dict[str, Any]:
                           "customer would give a customer tenancy to an operator.",
                 "user": summary}
 
-    if user.organization_id == org_id:
+    already_here = (user.organization_id == org_id
+                    or any(m.scope_id == org_id for m in workspace_rows))
+    if already_here:
         return {"email": email, "exists": True, "can_add": True, "action": "reuse",
                 "reason": "Already a member of this customer. Their existing account "
                           "will be updated, not duplicated.",
                 "user": summary}
 
-    if user.organization_id is None:
-        return {"email": email, "exists": True, "can_add": False, "action": "refuse",
-                "reason": "This person is brand-sales staff (organization_id is NULL by "
-                          "design - they sell the product, they do not use a tenant of "
-                          "it). Making them a customer user would change what they are. "
-                          "Use a different address for their customer-side account.",
-                "user": summary}
+    # An existing identity that belongs somewhere else — brand sales, another
+    # customer, or both. This is the multi-context case, and it is allowed.
+    held = []
+    if brand_sales_count:
+        held.append("brand-sales access")
+    if platform_count:
+        held.append("brand/platform access")
+    if other_workspaces:
+        held.append("%d other workspace%s"
+                    % (len(other_workspaces),
+                       "" if len(other_workspaces) == 1 else "s"))
+    if not held and user.organization_id:
+        other = db.query(Organization).filter(
+            Organization.id == user.organization_id).first()
+        held.append("access to %s" % (other.name if other else "another customer"))
 
-    other = db.query(Organization).filter(
-        Organization.id == user.organization_id).first()
-    return {"email": email, "exists": True, "can_add": False, "action": "refuse",
-            "reason": "This person already belongs to customer '%s'. Customer tenancy is "
-                      "a single field in this schema, so one identity cannot hold two "
-                      "customer organizations. A second user row would be a duplicate "
-                      "human, which is worse."
-                      % (other.name if other else user.organization_id),
-            "user": summary}
+    return {
+        "email": email, "exists": True, "can_add": True, "action": "add_context",
+        "reason": ("Existing AdvisorFlow identity. Their current access%s stays "
+                   "exactly as it is; this customer is ADDED as a separate "
+                   "workspace membership. No second account is created."
+                   % ((" (" + ", ".join(held) + ")") if held else "")),
+        "user": summary,
+    }
 
 
 def add_customer_user(db: Session, org: Organization, actor: User, *, email: str,
                       full_name: str, role: str = "advisor",
                       location_ids: Optional[List[str]] = None) -> Tuple[User, bool]:
-    """Add or reuse a person on a customer. Returns (user, created)."""
+    """Add or reuse a person on a customer. Returns (user, created).
+
+    WHAT THIS WRITES, AND WHAT IT REFUSES TO TOUCH
+    ==============================================
+    The grant is an ACTIVE `Membership(scope_type=customer_org)` row, which is
+    what `workspace_access` treats as authority to enter a workspace. It is
+    written on both branches — a person created here and a person reused here
+    both end up holding the same kind of grant, rather than the new one relying
+    on the legacy column and a login-time backfill to become real.
+
+    For an identity that already exists elsewhere, three things are left alone
+    on purpose, mirroring `customer_activation.add_existing_user`:
+
+      users.organization_id   seeded only when EMPTY. Already pointing at a
+                              tenant means they work there today, and
+                              repointing it would move them out of it — the
+                              transfer the old 409 was really protecting
+                              against, and still not what "add" means.
+      users.role              their PLATFORM role. Changed only when the legacy
+                              column points at this customer, i.e. when it is
+                              genuinely the role being described. A
+                              salesperson does not become an advisor because
+                              he also administers a customer.
+      every other membership  brand-sales, platform and other workspaces are
+                              never read for permission here and never written.
+
+    So the workspace role lives on the membership and the platform role lives
+    on the user row, and neither is inferred from the other.
+    """
     if role not in CUSTOMER_ROLES:
         raise HTTPException(
             status_code=400,
@@ -366,9 +452,51 @@ def add_customer_user(db: Session, org: Organization, actor: User, *, email: str
         created = True
     else:
         user = db.query(User).filter(User.id == look["user"]["id"]).first()
-        if role != user.role:
+        # READ BEFORE WRITING. Whether the column already described THIS
+        # customer has to be decided before anything below seeds it, or
+        # seeding makes the role test true in the same pass and rewrites the
+        # platform role of the very person it was meant to protect.
+        was_homed_here = (user.organization_id == org.id)
+        summary = look.get("user") or {}
+        # A STANDING PLATFORM IDENTITY KEEPS ITS EMPTY COLUMN.
+        #
+        # `active_workspace_org_id` resolves a request's tenant from the
+        # SELECTED workspace first and `users.organization_id` second. So
+        # seeding the column is right for somebody whose only context is this
+        # workspace — without it they would have no default tenant and every
+        # route that still reads the column would see nothing. It is wrong for
+        # brand-sales or brand/platform staff: it would make a customer their
+        # default tenancy, which is how a salesperson quietly becomes a
+        # customer-only person. They reach this workspace by selecting it, and
+        # their membership is what makes that selection real.
+        has_platform_identity = bool(summary.get("brand_sales_memberships")
+                                     or summary.get("platform_memberships"))
+        if not user.organization_id and not has_platform_identity:
+            user.organization_id = org.id
+            if not getattr(user, "platform_id", None):
+                user.platform_id = org.platform_id
+        # Only when the column was ALREADY describing this customer is
+        # `users.role` the role being set here. Otherwise it belongs to another
+        # context and the workspace role on the membership below is the answer.
+        if was_homed_here and role != user.role:
             user.role = role
         user.is_active = True
+
+    # THE GRANT ITSELF — additive, idempotent, and the thing authorization
+    # actually reads. `grant_workspace_membership` updates the one row for
+    # (person, this workspace) rather than adding a second, so calling this
+    # twice re-roles instead of duplicating.
+    from app.services import workspace_access
+    membership = workspace_access.grant_workspace_membership(
+        db, user_id=user.id, organization_id=org.id, role=role,
+        granted_by=actor.id, commit=False,
+        # The create branch above already reserved this seat through
+        # require_capacity, and the flushed `users` row is now counted as
+        # homed — checking again here would refuse a plan's last user.
+        check_capacity=not created)
+    # The per-request memo would otherwise still say this person has no
+    # membership here, for the rest of this request.
+    workspace_access.invalidate_workspace_memberships(user)
 
     assign_locations(db, org, user, actor, location_ids or [], commit=False)
 
@@ -378,7 +506,13 @@ def add_customer_user(db: Session, org: Organization, actor: User, *, email: str
         target_type="user", target_id=user.id,
         platform_id=org.platform_id,
         details={"email": user.email, "role": role, "created_identity": created,
-                 "locations": location_ids or []},
+                 "locations": location_ids or [],
+                 # Named in the record because "did this move him or add to
+                 # him" is the question a reader of this history will have.
+                 "workspace_membership_id": membership.id,
+                 "workspace_role": membership.role,
+                 "grant": "additive",
+                 "seconded": (user.organization_id != org.id)},
         commit=False,
     )
     return user, created
@@ -413,9 +547,46 @@ def assign_locations(db: Session, org: Organization, user: User, actor: User,
     return sorted(valid)
 
 
+def customer_people(db: Session, org_id: str) -> List[User]:
+    """Everyone with access to this customer, by EITHER route.
+
+    Two doors, one list. `users.organization_id` is the legacy home column,
+    and an ACTIVE customer_org `Membership` is the additive grant that
+    `workspace_access` treats as authority. Listing only the column is how a
+    brand-sales person who was given org_admin access to a customer stayed
+    invisible on that customer's own People tab — and, worse, invisible to
+    `launch_invitation.status`, which then reported the onboarding as never
+    sent because it could not see the person it had just been sent to.
+
+    Union, de-duplicated: somebody homed here who also holds a membership is
+    one person, not two rows.
+    """
+    from app.models.sales_models import Membership, SCOPE_CUSTOMER_ORG
+
+    homed = db.query(User).filter(User.organization_id == org_id).all()
+    member_ids = [r[0] for r in db.query(Membership.user_id)
+                  .filter(Membership.scope_type == SCOPE_CUSTOMER_ORG,
+                          Membership.scope_id == org_id,
+                          Membership.is_active == True).all()]  # noqa: E712
+    seen = {u.id: u for u in homed}
+    missing = [i for i in member_ids if i not in seen]
+    if missing:
+        for u in db.query(User).filter(User.id.in_(missing)).all():
+            seen[u.id] = u
+    return sorted(seen.values(), key=lambda u: (u.full_name or "", u.email or ""))
+
+
 def customer_users(db: Session, org_id: str) -> List[Dict[str, Any]]:
-    users = (db.query(User).filter(User.organization_id == org_id)
-             .order_by(User.full_name.asc()).all())
+    from app.models.sales_models import Membership, SCOPE_CUSTOMER_ORG
+
+    users = customer_people(db, org_id)
+    # The role IN THIS WORKSPACE, which is the membership's and never
+    # `users.role` — that column may be describing another context entirely.
+    ws_roles = {
+        m.user_id: m.role for m in db.query(Membership)
+        .filter(Membership.scope_type == SCOPE_CUSTOMER_ORG,
+                Membership.scope_id == org_id,
+                Membership.is_active == True).all()}      # noqa: E712
     links = {}
     for ul in db.query(UserLocation).filter(UserLocation.organization_id == org_id).all():
         links.setdefault(ul.user_id, []).append(ul.location_id)
@@ -423,7 +594,17 @@ def customer_users(db: Session, org_id: str) -> List[Dict[str, Any]]:
              .filter(Location.organization_id == org_id).all()}
     return [
         {
-            "id": u.id, "email": u.email, "full_name": u.full_name, "role": u.role,
+            "id": u.id, "email": u.email, "full_name": u.full_name,
+            # `role` stays the workspace answer this screen has always shown;
+            # where the person is only seconded here, that is the membership's
+            # role rather than their platform one.
+            "role": ws_roles.get(u.id) or u.role,
+            "platform_role": u.role,
+            "workspace_role": ws_roles.get(u.id),
+            # True for somebody whose home is elsewhere — a salesperson who
+            # also administers this customer. The operator should be able to
+            # see that without reading the schema.
+            "is_seconded": (u.organization_id != org_id),
             "is_active": bool(u.is_active),
             "must_change_password": bool(u.must_change_password),
             "has_signed_in": u.last_login_at is not None,
