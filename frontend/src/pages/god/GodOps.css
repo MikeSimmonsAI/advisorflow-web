@@ -409,6 +409,11 @@
 .go-row-name { flex: 1 1 auto; font-weight: 500; }
 
 .go-two { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
+/* Two fields of equal weight. `.go-two` is 1fr auto because it was built for a
+   field beside a button; a city and a state are not that shape, and reusing it
+   collapsed the second field to the width of its own text. */
+.go-two-even { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
+@media (max-width: 560px) { .go-two-even { grid-template-columns: 1fr; } }
 .go-input-sm { max-width: 90px; }
 
 .go-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
