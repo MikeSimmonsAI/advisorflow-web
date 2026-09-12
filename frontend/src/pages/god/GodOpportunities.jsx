@@ -101,14 +101,14 @@ export default function GodOpportunities() {
                         onClick={() => navigate(`/sales/opportunities/${o.id}`)}
                         title="View opportunity"
                       >
-                        <td className="god-td-primary">{o.company_name || '—'}</td>
-                        <td>{o.contact_name || '—'}</td>
-                        <td>{o.brand_name}</td>
-                        <td>{o.stage_label}</td>
-                        <td>{o.owner_name}</td>
-                        <td className="god-td-num">{money(o.deal_value)}</td>
-                        <td>{when(o.next_action_due_at)}</td>
-                        <td>
+                        <td className="god-td-primary" data-label="Company">{o.company_name || '—'}</td>
+                        <td data-label="Contact">{o.contact_name || '—'}</td>
+                        <td data-label="Brand">{o.brand_name}</td>
+                        <td data-label="Stage">{o.stage_label}</td>
+                        <td data-label="Owner">{o.owner_name}</td>
+                        <td className="god-td-num" data-label="Value">{money(o.deal_value)}</td>
+                        <td data-label="Next action due">{when(o.next_action_due_at)}</td>
+                        <td data-label="Flags">
                           {o.is_stalled && <span className="god-flag stalled">Stalled</span>}
                           {o.is_overdue && <span className="god-flag overdue">Overdue</span>}
                         </td>
