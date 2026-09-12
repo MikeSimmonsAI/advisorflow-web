@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 
 from app.services.calendar_providers.base import (
-    CalendarProvider, EventPayload, SyncResult, BusyInterval,
+    CalendarProvider, EventPayload, SyncResult, BusyInterval, ExternalEventState,
 )
 
 log = logging.getLogger(__name__)
@@ -250,6 +250,70 @@ class GoogleCalendarProvider(CalendarProvider):
                 return SyncResult(ok=True, external_event_id=external_event_id)
             return result
         return SyncResult(ok=True, external_event_id=external_event_id)
+
+    # ── read-back, for drift detection ──────────────────────────────────────
+
+    def supports_read_back(self) -> bool:
+        return True
+
+    def get_event(self, external_event_id: str):
+        """Read one event back. Returns (state, error).
+
+        Google reports a user-deleted event two different ways depending on how
+        it was removed: a 404, or a 200 whose `status` is "cancelled". Both mean
+        the copy is gone, so both come back as `exists=False` — the reconciler
+        must not have to know Google's disposal trivia to tell that a meeting
+        was deleted.
+
+        `extendedProperties.private` is read for the appointment id rather than
+        the description, because it survives a user editing the event text,
+        which is precisely the situation this method exists to detect. The
+        description marker is read as a fallback for events written before the
+        structured property was added.
+        """
+        service, err = self._service()
+        if err:
+            return None, err
+        try:
+            ev = service.events().get(
+                calendarId=self._calendar_id(),
+                eventId=external_event_id,
+            ).execute()
+        except Exception as e:
+            result = self._classify(e)
+            if result.error_code == "http_404":
+                return ExternalEventState(exists=False), None
+            return None, result
+
+        if (ev.get("status") or "").lower() == "cancelled":
+            return ExternalEventState(exists=False, is_cancelled=True,
+                                      etag=ev.get("etag")), None
+
+        claimed = None
+        try:
+            claimed = ((ev.get("extendedProperties") or {}).get("private") or {}) \
+                .get("advisorflow_appointment_id")
+        except Exception:
+            claimed = None
+        if not claimed:
+            try:
+                desc = ev.get("description") or ""
+                marker = "AdvisorFlow reference:"
+                if marker in desc:
+                    claimed = desc.split(marker, 1)[1].strip().split()[0].strip()
+            except Exception:
+                claimed = None
+
+        return ExternalEventState(
+            exists=True,
+            starts_at=_parse_google_dt(ev.get("start") or {}),
+            ends_at=_parse_google_dt(ev.get("end") or {}),
+            etag=ev.get("etag"),
+            is_cancelled=False,
+            claimed_appointment_id=claimed,
+            subject=ev.get("summary"),
+            location=ev.get("location"),
+        ), None
 
     # ── busy reads ──────────────────────────────────────────────────────────
 

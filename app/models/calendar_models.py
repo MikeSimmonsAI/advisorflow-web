@@ -88,6 +88,64 @@ SYNC_LABELS = {
 }
 
 
+# ── EXTERNAL EDITS — what a provider did behind our back ─────────────────────
+#
+# EvoSys owns an appointment it created; a provider event is a copy. But "we
+# own it" cannot mean "we may destroy whatever we find", because the thing we
+# would be destroying is a real decision a real person made in Outlook. So an
+# external change is classified, and only the deterministic classes are healed
+# automatically.
+#
+#   DELETED  — the copy is gone and we know exactly what it should say.
+#              Deterministic: recreate it. Nothing is lost, because a deleted
+#              event carries no information we would be overwriting.
+#   MOVED    — somebody changed the TIME outside EvoSys. NOT deterministic:
+#              they may have agreed a new time with the prospect by phone and
+#              moved it to match. Overwriting that silently puts the rep back
+#              in a meeting the customer has left. This raises a conflict.
+#   CHANGED  — a non-time field differs (subject, location). Deterministic in
+#              the safe direction: EvoSys's wording is authoritative and no
+#              scheduling commitment is at stake, so re-push.
+#   ORPHANED — we hold an event id the provider does not recognise as ours,
+#              or it belongs to a different appointment. Never touched: acting
+#              on an id we cannot prove is a cross-tenant write waiting to
+#              happen. Raised for review.
+CONFLICT_DELETED  = "provider_deleted"
+CONFLICT_MOVED    = "provider_moved"
+CONFLICT_CHANGED  = "provider_changed"
+CONFLICT_ORPHANED = "provider_orphaned"
+CONFLICT_KINDS = (CONFLICT_DELETED, CONFLICT_MOVED, CONFLICT_CHANGED,
+                  CONFLICT_ORPHANED)
+
+# Which classes this system will resolve without asking a human.
+CONFLICTS_AUTO_RECONCILABLE = (CONFLICT_DELETED, CONFLICT_CHANGED)
+
+CONFLICT_LABELS = {
+    CONFLICT_DELETED:  "Removed from their calendar",
+    CONFLICT_MOVED:    "Moved outside EvoSys Pro",
+    CONFLICT_CHANGED:  "Edited outside EvoSys Pro",
+    CONFLICT_ORPHANED: "Calendar event cannot be matched",
+}
+
+# What a human should understand about each, written once here rather than
+# reinvented by whichever screen renders it.
+CONFLICT_EXPLANATIONS = {
+    CONFLICT_DELETED:
+        "This meeting was deleted from the connected calendar. EvoSys Pro still "
+        "holds the appointment, so the calendar copy can be restored.",
+    CONFLICT_MOVED:
+        "The time was changed on the connected calendar, not in EvoSys Pro. "
+        "Nobody has decided which is right, so neither was overwritten — if the "
+        "new time was agreed with the prospect, reschedule here to match it.",
+    CONFLICT_CHANGED:
+        "Details were edited on the connected calendar. EvoSys Pro's version is "
+        "authoritative and can be pushed back over it.",
+    CONFLICT_ORPHANED:
+        "The stored calendar event no longer matches this appointment. It was "
+        "left untouched rather than risk changing an unrelated event.",
+}
+
+
 class CalendarConnection(Base):
     """One user's link to one provider. State only — never the token itself.
 

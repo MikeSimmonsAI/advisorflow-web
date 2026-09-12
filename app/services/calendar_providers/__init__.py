@@ -26,7 +26,7 @@ import logging
 from typing import Optional
 
 from app.services.calendar_providers.base import (
-    CalendarProvider, EventPayload, SyncResult, BusyInterval,
+    CalendarProvider, EventPayload, SyncResult, BusyInterval, ExternalEventState,
 )
 
 log = logging.getLogger(__name__)
@@ -250,6 +250,7 @@ def is_external_calendar(key: str) -> bool:
 
 __all__ = [
     "CalendarProvider", "EventPayload", "SyncResult", "BusyInterval",
+    "ExternalEventState",
     "PROVIDER_MICROSOFT", "PROVIDER_GOOGLE", "PROVIDER_ICS", "PREFERENCE",
     "get_provider", "resolve_provider_key", "is_external_calendar",
     "register_provider", "reset_providers",

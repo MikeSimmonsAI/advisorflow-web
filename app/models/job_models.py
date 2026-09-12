@@ -34,6 +34,13 @@ class JobName:
     # nothing can report on, and the first anyone knows it stopped is a brief
     # that quietly never appeared.
     SUPPORT_INTELLIGENCE = "support_intelligence_loop"
+    # Retention sweep for `user_sessions`. Per-device sessions mean the table
+    # gains a row per sign-in and keeps every revoked and expired one, so it is
+    # the first auth table in this codebase that grows without something
+    # deleting from it. Named here for the same reason as the loop above: a
+    # sweep nobody can report on is one whose failure is invisible until the
+    # table is the problem.
+    SESSION_CLEANUP   = "session_cleanup_loop"
 
     # Render cron SERVICES. Separate names on purpose, even where the work
     # overlaps a loop above: cadence runs hourly in the web dyno AND daily as a
@@ -61,6 +68,7 @@ LOOP_JOB_NAMES = (
     JobName.AI_CONVERSATION,
     JobName.REVIEW_REQUEST,
     JobName.SUPPORT_INTELLIGENCE,
+    JobName.SESSION_CLEANUP,
 )
 
 ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES

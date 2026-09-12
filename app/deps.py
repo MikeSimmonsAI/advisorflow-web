@@ -251,7 +251,24 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             except Exception:               # pragma: no cover - defensive
                 pass
             session_service.touch(db, sess)
-        elif user.session_token != token_jti:
+        elif (user.session_token != token_jti
+              or session_service.user_has_sessions(db, user.id)):
+            # THE LEGACY COLUMN, AND THE FENCE AROUND IT.
+            #
+            # No row for this jti. The column is allowed to decide, but only
+            # for a caller who has NO rows at all — a token minted before this
+            # table shipped, belonging to somebody who has not signed in since.
+            #
+            # Without the second clause, "no row" and "column matches" was
+            # enough on its own, and a jti can lose its row without being
+            # pre-migration: a refresh race leaves the row holding the second
+            # jti and the column holding the first, and deleting rows (demo
+            # reset today, a retention sweep tomorrow) strands whatever the
+            # column still names. Either way the token authenticates again and
+            # revoking the session does not reach it — revocation that a race
+            # or a cleanup job can undo is not revocation.
+            #
+            # See session_service.user_has_sessions.
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session expired. Please log in again.",
