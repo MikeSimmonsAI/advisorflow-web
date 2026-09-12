@@ -11,8 +11,13 @@
 import { Group, Field, Note, Upload, Uploads, Area, Collapse, Fields }
   from '../LaunchUI'
 
-export default function FilesDocumentsStep({ v, set, files, onUpload, onRemoveFile }) {
-  const up = { files, onUpload, onRemove: onRemoveFile }
+export default function FilesDocumentsStep({ v, set, files, onUpload,
+                                             onRemoveFile, preview = false }) {
+  // UPLOADING IS A REAL SIDE EFFECT, so it is the one thing on this step that
+  // stays off in a preview — and it LOOKS off, with the reason on the tile.
+  // Everything else here (typing, disclosures, navigation) behaves exactly as
+  // the customer's own page does.
+  const up = { files, onUpload, onRemove: onRemoveFile, disabled: preview }
   return (
     <>
       <Note tone="info" icon="folder" title="Two items are still outstanding">

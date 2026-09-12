@@ -117,9 +117,29 @@ export default function LaunchPad() {
   const [stepMeta, setStepMeta] = useState(null)
 
   const [railOpen, setRailOpen] = useState(false)
+  // Which journey stage the person has opened to read about. Inspection only —
+  // see LaunchProgress; nothing here can move the implementation.
+  const [openStage, setOpenStage] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveErr, setSaveErr] = useState(null)
+
+  // WHAT A SIMULATED ACTION SAYS OUT LOUD.
+  //
+  // A preview that silently does nothing is indistinguishable from a preview
+  // that is broken — which is exactly how the first version read. Every action
+  // that WOULD have written something now completes the interaction and says
+  // plainly that nothing was kept.
+  const [previewNotice, setPreviewNotice] = useState(null)
+  const noticeTimer = useRef(null)
+  const sayPreview = useCallback((what) => {
+    setPreviewNotice(what || 'Preview mode — no changes were saved.')
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current)
+    noticeTimer.current = window.setTimeout(() => setPreviewNotice(null), 4000)
+  }, [])
+  useEffect(() => () => {
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current)
+  }, [])
 
   const steps = launch?.overview?.steps || []
   const stepKeys = useMemo(() => steps.map(s => s.key), [steps])
@@ -213,7 +233,17 @@ export default function LaunchPad() {
     // The server would refuse anyway — the step endpoint is session-scoped to
     // the caller's own workspace — but a screen that attempts a write it knows
     // is wrong is a screen somebody will later "fix" by widening the endpoint.
-    if (preview) return false
+    //
+    // It returns TRUE, and that is deliberate. `saveAndGo` advances on a
+    // truthy result, so a preview steps forward exactly as the customer's own
+    // page does — the journey is walkable end to end — while nothing is
+    // written and the notice says so. Returning false here is what made Save
+    // & Continue look like a dead button.
+    if (preview) {
+      dirtyRef.current = false
+      sayPreview('Preview mode — no changes were saved.')
+      return true
+    }
     setSaving(true)
     setSaveErr(null)
     try {
@@ -239,7 +269,7 @@ export default function LaunchPad() {
     } finally {
       setSaving(false)
     }
-  }, [active, answers, reloadLaunch, preview])
+  }, [active, answers, reloadLaunch, preview, sayPreview])
 
   const goTo = useCallback(key => {
     // A preview keeps its own URL shape, so stepping through the journey
@@ -282,13 +312,17 @@ export default function LaunchPad() {
   const submit = useCallback(async () => {
     // SUBMISSION IS THE CUSTOMER'S SIGNATURE. A preview must never produce
     // one: it would put a completion event, a timestamp and a name against a
-    // customer who has not opened the page.
-    if (preview) return null
+    // customer who has not opened the page. The button is disabled and says
+    // so; this is the second line of defence, not the first.
+    if (preview) {
+      sayPreview('Submitting is unavailable in preview — nothing was sent.')
+      return null
+    }
     await persist()
     const res = await api.post('/launch/me/submit', {})
     await reloadLaunch()
     return res
-  }, [persist, reloadLaunch, preview])
+  }, [persist, reloadLaunch, preview, sayPreview])
 
   if (loading) {
     return <Centered><p style={{ color: '#64748b' }}>Loading your launch…</p></Centered>
@@ -379,7 +413,9 @@ export default function LaunchPad() {
             <LaunchProgress phases={journey || launch.lifecycle}
                             title={presentation.journey_title}
                             currentStatus={launch.implementation?.status}
-                            intakePct={overall} />
+                            intakePct={overall}
+                            openKey={openStage}
+                            onSelect={setOpenStage} />
 
             <div className="lp-work">
               <div style={{ minWidth: 0 }}>
@@ -396,6 +432,7 @@ export default function LaunchPad() {
                   onBack={prev ? () => goTo(prev.key) : null}
                   onContinue={next ? () => saveAndGo(next.key) : null}
                   continueLabel="Save & Continue"
+                  preview={preview}
                 >
                   <StepBody
                     v={answers}
@@ -412,7 +449,14 @@ export default function LaunchPad() {
                     blockers={launch.blockers}
                     overview={launch.overview}
                     submission={launch.submission}
-                    readOnly={submitted || preview}
+                    // A PREVIEW IS THE FULL EXPERIENCE MINUS MUTATION, so the
+                    // fields stay live: an operator judging the form has to be
+                    // able to type in it, tab through it and open its
+                    // disclosures. Nothing typed leaves the browser — `persist`
+                    // writes nothing in preview — and the banner and the notice
+                    // both say so. `readOnly` stays what it always was: the
+                    // lock a SUBMITTED intake gets.
+                    readOnly={submitted}
                     preview={preview}
                   />
                 </OnboardingStepShell>
@@ -446,6 +490,15 @@ export default function LaunchPad() {
           <LaunchFooter brand={brand} presentation={presentation} />
         </div>
       </div>
+
+      {/* THE ANSWER TO "DID THAT DO ANYTHING?"
+          Every simulated action in a preview lands here. It is the difference
+          between a screen that is read-only and a screen that appears broken,
+          and it is the only thing on the surface that moves when an operator
+          presses Save & Continue. */}
+      {preview && previewNotice ? (
+        <div className="lp-simnote" role="status">{previewNotice}</div>
+      ) : null}
     </div>
   )
 }
