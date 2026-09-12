@@ -425,6 +425,21 @@
       "previously_missed": true
     },
     {
+      "id": "OPS-01",
+      "system": "Platform Ownership & God Mode Operations",
+      "title": "The deploy gate itself fails on main: smoke_sales_staff.py aborts deploy.ps1",
+      "status": "FINISH",
+      "priority": "P1",
+      "depends_on": [],
+      "completed_on": null,
+      "evidence": "deploy.ps1 step 3 stops at scripts/smoke_sales_staff.py with \"SALES STAFF MANAGEMENT CHECKS FAILED - not deploying\": plan_limits cannot write its bypass audit row - sqlite3.IntegrityError, NOT NULL constraint failed on audit_log_entries.target_id, for bypass 'platform_provisioning' on org None - and the session then fails every later check with PendingRollbackError.",
+      "notes": "Proven pre-existing, not assumed: the same script fails identically in a separate worktree checked out at origin/main (fc741e2), which carries none of the roadmap changes. This is the gate that holds finished, merged work at IN PROGRESS - SCHED-07 among it - so it is not a test-hygiene chore, it is the thing standing between merge and production.",
+      "decision_required": null,
+      "blocked_reason": null,
+      "next_action": "Decide what target_id is for a platform-scoped bypass with no organization, then make the audit write satisfy it. Do not make the gate pass by skipping the audit, and do not disable the probe.",
+      "previously_missed": true
+    },
+    {
       "id": "EXEC-01",
       "system": "Executive Portfolio Layer",
       "title": "One canonical executive portfolio authority enforced server-side",
@@ -892,11 +907,11 @@
         "CUST-01"
       ],
       "completed_on": null,
-      "evidence": "SESSION_LOG_CUSTOMER_LAUNCH_EXPERIENCE.md (in origin/main); tests/test_launch_experience.py (44 tests), test_launch_engine.py, test_launch_delivery.py, test_launch_productization.py; frontend/src/pages/launch/*",
-      "notes": "One configured shell, four config layers, internal preview that writes nothing. Covers the Atlantis onboarding, the Send Onboarding workflow and the Launch Experience V2 visual implementation. No real onboarding invitation goes out without explicit authorization.",
+      "evidence": "SESSION_LOG_CUSTOMER_LAUNCH_EXPERIENCE.md (in origin/main); tests/test_launch_experience.py (44 tests), test_launch_engine.py, test_launch_delivery.py, test_launch_productization.py; frontend/src/pages/launch/*; tests/test_customer_launch_experience_v2.py (V2, commit 2e18717)",
+      "notes": "One configured shell, four config layers, internal preview that writes nothing. Covers the Atlantis onboarding, the Send Onboarding workflow and the Launch Experience V2 visual implementation - V2 (\"the customer's portal, not our software\", commit 2e18717) landed on main during this refresh and ships with it. No real onboarding invitation goes out without explicit authorization.",
       "decision_required": null,
       "blocked_reason": null,
-      "next_action": "Finish the V2 visual pass, then deploy and live-verify.",
+      "next_action": "Live-verify the deployed Launch Pad, then close. Sending a real invitation to the first customer is a separate authorization, not a completion step.",
       "previously_missed": true
     },
     {
@@ -1504,7 +1519,7 @@
       ],
       "completed_on": null,
       "evidence": "SESSION_LOG_CALENDAR_SCHEDULING.md (in origin/main), branch feat/sales-calendar-scheduling; availability intersection, recurring rules per local date, sales_appointments",
-      "notes": "Built, tested and merged. Deployment and live verification are still pending behind the Launch Engine deploy-gate issue - that is the only thing between this and COMPLETE.",
+      "notes": "Built, tested and merged. Deployment and live verification are still pending behind the Launch Engine deploy-gate issue - that is the only thing between this and COMPLETE. The deploy gate in question is tracked as OPS-01.",
       "decision_required": null,
       "blocked_reason": null,
       "next_action": "Clear the deploy gate, deploy, then verify /sales/calendar and /sales/team live.",
