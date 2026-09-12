@@ -31,6 +31,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, API_BASE } from '../../api/client'
 import GodLaunchDelivery from './GodLaunchDelivery'
+import SendOnboarding from './SendOnboarding'
 import {
   PROGRESS, buildSchemaIndex, intakeState, presentAllSteps, SECRET_NOTE,
 } from '../launch/present'
@@ -124,6 +125,8 @@ export default function GodLaunches() {
   const [brand, setBrand] = useState('all')
   const [implStatus, setImplStatus] = useState('all')
   const [busy, setBusy] = useState(false)
+  // The customer whose SEND ONBOARDING confirmation is open, if any.
+  const [sending, setSending] = useState(null)
 
   const load = () => {
     setLoading(true)
@@ -386,6 +389,28 @@ export default function GodLaunches() {
                     is composed by the same read-only function behind the
                     customer's own page, and the only thing it writes is the
                     audit note that somebody looked. */}
+                {/* SEND ONBOARDING — the OTHER door, and the real one.
+                    The preview above is internal and must never reach a
+                    customer. This gives a named person their own login and a
+                    one-time link, after which /launch resolves their workspace
+                    from their own session and saves what they type.
+
+                    It opens a confirmation first. Nothing is created, and
+                    nothing is sent, until the operator has confirmed the
+                    recipient and the brand together. */}
+                {r.launch_started === false ? null : (
+                  <button onClick={() => setSending({ id: r.organization_id,
+                                                      name: r.organization_name })}
+                          style={{
+                            fontSize: 12, padding: '7px 14px', borderRadius: 8,
+                            border: '1px solid var(--gm-blue)',
+                            background: 'var(--god-card, var(--gm-panel))',
+                            color: 'var(--gm-blue)', fontWeight: 700,
+                            cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    {r.delivery && r.delivery.state !== 'not_sent'
+                      ? 'Resend onboarding' : 'Send onboarding'}
+                  </button>
+                )}
                 {r.launch_started === false ? null : (
                 <a href={'/launch/preview/' + encodeURIComponent(r.organization_id)}
                    target="_blank" rel="noopener noreferrer"
@@ -400,6 +425,31 @@ export default function GodLaunches() {
                 )}
               </div>
             </div>
+
+            {/* HAS THIS CUSTOMER ACTUALLY BEEN SENT THEIR ONBOARDING?
+                A launch sitting at 0% has two completely different causes —
+                the customer is slow, or nobody ever sent it — and they call
+                for opposite actions. Every state here is derived from a
+                record; there is deliberately no "opened" or "delivered",
+                because nothing observes the recipient's mailbox. */}
+            {r.delivery ? (
+              <div style={{ marginTop: 10, fontSize: 12,
+                            color: 'var(--gm-text, #64748b)' }}>
+                <Chip label={r.delivery.label}
+                      tone={r.delivery.state === 'not_sent' ? 'warning' : 'ok'} />
+                {r.delivery.invited_email ? (
+                  <span style={{ marginLeft: 8 }}>
+                    {r.delivery.invited_email}
+                    {r.delivery.send_count > 1
+                      ? ' · sent ' + r.delivery.send_count + ' times' : ''}
+                  </span>
+                ) : (
+                  <span style={{ marginLeft: 8 }}>
+                    Nobody has been given access to this onboarding yet
+                  </span>
+                )}
+              </div>
+            ) : null}
 
             {(r.blockers?.length || r.warnings?.length) ? (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
@@ -419,6 +469,17 @@ export default function GodLaunches() {
           </div>
         )
       })}
+
+      {/* The confirmation. Rendered once for the whole list rather than per
+          row, so only one can ever be open. */}
+      {sending ? (
+        <SendOnboarding
+          orgId={sending.id}
+          orgName={sending.name}
+          onClose={() => setSending(null)}
+          onSent={load}
+        />
+      ) : null}
     </div>
   )
 }
