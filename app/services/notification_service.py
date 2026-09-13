@@ -15,7 +15,11 @@ from app.models.models import User, Lead, Reply, Notification, NotificationType
 from app.services.email_service import send_email_via_provider
 from app.services.platform_utils import get_brand_name
 
-NOTIFICATION_FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@restland-advisorflow.com")
+# NO CUSTOMER NAME IN A PLATFORM DEFAULT. This named a real cemetery
+# customer in an address every brand on the platform would have sent from.
+# Unused now that the send passes the advisor's own organization, and left
+# empty rather than pointing anywhere.
+NOTIFICATION_FROM_EMAIL = os.environ.get("EMAIL_FROM_ADDRESS", "").strip() or None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -106,7 +110,19 @@ def notify_hot_reply(db: Session, advisor: User, lead: Lead, reply: Reply) -> No
         <p>Log in to {get_brand_name(db, str(advisor.organization_id))} to respond.</p>
     """
 
-    result = send_email_via_provider(target_email, subject, body_html)
+    # SENT AS THE ADVISOR'S OWN ORGANIZATION, NOT AS WHOEVER THE DEPLOYMENT
+    # DEFAULTS TO. This called `send_email_via_provider` with no `org` at all,
+    # so the From address fell all the way back to the process-wide
+    # EMAIL_FROM_ADDRESS — one address for every brand on the platform. An
+    # EvoSys Pro advisor's hot-reply alert could arrive wearing another
+    # brand's name. The organization carries its own verified sender and its
+    # brand resolves the rest; passing it is the whole fix.
+    org = None
+    org_id = getattr(advisor, "organization_id", None)
+    if org_id:
+        from app.models.models import Organization
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+    result = send_email_via_provider(target_email, subject, body_html, org=org)
     if result["success"]:
         notification.is_sent = True
         from datetime import datetime, timezone

@@ -52,10 +52,10 @@ const NAV_GROUPS = [
       // "nothing here for you" on most accounts trains people to ignore the
       // nav. `launchOnly` is answered by a single GET /launch/me on mount.
       { to: '/launch', label: 'Launch', icon: 'zap', launchOnly: true },
-      { to: '/leads', label: 'Leads', icon: 'users' },
+      { to: '/leads', label: 'Leads', icon: 'users', featureKey: 'leads' },
       { to: '/replies', label: 'Replies', icon: 'message' },
       { to: '/activity', label: 'Activity', icon: 'send' },
-      { to: '/availability', label: 'Availability', icon: 'calendar' },
+      { to: '/availability', label: 'Availability', icon: 'calendar', featureKey: 'availability' },
       { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
     ],
   },
@@ -85,27 +85,27 @@ const NAV_GROUPS = [
       // caller's own workspace by the route signatures, and every write is
       // additionally gated by require_not_observation on the server.
       { to: '/ai-workforce-command', label: 'Workforce Command', icon: 'activity' },
-      { to: '/email-queue', label: 'Email Queue', icon: 'mail' },
+      { to: '/email-queue', label: 'Email Queue', icon: 'mail', featureKey: 'email' },
       { to: '/campaigns', label: 'Campaigns', icon: 'target', adminOnly: true, featureKey: 'campaigns' },
       // NO featureKey. `proposals` is not a key in app/services/entitlements.py,
       // and asking isFeatureEnabled() for a key the server has never heard of is
       // precisely the mistake documented in that file. `adminOnly` is the honest
       // test here because require_admin is what /proposals/* actually enforces.
       { to: '/proposals', label: 'Proposals', icon: 'file-text', adminOnly: true },
-      { to: '/cadence', label: 'Cadence', icon: 'repeat', adminOnly: true },
+      { to: '/cadence', label: 'Cadence', icon: 'repeat', adminOnly: true, featureKey: 'cadences' },
       { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
-      { to: '/compliance', label: 'DNC List', icon: 'shield-check' },
+      { to: '/compliance', label: 'DNC List', icon: 'shield-check', featureKey: 'compliance' },
     ],
   },
   {
     label: 'Operations',
     items: [
-      { to: '/crm', label: 'CRM', icon: 'database', adminOnly: true, featureKey: null },
-      { to: '/crm-connectors', label: 'CRM Connectors', icon: 'link', adminOnly: true, featureKey: null },
+      { to: '/crm', label: 'CRM', icon: 'database', adminOnly: true, featureKey: 'crm' },
+      { to: '/crm-connectors', label: 'CRM Connectors', icon: 'link', adminOnly: true, featureKey: 'crm_connectors' },
       { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users', adminOnly: true, featureKey: 'lead_cleanup' },
       { to: '/admin', label: 'Team Performance', icon: 'shield', adminOnly: true, featureKey: 'master_dashboard' },
       { to: '/reports', label: 'Reports', icon: 'activity', adminOnly: true, featureKey: 'reports' },
-      { to: '/import-batches', label: 'Lead Imports', icon: 'upload', adminOnly: true },
+      { to: '/import-batches', label: 'Lead Imports', icon: 'upload', adminOnly: true, featureKey: 'imports' },
     ],
   },
   {
@@ -546,7 +546,20 @@ export default function Layout({ children }) {
               sits. A group whose items are all hidden renders nothing at all,
               so a plain advisor does not see four empty headings. */}
           {(() => {
-            const isOrgAdmin = user?.role === 'org_admin' || user?.role === 'super_admin' || isGodAdmin
+            // THE ROLE IN THIS WORKSPACE, not the one on the user row.
+            //
+            // This read `user.role` out of localStorage, which is ONE VALUE
+            // FOR A WHOLE HUMAN. A person who administers customer A and is
+            // an ordinary user of customer B was drawn an administrator's
+            // sidebar inside B — Users, Reports, Imports, Cadence, Audit Log,
+            // Tier Config, Organization — for a company they hold no
+            // administrative role in. The server now states the role for the
+            // ACTIVE workspace on `/branding/org`; this renders what it says
+            // and falls back to the user row only for a deployment that has
+            // not refreshed its cached branding yet.
+            const workspaceRole = branding?.workspace_role || user?.role
+            const isOrgAdmin = workspaceRole === 'org_admin'
+              || workspaceRole === 'super_admin' || isGodAdmin
             const visible = (item) => {
               if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
               // Only orgs with a real implementation see Launch. `null` means

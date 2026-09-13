@@ -568,6 +568,13 @@ COLUMNS_TO_ADD = [
     ("leads", "import_list_name", "VARCHAR"),
     # Source category — user-defined grouping (purchased, organic, referral, database, etc.)
     ("leads", "source_category", "VARCHAR"),
+    # HOW A SUPPORT REQUEST REACHED US, and who to reply to when nobody signed
+    # in. A public-website ticket has no submitting user, so without these the
+    # acknowledgement had no address and the operator had no way to know the
+    # sender was unauthenticated.
+    ("support_tickets", "source", "VARCHAR DEFAULT 'in_app'"),
+    ("support_tickets", "reporter_email", "VARCHAR"),
+    ("support_tickets", "reporter_name", "VARCHAR"),
     # Source detail — WHICH form on the source produced the arrival: "Request
     # Demo", "SMS Opt-In", "Waitlist". Separate from source_category, which is
     # a classification the audience builders match on.

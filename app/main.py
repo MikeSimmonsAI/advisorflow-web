@@ -606,7 +606,30 @@ app.include_router(sms_router.router)
 # send. Registered next to sms_router because it answers for the same send path.
 app.include_router(compose_router)
 app.include_router(admin_router.router)
-app.include_router(cadence_router.router)
+# ── ENTITLEMENTS, ACTUALLY ENFORCED ────────────────────────────────────────
+#
+# `entitlements.FEATURES` registers twenty-two keys. Until now THREE of them
+# were enforced anywhere in the application — campaigns, crm, case_files — so
+# an organization configured with no features at all was refused on those
+# three routers and served everything else normally: its lead book, its user
+# administration, its reports, its imports, its cadence, its audit log, its
+# tier configuration. Proven live against a zero-feature customer.
+#
+# Gated at include time, one key per router, and only for routers whose whole
+# surface is that one customer module. Deliberately NOT gated:
+#   * sms / voice / email routers  - they carry unauthenticated PROVIDER
+#     WEBHOOKS (delivery receipts, inbound calls). A gate needing a signed-in
+#     user would turn every carrier callback into a 403.
+#   * crm_router                   - carries /crm/inbound/{org_id}, which is
+#     authenticated by a per-organization API key, not by a user session.
+#   * org_settings_router          - every customer surface reads its own
+#     vocabulary and tier configuration from it, including a customer with no
+#     modules enabled. Gating it would blank the app's own words.
+#   * admin_router                 - mixed: /admin/users is `users`,
+#     /admin/dashboard is `master_dashboard`, /admin/leads is `leads`. Gated
+#     per route inside that file instead.
+app.include_router(cadence_router.router,
+                   dependencies=[Depends(require_feature("cadences"))])
 app.include_router(email_router.router)
 app.include_router(calendar_router.router)
 app.include_router(notification_router.router)
@@ -623,7 +646,8 @@ app.include_router(site_intake_router.router)
 app.include_router(outcomes_router.router)
 app.include_router(microsoft_router.router)
 app.include_router(compliance_router.router)
-app.include_router(audit_log_router.router)
+app.include_router(audit_log_router.router,
+                   dependencies=[Depends(require_feature("audit_log"))])
 app.include_router(sample_data_router.router)
 app.include_router(health_router.router)
 app.include_router(workqueue_router.router)
@@ -650,7 +674,8 @@ app.include_router(auto_send_router.router)
 app.include_router(org_settings_router.router)
 app.include_router(availability_router.router)
 app.include_router(voice_router.router)
-app.include_router(reports_router.router)
+app.include_router(reports_router.router,
+                   dependencies=[Depends(require_feature("reports"))])
 app.include_router(crm_router.router)
 # Issuing, rotating and revoking the per-organization CRM inbound credentials,
 # plus the usage view that answers "who is still on the legacy path?". God-gated
@@ -661,7 +686,8 @@ app.include_router(crm_inbound_router.router)
 app.include_router(crm_native_router,
                    dependencies=[Depends(require_feature("crm"))])
 app.include_router(survey_router)
-app.include_router(tier_definitions_router)
+app.include_router(tier_definitions_router,
+                   dependencies=[Depends(require_feature("tier_config"))])
 # A2P 10DLC — GOD-ONLY BY DEFAULT.
 #
 # Every route here was `_require_admin`, so holding org_admin meant being able
@@ -768,7 +794,8 @@ app.include_router(voice_webhooks_router)
 # environments no longer serve the same application.
 app.include_router(demo_router)
 app.include_router(proposal_router.router)
-app.include_router(import_batch_router)
+app.include_router(import_batch_router,
+                   dependencies=[Depends(require_feature("imports"))])
 # RESTORED alongside it. Deliberately NOT behind require_feature: qualification
 # is how the platform decides who may be contacted, and a customer whose plan
 # does not include a feature flag must not thereby lose the guard that keeps

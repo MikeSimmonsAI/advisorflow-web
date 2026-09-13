@@ -189,7 +189,22 @@ def _seed_industry_tiers(db: Session, org: Organization):
             ))
     db.flush()
 
+from app.services.entitlements import require_feature
+
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+# ── THE `users` ENTITLEMENT, PER ROUTE ─────────────────────────────────────
+#
+# This router is three modules in one file: /admin/users is the `users`
+# feature, /admin/dashboard is `master_dashboard`, /admin/leads is `leads`.
+# Gating the router at include time would therefore be wrong in two
+# directions at once, so the gate goes on the routes it actually describes.
+#
+# It was enforced NOWHERE before: an organization with no features enabled
+# could list, create, deactivate, reset the password of and force-logout the
+# users of the workspace it was standing in.
+_USERS = [Depends(require_feature("users"))]
+
 
 
 @router.get("/dashboard")
@@ -842,7 +857,7 @@ class UserResponseWithOrg(BaseModel):
     profile_photo_url: str | None = None
 
 
-@router.get("/users")
+@router.get("/users", dependencies=_USERS)
 def list_users(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """Lists users. God/super admin sees ALL users across every org; org_admin sees their own org only."""
     if current_user.role in ("super_admin", "god_admin"):
@@ -872,12 +887,25 @@ def list_users(db: Session = Depends(get_db), current_user: User = Depends(requi
             }
             for u in users
         ]
-    users = (
-        db.query(User)
-        .filter(User.organization_id == current_user.organization_id)
-        .order_by(User.created_at.asc())
-        .all()
-    )
+    # THE PEOPLE OF THE WORKSPACE BEING WORKED IN — all of them, and only them.
+    #
+    # This read `User.organization_id == current_user.organization_id`, which
+    # is wrong twice over and both showed up live inside a second workspace:
+    #
+    #   * THE WRONG ORGANIZATION. It used the CALLER's home column rather than
+    #     the workspace they had selected, so a person working inside customer
+    #     B was shown customer A's team — and the advisor and owner pickers
+    #     built on this list offered people with no relationship to B at all.
+    #   * THE WRONG PEOPLE. Matching on the homed column alone misses everyone
+    #     seconded into this workspace by membership and includes anyone homed
+    #     here who works elsewhere. `customer_people` is the union that
+    #     `customer_users`, the readiness counts and the launch engine already
+    #     resolve through; this is the same answer, not a second one.
+    from app.services import customer_provisioning as _cp
+    from app.services.lead_scope import active_workspace_org_id
+    org_id = active_workspace_org_id(current_user, db) or current_user.organization_id
+    users = sorted(_cp.customer_people(db, org_id),
+                   key=lambda u: (u.created_at or datetime.min))
     return [
         UserResponse(
             id=u.id, email=u.email, full_name=u.full_name, role=u.role,
@@ -888,7 +916,7 @@ def list_users(db: Session = Depends(get_db), current_user: User = Depends(requi
     ]
 
 
-@router.post("/users", response_model=UserResponse)
+@router.post("/users", response_model=UserResponse, dependencies=_USERS)
 def create_user(
     req: CreateUserRequest,
     db: Session = Depends(get_db),
@@ -1009,7 +1037,7 @@ def _get_target_user_for_admin(user_id: str, current_user: User, db: Session) ->
     return target
 
 
-@router.patch("/users/{user_id}/deactivate")
+@router.patch("/users/{user_id}/deactivate", dependencies=_USERS)
 def deactivate_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
     Deactivates (not deletes) an advisor account — they can no longer log
@@ -1043,7 +1071,7 @@ def deactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
     return {"success": True}
 
 
-@router.patch("/users/{user_id}/reactivate")
+@router.patch("/users/{user_id}/reactivate", dependencies=_USERS)
 def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """Re-enables a previously deactivated account."""
     target = _get_target_user_for_admin(user_id, current_user, db)
@@ -1060,7 +1088,7 @@ def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
     return {"success": True}
 
 
-@router.post("/users/{user_id}/force-logout")
+@router.post("/users/{user_id}/force-logout", dependencies=_USERS)
 def force_logout_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
     Immediately invalidates the target user's active session by clearing
@@ -1093,7 +1121,7 @@ def force_logout_user(user_id: str, db: Session = Depends(get_db), current_user:
     return {"success": True}
 
 
-@router.patch("/users/{user_id}/clear-setup")
+@router.patch("/users/{user_id}/clear-setup", dependencies=_USERS)
 def clear_setup_flag(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
     Clears the must_change_password flag without touching the password.
@@ -1156,7 +1184,7 @@ class ResetPasswordRequest(BaseModel):
     must_change_password: bool | None = None
 
 
-@router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse)
+@router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse, dependencies=_USERS)
 def reset_user_password(
     user_id: str,
     req: ResetPasswordRequest = ResetPasswordRequest(),
@@ -1277,7 +1305,7 @@ class UpdateUserRequest(BaseModel):
     role: str | None = None  # 'advisor' or 'org_admin' only - see validation below
 
 
-@router.patch("/users/{user_id}", response_model=UserResponse)
+@router.patch("/users/{user_id}", response_model=UserResponse, dependencies=_USERS)
 def update_user(
     user_id: str,
     req: UpdateUserRequest,
@@ -1397,7 +1425,7 @@ def _recent_activity_for_advisor(db: Session, organization_id: str, advisor_id: 
     return feed[:limit]
 
 
-@router.get("/users/{user_id}/detail")
+@router.get("/users/{user_id}/detail", dependencies=_USERS)
 def get_user_detail(
     user_id: str,
     db: Session = Depends(get_db),

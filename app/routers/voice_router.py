@@ -318,7 +318,10 @@ async def voice_stream(
             db.commit()
 
         # Notify advisor
-        notification_email = getattr(advisor, 'notification_email', None) or getattr(advisor, 'email', None) or "admin@bookaboost.com"
+        # No brand literal: an advisor with no address on file gets no
+        # notification, rather than one addressed to another brand.
+        notification_email = (getattr(advisor, 'notification_email', None)
+                              or getattr(advisor, 'email', None))
         lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip()
         try:
             from app.services.ai_conversation_service import _send_email_via_graph

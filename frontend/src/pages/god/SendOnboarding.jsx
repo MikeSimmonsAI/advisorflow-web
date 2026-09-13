@@ -93,7 +93,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
   const needsName = !!(look && !look.exists) && !name.trim()
   const valid = matches && email.includes('@') && !refused && !needsName
 
-  const send = async () => {
+  const send = async (deliver = false) => {
     if (!valid || busy) return
     setBusy(true)
     setErr(null)
@@ -104,6 +104,11 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
         full_name: name.trim(),
         role,
         base_url: window.location.origin,
+        // WHAT THE BUTTON SAID IS WHAT THE PLATFORM DOES. Two buttons, two
+        // meanings: one emails the invitation and reports what the provider
+        // said, the other only mints the link. Before this the console
+        // reported a customer as "Invited" when nothing had been sent.
+        deliver,
       })
       setSent(res)
       if (onSent) onSent()
@@ -143,7 +148,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
     return (
       <div style={wrap} role="dialog" aria-modal="true">
         <div style={card}>
-          <h3 style={{ margin: '0 0 4px', fontSize: 17 }}>Onboarding ready to send</h3>
+          <h3 style={{ margin: '0 0 4px', fontSize: 17 }}>{sent.message_sent_by_platform ? 'Invitation sent' : 'Onboarding ready to send'}</h3>
           <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--gm-text, #475569)' }}>
             <b>{sent.recipient.name || sent.recipient.email}</b> now has access to{' '}
             <b>{orgName}</b>&rsquo;s onboarding as <b>{sent.recipient.role}</b>
@@ -176,6 +181,30 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
               yourself, from {sent.brand.name || 'your brand'}. It is shown once
               and cannot be retrieved afterwards — if it is lost, send onboarding
               again to issue a fresh one.
+            </div>
+          )}
+
+          {/* WHAT THE MAIL PROVIDER ACTUALLY SAID. Shown whenever a send was
+              attempted, including when it failed — a failure the operator
+              cannot see is worse than no send at all, because the customer is
+              then recorded as invited and is waiting for nothing. */}
+          {sent.delivery && sent.delivery.state !== 'generated' && (
+            <div style={{ border: '1px solid ' + (sent.delivery.state === 'sent'
+                            ? 'var(--gm-teal, #0d9488)' : 'var(--gm-red, #dc2626)'),
+                          background: sent.delivery.state === 'sent'
+                            ? 'var(--gm-pill-teal-bg, rgba(13,148,136,.08))'
+                            : 'rgba(220,38,38,.08)',
+                          borderRadius: 10, padding: '10px 12px', margin: '12px 0',
+                          fontSize: 12.5, lineHeight: 1.55 }}>
+              <b>{sent.delivery.label}</b>
+              {sent.delivery.to ? <> — to {sent.delivery.to}</> : null}
+              {sent.delivery.provider_message_id
+                ? <><br /><span style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                    {sent.delivery.provider_message_id}</span></>
+                : null}
+              {sent.delivery.error
+                ? <><br />{sent.delivery.error}</>
+                : null}
             </div>
           )}
 
@@ -341,14 +370,24 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
           ) : null}
           <span style={{ flex: 1 }} />
           <button style={btn} onClick={onClose} disabled={busy}>Cancel</button>
-          <button onClick={send} disabled={!valid || busy}
+          <button onClick={() => send(true)} disabled={!valid || busy}
+                  title="Emails the branded invitation and records what the mail provider said"
                   style={{ ...btn,
                            borderColor: valid ? 'var(--gm-teal)' : undefined,
                            background: valid ? 'var(--gm-pill-teal-bg)' : 'transparent',
                            color: valid ? 'var(--gm-teal)' : 'var(--gm-text, #94a3b8)',
                            cursor: valid && !busy ? 'pointer' : 'default',
                            opacity: busy ? 0.6 : 1 }}>
-            {busy ? 'Creating…' : 'Create onboarding link'}
+            {busy ? 'Working…' : 'Send invitation email'}
+          </button>
+          <button onClick={() => send(false)} disabled={!valid || busy}
+                  style={{ ...btn,
+                           borderColor: valid ? 'var(--gm-teal)' : undefined,
+                           background: valid ? 'var(--gm-pill-teal-bg)' : 'transparent',
+                           color: valid ? 'var(--gm-teal)' : 'var(--gm-text, #94a3b8)',
+                           cursor: valid && !busy ? 'pointer' : 'default',
+                           opacity: busy ? 0.6 : 1 }}>
+            {busy ? 'Creating…' : 'Generate link only'}
           </button>
         </div>
       </div>

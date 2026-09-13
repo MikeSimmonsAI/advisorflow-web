@@ -47,6 +47,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import Organization, User
 from app.models.support_models import (
+    TicketSource,
     Cause, Queue, Severity, SlaState, SupportTicket, SupportTicketAttachment,
     SupportTicketEvent, SupportTicketMessage, TicketCategory, TicketStatus,
 )
@@ -147,6 +148,9 @@ def create_ticket(db: Session, *, org: Organization, user: Optional[User],
                   diagnostic_run_id: Optional[str] = None,
                   signature: Optional[str] = None,
                   conversation_id: Optional[str] = None,
+                  source: str = TicketSource.IN_APP,
+                  reporter_email: Optional[str] = None,
+                  reporter_name: Optional[str] = None,
                   now: Optional[datetime] = None) -> SupportTicket:
     """Open a ticket with its entitlement, queue and clock already decided.
 
@@ -194,6 +198,13 @@ def create_ticket(db: Session, *, org: Organization, user: Optional[User],
         organization_id=org.id,
         platform_id=getattr(org, "platform_id", None),
         submitted_by=getattr(user, "id", None),
+        # HOW IT ARRIVED. A public-website request has no account behind it,
+        # and an operator must be told that before they answer it.
+        source=(source if source in TicketSource.ALL else TicketSource.IN_APP),
+        reporter_email=((reporter_email or getattr(user, "email", None) or "")
+                        .strip().lower() or None),
+        reporter_name=((reporter_name or getattr(user, "full_name", None) or "")
+                       .strip() or None),
         subject=(subject or "Support request").strip()[:300],
         category=category,
         severity=severity,
@@ -719,7 +730,15 @@ def notify_new_ticket(db: Session, ticket: SupportTicket, *,
 
     promise = ("We aim to respond within %s." % target if target
                else "We'll come back to you on this.")
-    customer_email = getattr(user, "notification_email", None) or getattr(user, "email", None)
+    # THE ADDRESS THE REQUEST CAME FROM, when no account did.
+    #
+    # This derived the customer's address purely from the submitting USER, so
+    # a ticket raised from a brand's public website — where there is no user —
+    # produced `None`, `_notify` returned early on `if not to_email`, and the
+    # person who had just asked for help was never acknowledged at all.
+    customer_email = (getattr(user, "notification_email", None)
+                      or getattr(user, "email", None)
+                      or getattr(ticket, "reporter_email", None))
     _notify(db, ticket, to_email=customer_email,
             subject="[%s] We've got your request" % ticket.ticket_number,
             body_html=_email_shell(

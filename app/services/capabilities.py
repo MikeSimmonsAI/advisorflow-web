@@ -897,7 +897,13 @@ def require_capability(key: str):
     def _dep(user: User = Depends(get_current_user),
              db: Session = Depends(get_db)) -> User:
         org = None
-        org_id = getattr(user, "organization_id", None)
+        # THE WORKSPACE BEING WORKED IN, not the legacy column. This read
+        # `users.organization_id` directly while `require_feature` next door
+        # already resolved through the workspace seam, so the same request
+        # could be judged against two different organizations depending on
+        # which gate ran. One seam, one answer.
+        from app.services.lead_scope import active_workspace_org_id
+        org_id = active_workspace_org_id(user, db)
         if org_id:
             org = db.query(Organization).filter(Organization.id == org_id).first()
         decision = resolve(db, user, org, key)
@@ -955,15 +961,24 @@ def require_feature_capability(key: str):
         org_id = active_workspace_org_id(user, db)
 
         # org_admin: allowed by role (no explicit grant needed for feature use).
-        # THE ROLE THAT COUNTS IS THE ROLE IN THIS WORKSPACE. A person seconded
-        # here as org_admin carries another platform role on their user row —
-        # that column is describing a different context, not this one.
-        if role == "org_admin":
+        #
+        # THE ROLE THAT COUNTS IS THE ROLE IN THIS WORKSPACE — and until now
+        # this code said so in a comment while doing the opposite. The
+        # platform-role test ran FIRST:
+        #
+        #     if role == "org_admin":          # users.role, any workspace
+        #         return user
+        #     if org_id:                       # unreachable for that person
+        #         ... workspace_role(...) == "org_admin"
+        #
+        # so an org_admin of customer A returned on line one and the workspace
+        # check below it could never be reached for exactly the person it was
+        # written for. `effective_role` resolves the selected workspace's
+        # membership role first and falls back to `users.role` only when there
+        # is no selection, which is the single-workspace customer.
+        from app.services.lead_scope import effective_role
+        if effective_role(user, db) == "org_admin":
             return user
-        if org_id:
-            from app.services import workspace_access
-            if workspace_access.workspace_role(user, db, org_id) == "org_admin":
-                return user
 
         # Everyone else: must have an explicit UserCapabilityGrant
         if org_id and user_has_grant(db, user.id, org_id, key):

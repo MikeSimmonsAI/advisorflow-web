@@ -419,6 +419,20 @@ export async function fetchAndStoreBranding() {
       tagline: data.tagline || null,
       support_email: data.support_email || null,
       email_sender_name: data.email_sender_name || null,
+      // WHAT THIS WORKSPACE IS ENTITLED TO, AND WHO THIS PERSON IS IN IT.
+      //
+      // This object was an eight-key whitelist and these three were not in
+      // it, so `Layout.jsx`'s `branding?.enabled_features ?? null` was always
+      // null — which it reads as "no restriction". The sidebar could not hide
+      // a module even when the server would refuse it, and `branding.industry`
+      // being absent is why the industry-aware checks never fired either.
+      //
+      // `??` not `||`: an empty array means "no modules enabled", and `||`
+      // would turn that into null, which is the exact opposite instruction.
+      enabled_features: data.enabled_features ?? null,
+      industry: data.industry ?? null,
+      workspace_role: data.workspace_role ?? null,
+      organization_id: data.organization_id ?? null,
     }
     localStorage.setItem(KEY_BRANDING, JSON.stringify(branding))
     applyBrandingCSS(branding)
@@ -437,6 +451,13 @@ export async function fetchAndStoreBranding() {
         tagline: null,
         support_email: null,
         email_sender_name: null,
+        // The fallback path dropped these too, so a deployment that fell back
+        // got the same fail-open sidebar. `/org-settings/` has always
+        // returned both.
+        enabled_features: data.enabled_features ?? null,
+        industry: data.industry ?? null,
+        workspace_role: null,
+        organization_id: data.id ?? null,
       }
       localStorage.setItem(KEY_BRANDING, JSON.stringify(branding))
       applyBrandingCSS(branding)

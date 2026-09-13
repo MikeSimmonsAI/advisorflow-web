@@ -37,10 +37,15 @@
  * avoid.
  */
 import { Ico } from './LaunchUI'
+import { resolveLaunchExit } from './launchExit'
 
 export default function LaunchHeader({ brand, customer, preview = false,
                                        section = null, saveState = null }) {
   const person = (customer && customer.user) || null
+  // THE WAY OUT. There was none: the browser's Back button was the only exit
+  // from onboarding, for customers and operators alike. Where it goes depends
+  // on where the person came from — see launchExit.js.
+  const exit = preview ? null : resolveLaunchExit()
   return (
     <header className="lp-top">
       <div className="lp-crumb">
@@ -71,6 +76,19 @@ export default function LaunchHeader({ brand, customer, preview = false,
           <Ico name="info" size={13} />
           {saveState}
         </span>
+      ) : null}
+
+      {/* NAMED, NOT JUST AN ARROW. The button says where it goes, because the
+          three people who reach this screen leave to three different places
+          and a generic "Back" would be wrong for two of them. A plain <a>
+          rather than a router push: Launch is reached from inside and outside
+          the customer shell, and a full navigation re-resolves the layout for
+          the destination instead of stranding the old one around it. */}
+      {exit ? (
+        <a href={exit.to} className="lp-exit">
+          <Ico name="caret" size={13} />
+          {exit.label}
+        </a>
       ) : null}
 
       <div className="lp-user">

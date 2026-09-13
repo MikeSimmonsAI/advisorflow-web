@@ -153,6 +153,38 @@ class TicketCategory:
     CONSUMES_ASSISTANCE_ALLOWANCE = (CUSTOMER_ASSISTANCE, PROFESSIONAL_SERVICES)
 
 
+class TicketSource:
+    """HOW THE REQUEST REACHED US, which is not the same as who sent it.
+
+    Every ticket used to be indistinguishable from every other: a signed-in
+    customer opening one in Help & Support and a stranger typing into a
+    marketing site's contact form produced identical rows. An operator
+    answering the second one has to know they are talking to somebody with no
+    account, possibly no organization relationship at all, and that nothing
+    about the sender has been authenticated.
+
+    PUBLIC_WEBSITE is that case, and it is the reason `submitted_by` can be
+    null on a real ticket rather than only on an imported one.
+    """
+
+    IN_APP = "in_app"                  # signed in, inside the workspace
+    PUBLIC_WEBSITE = "public_website"   # a brand's marketing site, unauthenticated
+    EMAIL = "email"                     # forwarded into support
+    OPERATOR = "operator"               # raised by the platform on a customer's behalf
+
+    ALL = (IN_APP, PUBLIC_WEBSITE, EMAIL, OPERATOR)
+
+    LABELS = {
+        IN_APP: "In-app",
+        PUBLIC_WEBSITE: "Public website",
+        EMAIL: "Email",
+        OPERATOR: "Raised by operator",
+    }
+
+    # Sources where nobody proved who they are. An operator must be told.
+    UNAUTHENTICATED = (PUBLIC_WEBSITE, EMAIL)
+
+
 class SlaState:
     WITHIN = "within"
     AT_RISK = "at_risk"
@@ -605,6 +637,17 @@ class SupportTicket(Base):
     platform_id = Column(String, ForeignKey("platforms.id", ondelete="SET NULL"),
                          nullable=True, index=True)
     submitted_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # ── HOW IT ARRIVED, AND WHO TO REPLY TO WHEN NOBODY SIGNED IN ──────────
+    #
+    # A ticket from a brand's public website has no `submitted_by` — there is
+    # no account behind it. Without these three columns such a request is
+    # indistinguishable from an in-app one and, worse, unanswerable: every
+    # notification path derived the customer's address from the submitting
+    # USER, so an anonymous ticket silently sent no acknowledgement to anyone.
+    source = Column(String, nullable=False, default=TicketSource.IN_APP, index=True)
+    reporter_email = Column(String, nullable=True)
+    reporter_name = Column(String, nullable=True)
 
     subject = Column(String, nullable=False)
     category = Column(String, nullable=False,

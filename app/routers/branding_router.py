@@ -128,7 +128,26 @@ def get_org_branding(
     Called by the frontend on login to apply per-org white-label customization.
     Falls back to None values if the org has no custom branding set.
     """
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    # THE WORKSPACE BEING WORKED IN, and WHAT IT IS ENTITLED TO.
+    #
+    # Two defects closed here at once.
+    #
+    # 1. This read `current_user.organization_id` — the legacy column — so a
+    #    person seconded into a second workspace was themed, and now gated, by
+    #    their HOME organization rather than the one they had selected.
+    #
+    # 2. `enabled_features` was never in this payload, and this is the ONLY
+    #    call the customer shell makes on load. `Layout.jsx` reads
+    #    `branding?.enabled_features ?? null` and treats null as "no
+    #    restriction", so the value being absent meant every nav item rendered
+    #    for every customer, forever. An organization with no features enabled
+    #    was shown Leads, Campaigns, CRM, Users, AI Hub, Cadence, Reports,
+    #    Imports, Audit Log and Tier Config — a sidebar of a product it had
+    #    not been given. The backend gates are the real enforcement; this is
+    #    what stops the app OFFERING what it will then refuse.
+    from app.services.lead_scope import active_workspace_org_id, effective_role
+    org_id = active_workspace_org_id(current_user, db) or current_user.organization_id
+    org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         return {
             "brand_name": None,
@@ -139,7 +158,25 @@ def get_org_branding(
             "tagline": None,
             "support_email": None,
             "email_sender_name": None,
+            "enabled_features": None,
+            "industry": None,
+            "workspace_role": None,
+            "organization_id": None,
         }
+    import json as _json
+    features = None
+    raw = getattr(org, "enabled_features", None)
+    if raw:
+        try:
+            loaded = _json.loads(raw)
+            features = [f for f in loaded if isinstance(f, str)] if isinstance(loaded, list) else []
+        except (ValueError, TypeError):
+            features = None
+    elif raw is not None:
+        # An explicit empty list means "no modules", which is not the same
+        # thing as "never configured". Preserved, because collapsing the two
+        # is how the sidebar came to show everything.
+        features = []
     return {
         "brand_name": org.brand_name,
         "brand_logo_url": org.brand_logo_url,
@@ -149,4 +186,12 @@ def get_org_branding(
         "tagline": getattr(org, "tagline", None),
         "support_email": getattr(org, "support_email", None),
         "email_sender_name": getattr(org, "email_sender_name", None),
+        "enabled_features": features,
+        "industry": getattr(org, "industry", None),
+        # THE ROLE IN THIS WORKSPACE. The browser had only `users.role`, which
+        # is one value for a whole human, so an org_admin of one customer was
+        # drawn an administrator's sidebar inside every customer they could
+        # reach. The server decides this; the client renders it.
+        "workspace_role": effective_role(current_user, db),
+        "organization_id": org.id,
     }

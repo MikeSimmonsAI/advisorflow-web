@@ -60,7 +60,11 @@ def _send_email(to_email: str, subject: str, html_body: str, org, advisor) -> bo
         import resend
 
         api_key = getattr(org, "resend_api_key", None) or os.environ.get("RESEND_API_KEY", "")
-        from_addr = getattr(org, "from_email", None) or os.environ.get("EMAIL_FROM_ADDRESS", "noreply@bookaboost.com")
+        # NO BRAND NAME IN A DEFAULT, EVER. This fell back to one brand's
+        # address for every other brand on the platform. An organization
+        # with no verified sender must fail visibly, not borrow one.
+        from_addr = (getattr(org, "from_email", None)
+                     or os.environ.get("EMAIL_FROM_ADDRESS", "").strip() or None)
         brand = getattr(org, "name", None) or getattr(advisor, "full_name", "Your Advisor")
 
         if not api_key:

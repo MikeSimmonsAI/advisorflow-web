@@ -734,6 +734,13 @@ class SendOnboardingBody(BaseModel):
     role: Optional[str] = None
     base_url: Optional[str] = None
     location_ids: List[str] = []
+    # WHETHER THE PLATFORM ACTUALLY MAILS IT.
+    #
+    # Defaults to False, which is exactly what this endpoint has always done:
+    # it creates access and hands back a link. What changed is that asking for
+    # a send is now possible AND the answer records what happened, so nothing
+    # can report "Invited" on the strength of a link nobody sent.
+    deliver: bool = False
 
 
 @god_router.post("/{organization_id}/send-onboarding")
@@ -761,7 +768,8 @@ def staff_send_onboarding(organization_id: str, body: SendOnboardingBody,
         email=body.email, confirm_email=body.confirm_email,
         full_name=body.full_name or "",
         role=(body.role or launch_invitation.DEFAULT_ROLE),
-        base_url=body.base_url, location_ids=body.location_ids)
+        base_url=body.base_url, location_ids=body.location_ids,
+        deliver=bool(body.deliver))
 
 
 @god_router.get("/{organization_id}")

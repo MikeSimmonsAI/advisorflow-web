@@ -107,11 +107,37 @@
   align-self: stretch;
 }
 
-/* ── AI controls bar ─────────────────────────────────────────────── */
+/* ── AI controls bar ───────────────────────────────────────────────
+ *
+ * WHY THIS WAS CRUSHED, AND WHAT ACTUALLY FIXED IT.
+ *
+ * The bar was one `display:flex` row with no `flex-wrap`, so it could never
+ * be anything but a single line. Inside it, the LEFT half declared
+ * `flex-shrink: 0` and held four unbreakable things — an uppercase label, four
+ * tone pills and a `white-space: nowrap` hint sentence — while the RIGHT half
+ * was `flex: 1` with no floor.
+ *
+ * Flexbox resolves that exactly one way: everything the left half needs, it
+ * takes, and the right half absorbs the entire shortfall. Below roughly
+ * 1100px the "Campaign direction" label and its input were squeezed toward
+ * zero width, which is why the label wrapped a character at a time and the
+ * control appeared vertically broken. It was never a text-overflow problem,
+ * so nothing about truncation would have fixed it.
+ *
+ * Three changes, and each is load-bearing:
+ *   1. the bar may WRAP, so the halves stack instead of fighting;
+ *   2. the right half has a `min-width` floor, so it stops being the only
+ *      thing that yields;
+ *   3. the hint may wrap, so the left half stops demanding a full sentence
+ *      on one line.
+ * Nothing is hidden at any width — hiding the copy would make the defect
+ * invisible rather than absent.
+ */
 .eq-controls-bar {
   display: flex;
   align-items: center;
-  gap: 0;
+  flex-wrap: wrap;
+  gap: 12px 0;
   padding: 14px 20px !important;
   margin-bottom: 16px;
 }
@@ -119,8 +145,10 @@
 .eq-controls-left {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
   padding-right: 20px;
   border-right: 1px solid var(--border-subtle);
 }
@@ -129,7 +157,10 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1;
+  /* THE FLOOR. Without a basis the input was the only element that could
+     shrink, so it took every pixel the left half wanted. */
+  flex: 1 1 320px;
+  min-width: 280px;
   padding-left: 20px;
 }
 
@@ -145,6 +176,7 @@
 
 .eq-controls-pills {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   flex-shrink: 0;
 }
@@ -152,12 +184,30 @@
 .eq-tone-hint {
   font-size: 11px;
   color: var(--text-tertiary);
-  white-space: nowrap;
+  /* Was `nowrap`, which is what made the left half incompressible. */
+  min-width: 0;
 }
 
 .eq-direction-input {
-  flex: 1 !important;
+  flex: 1 1 auto !important;
+  min-width: 0;
   margin: 0 !important;
+}
+
+/* Once the two halves have stacked, a vertical rule between them is pointing
+   the wrong way and the left padding is indenting a full-width row. */
+@media (max-width: 1100px) {
+  .eq-controls-left {
+    flex-basis: 100%;
+    padding-right: 0;
+    border-right: none;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .eq-controls-right {
+    flex-basis: 100%;
+    padding-left: 0;
+  }
 }
 
 /* Legacy KPI row — kept for fallback */

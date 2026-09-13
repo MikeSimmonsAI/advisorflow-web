@@ -549,8 +549,38 @@ def require_tenant_user(request: Request = None,
                "brand sales organization, not a customer organization.")
 
 
-def require_admin(user: User = Depends(get_current_user)) -> User:
-    if user.role not in ("org_admin", "super_admin", "god_admin"):
+def require_admin(request: Request,
+                  user: User = Depends(get_current_user),
+                  db: Session = Depends(get_db)) -> User:
+    """Customer-workspace admin authority, FOR THE WORKSPACE BEING WORKED IN.
+
+    THE DEFECT THIS CLOSES, found live. This read `users.role` and nothing
+    else:
+
+        if user.role not in ("org_admin", "super_admin", "god_admin"):
+
+    `users.role` is ONE VALUE FOR A WHOLE HUMAN. It cannot be true of two
+    workspaces at once, and this gate could not see which workspace the
+    request was for — it took no `request` and no `db`, so the selected
+    workspace was not even reachable from here.
+
+    So a person who is org_admin of customer A and an ORDINARY USER of
+    customer B passed every admin gate inside B: Users, Reports, Imports,
+    Cadence, Audit Log, Tier Definitions, Organization Settings. They were
+    shown, and could operate, an administrator's view of a company they hold
+    no administrative role in. That is a tenant authorization defect, not a
+    cosmetic one, and it was reproduced against a real second workspace.
+
+    `lead_scope.is_manager_here` is the answer and it already existed — its
+    own docstring calls itself "the drop-in replacement for the inline
+    `current_user.role in (...)`". It resolves the SELECTED workspace, then
+    that person's membership role IN it, and only falls back to `users.role`
+    when there is no selected workspace (the single-workspace customer, who
+    behaves exactly as before). god_admin is root authority and passes here
+    as it always did.
+    """
+    from app.services.lead_scope import is_manager_here
+    if not is_manager_here(user, db, request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
 

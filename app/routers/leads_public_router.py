@@ -195,7 +195,12 @@ def _notify_demo_request(payload: "DemoRequestPayload", platform) -> None:
         try:
             import resend
             api_key = os.environ.get("RESEND_API_KEY", "")
-            from_addr = os.environ.get("EMAIL_FROM_ADDRESS", "noreply@bookaboost.com")
+            # NO BRAND NAME IN A DEFAULT. This is the demo-request team
+            # notification, which every brand's marketing site reaches;
+            # the literal made all of them send as one of them.
+            from_addr = os.environ.get("EMAIL_FROM_ADDRESS", "").strip()
+            if not from_addr:
+                raise RuntimeError("no verified sender configured")
             if api_key:
                 resend.api_key = api_key
                 html_body = f"""

@@ -889,6 +889,19 @@ select.lp-in{appearance:none;cursor:pointer;
 .lp-savestate{display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;
   font-size:11.5px;color:var(--lp-cink3);white-space:nowrap}
 .lp-savestate svg{color:var(--lp-cink4);flex:0 0 auto}
+/* THE WAY OUT OF ONBOARDING. Quiet by default — it is an exit, not a call to
+   action — and it wraps to its own line rather than crushing the header on a
+   narrow window, which is the mistake the Email Queue control bar made. */
+.lp-exit{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;
+  margin-left:14px;padding:7px 13px;border-radius:8px;
+  border:1px solid var(--lp-cline);background:var(--lp-card2);
+  color:var(--lp-cink3);font-size:12px;font-weight:600;
+  text-decoration:none;white-space:nowrap}
+.lp-exit:hover{color:var(--lp-cink);border-color:var(--lp-cline-strong)}
+.lp-exit svg{transform:rotate(180deg);flex:0 0 auto}
+@media (max-width:820px){
+  .lp-exit{margin-left:0}
+}
 .lp-iconbtn{border:1px solid var(--lp-cline);background:var(--lp-card2);
   color:var(--lp-cink3)}
 .lp-iconbtn:hover{color:var(--lp-cink);border-color:var(--lp-cline-strong)}

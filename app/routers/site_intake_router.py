@@ -309,6 +309,99 @@ def site_sms_optin(platform_slug: str, payload: SitePayload,
             "lead_id": result["lead_id"]}
 
 
+@router.post("/{platform_slug}/support", status_code=201)
+@limiter.shared_limit(public_intake.PUBLIC_INTAKE_LIMIT,
+                      scope=public_intake.PUBLIC_INTAKE_SCOPE)
+def site_support(platform_slug: str, payload: SitePayload,
+                 request: Request, db: Session = Depends(get_db)):
+    """A support request from a brand's public website.
+
+    A SUPPORT REQUEST IS NOT A LEAD, and this is the only route in this file
+    that does not create one. Somebody asking for help has not asked to be
+    sold to; filing them in the sales workspace would put a person with a
+    problem into a seller's queue, and the two other public forms here exist
+    precisely because that distinction matters.
+
+    IT REUSES THE SUPPORT SYSTEM THAT ALREADY EXISTS. `support_tickets.
+    create_ticket` is the one function in this codebase that constructs a
+    `SupportTicket`, and it stays that way: this route resolves the brand,
+    resolves the destination organization the same way every other public
+    intake does, and hands over. Everything downstream — the ticket number,
+    the entitlement snapshot, the SLA clock, the queue, the incident
+    correlation, the acknowledgement email and the brand's own support inbox —
+    is the existing engine, unchanged. No second ticketing system, no second
+    notification path, no second brand identity.
+
+    THE IDENTITY IS THE BRAND'S, RESOLVED, NEVER TYPED HERE. The acknowledgement
+    and the internal copy are sent by `support_branding.sending_identity_for_
+    ticket`, which reads the platform's own `support_email`. EvoSys Pro
+    therefore answers as support@evosyspro.live and BookaBoost as its own
+    address, from the same code, with neither named in it.
+    """
+    from app.models.support_models import TicketCategory, TicketSource
+    from app.services import support_tickets
+
+    platform, org = _destination(db, platform_slug, request)
+
+    email = (payload.email or "").strip()
+    if not email or "@" not in email:
+        raise HTTPException(
+            status_code=422,
+            detail="A valid email address is required so we can reply.")
+    message = (payload.message or payload.goals or "").strip()
+    if not message:
+        raise HTTPException(status_code=422,
+                            detail="Tell us what you need help with.")
+
+    first, last = _names(payload)
+    reporter = " ".join(p for p in (first, last) if p).strip()
+
+    # WHAT THE PERSON TYPED, PLUS WHERE THEY TYPED IT. The extras are the
+    # form's own fields (V8 sends `topic` and `company`); they are appended to
+    # the body rather than dropped, because an operator answering this has no
+    # other record of the conversation.
+    extra, utm = _extras(payload)
+    lines = [message, ""]
+    if payload.company:
+        lines.append("Company: %s" % payload.company)
+    for key in sorted(extra):
+        value = extra.get(key)
+        if value:
+            lines.append("%s: %s" % (key.replace("_", " ").title(), value))
+    for key in sorted(utm):
+        lines.append("%s: %s" % (key, utm[key]))
+    lines.append("Reported by: %s <%s>" % (reporter or "(no name given)", email))
+    if payload.phone:
+        lines.append("Phone: %s" % payload.phone)
+    page = payload.source_url or payload.page_url
+    if page:
+        lines.append("Page: %s" % page)
+    lines.append("Received from the %s public website. The sender is NOT "
+                 "signed in and nothing about them has been verified."
+                 % (getattr(platform, "name", None) or "brand"))
+
+    subject = (extra.get("topic") or "Website support request")
+    ticket = support_tickets.create_ticket(
+        db, org=org, user=None,
+        subject=str(subject)[:300],
+        body="\n".join(lines),
+        # Deliberately the assistance category rather than product support: a
+        # stranger on a marketing site is far more often asking how something
+        # works than reporting that our software is broken, and miscategorising
+        # it the other way would draw down nobody's included minutes while
+        # telling the engineer the product had failed.
+        category=TicketCategory.CUSTOMER_ASSISTANCE,
+        source=TicketSource.PUBLIC_WEBSITE,
+        reporter_email=email,
+        reporter_name=reporter or None)
+    db.commit()
+
+    # The public caller gets the reference and nothing else. No queue, no
+    # severity, no SLA target, no organization name — none of that is an
+    # anonymous poster's to know.
+    return {"success": True, "reference": ticket.ticket_number}
+
+
 @router.post("/{platform_slug}/waitlist", status_code=201)
 @limiter.shared_limit(public_intake.PUBLIC_INTAKE_LIMIT,
                       scope=public_intake.PUBLIC_INTAKE_SCOPE)

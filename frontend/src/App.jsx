@@ -247,7 +247,7 @@ import AIWorkforceEmployee from './pages/AIWorkforceEmployee'
 import GodAIWorkforceBuilder from './pages/god/GodAIWorkforceBuilder'
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
-         clearWorkspaceContext } from './api/client'
+         clearWorkspaceContext, getBranding } from './api/client'
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
 import { exitCustomer } from './pages/god/enterCustomer'
@@ -262,11 +262,34 @@ function mustChangePassword() {
   return !!user?.must_change_password
 }
 
-function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = false, requireGodAdmin = false }) {
+function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = false,
+                         requireGodAdmin = false, feature = null }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
   const user = getCurrentUser()
-  const role = user?.role
+
+  // ── THE ROLE IN THIS WORKSPACE, AND WHAT THIS WORKSPACE HAS ─────────────
+  //
+  // `role` was `user.role` from localStorage — one value for a whole human.
+  // A person who administers customer A and is an ordinary user of customer B
+  // passed every `requireAdmin` route inside B by typing the URL, and the
+  // server agreed with them, because `require_admin` read the same column.
+  // Both ends now resolve the ACTIVE workspace's membership role.
+  //
+  // `feature` is new. Nothing in this file could express "this route belongs
+  // to a module this customer may not have", so a zero-feature organization
+  // reached /leads, /campaigns, /crm, /users, /reports, /imports and the rest
+  // by typing them. The server refuses those now with 402; this stops the
+  // browser walking into the refusal and showing a broken screen.
+  //
+  // NEITHER IS ACCESS CONTROL. Every route behind this is enforced on the
+  // server. This decides what the app OFFERS, and offering a door that opens
+  // onto a 402 is the defect being closed.
+  const branding = getBranding()
+  const role = branding?.workspace_role || user?.role
+  const enabled = branding?.enabled_features ?? null
+  const featureOff = Boolean(feature) && enabled !== null
+    && !enabled.includes(feature) && role !== 'god_admin'
 
   // A REFUSAL IS SHOWN, NOT SWALLOWED.
   //
@@ -281,12 +304,14 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   // put so a refresh shows the same honest answer instead of silently
   // rewriting where they asked to go.
   const denied = (
+    featureOff ||
     (requireGodAdmin && role !== 'god_admin') ||
     (requireSuperAdmin && role !== 'super_admin' && role !== 'god_admin') ||
     (requireAdmin && role !== 'org_admin' && role !== 'super_admin' && role !== 'god_admin')
   )
   if (denied) {
-    const required = requireGodAdmin ? 'god_admin'
+    const required = featureOff ? ('feature:' + feature)
+      : requireGodAdmin ? 'god_admin'
       : requireSuperAdmin ? 'super_admin'
       : 'org_admin'
     return (
@@ -841,7 +866,7 @@ export default function App() {
         <Route path="/commercial/agreements/:agreementId"
           element={<ProtectedRoute><CommercialConsole /></ProtectedRoute>} />
         <Route path="/cadence-templates" element={<ProtectedRoute requireAdmin><CadenceTemplates /></ProtectedRoute>} />
-        <Route path="/org-settings" element={<ProtectedRoute requireAdmin><OrgSettings /></ProtectedRoute>} />
+        <Route path="/org-settings" element={<ProtectedRoute feature="branding_settings" requireAdmin><OrgSettings /></ProtectedRoute>} />
         <Route path="/change-password"
           element={isAuthenticated() ? <ChangePassword forced={mustChangePassword()} /> : <Navigate to="/login" replace />} />
         {/* THE DEMO SUITE — the presenter's surface.
@@ -919,20 +944,20 @@ export default function App() {
         <Route path="/sales/demos" element={<SalesRoute><DemoQueue /></SalesRoute>} />
         <Route path="/sales/demo-build/:oppId" element={<SalesRoute><DemoBuild /></SalesRoute>} />
         <Route path="/sales/salespeople" element={<SalesRoute><Salespeople /></SalesRoute>} />
-        <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
+        <Route path="/leads" element={<ProtectedRoute feature="leads"><Leads /></ProtectedRoute>} />
         <Route path="/leads/:leadId" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
-        <Route path="/import-batches" element={<ProtectedRoute requireAdmin><ImportBatches /></ProtectedRoute>} />
+        <Route path="/import-batches" element={<ProtectedRoute feature="imports" requireAdmin><ImportBatches /></ProtectedRoute>} />
         <Route path="/import-batches/:batchId" element={<ProtectedRoute requireAdmin><ImportBatchReview /></ProtectedRoute>} />
         <Route path="/replies" element={<ProtectedRoute><Replies /></ProtectedRoute>} />
-        <Route path="/cadence" element={<ProtectedRoute><Cadence /></ProtectedRoute>} />
-        <Route path="/email-queue" element={<ProtectedRoute><EmailQueue /></ProtectedRoute>} />
+        <Route path="/cadence" element={<ProtectedRoute feature="cadences"><Cadence /></ProtectedRoute>} />
+        <Route path="/email-queue" element={<ProtectedRoute feature="email"><EmailQueue /></ProtectedRoute>} />
         <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
         <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
-        <Route path="/reports" element={<ProtectedRoute requireAdmin><Reports /></ProtectedRoute>} />
-        <Route path="/campaigns" element={<ProtectedRoute requireAdmin><CampaignBuilder /></ProtectedRoute>} />
-        <Route path="/admin" element={<ProtectedRoute requireAdmin><Admin /></ProtectedRoute>} />
-        <Route path="/users" element={<ProtectedRoute requireAdmin><Users /></ProtectedRoute>} />
+        <Route path="/reports" element={<ProtectedRoute feature="reports" requireAdmin><Reports /></ProtectedRoute>} />
+        <Route path="/campaigns" element={<ProtectedRoute feature="campaigns" requireAdmin><CampaignBuilder /></ProtectedRoute>} />
+        <Route path="/admin" element={<ProtectedRoute feature="master_dashboard" requireAdmin><Admin /></ProtectedRoute>} />
+        <Route path="/users" element={<ProtectedRoute feature="users" requireAdmin><Users /></ProtectedRoute>} />
         <Route path="/users/:userId" element={<ProtectedRoute requireAdmin><UserDetail /></ProtectedRoute>} />
         {/* NOT requireAdmin. compliance_router.py says so in its own comments:
             GET /suppression-list is require_tenant_user ("ALL users can
@@ -941,15 +966,15 @@ export default function App() {
             already hides both behind isAdmin — it even renders an
             explanation for non-admins that this route guard made dead
             code. An advisor must be able to see who not to contact. */}
-        <Route path="/compliance" element={<ProtectedRoute><Compliance /></ProtectedRoute>} />
-        <Route path="/audit-log" element={<ProtectedRoute requireAdmin><AuditLog /></ProtectedRoute>} />
+        <Route path="/compliance" element={<ProtectedRoute feature="compliance"><Compliance /></ProtectedRoute>} />
+        <Route path="/audit-log" element={<ProtectedRoute feature="audit_log" requireAdmin><AuditLog /></ProtectedRoute>} />
         <Route path="/system-health" element={<ProtectedRoute><SystemHealth /></ProtectedRoute>} />
         {/* Help & Support. Deliberately NOT behind requireAdmin or a feature
             gate: the person who notices the product is broken is whoever was
             using it, and a customer whose plan is missing a flag must still
             be able to tell us. */}
         <Route path="/help" element={<ProtectedRoute><HelpSupport /></ProtectedRoute>} />
-        <Route path="/lead-cleanup" element={<ProtectedRoute requireAdmin><LeadCleanup /></ProtectedRoute>} />
+        <Route path="/lead-cleanup" element={<ProtectedRoute feature="lead_cleanup" requireAdmin><LeadCleanup /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/templates" element={<ProtectedRoute requireAdmin><Templates /></ProtectedRoute>} />
         {/* requireAdmin mirrors the server exactly: every admin endpoint in
@@ -991,10 +1016,10 @@ export default function App() {
             FSA sets their OWN hours. Availability.jsx already gates its
             team-wide section behind its own isAdmin check, which the route
             guard made unreachable. */}
-        <Route path="/availability" element={<ProtectedRoute><Availability /></ProtectedRoute>} />
-        <Route path="/crm" element={<ProtectedRoute requireAdmin><CRM /></ProtectedRoute>} />
-        <Route path="/crm-connectors" element={<ProtectedRoute requireAdmin><CRMIntegration /></ProtectedRoute>} />
-        <Route path="/tier-definitions" element={<ProtectedRoute requireAdmin><TierDefinitions /></ProtectedRoute>} />
+        <Route path="/availability" element={<ProtectedRoute feature="availability"><Availability /></ProtectedRoute>} />
+        <Route path="/crm" element={<ProtectedRoute feature="crm" requireAdmin><CRM /></ProtectedRoute>} />
+        <Route path="/crm-connectors" element={<ProtectedRoute feature="crm_connectors" requireAdmin><CRMIntegration /></ProtectedRoute>} />
+        <Route path="/tier-definitions" element={<ProtectedRoute feature="tier_config" requireAdmin><TierDefinitions /></ProtectedRoute>} />
         <Route path="/10dlc" element={<ProtectedRoute requireAdmin><DLCRegistration /></ProtectedRoute>} />
         <Route path="/fiber-capture" element={<ProtectedRoute><FiberLeadCapture /></ProtectedRoute>} />
         <Route path="/re-engagement" element={<ProtectedRoute><ReEngagement /></ProtectedRoute>} />

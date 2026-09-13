@@ -56,6 +56,8 @@ from app.models.staff_models import (
     PURPOSE_SETUP, StaffActivation, STAFF_INVITE_ACCEPTED,
     STAFF_INVITE_PENDING,
 )
+import logging
+
 from app.routers.audit_log_router import log_action
 from app.services import customer_provisioning as cp
 from app.services import staff_activation as activation
@@ -63,6 +65,8 @@ from app.services import workspace_access as _ws
 
 # The customer-side roles, and only those. A control-plane role is not
 # expressible through this path — see the module docstring.
+log = logging.getLogger(__name__)
+
 ROLES = ("org_admin", "advisor", "viewer")
 DEFAULT_ROLE = "org_admin"
 
@@ -116,8 +120,137 @@ def _brand(db: Session, org: Organization) -> Dict[str, Any]:
     if plat is None:
         return {"id": None, "name": None, "support_email": None, "known": False}
     return {"id": plat.id, "name": plat.name,
-            "support_email": plat.support_email, "known": True}
+            "support_email": plat.support_email,
+            "accent_color": (getattr(plat, "invite_accent_color", None)
+                             or getattr(plat, "accent_color", None)),
+            "known": True}
 
+
+
+# ── ACTUALLY SENDING IT ─────────────────────────────────────────────────────
+
+# WHAT "SENT" IS ALLOWED TO MEAN.
+#
+# The God console reported a customer as "Invited" and Manage Access recorded
+# `sales_access_link_issued`, and BOTH were true — but nothing had ever
+# attempted an email, there was no delivery receipt, no send event and no
+# bounce, because this module only ever generated a link. A reader of those
+# two records could not tell the difference between "we emailed them" and "we
+# made a link somebody still has to paste into a message", and those are very
+# different states to be in with a customer who has gone quiet.
+#
+# So delivery is now a state with names, and every one of them is honest about
+# how far the platform actually got.
+DELIVERY_GENERATED = "generated"      # a link exists; nothing was sent
+DELIVERY_QUEUED = "queued"            # handed to the provider, no answer yet
+DELIVERY_SENT = "sent"                # the provider accepted it
+DELIVERY_FAILED = "failed"            # the provider refused it, with a reason
+DELIVERY_NOT_ATTEMPTED = "not_attempted"
+
+DELIVERY_LABELS = {
+    DELIVERY_GENERATED: "Link generated — not sent",
+    DELIVERY_QUEUED: "Queued with the mail provider",
+    DELIVERY_SENT: "Sent",
+    DELIVERY_FAILED: "Send failed",
+    DELIVERY_NOT_ATTEMPTED: "Not attempted",
+}
+
+
+def _invitation_email(brand: Dict[str, Any], org: Organization,
+                      recipient_name: str, url: str, one_time: bool) -> str:
+    """The branded invitation body. One brand's face, resolved, never typed."""
+    name = brand.get("name") or "your account team"
+    accent = brand.get("accent_color") or "#1d4ed8"
+    greeting = ("Hi %s," % recipient_name) if recipient_name else "Hi,"
+    action = ("set your password and start your onboarding"
+              if one_time else "sign in and start your onboarding")
+    note = ("This link can be used once and then expires."
+            if one_time else
+            "Use the password you already sign in with.")
+    support = brand.get("support_email")
+    tail = ("Questions? Reply to this email — it reaches %s." % support
+            if support else "")
+    return (
+        '<div style="font-family:Arial,Helvetica,sans-serif;color:#1c2430">'
+        '<p style="margin:0 0 4px;font-size:12px;color:#6b7a8c">%s</p>'
+        '<div style="height:3px;width:44px;background:%s;margin:0 0 14px"></div>'
+        '<h2 style="margin:0 0 12px;font-size:18px">Your %s workspace is ready</h2>'
+        '<p style="margin:0 0 12px">%s</p>'
+        '<p style="margin:0 0 16px">Use the button below to %s for '
+        '<strong>%s</strong>.</p>'
+        '<p style="margin:0 0 18px">'
+        '<a href="%s" style="display:inline-block;background:%s;color:#fff;'
+        'padding:11px 22px;border-radius:6px;text-decoration:none;'
+        'font-weight:700">Start onboarding</a></p>'
+        '<p style="margin:0 0 8px;font-size:12px;color:#6b7a8c">%s</p>'
+        '<p style="margin:0;font-size:12px;color:#6b7a8c">%s</p>'
+        '</div>'
+    ) % (name, accent, name, greeting, action,
+         getattr(org, "name", "your organization"), url, accent, note, tail)
+
+
+def _deliver(db: Session, org: Organization, brand: Dict[str, Any], *,
+             to_email: str, recipient_name: str, url: str,
+             one_time: bool) -> Dict[str, Any]:
+    """Hand the invitation to the mail provider and report what happened.
+
+    Uses the platform's existing email infrastructure — `email_service.
+    send_email_via_provider` with a resolved brand identity — so there is no
+    second mail system and no address typed into this file. A brand with no
+    verified sender FAILS here with that reason rather than borrowing
+    somebody else's address.
+    """
+    from app.services.email_service import send_email_via_provider
+
+    identity = _sending_identity(db, org, brand)
+    if not getattr(identity, "from_email", None):
+        return {"state": DELIVERY_FAILED, "to": to_email,
+                "provider_message_id": None,
+                "error": ("No verified sending address is configured for %s. "
+                          "Set the brand's support email before sending."
+                          % (brand.get("name") or "this brand")),
+                "attempted_at": datetime.utcnow()}
+    try:
+        result = send_email_via_provider(
+            to_email,
+            "Your %s onboarding" % (brand.get("name") or "workspace"),
+            _invitation_email(brand, org, recipient_name, url, one_time),
+            org=identity)
+    except Exception as exc:                                    # noqa: BLE001
+        log.exception("launch invitation: provider raised")
+        return {"state": DELIVERY_FAILED, "to": to_email,
+                "provider_message_id": None, "error": str(exc)[:300],
+                "attempted_at": datetime.utcnow()}
+    if result.get("success"):
+        return {"state": DELIVERY_SENT, "to": to_email,
+                "provider_message_id": result.get("provider_message_id"),
+                "error": None, "attempted_at": datetime.utcnow()}
+    return {"state": DELIVERY_FAILED, "to": to_email,
+            "provider_message_id": None,
+            "error": (result.get("error") or "The mail provider refused it.")[:300],
+            "attempted_at": datetime.utcnow()}
+
+
+class _BrandSender:
+    """Duck-type for `send_email_via_provider`, same shape support uses."""
+
+    __slots__ = ("from_email", "reply_to_email", "cc_email",
+                 "resend_api_key", "resolved")
+
+    def __init__(self, address, api_key=None):
+        self.from_email = address
+        self.reply_to_email = address
+        self.cc_email = None
+        self.resend_api_key = api_key
+        # RESOLVED MEANS "I ASKED THE BRAND". An unresolved brand must not be
+        # rescued by the deployment-wide default, which belongs to nobody.
+        self.resolved = True
+
+
+def _sending_identity(db: Session, org: Organization, brand: Dict[str, Any]):
+    address = (brand.get("support_email")
+               or getattr(org, "from_email", None))
+    return _BrandSender(address, getattr(org, "resend_api_key", None))
 
 # ── what would happen, before anything happens ──────────────────────────────
 
@@ -169,7 +302,8 @@ def find_identity(db: Session, org: Organization, email: str) -> Dict[str, Any]:
 def send(db: Session, org: Organization, impl: Implementation, actor: User, *,
          email: str, full_name: str = "", role: str = DEFAULT_ROLE,
          confirm_email: str = "", base_url: Optional[str] = None,
-         location_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+         location_ids: Optional[List[str]] = None,
+         deliver: bool = False) -> Dict[str, Any]:
     """Give a named person access to THIS customer's onboarding.
 
     Idempotent in the way that matters: an email that already has an identity
@@ -241,9 +375,21 @@ def send(db: Session, org: Organization, impl: Implementation, actor: User, *,
         base = (base_url or "").rstrip("/")
         url = ("%s/launch" % base) if base else "/launch"
 
+    # THE SEND ITSELF, when the operator asked for one. Attempted BEFORE the
+    # audit row is written so the record states what actually happened rather
+    # than what was intended.
+    delivery = {"state": DELIVERY_GENERATED if not deliver else DELIVERY_NOT_ATTEMPTED,
+                "to": None, "provider_message_id": None, "error": None,
+                "attempted_at": None}
+    if deliver:
+        delivery = _deliver(db, org, brand, to_email=target.email,
+                            recipient_name=(target.full_name or "").strip(),
+                            url=url, one_time=needs_setup)
+
     log_action(
         db, org.id, actor.id,
-        action="customer_onboarding_invitation_issued",
+        action=("customer_onboarding_invitation_sent" if deliver
+                else "customer_onboarding_invitation_issued"),
         target_type="implementation", target_id=impl.id,
         platform_id=org.platform_id,
         before={"status": before["state"]},
@@ -254,7 +400,14 @@ def send(db: Session, org: Organization, impl: Implementation, actor: User, *,
             "role": role,
             "brand": brand["name"],
             # Stated in the record because the next reader will want to know.
-            "message_sent_by_platform": False,
+            # It is now the TRUTH OF THIS ATTEMPT rather than a constant: the
+            # console reported "Invited" for months on the strength of a link
+            # nobody had sent.
+            "message_sent_by_platform": bool(
+                deliver and delivery["state"] == DELIVERY_SENT),
+            "delivery_state": delivery["state"],
+            "delivery_error": delivery.get("error"),
+            "provider_message_id": delivery.get("provider_message_id"),
             "send_count": (row.send_count if row is not None else 0),
             "access_path": ("setup_link" if needs_setup else "existing_login"),
             "credentials_touched": bool(needs_setup),
@@ -285,7 +438,16 @@ def send(db: Session, org: Organization, impl: Implementation, actor: User, *,
         "access_path": ("setup_link" if needs_setup else "existing_login"),
         "expires_at": (row.expires_at if row is not None else None),
         "send_count": (row.send_count if row is not None else 0),
-        "message_sent_by_platform": False,
+        "message_sent_by_platform": bool(
+            deliver and delivery["state"] == DELIVERY_SENT),
+        "delivery": {
+            "state": delivery["state"],
+            "label": DELIVERY_LABELS.get(delivery["state"], delivery["state"]),
+            "to": delivery.get("to"),
+            "provider_message_id": delivery.get("provider_message_id"),
+            "error": delivery.get("error"),
+            "attempted_at": delivery.get("attempted_at"),
+        },
         "note": ("A one-time link to set their password, then their own "
                  "onboarding."
                  if needs_setup else
