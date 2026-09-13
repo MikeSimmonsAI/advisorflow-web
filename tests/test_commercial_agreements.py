@@ -17,7 +17,7 @@ DATA, against a synthetic database.
 """
 
 import itertools
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -633,8 +633,15 @@ class TestOverrides:
                .filter(ImplementationMilestone.implementation_id == impl.id,
                        ImplementationMilestone.key == "business_profile").first())
         assert row.status == MILESTONE_DONE
-        # the milestone stamp is the DECISION, not the backdated work
-        assert row.completed_at.date() == date.today()
+        # the milestone stamp is the DECISION, not the backdated work.
+        #
+        # COMPARED IN UTC, BECAUSE THAT IS WHAT WAS WRITTEN. `completed_at` is
+        # `datetime.utcnow()` like every other stamp in this schema, and this
+        # line read `date.today()`, which is LOCAL. On a machine west of UTC
+        # the two disagree for the last hours of every evening, so this
+        # assertion failed nightly on a clock rather than on a defect. Nothing
+        # about the behaviour under test is timezone-dependent.
+        assert row.completed_at.date() == datetime.utcnow().date()
         o = ov.list_for(db_session, impl.id)[0]
         assert o.previously_completed_on == date(2026, 8, 12)
 

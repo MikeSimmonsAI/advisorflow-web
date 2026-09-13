@@ -69,17 +69,21 @@ class DemoRequestPayload(BaseModel):
 
 # A CEILING ON UNAUTHENTICATED WRITES INTO A CUSTOMER'S WORKSPACE.
 #
-# Both public intake routes create rows in a real organization with no
+# Every public intake route creates rows in a real organization with no
 # credential at all. Without a ceiling, a script can fill a customer's lead
 # table faster than anyone notices, and the platform's own rule is that
 # production is never contaminated with fabricated prospects. Generous enough
 # that a marketing site having a good day is never throttled, and low enough
 # that a bulk submitter runs out.
-# ONE BUDGET ACROSS BOTH INTAKE ROUTES. `limiter.limit` counts per endpoint, so
-# separate decorators would let a bulk submitter take the full allowance twice
-# by alternating between them. A named scope makes the ceiling mean what it says.
-PUBLIC_INTAKE_LIMIT = "20/minute;100/hour"
-PUBLIC_INTAKE_SCOPE = "public-intake"
+#
+# ONE BUDGET ACROSS EVERY INTAKE ROUTE, DEFINED ONCE IN public_intake.py.
+# `limiter.limit` counts per endpoint, so separate literals would let a bulk
+# submitter take the full allowance once per route by alternating between them.
+# Re-exported under the original names because the tests and the site-intake
+# router both read them from here.
+from app.services.public_intake import (  # noqa: E402
+    PUBLIC_INTAKE_LIMIT, PUBLIC_INTAKE_SCOPE,
+)
 
 
 @router.post("/demo-request", status_code=201)
@@ -122,82 +126,53 @@ def demo_request(payload: DemoRequestPayload,
             status_code=503,
             detail="We can't accept demo requests right now. Please email us.")
 
-    notes = payload.notes or ""
-    detail_lines = [
-        "Company: %s" % (payload.company or "n/a"),
-        "Industry: %s" % (payload.industry or "n/a"),
-        "Message: %s" % (payload.message or "n/a"),
-    ]
-    composed_notes = "[Demo Request]\n" + "\n".join(detail_lines)
-    if notes:
-        composed_notes = composed_notes + "\n" + notes
+    # ONE CAPTURE IMPLEMENTATION, SHARED WITH EVERY OTHER PUBLIC FORM. This
+    # handler used to own its own "find the person or make one", and the
+    # opt-in route below owned a different one - same workspace, two matching
+    # rules, so the same human filling in both forms became two rows and the
+    # consent on one did not attach to the other. See public_capture.py.
+    from app.services import public_capture as pc
 
-    # DEDUPE, kept from the handler that was live. A prospect who fills the form
-    # twice is one prospect; the second submission appends to the first rather
-    # than creating a duplicate record for someone to call twice.
-    existing = None
-    if payload.phone:
-        existing = db.query(Lead).filter(
-            Lead.organization_id == org.id,
-            Lead.phone == payload.phone,
-        ).first()
-    if existing is None and payload.email:
-        existing = db.query(Lead).filter(
-            Lead.organization_id == org.id,
-            Lead.email == payload.email,
-        ).first()
-
-    if existing is not None:
-        stamp = datetime.utcnow().strftime("%Y-%m-%d")
-        existing.notes = ("%s\n[New demo request %s]\n%s"
-                          % (existing.notes or "", stamp, composed_notes)).strip()
-        db.commit()
-        _notify_demo_request(payload, platform)
-        return {
-            # BOTH RESPONSE SHAPES. One handler returned {"status": ...} and the
-            # other {"success": ...}; a caller checking either keeps working.
-            "success": True,
-            "status": "updated",
-            "message": "Demo request received. We'll be in touch soon!",
-            "id": str(existing.id),
-        }
-
-    lead = Lead(
-        id=str(_uuid.uuid4()),
-        organization_id=org.id,
-        first_name=(payload.first_name or "").strip(),
-        last_name=((payload.last_name or "").strip() or None),
-        email=(payload.email.strip() if payload.email else None),
-        phone=(payload.phone.strip() if payload.phone else None),
-        status="new",
-        tier=payload.tier or "web_lead",
-        source_file=payload.source or "demo_request",
-        message_track="new_inquiry_intro",
-        notes=composed_notes,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+    sub = pc.Submission(
+        kind=pc.KIND_DEMO,
+        first_name=payload.first_name or "",
+        last_name=payload.last_name,
+        email=payload.email,
+        phone=payload.phone,
+        company=payload.company,
+        industry=payload.industry,
+        message=payload.message,
+        extra={k: v for k, v in (("notes", payload.notes),) if v},
     )
-
-    # PLAN CAPACITY - HELD, NEVER DROPPED. Public and unauthenticated: external
-    # arrival by every definition, and the prospect is real.
-    from app.services import lead_capacity
-    lead_capacity.hold_if_over_capacity(db, lead, org)
-
-    db.add(lead)
     try:
-        db.commit()
+        result = pc.capture(db, platform=platform, org=org, sub=sub)
     except Exception:
         db.rollback()
+        logging.getLogger(__name__).exception("demo-request capture failed")
         raise HTTPException(
             status_code=503,
             detail="We can't accept demo requests right now. Please email us.")
 
+    # The two fields this route's own schema carries that the shared capture
+    # has no opinion about. `tier`/`source` were caller-supplied overrides on
+    # the legacy shape and are still honoured, but only additively - a repeat
+    # submission never rewrites a tier a seller has since changed.
+    lead = db.query(Lead).filter(Lead.id == result["lead_id"]).first()
+    if lead is not None and result["action"] == "created":
+        if payload.tier:
+            lead.tier = payload.tier
+        if payload.source:
+            lead.source_file = payload.source
+        db.commit()
+
     _notify_demo_request(payload, platform)
     return {
+        # BOTH RESPONSE SHAPES. One handler returned {"status": ...} and the
+        # other {"success": ...}; a caller checking either keeps working.
         "success": True,
-        "status": "created",
+        "status": result["action"],
         "message": "Demo request received. We'll be in touch soon!",
-        "id": str(lead.id),
+        "id": str(result["lead_id"]),
     }
 
 
@@ -338,57 +313,64 @@ def sms_optin(
     except Exception:
         pass  # If suppression check fails, proceed — don't block opt-in
 
-    # Deduplicate: if lead already exists for this phone, update notes
-    existing = db.query(Lead).filter(
-        Lead.organization_id == org.id,
-        Lead.phone == phone_normalized,
-    ).first()
-
-    if existing:
-        note_entry = (
-            f"\n[SMS Opt-In {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC] "
-            f"Re-confirmed consent via {payload.source or 'optin_page'}. "
-            f"URL: {payload.optin_url or 'n/a'}"
-        )
-        existing.notes = (existing.notes or "") + note_entry
-        db.commit()
-        return {"success": True, "lead_id": existing.id, "action": "updated"}
-
-    lead = Lead(
-        id=str(uuid.uuid4()),
-        organization_id=org.id,
-        first_name=payload.first_name.strip(),
-        last_name=(payload.last_name or "").strip() or None,
-        phone=phone_normalized,
-        phone_raw=payload.phone,
-        contact_channel="sms",
-        status="new",
-        source_file="optin_page",
-        tier="web_lead",
-        notes=(
-            f"[SMS Opt-In {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC] "
-            f"Consent given via {payload.source or 'optin_page'}. "
-            f"URL: {payload.optin_url or 'n/a'}. "
-            f"Timestamp: {payload.optin_timestamp or 'n/a'}"
-        ),
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-
-    # PLAN CAPACITY - HELD, NEVER DROPPED.
+    # THE SAME CAPTURE AS EVERY OTHER PUBLIC FORM, and the consent is finally
+    # written where it can be queried.
     #
-    # Somebody typed their number into an opt-in page and consented to be
-    # texted. Throwing that away over a billing ceiling would discard a
-    # written consent record, which is the one artefact this platform can
-    # least afford to lose.
-    from app.services import lead_capacity
-    lead_capacity.hold_if_over_capacity(db, lead, org)
+    # This route recorded consent as a SENTENCE IN A NOTE - "Consent given via
+    # optin_page" - while `leads.sms_consent`, `sms_consent_timestamp`,
+    # `sms_consent_ip` and `sms_consent_text` sat null. Those columns are the
+    # ones the model's own comment calls the evidence, the ones a send path
+    # checks before texting anybody, and the ones a carrier or TCPA dispute is
+    # argued from. A consent nobody can query is a consent that does not
+    # protect the business that relied on it.
+    from app.services import public_capture as pc
 
-    db.add(lead)
-    db.commit()
-    db.refresh(lead)
+    sub = pc.Submission(
+        kind=pc.KIND_SMS_OPTIN,
+        first_name=payload.first_name or "",
+        last_name=payload.last_name,
+        phone=payload.phone,
+        page_url=payload.optin_url,
+        consent=pc.Consent(
+            given=True,
+            text=CONSENT_TEXT_UNSPECIFIED,
+            ip=(request.client.host if request.client else None),
+            user_agent=request.headers.get("user-agent"),
+            page_url=payload.optin_url,
+            at=_parse_optin_timestamp(payload.optin_timestamp),
+        ),
+        extra={k: v for k, v in (("optin_source", payload.source),) if v},
+        ip=(request.client.host if request.client else None),
+        user_agent=request.headers.get("user-agent"),
+    )
+    result = pc.capture(db, platform=_platform, org=org, sub=sub)
+    return {"success": True, "lead_id": result["lead_id"],
+            "action": result["action"]}
 
-    return {"success": True, "lead_id": lead.id, "action": "created"}
+
+# WHAT A CALLER THAT SENT NO WORDING IS RECORDED AS HAVING SHOWN: nothing.
+#
+# This schema has no field for the consent sentence, so a submission through it
+# cannot prove which wording the person read. Writing a plausible-looking
+# sentence here would manufacture evidence, which is worse than having none.
+# The site-intake routes DO carry the wording and record it verbatim.
+CONSENT_TEXT_UNSPECIFIED = (
+    "Consent recorded through the opt-in API, which does not carry the wording "
+    "shown to the person. The exact consent text was not captured for this "
+    "submission."
+)
+
+
+def _parse_optin_timestamp(raw: Optional[str]):
+    """The browser's own timestamp, only if it is actually a timestamp."""
+    if not raw:
+        return None
+    text = str(raw).strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except (ValueError, TypeError):
+        return None
+    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
 
 
 # ── Resend booking link ───────────────────────────────────────────────────────

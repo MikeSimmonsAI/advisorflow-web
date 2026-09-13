@@ -55,6 +55,18 @@ from app.models.models import Organization, Platform
 log = logging.getLogger(__name__)
 
 
+# A CEILING ON UNAUTHENTICATED WRITES INTO A CUSTOMER'S WORKSPACE - ONE
+# BUDGET, SHARED BY EVERY PUBLIC INTAKE ROUTE.
+#
+# These live here, next to the destination rule, rather than in one of the
+# routers that enforces them. `limiter.limit` counts per endpoint, so a second
+# router declaring its own literals would quietly hand a bulk submitter a
+# second full allowance simply by alternating between the two. One named scope
+# in one place is what makes the ceiling mean what it says.
+PUBLIC_INTAKE_LIMIT = "20/minute;100/hour"
+PUBLIC_INTAKE_SCOPE = "public-intake"
+
+
 class IntakeDestinationError(Exception):
     """No configured destination could be resolved. Carries an operator-facing
     reason; the public caller never sees it."""

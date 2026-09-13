@@ -614,6 +614,12 @@ app.include_router(settings_router.router)
 app.include_router(templates_router.router)
 app.include_router(ai_router.router)
 app.include_router(concierge_router.router)
+# PUBLIC WEBSITE INTAKE, server-to-server. A brand's marketing site posts its
+# own form answers here; the configured destination decides which customer
+# workspace they land in. No auth, no organization id on the wire, and it
+# shares the one public-intake rate ceiling. See site_intake_router.py.
+from app.routers import site_intake_router  # noqa: E402
+app.include_router(site_intake_router.router)
 app.include_router(outcomes_router.router)
 app.include_router(microsoft_router.router)
 app.include_router(compliance_router.router)

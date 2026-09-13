@@ -200,6 +200,7 @@ import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
 // `<ContextBanner />` and reported the banner as missing from every tenant
 // screen. The banner was always there; the gate was reading a hole.
 import GodAccess from './pages/god/GodAccess'
+import GodPublicIntake from './pages/god/GodPublicIntake'
 // ADD A PERSON. The front door for seating somebody - email first, existing
 // identity reused, brand seat and/or customer workspace granted in one act.
 import GodAddPerson from './pages/god/GodAddPerson'
@@ -1160,6 +1161,10 @@ export default function App() {
             as somebody's user id. */}
         <Route path="/god/access/new"            element={<GodRoute><GodModeLayout><GodAddPerson /></GodModeLayout></GodRoute>} />
         <Route path="/god/access/:userId"        element={<GodRoute><GodModeLayout><GodAccess /></GodModeLayout></GodRoute>} />
+        {/* PUBLIC INTAKE DESTINATION — where each brand's website leads land.
+            Above the /god/* catch-all like its neighbours, or it silently
+            renders the Command Center. */}
+        <Route path="/god/public-intake"         element={<GodRoute><GodModeLayout><GodPublicIntake /></GodModeLayout></GodRoute>} />
         <Route path="/god/demo-suite"            element={<GodRoute><GodModeLayout><GodDemoSuite /></GodModeLayout></GodRoute>} />
         <Route path="/god/training"              element={<GodRoute><GodModeLayout><GodTraining /></GodModeLayout></GodRoute>} />
         {/* Support Intelligence. MUST stay above the /god/* catch-all below,

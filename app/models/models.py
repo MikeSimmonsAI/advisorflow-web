@@ -849,6 +849,20 @@ class Lead(Base):
     # column import traceability depends on.
     source = Column(String, nullable=True)  # "facebook" | "fiber_intake" | ...
 
+    # WHICH FORM ON THAT SOURCE. `source` answers "where did this arrival come
+    # from" at the level of a channel or a website - "EvoSys Pro Website". It
+    # does not say WHICH form, and on a marketing site that difference is the
+    # whole meaning of the record: a demo request is sales intent, an SMS
+    # opt-in is a consent event that must not be treated as sales intent, and a
+    # waitlist signup is neither. Collapsing the three into one string loses
+    # the only fact that tells a seller what to do next.
+    #
+    # `source_category` was not reused for this. It is a CLASSIFICATION -
+    # purchased, organic, referral, database - that qualification.py and the
+    # audience builders match on, and writing "Request Demo" into it would
+    # silently change which audiences a lead falls into.
+    source_detail = Column(String, nullable=True)  # "Request Demo" | "SMS Opt-In" | ...
+
     # CRM history carried over from import - feeds the AI lead-quality analysis
     # Mike requested (last action taken + last contact date + original status
     # reason) so the AI can judge what kind of lead this really is, not just

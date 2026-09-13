@@ -568,6 +568,10 @@ COLUMNS_TO_ADD = [
     ("leads", "import_list_name", "VARCHAR"),
     # Source category — user-defined grouping (purchased, organic, referral, database, etc.)
     ("leads", "source_category", "VARCHAR"),
+    # Source detail — WHICH form on the source produced the arrival: "Request
+    # Demo", "SMS Opt-In", "Waitlist". Separate from source_category, which is
+    # a classification the audience builders match on.
+    ("leads", "source_detail", "VARCHAR"),
     # Manual flag — advisor-set flag when auto-detection misses a bad contact
     # Values: null (clean), "bad_email", "remove_all"
     ("leads", "manual_flag", "VARCHAR"),

@@ -55,6 +55,13 @@ export const TOOLS = [
     endpoint: 'PATCH /god/ops/packages/{id}/pricing',
   },
   {
+    key: 'public-intake', name: 'Public Intake Destination',
+    desc: "Which customer workspace receives a brand's website leads — demo "
+        + 'requests, SMS opt-ins and the waitlist. Unset means those forms refuse.',
+    cta: 'Set destinations →', to: '/god/public-intake',
+    endpoint: 'GET/PUT /god/platform/public-intake',
+  },
+  {
     key: 'suspend', name: 'Suspend / Reactivate',
     desc: 'Block or restore an organization immediately across the whole '
         + 'platform. Reversible, and recorded either way.',
