@@ -110,6 +110,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         "custom_fields": [],
         "vocabulary": {"lead": "lead", "leads": "leads",
                        "appointment": "appointment",
+                       "appointments": "Appointments",
                        "customer": "customer", "customers": "customers"},
         "onboarding_questions": [],
     },
@@ -162,6 +163,10 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "vocabulary": {"lead": "family", "leads": "families",
                        "appointment": "consultation",
+                       # The overview's seven KPI labels are all derived from
+                       # this noun, so it is the vertical's own word for the
+                       # thing it counts, not a synonym of "appointment".
+                       "appointments": "Arrangements",
                        "customer": "family", "customers": "families"},
         "onboarding_questions": [],
     },
@@ -215,6 +220,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "vocabulary": {"lead": "prospect", "leads": "prospects",
                        "appointment": "consultation",
+                       "appointments": "Consultations",
                        "customer": "account", "customers": "accounts"},
         "onboarding_questions": [
             {"key": "segments_served",
@@ -307,6 +313,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "vocabulary": {"lead": "lead", "leads": "leads",
                        "appointment": "inspection",
+                       "appointments": "Inspections",
                        "customer": "homeowner", "customers": "homeowners"},
         "onboarding_questions": [],
     },
@@ -343,6 +350,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "vocabulary": {"lead": "client", "leads": "clients",
                        "appointment": "showing",
+                       "appointments": "Showings",
                        "customer": "client", "customers": "clients"},
         "onboarding_questions": [],
     },
@@ -380,6 +388,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "vocabulary": {"lead": "prospect", "leads": "prospects",
                        "appointment": "consultation",
+                       "appointments": "Consultations",
                        "customer": "policyholder", "customers": "policyholders"},
         "onboarding_questions": [],
     },
@@ -418,6 +427,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "vocabulary": {"lead": "prospect", "leads": "prospects",
                        "appointment": "appointment",
+                       "appointments": "Installs",
                        "customer": "subscriber", "customers": "subscribers"},
         "onboarding_questions": [],
     },
@@ -451,6 +461,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "vocabulary": {"lead": "lead", "leads": "leads",
                        "appointment": "service call",
+                       "appointments": "Service Calls",
                        "customer": "customer", "customers": "customers"},
         "onboarding_questions": [],
     },
@@ -482,10 +493,161 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
         "custom_fields": [],
         "vocabulary": {"lead": "patient", "leads": "patients",
                        "appointment": "appointment",
+                       "appointments": "Appointments",
                        "customer": "patient", "customers": "patients"},
         "onboarding_questions": [],
     },
 }
+
+# ════════════════════════════════════════════════════════════════════════════
+# CRM PIPELINE STAGES, AS THE BOARD RENDERS THEM
+# ════════════════════════════════════════════════════════════════════════════
+#
+# THE FOURTH MAP. This table lived in `crm_native_router` as INDUSTRY_STAGES,
+# and it was exactly the defect the header of this file describes, one vertical
+# later: its own industry dictionary, looked up with the RAW industry string so
+# "Energy & Procurement" matched nothing, and — twice over —
+#
+#     INDUSTRY_STAGES.get(org.industry or "funeral", GENERIC_STAGES)
+#
+# so an organization with no industry recorded got a funeral home's pipeline:
+# Pre-Need, At-Need, Arrangements, Services Complete, Aftercare Follow-up.
+#
+# WHY IT IS A SEPARATE TABLE FROM `crm_stages` ABOVE, AND NOT DERIVED FROM IT.
+# `crm_stages` is a list of LABELS, used where a template is described to a
+# human. These are the objects a live board is built from, and their `key` is
+# written onto every CRMContact row. Deriving keys from labels would rename
+# them — `pre_need` would become `arrangement` — and every contact already
+# sitting in a stage would stop matching a column. The stage a record is in is
+# data; only its label is presentation.
+#
+# KEYED BY THE RAW STRING FIRST. Verticals that have live boards but no
+# template of their own (solar, auto_repair, and the insurance sub-types) keep
+# their exact stage sets, so no existing tenant's board changes shape.
+CRM_STAGE_OBJECTS: Dict[str, List[Dict[str, Any]]] = {
+    "funeral": [
+        {"key": "inquiry", "label": "Inquiry", "color": "#64748b"},
+        {"key": "pre_need", "label": "Pre-Need", "color": "#6366f1"},
+        {"key": "at_need", "label": "At-Need", "color": "#f59e0b"},
+        {"key": "arrangements", "label": "Arrangements", "color": "#ef4444"},
+        {"key": "services_complete", "label": "Services Complete", "color": "#10b981"},
+        {"key": "aftercare", "label": "Aftercare Follow-up", "color": "#3b82f6"},
+        {"key": "closed", "label": "Closed", "color": "#374151"},
+    ],
+    # The energy board this platform had no entry for at all, aligned with the
+    # energy template's own stage vocabulary above.
+    "energy": [
+        {"key": "new_inquiry", "label": "New Inquiry", "color": "#64748b"},
+        {"key": "usage_review", "label": "Usage Review", "color": "#6366f1"},
+        {"key": "rate_comparison", "label": "Rate Comparison", "color": "#f59e0b"},
+        {"key": "proposal_sent", "label": "Proposal Sent", "color": "#f97316"},
+        {"key": "contract_signed", "label": "Contract Signed", "color": "#10b981"},
+        {"key": "renewal_watch", "label": "Renewal Watch", "color": "#3b82f6"},
+        {"key": "lost", "label": "Lost", "color": "#374151"},
+    ],
+    "fiber": [
+        {"key": "new_lead", "label": "New Lead", "color": "#64748b"},
+        {"key": "contacted", "label": "Contacted", "color": "#6366f1"},
+        {"key": "quoted", "label": "Quoted", "color": "#f59e0b"},
+        {"key": "pending_install", "label": "Pending Install", "color": "#f97316"},
+        {"key": "installed", "label": "Installed", "color": "#10b981"},
+        {"key": "active", "label": "Active", "color": "#3b82f6"},
+        {"key": "churned", "label": "Churned", "color": "#374151"},
+    ],
+    "roofing": [
+        {"key": "new_lead", "label": "New Lead", "color": "#64748b"},
+        {"key": "inspection_scheduled", "label": "Inspection Scheduled", "color": "#6366f1"},
+        {"key": "estimate_sent", "label": "Estimate Sent", "color": "#f59e0b"},
+        {"key": "contract_signed", "label": "Contract Signed", "color": "#f97316"},
+        {"key": "job_scheduled", "label": "Job Scheduled", "color": "#8b5cf6"},
+        {"key": "completed", "label": "Completed", "color": "#10b981"},
+        {"key": "closed", "label": "Closed / Lost", "color": "#374151"},
+    ],
+    "insurance": [
+        {"key": "new_lead", "label": "New Lead", "color": "#64748b"},
+        {"key": "contacted", "label": "Contacted", "color": "#6366f1"},
+        {"key": "quoted", "label": "Quoted", "color": "#f59e0b"},
+        {"key": "application", "label": "Application", "color": "#f97316"},
+        {"key": "underwriting", "label": "Underwriting", "color": "#8b5cf6"},
+        {"key": "active_policy", "label": "Active Policy", "color": "#10b981"},
+        {"key": "lapsed", "label": "Lapsed", "color": "#374151"},
+    ],
+    "health_insurance": [
+        {"key": "new_lead", "label": "New Lead", "color": "#64748b"},
+        {"key": "contacted", "label": "Contacted", "color": "#6366f1"},
+        {"key": "quoted", "label": "Quoted", "color": "#f59e0b"},
+        {"key": "application", "label": "Application", "color": "#f97316"},
+        {"key": "enrolled", "label": "Enrolled", "color": "#10b981"},
+        {"key": "renewal", "label": "Up for Renewal", "color": "#3b82f6"},
+        {"key": "lapsed", "label": "Lapsed", "color": "#374151"},
+    ],
+    "medicare": [
+        {"key": "new_lead", "label": "New Lead", "color": "#64748b"},
+        {"key": "contacted", "label": "Contacted", "color": "#6366f1"},
+        {"key": "needs_assessed", "label": "Needs Assessed", "color": "#f59e0b"},
+        {"key": "plan_selected", "label": "Plan Selected", "color": "#f97316"},
+        {"key": "enrolled", "label": "Enrolled", "color": "#10b981"},
+        {"key": "renewal", "label": "Up for Renewal", "color": "#3b82f6"},
+        {"key": "lost", "label": "Lost", "color": "#374151"},
+    ],
+    "real_estate": [
+        {"key": "new_lead", "label": "New Lead", "color": "#64748b"},
+        {"key": "contacted", "label": "Contacted", "color": "#6366f1"},
+        {"key": "showing", "label": "Showing", "color": "#f59e0b"},
+        {"key": "offer_made", "label": "Offer Made", "color": "#f97316"},
+        {"key": "under_contract", "label": "Under Contract", "color": "#8b5cf6"},
+        {"key": "closed", "label": "Closed", "color": "#10b981"},
+        {"key": "lost", "label": "Lost", "color": "#374151"},
+    ],
+    "auto_repair": [
+        {"key": "new_lead", "label": "New Lead", "color": "#64748b"},
+        {"key": "contacted", "label": "Contacted", "color": "#6366f1"},
+        {"key": "estimate", "label": "Estimate Given", "color": "#f59e0b"},
+        {"key": "approved", "label": "Work Approved", "color": "#f97316"},
+        {"key": "in_shop", "label": "In Shop", "color": "#8b5cf6"},
+        {"key": "completed", "label": "Completed", "color": "#10b981"},
+        {"key": "closed", "label": "Closed", "color": "#374151"},
+    ],
+    "solar": [
+        {"key": "new_lead", "label": "New Lead", "color": "#64748b"},
+        {"key": "site_survey", "label": "Site Survey", "color": "#6366f1"},
+        {"key": "proposal", "label": "Proposal Sent", "color": "#f59e0b"},
+        {"key": "contract", "label": "Contract Signed", "color": "#f97316"},
+        {"key": "permitting", "label": "Permitting", "color": "#8b5cf6"},
+        {"key": "installation", "label": "Installation", "color": "#10b981"},
+        {"key": "active", "label": "Active / Live", "color": "#3b82f6"},
+        {"key": "lost", "label": "Lost", "color": "#374151"},
+    ],
+    "home_services": [
+        {"key": "new_lead", "label": "New Lead", "color": "#64748b"},
+        {"key": "scheduled", "label": "Scheduled", "color": "#6366f1"},
+        {"key": "quoted", "label": "Quoted", "color": "#f59e0b"},
+        {"key": "booked", "label": "Job Booked", "color": "#10b981"},
+        {"key": "complete", "label": "Complete", "color": "#3b82f6"},
+        {"key": "lost", "label": "Lost", "color": "#374151"},
+    ],
+    "dental": [
+        {"key": "inquiry", "label": "Inquiry", "color": "#64748b"},
+        {"key": "consultation", "label": "Consultation", "color": "#6366f1"},
+        {"key": "treatment_plan", "label": "Treatment Plan", "color": "#f59e0b"},
+        {"key": "active", "label": "Active", "color": "#10b981"},
+        {"key": "recall", "label": "Recall", "color": "#3b82f6"},
+        {"key": "lost", "label": "Lost", "color": "#374151"},
+    ],
+}
+
+# What a business this platform cannot place is given. Plain sales stages with
+# nobody's vertical in them — never whichever entry happens to be first.
+GENERIC_CRM_STAGE_OBJECTS: List[Dict[str, Any]] = [
+    {"key": "new_lead", "label": "New Lead", "color": "#64748b"},
+    {"key": "contacted", "label": "Contacted", "color": "#6366f1"},
+    {"key": "qualified", "label": "Qualified", "color": "#f59e0b"},
+    {"key": "proposal", "label": "Proposal", "color": "#f97316"},
+    {"key": "negotiating", "label": "Negotiating", "color": "#8b5cf6"},
+    {"key": "won", "label": "Won", "color": "#10b981"},
+    {"key": "lost", "label": "Lost", "color": "#374151"},
+]
+
 
 # alias -> canonical key, built once.
 _ALIASES: Dict[str, str] = {}
@@ -598,6 +760,30 @@ def crm_stages(industry: Optional[str]) -> List[str]:
     return list(resolve(industry)["crm_stages"])
 
 
+def crm_stage_objects(industry: Optional[str]) -> List[Dict[str, Any]]:
+    """The CRM board's columns for this business: [{key, label, color}].
+
+    Three steps, and the order is the whole point:
+
+      1. The RAW string, so a vertical with a live board but no template of its
+         own — solar, auto_repair, the insurance sub-types — keeps the exact
+         stage keys its contacts are already filed under.
+      2. The NORMALIZED key, so "Energy & Procurement" finds `energy` the way
+         every other lookup in this module does. The router this replaced did
+         a raw dictionary get and matched nothing.
+      3. GENERIC. Never funeral, which is what `or "funeral"` made it.
+
+    Returns copies: a caller that edits a stage must not edit the registry for
+    every other organization in the process.
+    """
+    table = CRM_STAGE_OBJECTS
+    raw = _slug(industry)
+    for key in (raw, normalize(industry)):
+        if key and key in table:
+            return copy.deepcopy(table[key])
+    return copy.deepcopy(GENERIC_CRM_STAGE_OBJECTS)
+
+
 def custom_fields(industry: Optional[str]) -> List[Dict[str, Any]]:
     return [dict(f) for f in resolve(industry)["custom_fields"]]
 
@@ -642,6 +828,7 @@ def summary(industry: Optional[str]) -> Dict[str, Any]:
         "lead_tiers": lead_tiers(industry),
         "appointment_types": appointment_types(industry),
         "crm_stages": crm_stages(industry),
+        "crm_stage_objects": crm_stage_objects(industry),
         "custom_fields": custom_fields(industry),
         "vocabulary": vocabulary(industry),
         "onboarding_questions": onboarding_questions(industry),

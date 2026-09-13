@@ -633,7 +633,7 @@ export default function CampaignBuilder() {
                       className="settings-input"
                       value={aiDirection}
                       onChange={e => setAiDirection(e.target.value)}
-                      placeholder="e.g. This is a file check campaign — ask if they still need pre-need planning"
+                      placeholder="e.g. This is a re-engagement campaign — ask if they still need help"
                     />
                     <span className="settings-help" style={{ fontSize: 11 }}>
                       The more specific you are, the better the AI message.

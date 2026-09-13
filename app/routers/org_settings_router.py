@@ -172,7 +172,28 @@ def get_org_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    org = _resolve_org(current_user, org_id, db)
+    # THE WORKSPACE THE CALLER IS ACTUALLY IN.
+    #
+    # `_resolve_org` reads `users.organization_id` for a non-operator, which is
+    # the legacy column rather than the selected workspace. This endpoint is
+    # now what the whole customer application reads its VOCABULARY from -
+    # tiers, CRM stages, the words on the overview - so a person seconded into
+    # a second workspace would have been shown their home organization's
+    # business language while working in somebody else's. `active_workspace_org_id`
+    # is the seam `require_tenant_user` and every lead query already resolve
+    # through; using it here means one notion of "which tenant", not two.
+    #
+    # The `?org_id=` operator path is untouched and still goes through
+    # `load_org_in_scope`.
+    if org_id:
+        org = _resolve_org(current_user, org_id, db)
+    else:
+        from app.services.lead_scope import active_workspace_org_id
+        resolved_id = active_workspace_org_id(current_user, db)
+        org = (db.query(Organization).filter(Organization.id == resolved_id).first()
+               if resolved_id else None)
+        if not org:
+            org = _resolve_org(current_user, None, db)
 
     tier_config = []
     if org.tier_config:
@@ -185,6 +206,18 @@ def get_org_settings(
         # recognise is shown a neutral set, flagged as unmatched, rather than
         # another vertical's vocabulary presented as its own.
         tier_config = industry_templates.lead_tiers(org.industry)
+
+    # THE CRM BOARD'S OWN COLUMNS, on the same resolution as everything else.
+    # Customized if this organization saved its own; otherwise its business
+    # type's, and never another vertical's.
+    crm_stages = []
+    if getattr(org, "crm_stages", None):
+        try:
+            crm_stages = json.loads(org.crm_stages)
+        except Exception:
+            crm_stages = []
+    if not crm_stages:
+        crm_stages = industry_templates.crm_stage_objects(org.industry)
 
     return {
         "id": org.id,
@@ -206,6 +239,12 @@ def get_org_settings(
         "member_label": getattr(org, "member_label", None),
         "members_label": getattr(org, "members_label", None),
         "tier_config": tier_config,
+        # WHAT THIS BUSINESS CALLS THINGS. The customer application reads its
+        # labels from here rather than from a literal in a React file: four
+        # screens each kept their own industry map and every one of them fell
+        # back to funeral. See frontend/src/terminology.js.
+        "crm_stages": crm_stages,
+        "vocabulary": industry_templates.vocabulary(org.industry),
         "facebook_url": getattr(org, "facebook_url", None),
         "google_review_url": getattr(org, "google_review_url", None),
         "instagram_url": getattr(org, "instagram_url", None),

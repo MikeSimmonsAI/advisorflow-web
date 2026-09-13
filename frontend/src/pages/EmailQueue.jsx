@@ -555,7 +555,7 @@ export default function EmailQueue() {
           <span className="eq-controls-label">Campaign direction</span>
           <input
             className="settings-input eq-direction-input"
-            placeholder="e.g. file check — ask if they still need pre-need planning"
+            placeholder="e.g. follow-up — ask if they still need help"
             value={aiDirection}
             onChange={(e) => setAiDirection(e.target.value)}
           />

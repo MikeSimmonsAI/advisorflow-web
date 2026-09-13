@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { useTerminology } from '../terminology'
 import '../styles/shared.css'
 
 const STAGE_CONFIG = {
@@ -16,14 +17,17 @@ const STAGE_CONFIG = {
   dnc:            { label: 'DNC',             color: '#ff4d4d', icon: '🚫' },
 }
 
+// AUDIENCE TYPES THAT ARE NOT A VERTICAL'S. `at_need` and `pre_need` were in
+// this list, so every tenant in every industry chose an AI campaign audience
+// from a menu containing a funeral home's two pipeline stages. The tiers this
+// organization is actually configured for are appended below, from its own
+// configuration, which is where a business's own words belong.
 const LEAD_TYPES = [
   { value: 'file_check',   label: 'File Check' },
   { value: 'code_lead',    label: 'Code Lead' },
   { value: 'new_inquiry',  label: 'New Inquiry' },
   { value: 'referral',     label: 'Referral' },
   { value: 'web_lead',     label: 'Web Lead' },
-  { value: 'at_need',      label: 'At-Need' },
-  { value: 'pre_need',     label: 'Pre-Need' },
   { value: 'general',      label: 'General Outreach' },
 ]
 
@@ -43,6 +47,18 @@ export default function Pipeline() {
   const [conversations, setConversations] = useState([])
   const [loading, setLoading] = useState(true)
   const [stageFilter, setStageFilter] = useState('')
+
+  // The universal audience types plus THIS organization's own tiers. A
+  // deathcare business still gets Pre-Need and At-Need here — from its
+  // configuration, not from a literal every other tenant also sees.
+  const terminology = useTerminology()
+  const audienceTypes = useMemo(() => {
+    const seen = new Set(LEAD_TYPES.map(t => t.value))
+    return LEAD_TYPES.concat(
+      (terminology.tiers || [])
+        .filter(t => t && t.value && !seen.has(t.value))
+        .map(t => ({ value: t.value, label: t.label })))
+  }, [terminology.tiers])
 
   // Launch form
   const [leads, setLeads] = useState([])
@@ -407,7 +423,7 @@ export default function Pipeline() {
               <label className="settings-label">
                 Lead type / context
                 <select className="filter-select" value={leadType} onChange={e => setLeadType(e.target.value)}>
-                  {LEAD_TYPES.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
+                  {audienceTypes.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
                 </select>
                 <span className="settings-help">Tells the AI what kind of conversation to have</span>
               </label>
@@ -435,7 +451,7 @@ export default function Pipeline() {
                 AI direction
                 <input className="settings-input" value={aiDirection}
                   onChange={e => setAiDirection(e.target.value)}
-                  placeholder="e.g. Reconnect with old file check leads, ask if they still need pre-need planning" />
+                  placeholder="e.g. Reconnect with older leads and ask if they still need help" />
                 <span className="settings-help">The more specific, the better the AI will perform</span>
               </label>
             </div>

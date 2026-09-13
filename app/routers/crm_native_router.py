@@ -32,103 +32,34 @@ from app.services import lead_scope
 router = APIRouter(prefix="/crm-native", tags=["crm-native"])
 
 
-# ── Industry-specific default stages ──────────────────────────────────────
+# ── Default stages: ONE REGISTRY, NOT A FOURTH MAP ───────────────────
+#
+# INDUSTRY_STAGES and GENERIC_STAGES were declared here, ninety lines of
+# vertical dictionaries looked up with `org.industry or "funeral"`. Two defects
+# in one expression:
+#
+#   * THE LOOKUP WAS RAW. `org.industry` holds whatever a human picked -
+#     "Energy & Procurement" - and this was a plain dict.get against
+#     lowercase_underscore keys, so a correctly configured energy organization
+#     matched nothing.
+#   * THE FALLBACK WAS A VERTICAL. An organization with no industry recorded
+#     was handed a funeral home's pipeline: Pre-Need, At-Need, Arrangements,
+#     Services Complete, Aftercare Follow-up. Nobody chose that.
+#
+# `app/services/industry_templates.py` is the platform's one industry registry
+# and it already normalizes, already has an energy entry, and already refuses
+# to fall back to anybody's vertical. The stage table now lives there beside
+# the tiers, appointment types and vocabulary it belongs with. The names below
+# are kept so nothing that imported them breaks.
+from app.services import industry_templates as _industry
 
-INDUSTRY_STAGES = {
-    "funeral": [
-        {"key": "inquiry",           "label": "Inquiry",              "color": "#64748b"},
-        {"key": "pre_need",          "label": "Pre-Need",             "color": "#6366f1"},
-        {"key": "at_need",           "label": "At-Need",              "color": "#f59e0b"},
-        {"key": "arrangements",      "label": "Arrangements",         "color": "#ef4444"},
-        {"key": "services_complete", "label": "Services Complete",    "color": "#10b981"},
-        {"key": "aftercare",         "label": "Aftercare Follow-up",  "color": "#3b82f6"},
-        {"key": "closed",            "label": "Closed",               "color": "#374151"},
-    ],
-    "fiber": [
-        {"key": "new_lead",       "label": "New Lead",         "color": "#64748b"},
-        {"key": "contacted",      "label": "Contacted",        "color": "#6366f1"},
-        {"key": "quoted",         "label": "Quoted",           "color": "#f59e0b"},
-        {"key": "pending_install","label": "Pending Install",  "color": "#f97316"},
-        {"key": "installed",      "label": "Installed",        "color": "#10b981"},
-        {"key": "active",         "label": "Active",           "color": "#3b82f6"},
-        {"key": "churned",        "label": "Churned",          "color": "#374151"},
-    ],
-    "roofing": [
-        {"key": "new_lead",            "label": "New Lead",            "color": "#64748b"},
-        {"key": "inspection_scheduled","label": "Inspection Scheduled","color": "#6366f1"},
-        {"key": "estimate_sent",       "label": "Estimate Sent",       "color": "#f59e0b"},
-        {"key": "contract_signed",     "label": "Contract Signed",     "color": "#f97316"},
-        {"key": "job_scheduled",       "label": "Job Scheduled",       "color": "#8b5cf6"},
-        {"key": "completed",           "label": "Completed",           "color": "#10b981"},
-        {"key": "closed",              "label": "Closed / Lost",       "color": "#374151"},
-    ],
-    "insurance": [
-        {"key": "new_lead",      "label": "New Lead",       "color": "#64748b"},
-        {"key": "contacted",     "label": "Contacted",      "color": "#6366f1"},
-        {"key": "quoted",        "label": "Quoted",         "color": "#f59e0b"},
-        {"key": "application",   "label": "Application",    "color": "#f97316"},
-        {"key": "underwriting",  "label": "Underwriting",   "color": "#8b5cf6"},
-        {"key": "active_policy", "label": "Active Policy",  "color": "#10b981"},
-        {"key": "lapsed",        "label": "Lapsed",         "color": "#374151"},
-    ],
-    "health_insurance": [
-        {"key": "new_lead",      "label": "New Lead",       "color": "#64748b"},
-        {"key": "contacted",     "label": "Contacted",      "color": "#6366f1"},
-        {"key": "quoted",        "label": "Quoted",         "color": "#f59e0b"},
-        {"key": "application",   "label": "Application",    "color": "#f97316"},
-        {"key": "enrolled",      "label": "Enrolled",       "color": "#10b981"},
-        {"key": "renewal",       "label": "Up for Renewal", "color": "#3b82f6"},
-        {"key": "lapsed",        "label": "Lapsed",         "color": "#374151"},
-    ],
-    "medicare": [
-        {"key": "new_lead",      "label": "New Lead",        "color": "#64748b"},
-        {"key": "contacted",     "label": "Contacted",       "color": "#6366f1"},
-        {"key": "needs_assessed","label": "Needs Assessed",  "color": "#f59e0b"},
-        {"key": "plan_selected", "label": "Plan Selected",   "color": "#f97316"},
-        {"key": "enrolled",      "label": "Enrolled",        "color": "#10b981"},
-        {"key": "renewal",       "label": "Up for Renewal",  "color": "#3b82f6"},
-        {"key": "lost",          "label": "Lost",            "color": "#374151"},
-    ],
-    "real_estate": [
-        {"key": "new_lead",       "label": "New Lead",        "color": "#64748b"},
-        {"key": "contacted",      "label": "Contacted",       "color": "#6366f1"},
-        {"key": "showing",        "label": "Showing",         "color": "#f59e0b"},
-        {"key": "offer_made",     "label": "Offer Made",      "color": "#f97316"},
-        {"key": "under_contract", "label": "Under Contract",  "color": "#8b5cf6"},
-        {"key": "closed",         "label": "Closed",          "color": "#10b981"},
-        {"key": "lost",           "label": "Lost",            "color": "#374151"},
-    ],
-    "auto_repair": [
-        {"key": "new_lead",    "label": "New Lead",       "color": "#64748b"},
-        {"key": "contacted",   "label": "Contacted",      "color": "#6366f1"},
-        {"key": "estimate",    "label": "Estimate Given", "color": "#f59e0b"},
-        {"key": "approved",    "label": "Work Approved",  "color": "#f97316"},
-        {"key": "in_shop",     "label": "In Shop",        "color": "#8b5cf6"},
-        {"key": "completed",   "label": "Completed",      "color": "#10b981"},
-        {"key": "closed",      "label": "Closed",         "color": "#374151"},
-    ],
-    "solar": [
-        {"key": "new_lead",      "label": "New Lead",        "color": "#64748b"},
-        {"key": "site_survey",   "label": "Site Survey",     "color": "#6366f1"},
-        {"key": "proposal",      "label": "Proposal Sent",   "color": "#f59e0b"},
-        {"key": "contract",      "label": "Contract Signed", "color": "#f97316"},
-        {"key": "permitting",    "label": "Permitting",      "color": "#8b5cf6"},
-        {"key": "installation",  "label": "Installation",    "color": "#10b981"},
-        {"key": "active",        "label": "Active / Live",   "color": "#3b82f6"},
-        {"key": "lost",          "label": "Lost",            "color": "#374151"},
-    ],
-}
+INDUSTRY_STAGES = _industry.CRM_STAGE_OBJECTS
+GENERIC_STAGES = _industry.GENERIC_CRM_STAGE_OBJECTS
 
-# Generic fallback for any industry not listed above
-GENERIC_STAGES = [
-    {"key": "new_lead",   "label": "New Lead",   "color": "#64748b"},
-    {"key": "contacted",  "label": "Contacted",  "color": "#6366f1"},
-    {"key": "qualified",  "label": "Qualified",  "color": "#f59e0b"},
-    {"key": "proposal",   "label": "Proposal",   "color": "#f97316"},
-    {"key": "negotiating","label": "Negotiating","color": "#8b5cf6"},
-    {"key": "won",        "label": "Won",         "color": "#10b981"},
-    {"key": "lost",       "label": "Lost",        "color": "#374151"},
-]
+
+def _industry_default_stages(org: Organization) -> list:
+    """This organization's stages before it customized anything."""
+    return _industry.crm_stage_objects(getattr(org, "industry", None))
 
 
 def _get_org_stages(org: Organization) -> list:
@@ -138,7 +69,7 @@ def _get_org_stages(org: Organization) -> list:
             return json.loads(org.crm_stages)
         except Exception:
             pass
-    return INDUSTRY_STAGES.get(org.industry or "funeral", GENERIC_STAGES)
+    return _industry_default_stages(org)
 
 
 def _get_org_custom_fields(org: Organization) -> list:
@@ -218,11 +149,13 @@ def get_stages(
     if not org:
         return GENERIC_STAGES
     stages = _get_org_stages(org)
-    industry_default = INDUSTRY_STAGES.get(org.industry or "funeral", GENERIC_STAGES)
+    industry_default = _industry_default_stages(org)
     return {
         "stages": stages,
         "is_custom": bool(org.crm_stages),
-        "industry": org.industry or "funeral",
+        # THE RESOLVED KEY, not the raw string and not a vertical default.
+        "industry": _industry.normalize(getattr(org, "industry", None)),
+        "industry_raw": getattr(org, "industry", None),
         "industry_default": industry_default,
     }
 
@@ -266,7 +199,7 @@ def reset_stages(
         raise HTTPException(status_code=404, detail="Org not found")
     org.crm_stages = None
     db.commit()
-    default = INDUSTRY_STAGES.get(org.industry or "funeral", GENERIC_STAGES)
+    default = _industry_default_stages(org)
     return {"reset": True, "stages": default}
 
 

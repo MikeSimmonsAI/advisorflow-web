@@ -8,24 +8,40 @@ import '../styles/shared.css'
 import './Leads.css'
 import VoiceCampaign from '../components/VoiceCampaign'
 
-const TIER_OPTIONS = [
-  { value: 'pre_need', label: 'Pre-Need' },
-  { value: 'at_need', label: 'At-Need' },
-  { value: 'imminent', label: 'Imminent' },
-  { value: 'contract_sold', label: 'Contract Sold' },
-  { value: 'new_inquiry', label: 'New Inquiry' },
-]
+// TIERS BELONG TO THE ORGANIZATION, NOT TO THIS FILE.
+//
+// These two lists were literals: Pre-Need, At-Need, Imminent, Contract Sold —
+// a funeral home's pipeline offered to every tenant as though it were the
+// platform's own vocabulary. An energy customer whose settings already read
+// New Inquiry · Rate Review · Proposal Sent · Contract Signed · Renewal Due
+// still filtered its leads by Pre-Need, because this page never asked.
+//
+// `org.tier_config` is the authority and `GET /org-settings/` has always
+// returned it. See src/terminology.js.
+//
+// LEGACY VALUES ARE NOT ERASED. A tenant whose records still carry a tier its
+// current configuration no longer lists keeps that tier visible in the filter,
+// appended and marked, so those leads remain findable. Nothing stored is
+// rewritten to change a label.
+import { useTerminology } from '../terminology'
 
-const TIER_FILTER_OPTIONS = [
-  { value: '', label: 'All tiers' },
-  { value: 'pre_need', label: 'Pre-Need' },
-  { value: 'at_need', label: 'At-Need' },
-  { value: 'imminent', label: 'Imminent' },
-  { value: 'contract_sold', label: 'Contract Sold' },
-  { value: 'new_inquiry', label: 'New Inquiry' },
-  { value: 'email_only', label: 'Email Only' },
-  { value: 'partial', label: 'Needs Review' },
-]
+function tierOptions(terminology, presentTiers) {
+  const configured = (terminology.tiers || []).map(t => ({
+    value: t.value, label: t.label,
+  }))
+  const known = new Set(configured.map(t => t.value))
+  const legacy = (presentTiers || [])
+    .filter(v => v && !known.has(v))
+    .map(v => ({ value: v, label: humanizeTier(v), legacy: true }))
+  return configured.concat(legacy)
+}
+
+function humanizeTier(value) {
+  return String(value || '')
+    .split(/[_\-\s]+/).filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
 
 const STATUS_FILTER_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -72,7 +88,11 @@ export default function Leads() {
   const [googleImporting, setGoogleImporting] = useState(false)
   const [googleImportResult, setGoogleImportResult] = useState(null)
   const [showAddLead, setShowAddLead] = useState(false)
-  const [addLeadForm, setAddLeadForm] = useState({ first_name: '', last_name: '', phone: '', email: '', tier: 'pre_need', source_year: '' })
+  // NO DEFAULT TIER FROM THIS FILE. It used to open on `pre_need`, so every
+  // lead added by hand in every industry started life in a funeral home's
+  // first pipeline stage. The organization's own first configured tier is
+  // filled in once its configuration is known.
+  const [addLeadForm, setAddLeadForm] = useState({ first_name: '', last_name: '', phone: '', email: '', tier: '', source_year: '' })
   const [addLeadSaving, setAddLeadSaving] = useState(false)
   const [importError, setImportError] = useState('')
   const [addLeadResult, setAddLeadResult] = useState(null)
@@ -88,16 +108,48 @@ export default function Leads() {
   // produce one behaviour, and changing a filter afterwards just works.
   const [urlParams] = useSearchParams()
   const [searchQuery, setSearchQuery] = useState(() => urlParams.get('q') || '')
-  const [tierFilter, setTierFilter] = useState(() => {
-    const t = urlParams.get('tier')
-    return TIER_FILTER_OPTIONS.some(o => o.value === t) ? t : ''
-  })
+  // A TIER IN THE URL IS A FILTER, NOT A CLAIM. It used to be checked against
+  // this file's own list, which meant a link to a tier the tenant actually has
+  // was silently dropped unless a funeral home happened to have it too. It is
+  // now accepted as a plain slug and added to the dropdown if the organization
+  // no longer lists it, so the link works and the filter is visible.
+  const [tierFilter, setTierFilter] = useState(
+    () => String(urlParams.get('tier') || '').replace(/[^a-zA-Z0-9_-]/g, ''))
   const [statusFilter, setStatusFilter] = useState(() => {
     const s = urlParams.get('status')
     return STATUS_FILTER_OPTIONS.some(o => o.value === s) ? s : ''
   })
   const [sortBy, setSortBy] = useState('created_at')
   const [sortDir, setSortDir] = useState('desc')
+
+  // ── THIS ORGANIZATION'S TIERS ────────────────────────────────────────────
+  // Resolved from its configured business type. `presentTiers` keeps any value
+  // the loaded records actually carry — including one the configuration has
+  // since dropped — so legacy data stays filterable without rewriting it.
+  const terminology = useTerminology()
+  const presentTiers = useMemo(() => {
+    const seen = new Set()
+    ;(leads || []).forEach(l => { if (l && l.tier) seen.add(l.tier) })
+    if (tierFilter) seen.add(tierFilter)
+    return [...seen]
+  }, [leads, tierFilter])
+  const tierChoices = useMemo(
+    () => tierOptions(terminology, presentTiers), [terminology, presentTiers])
+  const tierFilterChoices = useMemo(
+    () => [{ value: '', label: 'All tiers' }].concat(tierChoices), [tierChoices])
+  // Deathcare campaign purposes are offered to a deathcare business and to
+  // nobody else. They are legitimate configuration for a funeral or cemetery
+  // organization and were never a platform default.
+  const isDeathcare = terminology.industry === 'funeral'
+
+  // The add-lead drawer opens on the organization's FIRST configured tier
+  // rather than on a literal typed into this file.
+  useEffect(() => {
+    const first = (terminology.tiers || [])[0]
+    if (!first) return
+    setAddLeadForm(f => (f.tier ? f : { ...f, tier: first.value }))
+  }, [terminology.tiers])
+
   const [leadsPage, setLeadsPage] = useState(1)
   const LEADS_PAGE_SIZE = 100
 
@@ -661,7 +713,8 @@ export default function Leads() {
         source_year: addLeadForm.source_year ? parseInt(addLeadForm.source_year) : null,
       })
       setAddLeadResult(result)
-      setAddLeadForm({ first_name: '', last_name: '', phone: '', email: '', tier: 'pre_need', source_year: '' })
+      setAddLeadForm({ first_name: '', last_name: '', phone: '', email: '',
+        tier: ((terminology.tiers || [])[0] || {}).value || '', source_year: '' })
       loadLeads()
     } catch (err) {
       setAddLeadResult({ error: err.message || 'Could not create lead.' })
@@ -743,7 +796,7 @@ export default function Leads() {
             </label>
             <label className="leads-add-label">Tier
               <select className="filter-select" value={addLeadForm.tier} onChange={(e) => setAddLeadForm((p) => ({ ...p, tier: e.target.value }))}>
-                {TIER_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                {tierChoices.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </label>
             <label className="leads-add-label">Source year
@@ -832,9 +885,13 @@ export default function Leads() {
             >
               <option value="">🎯 Campaign purpose (optional)</option>
               <option value="file_review">📁 File review / reconnect</option>
-              <option value="markers">🪦 Markers / memorials</option>
-              <option value="pre_need">📋 Pre-need planning</option>
-              <option value="at_need_followup">💙 At-need follow-up</option>
+              {/* A DEATHCARE BUSINESS'S OWN PURPOSES, offered to a deathcare
+                  business. These were shown to every tenant, so an energy
+                  customer picked a campaign purpose from a list containing
+                  markers, memorials and pre-need planning. */}
+              {isDeathcare && <option value="markers">🪦 Markers / memorials</option>}
+              {isDeathcare && <option value="pre_need">📋 Pre-need planning</option>}
+              {isDeathcare && <option value="at_need_followup">💙 At-need follow-up</option>}
               <option value="upsell_existing">⭐ Existing client upsell</option>
               <option value="event_invite">🎟 Event invitation</option>
               <option value="re_engagement">🔄 Re-engagement / check-in</option>
@@ -1070,7 +1127,11 @@ export default function Leads() {
             />
           </div>
           <select className="filter-select" value={tierFilter} onChange={(e) => { setTierFilter(e.target.value); setLeadsPage(1) }}>
-            {TIER_FILTER_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+            {tierFilterChoices.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}{opt.legacy ? ' (legacy)' : ''}
+              </option>
+            ))}
           </select>
           <select className="filter-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setLeadsPage(1) }}>
             {STATUS_FILTER_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
@@ -1295,7 +1356,11 @@ export default function Leads() {
                           onChange={(e) => e.target.value && assignTier(lead.id, e.target.value)}
                         >
                           <option value="" disabled>Assign…</option>
-                          {TIER_OPTIONS.map((opt) => (
+                          {/* Only tiers this organization is configured for can
+                              be ASSIGNED. A legacy value stays filterable and
+                              visible on the records that carry it, but nothing
+                              new is put into a tier the business no longer uses. */}
+                          {(terminology.tiers || []).map((opt) => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
                           ))}
                         </select>
@@ -1542,7 +1607,7 @@ export default function Leads() {
                     border: '1px solid var(--border-default)', fontFamily: 'inherit',
                     background: 'var(--surface-base, #161929)', color: 'var(--text-primary)',
                   }}
-                  placeholder="AI direction (optional) — e.g. file check, ask if they still need pre-need planning"
+                  placeholder="AI direction (optional) — e.g. follow up and ask if they still need help"
                   value={bulkAiDirection}
                   onChange={e => setBulkAiDirection(e.target.value)}
                 />

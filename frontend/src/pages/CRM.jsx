@@ -3,17 +3,19 @@ import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './CRM.css'
 
-// Stages are loaded from /crm/stages at runtime so they're org-appropriate.
-// This fallback is used only before the API responds.
-const FALLBACK_STAGES = [
-  { key: 'inquiry',           label: 'Inquiry',             color: '#64748b' },
-  { key: 'pre_need',          label: 'Pre-Need',            color: '#6366f1' },
-  { key: 'at_need',           label: 'At-Need',             color: '#f59e0b' },
-  { key: 'arrangements',      label: 'Arrangements',        color: '#ef4444' },
-  { key: 'services_complete', label: 'Services Complete',   color: '#10b981' },
-  { key: 'aftercare',         label: 'Aftercare Follow-up', color: '#3b82f6' },
-  { key: 'closed',            label: 'Closed',              color: '#374151' },
-]
+// Stages are loaded from the server at runtime so they're org-appropriate.
+// This fallback is what renders in the moment before that answer arrives, or
+// if it never does.
+//
+// IT USED TO BE THE FUNERAL PIPELINE — Pre-Need, At-Need, Arrangements,
+// Services Complete, Aftercare Follow-up — shown to every tenant in every
+// industry on the way to their own configuration, and left standing whenever
+// the request failed. A first-paint default is indistinguishable from a
+// decision to the person reading it, so this one carries no vertical at all.
+// See src/terminology.js.
+import { NEUTRAL_STAGES } from '../terminology'
+
+const FALLBACK_STAGES = NEUTRAL_STAGES
 
 function stageColor(key, stages) {
   return ((stages || FALLBACK_STAGES).find(s => s.key === key) || {}).color || '#6b7280'

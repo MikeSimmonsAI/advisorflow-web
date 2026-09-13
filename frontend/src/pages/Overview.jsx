@@ -36,17 +36,25 @@ import { useObservationMode } from '../context/ObservationContext'
 import './Overview.css'
 
 // ── Industry-aware labels ─────────────────────────────────────────────────────
-const INDUSTRY_LABELS = {
-  funeral:      { appointments: 'Arrangements', bookingRate: 'Arrangement rate', bookedSub: 'Booked arrangements', projectedBookings: 'Projected arrangements', confirmLabel: 'arrangements confirmed', weeklyLabel: 'arrangements this week', recordedVisits: 'Recorded visits' },
-  fiber:        { appointments: 'Installs',     bookingRate: 'Install rate',     bookedSub: 'Scheduled installs',  projectedBookings: 'Projected installs',     confirmLabel: 'installs confirmed',     weeklyLabel: 'installs this week',     recordedVisits: 'Completed installs' },
-  solar:        { appointments: 'Assessments',  bookingRate: 'Assessment rate',  bookedSub: 'Scheduled assessments', projectedBookings: 'Projected assessments', confirmLabel: 'assessments confirmed', weeklyLabel: 'assessments this week', recordedVisits: 'Completed assessments' },
-  roofing:      { appointments: 'Inspections',  bookingRate: 'Inspection rate',  bookedSub: 'Scheduled inspections', projectedBookings: 'Projected inspections', confirmLabel: 'inspections confirmed', weeklyLabel: 'inspections this week', recordedVisits: 'Completed inspections' },
-  insurance:    { appointments: 'Consultations', bookingRate: 'Consultation rate', bookedSub: 'Booked consultations', projectedBookings: 'Projected consultations', confirmLabel: 'consultations confirmed', weeklyLabel: 'consultations this week', recordedVisits: 'Completed consultations' },
-  real_estate:  { appointments: 'Showings',     bookingRate: 'Showing rate',     bookedSub: 'Scheduled showings',  projectedBookings: 'Projected showings',    confirmLabel: 'showings confirmed',     weeklyLabel: 'showings this week',     recordedVisits: 'Completed showings' },
-  home_services:{ appointments: 'Appointments', bookingRate: 'Booking rate',     bookedSub: 'Booked appointments', projectedBookings: 'Projected bookings',    confirmLabel: 'appointments confirmed', weeklyLabel: 'bookings this week',     recordedVisits: 'Completed appointments' },
-  sales:        { appointments: 'Demos',        bookingRate: 'Demo rate',        bookedSub: 'Scheduled demos',     projectedBookings: 'Projected demos',       confirmLabel: 'demos confirmed',        weeklyLabel: 'demos this week',        recordedVisits: 'Completed demos' },
-}
-const DEFAULT_LABELS = INDUSTRY_LABELS.funeral
+//
+// THIS USED TO BE A SECOND INDUSTRY REGISTRY, AND IT ANSWERED "FUNERAL" FOR
+// EVERY TENANT ON THE PLATFORM. Seventy hand-written strings in a map keyed by
+// industries the backend has never heard of (`solar`, `sales`) and missing ones
+// it has (`energy`, `dental`, `generic`), read as:
+//
+//     const industry = branding?.industry || 'funeral'
+//     const IL = INDUSTRY_LABELS[industry] || DEFAULT_LABELS   // = funeral
+//
+// `branding` never carried an `industry` key — `fetchAndStoreBranding` builds
+// an eight-field object and that is not one of them — so `industry` was
+// ALWAYS undefined and the funeral map was not a fallback, it was the only
+// path. An energy customer's dashboard said ARRANGEMENTS, ARRANGEMENT RATE and
+// RECORDED VISITS because nothing had ever asked what business they are in.
+//
+// The platform's one industry registry answers that, and `src/terminology.js`
+// fetches it. The seven labels are derived from a single noun per business
+// type, so there is nothing here to drift.
+import { metricLabels, useTerminology } from '../terminology'
 
 const STAGE_TONE = {
   new: 'var(--signal-amber)', sent: 'var(--signal-blue)', replied: 'var(--signal-blue)',
@@ -89,8 +97,12 @@ export default function Overview() {
   const branding = getBranding()
   const enabledFeatures = branding?.enabled_features ?? null
   const isEnabled = (key) => !enabledFeatures || enabledFeatures.includes(key)
-  const industry = branding?.industry || 'funeral'
-  const IL = INDUSTRY_LABELS[industry] || DEFAULT_LABELS
+  // THIS ORGANIZATION'S OWN WORDS, resolved by the server from its configured
+  // business type. Neutral English until the answer arrives, never a vertical's.
+  const terminology = useTerminology()
+  const IL = useMemo(
+    () => metricLabels(terminology.vocabulary?.appointments),
+    [terminology.vocabulary?.appointments])
 
   // Team performance reads an admin endpoint. An advisor asking for it gets a
   // 403, so it is not requested for them and the panel says why rather than
