@@ -102,7 +102,7 @@ export default function Onboarding() {
                 className="onboarding-input"
                 value={form.business_name}
                 onChange={(e) => update('business_name', e.target.value)}
-                placeholder="Restland Cemetery & Funeral Home"
+                placeholder="Your company name"
                 autoFocus
               />
             </label>

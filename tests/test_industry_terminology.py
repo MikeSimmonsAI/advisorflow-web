@@ -301,6 +301,7 @@ CUSTOMER_SURFACES = [
     "frontend/src/pages/OrgSettings.jsx",
     "frontend/src/pages/ImportBatches.jsx",
     "frontend/src/pages/CampaignBuilder.jsx",
+    "frontend/src/pages/Onboarding.jsx",
     "frontend/src/terminology.js",
 ]
 
