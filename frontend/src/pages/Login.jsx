@@ -107,7 +107,33 @@ const PLATFORM_CONTENT = {
   },
 }
 
-const content = PLATFORM_CONTENT[theme] || PLATFORM_CONTENT[THEMES.BOOKABOOST]
+/* AN UNRECOGNISED BRAND GETS NO BRAND'S COPY, NOT THE FIRST ONE IN THE FILE.
+ *
+ * This fell back to BookaBoost — headline "BookaBoost", a pre-need tagline,
+ * "Funeral-industry CRM built in" and a "Pre-Need Edition" badge. Every brand
+ * on the platform today has its own entry, so nobody sees that now; the fifth
+ * brand added would have, and its customers' first ever screen would have been
+ * a funeral product belonging to somebody else.
+ *
+ * The neutral panel takes its name and colour from the resolved brand config,
+ * which is populated from the platform row, and says nothing about an industry
+ * because it does not know one.
+ */
+const NEUTRAL_CONTENT = {
+  headline: brand?.displayName || '',
+  tagline: 'Sign in to your workspace.',
+  accentColor: brand?.accentColor || '#3b82f6',
+  accentGlow: 'rgba(59,130,246,0.15)',
+  bgGradient: 'linear-gradient(135deg, #0b1220 0%, #0e1626 50%, #0b1220 100%)',
+  panelGradient: 'linear-gradient(160deg, #0e1626 0%, #0b1220 100%)',
+  poweredBy: brand?.displayName || '',
+  stats: [],
+  features: [],
+  badge: null,
+  badgeStyle: {},
+}
+
+const content = PLATFORM_CONTENT[theme] || NEUTRAL_CONTENT
 
 // Animated ticker — cycles through stats
 function StatTicker({ stats, accentColor }) {
@@ -125,7 +151,11 @@ function StatTicker({ stats, accentColor }) {
     return () => clearInterval(interval)
   }, [stats.length])
 
+  // A brand with no marketing stats configured renders nothing here rather
+  // than dereferencing `stats[0]` and taking the whole login page down with
+  // it — an unmounted React tree on the SIGN-IN screen locks everyone out.
   const stat = stats[idx]
+  if (!stat) return null
   return (
     <div className="login-stat-ticker" style={{ opacity: visible ? 1 : 0, transition: 'opacity 0.3s' }}>
       <span className="login-stat-value" style={{ color: accentColor }}>{stat.value}</span>
@@ -199,7 +229,9 @@ export default function Login() {
       <div className="login-left" style={{ background: content.panelGradient }}>
 
         {/* Badge */}
-        <div className="login-lp-badge" style={content.badgeStyle}>{content.badge}</div>
+        {content.badge ? (
+          <div className="login-lp-badge" style={content.badgeStyle}>{content.badge}</div>
+        ) : null}
 
         {/* Brand */}
         <div className="login-lp-brand">

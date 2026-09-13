@@ -1,4 +1,5 @@
 import './StatusBadge.css'
+import { useTerminology } from '../terminology'
 
 const STATUS_CONFIG = {
   new: { label: 'New', color: 'blue' },
@@ -12,15 +13,49 @@ const STATUS_CONFIG = {
   needs_tier_review: { label: 'Needs Review', color: 'amber' },
 }
 
-const TIER_CONFIG = {
-  pre_need: { label: 'Pre-Need', color: 'blue' },
-  at_need: { label: 'At-Need', color: 'amber' },
-  imminent: { label: 'Imminent', color: 'red' },
-  contract_sold: { label: 'Contract Sold', color: 'green' },
-  new_inquiry: { label: 'New Inquiry', color: 'purple' },
-  email_only: { label: 'Email Only', color: 'neutral' },
-  addr_only: { label: 'Address Only', color: 'neutral-dim' },
-  partial: { label: 'Needs Review', color: 'amber' },
+/* ONE INDUSTRY'S TIER NAMES, PRINTED FOR EVERY INDUSTRY.
+ *
+ * This map was the label source for every tier badge in the product — the
+ * Leads table and its tier counts, Lead Detail, Campaign Builder, Cadence and
+ * the Admin book. It knows eight keys and all of the business ones are
+ * deathcare: Pre-Need, At-Need, Imminent, Contract Sold.
+ *
+ * For a customer configured as anything else that produced BOTH failure modes
+ * at once. A key this map happens to hold rendered SOMEBODY ELSE'S WORD —
+ * an energy customer's `contract_sold` came out "Contract Sold" from a funeral
+ * vocabulary — and every key it does not hold fell through to `label: tier`
+ * and printed the raw column value, so Atlantis Light & Power showed
+ * `rate_review` and `renewal_due` in snake_case on its own leads.
+ *
+ * The organization's configured tier model is the label authority — the same
+ * one `/org-settings/` gives the tier filter and the tier editor — so a tenant
+ * is never shown a word it did not choose. What stays here is COLOUR, which is
+ * a visual convention rather than vocabulary, keyed by meaning that survives
+ * across industries (an inbound enquiry reads cool, a closed deal green) and
+ * defaulting to neutral rather than guessing.
+ *
+ * LEGACY KEYS ARE STILL READABLE. A lead carrying a tier its organization no
+ * longer lists is humanised from its own key rather than dropped or relabelled
+ * — the row has to stay findable, and nothing stored is rewritten.
+ */
+const TIER_COLOR = {
+  pre_need: 'blue',
+  at_need: 'amber',
+  imminent: 'red',
+  contract_sold: 'green',
+  contract_signed: 'green',
+  new_inquiry: 'purple',
+  email_only: 'neutral',
+  addr_only: 'neutral-dim',
+  partial: 'amber',
+  needs_tier_review: 'amber',
+}
+
+function humanizeTier(value) {
+  return String(value || '')
+    .split(/[_\-\s]+/).filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
 }
 
 export function StatusBadge({ status }) {
@@ -29,6 +64,9 @@ export function StatusBadge({ status }) {
 }
 
 export function TierBadge({ tier }) {
-  const config = TIER_CONFIG[tier] || { label: tier, color: 'neutral' }
-  return <span className={`badge badge--${config.color}`}>{config.label}</span>
+  const terminology = useTerminology()
+  const configured = (terminology.tiers || []).find(t => t.value === tier)
+  const label = configured?.label || humanizeTier(tier)
+  const color = configured?.color || TIER_COLOR[tier] || 'neutral'
+  return <span className={`badge badge--${color}`}>{label}</span>
 }

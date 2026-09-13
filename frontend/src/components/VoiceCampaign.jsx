@@ -129,11 +129,14 @@ export default function VoiceCampaign({ selectedLeads = [], onClose, onSuccess }
         {/* Campaign name */}
         <div style={styles.field}>
           <label style={styles.label}>Campaign name</label>
+          {/* A shape, not a vertical. The example here was "Pre-Need Follow-Up
+              July 2026" — a funeral term, on a form shown to every industry on
+              the platform. */}
           <input
             style={styles.input}
             value={campaignName}
             onChange={e => setCampaignName(e.target.value)}
-            placeholder="e.g. Pre-Need Follow-Up July 2026"
+            placeholder="e.g. Follow-Up — July 2026"
           />
         </div>
 
