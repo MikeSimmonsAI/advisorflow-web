@@ -65,6 +65,7 @@ export const NEUTRAL_VOCABULARY = {
 }
 
 export const NEUTRAL = {
+  orgName: '',
   industry: 'generic',
   industryLabel: 'General service business',
   matched: false,
@@ -177,6 +178,11 @@ function shape(data) {
     ? data.crm_stages
     : NEUTRAL_STAGES
   return {
+    // THE BUSINESS'S OWN NAME, for copy that addresses its customers. Composed
+    // email subjects used to name one real cemetery customer in every tenant's
+    // outbound mail; a subject that cannot name this business omits the name
+    // rather than borrowing somebody else's.
+    orgName: data.brand_name || data.name || '',
     industry: data.industry || NEUTRAL.industry,
     industryLabel: data.industry_label || NEUTRAL.industryLabel,
     matched: Boolean(data.industry_matched),

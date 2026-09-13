@@ -656,11 +656,11 @@ export default function OrgSettings() {
                   <div className="os-tier-fields">
                     <label className="os-tier-label">
                       Value (internal)
-                      <input className="os-input os-input--sm" value={tier.value} onChange={(e) => updateTier(i, 'value', e.target.value)} placeholder="pre_need" />
+                      <input className="os-input os-input--sm" value={tier.value} onChange={(e) => updateTier(i, 'value', e.target.value)} placeholder="new_inquiry" />
                     </label>
                     <label className="os-tier-label">
                       Display label
-                      <input className="os-input os-input--sm" value={tier.label} onChange={(e) => updateTier(i, 'label', e.target.value)} placeholder="Pre-Need" />
+                      <input className="os-input os-input--sm" value={tier.label} onChange={(e) => updateTier(i, 'label', e.target.value)} placeholder="New Inquiry" />
                     </label>
                     <label className="os-tier-label">
                       Description

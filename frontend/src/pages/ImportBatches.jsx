@@ -187,7 +187,7 @@ export default function ImportBatches() {
             <div className="form-row-group">
               <div className="form-row">
                 <label className="form-label">List Name</label>
-                <input type="text" placeholder="e.g. 2024 Pre-Need Purchased List"
+                <input type="text" placeholder="e.g. 2024 Purchased List"
                   value={displayName} onChange={e => setDisplayName(e.target.value)} />
               </div>
               <div className="form-row">

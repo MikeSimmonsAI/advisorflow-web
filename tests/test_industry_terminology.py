@@ -34,8 +34,12 @@ from app.services import industry_templates as templates
 from app.services.auth_service import hash_password
 
 
+# "imminent" is deliberately NOT here. It is a tier VALUE a funeral home
+# configures, and the composer matches on tier words to pick an appointment
+# type — matching on a key renders nothing. The words below are ones that,
+# appearing in a customer surface, are being SHOWN to somebody.
 DEATHCARE_WORDS = ("pre-need", "pre_need", "at-need", "at_need", "arrangement",
-                   "aftercare", "imminent", "memorial", "marker")
+                   "aftercare", "memorial", "marker")
 
 
 def _has_deathcare(blob) -> bool:
@@ -291,8 +295,18 @@ CUSTOMER_SURFACES = [
     "frontend/src/pages/CRM.jsx",
     "frontend/src/pages/EmailQueue.jsx",
     "frontend/src/pages/Pipeline.jsx",
+    "frontend/src/pages/LeadDetail.jsx",
+    "frontend/src/pages/Templates.jsx",
+    "frontend/src/pages/TierDefinitions.jsx",
+    "frontend/src/pages/OrgSettings.jsx",
+    "frontend/src/pages/ImportBatches.jsx",
+    "frontend/src/pages/CampaignBuilder.jsx",
     "frontend/src/terminology.js",
 ]
+
+# One real customer, whose name was typed into the composer's subject-line
+# generator and therefore into every other tenant's outgoing email.
+CUSTOMER_NAMES = ("Restland",)
 
 # Words that may legitimately appear in these files as CODE or as a comment
 # explaining the defect, rather than as something a customer is shown.
@@ -332,4 +346,19 @@ def test_no_customer_surface_hard_codes_another_vertical(path):
                 offenders.append(line)
                 break
     assert not offenders, "%s still renders deathcare wording:\n%s" % (
+        path, "\n".join(offenders[:8]))
+
+
+@pytest.mark.parametrize("path", CUSTOMER_SURFACES)
+def test_no_customer_surface_names_another_customer(path):
+    """A REAL CUSTOMER'S NAME IN A SHARED COMPOSER IS NOT A LABEL DEFECT.
+
+    `smartSubject` in LeadDetail.jsx returned "Your family file at <a cemetery
+    customer's name>" and it is the DEFAULT SUBJECT of the email that page
+    sends, so an advisor who did not retype the field mailed their own prospect
+    under somebody else's business name.
+    """
+    offenders = [line for line in _rendered_lines(path)
+                 if any(name in line for name in CUSTOMER_NAMES)]
+    assert not offenders, "%s names another customer:\n%s" % (
         path, "\n".join(offenders[:8]))

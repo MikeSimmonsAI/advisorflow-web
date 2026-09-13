@@ -858,7 +858,7 @@ export default function Leads() {
             />
             <input
               type="text"
-              placeholder="List name (optional, e.g. 'Restland Q1 2024')"
+              placeholder="List name (optional, e.g. 'Q1 2024 purchased list')"
               value={importListName}
               onChange={(e) => setImportListName(e.target.value)}
               className="settings-input"

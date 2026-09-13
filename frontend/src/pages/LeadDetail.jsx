@@ -7,6 +7,7 @@ import OutcomeTracker from '../components/OutcomeTracker'
 import CaseFile from './CaseFile'
 import { useToast } from '../components/Toast'
 import { formatPhone } from '../utils/phone'
+import { useTerminology } from '../terminology'
 import '../styles/shared.css'
 import './LeadDetail.css'
 
@@ -52,117 +53,113 @@ const TONES = [
   { key: 'urgent', label: '⚡ Urgent', color: 'var(--signal-purple)', desc: 'Brief, time-sensitive ask' },
 ]
 
-// Mirrors APPT_TYPE_MAP in app/services/sms_service.py
-const APPT_TYPE_MAP = {
-  pre_need:          'Pre-Need Planning Consultation',
-  'pre-need':        'Pre-Need Planning Consultation',
-  preneed:           'Pre-Need Planning Consultation',
-  preplanning:       'Pre-Planning Consultation',
-  pre_planning:      'Pre-Planning Consultation',
-  at_need:           'At-Need Arrangement Conference',
-  'at-need':         'At-Need Arrangement Conference',
-  atneed:            'At-Need Arrangement Conference',
-  imminent:          'Immediate Need Consultation',
-  urgent:            'Urgent Arrangement Consultation',
-  file_check:        'Family File Review',
-  'file check':      'Family File Review',
-  code_lead:         'Family File Review',
-  'code lead':       'Family File Review',
-  file_review:       'Family File Review',
-  property:          'Property Ownership Review',
-  property_transfer: 'Property Transfer Appointment',
-  plot:              'Cemetery Property Consultation',
-  marker:            'Marker & Memorial Consultation',
-  memorial:          'Memorial Planning Consultation',
-  flower:            'Memorial Flower Review',
-  flowers:           'Memorial Flower Review',
-  contract:          'Contract Review Appointment',
-  contract_sold:     'Contract Review Appointment',
-  existing_customer: 'Family Services Appointment',
-  referral:          'Family Services Consultation',
-  web_lead:          'General Consultation',
-  'web lead':        'General Consultation',
-  new_inquiry:       'New Family Consultation',
-  'new inquiry':     'New Family Consultation',
-  insurance:         'Insurance & Benefits Review',
-  benefits:          'Benefits & Coverage Consultation',
-  veteran:           'Veterans Benefits Consultation',
-  veterans:          'Veterans Benefits Consultation',
-  general:           'Family Services Appointment',
-}
+// ── APPOINTMENT LABELS AND SUBJECT LINES ──────────────────────────────────
+//
+// WHAT WAS HERE, AND WHY IT MATTERED MORE THAN A LABEL. A forty-entry funeral
+// appointment taxonomy, a twenty-line funeral fallback list, and - the part
+// that actually reached people - a subject-line generator whose file-check and
+// property branches returned "Your family file at <a real cemetery customer's
+// name>" and "Your property at <the same name>", typed in as literals.
+//
+// `smartSubject` is not a hint. It is the DEFAULT SUBJECT of the email this
+// page sends: an advisor who does not retype the field sends it. So every
+// tenant of this platform, in every industry, emailed their own prospects
+// naming ANOTHER CUSTOMER'S BUSINESS, and the rest named a funeral home's
+// products to people buying electricity.
+//
+// The organization's own appointment types are already fetched from
+// `/settings/appointment-types` and already override the list below; what was
+// missing was that the defaults, the auto-detection and the subject lines all
+// had one vertical baked in. They now resolve from the organization's
+// configuration, and the local fallbacks carry nobody's vertical.
 
-// Fallback list — overridden by org-specific types fetched from the API
+// The pre-fetch fallback only. Neutral on purpose: whatever renders before the
+// organization's own list arrives must not be another business's vocabulary.
 const DEFAULT_APPT_TYPE_OPTIONS = [
-  'Pre-Need Planning Consultation',
-  'Pre-Planning Consultation',
-  'At-Need Arrangement Conference',
-  'Immediate Need Consultation',
-  'Urgent Arrangement Consultation',
-  'Family File Review',
-  'Property Ownership Review',
-  'Property Transfer Appointment',
-  'Cemetery Property Consultation',
-  'Marker & Memorial Consultation',
-  'Memorial Planning Consultation',
-  'Memorial Flower Review',
-  'Contract Review Appointment',
-  'Family Services Appointment',
-  'Family Services Consultation',
   'General Consultation',
-  'New Family Consultation',
-  'Insurance & Benefits Review',
-  'Benefits & Coverage Consultation',
-  'Veterans Benefits Consultation',
+  'Discovery Call',
+  'Follow-Up Appointment',
+  'Phone Call',
+  'Video Call',
+  'Referral Appointment',
 ]
 
-// Auto-detect appointment label from lead fields
-function detectApptLabel(tier, messageTrack, contactChannel) {
-  for (const field of [messageTrack, tier, contactChannel]) {
-    if (!field) continue
-    const key = field.toLowerCase().trim()
-    if (APPT_TYPE_MAP[key]) return APPT_TYPE_MAP[key]
-    for (const [mapKey, label] of Object.entries(APPT_TYPE_MAP)) {
-      if (mapKey.includes(key) || key.includes(mapKey)) return label
+// Words in a tier or track that suggest which of the ORGANIZATION'S OWN
+// appointment types to preselect. Matching is done against that fetched list,
+// so a funeral home still lands on its arrangement conference and an energy
+// business on its rate review - because those are the types each of them
+// configured, not because either is named here.
+const APPT_HINTS = [
+  ['renewal', 'renew'],
+  ['contract', 'contract'],
+  ['proposal', 'proposal'],
+  ['rate', 'rate'],
+  ['estimate', 'estimate'],
+  ['inspection', 'inspect'],
+  ['install', 'install'],
+  ['review', 'review'],
+  ['consultation', 'consult'],
+  ['referral', 'referral'],
+  ['urgent', 'urgent'],
+  ['imminent', 'immediate'],
+]
+
+/**
+ * Which of this organization's appointment types fits this lead.
+ *
+ * `options` is the org's own list. A tier or track whose words appear in one of
+ * its types selects that type; otherwise the first type the organization
+ * configured, which is its own starting point rather than anybody else's.
+ */
+function detectApptLabel(tier, messageTrack, contactChannel, options) {
+  const list = (options && options.length) ? options : DEFAULT_APPT_TYPE_OPTIONS
+  const fields = [messageTrack, tier, contactChannel]
+    .filter(Boolean).map(f => String(f).toLowerCase().replace(/[_-]+/g, ' '))
+
+  for (const field of fields) {
+    const direct = list.find(o => o.toLowerCase() === field)
+    if (direct) return direct
+  }
+  for (const field of fields) {
+    for (const word of field.split(/\s+/).filter(w => w.length > 3)) {
+      const hit = list.find(o => o.toLowerCase().includes(word))
+      if (hit) return hit
+    }
+    for (const [needle, inType] of APPT_HINTS) {
+      if (!field.includes(needle)) continue
+      const hit = list.find(o => o.toLowerCase().includes(inType))
+      if (hit) return hit
     }
   }
-  return 'Family Services Appointment'
+  return list[0]
 }
 
-// Smart subject line based on tier / message_track — no AI call needed
-function smartSubject(firstName, tier, messageTrack) {
+/**
+ * A default subject line that names THIS business, or nothing at all.
+ *
+ * The organization's own name comes from the caller; when it is not known yet
+ * the subject simply omits it rather than substituting somebody else's. No
+ * vertical's products are named: a subject a seller has not read should be
+ * bland, not wrong.
+ */
+function smartSubject(firstName, tier, messageTrack, orgName) {
   const name = firstName ? `, ${firstName}` : ''
+  const at = orgName ? ` at ${orgName}` : ''
   const track = (messageTrack || '').toLowerCase()
   const t = (tier || '').toLowerCase()
+  const says = (...words) => words.some(w => track.includes(w) || t.includes(w))
 
-  if (track.includes('pre_need') || track.includes('preneed') || track.includes('pre-need') ||
-      t.includes('pre_need') || t.includes('preneed')) {
-    return `Quick question about your pre-need plan${name}`
+  if (says('renewal', 'renew')) return `Your renewal is coming up${name}`
+  if (says('proposal', 'quote', 'quoted', 'estimate')) {
+    return `Following up on your quote${name}`
   }
-  if (track.includes('at_need') || track.includes('atneed') || t.includes('at_need')) {
-    return `We're here for you${name}`
+  if (says('contract')) return `About your contract${at}${name}`
+  if (says('referral')) return `Someone thought of you${name}`
+  if (says('urgent', 'imminent')) return `We're ready to help${name}`
+  if (says('file_check', 'file check', 'file_review', 'code_lead', 'code lead')) {
+    return `Your file${at}${name}`
   }
-  if (track.includes('file_check') || track.includes('code_lead') || track.includes('file_review') ||
-      t.includes('file_check') || t.includes('code_lead')) {
-    return `Your family file at Restland${name}`
-  }
-  if (track.includes('property') || track.includes('plot') || t.includes('property')) {
-    return `Your property at Restland${name}`
-  }
-  if (track.includes('marker') || track.includes('memorial') || t.includes('marker') || t.includes('memorial')) {
-    return `Your memorial arrangement${name}`
-  }
-  if (track.includes('veteran') || t.includes('veteran')) {
-    return `Your veterans benefits${name}`
-  }
-  if (track.includes('insurance') || track.includes('benefits') || t.includes('insurance')) {
-    return `Your insurance & benefits review${name}`
-  }
-  if (track.includes('referral') || t.includes('referral')) {
-    return `Someone thought of you${name}`
-  }
-  if (track.includes('imminent') || t.includes('imminent')) {
-    return `We're ready to help${name}`
-  }
+  if (says('insurance', 'benefits')) return `Your benefits review${name}`
   return `Checking in${name}`
 }
 
@@ -341,6 +338,14 @@ export default function LeadDetail() {
   const [activityError, setActivityError] = useState('')
   const [activeTab, setActiveTab] = useState('conversation') // 'conversation' | 'calls' | 'timeline'
   const [apptTypeOptions, setApptTypeOptions] = useState(DEFAULT_APPT_TYPE_OPTIONS)
+  // The timeline load preselects an appointment label and can finish before or
+  // after the org's own type list arrives, so the list is read through a ref
+  // rather than captured in that closure.
+  const apptTypeOptionsRef = useRef(DEFAULT_APPT_TYPE_OPTIONS)
+  useEffect(() => { apptTypeOptionsRef.current = apptTypeOptions }, [apptTypeOptions])
+  // This organization's own name, for the default email subject.
+  const terminology = useTerminology()
+  const orgName = terminology.orgName
   const timelineRef = useRef(null)
 
   // Manual flagging
@@ -400,7 +405,8 @@ export default function LeadDetail() {
         setData(d)
         // Auto-detect appt label on first load; preserve manual selection afterward
         setApptLabel((prev) =>
-          prev || detectApptLabel(d?.lead?.tier, d?.lead?.message_track, d?.lead?.contact_channel)
+          prev || detectApptLabel(d?.lead?.tier, d?.lead?.message_track,
+                                  d?.lead?.contact_channel, apptTypeOptionsRef.current)
         )
       })
       .catch((err) => {
@@ -576,7 +582,7 @@ export default function LeadDetail() {
       const lead = data?.lead
       setEmailSubject(
         option.subject ||
-        smartSubject(lead?.first_name, lead?.tier, lead?.message_track)
+        smartSubject(lead?.first_name, lead?.tier, lead?.message_track, orgName)
       )
       setIncludeBookingLink(true)
     } catch (err) {
@@ -650,7 +656,7 @@ export default function LeadDetail() {
       if (emailAttachment) {
         // Use multipart endpoint when an attachment is present
         const formData = new FormData()
-        formData.append('subject', emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track))
+        formData.append('subject', emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track, orgName))
         formData.append('body_html', emailBody)
         formData.append('include_booking_link', includeBookingLink ? 'true' : 'false')
         if (apptLabel) formData.append('appt_label', apptLabel)
@@ -660,7 +666,7 @@ export default function LeadDetail() {
         if (emailAttachRef.current) emailAttachRef.current.value = ''
       } else {
         await api.post(`/email/send/${leadId}`, {
-          subject: emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track),
+          subject: emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track, orgName),
           body: emailBody,
           include_booking_link: includeBookingLink,
           appt_label: apptLabel,
@@ -1503,7 +1509,7 @@ export default function LeadDetail() {
                 )}
                 <input
                   className="compose-subject"
-                  placeholder={`Subject — e.g. ${smartSubject(lead.first_name, lead.tier, lead.message_track)}`}
+                  placeholder={`Subject — e.g. ${smartSubject(lead.first_name, lead.tier, lead.message_track, orgName)}`}
                   value={emailSubject}
                   onChange={(e) => setEmailSubject(e.target.value)}
                 />

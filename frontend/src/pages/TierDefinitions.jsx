@@ -236,7 +236,11 @@ export default function TierDefinitions() {
         <div className="td-empty panel">
           <p style={{ fontSize: '2rem', marginBottom: 8 }}>🏗️</p>
           <p><strong>No tiers configured yet.</strong></p>
-          <p>Click <strong>Seed Defaults</strong> to load Restland's standard 8-tier set, or create your own tiers from scratch.</p>
+          {/* SEEDING LOADS THIS ORGANIZATION'S BUSINESS TYPE, not a named
+              customer's. The copy said it loaded one real cemetery customer's
+              eight-tier set, which is what it looked like it would do to every
+              other business reading it. */}
+          <p>Click <strong>Seed Defaults</strong> to load the standard tier set for your business type, or create your own tiers from scratch.</p>
           <div className="td-btn td-btn--primary" style={{ marginTop: 16, display: 'inline-flex' }} onClick={seedDefaults}>
             ⟳ Seed Default Tiers
           </div>
@@ -338,7 +342,7 @@ export default function TierDefinitions() {
                   <label className="td-label">Tier Key *</label>
                   <input
                     className="td-input"
-                    placeholder="e.g. pre_need"
+                    placeholder="e.g. new_inquiry"
                     value={form.tier_key}
                     onChange={e => setForm(f => ({ ...f, tier_key: e.target.value }))}
                     disabled={!!editingTier}
@@ -349,7 +353,7 @@ export default function TierDefinitions() {
                   <label className="td-label">Tier Label *</label>
                   <input
                     className="td-input"
-                    placeholder="e.g. Pre-Need"
+                    placeholder="e.g. New Inquiry"
                     value={form.tier_label}
                     onChange={e => setForm(f => ({ ...f, tier_label: e.target.value }))}
                   />
@@ -362,7 +366,7 @@ export default function TierDefinitions() {
                   <label className="td-label">Track Key *</label>
                   <input
                     className="td-input"
-                    placeholder="e.g. pre_need_lock_price"
+                    placeholder="e.g. new_inquiry_intro"
                     value={form.track_key}
                     onChange={e => setForm(f => ({ ...f, track_key: e.target.value }))}
                   />
@@ -372,7 +376,7 @@ export default function TierDefinitions() {
                   <label className="td-label">Track Label *</label>
                   <input
                     className="td-input"
-                    placeholder="e.g. Pre-Need (Lock Price)"
+                    placeholder="e.g. New Inquiry (Intro)"
                     value={form.track_label}
                     onChange={e => setForm(f => ({ ...f, track_label: e.target.value }))}
                   />
@@ -385,7 +389,7 @@ export default function TierDefinitions() {
                 <textarea
                   className="td-textarea"
                   rows={4}
-                  placeholder="Describe the tone and context the AI should use when drafting messages for this tier. Be specific — e.g. 'At-Need: the lead's family is currently arranging services for a recent loss. Tone should be warm, supportive, and unhurried — never salesy.'"
+                  placeholder="Describe the tone and context the AI should use when drafting messages for this tier. Be specific — e.g. 'Renewal Due: this account's contract is ending soon. Tone should be helpful and matter-of-fact, and should lead with the deadline rather than a pitch.'"
                   value={form.ai_tone_context}
                   onChange={e => setForm(f => ({ ...f, ai_tone_context: e.target.value }))}
                 />

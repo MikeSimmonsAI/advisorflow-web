@@ -3,13 +3,33 @@ import { api } from '../api/client'
 import '../styles/shared.css'
 import './Templates.css'
 
-const TRACK_LABELS = {
-  pre_need_lock_price: 'Pre-Need (price-lock pitch)',
-  at_need_support: 'At-Need (support)',
-  imminent_support: 'Imminent (support)',
-  upsell_existing: 'Contract Sold (upsell)',
-  email_only_nurture: 'Email-only (nurture)',
-  needs_review: 'Needs review (fallback)',
+// TRACK LABELS ARE A BUSINESS'S OWN, NOT THE PLATFORM'S.
+//
+// This was a lookup table naming a funeral home's tracks — Pre-Need
+// (price-lock pitch), At-Need (support), Imminent, Contract Sold — as though
+// every tenant had them, with `|| track` showing the raw key for anybody whose
+// tracks were not on the list. So the businesses this platform actually
+// serves saw `new_inquiry_intro` while a single vertical got prose.
+//
+// A track key is authored by the organization in its own tier definitions.
+// Turning it back into words is grammar, and grammar works for every business;
+// a dictionary of one vertical's tracks does not.
+const TRACK_SUFFIXES = {
+  intro: 'intro', nurture: 'nurture', support: 'support',
+  followup: 'follow-up', follow_up: 'follow-up', upsell: 'upsell',
+  fallback: 'fallback', reminder: 'reminder', review: 'review',
+}
+
+function trackLabel(track) {
+  const key = String(track || '').trim()
+  if (!key) return 'Untitled track'
+  const parts = key.split(/[_\-\s]+/).filter(Boolean)
+  const last = parts.length > 1 ? parts[parts.length - 1].toLowerCase() : null
+  const suffix = last && TRACK_SUFFIXES[last] ? parts.pop() : null
+  const name = parts
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+  return suffix ? `${name} (${TRACK_SUFFIXES[suffix.toLowerCase()]})` : name
 }
 
 export default function Templates() {
@@ -141,7 +161,7 @@ export default function Templates() {
           {Object.entries(grouped).map(([track, channels]) => (
             <section key={track} className="panel template-group">
               <div className="panel-header">
-                <h2 className="panel-title">{TRACK_LABELS[track] || track}</h2>
+                <h2 className="panel-title">{trackLabel(track)}</h2>
               </div>
               <div className="template-channels">
                 {['sms', 'email'].map((channel) => {
