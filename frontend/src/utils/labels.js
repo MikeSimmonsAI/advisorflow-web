@@ -71,13 +71,19 @@ const DEFAULT_LABELS = { singular: 'Advisor', plural: 'Advisors' }
  * @returns {string}
  */
 export function getMemberLabel(branding, plural = false) {
+  // NO FUNERAL FALLBACK. An unknown industry took `'funeral'` and then looked
+  // it up, which is a lookup that cannot fail into the neutral default — it
+  // lands in one vertical's row on purpose. The two happen to agree today, so
+  // this changed nothing visible; it is the SHAPE that was wrong, and the same
+  // shape in Overview, Templates, CRM and the tier map is what put a funeral
+  // home's vocabulary in front of every other industry. The neutral default is
+  // reached by not naming a vertical.
+  const industry = branding?.industry
+  const labels = (industry && INDUSTRY_MEMBER_LABELS[industry]) || DEFAULT_LABELS
   if (plural) {
     if (branding?.members_label) return branding.members_label
-    const industry = branding?.industry || 'funeral'
-    return (INDUSTRY_MEMBER_LABELS[industry] || DEFAULT_LABELS).plural
-  } else {
-    if (branding?.member_label) return branding.member_label
-    const industry = branding?.industry || 'funeral'
-    return (INDUSTRY_MEMBER_LABELS[industry] || DEFAULT_LABELS).singular
+    return labels.plural
   }
+  if (branding?.member_label) return branding.member_label
+  return labels.singular
 }

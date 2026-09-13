@@ -862,7 +862,7 @@ export default function OrgSettings() {
           </p>
           <label className="os-label">
             Organization name
-            <input className="os-input" value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="e.g. Acme Funeral Home" />
+            <input className="os-input" value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="e.g. Acme Services, Inc." />
           </label>
           <label className="os-label">
             Office address

@@ -102,7 +102,8 @@ export default function CadenceTemplates() {
     setEditing({
       name: '',
       description: '',
-      industry: 'funeral',
+      // A new template belongs to no vertical until somebody says so.
+      industry: '',
       is_default: false,
       allow_advisor_override: false,
       touches: [emptyTouch(1)],

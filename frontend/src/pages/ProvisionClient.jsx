@@ -41,7 +41,10 @@ function ColorPicker({ field, value, onChange }) {
 function EditOrgModal({ org, onClose, onSaved }) {
   const [form, setForm] = useState({
     name: org.name || '',
-    industry: org.industry || 'funeral',
+    // The organization's OWN industry, or nothing. Defaulting the edit
+    // form to 'funeral' meant an unset industry silently became funeral
+    // the first time anybody saved this form.
+    industry: org.industry || '',
     plan: org.plan || 'trial',
     is_active: org.is_active !== false,
     brand_name: org.brand_name || '',
@@ -97,6 +100,10 @@ function EditOrgModal({ org, onClose, onSaved }) {
               <label>Industry
                 <select value={form.industry}
                   onChange={e => setForm(f => ({ ...f, industry: e.target.value }))}>
+                  {/* An explicit "not chosen" entry, so an unset industry shows
+                      as unset instead of silently reading as whichever option
+                      the browser lands on first. */}
+                  <option value="">— Select an industry —</option>
                   <optgroup label="Field Sales / D2D">
                     <option value="fiber">Fiber Internet (ISP)</option>
                     <option value="door_to_door">Door-to-Door Sales</option>
@@ -228,7 +235,7 @@ export default function ProvisionClient() {
   const [form, setForm] = useState({
     org_name: '',
     org_slug: '',
-    industry: 'funeral',
+    industry: '',
     plan: 'trial',
     supervisor_full_name: '',
     supervisor_email: '',
@@ -312,7 +319,7 @@ export default function ProvisionClient() {
       setResult(res)
       loadOrgs()
       setForm({
-        org_name: '', org_slug: '', industry: 'funeral', plan: 'trial',
+        org_name: '', org_slug: '', industry: '', plan: 'trial',
         supervisor_full_name: '', supervisor_email: '', supervisor_password: '',
         brand_name: '', brand_logo_url: '',
         brand_color_primary: '#2fb6ff', brand_color_accent: '#1ef0a8',
@@ -352,6 +359,9 @@ export default function ProvisionClient() {
             <div className="provision-field">
               <label>Industry</label>
               <select name="industry" value={form.industry} onChange={handleChange}>
+                {/* Unset reads as unset. See the note on the other industry
+                    select in this file. */}
+                <option value="">— Select an industry —</option>
                 <optgroup label="Field Sales / D2D">
                   <option value="fiber">Fiber Internet (ISP)</option>
                   <option value="door_to_door">Door-to-Door Sales</option>

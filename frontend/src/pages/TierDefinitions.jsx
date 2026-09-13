@@ -144,11 +144,22 @@ export default function TierDefinitions() {
   async function seedDefaults() {
     setSeeding(true)
     try {
+      // THE BROWSER DOES NOT GUESS AN INDUSTRY FOR A WRITE.
+      //
+      // This sent `industry = branding?.industry || 'funeral'`, so an
+      // organization whose branding had not loaded — or had no industry —
+      // seeded A FUNERAL HOME'S TIERS INTO ITS DATABASE. Not a mislabel: rows
+      // written, permanently, in the wrong vocabulary, on a button whose whole
+      // job is to write them.
+      //
+      // The server already resolves the industry from the organization when
+      // the parameter is absent, and it has no funeral fallback either. So the
+      // parameter is sent only when the browser actually knows.
       const branding = getBranding()
-      const industry = branding?.industry || 'funeral'
+      const industry = branding?.industry
       const params = new URLSearchParams()
       if (isSuperAdmin && orgId) params.set('org_id', orgId)
-      params.set('industry', industry)
+      if (industry) params.set('industry', industry)
       const result = await api.post(`/tier-definitions/seed-defaults?${params}`, {})
       flash(result.message || 'Defaults seeded.')
       load()
@@ -160,15 +171,18 @@ export default function TierDefinitions() {
   }
 
   async function resetDefaults() {
+    // Same guess, on the DESTRUCTIVE button. See seedDefaults above — this one
+    // deletes every existing tier first, so a guessed industry would have
+    // replaced a customer's configured model with a funeral home's.
     const branding = getBranding()
-    const industry = branding?.industry || 'funeral'
-    const label = industry.replace(/_/g, ' ')
+    const industry = branding?.industry
+    const label = industry ? industry.replace(/_/g, ' ') : 'your organization’s'
     if (!window.confirm(`This will DELETE all current tiers and replace them with ${label} industry defaults. Are you sure?`)) return
     setResetting(true)
     try {
       const params = new URLSearchParams()
       if (isSuperAdmin && orgId) params.set('org_id', orgId)
-      params.set('industry', industry)
+      if (industry) params.set('industry', industry)
       const result = await api.post(`/tier-definitions/reset-defaults?${params}`, {})
       flash(result.message || 'Tiers reset.')
       load()

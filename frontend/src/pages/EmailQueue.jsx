@@ -292,7 +292,13 @@ export default function EmailQueue() {
     if (mismatchCount > 0) {
       const ok = window.confirm(
         `⚠️ ${mismatchCount} of your selected leads have a name/email mismatch.\n\n` +
-        `In funeral home data, the email often belongs to a surviving family member.\n\n` +
+        // ONE INDUSTRY'S EXPLANATION FOR A UNIVERSAL SIGNAL. A name that does
+        // not match its email address means the address may belong to someone
+        // else — a relative, an assistant, a shared household or company
+        // mailbox. Naming only the funeral case told every other industry that
+        // its own data was funeral-home data.
+        `The address may belong to someone other than the person named — a relative, ` +
+        `an assistant, or a shared mailbox.\n\n` +
         `Continue sending to all ${ids.length} selected leads?`
       )
       if (!ok) return
@@ -848,7 +854,7 @@ export default function EmailQueue() {
                               <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 6,
                                 padding: '8px 12px', margin: '8px 0', fontSize: 13, color: '#856404' }}>
                                 ⚠️ <strong>Name/email mismatch:</strong> The email address doesn't match this lead's name.
-                                In funeral home records, this often means the email belongs to a surviving family member.
+                                It may belong to someone else — a relative, an assistant, or a shared mailbox.
                                 Double-check before sending.
                               </div>
                             )}

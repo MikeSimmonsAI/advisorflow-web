@@ -20,7 +20,12 @@ export default function Onboarding() {
   const [step, setStep] = useState(0)
   const [form, setForm] = useState({
     business_name: '',
-    industry: 'funeral',
+    // NO PRE-SELECTED VERTICAL. This opened with Funeral & Cemetery
+    // already chosen, so anybody who did not notice the grid signed up as
+    // a funeral home — and every tier, stage and word in their product
+    // followed from it. Empty means the person has to choose, which the
+    // submit guard already requires.
+    industry: '',
     admin_full_name: '',
     admin_email: '',
     admin_password: '',

@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
+import { useTerminology } from '../terminology'
 import '../styles/shared.css'
 import './CampaignBuilder.css'
 
@@ -54,9 +55,25 @@ const CHANNEL_OPTIONS = [
   { value: 'auto', label: '🔄 Auto (SMS or email by lead type)' },
 ]
 
-const OFFER_HOOK_OPTIONS = [
+/* OFFERS EVERY INDUSTRY WAS SHOWN, THAT ONLY ONE CAN MAKE.
+ *
+ * "Free funeral home tour", "Free space consultation" (a cemetery plot) and
+ * "Free Family Service consult" are a deathcare business's offers. They were
+ * in the campaign builder's offer list for every tenant, so an energy broker
+ * and a roofer were invited to advertise a funeral home tour.
+ *
+ * THE ANSWER IS NOT TO DELETE THEM. They are legitimate configuration for the
+ * customers who actually sell those things, and Restland must keep them. Same
+ * shape as the deathcare campaign purposes on the Leads page: offered to a
+ * deathcare business and to nobody else, resolved from the organization's own
+ * configured industry rather than assumed.
+ */
+const UNIVERSAL_OFFER_HOOKS = [
   { value: '', label: 'No specific offer (general outreach)' },
   { value: 'lunch_and_learn', label: '🍽 Lunch & Learn event' },
+]
+
+const DEATHCARE_OFFER_HOOKS = [
   { value: 'free_tour', label: '🚪 Free funeral home tour' },
   { value: 'free_space', label: '🌿 Free space consultation' },
   { value: 'family_service_consult', label: '🤝 Free Family Service consult' },
@@ -93,6 +110,13 @@ export default function CampaignBuilder() {
 
   // Step 1 — filters
   const [filters, setFilters] = useState(EMPTY_FILTERS)
+  // The organization's own industry decides whether deathcare offers appear.
+  const terminology = useTerminology()
+  const offerHookOptions = useMemo(
+    () => (terminology.industry === 'funeral'
+      ? UNIVERSAL_OFFER_HOOKS.concat(DEATHCARE_OFFER_HOOKS)
+      : UNIVERSAL_OFFER_HOOKS),
+    [terminology.industry])
   const [advisors, setAdvisors] = useState([])
   const [tierOptions, setTierOptions] = useState([{ value: '', label: 'All tiers' }])
   const [purposeOptions, setPurposeOptions] = useState([])
@@ -643,7 +667,7 @@ export default function CampaignBuilder() {
                   <label className="settings-label">
                     Offer hook (AI will weave this naturally into the message)
                     <select className="filter-select" value={offerHook} onChange={e => setOfferHook(e.target.value)}>
-                      {OFFER_HOOK_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      {offerHookOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                     <span className="settings-help" style={{ fontSize: 11 }}>
                       The AI will include this as a soft, low-pressure invite — not the entire focus of the message.

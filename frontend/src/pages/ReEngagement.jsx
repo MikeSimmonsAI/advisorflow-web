@@ -13,8 +13,10 @@ const TABS = [
 export default function ReEngagement() {
   const user = getCurrentUser()
   const navigate = useNavigate()
-  const _branding = getBranding()
-  const industry = _branding?.industry || 'funeral'
+  // The industry was read here, defaulted to 'funeral', and then never used by
+  // anything on this page — a dead assignment that nonetheless copied the
+  // pattern that put a funeral home's vocabulary in front of every tenant.
+  // Removed rather than re-defaulted.
 
   const [activeTab, setActiveTab] = useState('hot') // 'hot' | 'warm' | 'cold' | 'all'
   const [leads, setLeads] = useState({ hot: [], warm: [], cold: [] })
