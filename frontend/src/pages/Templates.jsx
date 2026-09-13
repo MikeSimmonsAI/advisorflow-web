@@ -161,7 +161,15 @@ export default function Templates() {
           {Object.entries(grouped).map(([track, channels]) => (
             <section key={track} className="panel template-group">
               <div className="panel-header">
-                <h2 className="panel-title">{trackLabel(track)}</h2>
+                {/* The organization's OWN name for this track when the server
+                    sends one — it comes from that organization's tier
+                    definitions. Humanising the key is the fallback, not the
+                    first choice: "Rate Review" beats "Rate Review" only by
+                    accident, but "Email Only Nurture" is not what a business
+                    calls it. */}
+                <h2 className="panel-title">
+                  {(channels.sms || channels.email)?.track_label || trackLabel(track)}
+                </h2>
               </div>
               <div className="template-channels">
                 {['sms', 'email'].map((channel) => {

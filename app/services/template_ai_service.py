@@ -141,7 +141,25 @@ def _call_openai(prompt: str) -> dict[str, Any]:
     return _safe_parse_json(raw)
 
 
-def generate_template(track: MessageTrack, channel: str, instruction: str | None = None) -> dict[str, Any]:
+# THE SITUATION, IN THE ORGANIZATION'S OWN WORDS WHERE IT HAS THEM.
+#
+# `TRACK_CONTEXT` below is entirely deathcare — "planning ahead for future
+# cemetery/funeral arrangements", "arranging services for a recent loss" — and
+# every other industry fell through it to "General outreach.", so the writer was
+# told nothing about the situation it was writing for.
+#
+# The caller passes the organization's own `ai_tone_context` for this track,
+# which is a column on its tier definitions and is already what the cadence
+# engine reads. The platform map remains the fallback, so a deathcare customer
+# with no stored tone context keeps exactly the guidance it has today.
+def _situation(track, supplied: str | None) -> str:
+    if supplied and supplied.strip():
+        return supplied.strip()
+    return TRACK_CONTEXT.get(track, "General outreach.")
+
+
+def generate_template(track, channel: str, instruction: str | None = None,
+                      track_context: str | None = None) -> dict[str, Any]:
     """
     Generates a new template draft from scratch for this track+channel.
     If `instruction` is given, it's folded in as additional guidance on top
@@ -152,7 +170,7 @@ def generate_template(track: MessageTrack, channel: str, instruction: str | None
 
     prompt = GENERATE_PROMPT.format(
         channel=channel,
-        track_context=TRACK_CONTEXT.get(track, "General outreach."),
+        track_context=_situation(track, track_context),
         placeholders=", ".join(placeholders),
         instruction_block=instruction_block,
     )
@@ -160,7 +178,9 @@ def generate_template(track: MessageTrack, channel: str, instruction: str | None
     return _normalize_result(parsed, channel)
 
 
-def rewrite_template(track: MessageTrack, channel: str, current_body: str, current_subject: str | None, instruction: str) -> dict[str, Any]:
+def rewrite_template(track, channel: str, current_body: str,
+                     current_subject: str | None, instruction: str,
+                     track_context: str | None = None) -> dict[str, Any]:
     """
     Rewrites the admin's current draft per a free-text instruction, e.g.
     "make this warmer" or "shorter" or "add more urgency".
@@ -175,7 +195,7 @@ def rewrite_template(track: MessageTrack, channel: str, current_body: str, curre
 
     prompt = REWRITE_PROMPT.format(
         channel=channel,
-        track_context=TRACK_CONTEXT.get(track, "General outreach."),
+        track_context=_situation(track, track_context),
         current=current_display,
         instruction=instruction.strip(),
         placeholders=", ".join(placeholders),
