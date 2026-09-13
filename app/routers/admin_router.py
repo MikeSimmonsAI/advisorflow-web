@@ -859,8 +859,34 @@ class UserResponseWithOrg(BaseModel):
 
 @router.get("/users", dependencies=_USERS)
 def list_users(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """Lists users. God/super admin sees ALL users across every org; org_admin sees their own org only."""
-    if current_user.role in ("super_admin", "god_admin"):
+    """Lists users. An operator with no customer selected sees the platform;
+    everyone else — including an operator STANDING INSIDE a customer — sees
+    that customer's people.
+
+    THE ADVISOR PICKER SHOWED THE WHOLE PLATFORM. Found live: inside Atlantis
+    Light & Power the people selectors offered forty identities — another
+    customer's advisors, demo accounts, QA identities — because this route
+    answered "who are the users" globally for any operator, and the campaign
+    advisor dropdown, the lead owner picker and bulk reassignment are all built
+    on it. Assigning a lead to a stranger from another company was one click
+    away, and every one of those names was a disclosure of who else is on the
+    platform.
+
+    ENTERING A CUSTOMER IS THE POINT OF CUSTOMER-VIEW. `_god_all_orgs` is set
+    by `get_current_user` only when NO customer is selected, so its absence is
+    the operator saying "I am working inside this one" — and the honest answer
+    to "who are the users" there is the customer's team, exactly as it is for
+    that customer's own admin. God Mode's own user administration, which is
+    where the platform-wide list belongs, is unaffected: no customer selected,
+    same list as before.
+    """
+    from app.services.lead_scope import active_workspace_org_id as _ws
+
+    _operator = current_user.role in ("super_admin", "god_admin")
+    _in_customer = _operator and not getattr(current_user, "_god_all_orgs", False)
+    _customer_org_id = _ws(current_user, db) if _in_customer else None
+
+    if _operator and not _customer_org_id:
         scoped_org_ids = get_platform_org_ids(current_user, db)
         if current_user.role == "god_admin":
             users = db.query(User).order_by(User.organization_id.asc(), User.created_at.asc()).all()
@@ -902,8 +928,7 @@ def list_users(db: Session = Depends(get_db), current_user: User = Depends(requi
     #     `customer_users`, the readiness counts and the launch engine already
     #     resolve through; this is the same answer, not a second one.
     from app.services import customer_provisioning as _cp
-    from app.services.lead_scope import active_workspace_org_id
-    org_id = active_workspace_org_id(current_user, db) or current_user.organization_id
+    org_id = _customer_org_id or _ws(current_user, db) or current_user.organization_id
     users = sorted(_cp.customer_people(db, org_id),
                    key=lambda u: (u.created_at or datetime.min))
     return [

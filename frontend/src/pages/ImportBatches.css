@@ -1,8 +1,12 @@
 /* ImportBatches.css */
 .import-batches-page { max-width: 1100px; margin: 0 auto; padding: 28px 24px 60px; }
 .import-batches-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
-.page-title { font-size: 1.5rem; font-weight: 700; color: var(--text-primary, #111); margin: 0 0 4px; }
-.page-subtitle { font-size: 0.875rem; color: var(--text-secondary, #666); margin: 0; max-width: 520px; }
+/* Scoped to this page's header. As bare globals these restyled `.page-title`
+ * and `.page-subtitle` on every screen in the app — all page CSS lands in one
+ * bundled sheet — and the 520px cap in particular pinned other pages'
+ * subtitles into a narrow column. See the note in Users.css. */
+.import-batches-header .page-title { font-size: 1.5rem; font-weight: 700; color: var(--text-primary, #111); margin: 0 0 4px; }
+.import-batches-header .page-subtitle { font-size: 0.875rem; color: var(--text-secondary, #666); margin: 0; max-width: 520px; }
 .upload-panel { background: var(--surface, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 10px; padding: 24px; margin-bottom: 28px; }
 .upload-panel-title { font-size: 1rem; font-weight: 600; margin: 0 0 20px; color: var(--text-primary, #111); }
 .upload-form { display: flex; flex-direction: column; gap: 16px; }

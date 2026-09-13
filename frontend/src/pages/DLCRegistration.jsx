@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, getCurrentUser, API_BASE } from '../api/client'
+import { getCachedBrand } from '../theme'
 import '../styles/shared.css'
 
 const STEPS = [
@@ -49,6 +50,8 @@ function StatusBadge({ status }) {
 
 export default function DLCRegistration() {
   const currentUser = getCurrentUser()
+  // The platform's own name, resolved from the brand this shell is serving.
+  const platformName = getCachedBrand()?.displayName || 'this platform'
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [activeStep, setActiveStep] = useState(null)
@@ -75,7 +78,12 @@ export default function DLCRegistration() {
   // Campaign form
   const [campaign, setCampaign] = useState({
     description: 'We send appointment scheduling messages, reminders, and follow-up texts to customers who have provided verbal consent during in-person consultations with our advisors.',
-    message_flow: 'Customers provide verbal consent during in-person consultations or phone calls with our Family Service Advisors. Advisors log consent in BookaBoost at time of collection.',
+    // A DEFAULT, NOT ONE INDUSTRY'S SCRIPT. This said "our Family Service
+    // Advisors" — a funeral-home job title — and named one platform brand, in
+    // a filing every tenant submits under its OWN legal identity. A default
+    // that describes somebody else's business is worse than a blank field,
+    // because it is plausible enough to be sent as-is to a carrier.
+    message_flow: 'Customers provide verbal consent during in-person consultations or phone calls with our staff. Staff log consent in this platform at the time it is collected.',
     sample_message_1: "Hi {first_name}, this is {advisor_name} from our office. I wanted to follow up about your appointment. Would you like to schedule a time to meet? Reply STOP to opt out.",
     sample_message_2: "Reminder: Your appointment is tomorrow. Reply STOP to opt out at any time.",
     use_case: 'MIXED',
@@ -340,18 +348,34 @@ export default function DLCRegistration() {
             </p>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              {/*
+                PLACEHOLDERS TEACH THE FORMAT. THEY DO NOT NAME A REAL PARTY.
+
+                These were a real customer's registered legal name, that
+                customer's street address, a named individual, that person's
+                work address and a sister brand's domain — shown to EVERY
+                tenant filling in their own 10DLC registration. A placeholder
+                is a hint about shape; it is not a place to keep somebody's
+                filing details, and the one screen where a business types its
+                legal identity is the worst screen to show it another
+                business's.
+
+                What each one has to communicate is a FORMAT — nine digits
+                hyphenated after two, two-letter state, E.164 with the country
+                code — so the examples below carry the format and nothing else.
+              */}
               {[
-                { field: 'company_name', label: 'Legal Company Name', placeholder: 'North Star Memorial Group, Inc.' },
+                { field: 'company_name', label: 'Legal Company Name', placeholder: 'Your Company, Inc.' },
                 { field: 'ein', label: 'EIN (Tax ID)', placeholder: '12-3456789' },
-                { field: 'website', label: 'Website', placeholder: 'https://bookaboost.com' },
-                { field: 'address_street', label: 'Street Address', placeholder: '13005 Greenville Ave' },
-                { field: 'address_city', label: 'City', placeholder: 'Dallas' },
-                { field: 'address_state', label: 'State (2-letter)', placeholder: 'TX' },
-                { field: 'address_zip', label: 'ZIP', placeholder: '75243' },
-                { field: 'contact_first_name', label: 'Contact First Name', placeholder: 'Mike' },
-                { field: 'contact_last_name', label: 'Contact Last Name', placeholder: 'Simmons' },
-                { field: 'contact_email', label: 'Contact Email', placeholder: 'mike@bookaboost.com' },
-                { field: 'contact_phone', label: 'Contact Phone (E.164)', placeholder: '+14695537417' },
+                { field: 'website', label: 'Website', placeholder: 'https://www.example.com' },
+                { field: 'address_street', label: 'Street Address', placeholder: '100 Main Street, Suite 200' },
+                { field: 'address_city', label: 'City', placeholder: 'City' },
+                { field: 'address_state', label: 'State (2-letter)', placeholder: 'ST' },
+                { field: 'address_zip', label: 'ZIP', placeholder: '00000' },
+                { field: 'contact_first_name', label: 'Contact First Name', placeholder: 'First name' },
+                { field: 'contact_last_name', label: 'Contact Last Name', placeholder: 'Last name' },
+                { field: 'contact_email', label: 'Contact Email', placeholder: 'you@yourcompany.com' },
+                { field: 'contact_phone', label: 'Contact Phone (E.164)', placeholder: '+15551234567' },
               ].map(({ field, label, placeholder }) => (
                 <label key={field} className="settings-label" style={{ margin: 0 }}>
                   {label}
@@ -509,7 +533,7 @@ export default function DLCRegistration() {
         {activeStep === 'numbers' && (
           <div style={{ paddingTop: 12 }}>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              This links all advisor phone numbers configured in BookaBoost to the Messaging Service,
+              This links all advisor phone numbers configured in {platformName} to the Messaging Service,
               so messages sent through those numbers are covered by your A2P registration.
               Run this after your Messaging Service is created (Step 1).
             </p>

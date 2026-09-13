@@ -316,3 +316,159 @@ def test_somebody_seconded_into_a_workspace_appears_in_its_team(client, db_sessi
     seen = {u["email"] for u in
             client.get("/admin/users", headers=_hdr(db_session, person, b)).json()}
     assert "two.workspaces@example.com" in seen
+
+
+# ── 5. the access diagnostic reports the guards, not a description of them ──
+#
+# The God console's read-only access diagnostic is how this defect is answered
+# in production without borrowing anybody's password. Its value depends
+# entirely on it calling the real dependencies, so these tests assert the
+# answers DIVERGE by workspace for one person — a diagnostic that reported the
+# same thing in both workspaces would be reproducing the original bug in the
+# one place used to look for it.
+
+def test_diagnostic_reports_a_different_role_per_workspace(db_session,
+                                                           two_customers):
+    from app.services import access_diagnostic
+    report = access_diagnostic.run(db_session, two_customers["person"])
+    by_ws = {s["resolved_workspace_id"]: s for s in report["workspace_scenarios"]
+             if s["resolved_workspace_id"]}
+    a, b = two_customers["a"].id, two_customers["b"].id
+    assert by_ws[a]["effective_workspace_role"] == "org_admin"
+    assert by_ws[b]["effective_workspace_role"] != "org_admin"
+
+
+def test_diagnostic_denies_every_module_in_the_zero_feature_workspace(
+        db_session, two_customers):
+    from app.services import access_diagnostic
+    report = access_diagnostic.run(db_session, two_customers["person"])
+    by_ws = {s["resolved_workspace_id"]: s for s in report["workspace_scenarios"]
+             if s["resolved_workspace_id"]}
+    b = by_ws[two_customers["b"].id]
+    assert b["entitlements"]["enabled_features"] == []
+    assert all(v.startswith("DENIED") for v in b["guarded_surfaces"].values()), \
+        b["guarded_surfaces"]
+    assert b["entitlements"]["administrative_authority"].startswith("DENIED")
+
+
+def test_diagnostic_allows_the_workspace_the_person_actually_administers(
+        db_session, two_customers):
+    from app.services import access_diagnostic
+    report = access_diagnostic.run(db_session, two_customers["person"])
+    by_ws = {s["resolved_workspace_id"]: s for s in report["workspace_scenarios"]
+             if s["resolved_workspace_id"]}
+    a = by_ws[two_customers["a"].id]
+    assert a["guarded_surfaces"]["/leads"] == "ALLOWED"
+    assert a["guarded_surfaces"]["/users"] == "ALLOWED"
+    assert a["entitlements"]["administrative_authority"].startswith("ALLOWED")
+
+
+def test_diagnostic_distinguishes_never_configured_from_configured_to_nothing(
+        db_session, two_customers):
+    """NULL is legacy-open; [] is switched off. A report that blurred the two
+    would send an operator to fix an entitlement that was never the cause."""
+    from app.services import access_diagnostic
+    b = two_customers["b"]
+    b.enabled_features = None
+    db_session.commit()
+    report = access_diagnostic.run(db_session, two_customers["person"])
+    by_ws = {s["resolved_workspace_id"]: s for s in report["workspace_scenarios"]
+             if s["resolved_workspace_id"]}
+    ent = by_ws[b.id]["entitlements"]
+    assert ent["enabled_features"] is None
+    assert "legacy-open" in ent["entitlement_mode"]
+    assert by_ws[b.id]["guarded_surfaces"]["/leads"] == "ALLOWED"
+    # The ROLE is still not borrowed from the other workspace.
+    assert by_ws[b.id]["effective_workspace_role"] != "org_admin"
+    assert by_ws[b.id]["entitlements"]["administrative_authority"].startswith("DENIED")
+
+
+def test_diagnostic_writes_nothing(db_session, two_customers):
+    """A diagnosis that edits the patient is not a diagnosis."""
+    from app.services import access_diagnostic
+    person = two_customers["person"]
+    before = (person.role,
+              two_customers["b"].enabled_features,
+              db_session.query(Membership).filter(
+                  Membership.user_id == person.id).count())
+    access_diagnostic.run(db_session, person)
+    db_session.expire_all()
+    after = (db_session.query(User).filter(User.id == person.id).first().role,
+             db_session.query(Organization).filter(
+                 Organization.id == two_customers["b"].id).first().enabled_features,
+             db_session.query(Membership).filter(
+                 Membership.user_id == person.id).count())
+    assert before == after
+
+
+# ── 6. an operator inside a customer sees THAT customer's people ────────────
+#
+# Found live: standing inside Atlantis Light & Power, every people selector —
+# campaign advisor, lead owner, bulk reassignment — offered forty identities
+# from across the whole platform, including another customer's advisors and QA
+# accounts. God Mode's own user administration is where a platform-wide list
+# belongs; a customer's screens are not.
+
+def _god(db):
+    u = User(organization_id=None, email="operator+%s@example.com" % uuid.uuid4().hex[:6],
+             password_hash=hash_password("TestPass123!"), full_name="Operator",
+             role="god_admin", is_active=True, must_change_password=False)
+    db.add(u)
+    db.commit()
+    return u
+
+
+def test_operator_inside_a_customer_sees_only_that_customers_people(
+        client, db_session, two_customers):
+    a, b = two_customers["a"], two_customers["b"]
+    b.enabled_features = json.dumps(ALL_FEATURES)
+    db_session.commit()
+    _person(db_session, email="only.in.a.op@example.com", home=a)
+    only_b = _person(db_session, email="only.in.b.op@example.com", home=b)
+    _member(db_session, only_b, b, "advisor")
+
+    god = _god(db_session)
+    seen = {u["email"] for u in client.get(
+        "/admin/users",
+        headers={"Authorization": "Bearer " + create_access_token(god, db_session),
+                 "X-Org-Override": b.id}).json()}
+    assert "only.in.b.op@example.com" in seen
+    assert "only.in.a.op@example.com" not in seen, \
+        "another customer's staff was offered inside this one"
+
+
+def test_operator_with_no_customer_selected_still_sees_the_platform(
+        client, db_session, two_customers):
+    """God Mode's own user administration must not be narrowed by this."""
+    a, b = two_customers["a"], two_customers["b"]
+    _person(db_session, email="homed.in.a@example.com", home=a)
+    _person(db_session, email="homed.in.b@example.com", home=b)
+
+    god = _god(db_session)
+    seen = {u["email"] for u in client.get(
+        "/admin/users",
+        headers={"Authorization": "Bearer " + create_access_token(god, db_session)}).json()}
+    assert {"homed.in.a@example.com", "homed.in.b@example.com"} <= seen
+
+
+def test_the_operators_customer_list_is_the_same_one_the_customer_gets(
+        client, db_session, two_customers):
+    """Customer-view means what the customer sees — not a second answer."""
+    person, b = two_customers["person"], two_customers["b"]
+    b.enabled_features = json.dumps(ALL_FEATURES)
+    m = (db_session.query(Membership)
+         .filter(Membership.user_id == person.id,
+                 Membership.scope_id == b.id).first())
+    m.role = "org_admin"
+    db_session.commit()
+    from app.services import workspace_access
+    workspace_access.invalidate_workspace_memberships(person)
+
+    god = _god(db_session)
+    as_operator = {u["email"] for u in client.get(
+        "/admin/users",
+        headers={"Authorization": "Bearer " + create_access_token(god, db_session),
+                 "X-Org-Override": b.id}).json()}
+    as_customer = {u["email"] for u in client.get(
+        "/admin/users", headers=_hdr(db_session, person, b)).json()}
+    assert as_operator == as_customer

@@ -119,6 +119,88 @@ def _org_name(db: Session, org_id: Optional[str]) -> Optional[str]:
     return o.name if o else None
 
 
+# ── THE GUARDED SURFACES, AS THE ROUTER ASSEMBLY GATES THEM ─────────────────
+#
+# Path first because that is what a person reports ("I can still open /leads"),
+# feature key second because that is what the gate actually tests. The pairs
+# mirror `main.py` and `leads_router.py`; a gate added there and not here shows
+# up as a surface this report is silent about, never as a wrong answer.
+_GUARDED_SURFACES = (
+    ("/leads", "leads"),
+    ("/campaigns", "campaigns"),
+    ("/crm", "crm"),
+    ("/users", "users"),
+    ("/imports", "imports"),
+    ("/reports", "reports"),
+    ("/cadence", "cadences"),
+    ("/audit-log", "audit_log"),
+    ("/tier-config", "tier_config"),
+)
+
+
+def _guards(db: Session, target: User, req: Request,
+            resolved_org_id: Optional[str]) -> Dict[str, Any]:
+    """What the REAL dependencies answer for this (person, workspace) pair.
+
+    THE DEPENDENCIES THEMSELVES ARE CALLED. `require_feature(key)` returns the
+    very callable FastAPI puts in front of the router, and `require_admin` is
+    the one every administrative route depends on; both are invoked here with
+    the subject and the workspace under test. A reimplementation of their
+    reasoning would agree with itself and prove nothing — the same principle
+    that keeps column B above out of the hands of a hand-written query.
+
+    `require_feature` takes no `request` (it is a pure (user, db) dependency and
+    resolves the workspace through the ambient request like every other caller),
+    so the synthetic request is published for the duration and the operator's
+    own is restored in `finally`. This sets the DIAGNOSTIC's context, never the
+    operator's session.
+
+    Read-only: entitlement reads and membership reads, no writes, and a refusal
+    is recorded as the finding rather than raised.
+    """
+    from app.deps import require_admin
+    from app.services import entitlements, request_context
+
+    org = (db.query(Organization).filter(Organization.id == resolved_org_id).first()
+           if resolved_org_id else None)
+    allowed = entitlements.enabled_for(org)
+
+    out: Dict[str, Any] = {
+        "enabled_features": allowed,
+        # NULL AND [] ARE DIFFERENT ANSWERS and the difference is the whole
+        # migration story: a customer who predates entitlements has never been
+        # configured and is deliberately open, while a customer configured down
+        # to nothing has been switched off on purpose.
+        "entitlement_mode": ("never configured — legacy-open, every module allowed"
+                             if allowed is None else
+                             "explicit allow-list of %d module(s)" % len(allowed)),
+        "surfaces": {},
+    }
+
+    token = request_context.set_current_request(req)
+    try:
+        for path, key in _GUARDED_SURFACES:
+            dep = entitlements.require_feature(key)
+            try:
+                dep(user=target, db=db)
+                out["surfaces"][path] = "ALLOWED"
+            except HTTPException as e:
+                out["surfaces"][path] = "DENIED %s — %s" % (e.status_code, e.detail)
+            except Exception as e:      # a guard that raises is itself a finding
+                out["surfaces"][path] = "ERROR %s: %s" % (type(e).__name__, str(e)[:160])
+        try:
+            require_admin(request=req, user=target, db=db)
+            out["administrative_authority"] = (
+                "ALLOWED — this person is an administrator OF THIS WORKSPACE")
+        except HTTPException as e:
+            out["administrative_authority"] = "DENIED %s — %s" % (e.status_code, e.detail)
+        except Exception as e:
+            out["administrative_authority"] = "ERROR %s: %s" % (type(e).__name__, str(e)[:160])
+    finally:
+        request_context.reset_current_request(token)
+    return out
+
+
 def run(db: Session, target: User) -> Dict[str, Any]:
     """The whole diagnosis. Read-only from the first line to the last."""
     from app.services import lead_scope, workspace_access
@@ -202,6 +284,11 @@ def run(db: Session, target: User) -> Dict[str, Any]:
             "effective_role",
             lambda: lead_scope.effective_role(target, db, req))
 
+        # WHAT THE GUARDS SAY, not what the sidebar drew. The browser's nav is
+        # a rendering of an answer it was given; this is the answer.
+        guards = st.time("route_guards",
+                         lambda: _guards(db, target, req, resolved))
+
         # A. RAW — ownership straight from the table, no authorization at all.
         def _raw():
             q = db.query(Lead).filter(Lead.assigned_to_id == target.id)
@@ -252,6 +339,8 @@ def run(db: Session, target: User) -> Dict[str, Any]:
             "resolved_workspace_id": resolved,
             "resolved_workspace_name": _org_name(db, resolved),
             "effective_workspace_role": role,
+            "entitlements": {k: v for k, v in guards.items() if k != "surfaces"},
+            "guarded_surfaces": guards.get("surfaces"),
             "A_raw_assigned": raw_assigned,
             "B_lead_scope_count": scoped,
             "B_lead_scope_error": scoped_error,
@@ -365,6 +454,10 @@ def run(db: Session, target: User) -> Dict[str, Any]:
             "not by reimplementing it.",
             "C and D call the real endpoint functions, so they are what the "
             "customer's screen would show.",
+            "`guarded_surfaces` and `administrative_authority` are produced by "
+            "CALLING require_feature() and require_admin() themselves, per "
+            "workspace, so they are the authorization answer rather than a "
+            "description of it.",
             "Every resolution is run against a synthetic request carrying only "
             "the header under test - the operator's own session is never read.",
         ],

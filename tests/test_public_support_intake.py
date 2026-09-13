@@ -248,3 +248,65 @@ def test_the_privileged_support_api_is_still_privileged(client, db_session):
     assert client.post("/support/tickets",
                        json={"subject": "x", "body": "y"}).status_code in (401, 403)
     assert client.get("/god/support/overview").status_code in (401, 403)
+
+
+# ── 6. the operator console can see where it came from ─────────────────────
+#
+# Retaining source metadata on the row and never showing it to the person
+# answering the ticket is the same as not retaining it. These assert the
+# operator's view carries it and the CUSTOMER'S view still does not — the
+# reporter's address and the channel are operational facts, not something to
+# echo back onto a customer's own screen.
+
+def test_agent_view_shows_the_public_website_as_the_source(client, db_session):
+    from app.services import support_tickets
+    _configured(db_session)
+    ref = _post(client, SUPPORT).json()["reference"]
+    ticket = (db_session.query(SupportTicket)
+              .filter(SupportTicket.ticket_number == ref).first())
+
+    view = support_tickets.agent_view(db_session, ticket)
+    assert view["source"] == TicketSource.PUBLIC_WEBSITE
+    assert view["source_label"] == TicketSource.LABELS[TicketSource.PUBLIC_WEBSITE]
+    assert view["reporter_email"] == SUPPORT["email"]
+    assert view["reporter_name"] == SUPPORT["name"]
+    assert view["submitted_by"] is None, "nobody was signed in"
+
+
+def test_the_customer_view_does_not_gain_the_reporter_address(client, db_session):
+    from app.services import support_tickets
+    _configured(db_session)
+    ref = _post(client, SUPPORT).json()["reference"]
+    ticket = (db_session.query(SupportTicket)
+              .filter(SupportTicket.ticket_number == ref).first())
+
+    view = support_tickets.customer_view(db_session, ticket)
+    for key in ("reporter_email", "reporter_name", "source"):
+        assert key not in view, "%s leaked into the customer view" % key
+
+
+def test_an_in_app_ticket_still_reports_its_own_source(db_session):
+    """The addition must not relabel everything that already existed."""
+    from app.models.models import User
+    from app.services import support_tickets
+    from app.services.auth_service import hash_password
+
+    platform, org = _configured(db_session)
+    user = User(organization_id=org.id, email="staff@example.com",
+                password_hash=hash_password("TestPass123!"),
+                full_name="Staff", role="org_admin", is_active=True,
+                must_change_password=False)
+    db_session.add(user)
+    db_session.commit()
+
+    ticket = support_tickets.create_ticket(
+        db_session, org=org, user=user, subject="In-app", body="From the app.")
+    db_session.commit()
+
+    view = support_tickets.agent_view(db_session, ticket)
+    assert view["source"] == TicketSource.IN_APP
+    assert view["submitted_by"] == user.id
+    # The reply address is recorded either way — from the signed-in user here,
+    # from the form there — so one field answers "who do I write back to"
+    # without the caller having to know which kind of ticket it is.
+    assert view["reporter_email"] == "staff@example.com"

@@ -905,6 +905,20 @@ def agent_view(db: Session, ticket: SupportTicket) -> Dict[str, Any]:
         "organization_name": getattr(org, "name", None),
         "platform_id": ticket.platform_id,
         "submitted_by": ticket.submitted_by,
+        # WHERE IT CAME IN, AND WHO TO WRITE BACK TO.
+        #
+        # An in-app ticket has a `submitted_by` user and every notification
+        # path finds the address through them. A ticket raised from a brand's
+        # PUBLIC WEBSITE has no user at all, so without these three the
+        # operator console showed an anonymous row with no way to tell a
+        # website enquiry from an in-app report and no address to answer.
+        # They are on the agent view only; `customer_view` is unchanged, so
+        # nothing here reaches the customer's own screen.
+        "source": getattr(ticket, "source", None),
+        "source_label": TicketSource.LABELS.get(
+            getattr(ticket, "source", None) or "", getattr(ticket, "source", None)),
+        "reporter_email": getattr(ticket, "reporter_email", None),
+        "reporter_name": getattr(ticket, "reporter_name", None),
         "assigned_to": ticket.assigned_to,
         "assigned_team": ticket.assigned_team,
         "customer_reported_severity": ticket.customer_reported_severity,

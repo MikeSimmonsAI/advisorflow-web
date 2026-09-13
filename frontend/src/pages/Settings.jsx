@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, getCurrentUser, getBranding } from '../api/client'
+import { getCachedBrand } from '../theme'
 import { getMemberLabel } from '../utils/labels'
 import AppearanceToggle from '../components/AppearanceToggle'
 import '../styles/shared.css'
@@ -42,6 +43,13 @@ const CAL = {
 export default function Settings() {
   const currentUser = getCurrentUser()
   const isAdmin = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin' || currentUser?.role === 'god_admin'
+
+  // THE PLATFORM'S OWN NAME, RESOLVED. Help copy on this page named one brand
+  // in every brand's app. `getCachedBrand()` is the resolved brand the shell
+  // already themes itself from; the fallback is deliberately generic rather
+  // than any brand's name, because a page that cannot resolve the brand should
+  // say nothing about it instead of guessing one.
+  const platformName = getCachedBrand()?.displayName || 'platform'
 
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -928,20 +936,29 @@ export default function Settings() {
           <h2 className="panel-title">🔗 Your Booking Link</h2>
           {profile.booking_page_url && <span className="badge badge--green">Set</span>}
         </div>
+        {/* THE PLATFORM NAMES ITSELF FROM CONFIGURATION, NEVER FROM A LITERAL.
+            This sentence ended "...or your BookaBoost scheduling URL", so every
+            EvoSys Pro and Harmony Hustle customer was told to paste in a link
+            belonging to a brand that is not theirs and not the one they signed
+            up with. `getCachedBrand()` is the same resolved brand the shell
+            themes itself from. */}
         <p className="settings-help">
           Your personal booking page URL — paste this into SMS/email templates so leads can book directly with you.
-          Can be a Calendly link, Google booking page, or your BookaBoost scheduling URL.
+          Can be a Calendly link, Google booking page, or your {platformName} scheduling URL.
         </p>
         <form onSubmit={saveBookingPage} className="settings-form">
           <label className="settings-label">
             Booking page URL
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {/* A hint, not an advertisement for one of the platform's own
+                  brands: an EvoSys Pro customer typing their booking link was
+                  shown a BookaBoost address as the example. */}
               <input
                 className="settings-input"
                 type="url"
                 value={bookingUrl}
                 onChange={(e) => setBookingUrl(e.target.value)}
-                placeholder="https://calendly.com/yourname or https://book.bookaboost.com/..."
+                placeholder="https://calendly.com/yourname or your own booking link"
                 style={{ flex: 1 }}
               />
               {bookingUrl && (
@@ -971,7 +988,7 @@ export default function Settings() {
           <h2 className="panel-title">📅 Booking Settings</h2>
         </div>
         <p className="settings-help">
-          Control your availability and how appointments are booked through your BookaBoost scheduling link.
+          Control your availability and how appointments are booked through your {platformName} scheduling link.
         </p>
         <form onSubmit={saveBookingSettings} className="settings-form">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>

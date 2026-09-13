@@ -6,7 +6,23 @@
   margin-bottom: 22px;
 }
 
-.eq-page-header-left { flex: 1; }
+.eq-page-header-left { flex: 1; min-width: 0; }
+
+/* A READABLE MEASURE, SET HERE RATHER THAN GLOBALLY.
+ *
+ * This paragraph is a sentence with inline chips in it, so it needs ordinary
+ * text flow and a line length somebody can actually read — not the full width
+ * of a 1400px row. `ch` because the constraint is characters per line, not
+ * pixels, so it holds when the type scale changes.
+ *
+ * It is qualified by the page's own header on purpose: the previous attempt at
+ * this lived in two other pages' stylesheets as a bare `.page-subtitle`, which
+ * is what broke this paragraph in the first place. */
+.eq-page-header-left .page-subtitle {
+  display: block;
+  max-width: 86ch;
+  line-height: 1.6;
+}
 
 .eq-page-title-row {
   display: flex;

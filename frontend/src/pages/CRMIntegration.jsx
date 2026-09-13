@@ -1,5 +1,5 @@
 /**
- * CRM Integration Page — BookaBoost
+ * CRM Integration Page
  *
  * Allows org admins to:
  *   - Connect outbound webhooks (push bookings/events to any CRM)
@@ -13,7 +13,16 @@
 
 import { useState, useEffect } from 'react'
 import { api, getCurrentUser, API_BASE } from '../api/client'
+import { getCachedBrand } from '../theme'
 import './CRMIntegration.css'
+
+// THE PLATFORM NAMES ITSELF. Every label, hint and default on this page said
+// "BookaBoost" — including the ANNOTATION TAG that gets written into the
+// customer's own CRM against every record this platform touches. An EvoSys Pro
+// customer's Salesforce was therefore being stamped with another company's
+// name. The resolved brand is the one the shell themes from; the fallback
+// names no brand at all.
+const BRAND = () => getCachedBrand()?.displayName || 'Platform'
 
 const CRM_TYPES = [
   { value: 'webhook',      label: 'Generic Webhook (Zapier, Make, any CRM)' },
@@ -21,9 +30,12 @@ const CRM_TYPES = [
   { value: 'hubspot',      label: 'HubSpot (Direct API)' },
 ]
 
-const SYNC_MODES = [
-  { value: 'push_only', label: 'Push Only — BookaBoost → CRM' },
-  { value: 'pull_only', label: 'Pull Only — CRM → BookaBoost' },
+// Functions, not frozen arrays: the brand is resolved after this module is
+// first evaluated, so a constant computed at import time would bake in the
+// fallback for the life of the tab.
+const syncModes = () => [
+  { value: 'push_only', label: `Push Only — ${BRAND()} → CRM` },
+  { value: 'pull_only', label: `Pull Only — CRM → ${BRAND()}` },
   { value: 'two_way',   label: 'Two-Way Sync' },
 ]
 
@@ -36,7 +48,7 @@ const ALL_EVENTS = [
 
 const BACKEND = API_BASE
 
-const DEFAULT_FORM = {
+const defaultForm = () => ({
   name: '',
   crm_type: 'webhook',
   webhook_url: '',
@@ -45,9 +57,9 @@ const DEFAULT_FORM = {
   api_base_url: '',
   sync_mode: 'push_only',
   push_events: ['booking', 'status_change'],
-  annotation_tag: 'BookaBoost',
+  annotation_tag: BRAND(),
   active: true,
-}
+})
 
 export default function CRMIntegration() {
   const user = getCurrentUser()
@@ -58,7 +70,7 @@ export default function CRMIntegration() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState(null)
-  const [form, setForm] = useState(DEFAULT_FORM)
+  const [form, setForm] = useState(defaultForm())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [testResults, setTestResults] = useState({})
@@ -80,7 +92,7 @@ export default function CRMIntegration() {
 
   function openAdd() {
     setEditId(null)
-    setForm(DEFAULT_FORM)
+    setForm(defaultForm())
     setError('')
     setShowForm(true)
   }
@@ -96,7 +108,7 @@ export default function CRMIntegration() {
       api_base_url: conn.api_base_url || '',
       sync_mode: conn.sync_mode || 'push_only',
       push_events: conn.push_events || ['booking'],
-      annotation_tag: conn.annotation_tag || 'BookaBoost',
+      annotation_tag: conn.annotation_tag || BRAND(),
       active: conn.active !== false,
     })
     setError('')
@@ -169,7 +181,7 @@ export default function CRMIntegration() {
           <h1 className="crm-title">CRM Integration</h1>
           <p className="crm-subtitle">
             Push bookings and activity to your clients' CRMs, pull leads in, or both.
-            Every record sent is annotated with a BookaBoost tag for clear audit trails.
+            Every record sent is annotated with a {BRAND()} tag for clear audit trails.
           </p>
         </div>
         <button className="crm-btn-primary" onClick={openAdd}>+ Add Connection</button>
@@ -182,7 +194,7 @@ export default function CRMIntegration() {
           <span className="crm-badge crm-badge--blue">Pull-In</span>
         </div>
         <p className="crm-inbound-desc">
-          Give this URL to your client's CRM so it can push contacts directly into BookaBoost.
+          Give this URL to your client's CRM so it can push contacts directly into {BRAND()}.
           Paste it as a webhook endpoint in GoHighLevel, HubSpot, Zapier, Make, or any CRM.
           New contacts are deduplicated by phone and email.
         </p>
@@ -222,7 +234,7 @@ export default function CRMIntegration() {
                       {CRM_TYPES.find(t => t.value === conn.crm_type)?.label?.split(' ')[0] || conn.crm_type}
                     </span>
                     <span className="crm-badge crm-badge--purple">
-                      {SYNC_MODES.find(m => m.value === conn.sync_mode)?.label?.split(' ')[0] || conn.sync_mode}
+                      {syncModes().find(m => m.value === conn.sync_mode)?.label?.split(' ')[0] || conn.sync_mode}
                     </span>
                   </div>
                   <div className="crm-card-actions">
@@ -246,7 +258,7 @@ export default function CRMIntegration() {
                   <span>{(conn.push_events || []).join(', ') || 'none'}</span>
                   <span className="crm-card-detail-sep">·</span>
                   <span className="crm-card-detail-label">Tag:</span>
-                  <span>{conn.annotation_tag || 'BookaBoost'}</span>
+                  <span>{conn.annotation_tag || BRAND()}</span>
                   {conn.last_push_at && (
                     <><span className="crm-card-detail-sep">·</span>
                     <span className="crm-card-detail-label">Last push:</span>
@@ -315,14 +327,14 @@ export default function CRMIntegration() {
                   value={form.sync_mode}
                   onChange={e => setForm(f => ({ ...f, sync_mode: e.target.value }))}
                 >
-                  {SYNC_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  {syncModes().map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
               </label>
 
               {needsWebhookUrl && (
                 <>
                   <label className="crm-field">
-                    <span>Webhook URL <span className="crm-field-hint">(where BookaBoost POSTs events)</span></span>
+                    <span>Webhook URL <span className="crm-field-hint">(where {BRAND()} POSTs events)</span></span>
                     <input
                       className="crm-input"
                       type="url"
@@ -367,12 +379,12 @@ export default function CRMIntegration() {
               )}
 
               <label className="crm-field">
-                <span>Annotation Tag <span className="crm-field-hint">(added to every record BookaBoost creates/updates)</span></span>
+                <span>Annotation Tag <span className="crm-field-hint">(added to every record {BRAND()} creates/updates)</span></span>
                 <input
                   className="crm-input"
                   value={form.annotation_tag}
                   onChange={e => setForm(f => ({ ...f, annotation_tag: e.target.value }))}
-                  placeholder="BookaBoost"
+                  placeholder={BRAND()}
                 />
               </label>
 

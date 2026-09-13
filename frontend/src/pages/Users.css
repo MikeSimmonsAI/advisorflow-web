@@ -5,8 +5,27 @@
   display: flex; align-items: flex-start; justify-content: space-between;
   margin-bottom: 24px; gap: 16px;
 }
-.page-title { font-size: 26px; font-weight: 700; margin: 0 0 4px; color: var(--text-primary); }
-.page-subtitle { font-size: 14px; color: var(--text-tertiary); margin: 0; display: flex; align-items: center; gap: 10px; }
+/* SCOPED TO THIS PAGE'S HEADER, DELIBERATELY.
+ *
+ * These two were written as BARE GLOBAL SELECTORS in a page stylesheet. Every
+ * page's CSS is bundled into one sheet, so they did not style this header —
+ * they restyled `.page-subtitle` on all twenty-four screens that use it, and
+ * whichever page file happened to be concatenated last won for every one of
+ * them.
+ *
+ * `display: flex` is the one that did visible damage. This page's subtitle is
+ * a count plus a badge, so a flex row is right HERE; on the Email Queue the
+ * subtitle is a sentence with inline chips in it, and flex turns each run of
+ * words between chips into its own flex item that shrinks to min-content —
+ * which is exactly the crushed, vertically-broken paragraph reported at the
+ * top of that page. `max-width: 520px` from ImportBatches.css was stacked on
+ * top of it, pinning the whole thing into a narrow column of a wide row.
+ *
+ * The fix is the scope, not the values: the shared definition in
+ * styles/shared.css is the global one, and page files qualify their own.
+ */
+.users-header .page-title { font-size: 26px; font-weight: 700; margin: 0 0 4px; color: var(--text-primary); }
+.users-header .page-subtitle { font-size: 14px; color: var(--text-tertiary); margin: 0; display: flex; align-items: center; gap: 10px; }
 .header-pending-badge {
   background: rgba(217,119,6,0.15); color: #f59e0b;
   border: 1px solid rgba(217,119,6,0.3);

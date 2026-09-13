@@ -14,6 +14,16 @@
 
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { getCachedBrand } from '../theme'
+
+// THE BRAND NAMES ITSELF. This page is the FIRST screen a new customer's staff
+// ever sees — it arrives as a setup link before they have an account — and it
+// said "Powered by BookaBoost" to every one of them, whichever brand they had
+// actually signed up with. The resolved brand is the same one the login screen
+// and the shell theme from; the fallback names no brand at all rather than
+// guessing one, because an unrecognised host getting the WRONG name is worse
+// than getting none.
+const BRAND = () => getCachedBrand()?.displayName || 'this platform'
 
 const BG = 'var(--bg-app, #0f1117)'
 const CARD = 'var(--bg-card, #1a1f2e)'
@@ -68,7 +78,7 @@ export default function SetupIntegrations() {
   if (calendarConnected || microsoftConnected) {
     const service = calendarConnected ? 'Google Calendar' : 'Microsoft 365'
     const detail = calendarConnected
-      ? 'Appointments booked through BookaBoost will land directly on your calendar.'
+      ? `Appointments booked through ${BRAND()} will land directly on your calendar.`
       : 'Outbound emails will send from your real Outlook address and replies arrive in your inbox.'
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: BG, padding: 24 }}>
@@ -134,7 +144,7 @@ export default function SetupIntegrations() {
           {advisor && (
             <p style={{ fontSize: 15, color: TEXT_SEC, lineHeight: 1.6 }}>
               Hi <strong style={{ color: '#fff' }}>{advisor.full_name}</strong> — link your Google Calendar
-              and/or Microsoft 365 so BookaBoost can schedule appointments and send emails on your behalf.
+              and/or Microsoft 365 so {BRAND()} can schedule appointments and send emails on your behalf.
             </p>
           )}
           {(calendarError || microsoftError) && (
@@ -158,7 +168,7 @@ export default function SetupIntegrations() {
                 )}
               </div>
               <p style={{ fontSize: 13, color: TEXT_SEC, marginTop: 4, lineHeight: 1.5 }}>
-                Appointments booked through your BookaBoost link land directly on your Google Calendar — no manual entry needed.
+                Appointments booked through your {BRAND()} link land directly on your Google Calendar — no manual entry needed.
               </p>
             </div>
           </div>
@@ -209,7 +219,7 @@ export default function SetupIntegrations() {
         </div>
 
         <p style={{ textAlign: 'center', marginTop: 24, fontSize: 12, color: TEXT_TER }}>
-          Powered by BookaBoost · This setup link expires in 48 hours
+          Powered by {BRAND()} · This setup link expires in 48 hours
         </p>
       </div>
     </div>
