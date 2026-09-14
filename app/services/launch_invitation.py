@@ -201,6 +201,7 @@ def _deliver(db: Session, org: Organization, brand: Dict[str, Any], *,
     somebody else's address.
     """
     from app.services.email_service import send_email_via_provider
+    from app.services import email_identity
 
     identity = _sending_identity(db, org, brand)
     if not getattr(identity, "from_email", None):
@@ -215,33 +216,101 @@ def _deliver(db: Session, org: Organization, brand: Dict[str, Any], *,
             to_email,
             "Your %s onboarding" % (brand.get("name") or "workspace"),
             _invitation_email(brand, org, recipient_name, url, one_time),
-            org=identity)
+            org=identity,
+            # DECLARED, so the decision is not left to a default. This message
+            # contains a one-time setup link; `email_identity` refuses an audit
+            # copy for this type and `_record_delivery` below keeps the
+            # envelope instead.
+            message_type="onboarding_invitation",
+            sensitivity=email_identity.SENSITIVE,
+            template_id="launch.onboarding_invitation")
     except Exception as exc:                                    # noqa: BLE001
         log.exception("launch invitation: provider raised")
         return {"state": DELIVERY_FAILED, "to": to_email,
                 "provider_message_id": None, "error": str(exc)[:300],
                 "attempted_at": datetime.utcnow()}
-    if result.get("success"):
-        return {"state": DELIVERY_SENT, "to": to_email,
-                "provider_message_id": result.get("provider_message_id"),
-                "error": None, "attempted_at": datetime.utcnow()}
-    return {"state": DELIVERY_FAILED, "to": to_email,
-            "provider_message_id": None,
-            "error": (result.get("error") or "The mail provider refused it.")[:300],
-            "attempted_at": datetime.utcnow()}
+    state = DELIVERY_SENT if result.get("success") else DELIVERY_FAILED
+    out = {"state": state, "to": to_email,
+           "provider_message_id": (result.get("provider_message_id")
+                                   if result.get("success") else None),
+           "error": (None if result.get("success")
+                     else (result.get("error")
+                           or "The mail provider refused it.")[:300]),
+           "attempted_at": datetime.utcnow()}
+    _record_delivery(db, org, brand, identity, out, subject_template=(
+        "launch.onboarding_invitation"))
+    return out
+
+
+def _record_delivery(db: Session, org: Organization, brand: Dict[str, Any],
+                     identity, outcome: Dict[str, Any],
+                     subject_template: str) -> None:
+    """THE ENVELOPE OF A MESSAGE WE ARE NOT ALLOWED TO COPY.
+
+    A BCC is out of the question here — the body holds a one-time setup link —
+    but "we sent it and the provider took it" is exactly the fact nobody could
+    retrieve afterwards, which is what made "was Joshua's invitation actually
+    delivered?" an archaeology exercise. So the envelope is recorded and the
+    contents are not.
+
+    `safe_delivery_record` is given the subject, the addresses and the
+    provider's answer; it is never given the body, the link or the token, and
+    it scrubs anything URL-shaped that arrives anyway. Best-effort: an audit
+    failure must never turn a delivered invitation into an error.
+    """
+    from app.services import email_identity
+    try:
+        record = email_identity.safe_delivery_record(
+            platform_id=getattr(org, "platform_id", None),
+            brand_name=brand.get("name"),
+            organization_id=getattr(org, "id", None),
+            recipient=outcome.get("to"),
+            message_type="onboarding_invitation",
+            template_id=subject_template,
+            subject="Your %s onboarding" % (brand.get("name") or "workspace"),
+            from_email=getattr(identity, "from_email", None),
+            sent_at=outcome.get("attempted_at"),
+            provider="resend",
+            provider_message_id=outcome.get("provider_message_id"),
+            delivery_state=outcome.get("state"),
+            delivery_error=outcome.get("error"),
+        )
+        log_action(db, getattr(org, "id", None), None,
+                   action="email.credential_delivery",
+                   target_type="organization",
+                   target_id=getattr(org, "id", None),
+                   platform_id=getattr(org, "platform_id", None),
+                   details=record,
+                   note="Envelope only. No link, token or body is recorded.",
+                   commit=False)
+    except Exception:                                           # noqa: BLE001
+        log.exception("launch invitation: delivery record not written")
 
 
 class _BrandSender:
     """Duck-type for `send_email_via_provider`, same shape support uses."""
 
     __slots__ = ("from_email", "reply_to_email", "cc_email",
-                 "resend_api_key", "resolved")
+                 "resend_api_key", "resolved", "from_name", "audit_bcc_email")
 
-    def __init__(self, address, api_key=None):
+    def __init__(self, address, api_key=None, brand_name=None):
         self.from_email = address
         self.reply_to_email = address
         self.cc_email = None
         self.resend_api_key = api_key
+        # THE BRAND NAMES ITSELF ON ITS OWN INVITATION. From the brand row
+        # that supplied the address, so the two cannot disagree.
+        self.from_name = brand_name
+        # DELIBERATELY None, AND NOT A MISSING FEATURE.
+        #
+        # An onboarding invitation carries a one-time setup link: whoever holds
+        # the text can set the recipient's password. BCCing it into a shared
+        # mailbox would make a single-use credential a standing one, readable
+        # by everyone with access to that inbox, long after the customer has
+        # signed in. `email_identity.audit_bcc_for` refuses this message type
+        # anyway; leaving the attribute empty means two independent things
+        # would have to fail before a copy could be taken.
+        self.audit_bcc_email = None
         # RESOLVED MEANS "I ASKED THE BRAND". An unresolved brand must not be
         # rescued by the deployment-wide default, which belongs to nobody.
         self.resolved = True
@@ -250,7 +319,8 @@ class _BrandSender:
 def _sending_identity(db: Session, org: Organization, brand: Dict[str, Any]):
     address = (brand.get("support_email")
                or getattr(org, "from_email", None))
-    return _BrandSender(address, getattr(org, "resend_api_key", None))
+    return _BrandSender(address, getattr(org, "resend_api_key", None),
+                        brand_name=brand.get("name"))
 
 # ── what would happen, before anything happens ──────────────────────────────
 

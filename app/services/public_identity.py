@@ -362,14 +362,24 @@ class SendingIdentity(object):
     """
 
     __slots__ = ("from_email", "resend_api_key", "reply_to_email", "cc_email",
-                 "resolved")
+                 "resolved", "from_name", "audit_bcc_email", "platform_id")
 
     def __init__(self, from_email=None, resend_api_key=None,
-                 reply_to_email=None, cc_email=None):
+                 reply_to_email=None, cc_email=None, from_name=None,
+                 audit_bcc_email=None, platform_id=None):
         self.from_email = from_email
         self.resend_api_key = resend_api_key
         self.reply_to_email = reply_to_email
         self.cc_email = cc_email
+        # THE NAME THAT GOES IN FRONT OF THE ADDRESS. Resolved from the same
+        # walk, so a brand that answers "support@evosyspro.live" also answers
+        # "EvoSys Pro" and neither can come from a different brand than the
+        # other. None means send under the bare address, as before.
+        self.from_name = from_name
+        # The brand's own audit mailbox, or None. Read by
+        # `email_identity.audit_bcc_for`, which refuses it for credentials.
+        self.audit_bcc_email = audit_bcc_email
+        self.platform_id = platform_id
         # THIS OBJECT HAS ALREADY ASKED EVERY LEVEL. A `from_email` of None on
         # a raw Organization row means "not configured here, look further up";
         # on THIS object it means the whole walk came back empty, and there is
@@ -385,10 +395,56 @@ class SendingIdentity(object):
 
 def sending_identity_for_org(db: Session, organization_id: Optional[str]) -> SendingIdentity:
     ident = identity_for_org(db, organization_id)
+    # THE DISPLAY NAME IS THE CUSTOMER-FACING ONE, NOT THE PLATFORM'S.
+    #
+    # `brand_name` is infrastructure — EvoSys Pro — and a family has never
+    # heard of it; `customer_facing_name` is the business they believe is
+    # writing to them. Mail signed "The EvoSys Pro Team" to a funeral home's
+    # family is the same defect this module was built to stop, one field over.
+    # Falls back to the brand only when a customer name is genuinely absent.
     return SendingIdentity(from_email=ident.from_email,
                            resend_api_key=ident.resend_api_key,
                            reply_to_email=ident.reply_to_email,
-                           cc_email=ident.cc_email)
+                           cc_email=ident.cc_email,
+                           from_name=(ident.customer_facing_name
+                                      or ident.brand_name),
+                           audit_bcc_email=_audit_bcc_for_org(db, organization_id),
+                           platform_id=_platform_id_for_org(db, organization_id))
+
+
+def _platform_row(db: Session, organization_id: Optional[str]):
+    """The Platform behind one organization, or None. Never raises."""
+    if not organization_id:
+        return None
+    try:
+        from app.models.models import Organization, Platform
+        org = (db.query(Organization)
+               .filter(Organization.id == organization_id).first())
+        if org is None or not getattr(org, "platform_id", None):
+            return None
+        return (db.query(Platform)
+                .filter(Platform.id == org.platform_id).first())
+    except Exception:
+        log.exception("public_identity: platform lookup failed for %s",
+                      organization_id)
+        return None
+
+
+def _platform_id_for_org(db: Session, organization_id: Optional[str]):
+    plat = _platform_row(db, organization_id)
+    return getattr(plat, "id", None) if plat is not None else None
+
+
+def _audit_bcc_for_org(db: Session, organization_id: Optional[str]):
+    """The brand's audit mailbox. Brand-scoped, with no environment fallback.
+
+    Deliberately has no `or os.environ[...]` tail. An audit mailbox that came
+    from a deployment-wide default would collect three brands' customer mail
+    into one inbox, which is the leak this module exists to prevent wearing a
+    compliance hat.
+    """
+    plat = _platform_row(db, organization_id)
+    return (getattr(plat, "audit_bcc_email", None) or None) if plat is not None else None
 
 
 # ── public link builders ────────────────────────────────────────────────────

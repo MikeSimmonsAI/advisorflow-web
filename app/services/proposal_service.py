@@ -1020,7 +1020,8 @@ def _send_portal_email(db: Session, prop: Proposal, ident: dict,
             subject="Your proposal from %s" % (ident.get("name") or "us"),
             body_html=body,
             attachments=None,
-            org=_SendingOrg(ident.get("from_email")),
+            org=_SendingOrg(ident.get("from_email"),
+                            from_name=ident.get("name")),
         )
     except Exception as e:
         log.exception("proposal email send blew up for %s", prop.id)

@@ -155,6 +155,9 @@ def send_email_via_provider(
     body_html: str,
     attachments: list = None,
     org=None,
+    message_type: str = None,
+    sensitivity: str = None,
+    template_id: str = None,
 ) -> dict:
     """
     Sends via Resend. Returns {"success": bool, "provider_message_id": str|None, "error": str|None}.
@@ -164,7 +167,15 @@ def send_email_via_provider(
     resend_api_key / from_email set, those override the global env vars so each
     brand sends from its own verified domain. Falls back gracefully to the global
     env vars when org fields are not set (e.g. during system-check calls).
+
+    message_type / sensitivity / template_id describe WHAT is being sent, which
+    is what decides whether the brand's audit mailbox may receive a silent copy.
+    Both default to "assume it carries a credential" — see email_identity — so a
+    caller that says nothing gets no BCC rather than an accidental one.
     """
+    from app.services.email_identity import (
+        audit_bcc_for, format_from, is_sensitive,
+    )
     # Resolve which API key and from address to use — org-level beats env var.
     api_key = (getattr(org, "resend_api_key", None) or RESEND_API_KEY) if org else RESEND_API_KEY
     from_addr = (getattr(org, "from_email", None) or FROM_EMAIL) if org else FROM_EMAIL
@@ -216,8 +227,16 @@ def send_email_via_provider(
         import resend
         resend.api_key = api_key
 
+        # THE BRAND NAMES ITSELF. A mail client shows the display name and
+        # hides the address, so a bare `support@evosyspro.live` reads as a
+        # machine on a domain the recipient has never typed. The name comes
+        # off the SAME resolved identity as the address — no constant, no
+        # per-customer branch — so every white-label names itself and none of
+        # them can name another. An identity with no name still sends, under
+        # the bare address exactly as before.
         params = {
-            "from": from_addr,
+            "from": format_from(getattr(org, "from_name", None) if org else None,
+                                from_addr),
             "to": [to_email],
             "subject": subject,
             "html": body_html,
@@ -235,6 +254,21 @@ def send_email_via_provider(
         if _cc:
             params["cc"] = [_cc]
 
+        # THE BRAND'S AUDIT COPY — BCC, and never for a credential.
+        #
+        # BCC rather than CC because the customer must not see it; brand-scoped
+        # because one mailbox collecting three brands' customer mail is the
+        # same mistake as one From address for three brands; and refused
+        # outright for anything carrying an activation link, a reset link or a
+        # one-time code, because copying a bearer credential into a shared
+        # mailbox turns a single-use secret into a standing one. Those messages
+        # get `email_identity.safe_delivery_record` instead — see
+        # `launch_invitation._record_delivery` — which is handed the envelope
+        # and has no parameter for the body at all.
+        _audit = audit_bcc_for(org, message_type, sensitivity) if org else None
+        if _audit and _audit.strip().lower() != (to_email or "").strip().lower():
+            params["bcc"] = [_audit]
+
         if attachments:
             params["attachments"] = [
                 {"filename": att["filename"], "content": att["content"], "content_type": att.get("content_type", "application/octet-stream")}
@@ -243,9 +277,18 @@ def send_email_via_provider(
 
         response = resend.Emails.send(params)
         message_id = response.get("id") if isinstance(response, dict) else getattr(response, "id", None)
-        return {"success": True, "provider_message_id": message_id, "error": None}
+        # The envelope, reported back. A caller writing a delivery record needs
+        # to state the From it actually sent under and whether a copy was taken,
+        # and neither is knowable from outside this function.
+        return {"success": True, "provider_message_id": message_id, "error": None,
+                "from_email": from_addr, "provider": "resend",
+                "audit_bcc_applied": bool(params.get("bcc")),
+                "sensitive": is_sensitive(message_type, sensitivity)}
     except Exception as e:
-        return {"success": False, "provider_message_id": None, "error": str(e)}
+        return {"success": False, "provider_message_id": None, "error": str(e),
+                "from_email": from_addr, "provider": "resend",
+                "audit_bcc_applied": False,
+                "sensitive": is_sensitive(message_type, sensitivity)}
 
 
 def send_email(

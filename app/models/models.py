@@ -138,6 +138,19 @@ class Platform(Base):
     slug = Column(String, unique=True, nullable=False)  # bookaboost | evosyspro | harmonyhustle
     domain = Column(String, nullable=True)        # e.g. "app.bookaboost.live"
     support_email = Column(String, nullable=True) # e.g. "support@bookaboost.live"
+    # WHERE THIS BRAND KEEPS A COPY OF ITS OWN OUTBOUND MAIL.
+    #
+    # Optional, nullable, and brand-scoped on purpose: one mailbox collecting
+    # three brands' customer mail is the same category of mistake as one From
+    # address for three brands, so there is deliberately no deployment-wide
+    # equivalent of this column. NULL — the default everywhere — means no copy
+    # is taken, which is exactly the behaviour every brand has today.
+    #
+    # NEVER receives a message carrying an activation link, a reset link or a
+    # one-time code. See app/services/email_identity.py: those are recorded by
+    # envelope instead, because BCCing a bearer credential into a shared
+    # mailbox turns a single-use secret into a standing one.
+    audit_bcc_email = Column(String, nullable=True)
     # BRAND PRESENTATION — the single source of truth.
     #
     # These values used to live in four unsynchronised places that never read

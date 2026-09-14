@@ -157,6 +157,14 @@ def _is_lock_contention(exc) -> bool:
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # ── The brand's outbound-mail audit mailbox (2026-09-14) ───────────────
+    #
+    # Nullable with no default, and NULL is the whole fleet's current state:
+    # no brand takes a copy until an operator sets one. Reading it is
+    # `email_identity.audit_bcc_for`, which refuses for anything carrying a
+    # credential no matter what this column says.
+    ("platforms", "audit_bcc_email", "VARCHAR"),
+
     # ── Stripe billing on organizations (2026-09-07) ───────────────────────
     #
     # THESE WERE NEVER IN THIS LIST AND SHOULD HAVE BEEN SINCE THE DAY THEY

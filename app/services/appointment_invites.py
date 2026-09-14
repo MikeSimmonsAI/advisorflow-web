@@ -181,9 +181,24 @@ class _SendingOrg(object):
     its own — so this carries the brand's verified from-address without
     pretending a customer tenant is involved.
     """
-    def __init__(self, from_email, resend_api_key=None):
+    def __init__(self, from_email, resend_api_key=None, from_name=None):
         self.from_email = from_email
         self.resend_api_key = resend_api_key
+        # The brand names itself, from the same resolved identity.
+        self.from_name = from_name
+        # No audit copy for brand-sales appointment mail: nothing has asked
+        # for one, and a silent default copy of a prospect's calendar invite
+        # is not a thing to switch on by accident.
+        self.audit_bcc_email = None
+        # THIS IS AN ANSWER, NOT A GAP.
+        #
+        # `ident.get("from_email")` has already walked the brand. None here
+        # means the BRAND has no verified sender — not "look further up" —
+        # and the deployment-wide EMAIL_FROM_ADDRESS is `noreply@bookaboost
+        # .live`, which is another company's name on this brand's mail. With
+        # this flag set, `send_email_via_provider` refuses instead of
+        # substituting it.
+        self.resolved = True
 
 
 # ── the token ───────────────────────────────────────────────────────────────
@@ -484,7 +499,8 @@ def send_prospect_invitation(db: Session, appt: SalesAppointment,
     else:
         subject = "Your meeting with %s" % (ident.get("name") or "us")
 
-    sending_org = _SendingOrg(ident.get("from_email"))
+    sending_org = _SendingOrg(ident.get("from_email"),
+                              from_name=ident.get("name"))
     try:
         from app.services.email_service import send_email_via_provider
         result = send_email_via_provider(
