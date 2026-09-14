@@ -228,6 +228,7 @@ def run_backfill(
     batch_size: int = Query(master_backfill.DEFAULT_BATCH, ge=1, le=2000),
     dry_run: bool = Query(True),
     refresh: bool = Query(False),
+    after_lead_id: Optional[str] = Query(None),
     god: User = Depends(require_god),
     db: Session = Depends(get_db),
 ):
@@ -250,6 +251,7 @@ def run_backfill(
         batch_size=batch_size,
         dry_run=dry_run,
         refresh=refresh,
+        after_lead_id=after_lead_id,
     )
     log.info("god master backfill by %s: %s", god.id, result)
     return result

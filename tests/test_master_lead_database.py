@@ -380,6 +380,39 @@ def test_a_refresh_pass_reclassifies_without_creating_or_double_counting(db_sess
     assert real_occ.is_synthetic is False
 
 
+def test_a_refresh_pass_pages_forward_instead_of_re_reading_the_same_rows(db_session):
+    """The defect that made the first production refresh attempt useless.
+
+    The ordinary pass is self-advancing: a lead it records gains an occurrence
+    and drops out of the next call's query. A refresh filters nothing, so
+    without a cursor every call re-reads the head of the table and a caller
+    paging through it loops forever over the first `limit` rows.
+    """
+    org = _org(db_session, "WUPA")
+    for i in range(10):
+        _lead(db_session, org, email="p%d@realbrand.org" % i)
+    master_backfill.backfill(db_session)
+
+    seen = []
+    cursor = None
+    for _ in range(6):
+        result = master_backfill.backfill(
+            db_session, refresh=True, limit=3, batch_size=3,
+            after_lead_id=cursor)
+        if result["scanned"] == 0:
+            break
+        cursor = result["last_lead_id"]
+        seen.append((result["scanned"], cursor))
+
+    # Four pages of 3, 3, 3, 1 — and every cursor distinct, which is the
+    # assertion that actually fails if paging regresses.
+    assert [s for s, _ in seen] == [3, 3, 3, 1]
+    cursors = [c for _, c in seen]
+    assert len(set(cursors)) == len(cursors)
+    assert db_session.query(LeadOccurrence).count() == 10
+    assert db_session.query(MasterContact).count() == 10
+
+
 def test_one_real_appearance_keeps_a_person_out_of_the_props(db_session):
     """A human seen in a demo org AND a real one is a human."""
     demo = _org(db_session, "Proof", is_demo=True)

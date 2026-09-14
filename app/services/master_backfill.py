@@ -96,6 +96,7 @@ def backfill(
     batch_size: int = DEFAULT_BATCH,
     dry_run: bool = False,
     refresh: bool = False,
+    after_lead_id: Optional[str] = None,
 ) -> dict:
     """Walk leads with no occurrence and record them. Returns counts.
 
@@ -110,11 +111,20 @@ def backfill(
     because the first production pass classified 1,683 seed addresses as
     people, and the honest fix for that is to improve the rule and re-derive,
     not to hand-edit rows.
+
+    `after_lead_id` resumes from a lead id, and the result reports
+    `last_lead_id` so a caller can page. THIS IS WHAT MAKES `refresh` USABLE
+    OVER A REAL ESTATE. The ordinary pass is self-advancing: a lead it records
+    gains an occurrence and is filtered out of the next call's query, so
+    successive calls naturally walk forward. A refresh pass filters nothing,
+    so without a cursor every call re-reads the same first `limit` rows and
+    the caller loops forever over the head of the table — which is exactly
+    what happened on the first attempt to run one.
     """
     scanned = 0
     recorded = 0
     failed = 0
-    cursor: Optional[str] = None
+    cursor: Optional[str] = after_lead_id
 
     contacts_before = int(db.query(func.count(MasterContact.id)).scalar() or 0)
 
@@ -175,6 +185,9 @@ def backfill(
         "scanned": scanned,
         "recorded": recorded,
         "failed": failed,
+        # Pass back as `after_lead_id` to continue. None means nothing was
+        # read, which is the only honest signal that a refresh has finished.
+        "last_lead_id": cursor,
         "contacts_created": max(0, contacts_after - contacts_before),
         "leads_without_occurrence_remaining": pending_count(db, organization_id),
     }
