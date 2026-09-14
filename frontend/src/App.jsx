@@ -1026,7 +1026,9 @@ export default function App() {
         <Route path="/tier-definitions" element={<ProtectedRoute feature="tier_config" requireAdmin><TierDefinitions /></ProtectedRoute>} />
         <Route path="/10dlc" element={<ProtectedRoute requireAdmin><DLCRegistration /></ProtectedRoute>} />
         <Route path="/fiber-capture" element={<ProtectedRoute><FiberLeadCapture /></ProtectedRoute>} />
-        <Route path="/re-engagement" element={<ProtectedRoute><ReEngagement /></ProtectedRoute>} />
+        {/* Three /leads/ calls and nothing else — see the matching note on the
+            nav item. The route must agree with the sidebar that hides it. */}
+        <Route path="/re-engagement" element={<ProtectedRoute feature="leads"><ReEngagement /></ProtectedRoute>} />
         <Route path="/orgs" element={<ProtectedRoute requireSuperAdmin><OrgManager /></ProtectedRoute>} />
         <Route path="/billing" element={<ProtectedRoute requireAdmin><Billing /></ProtectedRoute>} />
         {/* ══════════════════════════════════════════════════════════════

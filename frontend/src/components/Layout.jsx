@@ -94,7 +94,13 @@ const NAV_GROUPS = [
       // test here because require_admin is what /proposals/* actually enforces.
       { to: '/proposals', label: 'Proposals', icon: 'file-text', adminOnly: true },
       { to: '/cadence', label: 'Cadence', icon: 'repeat', adminOnly: true, featureKey: 'cadences' },
-      { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer' },
+      // `leads`, because that is all this page is. It calls /leads/ three
+      // times — hot, warm and cold — and renders nothing else. Without a
+      // feature key it stayed in the sidebar for a workspace without the lead
+      // module and opened onto three refusals, which the page then swallowed
+      // into "no leads in any temperature". The one surface still out of step
+      // with the other four.
+      { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer', featureKey: 'leads' },
       { to: '/compliance', label: 'DNC List', icon: 'shield-check', featureKey: 'compliance' },
     ],
   },
