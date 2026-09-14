@@ -18,7 +18,8 @@
  * function refuses to continue if they differ, so the centralized-identity rule
  * is checked on every single entry rather than trusted.
  */
-import { api, setOrgContext, setBrandContext, clearOrgContext, clearBranding } from '../../api/client'
+import { api, setOrgContext, setBrandContext, clearOrgContext, clearBranding,
+         fetchAndStoreBranding } from '../../api/client'
 
 /**
  * Enter a customer organization's context.
@@ -48,17 +49,28 @@ export async function enterCustomer(orgId, orgName) {
 
   // The cached branding belongs to whoever was entered LAST, and it carries
   // `enabled_features` — an allow-list keyed to one organization. Keeping it
-  // would render the previous customer's modules under this customer's banner
-  // until the refetch lands. Layout refetches immediately; this is what stops
-  // the wrong answer being shown in the meantime.
+  // would render the previous customer's modules under this customer's banner.
   clearBranding()
+
+  // AND THE NEW ONE IS FETCHED BEFORE THE REDIRECT, not after the first paint.
+  //
+  // `Login.jsx` already awaits this for exactly the same reason: an absent
+  // cache reads as legacy-open, so a dashboard that paints before the answer
+  // arrives renders every module and fires every module's request, then
+  // retracts them a second later. A customer logging in never sees that
+  // because login waits. An operator switching customer did, twice per
+  // switch. Failure is not fatal — it leaves the cache absent, which is
+  // exactly where this line started.
 
   // Establish brand context from the server's resolved platform so that
   // X-Brand-Override is always current, even when switching between customers
   // that belong to different brands. Never hardcoded — always from the server.
+  // BEFORE the branding fetch below, so that call already carries it.
   if (r && r.context && r.context.platform) {
     setBrandContext(r.context.platform.id, r.context.platform.name)
   }
+
+  try { await fetchAndStoreBranding({ applyTheme: false }) } catch (_) { /* open */ }
 
   return r ? r.context : null
 }
