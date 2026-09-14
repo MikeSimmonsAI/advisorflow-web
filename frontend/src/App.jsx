@@ -250,7 +250,7 @@ import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          clearWorkspaceContext, getBranding } from './api/client'
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
-import { featuresOf, roleOf } from './auth/workspaceAuthority'
+import { roleOf, routeFeatureDenied } from './auth/workspaceAuthority'
 import { exitCustomer } from './pages/god/enterCustomer'
 
 function isAuthenticated() {
@@ -291,9 +291,13 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   // so a route cannot decide a module is available while the nav hides it, or
   // the reverse. See auth/workspaceAuthority.js.
   const role = roleOf(branding, user)
-  const enabled = featuresOf(branding)
-  const featureOff = Boolean(feature) && enabled !== null
-    && !enabled.includes(feature) && role !== 'god_admin'
+  // THE SAME EXPRESSION THE SIDEBAR AND THE DASHBOARD EVALUATE — not a fourth
+  // paraphrase of it. This read `featuresOf(branding)` and then exempted
+  // `role !== 'god_admin'`, which exempted god from the route but not
+  // super_admin, while the sidebar exempted BOTH from everything. A route that
+  // refuses what the nav offers, or offers what the nav refuses, is the defect
+  // regardless of which direction it points. See auth/workspaceRules.js.
+  const featureOff = routeFeatureDenied(feature, branding, user, getOrgContext())
 
   // A REFUSAL IS SHOWN, NOT SWALLOWED.
   //

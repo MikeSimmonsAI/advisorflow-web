@@ -18,7 +18,7 @@
  * function refuses to continue if they differ, so the centralized-identity rule
  * is checked on every single entry rather than trusted.
  */
-import { api, setOrgContext, setBrandContext, clearOrgContext } from '../../api/client'
+import { api, setOrgContext, setBrandContext, clearOrgContext, clearBranding } from '../../api/client'
 
 /**
  * Enter a customer organization's context.
@@ -46,6 +46,13 @@ export async function enterCustomer(orgId, orgName) {
   const name = (r && r.context && r.context.customer && r.context.customer.name) || orgName || orgId
   setOrgContext(orgId, name)
 
+  // The cached branding belongs to whoever was entered LAST, and it carries
+  // `enabled_features` — an allow-list keyed to one organization. Keeping it
+  // would render the previous customer's modules under this customer's banner
+  // until the refetch lands. Layout refetches immediately; this is what stops
+  // the wrong answer being shown in the meantime.
+  clearBranding()
+
   // Establish brand context from the server's resolved platform so that
   // X-Brand-Override is always current, even when switching between customers
   // that belong to different brands. Never hardcoded — always from the server.
@@ -64,4 +71,7 @@ export async function enterCustomer(orgId, orgName) {
 export async function exitCustomer() {
   try { await api.post('/god/platform/context/exit', {}) } catch (_) { /* leaving regardless */ }
   clearOrgContext()
+  // Same reason as entering: the allow-list left behind belongs to the
+  // customer just left, and nothing outside a customer should render from it.
+  clearBranding()
 }

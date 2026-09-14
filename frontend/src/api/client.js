@@ -406,7 +406,15 @@ export function stopRefreshLoop() {
 
 // â”€â”€ Branding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-export async function fetchAndStoreBranding() {
+/**
+ * @param {object}  [opts]
+ * @param {boolean} [opts.applyTheme=true]  Paint the page with this branding.
+ *        An operator in customer-view passes false: they want the customer's
+ *        ENTITLEMENTS, which is what the sidebar and dashboard render from,
+ *        without God Mode silently taking on the customer's colours, favicon
+ *        and document title.
+ */
+export async function fetchAndStoreBranding({ applyTheme = true } = {}) {
   try {
     // Primary source: per-org branding set by god_admin in Command Center
     const data = await api.get('/branding/org', { skipRedirect: true })
@@ -435,8 +443,7 @@ export async function fetchAndStoreBranding() {
       organization_id: data.organization_id ?? null,
     }
     localStorage.setItem(KEY_BRANDING, JSON.stringify(branding))
-    applyBrandingCSS(branding)
-    applyBrandingDOM(branding)
+    if (applyTheme) { applyBrandingCSS(branding); applyBrandingDOM(branding) }
     return branding
   } catch {
     // Fall back to org-settings for backward compat
@@ -460,8 +467,7 @@ export async function fetchAndStoreBranding() {
         organization_id: data.id ?? null,
       }
       localStorage.setItem(KEY_BRANDING, JSON.stringify(branding))
-      applyBrandingCSS(branding)
-      applyBrandingDOM(branding)
+      if (applyTheme) { applyBrandingCSS(branding); applyBrandingDOM(branding) }
       return branding
     } catch { return null }
   }
@@ -471,6 +477,19 @@ export function getBranding() {
   _migrate(KEY_BRANDING, 'bb_branding')
   const raw = localStorage.getItem(KEY_BRANDING)
   return raw ? JSON.parse(raw) : null
+}
+
+/**
+ * FORGET THE PREVIOUS WORKSPACE'S ANSWER.
+ *
+ * `af_branding` carries `enabled_features` — an ALLOW-LIST, keyed to one
+ * organization. Entering a second customer without clearing it renders the
+ * first customer's modules under the second customer's name until the fetch
+ * comes back, which is a wrong answer with a confident banner over it. Called
+ * on entering and on leaving a customer.
+ */
+export function clearBranding() {
+  try { localStorage.removeItem(KEY_BRANDING) } catch { /* storage blocked */ }
 }
 
 

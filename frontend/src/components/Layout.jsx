@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, refreshCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
-import { featuresOf, isManagerRole, roleOf } from '../auth/workspaceAuthority'
+import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
+import { isManagerRole, roleOf, workspaceFeatures } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
 import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
@@ -302,15 +302,22 @@ export default function Layout({ children }) {
   const isGodAdmin = user?.role === 'god_admin'
   const isElevated = isSuperAdmin || isGodAdmin
   const [orgContext, setOrgCtx] = useState(() => isElevated ? getOrgContext() : null)
-  const [branding, setBranding] = useState(() => isElevated ? null : getBranding())
+  const [branding, setBranding] = useState(() => getBranding())
   const [allOrgs, setAllOrgs] = useState([])
   const [orgPickerOpen, setOrgPickerOpen] = useState(false)
 
-  // THE SHARED ANSWER, not this file's own copy of it. `featuresOf` preserves
-  // the NULL-vs-[] distinction the same way everywhere; see
-  // auth/workspaceAuthority.js for why three independent copies of this became
-  // three different answers.
-  const enabledFeatures = isElevated ? null : featuresOf(branding)
+  // THE SHARED ANSWER, not this file's own copy of it.
+  //
+  // This read `isElevated ? null : featuresOf(branding)`, which is a THIRD
+  // rule: an operator saw every module of every customer even while standing
+  // inside one whose modules were switched off. Atlantis Light & Power has no
+  // modules at all and customer-view still drew Leads, Campaigns, CRM, Imports
+  // and the rest — the exact screen this work exists to stop drawing, shown to
+  // the one person who would be asked to explain it.
+  //
+  // `workspaceFeatures` is now that rule, and the dashboard and the route
+  // guard evaluate the same expression. See auth/workspaceRules.js.
+  const enabledFeatures = workspaceFeatures(branding, user, orgContext)
   const isFeatureEnabled = (key) => !key || enabledFeatures === null || enabledFeatures.includes(key)
 
   // WHAT THIS PERSON MAY ADMINISTER, ANSWERED BY THE SERVER.
@@ -332,6 +339,7 @@ export default function Layout({ children }) {
 
   function handleExitOrg() {
     clearOrgContext()
+    clearBranding()
     setOrgCtx(null)
     window.location.href = '/'
   }
@@ -360,6 +368,7 @@ export default function Layout({ children }) {
     if (!org) {
       clearOrgContext()
       clearBrandContext()
+      clearBranding()
       setOrgCtx(null)
       window.location.href = '/god'
     } else {
@@ -373,18 +382,33 @@ export default function Layout({ children }) {
       } catch (_) {
         // Fall back to local context only if the server call fails
         setOrgContext(org.id, org.name)
+        clearBranding()
         setOrgCtx({ orgId: org.id, orgName: org.name })
         window.location.href = '/god/customer-app'
       }
     }
   }
 
+  // THE OPERATOR INSIDE A CUSTOMER NEEDS THIS CALL TOO.
+  //
+  // This returned early for every elevated user, so `af_branding` stayed at
+  // whatever login left behind — `{enabled_features: null, workspace_role:
+  // null, organization_id: null}` — for the whole session. null means
+  // "legacy-open", so customer-view could not have hidden a module even after
+  // the sidebar started asking: there was nothing to ask. The fetch is what
+  // makes the answer exist, and `X-Org-Override` travels with it on
+  // customer-class paths, so the server resolves the ENTERED customer and
+  // returns THEIR allow-list.
+  //
+  // The theme is NOT applied for an operator. Customer-view should report the
+  // customer's entitlements, not repaint God Mode in the customer's colours —
+  // the header, the logo and the banner already say whose workspace this is.
   useEffect(() => {
-    if (isElevated) return
+    if (isElevated && !orgContext) return
     const stored = getBranding()
-    if (stored) { applyBrandingCSS(stored); applyBrandingDOM(stored) }
-    fetchAndStoreBranding().then(b => { if (b) setBranding(b) })
-  }, [isElevated, location.pathname])
+    if (stored && !isElevated) { applyBrandingCSS(stored); applyBrandingDOM(stored) }
+    fetchAndStoreBranding({ applyTheme: !isElevated }).then(b => { if (b) setBranding(b) })
+  }, [isElevated, orgContext, location.pathname])
 
   useEffect(() => {
     refreshCurrentUser().then(p => {

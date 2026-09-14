@@ -39,65 +39,35 @@
  */
 import { useEffect, useState } from 'react'
 import { api, getBranding, getCurrentUser, getOrgContext } from '../api/client'
+// THE RULES THEMSELVES LIVE IN A FILE THAT IMPORTS NOTHING, so the sidebar,
+// the dashboard, the route guard and a plain `node` test all apply the same
+// two expressions rather than four paraphrases of them. See workspaceRules.js
+// for the three that had already drifted.
+import {
+  featureEnabled, featuresOf, isManagerRole, isOperator, operatorRouteExempt,
+  roleOf, routeFeatureDenied, workspaceFeatures,
+} from './workspaceRules'
 
-/* ── features ─────────────────────────────────────────────────────────────── */
-
-/**
- * NULL MEANS EVERYTHING, AND THAT IS NOT A DEFAULT — IT IS THE MIGRATION.
- *
- * An organization that predates entitlements has `enabled_features = NULL` and
- * is deliberately open. One configured down to nothing has `[]`. Collapsing
- * the two is how the sidebar came to render every module for every customer,
- * so the distinction is preserved at every hop: the column, the API payload,
- * `client.js` (which uses `??`, never `||`, because `[]` is falsy), and here.
- */
-export function featuresOf(branding) {
-  const f = branding?.enabled_features
-  return f === undefined ? null : f
-}
-
-export function featureEnabled(branding, key) {
-  if (!key) return true
-  const f = featuresOf(branding)
-  return f === null || f.includes(key)
-}
-
-/* ── role ─────────────────────────────────────────────────────────────────── */
-
-/**
- * THE ROLE IN THIS WORKSPACE, never `users.role`.
- *
- * `users.role` is one value for a whole human and cannot be true of two
- * customers at once. The server resolves the membership role for the selected
- * workspace and sends it as `workspace_role`; the fallback to `user.role`
- * covers only the moment before branding has loaded, and a single-workspace
- * customer where the two agree by construction.
- */
-export function roleOf(branding, user) {
-  return branding?.workspace_role || user?.role || null
-}
-
-export function isManagerRole(role) {
-  return role === 'org_admin' || role === 'super_admin' || role === 'god_admin'
+// Re-exported so every existing import site keeps working and there is still
+// only one module a surface needs to know about.
+export {
+  featureEnabled, featuresOf, isManagerRole, isOperator, operatorRouteExempt,
+  roleOf, routeFeatureDenied, workspaceFeatures,
 }
 
 /* ── the whole answer ─────────────────────────────────────────────────────── */
 
-export function readAuthority({ capabilities = null, elevatedSeesAll = false } = {}) {
+export function readAuthority({ capabilities = null } = {}) {
   const user = getCurrentUser()
   const branding = getBranding()
   const role = roleOf(branding, user)
 
-  // An operator standing OUTSIDE a customer is not subject to a customer's
-  // allow-list. Inside one they are, for rendering, because customer-view
-  // exists to show what the customer sees — the routes let them through
-  // regardless, which is what keeps God Mode able to configure a module that
-  // is currently switched off.
-  const elevated = elevatedSeesAll
-    && (user?.role === 'god_admin' || user?.role === 'super_admin')
-    && !getOrgContext()
-
-  const features = elevated ? null : featuresOf(branding)
+  // ONE RULE, NOT THIS FILE'S OWN VERSION OF IT. An operator standing OUTSIDE
+  // a customer is not subject to a customer's allow-list; inside one they are,
+  // for rendering, because customer-view exists to show what the customer
+  // sees. Direct routes still let god through — `operatorRouteExempt` — which
+  // is what keeps God Mode able to reach a module that is switched off.
+  const features = workspaceFeatures(branding, user, getOrgContext())
 
   return {
     user,
