@@ -36,12 +36,16 @@ import { supportBlock, supportLine } from './present'
  * different surface with its own navigation, and mixing the two is what made
  * this read as "generic software with a customer dropped into it".
  */
+// `live` is what keeps an item out of the dimmed `quiet` style. Three of these
+// were dimmed because they went nowhere; they now open the onboarding section
+// they name (LaunchPad's `selectRail`), so they are as live as Onboarding is
+// and reading them as unavailable would be the new lie.
 const NAV = [
-  { key: 'launchpad',    label: 'Launch Pad',        icon: 'rocket' },
+  { key: 'launchpad',    label: 'Launch Pad',        icon: 'rocket', live: true },
   { key: 'onboarding',   label: 'Onboarding',        icon: 'clip', live: true },
-  { key: 'files',        label: 'Files & Documents', icon: 'folder' },
-  { key: 'team',         label: 'Team & Users',      icon: 'users' },
-  { key: 'integrations', label: 'Integrations',      icon: 'plug' },
+  { key: 'files',        label: 'Files & Documents', icon: 'folder', live: true },
+  { key: 'team',         label: 'Team & Users',      icon: 'users', live: true },
+  { key: 'integrations', label: 'Integrations',      icon: 'plug', live: true },
 ]
 
 const HELP_NAV = [

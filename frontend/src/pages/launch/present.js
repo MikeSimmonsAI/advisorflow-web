@@ -360,6 +360,16 @@ export function supportLine(presentation, brandName) {
   const s = supportBlock(presentation)
   if (s.responsePromise) return s.responsePromise
   if (s.body) return s.body
-  const who = brandName ? brandName + ' implementation team' : 'implementation team'
-  return 'Your ' + who + ' is here to help.'
+  // THE FALLBACK BRAND IS A PHRASE, NOT A NAME. When a customer's launch has
+  // no platform resolved, the server sends `brand.name = "Your implementation
+  // team"` — deliberately, so nothing names the wrong brand. Interpolating a
+  // phrase into a sentence built for a name produced "Your your implementation
+  // team implementation team is here to help.", observed live. So the phrase
+  // is detected and used as the whole subject rather than as a name inside it.
+  const named = (brandName || '').trim()
+  if (!named) return 'Your implementation team is here to help.'
+  if (/implementation team/i.test(named)) {
+    return named.charAt(0).toUpperCase() + named.slice(1) + ' is here to help.'
+  }
+  return 'Your ' + named + ' implementation team is here to help.'
 }

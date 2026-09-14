@@ -99,6 +99,9 @@ function Centered({ children }) {
   )
 }
 
+/** Rail item → the onboarding step it names. See `selectRail` below. */
+const RAIL_STEP = { files: 'files', team: 'systems', integrations: 'compare' }
+
 export default function LaunchPad() {
   const { stepKey, organizationId } = useParams()
   const navigate = useNavigate()
@@ -294,6 +297,33 @@ export default function LaunchPad() {
     if (ok) goTo(key)
   }, [persist, goTo])
 
+  // ── THE RAIL NAMED THREE SECTIONS AND OPENED NONE OF THEM ─────────────────
+  //
+  // `onSelect` was `() => setRailOpen(false)`. So "Files & Documents", "Team &
+  // Users" and "Integrations" closed the mobile rail and did nothing else — on
+  // the first screen a customer ever sees, three of the five navigation items
+  // were inert. The content was never missing: each one names a real
+  // onboarding section that the Save & Continue path reaches perfectly well.
+  // The rail simply was not wired to it.
+  //
+  // Mapped by step key rather than by position, and only when the step is
+  // actually in THIS customer's template — a brand whose template omits a
+  // section gets the old no-op rather than a route to a step that is not
+  // there. `launchpad` and `onboarding` are the same screen as the hero above,
+  // so they return to the top of it, which is a visible answer instead of
+  // none.
+  const railActive = useMemo(() => {
+    const hit = Object.keys(RAIL_STEP).find(k => RAIL_STEP[k] === active)
+    return hit || 'onboarding'
+  }, [active])
+
+  const selectRail = useCallback(key => {
+    setRailOpen(false)
+    const target = RAIL_STEP[key]
+    if (target && stepKeys.includes(target)) { goTo(target); return }
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [goTo, stepKeys])
+
   const uploadFile = useCallback(async (file, label) => {
     // A PREVIEW UPLOADS NOTHING. The route is session-scoped, so the file
     // would land in the OPERATOR's workspace, not the customer's — a preview
@@ -390,10 +420,10 @@ export default function LaunchPad() {
       <LaunchStyles />
       {preview ? <PreviewBanner context={launch.preview_context} /> : null}
       <div className="lp-shell">
-        <LaunchSidebar brand={brand} customer={customer} active="onboarding"
+        <LaunchSidebar brand={brand} customer={customer} active={railActive}
           open={railOpen} presentation={presentation}
           sectionsComplete={sectionsComplete} sectionsTotal={steps.length}
-          onToggle={() => setRailOpen(o => !o)} onSelect={() => setRailOpen(false)} />
+          onToggle={() => setRailOpen(o => !o)} onSelect={selectRail} />
 
         <div className="lp-body">
           <LaunchHeader brand={brand} customer={customer} preview={preview}
