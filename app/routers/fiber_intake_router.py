@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db
 from app.models.models import Lead, Organization
+from app.services import master_contacts
 
 logger = logging.getLogger(__name__)
 
@@ -396,12 +397,27 @@ def fiber_intake_submit(
         held = lead_capacity.hold_if_over_capacity(db, lead, org)
 
         db.add(lead)
+        db.flush()
+        master_contacts.record_lead(
+            db, lead,
+            source="fiber_intake",
+            source_detail="Public intake form",
+            ingestion_path="fiber_intake_router",
+        )
         db.commit()
         logger.info("fiber_intake: created lead %s for org %s%s", lead.id, org.id,
                     " [HELD - plan lead limit reached]" if held else "")
     else:
         # Update service address + extra data if they re-submit
         existing.service_address = service_address.strip()
+        # A re-submission is the same human arriving again: last-seen moves,
+        # nothing is counted twice.
+        master_contacts.record_lead(
+            db, existing,
+            source="fiber_intake",
+            source_detail="Public intake form",
+            ingestion_path="fiber_intake_router",
+        )
         db.commit()
         logger.info("fiber_intake: deduped to existing lead %s", existing.id)
 

@@ -98,6 +98,12 @@ from app.routers.god_catalog_router import router as god_catalog_router
 # identity-provisioning routes and burying them at the bottom of 2,500 lines of
 # diagnostics would hide the most consequential surface on the control plane.
 from app.routers.god_access_router import router as god_access_router
+# THE ADVISORFLOW MASTER LEAD DATABASE. The one router in the codebase that
+# reads across tenants on purpose, which is exactly why it is its own module
+# and every route in it is require_god. No customer-facing router imports
+# `master_contact_models`; a customer's isolation does not depend on a filter
+# being remembered here, because a customer cannot reach this router at all.
+from app.routers.god_master_router import router as god_master_router
 # THE DEMO SUITE. Two routers: the presenter's, gated by the `demo_suite`
 # capability over a brand, and the owner's, for building the environments.
 # NOT mounted under /demo - that prefix belongs to the APP_ENV=demo deployment
@@ -715,6 +721,7 @@ app.include_router(god_pricing_router)   # Pricing floors + compensation plans �
 app.include_router(god_billing_router)   # Customer SaaS plan catalogue + billing policy + revenue — god_admin only
 app.include_router(god_catalog_router)   # Brand catalogue: recurring add-ons + one-time products/services — god_admin only
 app.include_router(god_access_router)    # /god/access — Manage Access: footprint, preview, apply, audit. god_admin only
+app.include_router(god_master_router)    # /god/master — the AdvisorFlow Master Lead Database. CROSS-TENANT BY DESIGN and god_admin only; no customer route reads these tables.
 app.include_router(god_demo_suite_router)  # /god/demo-suite — build and reset brands' demonstration environments
 app.include_router(god_training_router)  # /god/training — assign training, readiness report. god_admin only
 # The presenter's Demo Suite. Gated by the `demo_suite` capability over the

@@ -22,6 +22,7 @@ from app.models.import_models import (
     ImportRowReviewStatus, ImportStagedRow,
 )
 from app.models.models import Lead, gen_uuid
+from app.services import master_contacts
 log = logging.getLogger(__name__)
 
 # Fields that must NEVER be overwritten when merging into an existing Lead
@@ -203,6 +204,17 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
                 )
                 db.add(lead)
                 db.flush()
+                # Master retention for the reviewed-import path, carrying the
+                # batch so the platform can say which upload a person arrived
+                # on. Best-effort by construction: a failure here rolls back
+                # its own savepoint and the commit below still succeeds.
+                master_contacts.record_lead(
+                    db, lead,
+                    source="import",
+                    source_detail=batch.source_filename or None,
+                    import_batch_id=batch.id,
+                    ingestion_path="import_commit_service.commit_batch",
+                )
             row.review_status = ImportRowReviewStatus.COMMITTED
             row.committed_at = datetime.now(timezone.utc)
             row.committed_by_id = committer_id

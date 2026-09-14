@@ -32,6 +32,7 @@ from app.routers.audit_log_router import log_action
 # stated once instead of re-derived per route.
 from app.services import lead_scope
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.services import master_contacts
 
 router = APIRouter()
 
@@ -133,6 +134,15 @@ def create_lead_manually(
         updated_at=datetime.utcnow(),
     )
     db.add(lead)
+    db.flush()
+    # Master retention for the manually-added lead. Same transaction as the
+    # lead itself, so the platform's record and the tenant's record agree.
+    master_contacts.record_lead(
+        db, lead,
+        source="manual",
+        source_detail="Manual add",
+        ingestion_path="leads_crud_router.create_lead",
+    )
     db.commit()
     db.refresh(lead)
 

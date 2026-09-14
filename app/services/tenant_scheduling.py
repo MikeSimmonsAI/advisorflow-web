@@ -90,6 +90,7 @@ from app.models.integration_models import (
     IntegrationCredential, IntegrationRequestLog,
     ACTION_BOOK,
 )
+from app.services import master_contacts
 
 log = logging.getLogger(__name__)
 
@@ -831,6 +832,15 @@ def resolve_lead(db: Session, cred: IntegrationCredential, org: Organization,
 
     db.add(lead)
     db.flush()
+    # Master retention for the inbound-call path. Somebody rang in and booked:
+    # that is a real person arriving through a real organization, and it is
+    # exactly the kind of arrival that never appears in an import file.
+    master_contacts.record_lead(
+        db, lead,
+        source="voice",
+        source_detail="voice:%s" % cred.name,
+        ingestion_path="tenant_scheduling.booking",
+    )
     return lead
 
 

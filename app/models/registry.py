@@ -228,6 +228,16 @@ import app.models.commercial_models  # noqa: F401  (imported for side effects)
 # customer's own configuration silently cannot be stored. Added to BOTH blocks
 # in this file, per the merge-artefact note above.
 import app.models.launch_experience_models  # noqa: F401  (side effects)
+# The AdvisorFlow MASTER LEAD DATABASE (master_contacts / lead_occurrences) —
+# the platform's own record of every person who has ever entered any tenant,
+# and which organization they entered through. Same Base, same reason.
+#
+# Dropping this line has a quiet consequence rather than a loud one: the
+# tables never appear, every master write hits its savepoint and is swallowed
+# by design, and ingestion keeps working perfectly while the platform silently
+# learns nothing. Added to BOTH blocks in this file, per the merge-artefact
+# note above.
+import app.models.master_contact_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -445,3 +455,14 @@ import app.models.commercial_models  # noqa: F401  (imported for side effects)
 # customer's own configuration silently cannot be stored. Added to BOTH blocks
 # in this file, per the merge-artefact note above.
 import app.models.launch_experience_models  # noqa: F401  (side effects)
+
+# The AdvisorFlow MASTER LEAD DATABASE (master_contacts / lead_occurrences) —
+# the platform's own record of every person who has ever entered any tenant,
+# and which organization they entered through. Same Base, same reason.
+#
+# Dropping this line has a quiet consequence rather than a loud one: the
+# tables never appear, every master write hits its savepoint and is swallowed
+# by design, and ingestion keeps working perfectly while the platform silently
+# learns nothing. Added to BOTH blocks in this file, per the merge-artefact
+# note above.
+import app.models.master_contact_models  # noqa: F401  (imported for side effects)

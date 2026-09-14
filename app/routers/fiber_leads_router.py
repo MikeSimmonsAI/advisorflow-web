@@ -23,6 +23,7 @@ from app.deps import get_db, get_current_user, require_tenant_user
 from app.services.platform_owner import require_tenant_context
 from app.models.models import Lead, gen_uuid
 from app.services import lead_scope
+from app.services import master_contacts
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/fiber-leads", tags=["fiber-leads"])
@@ -125,6 +126,13 @@ def create_fiber_lead(
         extra_data=json.dumps(extra),
     )
     db.add(lead)
+    db.flush()
+    master_contacts.record_lead(
+        db, lead,
+        source="fiber_field",
+        source_detail="Field rep entry",
+        ingestion_path="fiber_leads_router.create_lead",
+    )
     db.commit()
     db.refresh(lead)
 

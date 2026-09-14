@@ -45,6 +45,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_admin
 from app.models.models import Lead, Organization, User
+from app.services import master_contacts
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,16 @@ def _upsert_social_lead(
     held = lead_capacity.hold_if_over_capacity(db, lead, org)
 
     db.add(lead)
+    db.flush()
+    # Master retention. A social lead form is one of the few places a genuinely
+    # new human enters the platform, so it is one of the places most worth
+    # retaining centrally.
+    master_contacts.record_lead(
+        db, lead,
+        source=source,
+        source_detail=source_ref or None,
+        ingestion_path="social_webhooks_router",
+    )
     db.commit()
     db.refresh(lead)
 

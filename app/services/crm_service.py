@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.services import crm_secrets
+from app.services import master_contacts
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +287,7 @@ def import_inbound_leads(db: Session, org_id: str, records: list[dict]) -> dict:
 
     created = 0
     skipped = 0
+    created_leads = []   # for the master-database pass after the commit
     # PLAN CAPACITY. Inbound CRM push is an INTEGRATION path - exactly the kind
     # that gets forgotten, because no human clicks anything. One count for the
     # payload, then claimed per record that actually creates; records past the
@@ -330,8 +332,19 @@ def import_inbound_leads(db: Session, org_id: str, records: list[dict]) -> dict:
             over_limit += 1
 
         db.add(lead)
+        created_leads.append(lead)
         created += 1
 
+    db.commit()
+
+    # Master retention for the inbound CRM pull. The customer's other system
+    # decided these people are prospects; the platform records that they are
+    # people, and which organization they arrived through.
+    master_contacts.record_leads(
+        db, created_leads,
+        source="crm_sync",
+        ingestion_path="crm_service.pull",
+    )
     db.commit()
 
     if created > 0:

@@ -52,6 +52,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import Lead
 from app.services.dedup_service import normalize_phone
+from app.services import master_contacts
 
 log = logging.getLogger(__name__)
 
@@ -386,6 +387,21 @@ def capture(db: Session, *, platform, org, sub: Submission,
         from app.services import lead_capacity
         lead_capacity.hold_if_over_capacity(db, lead, org)
         db.add(lead)
+
+    # Master retention, on creations AND repeat submissions. A returning
+    # prospect is the same human seen again, which is a last-seen refresh
+    # rather than a second person — `record_lead` recognises the existing
+    # occurrence by (organization, lead) and does not double-count it.
+    #
+    # Placed BEFORE the commit below on purpose: the master rows belong to the
+    # same transaction as the lead they describe, so either both land or
+    # neither does.
+    master_contacts.record_lead(
+        db, lead,
+        source=source,
+        source_detail=detail,
+        ingestion_path="public_capture.capture",
+    )
 
     if commit:
         db.commit()

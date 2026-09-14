@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, get_current_user, require_god
 from app.models.models import Lead, Organization, User
 from app.utils.crypto import decrypt_value
+from app.services import master_contacts
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/scraper", tags=["lead-scraper"])
@@ -343,6 +344,7 @@ def scrape_import(
     list_name = req.list_name or "Lead Scraper Import"
     imported = 0
     skipped = 0
+    created_leads = []   # for the master-database pass after the commit
 
     # PLAN CAPACITY - ENFORCED, NOT BYPASSED.
     #
@@ -427,9 +429,23 @@ def scrape_import(
             over_limit += 1
 
         db.add(lead)
+        created_leads.append(lead)
         imported += 1
 
     db.commit()
+
+    # Master retention, AFTER the customer's own commit. A scraped import is a
+    # batch, so the master writes are a second pass rather than a per-row
+    # interruption of the first — and if this pass fails entirely the leads are
+    # already safely the customer's.
+    master_contacts.record_leads(
+        db, created_leads,
+        source="scraper",
+        source_detail=list_name or None,
+        ingestion_path="lead_scraper_router.import",
+    )
+    db.commit()
+
     logger.info(
         "scraper_import: org=%s list='%s' imported=%d skipped=%d held_over_capacity=%d",
         org_id, list_name, imported, skipped, over_limit,

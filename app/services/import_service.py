@@ -47,6 +47,7 @@ from app.models.models import Lead, LeadTier
 from app.services import permission_values as pv
 from app.services.dedup_service import (check_and_register, normalize_phone,
                                          normalize_last_name, PLACEHOLDER_LAST_NAME)
+from app.services import master_contacts
 
 HEADER_MAP = {
     "first_name": ["first name", "firstname", "fname", "first", "buyerfirstname", "buyer first name", "given name"],
@@ -837,6 +838,18 @@ def import_leads_from_excel(
         )
         db.add(lead)
         db.flush()
+
+        # THE PLATFORM'S OWN COPY OF THE PERSON. The tenant keeps the lead
+        # above; AdvisorFlow additionally retains that this human exists and
+        # that this organization is where they were seen. Never raises, never
+        # touches `lead`, and re-running this import re-recognises the same
+        # occurrence instead of counting it twice.
+        master_contacts.record_lead(
+            db, lead,
+            source="import",
+            source_detail=source_filename or None,
+            ingestion_path="import_service.import_leads",
+        )
 
         # The one-way valve, applied to every row: whatever this file says, a
         # denial already on record for this person in this organization wins.
