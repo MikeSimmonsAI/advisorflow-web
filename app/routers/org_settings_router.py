@@ -759,6 +759,13 @@ class OrgTwilioPhoneUpdate(BaseModel):
     org_twilio_number_type:    Optional[str] = None
 
 
+class OrgTwilioSharedTransfer(BaseModel):
+    """Move an existing in-org advisor sender to the organization shared slot."""
+    user_id: str
+    org_twilio_number_type: Optional[str] = "10dlc"
+    org_twilio_caller_id_name: Optional[str] = None
+
+
 # â”€â”€ Sending-number assignment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 #
 # A sending number identifies exactly one mailbox in the inbound webhook
@@ -929,6 +936,70 @@ def update_org_twilio_phone(
         org.org_twilio_number_type = req.org_twilio_number_type
     db.commit()
     return {"updated": True, "org_twilio_phone_number": org.org_twilio_phone_number}
+
+
+@router.post("/twilio/phone/transfer-from-user")
+def transfer_user_number_to_shared_org_number(
+    req: OrgTwilioSharedTransfer,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+    _cap: User = Depends(require_capability("twilio_numbers")),
+):
+    """Atomically move a same-org advisor number to the shared org sender.
+
+    The ordinary uniqueness guard is intentionally strict: a number may identify
+    exactly one sender for inbound reply routing. This endpoint is the safe
+    exception for the common migration case where the number already belongs to
+    a member of THIS organization and should become the organization's shared
+    sender. The user row is cleared and the org row is set in the same commit,
+    so the committed database state never has both owners.
+    """
+    org = _resolve_org(current_user, org_id, db)
+    target = (
+        db.query(User)
+        .filter(User.id == req.user_id, User.organization_id == org.id)
+        .first()
+    )
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found in this organization")
+    if (target.role or "").lower() == "god_admin":
+        raise HTTPException(
+            status_code=400,
+            detail="The platform owner's number is not a tenant sending number.",
+        )
+
+    number = _normalize_e164(target.twilio_phone_number, "Advisor sending number")
+    if not number:
+        raise HTTPException(
+            status_code=400,
+            detail="This user does not currently hold a sending number to move.",
+        )
+
+    # Allow the current target user and current organization because this route
+    # is moving exactly that ownership. Any other user/org collision remains a
+    # hard stop; inbound reply routing would otherwise be ambiguous.
+    _assert_number_unused(db, number, allow_user_id=target.id, allow_org_id=org.id)
+
+    target.twilio_phone_number = None
+    target.twilio_caller_id_name = None
+    org.org_twilio_phone_number = number
+    org.org_twilio_number_type = req.org_twilio_number_type or "10dlc"
+    if req.org_twilio_caller_id_name is not None:
+        org.org_twilio_caller_id_name = req.org_twilio_caller_id_name.strip() or None
+    elif not org.org_twilio_caller_id_name:
+        org.org_twilio_caller_id_name = org.name
+
+    db.commit()
+    return {
+        "updated": True,
+        "from_user_id": target.id,
+        "from_user_name": target.full_name,
+        "org_twilio_phone_number": org.org_twilio_phone_number,
+        "org_twilio_number_type": org.org_twilio_number_type,
+        "org_twilio_caller_id_name": org.org_twilio_caller_id_name,
+        "user_twilio_phone_number": target.twilio_phone_number,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -801,8 +801,8 @@ export default function OrgSettings() {
               <h2 className="panel-title">📱 Twilio account</h2>
             </div>
             <p className="os-hint">
-              Your organization's own Twilio account. Every text this team sends goes out
-              on it, under your own A2P registration.
+              Outbound SMS uses this organization's Twilio account.
+              Carrier/A2P registration status is shown separately.
               {orgTwilioConfigured && (
                 <span style={{ color: 'var(--signal-green, #22c55e)', marginLeft: 6 }}>
                   ✓ Credentials saved{orgTwilioSidLast4 ? ` (SID ending ${orgTwilioSidLast4})` : ''}
@@ -829,10 +829,9 @@ export default function OrgSettings() {
 
             <h3 className="os-label" style={{ marginTop: 18 }}>Shared number (optional)</h3>
             <p className="os-hint">
-              Leave this blank when every person sends from their own assigned number.
-              A shared number is only for teams who want one number for the whole
-              organization — it is not required, and it is not a fallback for someone
-              whose own number is missing.
+              Shared organization number. When configured, advisors without a
+              dedicated sending number use this number by default. Advisors with a
+              dedicated sending number may continue using their own number.
             </p>
 
             <div className="os-field-row" style={{ gap: 12, marginTop: 12 }}>
@@ -840,7 +839,7 @@ export default function OrgSettings() {
                 <label className="os-label">Number type</label>
                 <select className="os-input" value={orgTwilioNumberType} onChange={e => setOrgTwilioNumberType(e.target.value)}>
                   <option value="toll_free">Toll-free (8XX) — TFV approved</option>
-                  <option value="10dlc">10DLC — local 10-digit (A2P registered)</option>
+                  <option value="10dlc">10DLC — local 10-digit</option>
                   <option value="short_code">Short code</option>
                 </select>
               </div>
@@ -877,7 +876,16 @@ export default function OrgSettings() {
           </section>
 
         {/* ── A2P registration + who holds which number ── */}
-          <TwilioNumbersSection orgQuery={orgQuery} orgTwilioConfigured={orgTwilioConfigured} />
+          <TwilioNumbersSection
+            orgQuery={orgQuery}
+            orgTwilioConfigured={orgTwilioConfigured}
+            orgSharedNumber={orgTwilioPhone}
+            onSharedNumberMoved={(r) => {
+              setOrgTwilioPhone(r.org_twilio_phone_number || '')
+              setOrgTwilioNumberType(r.org_twilio_number_type || '10dlc')
+              setOrgTwilioCallerId(r.org_twilio_caller_id_name || '')
+            }}
+          />
 
         {/* ── Booking Page Info ── */}
         <section className="panel os-section" style={{ marginTop: 16 }}>
@@ -971,7 +979,7 @@ function SeedDemoButton({ orgId }) {
 // promoted to "approved", "connected" or "active" by this UI: a campaign that
 // reads as registered when it is not is how a customer's messages get quietly
 // filtered by carriers with no error anywhere.
-function TwilioNumbersSection({ orgQuery, orgTwilioConfigured }) {
+function TwilioNumbersSection({ orgQuery, orgTwilioConfigured, orgSharedNumber, onSharedNumberMoved }) {
   const [status, setStatus] = useState(null)
   const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1014,6 +1022,26 @@ function TwilioNumbersSection({ orgQuery, orgTwilioConfigured }) {
     }
   }
 
+  async function moveToSharedNumber(m) {
+    setSavingId(`shared:${m.id}`); setErr(''); setSavedId(null)
+    try {
+      const r = await api.post(`/org-settings/twilio/phone/transfer-from-user${orgQuery}`, {
+        user_id: m.id,
+        org_twilio_number_type: '10dlc',
+      })
+      setMembers(prev => prev.map(x => x.id === m.id
+        ? { ...x, twilio_phone_number: r.user_twilio_phone_number } : x))
+      setDrafts(prev => { const n = { ...prev }; delete n[m.id]; return n })
+      if (onSharedNumberMoved) onSharedNumberMoved(r)
+      setSavedId(`shared:${m.id}`)
+      setTimeout(() => setSavedId(null), 2500)
+    } catch (e) {
+      setErr(e.message || 'Could not move that number to the shared organization sender')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
   const pill = (label, value) => (
     <span style={{
       display: 'inline-block', fontSize: 12, padding: '2px 9px', borderRadius: 999,
@@ -1039,8 +1067,8 @@ function TwilioNumbersSection({ orgQuery, orgTwilioConfigured }) {
 
       <p className="os-hint" style={{ marginTop: 8 }}>
         US carriers require an A2P 10DLC brand and campaign before local numbers can
-        text reliably. Register once for the organization — every number below sends
-        under it.
+        text reliably. Registration state is shown separately from number type and is
+        never assumed from the selected number type.
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
@@ -1051,9 +1079,9 @@ function TwilioNumbersSection({ orgQuery, orgTwilioConfigured }) {
 
       <h3 className="os-label" style={{ marginTop: 20 }}>Who sends from which number</h3>
       <p className="os-hint">
-        Each person needs their own number from your Twilio account. Buy numbers in
-        the Twilio Console, then enter them here — this page never purchases a number
-        for you.
+        Dedicated numbers override the shared organization number. Advisors without
+        a dedicated number use the shared organization number when one is configured.
+        This page never purchases a number for you.
       </p>
 
       {loading ? (
@@ -1091,6 +1119,18 @@ function TwilioNumbersSection({ orgQuery, orgTwilioConfigured }) {
                     : savedId === m.id ? '✓ Saved'
                     : draft.trim() ? 'Assign' : 'Unassign'}
                 </button>
+                {m.twilio_phone_number && m.twilio_phone_number !== orgSharedNumber && (
+                  <button
+                    className="btn btn--secondary"
+                    disabled={savingId === `shared:${m.id}`}
+                    onClick={() => moveToSharedNumber(m)}
+                    title={`Move ${m.twilio_phone_number} from ${m.full_name} to the shared organization sender`}
+                  >
+                    {savingId === `shared:${m.id}` ? 'Moving…'
+                      : savedId === `shared:${m.id}` ? '✓ Moved'
+                      : 'Move to Shared Organization Number'}
+                  </button>
+                )}
                 {/* A person carrying their own Twilio account predates the
                     organization-credential model. Say so plainly rather than
                     letting it look like every other row. */}
