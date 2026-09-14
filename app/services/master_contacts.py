@@ -128,11 +128,35 @@ def _looks_synthetic(db: Session, lead: Lead, explicit: Optional[bool]) -> tuple
         except Exception:
             pass
 
-    email = (getattr(lead, "email", "") or "").lower()
-    # Reserved-by-RFC test domains. Anything addressed here is, by definition,
-    # incapable of belonging to a real person.
-    if email.endswith((".invalid", ".test", ".example", "@example.com")):
-        return True, "reserved test domain"
+    email = (getattr(lead, "email", "") or "").strip().lower()
+    if email:
+        # Reserved-by-RFC test domains. Anything addressed here is, by
+        # definition, incapable of belonging to a real person.
+        if email.endswith((".invalid", ".test", ".example", "@example.com")):
+            return True, "reserved test domain"
+
+        local, _, domain = email.partition("@")
+
+        # SEED DATA WEARING A PLAUSIBLE DOMAIN.
+        #
+        # The estate's demo leads are addressed
+        # `demo.lead.1650@example-evosyspro.com` — a domain that is not
+        # reserved, so the rule above passes it, and 1,683 of them read as
+        # production people in the master browser. The first label being
+        # literally "example" is the tell, and it is a narrow one: a real
+        # company's domain does not begin "example-".
+        first_label = domain.split(".")[0] if domain else ""
+        if first_label == "example" or first_label.startswith("example-"):
+            return True, "example-* domain"
+
+        # Generated local parts. Deliberately anchored at the START and
+        # deliberately short, because "demo", "test" and "qa" appear inside
+        # perfectly real addresses — demostrene@, testaverde@, qadir@ — and a
+        # substring match would flag living people as props.
+        for prefix in ("demo.lead.", "demo.lead+", "seed.lead.", "qa.lead.",
+                       "synthetic.", "fixture.", "loadtest."):
+            if local.startswith(prefix):
+                return True, "generated address (%s…)" % prefix
 
     return False, None
 
@@ -245,6 +269,15 @@ def _record(
             existing.source_detail = src_detail
         if import_batch_id and not existing.import_batch_id:
             existing.import_batch_id = import_batch_id
+
+        # SYNTHETIC IS DERIVED, NOT ASSERTED, so it is recomputed here rather
+        # than frozen at first sight. That is what lets a refresh pass correct
+        # the whole estate when the rules improve — which they did, once the
+        # first production backfill showed 1,683 seed addresses reading as
+        # people. Source, batch and first-seen are NOT recomputed: those are
+        # facts about an arrival that already happened.
+        existing.is_synthetic = is_synthetic
+
         contact = (
             db.query(MasterContact)
             .filter(MasterContact.id == existing.master_contact_id)
@@ -252,11 +285,7 @@ def _record(
         )
         if contact is not None:
             contact.last_seen_at = now
-            # A person who reappears through a real tenant is a real person,
-            # even if we first met them in a demo org.
-            if contact.is_synthetic and not is_synthetic:
-                contact.is_synthetic = False
-                contact.synthetic_reason = None
+            _resync_contact_synthetic(db, contact, is_synthetic, synthetic_reason)
         db.flush()
         return existing
 
@@ -356,6 +385,39 @@ def _resolve_contact(
 
     db.flush()
     return contact
+
+
+def _resync_contact_synthetic(
+    db: Session,
+    contact: MasterContact,
+    occurrence_is_synthetic: bool,
+    reason: Optional[str],
+) -> None:
+    """A person is a prop only while EVERY appearance of them is.
+
+    One real arrival makes them real and keeps them real; the cheap check
+    below answers that without a query. Going the other way — the last real
+    appearance having been reclassified as seed data — needs the full picture,
+    so that branch, and only that branch, counts the siblings.
+    """
+    if not occurrence_is_synthetic:
+        if contact.is_synthetic:
+            contact.is_synthetic = False
+            contact.synthetic_reason = None
+        return
+
+    if contact.is_synthetic:
+        return
+
+    real_siblings = (
+        db.query(LeadOccurrence.id)
+        .filter(LeadOccurrence.master_contact_id == contact.id,
+                LeadOccurrence.is_synthetic.is_(False))
+        .first()
+    )
+    if real_siblings is None:
+        contact.is_synthetic = True
+        contact.synthetic_reason = reason
 
 
 def _flag(contact: MasterContact, reason: str, now: datetime) -> None:

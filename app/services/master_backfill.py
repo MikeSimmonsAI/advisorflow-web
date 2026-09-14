@@ -95,12 +95,21 @@ def backfill(
     limit: Optional[int] = None,
     batch_size: int = DEFAULT_BATCH,
     dry_run: bool = False,
+    refresh: bool = False,
 ) -> dict:
     """Walk leads with no occurrence and record them. Returns counts.
 
     `dry_run` counts what WOULD be written and writes nothing — the mode to
     run first against production, because a number nobody expected is the
     cheapest possible place to discover a wrong assumption.
+
+    `refresh` walks leads that ALREADY have an occurrence as well, driving
+    each through the same idempotent writer so derived fields — the synthetic
+    classification, the tenant status snapshot — are recomputed against the
+    current rules. It creates nothing and counts nothing twice; it exists
+    because the first production pass classified 1,683 seed addresses as
+    people, and the honest fix for that is to improve the rule and re-derive,
+    not to hand-edit rows.
     """
     scanned = 0
     recorded = 0
@@ -129,7 +138,9 @@ def backfill(
 
         # Keyset pagination on the primary key rather than OFFSET: every batch
         # commits, so rows shift under an offset and a page would be skipped.
-        q = db.query(Lead).filter(~_has_occurrence())
+        q = db.query(Lead)
+        if not refresh:
+            q = q.filter(~_has_occurrence())
         if organization_id:
             q = q.filter(Lead.organization_id == organization_id)
         if cursor is not None:
@@ -159,6 +170,7 @@ def backfill(
     contacts_after = int(db.query(func.count(MasterContact.id)).scalar() or 0)
     return {
         "dry_run": False,
+        "refresh": refresh,
         "organization_id": organization_id,
         "scanned": scanned,
         "recorded": recorded,

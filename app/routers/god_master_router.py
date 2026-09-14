@@ -227,6 +227,7 @@ def run_backfill(
     limit: Optional[int] = Query(None, ge=1, le=100000),
     batch_size: int = Query(master_backfill.DEFAULT_BATCH, ge=1, le=2000),
     dry_run: bool = Query(True),
+    refresh: bool = Query(False),
     god: User = Depends(require_god),
     db: Session = Depends(get_db),
 ):
@@ -235,6 +236,9 @@ def run_backfill(
     `dry_run` DEFAULTS TO TRUE. Running the real thing takes an explicit
     `dry_run=false`, because the default behaviour of a bulk endpoint should
     be the one that cannot surprise anybody.
+
+    `refresh=true` also revisits leads that already have an occurrence, so
+    derived fields are recomputed under the current rules. It creates nothing.
 
     Writes only `master_contacts` and `lead_occurrences`; see
     `app/services/master_backfill.py` for what it structurally cannot do.
@@ -245,6 +249,7 @@ def run_backfill(
         limit=limit,
         batch_size=batch_size,
         dry_run=dry_run,
+        refresh=refresh,
     )
     log.info("god master backfill by %s: %s", god.id, result)
     return result

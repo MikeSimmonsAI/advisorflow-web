@@ -310,6 +310,97 @@ def test_a_test_lead_and_a_demo_org_are_both_marked_synthetic(db_session):
         MasterContact.is_synthetic.is_(True)).count() == 2
 
 
+def test_seed_addresses_on_a_plausible_domain_are_recognised_as_props(db_session):
+    """The case the first production backfill actually found.
+
+    1,683 leads addressed `demo.lead.NNNN@example-evosyspro.com` read as real
+    people, because the domain is not RFC-reserved. A domain whose first label
+    is literally "example" is the tell.
+    """
+    org = _org(db_session, "WUPA")
+    for addr in ["demo.lead.1650@example-evosyspro.com",
+                 "someone@example-bookaboost.com",
+                 "seed.lead.4@realish-domain.com",
+                 "synthetic.person@acme.co"]:
+        master_contacts.record_lead(db_session, _lead(db_session, org, email=addr))
+    db_session.commit()
+
+    assert db_session.query(MasterContact).count() == 4
+    assert db_session.query(MasterContact).filter(
+        MasterContact.is_synthetic.is_(True)).count() == 4
+
+
+def test_real_people_whose_addresses_merely_start_with_those_words_are_not_flagged(db_session):
+    """The false positives a substring match would have produced.
+
+    `demostrene`, `testaverde` and `qadir` are real surnames, and `example` in
+    the middle of a domain is an ordinary word. Flagging a living person as a
+    prop hides them from the only view an operator looks at.
+    """
+    org = _org(db_session, "Atlantis")
+    for addr in ["demostrene@gmail.com", "testaverde@outlook.com",
+                 "qadir@nhs.uk", "sales@byexample.com",
+                 "demo@realcompany.com"]:
+        master_contacts.record_lead(db_session, _lead(db_session, org, email=addr))
+    db_session.commit()
+
+    assert db_session.query(MasterContact).filter(
+        MasterContact.is_synthetic.is_(True)).count() == 0
+
+
+def test_a_refresh_pass_reclassifies_without_creating_or_double_counting(db_session):
+    """Synthetic is derived, so improving the rule must fix the whole estate."""
+    org = _org(db_session, "WUPA")
+    seeded = _lead(db_session, org, email="demo.lead.7@example-evosyspro.com")
+    real = _lead(db_session, org, email="mike@realbrand.org")
+    master_backfill.backfill(db_session)
+
+    # Simulate the pre-fix state: the rule did not know about these yet.
+    for occ in db_session.query(LeadOccurrence).all():
+        occ.is_synthetic = False
+    for c in db_session.query(MasterContact).all():
+        c.is_synthetic = False
+    db_session.commit()
+
+    result = master_backfill.backfill(db_session, refresh=True)
+
+    assert result["refresh"] is True
+    assert result["scanned"] == 2
+    assert result["contacts_created"] == 0
+    assert db_session.query(LeadOccurrence).count() == 2
+    assert db_session.query(MasterContact).count() == 2
+    for c in db_session.query(MasterContact).all():
+        assert c.occurrence_count == 1        # nothing counted twice
+
+    seeded_occ = db_session.query(LeadOccurrence).filter(
+        LeadOccurrence.lead_id == seeded.id).one()
+    real_occ = db_session.query(LeadOccurrence).filter(
+        LeadOccurrence.lead_id == real.id).one()
+    assert seeded_occ.is_synthetic is True
+    assert real_occ.is_synthetic is False
+
+
+def test_one_real_appearance_keeps_a_person_out_of_the_props(db_session):
+    """A human seen in a demo org AND a real one is a human."""
+    demo = _org(db_session, "Proof", is_demo=True)
+    real = _org(db_session, "Atlantis")
+    master_contacts.record_lead(db_session, _lead(db_session, demo,
+                                                  email="dual@realbrand.org"))
+    master_contacts.record_lead(db_session, _lead(db_session, real,
+                                                  email="dual@realbrand.org"))
+    db_session.commit()
+
+    contact = db_session.query(MasterContact).one()
+    assert contact.is_synthetic is False
+    assert contact.occurrence_count == 2
+
+    # And a refresh does not undo that.
+    master_backfill.backfill(db_session, refresh=True)
+    db_session.refresh(contact)
+    assert contact.is_synthetic is False
+    assert contact.occurrence_count == 2
+
+
 def test_a_person_who_reappears_for_real_stops_being_synthetic(db_session):
     demo = _org(db_session, "Proof", is_demo=True)
     real = _org(db_session, "Atlantis")
@@ -504,8 +595,11 @@ def test_god_reads_every_organization_and_the_rows_carry_their_origin(client, db
     plat = _platform(db_session)
     a = _org(db_session, "Atlantis", plat)
     b = _org(db_session, "WUPA", plat)
-    _lead(db_session, a, email="atlantis.person@example.org", first="Atl")
-    _lead(db_session, b, email="wupa.person@example.org", first="Wup")
+    # Deliberately NOT example.org: that domain is RFC-reserved and the
+    # synthetic rule correctly hides it, which would make this test assert
+    # against an empty production view.
+    _lead(db_session, a, email="atlantis.person@atlantis-lp.com", first="Atl")
+    _lead(db_session, b, email="wupa.person@wupa-energy.com", first="Wup")
     master_backfill.backfill(db_session)
 
     god = _user(db_session, None, "god_admin")
@@ -525,8 +619,8 @@ def test_god_reads_every_organization_and_the_rows_carry_their_origin(client, db
 def test_synthetic_records_are_hidden_by_default_and_available_on_request(client, db_session):
     real = _org(db_session, "Atlantis")
     demo = _org(db_session, "Proof", is_demo=True)
-    _lead(db_session, real, email="real.person@example.org")
-    _lead(db_session, demo, email="demo.person@other.org")
+    _lead(db_session, real, email="real.person@realbrand.org")
+    _lead(db_session, demo, email="a.person@other-real.org")
     master_backfill.backfill(db_session)
 
     god = _user(db_session, None, "god_admin")
@@ -543,7 +637,7 @@ def test_synthetic_records_are_hidden_by_default_and_available_on_request(client
 
 def test_god_can_find_a_person_by_a_phone_number_typed_any_way(client, db_session):
     org = _org(db_session, "Atlantis")
-    _lead(db_session, org, first="Ada", email="ada.finder@example.org",
+    _lead(db_session, org, first="Ada", email="ada.finder@realbrand.org",
           phone="5550104242")
     master_backfill.backfill(db_session)
 
