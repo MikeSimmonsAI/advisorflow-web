@@ -48,10 +48,10 @@ const NAV_GROUPS = [
     label: 'Workspace',
     items: [
       { to: '/', label: 'Overview', icon: 'grid' },
-      // LAUNCH — the customer's onboarding. Shown ONLY to organizations that
-      // actually have an implementation, because a nav item that leads to
-      // "nothing here for you" on most accounts trains people to ignore the
-      // nav. `launchOnly` is answered by a single GET /launch/me on mount.
+      // LAUNCH — the customer's onboarding. Shown ONLY while setup is still
+      // open. A completed launch remains reviewable from Organization settings
+      // for admins, but no longer sits in the normal operational rail.
+      // `launchOnly` is answered by a single GET /launch/me on mount.
       { to: '/launch', label: 'Launch', icon: 'zap', launchOnly: true },
       { to: '/leads', label: 'Leads', icon: 'users', featureKey: 'leads' },
       { to: '/replies', label: 'Replies', icon: 'message' },
@@ -267,16 +267,21 @@ export default function Layout({ children }) {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  // DOES THIS ORGANIZATION HAVE A LAUNCH? One cheap call, once per mount,
-  // answered by the server rather than guessed from a role or a plan name.
-  // `null` = not yet known and the nav item stays hidden; a 404 is the normal
-  // answer for the large majority of orgs and is not an error.
-  const [hasLaunch, setHasLaunch] = useState(null)
+  // DOES THIS ORGANIZATION HAVE AN OPEN LAUNCH? One cheap call, once per
+  // mount, answered by the server's implementation status rather than guessed
+  // from a percentage, role or plan name. `null` = not yet known and the nav
+  // item stays hidden; a 404 is the normal answer for many orgs and is not an
+  // error. `live` is the authoritative completed state.
+  const [launchNavState, setLaunchNavState] = useState(null)
   useEffect(() => {
     let alive = true
     api.get('/launch/me', { skipRedirect: true })
-      .then(() => { if (alive) setHasLaunch(true) })
-      .catch(() => { if (alive) setHasLaunch(false) })
+      .then(d => {
+        if (!alive) return
+        const status = d?.implementation?.status
+        setLaunchNavState({ exists: true, completed: status === 'live' })
+      })
+      .catch(() => { if (alive) setLaunchNavState({ exists: false, completed: false }) })
     return () => { alive = false }
   }, [])
   // Non-admin regular advisors start collapsed; admins start expanded
@@ -596,11 +601,12 @@ export default function Layout({ children }) {
             const isOrgAdmin = isManagerRole(workspaceRole) || isGodAdmin
             const visible = (item) => {
               if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
-              // Only orgs with a real implementation see Launch. `null` means
-              // the answer has not arrived yet, and the item stays hidden
-              // until it does — a nav entry that appears a second late is far
-              // better than one that flashes and vanishes.
-              if (item.launchOnly && hasLaunch !== true) return false
+              // Only orgs with an open implementation see Launch. `null`
+              // means the answer has not arrived yet, and the item stays
+              // hidden until it does — a nav entry that appears a second late
+              // is far better than one that flashes and vanishes.
+              if (item.launchOnly &&
+                  (!launchNavState?.exists || launchNavState.completed)) return false
               // A capability item is NEVER shown on the strength of a role.
               // That is the whole difference: `adminOnly` asks who you are,
               // `capability` asks what the server says you may administer.

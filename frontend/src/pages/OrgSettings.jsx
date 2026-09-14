@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api, fetchAndStoreBranding, getCurrentUser, getOrgContext } from '../api/client'
 import '../styles/shared.css'
 import './OrgSettings.css'
@@ -72,6 +73,7 @@ const TIER_COLORS = ['blue', 'green', 'amber', 'red', 'purple', 'neutral']
 
 export default function OrgSettings() {
   const user = getCurrentUser()
+  const navigate = useNavigate()
   const isSuperAdmin = user?.role === 'super_admin' || user?.role === 'god_admin'
 
   // Super admin org selector — seed from active org view context so god admin
@@ -101,6 +103,7 @@ export default function OrgSettings() {
   const [platform, setPlatform] = useState(null)
   const [industryLabel, setIndustryLabel] = useState('')
   const [industryMatched, setIndustryMatched] = useState(true)
+  const [launchInfo, setLaunchInfo] = useState(null)
 
   // Organization profile
   const [brandName, setBrandName] = useState('')
@@ -177,6 +180,7 @@ export default function OrgSettings() {
     setLoading(true)
     setError('')
     setSuccess('')
+    setLaunchInfo(null)
     api.get(`/org-settings/${orgQuery}`)
       .then((data) => {
         setSettings(data)
@@ -218,6 +222,15 @@ export default function OrgSettings() {
       })
       .catch(() => {})
   }, [selectedOrgId, isSuperAdmin])
+
+  useEffect(() => {
+    if (isSuperAdmin && !selectedOrgId) return
+    let alive = true
+    api.get('/launch/me', { skipRedirect: true })
+      .then(d => { if (alive) setLaunchInfo(d) })
+      .catch(() => { if (alive) setLaunchInfo(null) })
+    return () => { alive = false }
+  }, [isSuperAdmin, selectedOrgId])
 
   async function saveBranding() {
     setSaving(true)
@@ -444,6 +457,18 @@ export default function OrgSettings() {
 
       {(!isSuperAdmin || (isSuperAdmin && (selectedOrgId || getOrgContext()) && !loading)) && (
         <>
+          {launchInfo && (
+            <section className="panel os-section" style={{ marginBottom: 16 }}>
+              <div className="panel-header"><h2 className="panel-title">Company Setup</h2></div>
+              <p className="os-hint">
+                Review the company onboarding and launch information for this workspace.
+              </p>
+              <button className="btn btn--primary" onClick={() => navigate('/launch')}>
+                Open Company Setup
+              </button>
+            </section>
+          )}
+
           <div className="os-grid">
             <section className="panel os-section">
               <div className="panel-header"><h2 className="panel-title">Organization profile</h2></div>
