@@ -167,6 +167,12 @@ def _guards(db: Session, target: User, req: Request,
 
     out: Dict[str, Any] = {
         "enabled_features": allowed,
+        # THE CONFIGURATION'S OWN COHERENCE, in the report that answers "why
+        # can this person not see their work". A module enabled without the
+        # module it operates on is the answer often enough to belong here:
+        # WUPA held campaigns, lead cleanup and tier config with `leads` off,
+        # and the advisor's screen could only say "denied" nine times.
+        "dependency_gaps": entitlements.dependency_gaps(allowed),
         # NULL AND [] ARE DIFFERENT ANSWERS and the difference is the whole
         # migration story: a customer who predates entitlements has never been
         # configured and is deliberately open, while a customer configured down
@@ -196,6 +202,18 @@ def _guards(db: Session, target: User, req: Request,
             out["administrative_authority"] = "DENIED %s — %s" % (e.status_code, e.detail)
         except Exception as e:
             out["administrative_authority"] = "ERROR %s: %s" % (type(e).__name__, str(e)[:160])
+
+        # WHAT THEY MAY ADMINISTER, from the same function the sidebar asks.
+        #
+        # `my_capabilities` is what `/settings/my-capabilities` returns, so this
+        # is the answer the person's own browser would be given — not a second
+        # opinion about it. Reported per workspace because a capability is a
+        # property of (person, organization) like everything else here.
+        try:
+            from app.services import capabilities as _caps
+            out["capabilities"] = _caps.my_capabilities(db, target).get("capabilities", [])
+        except Exception as e:                                   # noqa: BLE001
+            out["capabilities"] = "ERROR %s: %s" % (type(e).__name__, str(e)[:160])
     finally:
         request_context.reset_current_request(token)
     return out
@@ -363,7 +381,21 @@ def run(db: Session, target: User) -> Dict[str, Any]:
     api_counts: Dict[str, Any] = {}
 
     def _service_counts():
-        from app.routers import leads_router
+        # `leads_router` IS AN ASSEMBLER, NOT A MODULE WITH ROUTES IN IT.
+        #
+        # It was, when this was written. The lead routes were later split into
+        # five sub-routers and `leads_router` became the file that includes
+        # them, so `leads_router.list_leads` stopped existing and columns C and
+        # D of every report since have read:
+        #
+        #   "AttributeError: module 'app.routers.leads_router' has no
+        #    attribute 'list_leads'"
+        #
+        # — which is not a finding about the subject, it is this tool being
+        # broken, and it rendered in the same place a real refusal would.
+        # Importing the module that actually defines them is the fix; the rest
+        # of the reasoning below is unchanged.
+        from app.routers import leads_query_router as leads_router
         from app.services import request_context
         out: Dict[str, Any] = {}
         req = _synthetic_request(None)   # the no-header case, as a browser sends

@@ -192,3 +192,10 @@
   .ov-hero { align-items: flex-start; }
   .ov-datebox { text-align: left; }
 }
+
+/* The top bar is a two-part row: search on the left, actions on the right.
+   When the workspace has no lead module there is no search box, and without a
+   left-hand element the actions slide across to where the search used to be.
+   The spacer holds the shape so the page does not rearrange itself around a
+   module's absence. */
+.ov-search-spacer { flex: 1; min-width: 0; }

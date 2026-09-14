@@ -33,7 +33,7 @@ existing customer the moment this shipped.
 """
 
 import json
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -95,6 +95,132 @@ FEATURES: Dict[str, str] = {
 }
 
 ALL_FEATURE_KEYS = tuple(sorted(FEATURES))
+
+
+# ── WHAT A MODULE CANNOT WORK WITHOUT ───────────────────────────────────────
+#
+# FOUND LIVE, AND IT COST TWO CUSTOMERS THEIR LEAD BOOK. WUPA had `campaigns`,
+# `lead_cleanup`, `tier_config` and `crm` enabled, 4,000 leads in the database,
+# 778 of them assigned to one advisor — and `leads` switched OFF. Fiber Cartel
+# was in the same state with 237. Every one of those modules exists to do
+# something TO leads: the campaign builder filters a lead list, cleanup merges
+# duplicate leads, tier config classifies leads. An allow-list that sells them
+# without `leads` is not a narrower product, it is an incoherent one.
+#
+# This did no visible harm while `leads` was ungated. The moment entitlements
+# were actually enforced, those organizations lost the module the other four
+# were operating on, and their advisors got a dashboard of refusals.
+#
+# THIS MAP DOES NOT GRANT ANYTHING. Nothing reads it to widen an allow-list at
+# request time — a dependency that silently switched a module on would make the
+# stored configuration a lie, and an operator would never see it. It is here so
+# the God console can SAY that a configuration is incoherent, and so
+# `plan_features()` below cannot mint another one.
+REQUIRES = {
+    "campaigns":      ("leads",),
+    "cadences":       ("leads",),
+    "lead_cleanup":   ("leads",),
+    "tier_config":    ("leads",),
+    "imports":        ("leads",),
+    "crm_connectors": ("crm",),
+    "case_files":     ("leads",),
+}
+
+
+def dependency_gaps(keys: Optional[List[str]]) -> List[Dict[str, Any]]:
+    """Modules in this allow-list whose prerequisite is missing from it.
+
+    Returns [] for a legacy-open organization (None), which is entitled to
+    everything and therefore cannot be missing a prerequisite.
+    """
+    if keys is None:
+        return []
+    have = set(keys)
+    gaps = []
+    for key in sorted(have):
+        for needed in REQUIRES.get(key, ()):
+            if needed not in have:
+                gaps.append({
+                    "feature": key,
+                    "feature_label": FEATURES.get(key, key),
+                    "requires": needed,
+                    "requires_label": FEATURES.get(needed, needed),
+                    "detail": "%s is enabled but %s is not. %s operates on "
+                              "%s and cannot function without it."
+                              % (FEATURES.get(key, key),
+                                 FEATURES.get(needed, needed),
+                                 FEATURES.get(key, key),
+                                 FEATURES.get(needed, needed).lower()),
+                })
+    return gaps
+
+
+# ── PLAN PRESETS ────────────────────────────────────────────────────────────
+#
+# THESE LIVED IN `OrgManager.jsx`, IN THE BROWSER. A React file decided what a
+# customer was entitled to, which is how it drifted from this registry — the
+# same drift the note above records for the feature keys themselves, repeated
+# one level up. Presets are a server concern and now live beside the registry
+# they draw from; the God console reads them from here.
+#
+# `leads` IS IN EVERY TIER, and its absence from all four is the defect this
+# constant exists to have fixed. The rest of each tier is unchanged: this is
+# not a repricing, it is the observation that a lead platform cannot sell a
+# plan that does not include leads.
+_CORE = ("leads",)
+
+PLAN_FEATURES: Dict[str, Optional[List[str]]] = {
+    "trial":        list(_CORE) + ["master_dashboard", "users", "reports", "availability",
+                                   "tier_config", "branding_settings", "compliance", "audit_log"],
+    "starter":      list(_CORE) + ["master_dashboard", "users", "reports", "availability",
+                                   "tier_config", "branding_settings", "compliance", "audit_log",
+                                   "campaigns"],
+    "growth":       list(_CORE) + ["master_dashboard", "users", "reports", "availability",
+                                   "tier_config", "branding_settings", "compliance", "audit_log",
+                                   "campaigns", "lead_cleanup"],
+    "professional": list(_CORE) + ["master_dashboard", "users", "reports", "availability",
+                                   "tier_config", "branding_settings", "compliance", "audit_log",
+                                   "campaigns", "lead_cleanup", "crm", "crm_connectors"],
+    # null/None = every feature.
+    "enterprise":   None,
+    # Legacy alias, kept so organizations already on 'standard' still resolve.
+    "standard":     list(_CORE) + ["master_dashboard", "users", "reports", "availability",
+                                   "tier_config", "branding_settings", "compliance", "audit_log",
+                                   "campaigns", "lead_cleanup"],
+}
+
+
+def plan_features(plan: Optional[str]) -> Optional[List[str]]:
+    """The preset for a plan, or None for 'everything'. Unknown plan -> trial."""
+    key = (plan or "trial").strip().lower()
+    if key in PLAN_FEATURES:
+        return PLAN_FEATURES[key]
+    return PLAN_FEATURES["trial"]
+
+
+def _assert_presets_are_coherent() -> None:
+    """A preset that ships a dependency gap is the bug this module just fixed.
+
+    Checked at import so it cannot be reintroduced quietly: the process refuses
+    to start rather than let another organization be configured into the state
+    WUPA was found in.
+    """
+    for plan, keys in PLAN_FEATURES.items():
+        if keys is None:
+            continue
+        unknown = [k for k in keys if k not in FEATURES]
+        if unknown:
+            raise RuntimeError(
+                "PLAN_FEATURES[%r] names unregistered feature(s): %s"
+                % (plan, ", ".join(sorted(unknown))))
+        gaps = dependency_gaps(keys)
+        if gaps:
+            raise RuntimeError(
+                "PLAN_FEATURES[%r] is incoherent: %s"
+                % (plan, "; ".join(g["detail"] for g in gaps)))
+
+
+_assert_presets_are_coherent()
 
 
 def normalize_keys(keys: Optional[List[str]]) -> List[str]:
@@ -164,13 +290,26 @@ def set_features(db: Session, org: Organization, actor: User,
 
 def feature_report(org: Optional[Organization]) -> Dict:
     allowed = enabled_for(org)
+    plan = getattr(org, "plan", None) if org is not None else None
+    preset = plan_features(plan)
     return {
         "mode": "all" if allowed is None else "allow_list",
         "enabled": list(ALL_FEATURE_KEYS) if allowed is None else allowed,
         "available": [{"key": k, "label": FEATURES[k],
-                       "enabled": True if allowed is None else (k in allowed)}
+                       "enabled": True if allowed is None else (k in allowed),
+                       "requires": list(REQUIRES.get(k, ()))}
                       for k in ALL_FEATURE_KEYS],
         "enabled_count": len(ALL_FEATURE_KEYS) if allowed is None else len(allowed),
+
+        # AN OPERATOR SURFACE, NOT A CUSTOMER ONE. Everything below says
+        # "this configuration does not hold together" to the person who can
+        # fix it. None of it is sent to a customer's workspace, and none of it
+        # changes what that workspace is entitled to.
+        "plan": plan,
+        "plan_preset": preset,
+        "below_plan": ([] if allowed is None or preset is None
+                       else sorted(k for k in preset if k not in allowed)),
+        "dependency_gaps": dependency_gaps(allowed),
     }
 
 

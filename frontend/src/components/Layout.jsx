@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, refreshCurrentUser, logout, getBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
+import { featuresOf, isManagerRole, roleOf } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
 import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
@@ -299,7 +300,11 @@ export default function Layout({ children }) {
   const [allOrgs, setAllOrgs] = useState([])
   const [orgPickerOpen, setOrgPickerOpen] = useState(false)
 
-  const enabledFeatures = isElevated ? null : (branding?.enabled_features ?? null)
+  // THE SHARED ANSWER, not this file's own copy of it. `featuresOf` preserves
+  // the NULL-vs-[] distinction the same way everywhere; see
+  // auth/workspaceAuthority.js for why three independent copies of this became
+  // three different answers.
+  const enabledFeatures = isElevated ? null : featuresOf(branding)
   const isFeatureEnabled = (key) => !key || enabledFeatures === null || enabledFeatures.includes(key)
 
   // WHAT THIS PERSON MAY ADMINISTER, ANSWERED BY THE SERVER.
@@ -557,9 +562,8 @@ export default function Layout({ children }) {
             // ACTIVE workspace on `/branding/org`; this renders what it says
             // and falls back to the user row only for a deployment that has
             // not refreshed its cached branding yet.
-            const workspaceRole = branding?.workspace_role || user?.role
-            const isOrgAdmin = workspaceRole === 'org_admin'
-              || workspaceRole === 'super_admin' || isGodAdmin
+            const workspaceRole = roleOf(branding, user)
+            const isOrgAdmin = isManagerRole(workspaceRole) || isGodAdmin
             const visible = (item) => {
               if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
               // Only orgs with a real implementation see Launch. `null` means

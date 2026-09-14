@@ -31,8 +31,9 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, getCurrentUser, getBranding, getWorkspaceContext } from '../api/client'
+import { api, getCurrentUser, getWorkspaceContext } from '../api/client'
 import { useObservationMode } from '../context/ObservationContext'
+import { useWorkspaceAuthority } from '../auth/workspaceAuthority'
 import './Overview.css'
 
 // ── Industry-aware labels ─────────────────────────────────────────────────────
@@ -94,9 +95,15 @@ export default function Overview() {
   const navigate = useNavigate()
   const observationMode = useObservationMode()
 
-  const branding = getBranding()
-  const enabledFeatures = branding?.enabled_features ?? null
-  const isEnabled = (key) => !enabledFeatures || enabledFeatures.includes(key)
+  // ONE AUTHORITY, THE SAME ONE THE SIDEBAR AND THE ROUTES USE.
+  //
+  // This page used to read `branding.enabled_features` itself and apply the
+  // answer to exactly one button, while deciding "is this person a manager"
+  // from `user.role` — the global row value the rest of the app had already
+  // stopped trusting. See auth/workspaceAuthority.js for what that cost.
+  const authority = useWorkspaceAuthority()
+  const { isFeatureEnabled: isEnabled, isManager } = authority
+  const branding = authority.branding
   // THIS ORGANIZATION'S OWN WORDS, resolved by the server from its configured
   // business type. Neutral English until the answer arrives, never a vertical's.
   const terminology = useTerminology()
@@ -107,7 +114,18 @@ export default function Overview() {
   // Team performance reads an admin endpoint. An advisor asking for it gets a
   // 403, so it is not requested for them and the panel says why rather than
   // rendering an empty box that looks like "your team did nothing".
-  const isManager = ['org_admin', 'super_admin', 'god_admin'].includes(user?.role)
+  // (`isManager` now comes from the workspace role above, not `user.role`.)
+
+  // WHAT THIS DASHBOARD IS ALLOWED TO BE ABOUT.
+  //
+  // Six of the ten calls below are lead-only, as are the search box, the
+  // import button, four KPI cards, two of the quick-row tiles, Lead flow and
+  // Leads needing action. Resolved once, here, so the request list and the
+  // render agree by construction rather than by both remembering to check.
+  const hasLeads = isEnabled('leads')
+  const hasImports = isEnabled('imports')
+  const hasCadences = isEnabled('cadences')
+  const hasCompliance = isEnabled('compliance')
 
   const [totalLeads, setTotalLeads] = useState(null)
   const [dncCount, setDncCount] = useState(null)
@@ -161,29 +179,63 @@ export default function Overview() {
 
   useEffect(() => {
     let live = true
-    const failures = []
-    // Records WHY a call failed instead of discarding it. The fallback value
-    // keeps the existing render shape; the recorded message is what makes the
-    // failure visible.
+    let unexpected = 0
+
+    // A REFUSAL IS NOT AN ERROR, AND NEITHER IS EVER SHOWN VERBATIM.
+    //
+    // This used to push `e.message` — the backend's own `detail` string — into
+    // a banner the customer reads. An advisor in a workspace without `leads`
+    // was shown, six times over:
+    //
+    //   "This organization is not enabled for 'leads' (Lead management and the
+    //    leads list). An operator can enable it in the customer's Features
+    //    settings."
+    //
+    // That sentence is addressed to an operator. It names an internal feature
+    // key, describes a console the reader cannot open, and tells somebody who
+    // bought a plan without a module that their software is broken. It is also
+    // the wrong count: six refusals of one module read as six failures.
+    //
+    // 402 and 403 are the server working correctly. They are not counted, not
+    // shown, and not described — the module is simply absent from the page, as
+    // it is from the sidebar. Anything else is a genuine fault, and the
+    // customer is told that much in one sentence with no detail in it. The
+    // detail still goes to the console for whoever is looking.
     const attempt = (label, promise, fallback) =>
       promise.catch(e => {
-        failures.push(`${label}: ${e?.message || 'request failed'}`)
+        const status = e?.status ?? e?.response?.status
+        const entitlement = status === 402 || status === 403
+        if (!entitlement) {
+          unexpected += 1
+          // eslint-disable-next-line no-console
+          console.warn('[overview] %s failed:', label, e?.message || e)
+        }
         return fallback
       })
 
+    // NOT REQUESTED AT ALL WHEN THE MODULE IS OFF.
+    //
+    // Firing a request you know will be refused is six round trips spent to
+    // learn something already in hand, and every one of them is a log line
+    // that looks like an incident. `skip` keeps the destructuring positional
+    // so the shape of this list stays readable against the render below.
+    const skip = (fallback) => Promise.resolve(fallback)
+
     const calls = [
-      attempt('leads', api.get('/leads/?page=1&page_size=1'), null),
-      attempt('suppression', api.get('/leads/?status=dnc&page=1&page_size=1'), null),
-      attempt('status funnel', api.get('/leads/status-funnel'), []),
-      attempt('daily briefing', api.get('/leads/daily-briefing'), null),
+      hasLeads ? attempt('leads', api.get('/leads/?page=1&page_size=1'), null) : skip(null),
+      hasLeads && hasCompliance
+        ? attempt('suppression', api.get('/leads/?status=dnc&page=1&page_size=1'), null)
+        : skip(null),
+      hasLeads ? attempt('status funnel', api.get('/leads/status-funnel'), []) : skip([]),
+      hasLeads ? attempt('daily briefing', api.get('/leads/daily-briefing'), null) : skip(null),
       attempt('replies', api.get('/sms/replies?needs_attention=true'), []),
-      attempt('lead list', api.get('/leads/?page=1&page_size=40'), null),
+      hasLeads ? attempt('lead list', api.get('/leads/?page=1&page_size=40'), null) : skip(null),
       attempt('activity', api.get('/activity/sent?limit=8&days=7'), []),
       attempt('outcomes', api.get('/outcomes/summary'), null),
-      attempt('forecast', api.get('/pipeline/forecast'), null),
-      isManager
-        ? api.get('/admin/dashboard/metrics').catch(e => ({ __err: e?.message || 'unavailable' }))
-        : Promise.resolve(null),
+      hasLeads ? attempt('forecast', api.get('/pipeline/forecast'), null) : skip(null),
+      isManager && isEnabled('master_dashboard')
+        ? attempt('team', api.get('/admin/dashboard/metrics'), null)
+        : skip(null),
     ]
     Promise.all(calls).then(([t, dnc, fn, br, rp, rl, ac, oc, fc, tm]) => {
       if (!live) return
@@ -196,12 +248,17 @@ export default function Overview() {
       setActivity(Array.isArray(ac) ? ac : [])
       setOutcomes(oc)
       setForecast(fc)
-      if (tm && tm.__err) { setTeamError(tm.__err); setTeam(null) } else { setTeam(tm) }
-      setLoadError(failures.join(' · '))
+      setTeam(tm)
+      setTeamError('')
+      // ONE SENTENCE, NO DETAIL, AND ONLY FOR A REAL FAULT. The count is not
+      // shown either: "3 of 10 calls failed" is an engineer's framing of a
+      // problem the reader cannot act on.
+      setLoadError(unexpected > 0 ? 'Some workspace data is unavailable.' : '')
       setLoading(false)
     })
     return () => { live = false }
-  }, [isManager, identityKey, workspaceKey])
+  }, [isManager, identityKey, workspaceKey,
+      hasLeads, hasImports, hasCadences, hasCompliance])
 
   // ── derived ───────────────────────────────────────────────────────────────
   const stage = (s) => funnel.find(x => x.status === s)?.count ?? 0
@@ -270,11 +327,21 @@ export default function Overview() {
     cta: a.action || 'Open', to: a.path || '/pipeline',
   }))
 
+  // EVERY TILE DECLARES THE MODULE IT IS ABOUT.
+  //
+  // Eight tiles, six of them lead-derived, and not one of them said so. In a
+  // workspace without `leads` the six rendered anyway: "Total leads —", "New /
+  // unworked —", four more, each a door onto a route that refuses and each a
+  // dash that reads as "you have none" rather than "we did not ask". `feature`
+  // is filtered below, next to the existing managerOnly filter, so the two
+  // reasons a tile can be absent are stated in the same place.
   const kpis = [
-    { label: 'Total leads', value: num(totalLeads), color: 'var(--signal-blue)',
+    { label: `Total ${terminology.vocabulary?.leads || 'leads'}`, value: num(totalLeads),
+      feature: 'leads', color: 'var(--signal-blue)',
       trend: briefing?.leads_imported_last_24h != null
         ? `+${num(briefing.leads_imported_last_24h)} in 24h` : 'all lists', to: '/leads' },
     { label: 'New / unworked', value: num(newLeads), color: 'var(--signal-amber)',
+      feature: 'leads',
       trend: newLeads > 0 ? 'needs attention' : 'nothing waiting', to: '/leads?status=new' },
     { label: 'Hot replies', value: num(hotReplies), color: 'var(--signal-red)',
       trend: hotReplies > 0 ? 'awaiting a decision' : 'inbox clear',
@@ -285,19 +352,23 @@ export default function Overview() {
       // by nature ("Arrangements", "Installs") so there is no singular to pick.
       trend: outcomes?.total_appointments != null
         ? `${IL.recordedVisits}: ${num(outcomes.total_appointments)}` : IL.bookedSub,
-      to: '/leads?status=booked' },
+      feature: 'leads', to: '/leads?status=booked' },
     { label: 'Reply rate', value: replyRate === null ? '—' : replyRate + '%',
       color: 'var(--signal-purple)',
       trend: sentLeads > 0 ? `of ${num(sentLeads)} contacted` : 'nothing sent yet',
-      to: '/reports', managerOnly: true },
+      to: '/reports', managerOnly: true, feature: 'reports' },
     { label: IL.bookingRate, value: bookingRate === null ? '—' : bookingRate + '%',
       color: 'var(--signal-green)',
       trend: sentLeads > 0 ? `of ${num(sentLeads)} contacted` : 'nothing sent yet',
-      to: '/reports', managerOnly: true },
+      to: '/reports', managerOnly: true, feature: 'reports' },
     { label: 'Callbacks & touches', value: num(briefing?.cadence_touches_due_today),
-      color: 'var(--signal-amber)', trend: 'due today', to: '/cadence' },
+      color: 'var(--signal-amber)', trend: 'due today', to: '/cadence',
+      feature: 'cadences' },
     { label: 'DNC / opted out', value: num(dncCount), color: 'var(--text-secondary)',
-      trend: 'suppression active', to: '/leads?status=dnc' },
+      trend: 'suppression active', to: '/leads?status=dnc',
+      // Two modules: the suppression list is a compliance feature, and this
+      // particular view of it is a filter over the lead list.
+      feature: 'compliance', alsoFeature: 'leads' },
   ]
 
   return (
@@ -305,16 +376,23 @@ export default function Overview() {
 
       {/* ── top bar ── */}
       <div className="ov-topbar">
-        <form className="ov-search" onSubmit={runSearch}>
-          <span className="ov-search-icon" aria-hidden="true">🔍</span>
-          <input
-            value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="Search leads by name, phone or email…"
-            aria-label="Search leads"
-          />
-        </form>
+        {/* THE SEARCH BOX SEARCHES LEADS. Without the module there is nothing
+            behind it: submitting went to /leads, which the router refuses, so
+            it was a text field whose only outcome was a denial. */}
+        {hasLeads ? (
+          <form className="ov-search" onSubmit={runSearch}>
+            <span className="ov-search-icon" aria-hidden="true">🔍</span>
+            <input
+              value={query} onChange={e => setQuery(e.target.value)}
+              placeholder={`Search ${terminology.vocabulary?.leads || 'leads'} by name, phone or email…`}
+              aria-label={`Search ${terminology.vocabulary?.leads || 'leads'}`}
+            />
+          </form>
+        ) : <div className="ov-search-spacer" />}
         <div className="ov-top-actions">
-          {!observationMode && (
+          {/* IMPORT NEEDS BOTH: somewhere to put the records and the right to
+              stage them. It was shown unconditionally. */}
+          {!observationMode && hasLeads && hasImports && (
             <button className="ov-btn" onClick={() => go('/leads?import=1')}>Import leads</button>
           )}
           {!observationMode && isEnabled('campaigns') && isManager && (
@@ -326,21 +404,20 @@ export default function Overview() {
         </div>
       </div>
 
-      {/* THE FAILURE IS SAID OUT LOUD, ABOVE THE NUMBERS IT INVALIDATES.
-          Placed here rather than inside one widget because a failed request
-          poisons several tiles at once, and an advisor reading "0 leads" needs
-          to know the figure is not an answer before they act on it. */}
+      {/* SAID ONCE, CALMLY, AND ONLY WHEN SOMETHING ACTUALLY BROKE.
+          A module this workspace does not have is not a failure and does not
+          appear here — it is absent from the page, the way it is absent from
+          the sidebar. What remains is a genuine fault, and the reader is told
+          that much and nothing they cannot act on. The status colour is amber
+          rather than red for the same reason: the page around it is still
+          correct. */}
       {!loading && loadError && (
-        <div className="ov-load-error" role="alert" style={{
+        <div className="ov-load-error" role="status" style={{
           margin: '0 0 16px', padding: '11px 14px', borderRadius: 10,
-          background: 'rgba(240,80,80,0.12)',
-          border: '1px solid rgba(240,80,80,0.35)', fontSize: 13.5,
+          background: 'rgba(240,180,60,0.10)',
+          border: '1px solid rgba(240,180,60,0.30)', fontSize: 13.5,
         }}>
-          <strong>Some of this dashboard could not load.</strong>{' '}
-          The numbers below are incomplete — this is not an empty pipeline.
-          <div style={{ marginTop: 5, opacity: 0.75, fontSize: 12.5 }}>
-            {loadError}
-          </div>
+          {loadError}
         </div>
       )}
 
@@ -366,26 +443,38 @@ export default function Overview() {
       </div>
 
       {/* ── quick row ── */}
+      {/* Replies is its own module and keeps working — this workspace has it,
+          and its hot replies are real work whatever else is switched off. The
+          other three are lead- and cadence-derived and go with them. */}
       {!loading && (
         <div className="ov-quick-row">
           <button className="ov-quick" onClick={() => go('/replies?needs_attention=true')}>
             <strong>{num(hotReplies)}</strong> replies awaiting review
           </button>
-          <button className="ov-quick" onClick={() => go('/cadence')}>
-            <strong>{num(briefing?.cadence_touches_due_today ?? 0)}</strong> touches due today
-          </button>
-          <button className="ov-quick" onClick={() => go('/leads?status=new')}>
-            <strong>{num(newLeads)}</strong> leads never contacted
-          </button>
-          <button className="ov-quick" onClick={() => go('/leads?status=booked')}>
-            <strong>{num(briefing?.bookings_last_7_days ?? 0)}</strong> {IL.weeklyLabel}
-          </button>
+          {hasCadences && (
+            <button className="ov-quick" onClick={() => go('/cadence')}>
+              <strong>{num(briefing?.cadence_touches_due_today ?? 0)}</strong> touches due today
+            </button>
+          )}
+          {hasLeads && (
+            <button className="ov-quick" onClick={() => go('/leads?status=new')}>
+              <strong>{num(newLeads)}</strong> {terminology.vocabulary?.leads || 'leads'} never contacted
+            </button>
+          )}
+          {hasLeads && (
+            <button className="ov-quick" onClick={() => go('/leads?status=booked')}>
+              <strong>{num(briefing?.bookings_last_7_days ?? 0)}</strong> {IL.weeklyLabel}
+            </button>
+          )}
         </div>
       )}
 
       {/* ── KPI cards ── */}
       <div className="ov-kpis">
-        {kpis.filter(k => !k.managerOnly || isManager).map(k => (
+        {kpis
+          .filter(k => !k.managerOnly || isManager)
+          .filter(k => isEnabled(k.feature) && isEnabled(k.alsoFeature))
+          .map(k => (
           <button key={k.label} className="ov-kpi" onClick={() => go(k.to)}
                   title={'Open ' + k.to}>
             <span className="ov-kpi-label">{k.label}</span>
@@ -471,6 +560,7 @@ export default function Overview() {
       </div>
 
       {/* ── lead flow ── */}
+      {hasLeads && (
       <section className="panel">
         <div className="panel-header">
           <h2 className="panel-title">Lead flow</h2>
@@ -509,9 +599,11 @@ export default function Overview() {
           record are not shown.
         </p>
       </section>
+      )}
 
       {/* ── leads needing action + activity ── */}
       <div className="ov-grid">
+        {hasLeads && (
         <section className="panel ov-panel">
           <div className="panel-header">
             <h2 className="panel-title">Leads needing action</h2>
@@ -574,6 +666,7 @@ export default function Overview() {
             read — an advisor sees only their own leads here, so the owner is always them.
           </p>
         </section>
+        )}
 
         <section className="panel ov-panel">
           <div className="panel-header">
@@ -608,6 +701,7 @@ export default function Overview() {
       </div>
 
       {/* ── team performance ── */}
+      {isManager && isEnabled('master_dashboard') && (
       <section className="panel">
         <div className="panel-header">
           <h2 className="panel-title">Team performance</h2>
@@ -615,13 +709,12 @@ export default function Overview() {
             <span className="panel-count">{num(team.advisors?.length ?? 0)}</span>
           )}
         </div>
-        {!isManager ? (
-          <div className="empty-state">
-            Team performance is an organization-admin view. Your own numbers are in Reports.
-          </div>
-        ) : teamError ? (
-          <div className="empty-state">Team metrics are unavailable: {teamError}</div>
-        ) : loading ? (
+        {/* The !isManager branch is unreachable now that the whole section is
+            behind `isManager` — an advisor is not shown an admin view and then
+            told it is an admin view. `teamError` likewise: the request is only
+            made when both the role and the module allow it, and a failure is
+            counted with the rest rather than described here. */}
+        {loading ? (
           <div className="empty-state">Loading…</div>
         ) : !team?.advisors?.length ? (
           <div className="empty-state">
@@ -660,6 +753,7 @@ export default function Overview() {
           </>
         )}
       </section>
+      )}
     </div>
   )
 }

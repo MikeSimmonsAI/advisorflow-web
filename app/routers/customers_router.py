@@ -18,7 +18,7 @@ that changes.
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -349,8 +349,30 @@ def get_features(org_id: str, db: Session = Depends(get_db),
 
 
 class FeaturesIn(BaseModel):
-    # None restores the legacy "everything" mode; [] means nothing enabled.
-    enabled: Optional[List[str]] = None
+    """The allow-list to store.
+
+    `None` restores the legacy "everything" mode; `[]` means nothing enabled.
+
+    THE FIELD IS REQUIRED, AND IT WAS NOT. It defaulted to `None`, and `None`
+    on this endpoint means GRANT EVERY FEATURE. So a request that named the
+    field wrongly — `{"enabled_features": [...]}` instead of `{"enabled": [...]}`
+    — did not fail. It returned 200 and switched all twenty-two modules on for
+    that customer, because the misspelled key was ignored and the real one took
+    its maximal default.
+    #
+    # I did this to two live customers while fixing an unrelated defect in
+    # them, and the only reason I noticed is that the response echoed
+    # `"mode": "all"`. A caller that did not read the response would have left
+    # two organizations fully entitled and never known.
+    #
+    # `model_config` refuses unknown keys outright, and the field has no
+    # default, so both halves of that mistake are now a 422: the wrong name is
+    # rejected, and an absent `enabled` is rejected. Granting everything stays
+    # possible and stays explicit — `{"enabled": null}` says so in as many
+    # words.
+    """
+    model_config = ConfigDict(extra="forbid")
+    enabled: Optional[List[str]]
 
 
 @router.put("/{org_id}/features")

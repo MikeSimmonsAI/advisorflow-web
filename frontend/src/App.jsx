@@ -250,6 +250,7 @@ import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          clearWorkspaceContext, getBranding } from './api/client'
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
+import { featuresOf, roleOf } from './auth/workspaceAuthority'
 import { exitCustomer } from './pages/god/enterCustomer'
 
 function isAuthenticated() {
@@ -286,8 +287,11 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   // server. This decides what the app OFFERS, and offering a door that opens
   // onto a 402 is the defect being closed.
   const branding = getBranding()
-  const role = branding?.workspace_role || user?.role
-  const enabled = branding?.enabled_features ?? null
+  // THE SHARED ANSWER. The same two helpers the sidebar and the dashboard use,
+  // so a route cannot decide a module is available while the nav hides it, or
+  // the reverse. See auth/workspaceAuthority.js.
+  const role = roleOf(branding, user)
+  const enabled = featuresOf(branding)
   const featureOff = Boolean(feature) && enabled !== null
     && !enabled.includes(feature) && role !== 'god_admin'
 

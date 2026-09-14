@@ -855,7 +855,23 @@ def resolve(db: Session, user: User, org: Optional[Organization],
                    % (cap.requires_feature, cap.label),
             402, "feature")
 
-    if getattr(user, "role", None) not in ELIGIBLE_ADMIN_ROLES:
+    # THE ROLE IN *THIS* ORGANIZATION, not the one on the user row.
+    #
+    # `users.role` is a single value for a whole human and cannot be true of two
+    # customers at once. Reading it here meant an org_admin of customer A was
+    # treated as an eligible administrator inside customer B — the same defect
+    # closed in `require_admin` and `require_feature_capability`, still open on
+    # the endpoint the sidebar treats as authoritative.
+    #
+    # The membership for THIS (user, org) pair is the answer, and it is resolved
+    # from the pair rather than from the ambient request: `resolve` is also
+    # called in a loop over OTHER users when listing a customer's
+    # administrators, and reading the caller's context there would describe the
+    # wrong person. Falling back to `users.role` when no membership row exists
+    # keeps the legacy single-workspace customer resolving exactly as before.
+    from app.services.workspace_access import workspace_role as _ws_role
+    effective = _ws_role(user, db, org.id) or getattr(user, "role", None)
+    if effective not in ELIGIBLE_ADMIN_ROLES:
         return Decision(
             False, "%s is administered by an organization administrator, not "
                    "by every user of the feature." % cap.label,
@@ -1081,17 +1097,30 @@ def administration_report(db: Session, org: Organization) -> Dict:
 
 
 def my_capabilities(db: Session, user: User) -> Dict:
-    """What the CALLER may administer. The frontend asks this instead of
-    deciding from `role`, which is how the sidebar came to disagree with the
-    server in the first place."""
+    """What the CALLER may administer, IN THE WORKSPACE THEY ARE WORKING IN.
+
+    The frontend asks this instead of deciding from `role`, which is how the
+    sidebar came to disagree with the server in the first place.
+
+    THE WORKSPACE SEAM, WHICH THIS ENDPOINT WAS STILL MISSING. It resolved the
+    organization from `users.organization_id` — the legacy column — while the
+    feature gates next door had already moved to the selected workspace. So the
+    one endpoint the sidebar treats as authoritative answered about a different
+    organization than the routes it was rendering links to, for exactly the
+    person who holds a workspace by membership rather than by that column.
+    `active_workspace_org_id` is that seam, and it falls back to the column, so
+    a single-workspace customer resolves precisely as before.
+    """
     if is_god(user):
         return {"is_god": True, "capabilities": list(ALL_CAPABILITY_KEYS)}
+    from app.services.lead_scope import active_workspace_org_id
     org = None
-    org_id = getattr(user, "organization_id", None)
+    org_id = active_workspace_org_id(user, db) or getattr(user, "organization_id", None)
     if org_id:
         org = db.query(Organization).filter(Organization.id == org_id).first()
     return {
         "is_god": False,
+        "organization_id": org_id,
         "capabilities": [k for k in ALL_CAPABILITY_KEYS
                          if resolve(db, user, org, k).allowed],
     }
