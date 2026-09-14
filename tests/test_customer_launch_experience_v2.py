@@ -106,9 +106,39 @@ def test_the_platform_default_promises_no_response_time():
         "The platform default must not ship a response-time promise. "
         "Nobody sold it and nobody is accountable for it."
     )
-    assert "{brand}" in support["body"], (
+    # A BRAND TOKEN, EITHER FORM. `{brand}` is the name; `{team}` is the same
+    # name already made into the noun phrase "<name> implementation team", and
+    # the unbranded fallback of `{brand}` is that phrase in lowercase — which
+    # is why the support line uses `{team}`: wrapping `{brand}` in more of its
+    # own words produced "Your your implementation team implementation team is
+    # here to help." for a customer whose launch has no platform. What this
+    # test is really protecting is that the line is DERIVED, never a literal
+    # platform name typed into a default.
+    assert ("{brand}" in support["body"]) or ("{team}" in support["body"]), (
         "The neutral line names the brand, not the platform."
     )
+    assert "advisorflow" not in support["body"].lower()
+
+
+def test_the_neutral_line_reads_correctly_branded_and_unbranded():
+    """The sentence the customer actually reads, in both shapes.
+
+    The bug this pins was live: a launch with no platform resolved rendered
+    "Your your implementation team implementation team is here to help."
+    """
+    body = launch_experience.DEFAULT_PRESENTATION["support"]
+
+    branded = launch_experience._fill(
+        body, {"team": "EvoSys Pro implementation team", "brand": "EvoSys Pro",
+               "customer": "Atlantis Light & Power", "year": "2026"})
+    assert branded["body"] == "Your EvoSys Pro implementation team is here to help."
+
+    unbranded = launch_experience._fill(
+        body, {"team": "implementation team", "brand": "your implementation team",
+               "customer": "Someone", "year": "2026"})
+    assert unbranded["body"] == "Your implementation team is here to help."
+    assert "team team" not in unbranded["body"]
+    assert "your your" not in unbranded["body"].lower()
 
 
 def test_the_neutral_line_states_no_timeframe():

@@ -118,7 +118,10 @@ DEFAULT_PRESENTATION: Dict[str, Any] = {
     # neutral line below, which commits the brand to helping and to no clock.
     "support": {
         "title": "Your launch team",
-        "body": "Your {brand} implementation team is here to help.",
+        # `{team}`, not `{brand}` — see the token table in `compose`. This is
+        # the one default that wraps the name in more words of its own, and
+        # `{brand}`'s unbranded fallback is already those words.
+        "body": "Your {team} is here to help.",
         "response_promise": None,
     },
     # What the seven-stage tracker is called on screen. A brand that runs
@@ -419,8 +422,26 @@ def compose(db: Session, impl, org: Organization,
     config = resolve(db, industry=getattr(org, "industry", None),
                      platform_id=impl.platform_id, organization_id=org.id)
 
+    # `{brand}` IS A MID-SENTENCE NOUN PHRASE, AND ONE TEMPLATE WRAPPED IT.
+    #
+    # The fallback is the lowercase phrase "your implementation team", which
+    # reads correctly everywhere it is dropped into a sentence — "tells your
+    # implementation team what to build" — and wrongly in the one default that
+    # wrapped it in more of the same words: "Your {brand} implementation team
+    # is here to help." became "Your your implementation team implementation
+    # team is here to help." for any customer whose launch has no platform
+    # resolved. Observed live on a launch created for an unbranded workspace.
+    #
+    # `{team}` is the noun phrase already complete, so the sentence adds only
+    # the possessive: "Your EvoSys Pro implementation team is here to help."
+    # and, unbranded, "Your implementation team is here to help." `{brand}` is
+    # unchanged, so every brand's stored override keeps meaning what it meant.
+    team = ("%s implementation team" % platform.name
+            if platform is not None and getattr(platform, "name", None)
+            else "implementation team")
+
     from datetime import date as _date
-    tokens = {"brand": brand_name, "customer": org.name or "",
+    tokens = {"brand": brand_name, "team": team, "customer": org.name or "",
               "year": str(_date.today().year)}
 
     presentation = _fill(config["presentation"], tokens)
