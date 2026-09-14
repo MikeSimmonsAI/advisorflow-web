@@ -18,15 +18,22 @@
  * THE LINK IS SHOWN ONCE
  * ===========================================================================
  *
- * The platform does not send the message; the operator does. So the link is
- * displayed after sending, with a copy button and a plain statement that it
- * will not be shown again. It is never stored by this component, never put in
- * the URL, and closing the dialog loses it — which is correct, because the way
- * to recover a lost link is to issue a new one, not to find the old one.
+ * The platform sends the message only when the operator asks it to; otherwise
+ * the operator sends it. Either way the link is displayed after sending, with
+ * a copy button and a plain statement that it will not be shown again. It is
+ * never stored by this component, never put in the URL, and closing the dialog
+ * loses it — which is correct, because the way to recover a lost link is to
+ * issue a new one, not to find the old one.
+ *
+ * WHICH NOTICES APPEAR IS NOT DECIDED HERE. See sendOnboardingNotices.js: the
+ * dialog once claimed "Nothing has been sent." underneath its own "Invitation
+ * sent" heading, because that block was keyed to whether a setup link existed
+ * rather than to whether anything was delivered.
  */
 import { useEffect, useState } from 'react'
 
 import { api } from '../../api/client'
+import { postSendNotices } from './sendOnboardingNotices'
 
 export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
   const [ctx, setCtx] = useState(null)
@@ -145,10 +152,11 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
 
   // ── after sending: the link, once ──
   if (sent) {
+    const notice = postSendNotices(sent)
     return (
       <div style={wrap} role="dialog" aria-modal="true">
         <div style={card}>
-          <h3 style={{ margin: '0 0 4px', fontSize: 17 }}>{sent.message_sent_by_platform ? 'Invitation sent' : 'Onboarding ready to send'}</h3>
+          <h3 style={{ margin: '0 0 4px', fontSize: 17 }}>{notice.heading}</h3>
           <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--gm-text, #475569)' }}>
             <b>{sent.recipient.name || sent.recipient.email}</b> now has access to{' '}
             <b>{orgName}</b>&rsquo;s onboarding as <b>{sent.recipient.role}</b>
@@ -160,7 +168,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
               about a plain /launch URL would teach the operator to treat a
               recoverable address as a secret, and to re-issue onboarding to
               get it back. */}
-          {sent.access_path === 'existing_login' ? (
+          {notice.existingLogin ? (
             <div style={{ border: '1px solid var(--gm-teal, #0d9488)',
                           background: 'var(--gm-pill-teal-bg, rgba(13,148,136,.08))',
                           borderRadius: 10, padding: '10px 12px', margin: '12px 0',
@@ -171,9 +179,12 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
               they sign in as they always do and land on this customer&rsquo;s
               onboarding.
             </div>
-          ) : (
+          ) : notice.manualSend ? (
             /* SAID PLAINLY. An operator who assumes the platform emailed it
-               will wait for a reply that is never coming. */
+               will wait for a reply that is never coming. Gated on DELIVERY,
+               not on the existence of a link: this block used to appear under
+               an "Invitation sent" heading for a message the provider had
+               already accepted. */
             <div style={{ border: '1px solid var(--gm-amber, #f59e0b)',
                           background: 'rgba(245,158,11,.08)', borderRadius: 10,
                           padding: '10px 12px', margin: '12px 0', fontSize: 12.5 }}>
@@ -182,13 +193,28 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
               and cannot be retrieved afterwards — if it is lost, send onboarding
               again to issue a fresh one.
             </div>
-          )}
+          ) : notice.keepLink ? (
+            /* THE LINK IS STILL ONE-TIME. The sentence above carried two
+               claims — that nothing was sent, and that the link will not be
+               shown again — and only the first stops being true when the
+               platform delivers it. Dropping both would lose the only warning
+               about the link's shelf life at exactly the moment the operator
+               relaxes. */
+            <div style={{ border: '1px solid var(--god-border, #e5e7eb)',
+                          background: 'var(--god-bg, #f8fafc)', borderRadius: 10,
+                          padding: '10px 12px', margin: '12px 0', fontSize: 12.5,
+                          lineHeight: 1.55 }}>
+              <b>Keep this link if you need it.</b> It is shown once and cannot
+              be retrieved afterwards — if it is lost, send onboarding again to
+              issue a fresh one, which revokes this one.
+            </div>
+          ) : null}
 
           {/* WHAT THE MAIL PROVIDER ACTUALLY SAID. Shown whenever a send was
               attempted, including when it failed — a failure the operator
               cannot see is worse than no send at all, because the customer is
               then recorded as invited and is waiting for nothing. */}
-          {sent.delivery && sent.delivery.state !== 'generated' && (
+          {notice.deliveryReport && (
             <div style={{ border: '1px solid ' + (sent.delivery.state === 'sent'
                             ? 'var(--gm-teal, #0d9488)' : 'var(--gm-red, #dc2626)'),
                           background: sent.delivery.state === 'sent'
@@ -208,11 +234,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
             </div>
           )}
 
-          <label style={label}>
-            {sent.access_path === 'existing_login'
-              ? 'Their onboarding address'
-              : 'One-time onboarding link'}
-          </label>
+          <label style={label}>{notice.linkLabel}</label>
           <textarea readOnly value={sent.onboarding_url} rows={3}
                     style={{ ...field, fontFamily: 'monospace', fontSize: 11.5 }}
                     onFocus={e => e.target.select()} />
