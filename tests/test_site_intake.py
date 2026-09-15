@@ -17,7 +17,9 @@ What is being defended here, in order of how much it would cost to get wrong:
      later form never silently withdraws it.
   4. CONSENT IS NOT SALES INTENT. An opt-in does not acquire a sales tier, a
      message track, or a place in anybody's cadence.
-  5. NOTHING IS SENT. Not by this path, not ever, without a person deciding.
+  5. THE DEMO FORM NOTIFIES ONLY. It never starts outreach or cadence. It does
+     send the brand's internal demo notice and a customer acknowledgement after
+     the lead is safely persisted.
 """
 
 import uuid
@@ -30,8 +32,11 @@ SLUG = "evosyspro"
 
 # ── fixtures ────────────────────────────────────────────────────────────────
 
-def _brand(db, *, slug=SLUG, name="EvoSys Pro", website="https://evosyspro.live"):
-    platform = Platform(name=name, slug=slug, website_url=website)
+def _brand(db, *, slug=SLUG, name="EvoSys Pro",
+           website="https://evosyspro.live",
+           support_email="support@evosyspro.live"):
+    platform = Platform(name=name, slug=slug, website_url=website,
+                        support_email=support_email)
     db.add(platform)
     db.commit()
     return platform
@@ -389,6 +394,78 @@ def test_a_demo_request_does_carry_sales_intent(client, db_session):
     lead = db_session.query(Lead).one()
     assert lead.tier == "web_lead"
     assert lead.message_track == "new_inquiry_intro"
+
+
+def test_a_demo_request_sends_internal_and_customer_notifications(
+        client, db_session, monkeypatch):
+    platform, _ = _configured(db_session)
+    sent = []
+
+    def fake_send(to_email, subject, body_html, **kwargs):
+        sent.append({
+            "to": to_email,
+            "subject": subject,
+            "html": body_html,
+            "org": kwargs.get("org"),
+        })
+        return {"success": True, "provider_message_id": "msg_123",
+                "error": None}
+
+    monkeypatch.setattr("app.services.email_service.send_email_via_provider",
+                        fake_send)
+    r = _post(client, "demo-request", DEMO)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["notifications"] == {"internal": True, "customer": True}
+    assert db_session.query(Lead).count() == 1
+    assert len(sent) == 2
+
+    internal, customer = sent
+    assert internal["to"] == "support@evosyspro.live"
+    assert "New EvoSys Pro Demo Request" in internal["subject"]
+    for text in ("Dana Whitfield", "Whitfield Roofing", DEMO["email"],
+                 DEMO["phone"], "growth", "spreadsheets",
+                 "Follow up faster"):
+        assert text in internal["html"]
+    assert customer["to"] == DEMO["email"]
+    assert customer["subject"] == "EvoSys Pro — We Received Your Demo Request"
+    assert "We received your demo request" in customer["html"]
+    assert sent[0]["org"].from_email == platform.support_email
+
+
+def test_a_repeat_demo_request_does_not_create_duplicate_leads_or_emails(
+        client, db_session, monkeypatch):
+    _configured(db_session)
+    sent = []
+    monkeypatch.setattr(
+        "app.services.email_service.send_email_via_provider",
+        lambda to_email, subject, body_html, **kwargs:
+            sent.append((to_email, subject)) or
+            {"success": True, "provider_message_id": "msg", "error": None},
+    )
+    assert _post(client, "demo-request", DEMO).status_code == 201
+    assert _post(client, "demo-request", {**DEMO, "goals": "Second attempt."}).status_code == 201
+    assert db_session.query(Lead).count() == 1
+    assert len(sent) == 4
+    assert sum(1 for _to, subj in sent if "New EvoSys Pro Demo Request" in subj) == 2
+    assert sum(1 for _to, subj in sent if subj == "EvoSys Pro — We Received Your Demo Request") == 2
+
+
+def test_demo_notification_failure_keeps_the_lead(client, db_session, monkeypatch):
+    _configured(db_session)
+
+    def fail_send(*args, **kwargs):
+        return {"success": False, "provider_message_id": None,
+                "error": "simulated provider failure"}
+
+    monkeypatch.setattr("app.services.email_service.send_email_via_provider",
+                        fail_send)
+    r = _post(client, "demo-request", DEMO)
+    assert r.status_code == 201, r.text
+    assert r.json()["notifications"] == {"internal": False, "customer": False}
+    lead = db_session.query(Lead).one()
+    assert lead.email == DEMO["email"]
+    assert lead.source_detail == "Request Demo"
 
 
 def test_an_optin_never_raises_a_lead_a_seller_has_already_advanced(

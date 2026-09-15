@@ -29,9 +29,10 @@ WHAT A PUBLIC CALLER IS TOLD WHEN SOMETHING IS WRONG: that we cannot take the
 submission right now. Not which brands exist, not which are configured, not
 why. The operator gets the reason in the log.
 
-NOTHING HERE SENDS ANYTHING. A submission creates or updates one record and
-stops. No cadence is started, no SMS or email goes to the person, no AI is
-woken. See public_capture.py.
+NOTHING HERE STARTS OUTREACH. A submission creates or updates one record, then
+the demo-request path sends only two transactional notifications: one internal
+brand notice and one submitter acknowledgement. No cadence is started, no SMS
+is sent, and no AI is woken. See public_capture.py for the capture boundary.
 """
 
 # NO `from __future__ import annotations` HERE. slowapi's rate-limit decorator
@@ -262,8 +263,23 @@ def site_demo_request(platform_slug: str, payload: SitePayload,
 
     sub = _submission(payload, pc.KIND_DEMO, _consent(payload, required=False))
     result = pc.capture(db, platform=platform, org=org, sub=sub)
+    notify = {"internal": False, "customer": False}
+    try:
+        from app.models.models import Lead
+        from app.services.public_demo_notifications import notify_demo_request
+        lead = db.query(Lead).filter(Lead.id == result["lead_id"]).first()
+        if lead is not None:
+            sent = notify_demo_request(db, platform=platform, lead=lead,
+                                       payload=payload)
+            notify = {
+                "internal": sent.internal_sent,
+                "customer": sent.customer_sent,
+            }
+    except Exception:
+        log.exception("site demo notification failed after capture for lead %s",
+                      result.get("lead_id"))
     return {"success": True, "action": result["action"],
-            "lead_id": result["lead_id"]}
+            "lead_id": result["lead_id"], "notifications": notify}
 
 
 @router.post("/{platform_slug}/sms-optin", status_code=201)
