@@ -185,6 +185,19 @@ def queue_summary(
     return operational_queues.summary(db, current_user, request=request)
 
 
+@router.get("/queues/provenance")
+def queue_provenance(current_user: User = Depends(require_tenant_or_observer)):
+    """WHERE EACH QUEUE'S ANSWER COMES FROM.
+
+    Not documentation for its own sake. The claim SS8 rests on is that these
+    queues need no tables of their own, and a rep or an admin asking "why is
+    this lead in my queue" deserves an answer better than "the system decided".
+    Every source named here is asserted by a test to be one the code actually
+    reads.
+    """
+    return operational_queues.provenance()
+
+
 @router.get("/queues/{name}")
 def queue(
     name: str,

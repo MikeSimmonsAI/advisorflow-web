@@ -330,3 +330,75 @@ def test_the_nav_icon_exists_in_the_icon_map():
     icon_map = icon_map[:icon_map.index("\n  }")]
     assert ("%s:" % name) in icon_map or ("'%s':" % name) in icon_map, \
         "icon %r is not in the icon map" % name
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PROVENANCE — the SS8 claim, checked against the code rather than the prose
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_every_queue_declares_where_its_answer_comes_from():
+    report = oq.provenance()
+    assert set(report["queues"]) == set(oq.QUEUES)
+    for name, row in report["queues"].items():
+        assert row["authoritative_state"], name
+        assert row["materialized_table"] is None, (
+            "%s claims a table of its own, which is the thing SS8 exists to "
+            "stop doing" % name)
+        assert "lead_scope" in row["services"], (
+            "%s does not name the scope seam" % name)
+
+
+def test_the_declared_sources_are_ones_the_code_actually_reads():
+    """A provenance block that drifts from the code is worse than none: it is
+    an answer to 'why is this lead in my queue' that happens to be wrong."""
+    import inspect
+    src = inspect.getsource(oq)
+    # Model class names the module must genuinely reference for its claims.
+    expected_models = {
+        "voice_calls": "VoiceCall",
+        "cadence_states": "CadenceState",
+        "pipeline_conversations": "PipelineConversation",
+        "booking_links": "BookingLink",
+        "replies": "Reply",
+        "lead_outcomes": "LeadOutcome",
+    }
+    import inspect as _i
+    from app.services import lead_stage as _ls
+    combined = src + _i.getsource(_ls)
+    for row in oq.provenance()["queues"].values():
+        for table, _why in row["authoritative_state"]:
+            model = expected_models.get(table)
+            if model:
+                assert model in combined, (
+                    "%s is declared as a source but neither operational_queues "
+                    "nor lead_stage reads %s" % (table, model))
+
+
+def test_no_queue_reads_a_superseded_materialized_table():
+    """auto_send_queue and ai_work_items are rows written at a moment that
+    then drift from the lead they describe. Reading one here would rebuild the
+    exact problem SS8 removes."""
+    import ast, inspect
+    tree = ast.parse(inspect.getsource(oq))
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    for forbidden in ("AutoSendQueue", "AIWorkItem"):
+        assert forbidden not in names
+
+
+def test_provenance_refuses_an_unknown_queue():
+    with pytest.raises(ValueError, match="Unknown queue"):
+        oq.provenance("txt")
+
+
+def test_the_provenance_endpoint_answers(client, auth_headers):
+    r = client.get("/workqueue/queues/provenance", headers=auth_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["derived"] is True
+    assert set(body["queues"]) == set(oq.QUEUES)
+
+
+def test_the_provenance_route_did_not_shadow_a_queue_name():
+    """`/queues/provenance` sits beside `/queues/{name}`. If it were declared
+    after the wildcard it would be swallowed by it and return a 400."""
+    assert "provenance" not in oq.QUEUES

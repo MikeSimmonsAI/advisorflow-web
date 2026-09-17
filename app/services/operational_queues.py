@@ -356,3 +356,87 @@ def get(name: str, db: Session, current_user: User, **kw) -> Dict[str, Any]:
     if name not in fns:
         raise ValueError("Unknown queue: %s" % name)
     return fns[name](db, current_user, **kw)
+
+
+# ── WHERE EACH QUEUE COMES FROM ─────────────────────────────────────────────
+#
+# STATED IN DATA, NOT IN A COMMENT, so it can be checked.
+#
+# The claim SS8 rests on is that these four queues need no tables of their own
+# because the authoritative state already exists. That claim is only worth
+# something if it is true of the code rather than of the design document, so
+# this names the actual sources and a test asserts the module really does read
+# them and really does not read anything else it has not declared.
+
+PROVENANCE = {
+    SMS: {
+        "authoritative_state": [
+            ("leads", "the population, through lead_scope.authorized_lead_query"),
+            ("replies", "an unreviewed interested/callback reply is the top item"),
+            ("cadence_states", "a live sequence REMOVES a lead from this queue"),
+            ("suppression_entries", "via qualification, never read directly"),
+            ("messages", "last contact, and the manual-takeover signal"),
+        ],
+        "services": ["lead_scope", "lead_stage", "qualification"],
+        "materialized_table": None,
+        "replaces": "nothing yet - there was no SMS queue at all",
+    },
+    EMAIL: {
+        "authoritative_state": [
+            ("leads", "the population, through lead_scope.authorized_lead_query"),
+            ("email_messages", "last contact and delivery state"),
+            ("replies", "an unreviewed reply outranks new outreach"),
+            ("pipeline_conversations", "a live AI conversation REMOVES a lead"),
+        ],
+        "services": ["lead_scope", "lead_stage", "qualification"],
+        "materialized_table": None,
+        "replaces": ("GET /email/queue, which filters on Lead.status rather "
+                     "than on whether the lead is actually sendable"),
+    },
+    VOICE: {
+        "authoritative_state": [
+            ("leads", "the population, through lead_scope.authorized_lead_query"),
+            ("voice_calls.callback_at", "a promise made on a recorded line"),
+            ("voice_calls.call_number", "the existing three-attempt ceiling"),
+            ("voice_calls.outcome", "a booked call closes its own callback"),
+        ],
+        "services": ["lead_scope", "lead_stage", "qualification"],
+        "materialized_table": None,
+        "replaces": ("the flat list on GET /voice/calls, which is a log rather "
+                     "than a queue"),
+    },
+    FOLLOW_UP: {
+        "authoritative_state": [
+            ("leads", "the population, through lead_scope.authorized_lead_query"),
+            ("replies", "somebody is waiting on an answer"),
+            ("booking_links", "an appointment whose time has passed"),
+            ("lead_outcomes", "whether anybody recorded what happened"),
+            ("cadence_states", "a touch that is already overdue"),
+            ("pipeline_conversations", "a send that is already overdue"),
+        ],
+        "services": ["lead_scope", "lead_stage"],
+        "materialized_table": None,
+        "replaces": ("GET /workqueue/today, which is correct but scopes on "
+                     "assigned_to_id == me, so a manager saw nothing their "
+                     "team owed"),
+    },
+}
+
+# The materialized tables SS8 exists to stop reading as queues. Each one is
+# written at a moment and then drifts from the lead it describes, which is how
+# one screen came to say a lead needed a text while another said it was booked.
+SUPERSEDED_MATERIALIZED_TABLES = (
+    "auto_send_queue",
+    "ai_work_items",
+)
+
+
+def provenance(queue: Optional[str] = None) -> Dict[str, Any]:
+    """What authoritative state produces each queue. Read-only, no database."""
+    if queue is not None:
+        if queue not in PROVENANCE:
+            raise ValueError("Unknown queue: %s" % queue)
+        return dict(PROVENANCE[queue])
+    return {"queues": {k: dict(v) for k, v in PROVENANCE.items()},
+            "superseded_materialized_tables": list(SUPERSEDED_MATERIALIZED_TABLES),
+            "derived": True}
