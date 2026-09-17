@@ -1432,12 +1432,43 @@ async def on_startup():
         import logging as _logging
         _logging.getLogger(__name__).warning("Platform seed note: %s", e)
 
-    # 5. Start background asyncio loops (fire-and-forget, run for app lifetime)
-    asyncio.create_task(_review_request_loop())   # Google review SMS  — every 30 min
-    asyncio.create_task(_ai_conversation_loop())  # AI lead touches    — every 2 min
-    asyncio.create_task(_cadence_loop())          # SMS cadence touches — every 1 hr
-    asyncio.create_task(_support_intelligence_loop())  # support brief — every 6 hr
-    asyncio.create_task(_session_cleanup_loop())  # dead session sweep — daily
+    # 6. START ONLY THE SCHEDULERS THIS SERVICE OWNS.
+    #
+    # These five used to be started unconditionally. `advisorflow-voice` runs
+    # this same ASGI app, so it started all five too, and every background job
+    # in the platform ran at exactly twice its configured rate - 1,436
+    # ai_conversation_loop runs in 24 hours against 720 configured, visible in
+    # `job_runs` as pairs 1-2 seconds apart.
+    #
+    # Two runners a second apart on `pipeline_conversations WHERE next_send_at
+    # <= now` is a double-send waiting for the gap between read and write to
+    # widen. So this is a correctness fix, not only a cost one.
+    #
+    # Ownership lives in ONE table, app/service_role.py. A process whose role
+    # is unknown starts nothing: every loop here can eventually text or email a
+    # customer, and a process that cannot say what it is has no business doing
+    # that.
+    from app import service_role as _role
+    from app.models.job_models import JobName
+    _plan = _role.log_startup_plan()
+    _loop_factories = {
+        JobName.REVIEW_REQUEST:       _review_request_loop,
+        JobName.AI_CONVERSATION:      _ai_conversation_loop,
+        JobName.CADENCE_LOOP:         _cadence_loop,
+        JobName.SUPPORT_INTELLIGENCE: _support_intelligence_loop,
+        JobName.SESSION_CLEANUP:      _session_cleanup_loop,
+    }
+    for _job_name in _plan["start"]:
+        _factory = _loop_factories.get(_job_name)
+        if _factory is None:
+            # A name in the ownership table with no loop behind it. Refuse
+            # silently-nothing: say so, because the alternative is a scheduler
+            # everyone believes is running.
+            _logging.getLogger(__name__).error(
+                "service_role owns %r but app.main has no loop for it; it will "
+                "not run.", _job_name)
+            continue
+        asyncio.create_task(_factory())
 
 
 def _build_metadata() -> dict:

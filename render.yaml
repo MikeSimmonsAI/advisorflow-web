@@ -79,6 +79,22 @@ services:
         - "*.bat"
         - "*.ps1"
     envVars:
+      # ── WHAT THIS SERVICE IS FOR ────────────────────────────────────────
+      # This process and advisorflow-voice run the SAME `app.main:app`, and the
+      # startup handler used to start five background schedulers
+      # unconditionally - so BOTH ran all five and every background job in the
+      # platform ran at exactly twice its configured rate (1,436
+      # ai_conversation_loop runs in 24h against 720 configured, visible in
+      # job_runs as pairs 1-2 seconds apart).
+      #
+      # Ownership now lives in app/service_role.py, keyed on this variable.
+      # THE API SERVICE OWNS THE PLATFORM SCHEDULERS.
+      #
+      # A process with no role starts NO scheduler. That is deliberate: each of
+      # them can eventually text or email a customer, and a process that cannot
+      # say what it is has no business doing that. So this must be set.
+      - key: SERVICE_ROLE
+        value: backend
       - key: DATABASE_URL
         fromDatabase:
           name: advisorflow-db
@@ -200,6 +216,11 @@ services:
     startCommand: "python app/jobs/run_cadence_job.py"
     buildFilter: *pythonBuildFilter
     envVars:
+      # A cron container runs a job script, not app.main, so it starts no
+      # in-process scheduler either way. Declared so every service in this file
+      # answers the same question the same way.
+      - key: SERVICE_ROLE
+        value: job
       - key: DATABASE_URL
         fromDatabase:
           name: advisorflow-db
@@ -233,6 +254,11 @@ services:
     startCommand: "python app/jobs/run_email_poller.py"
     buildFilter: *pythonBuildFilter
     envVars:
+      # A cron container runs a job script, not app.main, so it starts no
+      # in-process scheduler either way. Declared so every service in this file
+      # answers the same question the same way.
+      - key: SERVICE_ROLE
+        value: job
       - key: DATABASE_URL
         fromDatabase:
           name: advisorflow-db
@@ -257,6 +283,11 @@ services:
     startCommand: "python app/jobs/run_ai_conversation_job.py"
     buildFilter: *pythonBuildFilter
     envVars:
+      # A cron container runs a job script, not app.main, so it starts no
+      # in-process scheduler either way. Declared so every service in this file
+      # answers the same question the same way.
+      - key: SERVICE_ROLE
+        value: job
       - key: DATABASE_URL
         fromDatabase:
           name: advisorflow-db
@@ -287,6 +318,21 @@ services:
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     buildFilter: *pythonBuildFilter
     envVars:
+      # ── AND IT RUNS NO PLATFORM SCHEDULERS EITHER ───────────────────────
+      #
+      # Same argument as SKIP_STARTUP_MIGRATIONS below, one level out. This
+      # service runs the same ASGI app as the backend, so it was also running
+      # the AI conversation loop every two minutes, the cadence loop hourly,
+      # the review-request SMS loop every half hour, the support brief and the
+      # session sweep - none of which has anything to do with holding a Twilio
+      # media stream open.
+      #
+      # It could not actually complete most of that work (it has no
+      # OPENAI_API_KEY and no ENCRYPTION_KEY), so it failed quietly every two
+      # minutes while still hitting the database. `voice` owns no scheduled
+      # tasks.
+      - key: SERVICE_ROLE
+        value: voice
       - key: DATABASE_URL
         fromDatabase:
           name: advisorflow-db
