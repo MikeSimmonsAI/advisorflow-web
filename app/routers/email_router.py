@@ -695,22 +695,29 @@ def email_sent_log(
     current_user: User = Depends(require_tenant_user),
 ):
     """
-    Recent email sends by this advisor — ordered newest first.
+    Recent email sends — ordered newest first.
     Used by Email Queue's 'Recently Sent' panel so advisors always know
     who they already emailed and don't accidentally double-send.
+
+    This filtered on `sender_id == current_user.id` with NO manager branch, so
+    it answered the double-send question wrongly twice over: an org_admin saw
+    nothing at all, and an advisor who emailed a colleague's lead could not see
+    their own send, because the write stamps the lead's ASSIGNED advisor. A
+    'Recently Sent' panel that hides sends is worse than no panel - it is the
+    one surface whose whole job is stopping a duplicate.
+
+    Org scope is unchanged and still the outer filter.
     """
     from sqlalchemy import desc
-    rows = (
+    q = (
         db.query(EmailMessage, Lead)
         .join(Lead, EmailMessage.lead_id == Lead.id)
-        .filter(
-            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
-            EmailMessage.sender_id == current_user.id,
-        )
-        .order_by(desc(EmailMessage.sent_at))
-        .limit(limit)
-        .all()
+        .filter(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
     )
+    q = lead_scope.own_or_assigned_records_only(
+        q, EmailMessage.sender_id, Lead.assigned_to_id, current_user, db
+    )
+    rows = q.order_by(desc(EmailMessage.sent_at)).limit(limit).all()
     return [
         {
             "id": msg.id,

@@ -55,6 +55,12 @@ class AutoReplyRequest(BaseModel):
 class SingleReplyRequest(BaseModel):
     lead_id: str
     tone: str = "warm"
+    # The Leads bulk composer has always SENT these two. They were not declared
+    # here and not forwarded below, so pydantic dropped them and the operator's
+    # typed instruction was silently discarded on every single preview. Named
+    # to match AutoReplyRequest above, which had them all along.
+    ai_direction: Optional[str] = None
+    relationship_type: Optional[str] = None
 
 
 class ApproveRequest(BaseModel):
@@ -199,7 +205,12 @@ def preview_auto_reply(
     lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    result = generate_auto_reply(db, lead, current_user, tone=req.tone)
+    result = generate_auto_reply(
+        db, lead, current_user,
+        tone=req.tone,
+        ai_direction=req.ai_direction,
+        relationship_type=req.relationship_type,
+    )
     return {"lead_id": lead.id, "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(), "phone": lead.phone, **result}
 
 

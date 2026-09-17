@@ -570,10 +570,34 @@ export default function Leads() {
         tone: aiTone,
         ai_direction: bulkAiDirection.trim() || null,
       })
-      if (result.message) {
-        setBulkMessage(result.message)
+      // THE KEY IS `reply`, AND IT ALWAYS WAS.
+      //
+      // This read `result.message`. /ai-conversation/preview has never
+      // returned a `message` field - the body comes back as `reply` - so
+      // `result.message` was undefined on every call and this fell into the
+      // error branch every time, for every account, with every API key. That
+      // is why "AI returned no message." looked account-specific: it was
+      // deterministic, so it reproduced everywhere.
+      if (result.reply) {
+        setBulkMessage(result.reply)
+        // A fallback is not a generation. When the AI call failed, the service
+        // substitutes a canned sentence and marks it source:'fallback' with the
+        // exception class in error_kind. Say so, rather than presenting it as
+        // the AI's work.
+        if (result.source === 'fallback') {
+          setBulkAiError(
+            `The AI did not respond${result.error_kind ? ` (${result.error_kind})` : ''} — this is a generic fallback message, not a generated one. Edit it before sending.`
+          )
+        }
+      } else if (result.should_stop) {
+        // The AI deliberately declined for this lead.
+        setBulkAiError(result.reason
+          ? `AI stopped for this lead: ${result.reason}`
+          : 'AI stopped for this lead and did not draft a message.')
       } else {
-        setBulkAiError('AI returned no message.')
+        setBulkAiError(
+          `AI returned an empty message${result.error_kind ? ` (${result.error_kind})` : ''}.`
+        )
       }
     } catch (err) {
       setBulkAiError(err.message || 'AI generate failed')
@@ -1687,10 +1711,32 @@ export default function Leads() {
               )}
               {aiResult && !aiResult.error && (
                 <div className="leads-ai-result" style={{ marginTop: 8 }}>
-                  {aiResult.mode === 'queue'
-                    ? `✓ ${aiResult.queued} messages queued for review`
-                    : `✓ Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped}`}
+                  {/*
+                    THE BACKEND HAS ALWAYS RETURNED `errors` AND `results[]`.
+                    Neither was rendered, so a batch in which every single lead
+                    failed still drew a green "✓ Sent: 0 · Queued: 0 · Skipped: 0"
+                    and the operator believed the send had gone out. Never lead
+                    with a tick when anything failed, and show the reasons.
+                  */}
+                  {aiResult.errors > 0
+                    ? `⚠ ${aiResult.errors} of ${aiResult.total} failed · Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped}`
+                    : aiResult.mode === 'queue'
+                      ? `✓ ${aiResult.queued} messages queued for review`
+                      : `✓ Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped}`}
                 </div>
+              )}
+              {aiResult?.errors > 0 && (
+                <ul className="compose-error" style={{ marginTop: 6, paddingLeft: 18 }}>
+                  {(aiResult.results || [])
+                    .filter(r => r.action === 'error')
+                    .slice(0, 5)
+                    .map(r => (
+                      <li key={r.lead_id}>{r.reason || 'Unknown error'}</li>
+                    ))}
+                  {(aiResult.results || []).filter(r => r.action === 'error').length > 5 && (
+                    <li>…and {(aiResult.results || []).filter(r => r.action === 'error').length - 5} more</li>
+                  )}
+                </ul>
               )}
               {aiResult?.error && <div className="compose-error" style={{ marginTop: 8 }}>{aiResult.error}</div>}
             </div>

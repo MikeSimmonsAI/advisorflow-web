@@ -40,6 +40,7 @@ import logging
 from typing import Iterable, List, Optional, Sequence
 
 from fastapi import HTTPException, Request, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.models import Lead, User
@@ -220,6 +221,41 @@ def own_records_only(query, owner_column, user: User):
     if is_owner_scoped(user):
         return query.filter(owner_column == user.id)
     return query
+
+
+def own_or_assigned_records_only(query, owner_column, assigned_column,
+                                 user: User, db: Session = None,
+                                 request: Optional[Request] = None):
+    """Rows this advisor SENT, plus rows sent on a family that is theirs.
+
+    `own_records_only` above narrows a child table to `owner_column == user.id`
+    and that is right for a queue item, which belongs to whoever queued it. It
+    is wrong for a SENT MESSAGE, because the two sides disagree about what the
+    owner column means.
+
+    The WRITE side stamps `Message.sender_id` / `EmailMessage.sender_id` with
+    `compose_router.acting_advisor(...)` - the family's ASSIGNED advisor, not
+    whoever pressed send. That is deliberate and correct: the email has to sign
+    as the advisor the family deals with, and the booking link has to point at
+    that advisor's calendar.
+
+    The READ side then filtered on `sender_id == current_user.id`, i.e. on the
+    caller. So an advisor who emailed a colleague's lead wrote a row stamped
+    with the COLLEAGUE's id and could never see their own send again, and an
+    advisor could not see a colleague's send on a family assigned to them. Two
+    people looking at the same organization saw two different, both-incomplete
+    histories - with no impersonation and no workspace migration involved.
+
+    Until the actor is recorded in its own column, the honest answer to "is
+    this mine" is either side of that seam: the row is stamped to me, or the
+    lead is assigned to me. Managers and god pass through unchanged.
+
+    ORG SCOPE IS NOT THIS FUNCTION'S JOB. Callers must already have filtered on
+    the workspace org; this only narrows WITHIN it.
+    """
+    if is_manager_here(user, db, request):
+        return query
+    return query.filter(or_(owner_column == user.id, assigned_column == user.id))
 
 
 def log_denial(user: Optional[User], reason: str,

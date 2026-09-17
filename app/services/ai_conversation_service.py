@@ -556,13 +556,27 @@ def generate_touch_email(
             "source": "ai",
         }
     except Exception as e:
-        logger.error("generate_touch_email error: %s", e)
+        # THE FALLBACK HAS TO ADMIT IT IS A FALLBACK.
+        #
+        # This one `except` swallows a missing OPENAI_API_KEY, a rate limit, a
+        # timeout, a network error and a non-JSON response, and returns a
+        # hand-written English sentence. It already set source="fallback", but
+        # nothing downstream read it, so a dead API key produced a plausible
+        # AI-looking draft and the operator had no way to tell.
+        #
+        # error_kind is the exception's CLASS name only - AuthenticationError,
+        # RateLimitError, APIConnectionError, JSONDecodeError - which is what
+        # makes it diagnosable. The full message stays in the log deliberately:
+        # OpenAI's auth errors quote a fragment of the key back, and that does
+        # not belong in an API response a browser can read.
+        logger.error("generate_touch_email error (%s): %s", type(e).__name__, e)
         return {
             "subject": f"Following up, {lead.first_name or 'there'}",
             "body": f"Hi {lead.first_name or 'there'}, I wanted to follow up regarding your {appt_label}. I'd love to connect at your convenience.",
             "should_stop": False,
             "escalate": False,
             "source": "fallback",
+            "error_kind": type(e).__name__,
             "touch_number": touch_number,
         }
 
@@ -1112,5 +1126,9 @@ def generate_auto_reply(
         "should_stop": result.get("should_stop", False),
         "reason": result.get("stop_reason", ""),
         "source": result.get("source", "ai"),
+        # Present only when the AI call failed and the canned body was
+        # substituted. The caller uses it to say WHY instead of presenting the
+        # fallback as a successful generation.
+        "error_kind": result.get("error_kind"),
         "booking_url": booking_url,
     }

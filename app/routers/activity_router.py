@@ -35,7 +35,6 @@ def sent_activity(
     god_admin with no org selected sees activity across ALL orgs.
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
-    is_manager = lead_scope.is_manager_here(current_user, db)
     god_all = getattr(current_user, '_god_all_orgs', False)
 
     # ── SMS sends ──────────────────────────────────────────────────────────
@@ -44,8 +43,13 @@ def sent_activity(
     if not god_all:
         sms_filters.append(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
     sms_query = sms_base.filter(*sms_filters)
-    if not is_manager:
-        sms_query = sms_query.filter(Message.sender_id == current_user.id)
+    if not god_all:
+        # sender_id is the lead's ASSIGNED advisor (compose_router.acting_advisor),
+        # not whoever pressed send, so filtering it against the caller hid an
+        # advisor's own sends from them. See lead_scope.own_or_assigned_records_only.
+        sms_query = lead_scope.own_or_assigned_records_only(
+            sms_query, Message.sender_id, Lead.assigned_to_id, current_user, db
+        )
     sms_rows = sms_query.order_by(Message.sent_at.desc()).limit(limit).all()
 
     sms_items = [
@@ -70,8 +74,10 @@ def sent_activity(
     if not god_all:
         email_filters.append(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
     email_query = email_base.filter(*email_filters)
-    if not is_manager:
-        email_query = email_query.filter(EmailMessage.sender_id == current_user.id)
+    if not god_all:
+        email_query = lead_scope.own_or_assigned_records_only(
+            email_query, EmailMessage.sender_id, Lead.assigned_to_id, current_user, db
+        )
     email_rows = email_query.order_by(EmailMessage.sent_at.desc()).limit(limit).all()
 
     email_items = [
