@@ -32,6 +32,8 @@ from app.services.voice_service import (
 )
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 from app.routers.audit_log_router import log_action
+from app.services import outbound_email_gate
+from app.services import send_source
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 logger = logging.getLogger(__name__)
@@ -295,7 +297,6 @@ async def voice_stream(
         # Send booking link via email
         if lead.email and advisor.microsoft_365_connected:
             try:
-                from app.services.ai_conversation_service import _send_email_via_graph
                 subject = f"Your booking link — {_get_appt_label(lead)}"
                 body = (
                     f"Hi {lead.first_name or 'there'},\n\n"
@@ -305,7 +306,17 @@ async def voice_stream(
                     f"We look forward to connecting with you.\n\n"
                     f"Best,\n{advisor.full_name}"
                 )
-                _send_email_via_graph(advisor, lead.email, subject, body)
+                # Gate in, sender still out. Note that call.booking_url_sent
+                # was set True above, BEFORE this block, and stayed True
+                # through every ImportError - so that column has been
+                # reporting sent booking links for sends that never happened.
+                # It is left alone here rather than quietly rewritten; the
+                # flag belongs with the restored sender in Phase 3.
+                outbound_email_gate.gate_lead_email(
+                    db, lead,
+                    send_source=send_source.VOICE_BOOKING_LINK,
+                    actor_user_id=getattr(advisor, "id", None),
+                )
             except Exception as e:
                 logger.error("on_booking_detected email error: %s", e)
 
@@ -324,14 +335,15 @@ async def voice_stream(
                               or getattr(advisor, 'email', None))
         lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip()
         try:
-            from app.services.ai_conversation_service import _send_email_via_graph
-            _send_email_via_graph(
-                advisor, notification_email,
-                f"⚠️ Voice Call Escalated — {lead_name}",
-                f"<p>AI voice call with <strong>{lead_name}</strong> was escalated.</p>"
-                f"<p><strong>Trigger phrase:</strong> '{phrase}'</p>"
-                f"<p>The call was ended gracefully. You may want to follow up manually.</p>"
-                f"<p><a href='{FRONTEND_URL}/leads/{lead_id}'>View lead →</a></p>"
+            # A STAFF NOTIFICATION, NOT LEAD CONTACT. The compliance preflight
+            # deliberately does not run here: it answers questions about a
+            # family's consent, and the recipient is our own advisor. The one
+            # guard that does belong is that there is an address at all -
+            # _escalate_conversation checks exactly that before its send and
+            # this path never did, so it would have handed None to the
+            # provider as a recipient.
+            outbound_email_gate.gate_staff_email(
+                notification_email, purpose="voice call escalation alert"
             )
         except Exception as e:
             logger.error("on_escalation_detected email error: %s", e)

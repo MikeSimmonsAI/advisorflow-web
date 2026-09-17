@@ -1081,6 +1081,43 @@ class Message(Base):
     delivery_status = Column(String, default="pending", nullable=True)
     delivery_status_at = Column(DateTime, nullable=True)  # when Twilio last updated this
 
+    # ── ATTRIBUTION. WHO ACTUALLY PRESSED SEND, AND WHY THE SEND HAPPENED ──
+    #
+    # sender_id above is NOT the actor. Every human path sets it from
+    # compose_router.acting_advisor, i.e. the lead's ASSIGNED advisor, so the
+    # message signs as the advisor the family deals with and a booking link
+    # points at that advisor's calendar. That is deliberate and stays.
+    #
+    # The consequence was that nothing anywhere recorded who pressed the
+    # button. An org_admin sending on a colleague's lead left a row naming the
+    # colleague, and there was no second column to say otherwise.
+    #
+    # sent_by_user_id is that second column. NULL is meaningful and common: a
+    # cron, a webhook and a background loop have no authenticated human in
+    # them, and rows written before this column existed have no evidence of
+    # one. Nothing backfills it - inferring an actor would be manufacturing
+    # data. send_source says WHY the send happened; the vocabulary is defined
+    # once in app/services/send_source.py and nowhere else.
+    # A PLAIN STRING, NOT A ForeignKey, AND THAT IS DELIBERATE.
+    #
+    # Two reasons, and either one alone would be sufficient.
+    #
+    # It matches what production actually gets. auto_migrate adds this as
+    # ("messages", "sent_by_user_id", "VARCHAR") - a bare column with no
+    # constraint - which is how every column added to a live table in this
+    # codebase is added, email_messages.sender_id included. Declaring a
+    # ForeignKey here would describe a constraint the database does not have.
+    #
+    # And a second users -> messages foreign key makes the join between those
+    # two tables ambiguous: SQLAlchemy can no longer infer the condition for
+    # the existing Message.sender / User.messages_sent relationship, and every
+    # one of them would need an explicit foreign_keys=. Paying that to declare
+    # a constraint production will not have is the wrong trade.
+    # app/models/ai_operations_models.py made the same call for the same
+    # reason and says so.
+    sent_by_user_id = Column(String, nullable=True, index=True)
+    send_source = Column(String, nullable=True)
+
     # The five-state outcome vocabulary — see app/services/message_state.py.
     # blocked | queued | sent | delivered | failed. `delivery_status` above
     # stays raw Twilio for the existing activity feed; this column is the one
@@ -1472,6 +1509,11 @@ class EmailMessage(Base):
 
     subject = Column(String, nullable=False)
     body_html = Column(Text, nullable=False)
+    # Attribution. Same two columns, same reasoning, and the same deliberate
+    # absence of a ForeignKey, as on Message above.
+    sent_by_user_id = Column(String, nullable=True, index=True)
+    send_source = Column(String, nullable=True)
+
     provider_message_id = Column(String, nullable=True)  # e.g. SendGrid/SES message ID
     status = Column(String, default="queued")  # queued, sent, delivered, bounced, failed
 

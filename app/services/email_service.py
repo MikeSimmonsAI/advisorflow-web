@@ -291,6 +291,25 @@ def send_email_via_provider(
                 "sensitive": is_sensitive(message_type, sensitivity)}
 
 
+def plain_text_to_html(body: str) -> str:
+    """The plain-text -> HTML render every drafted message goes through.
+
+    Lifted verbatim out of send_email so the auto-send queue can produce the
+    same body while going through send_email_to_lead, which gates and logs.
+    A second copy of this would be a second way for a drafted email to look
+    different depending on which sender happened to carry it.
+    """
+    escaped = (body or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    escaped = escaped.replace("\n", "<br>")
+    # **text** → <strong>text</strong>
+    import re
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+    return (
+        "<div style='font-family:sans-serif;font-size:15px;line-height:1.6;"
+        f"color:#222;max-width:600px'>{escaped}</div>"
+    )
+
+
 def send_email(
     db: Session,
     org_id: str,
@@ -310,13 +329,7 @@ def send_email(
     from app.models.models import Organization
     org = db.query(Organization).filter(Organization.id == org_id).first()
 
-    # Convert newlines to <br> and **bold** to <strong> for a basic HTML render
-    body_html = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    body_html = body_html.replace("\n", "<br>")
-    # **text** → <strong>text</strong>
-    import re
-    body_html = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", body_html)
-    body_html = f"<div style='font-family:sans-serif;font-size:15px;line-height:1.6;color:#222;max-width:600px'>{body_html}</div>"
+    body_html = plain_text_to_html(body)
 
     return send_email_via_provider(
         to_email=to_email,
@@ -326,9 +339,42 @@ def send_email(
     )
 
 
-def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
+def send_email_to_lead(db: Session, advisor: User, lead: Lead,
+                       subject: str = None, body_html: str = None,
+                       send_source: str = None,
+                       sent_by_user_id: str = None,
+                       raise_on_provider_failure: bool = False) -> EmailMessage:
     """Sends one email to a lead and logs it. Raises ValueError if the lead
-    may not be emailed."""
+    may not be emailed.
+
+    SUBJECT/BODY OVERRIDE, AND WHY IT LIVES HERE RATHER THAN IN A SECOND
+    FUNCTION. This is the only email function in the codebase that does all
+    three of the things a send to a family requires: refuse a demo tenant,
+    run the compliance gate, and write the `email_messages` row that the
+    timeline, the activity feed and the sent log all read.
+
+    Every caller that needed to send a DRAFTED subject and body - the
+    auto-send approval queue, the AI conversation engine, the pipeline
+    auto-reply - could not use it, because it rendered its own body from the
+    lead's message track and would have thrown their draft away. So each of
+    them reached past it to a raw sender instead and inherited neither the
+    gate nor the row. That is the whole reason approved AI emails sent for
+    real and then vanished from the lead's history.
+
+    Passing both `subject` and `body_html` now skips only the template
+    render and the booking-link mint. The demo boundary, the compliance
+    gate, the provider call and the logged row are identical either way, so
+    a drafted send cannot acquire weaker guarantees than a templated one.
+    Passing one without the other is a caller error and raises.
+    send_source / sent_by_user_id are OPTIONAL and default to None, which is
+    the honest value: a path that has not been migrated to state its origin
+    must record "unrecorded", never a guess. See app/services/send_source.py.
+    """
+    if (subject is None) != (body_html is None):
+        raise ValueError(
+            "send_email_to_lead: pass both subject and body_html to send a "
+            "drafted email, or neither to render the lead's message track."
+        )
     # ── THE DEMONSTRATION BOUNDARY ──────────────────────────────────────────
     # Before the compliance gate, because compliance answers questions about a
     # real family's real consent and this asks whether there is a real family
@@ -365,15 +411,24 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     from app.models.models import Organization
     import os as _os
 
-    booking = create_booking_link(db, lead, advisor)
+    if subject is not None:
+        # Caller-supplied draft. No booking link is minted: the draft already
+        # contains whatever call to action its author intended, and quietly
+        # creating a second booking token per send would litter the table.
+        rendered = {"subject": subject, "body_html": body_html}
+    else:
+        rendered = None
+
+    booking = create_booking_link(db, lead, advisor) if rendered is None else None
     # Branded, resolver-built. The old line concatenated BOOKING_BASE_URL by
     # hand and produced "/book/<token>" against an empty string when the env
     # var was unset - a relative path in an email, which resolves nowhere.
-    from app.services.public_identity import booking_url as _booking_url
-    booking_url = _booking_url(db, lead.organization_id, booking.token)
+    if rendered is None:
+        from app.services.public_identity import booking_url as _booking_url
+        booking_url = _booking_url(db, lead.organization_id, booking.token)
 
-    track = lead.message_track or "email_only_nurture"
-    rendered = render_email(db, track, lead, advisor, booking_url)
+        track = lead.message_track or "email_only_nurture"
+        rendered = render_email(db, track, lead, advisor, booking_url)
 
     # The RESOLVED identity, not the raw org row. Greenland/Restland has no
     # from_email of its own, and passing the bare row let the send fall through
@@ -389,7 +444,14 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
     # Microsoft 365 per-advisor sending is no longer the primary path — it hit
     # anti-spam quota limits (WASCL RefuseQuota) during bulk sends. Resend via the
     # org's verified domain is cleaner, more reliable, and scales properly.
-    result = send_email_via_provider(lead.email, rendered["subject"], rendered["body_html"], org=org)
+    # Keyword arguments, so a caller inspecting this call - or a test asserting
+    # on what actually went out - sees named fields rather than positions.
+    result = send_email_via_provider(
+        to_email=lead.email,
+        subject=rendered["subject"],
+        body_html=rendered["body_html"],
+        org=org,
+    )
 
     email_msg = EmailMessage(
         lead_id=lead.id,
@@ -398,12 +460,28 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead) -> EmailMessage:
         body_html=rendered["body_html"],
         provider_message_id=result.get("provider_message_id"),
         status="sent" if result["success"] else "failed",
+        send_source=send_source,
+        sent_by_user_id=sent_by_user_id,
     )
     db.add(email_msg)
 
     if result["success"]:
         lead.status = "sent"
     db.commit()
+
+    # THE ROW IS WRITTEN EITHER WAY - a failed send is a fact worth keeping,
+    # and status="failed" above records it. What differs is whether the caller
+    # is told.
+    #
+    # Existing callers read the returned row and keep their current behaviour,
+    # so this defaults to False. The auto-send queue passes True because it has
+    # to mark its own item failed and show the advisor a reason, and "the email
+    # provider rejected the message" is not a reason - "domain not verified" is.
+    # Losing the provider's own words is losing the only thing that tells an
+    # operator what to fix.
+    if raise_on_provider_failure and not result["success"]:
+        raise RuntimeError(result.get("error")
+                           or "The email provider rejected the message.")
     return email_msg
 
 

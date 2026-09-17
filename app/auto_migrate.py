@@ -615,6 +615,14 @@ COLUMNS_TO_ADD = [
     ("platforms", "support_phone", "VARCHAR"),
     ("platforms", "website_url", "VARCHAR"),
     ("platforms", "app_base_url", "VARCHAR"),
+    # Attribution, added with the outbound-visibility work. Both nullable with
+    # no default on purpose: NULL means "written before the platform recorded
+    # this", which is a different fact from any real source value, and nothing
+    # backfills them. See app/services/send_source.py.
+    ("messages", "sent_by_user_id", "VARCHAR"),
+    ("messages", "send_source", "VARCHAR"),
+    ("email_messages", "sent_by_user_id", "VARCHAR"),
+    ("email_messages", "send_source", "VARCHAR"),
     ("messages", "send_state", "VARCHAR"),
     ("messages", "error_code", "VARCHAR"),
     ("messages", "error_message", "VARCHAR"),
@@ -1107,6 +1115,10 @@ INDEXES_TO_CREATE = [
     "CREATE INDEX IF NOT EXISTS ix_messages_sent_at      ON messages(sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_messages_sender_id    ON messages(sender_id)",
     "CREATE INDEX IF NOT EXISTS ix_email_messages_lead_id   ON email_messages(lead_id)",
+    # Reporting reads these by source over a date range ("what did the cadence
+    # send today"), so the index leads with the filtered column.
+    "CREATE INDEX IF NOT EXISTS ix_messages_send_source ON messages(send_source, sent_at)",
+    "CREATE INDEX IF NOT EXISTS ix_email_messages_send_source ON email_messages(send_source, sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_email_messages_sent_at   ON email_messages(sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_email_messages_sender_id ON email_messages(sender_id)",
     "CREATE INDEX IF NOT EXISTS ix_replies_lead_id       ON replies(lead_id)",

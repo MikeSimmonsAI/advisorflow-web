@@ -20,6 +20,8 @@ from app.services.ai_conversation_service import (
 )
 from app.routers.audit_log_router import log_action
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.services import outbound_email_gate
+from app.services import send_source
 
 router = APIRouter(prefix="/ai-conversation", tags=["ai-conversation"])
 
@@ -237,11 +239,28 @@ def generate_batch_replies(
                 continue
             if req.auto_send and ai_result["reply"] and lead.email:
                 try:
-                    from app.services.ai_conversation_service import _send_email_via_graph
-                    _send_email_via_graph(current_user, lead.email, ai_result.get("subject", f"Following up, {lead.first_name or 'there'}"), ai_result["reply"])
+                    # THE GATE THAT WAS NEVER HERE. This branch called
+                    # _send_email_via_graph, which is defined nowhere, so every
+                    # call raised ImportError into the handler below and was
+                    # counted as an error - while the UI rendered a green tick.
+                    # Nothing checked DNC, allow_email or a bad address first.
+                    # The gate runs now; the sender is still deliberately
+                    # absent and gate_lead_email always raises.
+                    outbound_email_gate.gate_lead_email(
+                        db, lead,
+                        send_source=send_source.BULK_AI,
+                        actor_user_id=current_user.id,
+                    )
                     sent += 1
                     log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.auto_sent", target_type="lead", target_id=lead.id)
                     results.append({"lead_id": lead.id, "action": "sent", "reply": ai_result["reply"]})
+                except ValueError as blocked:
+                    # A compliance refusal is not a fault. It is counted and
+                    # reported separately so an operator can tell "we may not
+                    # contact this family" from "the send broke".
+                    skipped += 1
+                    log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.blocked", target_type="lead", target_id=lead.id)
+                    results.append({"lead_id": lead.id, "action": "blocked", "reason": str(blocked), "reply": ""})
                 except Exception as e:
                     errors += 1
                     results.append({"lead_id": lead.id, "action": "error", "reason": str(e)})

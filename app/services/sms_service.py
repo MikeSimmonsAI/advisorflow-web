@@ -504,9 +504,16 @@ def send_sms(
     lead: Lead,
     template: str,
     include_booking_link: bool = True,
+    send_source: str = None,
+    sent_by_user_id: str = None,
 ) -> Message:
     """
     Sends a single SMS from advisor -> lead.
+
+    send_source / sent_by_user_id are OPTIONAL and default to None, which is
+    the honest value: a path that has not been migrated to state its origin
+    must record "unrecorded", never a guess. See app/services/send_source.py.
+
     Caller ID name (if configured on the advisor's Twilio number) is set
     at the Twilio phone number / messaging service level, not per-message -
     that's configured once via configure_caller_id_name() below.
@@ -585,6 +592,8 @@ def send_sms(
         twilio_sid=twilio_msg.sid,
         twilio_status=twilio_msg.status,
         delivery_status="pending",
+        send_source=send_source,
+        sent_by_user_id=sent_by_user_id,
         # The provider's own word for what it did with this message, mapped to
         # the five-state vocabulary. Twilio answers `queued` here, never
         # `delivered`, so a fresh row now reads "Queued" instead of borrowing
@@ -609,9 +618,16 @@ def send_mms(
     template: str,
     media_url: str,
     include_booking_link: bool = False,
+    send_source: str = None,
+    sent_by_user_id: str = None,
 ) -> Message:
     """
     Sends an MMS (text + image/flyer) from advisor -> lead.
+
+    send_source / sent_by_user_id are OPTIONAL and default to None, which is
+    the honest value: a path that has not been migrated to state its origin
+    must record "unrecorded", never a guess. See app/services/send_source.py.
+
     media_url must be a publicly accessible URL (e.g. uploaded to S3 or Cloudinary).
     Twilio A2P 10DLC approval is required for MMS just like SMS.
     """
@@ -661,6 +677,8 @@ def send_mms(
         twilio_sid=twilio_msg.sid,
         twilio_status=twilio_msg.status,
         delivery_status="pending",
+        send_source=send_source,
+        sent_by_user_id=sent_by_user_id,
         send_state=normalize_provider_status(twilio_msg.status),
         error_code=str(getattr(twilio_msg, "error_code", None))
                    if getattr(twilio_msg, "error_code", None) else None,

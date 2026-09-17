@@ -36,6 +36,7 @@ from app.models.models import User, Lead, Base
 from app.routers.audit_log_router import log_action
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 from app.services import lead_scope
+from app.services import send_source
 
 router = APIRouter(prefix="/auto-send", tags=["auto-send"])
 
@@ -121,31 +122,53 @@ def _deliver(db: Session, item, lead: Lead, advisor: User) -> None:
     TypeError, was caught by the caller's `except Exception`, and was marked
     'failed' without one message ever being attempted.
 
-    send_email(db, org_id, to_email, to_name, subject, body) is the right
-    function here, and NOT send_email_to_lead: that one renders the lead's
-    message-track template and would throw away the drafted subject and body
-    this queue exists to carry. send_email reports provider failure in its
-    return value rather than raising, so the result is checked and turned
-    into an exception to keep one failure path for the caller."""
+    `advisor` is the APPROVER - approve_item and approve_all both pass
+    current_user - so it is a real authenticated actor and is recorded as
+    sent_by_user_id on whichever row this writes.
+
+    THE EMAIL BRANCH USED TO SEND FOR REAL AND LEAVE NO RECORD. It called
+    email_service.send_email, a generic transactional sender that writes no
+    `email_messages` row. The SMS branch called send_sms, which does write a
+    `messages` row. So an approved text appeared on the lead's timeline, in
+    the activity feed and in the sent log, and an approved EMAIL appeared
+    nowhere at all - it simply left. That asymmetry is the best single
+    explanation for "some of my activity shows and some doesn't".
+
+    It now goes through send_email_to_lead, which is the only email function
+    that refuses a demo tenant, runs the compliance gate AND writes the row.
+    It could not carry a drafted subject and body before; it can now, so the
+    queue no longer has to reach past it. The plain-text body is rendered by
+    the same helper send_email used, so the message looks identical.
+
+    Two deliberate behaviour changes, both for correctness:
+      * The sending identity is resolved from the LEAD's organization rather
+        than the approver's. A god_admin approving inside a customer has
+        organization_id = None, so the old call resolved the deployment-wide
+        default - a BookaBoost address on a deployment that also serves
+        EvoSys Pro customers. The lead's org is the one that decides who the
+        family hears from, which is the same rule _demo_send_guard follows.
+      * A provider failure now writes a row with status="failed" instead of
+        writing nothing, so a failed approval is visible rather than absent.
+    Failure still raises, keeping one failure path for the caller."""
     if _channel_for(item, lead) == "email":
-        from app.services.email_service import send_email
-        to_name = (f"{lead.first_name or ''} {lead.last_name or ''}".strip()
-                   or lead.email)
-        result = send_email(
-            db=db,
-            org_id=advisor.organization_id,
-            to_email=lead.email,
-            to_name=to_name,
+        from app.services.email_service import send_email_to_lead, plain_text_to_html
+        send_email_to_lead(
+            db, advisor, lead,
             subject=item.subject or "Following up",
-            body=item.message,
+            body_html=plain_text_to_html(item.message),
+            send_source=send_source.AUTO_SEND,
+            sent_by_user_id=advisor.id,
+            # Raise with the provider's own error text, so the advisor sees
+            # "domain not verified" on the queue row rather than a generic
+            # rejection they cannot act on.
+            raise_on_provider_failure=True,
         )
-        if not (result or {}).get("success"):
-            raise RuntimeError((result or {}).get("error")
-                               or "The email provider rejected the message.")
     else:
         from app.services.sms_service import send_sms
         send_sms(db=db, lead=lead, advisor=advisor, template=item.message,
-                 include_booking_link=False)
+                 include_booking_link=False,
+                 send_source=send_source.AUTO_SEND,
+                 sent_by_user_id=advisor.id)
 
 
 # ── Existing Endpoints (unchanged) ────────────────────────────────────────────

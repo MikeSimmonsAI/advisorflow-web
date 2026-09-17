@@ -17,6 +17,8 @@ from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.models.models import BookingFollowup, BookingLink, Lead, User, Organization
+from app.services import outbound_email_gate
+from app.services import send_source
 
 logger = logging.getLogger(__name__)
 
@@ -93,16 +95,33 @@ def _send_sms(advisor: User, lead: Lead, body: str) -> bool:
         return False
 
 
-def _send_email(advisor: User, lead: Lead, body: str, org_name: str) -> bool:
-    """Send via Microsoft Graph. Returns True on success."""
+def _send_email(db: Session, advisor: User, lead: Lead, body: str, org_name: str) -> bool:
+    """Run the compliance gate, then decline to send. Returns False.
+
+    `db` was added to the signature because the gate needs it. The whole body
+    of this function was previously dead: _send_email_via_graph was imported
+    in the same statement as _build_email_html and _strip_signoff, so the
+    ImportError fired on the import line and nothing ran. It returned False
+    every time, which _send_followup faithfully recorded as
+    thank_you_sent=False with error "No reachable channel or send failed".
+
+    That means this is the ONE of the five dead paths whose historical damage
+    is countable:
+        SELECT count(*) FROM booking_followups
+         WHERE thank_you_sent = false AND channel = 'email';
+    """
     try:
         from app.services.ai_conversation_service import (
-            _send_email_via_graph, _build_email_html, _strip_signoff
+            _build_email_html, _strip_signoff
         )
         advisor_name = advisor.full_name or "Your Advisor"
         subject = f"Thank you for meeting with us, {lead.first_name or 'there'}!"
         html = _build_email_html(_strip_signoff(body), advisor_name, org_name)
-        _send_email_via_graph(advisor, lead.email, subject, html)
+        outbound_email_gate.gate_lead_email(
+            db, lead,
+            send_source=send_source.APPOINTMENT_FOLLOWUP,
+            actor_user_id=None,  # cron sweep: no authenticated human
+        )
         return True
     except Exception as e:
         logger.error("Post-appt email failed lead=%s: %s", lead.id, e)
@@ -136,7 +155,7 @@ def _send_followup(db: Session, booking: BookingLink, lead: Lead, advisor: User)
         channel = "sms"
 
     if not sent and lead.email and advisor.microsoft_365_connected:
-        sent = _send_email(advisor, lead, message, org_name)
+        sent = _send_email(db, advisor, lead, message, org_name)
         channel = "email"
 
     followup.channel = channel

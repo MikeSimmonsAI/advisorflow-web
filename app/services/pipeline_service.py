@@ -29,6 +29,8 @@ from app.models.models import (
 )
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 from app.services.platform_utils import get_brand_name
+from app.services import outbound_email_gate
+from app.services import send_source
 
 logger = logging.getLogger(__name__)
 
@@ -442,28 +444,32 @@ def process_inbound_reply(
 
         if not sent_ok and lead.email and advisor.microsoft_365_connected:
             try:
+                # THE WHOLE BLOCK WAS DEAD, NOT JUST THE SEND. The three names
+                # were imported in one statement alongside _send_email_via_graph,
+                # so the ImportError fired on the import line and nothing below
+                # it ever ran - including the EmailMessage row this path
+                # believed it was writing. Meanwhile pipeline.ai_responses_sent
+                # and last_outbound_at were already incremented above, so the
+                # conversation counters have been recording outbound email that
+                # does not exist.
                 from app.services.ai_conversation_service import (
-                    _strip_signoff, _build_email_html, _send_email_via_graph,
-                    _get_org_name
+                    _strip_signoff, _build_email_html, _get_org_name
                 )
-                from app.models.models import EmailMessage
-                import uuid as _uuid
                 org_name = _get_org_name(db, advisor)
                 advisor_name = advisor.full_name or "Your Advisor"
                 subject = f"Following up, {lead.first_name or 'there'}"
                 clean = _strip_signoff(analysis["reply"])
                 html_body = _build_email_html(clean, advisor_name, org_name)
-                _send_email_via_graph(advisor, lead.email, subject, html_body)
-                msg = EmailMessage(
-                    id=str(_uuid.uuid4()),
-                    lead_id=lead.id,
-                    sender_id=advisor.id,
-                    subject=subject,
-                    body_html=html_body,
-                    status="sent",
-                    sent_at=datetime.utcnow(),
+                # Gate in, sender still out. When the sender is restored this
+                # becomes send_email_to_lead(..., subject=subject,
+                # body_html=html_body, send_source=PIPELINE_AUTO_REPLY), which
+                # writes the row itself - the hand-rolled EmailMessage that
+                # used to sit here is not needed and is gone.
+                outbound_email_gate.gate_lead_email(
+                    db, lead,
+                    send_source=send_source.PIPELINE_AUTO_REPLY,
+                    actor_user_id=None,  # cron / webhook: no authenticated human
                 )
-                db.add(msg)
                 sent_ok = True
                 channel_used = "email"
             except Exception as email_err:
