@@ -46,11 +46,58 @@ from app.services.workforce import tools as wf_tools
 
 _log = logging.getLogger(__name__)
 
-# A Tuesday at 10:00 America/Chicago. Inside every profile's working hours, so
+# A WEEKDAY AT 10:00 America/Chicago. Inside every profile's working hours, so
 # a scenario about eligibility is not silently a scenario about the clock.
-BUSINESS_HOURS = datetime(2026, 9, 15, 15, 0, 0)
-# The same Tuesday at 02:00 Chicago. For the scenario that IS about the clock.
-OUT_OF_HOURS = datetime(2026, 9, 15, 7, 0, 0)
+#
+# THIS USED TO BE A LITERAL - `datetime(2026, 9, 15, 15, 0, 0)`, one specific
+# Tuesday - and on 2026-09-16 the entire simulation suite began failing. Not
+# because anything regressed: the worlds a scenario builds seed their work at
+# the REAL current time, and once the calendar moved past the literal, every
+# claim was being made "as of" a moment before the work existed. Thirteen
+# tests, including the safety and security suites, went red overnight and
+# would have stayed red forever.
+#
+# A test clock that expires is worse than no test clock, because it fails
+# loudly for a while and is then assumed broken. So it is computed now: the
+# next weekday at 15:00 UTC at or after this moment, which is 10:00 Chicago in
+# daylight time. It is always ahead of the seeded work and always inside
+# working hours, which is the only thing the scenarios were ever asking for.
+
+
+def _next_business_hours(now: datetime = None) -> datetime:
+    """The next weekday at 15:00 UTC at or after `now`."""
+    now = now or datetime.utcnow()
+    anchor = now.replace(hour=15, minute=0, second=0, microsecond=0)
+    if anchor < now:
+        anchor += timedelta(days=1)
+    while anchor.weekday() >= 5:            # Saturday, Sunday
+        anchor += timedelta(days=1)
+    return anchor
+
+
+BUSINESS_HOURS = _next_business_hours()
+
+
+def _next_out_of_hours(anchor: datetime) -> datetime:
+    """The next weekday AFTER `anchor`, at 07:00 UTC - 02:00 Chicago.
+
+    A weekday, not a weekend, because the scenario is about the HOUR being
+    outside working hours and a Saturday would also trip the day-of-week rule -
+    a test that can pass for the wrong reason is not evidence.
+
+    And after `anchor` rather than earlier the same day, because a world seeds
+    its work at the real current time: an out-of-hours moment that fell before
+    the work existed could not claim it, and the scenario would fail at the
+    claim without ever reaching the rule it exists to prove.
+    """
+    out = (anchor + timedelta(days=1)).replace(hour=7, minute=0, second=0,
+                                               microsecond=0)
+    while out.weekday() >= 5:
+        out += timedelta(days=1)
+    return out
+
+
+OUT_OF_HOURS = _next_out_of_hours(BUSINESS_HOURS)
 
 
 class World:

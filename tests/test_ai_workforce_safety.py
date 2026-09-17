@@ -323,7 +323,12 @@ def test_the_reactivation_profile_runs_end_to_end(db_session):
     emp = (db_session.query(AIEmployee)
            .filter(AIEmployee.id == built["employee_id"]).first())
 
-    business_hours = datetime(2026, 9, 15, 15, 0, 0)   # Tue 10:00 Chicago
+    # THE SIMULATOR'S CLOCK, NOT A SECOND LITERAL. This was
+    # `datetime(2026, 9, 15, 15, 0, 0)` and it expired on 2026-09-16: the
+    # profile seeds its work at the real current time, so once the calendar
+    # moved past the literal every claim was made "as of" a moment before the
+    # work existed, and this test went red for good.
+    from app.services.workforce.simulator import BUSINESS_HOURS as business_hours
     with wf_outbound.use_simulated_adapters() as sim:
         result = wf_runtime.run_employee(db_session, emp, limit=70,
                                          trigger="test", now=business_hours)
