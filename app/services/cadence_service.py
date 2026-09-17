@@ -408,7 +408,8 @@ def _next_attempt_seq(db: Session, state, touch_number: int) -> int:
     return used + 1
 
 
-def run_due_cadences(db: Session, organization_id: str = None) -> dict:
+def run_due_cadences(db: Session, organization_id: str = None,
+                     now: "datetime | None" = None) -> dict:
     """Send every touch that is due, and record what happened to each one.
 
     WHAT CHANGED, AND WHY EACH PART OF IT HAD TO
@@ -449,15 +450,30 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
     """
     from app.services.lead_capacity import is_held
     from app.services.compliance_service import check_compliance_preflight
+    from app.services import contact_hours
     from app.services import entitlements
     from app.services import send_source as _src
     from app.services.sms_service import send_sms
-    from app.models.models import Organization
+    from app.models.models import BookingLink, Message, Organization
 
     # Naive UTC, matching the columns. cadence_router already does this at its
     # one comparison; the runner used an aware value and wrote it into naive
     # DateTime columns, which Postgres silently truncates.
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # `now` IS INJECTABLE, AND THAT IS NOT A TEST CONVENIENCE.
+    #
+    # Every decision below - what is due, whether the family's local clock
+    # permits it, when to re-schedule a refused touch - is made against this
+    # one value. A runner that reads the wall clock at four separate points
+    # can refuse a touch for being 20:00:59 and re-schedule it to a moment it
+    # has already passed. One value, read once.
+    #
+    # It also makes the permitted-hours behaviour testable at a fixed moment.
+    # The alternative is a suite that passes during the working day and fails
+    # overnight, which this codebase has already been bitten by once - see
+    # workforce/simulator.BUSINESS_HOURS.
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    if now.tzinfo is not None:
+        now = now.astimezone(timezone.utc).replace(tzinfo=None)
     sending_on = _sending_enabled()
 
     query = (
@@ -504,6 +520,50 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
                        reason="the family replied", scheduled_for=scheduled_for)
             stop_cadence_for_lead(db, lead.id, "stopped_replied")
             continue
+
+        # ── THE BOOKING ITSELF, NOT ONLY THE STATUS THAT SHOULD FOLLOW IT ──
+        #
+        # `lead.status == "booked"` is checked above and is the usual signal,
+        # but a booking made outside the flow that flips it - a rep booking on
+        # the phone, a link booked while the status write failed - leaves a
+        # real appointment and an unchanged status. Nine more texts to somebody
+        # who has already booked is the worst message this engine can send.
+        booked = (db.query(BookingLink)
+                  .filter(BookingLink.lead_id == lead.id,
+                          BookingLink.status.in_(("booked", "confirmed")))
+                  .first())
+        if booked is not None:
+            _log_touch(db, state, lead, touch_number=touch_number, attempt_seq=1,
+                       outcome=OUTCOME_STOPPED,
+                       reason="an appointment is already booked",
+                       scheduled_for=scheduled_for)
+            stop_cadence_for_lead(db, lead.id, "stopped_booked")
+            continue
+
+        # ── MANUAL TAKEOVER ────────────────────────────────────────────────
+        #
+        # A person picked this lead up. Once a human has texted them by hand,
+        # an automated sequence carrying on underneath is the machine talking
+        # over its own colleague - the family gets two voices and the rep does
+        # not know why.
+        #
+        # This is only answerable because send_source exists now. It reads
+        # HUMAN_INITIATED sends made AFTER the cadence started, so the touches
+        # the cadence itself sent do not stop the cadence.
+        since = state.cadence_started_at
+        if since is not None:
+            manual = (db.query(Message)
+                      .filter(Message.lead_id == lead.id,
+                              Message.send_source.in_(list(_src.HUMAN_INITIATED)),
+                              Message.sent_at > since)
+                      .first())
+            if manual is not None:
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=1, outcome=OUTCOME_STOPPED,
+                           reason="a person has taken this conversation over",
+                           scheduled_for=scheduled_for)
+                stop_cadence_for_lead(db, lead.id, "stopped_manual_takeover")
+                continue
 
         # ── TEMPORARY SKIPS. Recorded, and the cadence resumes later. ───────
         #
@@ -573,6 +633,35 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
                        outcome=OUTCOME_BLOCKED, reason=str(blocked),
                        scheduled_for=scheduled_for, attempted_at=now)
             state.next_touch_due_at = now + RETRY_BACKOFF
+            blocked_count += 1
+            db.commit()
+            continue
+
+        # ── PERMITTED CONTACT HOURS, IN THE LEAD'S OWN TIME ────────────────
+        #
+        # The engine had no clock at all. `touch_def["send_hour"]` was read
+        # into the schedule and never used, so a touch fired whenever the
+        # runner came round - which on a UTC server is the middle of the night
+        # for most of the United States.
+        #
+        # UNKNOWN MEANS NO. A lead whose zone cannot be determined is refused
+        # rather than texted on the server's clock; see contact_hours for why,
+        # and `cadence_backlog` for how many that is before anything is
+        # switched on.
+        hours = contact_hours.check(lead, now)
+        if not hours["permitted"]:
+            _log_touch(db, state, lead, touch_number=touch_number,
+                       attempt_seq=_next_attempt_seq(db, state, touch_number),
+                       outcome=OUTCOME_BLOCKED,
+                       reason="quiet hours: %s" % hours["reason"],
+                       scheduled_for=scheduled_for)
+            # Re-scheduled to the next moment it IS permitted, so the touch is
+            # delivered at a decent hour rather than re-refused every hour all
+            # night. A lead with no resolvable zone has no such moment, and
+            # backing off keeps it visible in the diagnostic instead of
+            # wedging the row.
+            nxt = contact_hours.next_permitted_utc(lead, now)
+            state.next_touch_due_at = nxt or (now + RETRY_BACKOFF)
             blocked_count += 1
             db.commit()
             continue

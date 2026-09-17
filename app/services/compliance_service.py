@@ -10,7 +10,35 @@ completely unaware of it.
 
 from sqlalchemy.orm import Session
 from app.models.models import Lead, SuppressionEntry, SuppressionSource
-from app.routers.compliance_router import normalize_phone
+
+
+def usable_us_phone(phone) -> str | None:
+    """The stored form of a US number, or None if it is not one.
+
+    THIS REPLACES AN IMPORT OF A ROUTER'S VALIDATOR.
+
+    `is_phone_suppressed` used to call `compliance_router.normalize_phone`,
+    which raises `HTTPException(422)` on anything that is not a ten-digit US
+    number. That is the right behaviour for a request body and the wrong
+    behaviour everywhere else this service is called from - the SMS reply
+    webhook, the send paths, and the cadence cron, which walks a whole book in
+    one loop and catches ValueError. One imported row with a seven-digit phone
+    would have thrown an HTTP exception out of a cron and ended the entire
+    run, leaving every later lead untouched with no record of why.
+
+    So the service answers in its own terms: a string, or None. The router
+    keeps its 422 for the request it validates.
+    """
+    if not phone:
+        return None
+    from app.services.dedup_service import normalize_phone as _shared
+    try:
+        normalized = _shared(phone)
+    except Exception:                                        # noqa: BLE001
+        return None
+    if len(normalized) != 11 or not normalized.startswith("1"):
+        return None
+    return normalized
 
 
 def is_phone_suppressed(db: Session, organization_id: str, phone: str) -> bool:
@@ -24,9 +52,13 @@ def is_phone_suppressed(db: Session, organization_id: str, phone: str) -> bool:
     send path must check directly, not as a substitute for the
     Lead.status check but as an additional, independent guard.
     """
-    if not phone:
+    normalized = usable_us_phone(phone)
+    if normalized is None:
+        # NOT a judgement that the number is clear - a statement that it
+        # cannot be ON this list, which holds normalized eleven-digit numbers
+        # and nothing else. The preflight below refuses such a number on its
+        # own terms, with a reason that names the real problem.
         return False
-    normalized = normalize_phone(phone)
     return (
         db.query(SuppressionEntry)
         .filter(SuppressionEntry.organization_id == organization_id, SuppressionEntry.phone == normalized)
@@ -116,6 +148,16 @@ def check_compliance_preflight(db: Session, lead: Lead,
     # matching Lead.status was never updated. A lead with no phone has nothing
     # to check here and passes rather than erroring.
     phone = getattr(lead, "phone", None)
+    if phone and usable_us_phone(phone) is None:
+        # A NUMBER WE CANNOT READ IS NOT A NUMBER WE MAY TEXT.
+        #
+        # It cannot be matched against the suppression list, so we cannot say
+        # this family has not opted out; and it cannot be dialled, so handing
+        # it to the provider buys a billable error instead of a message.
+        raise ValueError(
+            f"Lead {lead.id}'s phone number is not a usable US number, so it "
+            f"cannot be checked against the suppression list - blocked."
+        )
     if phone and is_phone_suppressed(db, lead.organization_id, phone):
         raise ValueError(
             f"Lead {lead.id}'s phone number is on the suppression list - "
