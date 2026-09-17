@@ -69,8 +69,57 @@ def get_lead(lead_id: str, db: Session = Depends(get_db), current_user: User = D
     return load_lead_in_scope(db, current_user, lead_id)
 
 
+@router.get("/{lead_id}/history")
+def get_lead_communication_history(
+    lead_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    before: Optional[datetime] = Query(
+        default=None, description="Return events older than this timestamp."),
+    channel: Optional[str] = Query(
+        default=None,
+        description="Comma-separated: sms,email,voice,cadence,appointment"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    """THE COMPLETE HISTORY, from one read model, with a real cursor.
+
+    `/timeline` above renders the lead detail transcript and keeps its own
+    shape, so it stays. This is the authoritative answer to "everything that
+    was ever said to this family, in order, including the parts that never
+    produced a message" - a failed or suppressed cadence touch writes no
+    `messages` row, so it cannot appear in any history assembled from messages
+    alone, and until now it appeared nowhere at all.
+
+    See app/services/communication_history.py for why this is a read model
+    over the existing tables rather than a new communication-events table.
+    """
+    lead = lead_scope.load_lead_in_scope(db, current_user, lead_id)
+    from app.services import communication_history
+    channels = [c.strip() for c in channel.split(",")] if channel else None
+    return communication_history.fetch(
+        db, lead.id, limit=limit, before=before, channels=channels)
+
+
+def _cadence_total_touches(db, organization_id) -> int:
+    """The org's own schedule length. This was a hardcoded 9, so a customer
+    whose default template has five touches was told "4 of 9"."""
+    try:
+        from app.services.cadence_service import _get_org_cadence_schedule
+        return len(_get_org_cadence_schedule(db, organization_id))
+    except Exception:
+        from app.services.cadence_service import TOTAL_TOUCHES
+        return TOTAL_TOUCHES
+
+
 @router.get("/{lead_id}/timeline")
-def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
+def get_lead_timeline(lead_id: str,
+                      limit: int = Query(default=200, ge=1, le=500),
+                      before: Optional[datetime] = Query(
+                          default=None,
+                          description="Return events older than this timestamp. "
+                                      "Pass the previous page's next_before."),
+                      db: Session = Depends(get_db),
+                      current_user: User = Depends(require_tenant_user)):
     """
     Returns the full conversation thread for one lead: every outbound
     message and every inbound reply, merged into one chronological feed,
@@ -94,21 +143,36 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Limit to 200 most recent events per channel — enough for any real conversation.
-    # The new indexes on (lead_id, sent_at DESC) / (lead_id, received_at DESC) make these fast.
+    # PAGINATION, WHICH THIS ENDPOINT DID NOT HAVE AT ALL.
+    #
+    # It took the 200 newest rows per channel and had no offset, cursor or page
+    # parameter on its signature - so past 200 messages, which a nine-touch
+    # cadence plus bulk sends reaches, the older ones were unreachable by any
+    # request the API could express. That is the literal "can't pull full
+    # history".
+    #
+    # A cursor rather than an offset: these are several tables merged in
+    # memory, so an OFFSET would re-read and re-merge everything skipped, and a
+    # row arriving mid-scroll would shift the window. `before` is a timestamp -
+    # the newest events older than it - so the page boundary is stable.
+    #
+    # The defaults reproduce the old behaviour exactly, so no existing caller
+    # changes. `has_more` and `next_before` in the response are what let a
+    # caller walk backwards to the beginning of time.
     from sqlalchemy import desc as _desc
-    messages = (db.query(Message)
-                .filter(Message.lead_id == lead_id)
-                .order_by(_desc(Message.sent_at))
-                .limit(200).all())
-    replies = (db.query(Reply)
-               .filter(Reply.lead_id == lead_id)
-               .order_by(_desc(Reply.received_at))
-               .limit(200).all())
-    email_messages = (db.query(EmailMessage)
-                      .filter(EmailMessage.lead_id == lead_id)
-                      .order_by(_desc(EmailMessage.sent_at))
-                      .limit(200).all())
+    page_size = max(1, min(int(limit or 200), 500))
+
+    def _paged(query, column):
+        if before is not None:
+            query = query.filter(column < before)
+        return query.order_by(_desc(column)).limit(page_size).all()
+
+    messages = _paged(db.query(Message).filter(Message.lead_id == lead_id),
+                      Message.sent_at)
+    replies = _paged(db.query(Reply).filter(Reply.lead_id == lead_id),
+                     Reply.received_at)
+    email_messages = _paged(db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id),
+                            EmailMessage.sent_at)
 
     events = []
     from app.services.message_state import describe as _describe_delivery
@@ -158,7 +222,8 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
         events.append({
             "type": "system",
             "channel": "cadence",
-            "body": f"Cadence started — {cadence.current_touch_number} of 9 touches sent",
+            "body": (f"Cadence started — {cadence.current_touch_number} of "
+                     f"{_cadence_total_touches(db, lead.organization_id)} touches sent"),
             "timestamp": cadence.cadence_started_at,
             "status": cadence.status,
         })
@@ -213,12 +278,23 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
             "created_at": vc.created_at.isoformat() if vc.created_at else None,
         })
 
+    # THE CURSOR. `has_more` is true when any channel returned a full page, so
+    # a caller walking backwards stops only when there is genuinely nothing
+    # older left, not when one quiet channel runs out.
+    page_full = (len(messages) == page_size or len(replies) == page_size
+                 or len(email_messages) == page_size)
+    dated = [e["timestamp"] for e in events if e.get("timestamp") is not None]
+    next_before = min(dated) if (page_full and dated) else None
+
     return {
         "lead": lead,
         "events": events,
         "ai_quality": ai_note,
         "booking": booking_info,
         "voice_calls": voice_call_list,
+        "has_more": bool(page_full and next_before is not None),
+        "next_before": next_before,
+        "limit": page_size,
     }
 
 
