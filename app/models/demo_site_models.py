@@ -25,7 +25,7 @@ import secrets
 import uuid
 
 from sqlalchemy import (Boolean, Column, DateTime, ForeignKey, Index, Integer,
-                        String, Text)
+                        String, Text, UniqueConstraint)
 
 from app.models.models import Base
 
@@ -86,9 +86,25 @@ class DemoSite(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # THE HUMAN-READABLE NAME, beside the secret rather than instead of it.
+    #
+    # `token` is 43 characters of CSPRNG and stays the canonical address, so
+    # every link already sent to a prospect keeps working exactly as it did.
+    # A slug is the same demo under a name somebody can read down a phone, and
+    # it SURVIVES REPUBLISH - which the token deliberately does not, since
+    # `create` always inserts a new row and mints a new secret.
+    #
+    # Unique per BRAND, not globally: two brands may each have a prospect
+    # called Countryside, and one taking the name from the other is a
+    # white-label leak. NULL slugs do not collide under a UNIQUE index on
+    # either Postgres or SQLite, so every existing row is unaffected.
+    slug = Column(String(48), nullable=True, index=True)
+
     __table_args__ = (
         Index("ix_demo_sites_opportunity", "opportunity_id", "is_active"),
         Index("ix_demo_sites_brand", "brand_sales_org_id"),
+        UniqueConstraint("brand_sales_org_id", "slug",
+                         name="uq_demo_site_brand_slug"),
     )
 
     def is_live(self, now=None) -> bool:

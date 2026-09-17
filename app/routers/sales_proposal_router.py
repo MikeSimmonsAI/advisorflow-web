@@ -834,6 +834,11 @@ class DemoSiteIn(BaseModel):
     # Older links in this slot stay live unless this says otherwise. A link a
     # prospect already has keeps working until somebody decides it should not.
     retire_previous: bool = False
+    # An optional human-readable name for the link - /demo/countryside rather
+    # than /demo/<43 characters>. It moves to each new version on republish, so
+    # a rep can say it out loud once and keep saying it. Omitting it leaves the
+    # demo reachable by its token exactly as before.
+    slug: Optional[str] = None
 
 
 @router.post("/sales/opportunities/{opportunity_id}/demo-site", status_code=201)
@@ -855,7 +860,8 @@ def publish_demo_site(opportunity_id: str, body: DemoSiteIn,
 
     slot = _demos.normalize_slot(body.slot)
     res = _demos.create(db, opp, user, title=body.title, html=body.html, slot=slot,
-                        retire_previous=bool(body.retire_previous))
+                        retire_previous=bool(body.retire_previous),
+                        slug=body.slug)
     if not res["ok"]:
         raise HTTPException(status_code=400, detail=res["error"])
     demo = res["demo"]
@@ -922,10 +928,27 @@ def revoke_demo_site(demo_id: str,
 # No ProtectedRoute, no account, no JWT. The token IS the authorization, and it
 # is the only thing this route accepts.
 
+def _brand_for_host(db, request):
+    """The brand serving this request's hostname, for scoping a vanity name."""
+    try:
+        return _demos.brand_for_request_host(db, request.headers.get("host"))
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
 @router.get("/public/demo/{token}")
 @limiter.limit("60/minute")
 def resolve_demo_site(request: Request, token: str, db: Session = Depends(get_db)):
-    demo = _demos.resolve(db, token)
+    """Opens a demo by its token OR by its brand's vanity name.
+
+    The token path is tried first and is unchanged, so every link already in a
+    sent proposal resolves exactly as it did. The rate limit matters more now
+    than it did: a short readable name is guessable in a way a 43-character
+    secret is not, and the single indistinguishable 404 below is what stops
+    this becoming an oracle for finding live demos.
+    """
+    demo = _demos.resolve(db, token,
+                          brand_sales_org_id=_brand_for_host(db, request))
     if demo is None:
         # One message for every failure mode. Distinguishing expired from
         # never-existed would let somebody probe for live tokens.

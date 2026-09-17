@@ -622,6 +622,9 @@ COLUMNS_TO_ADD = [
     # Per-customer outbound email enablement. Nullable, and NULL means none -
     # see the column comment on Organization.
     ("organizations", "outbound_email_sources", "TEXT"),
+    # Vanity demo links. Nullable: every existing demo keeps its token address
+    # and simply has no readable name yet.
+    ("demo_sites", "slug", "VARCHAR(48)"),
     # See the column comment on BrandBillingPlan: on the Custom tier a NULL
     # ceiling means unrecorded, not unlimited.
     ("brand_billing_plans", "requires_entitlement_policy", "BOOLEAN DEFAULT FALSE"),
@@ -1130,6 +1133,11 @@ INDEXES_TO_CREATE = [
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_cadence_touch_attempt ON cadence_touch_logs(cadence_state_id, touch_number, attempt_seq)",
     "CREATE INDEX IF NOT EXISTS ix_cadence_touch_lead ON cadence_touch_logs(lead_id, touch_number)",
     "CREATE INDEX IF NOT EXISTS ix_cadence_touch_outcome ON cadence_touch_logs(organization_id, outcome, attempted_at)",
+    # Unique per BRAND, not globally: two brands may each have a prospect
+    # called Countryside. NULL slugs do not collide under a unique index on
+    # Postgres or SQLite, so existing rows are unaffected.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_demo_site_brand_slug ON demo_sites(brand_sales_org_id, slug)",
+    "CREATE INDEX IF NOT EXISTS ix_demo_sites_slug ON demo_sites(slug)",
     "CREATE INDEX IF NOT EXISTS ix_messages_send_source ON messages(send_source, sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_email_messages_send_source ON email_messages(send_source, sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_email_messages_sent_at   ON email_messages(sent_at)",
