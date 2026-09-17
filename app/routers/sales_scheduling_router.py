@@ -1799,6 +1799,19 @@ def cancel_appointment(appt_id: str, body: CancelIn,
     db.query(AppointmentParticipant).filter(
         AppointmentParticipant.appointment_id == appt.id).update(
         {"is_blocking": False}, synchronize_session=False)
+    # A CANCELLED MEETING SENDS NO FURTHER REMINDERS. Suppressed here rather
+    # than only checked at send time: the reminder pass does re-check the
+    # appointment's status, but leaving rows PENDING on a dead meeting means an
+    # operations view shows reminders queued for something that is not
+    # happening. Both guards, because the cost of the wrong answer is a customer
+    # being told to join a call nobody is on.
+    try:
+        from app.services import sales_appointment_reminders as _reminders
+        _reminders.cancel_for(db, appt)
+    except Exception:                                            # noqa: BLE001
+        import logging as _logging
+        _logging.getLogger(__name__).exception(
+            "could not suppress reminders for cancelled appointment %s", appt.id)
     if appt.opportunity_id:
         db.add(OpportunityEvent(
             opportunity_id=appt.opportunity_id, event_type="appointment_cancelled",
