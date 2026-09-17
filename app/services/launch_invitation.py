@@ -191,8 +191,12 @@ def _invitation_email(brand: Dict[str, Any], org: Organization,
 
 def _deliver(db: Session, org: Organization, brand: Dict[str, Any], *,
              to_email: str, recipient_name: str, url: str,
-             one_time: bool) -> Dict[str, Any]:
+             one_time: bool, actor_user_id: str) -> Dict[str, Any]:
     """Hand the invitation to the mail provider and report what happened.
+
+    `actor_user_id` is the operator who pressed send. It is carried down to
+    the envelope record below, which used to pass None and could not be
+    written at all - see _record_delivery.
 
     Uses the platform's existing email infrastructure — `email_service.
     send_email_via_provider` with a resolved brand identity — so there is no
@@ -237,14 +241,15 @@ def _deliver(db: Session, org: Organization, brand: Dict[str, Any], *,
                      else (result.get("error")
                            or "The mail provider refused it.")[:300]),
            "attempted_at": datetime.utcnow()}
-    _record_delivery(db, org, brand, identity, out, subject_template=(
-        "launch.onboarding_invitation"))
+    _record_delivery(db, org, brand, identity, out,
+                     subject_template="launch.onboarding_invitation",
+                     actor_user_id=actor_user_id)
     return out
 
 
 def _record_delivery(db: Session, org: Organization, brand: Dict[str, Any],
                      identity, outcome: Dict[str, Any],
-                     subject_template: str) -> None:
+                     subject_template: str, actor_user_id: str) -> None:
     """THE ENVELOPE OF A MESSAGE WE ARE NOT ALLOWED TO COPY.
 
     A BCC is out of the question here — the body holds a one-time setup link —
@@ -275,7 +280,27 @@ def _record_delivery(db: Session, org: Organization, brand: Dict[str, Any],
             delivery_state=outcome.get("state"),
             delivery_error=outcome.get("error"),
         )
-        log_action(db, getattr(org, "id", None), None,
+        # THIS USED TO PASS None, AND IT COULD NOT WORK.
+        #
+        # audit_log_entries.actor_user_id is NOT NULL and a foreign key to
+        # users - the only non-nullable actor on any audit or event table in
+        # the codebase, and deliberately so: three separate modules
+        # (workforce/audit.py, support_remediation.py, lead_capacity.py)
+        # document that a system event with no human behind it is SKIPPED
+        # rather than forged, because inventing a user id to satisfy a foreign
+        # key is how an audit log becomes fiction.
+        #
+        # But this event was never system-initiated. An operator pressed send;
+        # `send` already writes a second audit row naming them for the very
+        # same action. The actor was simply never threaded through _deliver,
+        # so this call hardcoded None, the flush raised IntegrityError,
+        # `except Exception` below swallowed it - and the poisoned session then
+        # made the REAL audit write in `send` fail with PendingRollbackError.
+        # On production Postgres that means a delivered invitation could not
+        # commit its transaction: the mail went out and the record did not.
+        #
+        # The fix is the true answer, not a sentinel: record the operator.
+        log_action(db, getattr(org, "id", None), actor_user_id,
                    action="email.credential_delivery",
                    target_type="organization",
                    target_id=getattr(org, "id", None),
@@ -454,7 +479,8 @@ def send(db: Session, org: Organization, impl: Implementation, actor: User, *,
     if deliver:
         delivery = _deliver(db, org, brand, to_email=target.email,
                             recipient_name=(target.full_name or "").strip(),
-                            url=url, one_time=needs_setup)
+                            url=url, one_time=needs_setup,
+                            actor_user_id=actor.id)
 
     log_action(
         db, org.id, actor.id,

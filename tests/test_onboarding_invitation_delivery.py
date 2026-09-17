@@ -93,7 +93,13 @@ def test_the_audit_row_for_a_link_says_no_message_was_sent(db_session, world):
 def test_asking_to_deliver_calls_the_mail_provider(db_session, world, monkeypatch):
     calls = []
 
-    def _fake(to_email, subject, body_html, attachments=None, org=None):
+    # send_email_via_provider also declares message_type, sensitivity and
+    # template_id, and launch_invitation passes all three deliberately - the
+    # invitation carries a one-time setup link, so the audit-copy decision is
+    # stated rather than defaulted. A double that refuses them raises TypeError
+    # inside the provider try/except and looks exactly like "no send was
+    # attempted", which is what this test was reporting.
+    def _fake(to_email, subject, body_html, attachments=None, org=None, **kwargs):
         calls.append({"to": to_email, "subject": subject, "html": body_html,
                       "org": org})
         return {"success": True, "provider_message_id": "msg_synthetic_1",
@@ -117,7 +123,7 @@ def test_the_invitation_wears_the_brands_identity(db_session, world, monkeypatch
     calls = []
     monkeypatch.setattr(
         "app.services.email_service.send_email_via_provider",
-        lambda to_email, subject, body_html, attachments=None, org=None:
+        lambda to_email, subject, body_html, attachments=None, org=None, **kwargs:
             calls.append({"org": org, "subject": subject, "html": body_html})
             or {"success": True, "provider_message_id": "m", "error": None})
     _send(db_session, world, deliver=True)
@@ -208,3 +214,58 @@ def test_nothing_is_mailed_when_only_a_link_was_asked_for(db_session, world,
                                             "error": None})
     _send(db_session, world, deliver=False)
     assert calls == [], "a send happened without being asked for"
+
+
+def test_the_envelope_record_names_the_operator_who_sent_it(db_session, world, monkeypatch):
+    """REGRESSION: this row could not be written at all.
+
+    `email.credential_delivery` passed actor_user_id=None into log_action, and
+    audit_log_entries.actor_user_id is NOT NULL with a foreign key to users -
+    the only non-nullable actor on any audit or event table in this codebase,
+    and deliberately so. The flush raised IntegrityError, the surrounding
+    `except Exception` swallowed it, and the poisoned session then made the
+    REAL audit write fail with PendingRollbackError: on Postgres, a delivered
+    invitation whose transaction could not commit.
+
+    The fix is not a sentinel user and not a relaxed column. This event was
+    never system-initiated - an operator pressed send, and `send` already
+    audits that same action in their name. The actor is now threaded through.
+    """
+    from app.models.models import AuditLogEntry
+    monkeypatch.setattr(
+        "app.services.email_service.send_email_via_provider",
+        lambda *a, **k: {"success": True, "provider_message_id": "m3", "error": None})
+
+    out = _send(db_session, world, deliver=True)
+    assert out["delivery"]["state"] == launch_invitation.DELIVERY_SENT
+
+    envelope = (db_session.query(AuditLogEntry)
+                .filter(AuditLogEntry.action == "email.credential_delivery")
+                .first())
+    assert envelope is not None, "the envelope record was not written"
+    assert envelope.actor_user_id, "an audit row with no actor cannot exist"
+    assert envelope.actor_user_id == world["actor"].id
+
+    # And it is the same person the send row names, because it is the same act.
+    sent = (db_session.query(AuditLogEntry)
+            .filter(AuditLogEntry.action == "customer_onboarding_invitation_sent")
+            .first())
+    assert sent.actor_user_id == envelope.actor_user_id
+
+
+def test_no_audit_row_anywhere_is_written_without_an_actor(db_session, world, monkeypatch):
+    """The column is NOT NULL for a reason; nothing in this flow may forge it
+    either. `launch_delivery.py` passes the literal string "system", which
+    satisfies SQLite and violates the foreign key on Postgres - this asserts
+    that this flow does not acquire that habit."""
+    from app.models.models import AuditLogEntry, User
+    monkeypatch.setattr(
+        "app.services.email_service.send_email_via_provider",
+        lambda *a, **k: {"success": True, "provider_message_id": "m4", "error": None})
+    _send(db_session, world, deliver=True)
+
+    real_ids = {u.id for u in db_session.query(User).all()}
+    for row in db_session.query(AuditLogEntry).all():
+        assert row.actor_user_id in real_ids, (
+            f"audit row {row.action!r} names actor {row.actor_user_id!r}, "
+            f"which is not a real user - the foreign key would refuse it")
