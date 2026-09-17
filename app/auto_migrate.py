@@ -625,6 +625,10 @@ COLUMNS_TO_ADD = [
     # Vanity demo links. Nullable: every existing demo keeps its token address
     # and simply has no readable name yet.
     ("demo_sites", "slug", "VARCHAR(48)"),
+    # Demo confirmation status, tracked like the invitation beside it.
+    ("sales_appointments", "demo_confirmation_sent_at", "TIMESTAMP"),
+    ("sales_appointments", "demo_confirmation_error", "TEXT"),
+    ("sales_appointments", "demo_confirmation_count", "INTEGER DEFAULT 0"),
     # See the column comment on BrandBillingPlan: on the Custom tier a NULL
     # ceiling means unrecorded, not unlimited.
     ("brand_billing_plans", "requires_entitlement_policy", "BOOLEAN DEFAULT FALSE"),

@@ -380,6 +380,14 @@ class SalesAppointment(Base):
     notes            = Column(Text, nullable=True)
 
     # ── Prospect-facing invitation (Checkpoint 3) ───────────────────────────
+    # THE DEMO CONFIRMATION, tracked like the invitation beside it. `count`
+    # is what distinguishes a resend from a first send - a resend is the same
+    # call again, so without a counter the two are indistinguishable in the
+    # log.
+    demo_confirmation_sent_at = Column(DateTime, nullable=True)
+    demo_confirmation_error = Column(Text, nullable=True)
+    demo_confirmation_count = Column(Integer, default=0, nullable=True)
+
     prospect_invite_sent_at = Column(DateTime, nullable=True)
     prospect_invite_error   = Column(Text, nullable=True)
 

@@ -15,7 +15,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -2231,6 +2231,76 @@ def retry_video_meeting(appt_id: str,
     db.refresh(appt)
     out = _appt_out(db, appt, user)
     out["video_report"] = report
+    return out
+
+
+class DemoConfirmationIn(BaseModel):
+    """An optional branded graphic. Decoration only.
+
+    The join link is NOT a field here and cannot be: it is rendered as real
+    HTML from the appointment's own meeting_url, and a graphic that references
+    one is refused outright. See app/services/demo_confirmation.py.
+    """
+    model_config = ConfigDict(extra="forbid")
+    graphic_url: Optional[str] = None
+    graphic_alt: Optional[str] = None
+
+
+@router.post("/appointments/{appt_id}/demo-confirmation/preview")
+def preview_demo_confirmation(appt_id: str,
+                              body: DemoConfirmationIn = DemoConfirmationIn(),
+                              user: User = Depends(require_sales_member),
+                              db: Session = Depends(get_db)):
+    """Render the confirmation without sending it.
+
+    Reaches no provider by construction rather than by a flag: nothing in this
+    call graph imports one.
+    """
+    from app.services import demo_confirmation
+    appt = _load_appt(db, appt_id, user)
+    try:
+        return demo_confirmation.preview(db, appt,
+                                         graphic_url=body.graphic_url,
+                                         graphic_alt=body.graphic_alt)
+    except demo_confirmation.GraphicRefused as refused:
+        raise HTTPException(status_code=400, detail=str(refused))
+
+
+@router.post("/appointments/{appt_id}/demo-confirmation")
+def send_demo_confirmation(appt_id: str,
+                           body: DemoConfirmationIn = DemoConfirmationIn(),
+                           user: User = Depends(require_sales_member),
+                           db: Session = Depends(get_db)):
+    """Send it. Sending one again IS the resend - the count distinguishes them.
+
+    Disabled in this build: the staff-email switch governs it and ships unset,
+    so this returns 409 with the variable named rather than sending. Automation
+    is deliberately not wired: _push_appointment runs on every booking and
+    every reschedule, and this goes there only once the manual path is proven.
+    """
+    from app.services import demo_confirmation
+    from app.services.outbound_email_gate import EmailSendDisabled
+    appt = _load_appt(db, appt_id, user)
+    try:
+        rendered = demo_confirmation.send(db, appt, actor=user,
+                                          graphic_url=body.graphic_url,
+                                          graphic_alt=body.graphic_alt)
+    except demo_confirmation.GraphicRefused as refused:
+        raise HTTPException(status_code=400, detail=str(refused))
+    except EmailSendDisabled as disabled:
+        db.commit()
+        raise HTTPException(status_code=409, detail=str(disabled))
+    except ValueError as bad:
+        raise HTTPException(status_code=400, detail=str(bad))
+    db.commit()
+    db.refresh(appt)
+    out = _appt_out(db, appt, user)
+    out["demo_confirmation"] = {
+        "sent_at": appt.demo_confirmation_sent_at,
+        "count": appt.demo_confirmation_count,
+        "has_cta": rendered["has_cta"],
+        "industry": rendered["industry"],
+    }
     return out
 
 
