@@ -16,6 +16,7 @@ from app.models.models import (
     Reply,
     User,
 )
+from app.services import reply_classification_service as _rcs
 
 router = APIRouter(prefix="/workqueue", tags=["workqueue"])
 
@@ -69,8 +70,11 @@ def get_todays_work(
             Lead.organization_id == org_id,
             Lead.assigned_to_id == user_id,
             Lead.is_duplicate == False,
-            Reply.classification.in_(["interested", "callback", "hot", "callback_request"]),
-            Reply.reviewed_at.is_(None),
+            # "hot" and "callback_request" were in this list and are not
+            # ReplyClassification values - nothing is ever stored as either, so
+            # they matched nothing and this was always the other two. Stated
+            # once now, beside the vocabulary.
+            *_rcs.attention_filters(),
         )
         .order_by(Reply.received_at.desc(), Reply.id.desc())
         .limit(100)

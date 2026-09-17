@@ -354,13 +354,17 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(r
     if not is_manager:
         base_lead_filters.append(Lead.assigned_to_id == current_user.id)
 
+    # THE SAME DEFINITION THE INBOX USES, WHICH IT WAS NOT.
+    #
+    # This count omitted reviewed_at, so the Overview said "9 replies need
+    # attention", the rep clicked through to an inbox that applied the
+    # unreviewed filter, and found four. Neither number was wrong on its own
+    # terms and there was no way to tell which to believe.
+    from app.services import reply_classification_service as _rcs
     replies_needing_attention = (
         db.query(func.count(Reply.id))
         .join(Lead, Reply.lead_id == Lead.id)
-        .filter(
-            *base_lead_filters,
-            Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
-        )
+        .filter(*base_lead_filters, *_rcs.attention_filters())
         .scalar()
         or 0
     )

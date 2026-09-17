@@ -643,10 +643,8 @@ def reply_counts(
     def _count(*criteria):
         return base_query.filter(*criteria).count() if criteria else base_query.count()
 
-    needs_follow_up = _count(
-        Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
-        Reply.reviewed_at.is_(None),
-    )
+    from app.services import reply_classification_service as _rcs
+    needs_follow_up = _count(*_rcs.attention_filters())
 
     return {
         "hot": _count(Reply.classification == ReplyClassification.INTERESTED),
@@ -712,7 +710,15 @@ def list_replies(
     if hot_only:
         query = query.filter(Reply.is_hot == True)
     if needs_attention:
-        query = query.filter(Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]))
+        # THIS NOW EXCLUDES REPLIES A REP HAS ALREADY WORKED.
+        #
+        # It did not, and the docstring above claimed it matched the
+        # needs_follow_up bucket, which did. So the notification bell and the
+        # Overview page kept handing back replies whose reviewed_at was set -
+        # a rep marked one reviewed and it came straight back. One definition
+        # now, in reply_classification_service.
+        from app.services import reply_classification_service as _rcs
+        query = query.filter(*_rcs.attention_filters())
 
     # bucket is the action-center scorecard filter: clicking a card passes its
     # bucket name here. It is kept SEPARATE from needs_attention / hot_only
@@ -724,10 +730,8 @@ def list_replies(
     if bucket in REPLY_BUCKET_TO_CLASSIFICATION:
         query = query.filter(Reply.classification == REPLY_BUCKET_TO_CLASSIFICATION[bucket])
     elif bucket == "needs_follow_up":
-        query = query.filter(
-            Reply.classification.in_([ReplyClassification.INTERESTED, ReplyClassification.CALLBACK]),
-            Reply.reviewed_at.is_(None),
-        )
+        from app.services import reply_classification_service as _rcs
+        query = query.filter(*_rcs.attention_filters())
     elif bucket == "reviewed":
         query = query.filter(Reply.reviewed_at.isnot(None))
     elif bucket is not None:

@@ -90,6 +90,20 @@ class LeadStatus(str, enum.Enum):
     DNC = "dnc"
     DEAD = "dead"
     NEEDS_TIER_REVIEW = "needs_tier_review"
+    # THESE TWO WERE ALREADY IN PRODUCTION, UNDECLARED.
+    #
+    # ai_conversation_service writes "cold" when an AI sequence runs out of
+    # touches, and workforce/tool_impls writes "not_interested" when a contact
+    # says no. Both are deliberate and both are meaningful - but neither was in
+    # this enum, in the badge map, or in the leads filter, so a lead that
+    # reached either one fell out of every status filter in the product and
+    # rendered a raw snake_case badge. Declaring them changes no writer and no
+    # stored row; it makes rows that already exist visible.
+    #
+    # "not_interested" is NOT an opt-out. tool_impls says so explicitly: "no
+    # thanks" is not "never contact me again", and DNC remains its own value.
+    COLD = "cold"
+    NOT_INTERESTED = "not_interested"
 
 
 class MessageTrack(str, enum.Enum):

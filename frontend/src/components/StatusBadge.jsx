@@ -11,6 +11,11 @@ const STATUS_CONFIG = {
   dnc: { label: 'DNC', color: 'neutral-dim' },
   dead: { label: 'Dead', color: 'neutral-dim' },
   needs_tier_review: { label: 'Needs Review', color: 'amber' },
+  /* Written in production long before they were declared. Without these two
+   * rows the badge fell through and printed the raw column value. "Not
+   * Interested" is not DNC - it stops this work, not all contact. */
+  cold: { label: 'Cold', color: 'neutral' },
+  not_interested: { label: 'Not Interested', color: 'neutral-dim' },
 }
 
 /* ONE INDUSTRY'S TIER NAMES, PRINTED FOR EVERY INDUSTRY.

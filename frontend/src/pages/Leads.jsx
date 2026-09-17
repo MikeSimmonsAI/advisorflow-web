@@ -46,11 +46,21 @@ function humanizeTier(value) {
 const STATUS_FILTER_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: 'new', label: 'New' },
+  { value: 'queued', label: 'Queued' },
   { value: 'sent', label: 'Sent' },
   { value: 'replied', label: 'Replied' },
   { value: 'hot', label: 'Hot' },
   { value: 'booked', label: 'Booked' },
+  /* EVERY DECLARED STATUS IS FILTERABLE NOW.
+   * This list held 7 of the 11 values a lead can actually hold, so a lead
+   * that went cold, said no, died or was flagged for tier review could not be
+   * found by any filter on this page - "All statuses" was the only way to see
+   * it, mixed in with everything else. */
+  { value: 'cold', label: 'Cold' },
+  { value: 'not_interested', label: 'Not Interested' },
   { value: 'dnc', label: 'DNC' },
+  { value: 'dead', label: 'Dead' },
+  { value: 'needs_tier_review', label: 'Needs Review' },
 ]
 
 export default function Leads() {

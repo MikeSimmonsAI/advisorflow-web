@@ -175,3 +175,55 @@ def contains_hard_stop_language(body: str) -> bool:
     """
     body_lower = body.lower()
     return any(kw in body_lower for kw in HARD_STOP_KEYWORDS)
+
+
+# ── ONE DEFINITION OF "THIS REPLY STILL NEEDS A PERSON" ──────────────────────
+#
+# THERE WERE FOUR, AND THEY DISAGREED.
+#
+#   sms_router          `needs_attention=true`     interested|callback
+#   sms_router          `bucket=needs_follow_up`   interested|callback AND unreviewed
+#   leads_query_router  the Overview count         interested|callback
+#   workqueue_router    `needs_reply`              interested|callback|hot|
+#                                                  callback_request AND unreviewed
+#
+# The docstring on the scorecard endpoint asserted that the first two matched
+# ("Stated once, so the cards and the list they link to can never disagree").
+# They did not. Two consequences, both of them things a rep sees:
+#
+#   1. A reply a rep has already handled kept appearing in the inbox and in
+#      the Overview count, because two of the four never looked at reviewed_at.
+#      The count said 12, the follow-up card said 5, and neither was wrong on
+#      its own terms.
+#   2. `"hot"` and `"callback_request"` are not ReplyClassification values.
+#      They are not stored anywhere, so those two entries matched nothing and
+#      the work queue's list was really just the other two all along.
+#
+# So the answer is stated here, once, next to the vocabulary that defines it.
+# Anything that asks "does this reply need a person" asks these.
+
+ATTENTION_CLASSIFICATIONS = ("interested", "callback")
+
+
+def attention_filters(*, include_reviewed: bool = False):
+    """SQLAlchemy clauses for replies that still need a human.
+
+    Returns a list to splat into `.filter(*...)`. `include_reviewed=True` is
+    the deliberate exception - the scorecard's "reviewed" bucket and any
+    historical count that wants the whole set of interested-or-callback
+    replies regardless of whether a rep has since worked them.
+    """
+    from app.models.models import Reply, ReplyClassification
+
+    clauses = [Reply.classification.in_([ReplyClassification.INTERESTED,
+                                         ReplyClassification.CALLBACK])]
+    if not include_reviewed:
+        clauses.append(Reply.reviewed_at.is_(None))
+    return clauses
+
+
+def reply_needs_attention(reply) -> bool:
+    """The same question asked of one already-loaded Reply row."""
+    cls = getattr(reply, "classification", None)
+    cls = getattr(cls, "value", cls)
+    return cls in ATTENTION_CLASSIFICATIONS and getattr(reply, "reviewed_at", None) is None
