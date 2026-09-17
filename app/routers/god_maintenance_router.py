@@ -82,6 +82,127 @@ def pipeline_consistency(
             detail="Unknown verdict %r. Valid: %s" % (verdict, ", ".join(pc.ALL_VERDICTS)))
     return pc.scan(db, organization_id=organization_id, limit=limit, verdict=verdict)
 
+
+# ── READINESS: THE THREE QUESTIONS THAT HAVE TO BE ANSWERED FROM PRODUCTION ─
+#
+# ALL READ-ONLY. Every one of these was written as a service function first and
+# could be run from a shell, which is not the same as being available. A switch
+# that cannot be inspected, and a diagnostic nobody can reach, are both just
+# code - and the decisions below are the ones with real families on the other
+# side of them, so the numbers behind them should take one request.
+
+
+@router.get("/cadence-backlog")
+def cadence_backlog(
+    organization_id: str = Query(default=None,
+                                 description="Narrow to one customer. Omit to scan the platform."),
+    include_leads: bool = Query(default=False,
+                                description="Also list the individual enrollments."),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_god),
+):
+    """WHAT WOULD HAPPEN IF CADENCE SMS WERE SWITCHED ON, counted.
+
+    The engine never sent a message - it raised TypeError on the first touch of
+    every run, after the counter had already advanced and committed. The repair
+    ships disabled because turning it on begins real SMS to whatever has
+    accumulated since.
+
+    This answers that with numbers rather than a feeling: active enrollments,
+    touches the counters claim with no recorded send behind them, what would be
+    due the instant the switch flips, and how each of those would end - stopped,
+    blocked by compliance, blocked by permitted contact hours, skipped, or
+    actually sent - by organization and by touch number.
+
+    Sends nothing. Modifies nothing. Re-dates nothing.
+    """
+    from app.services import cadence_backlog as cb
+    return cb.scan(db, organization_id=organization_id, include_leads=include_leads)
+
+
+@router.get("/cadence-activation-plan")
+def cadence_activation_plan(
+    organization_id: str = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_god),
+):
+    """A safe way to turn the cadence on, with this deployment's own numbers.
+
+    Describes; does not execute. `executed` is False and there is no argument
+    that makes it True. The sentence it exists to make unavoidable: the backlog
+    is not the first thing you send, and sending it is what happens by itself
+    if the switch is simply flipped.
+    """
+    from app.services import cadence_backlog as cb
+    return cb.activation_plan(db, organization_id=organization_id)
+
+
+@router.get("/outbound-switches")
+def outbound_switches(
+    organization_id: str = Query(default=None,
+                                 description="Omit for the deployment-wide state."),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_god),
+):
+    """EVERY OUTBOUND SWITCH IN ONE PLACE, for the whole deployment.
+
+    The per-organization half was already visible on the customer record. The
+    deployment half was only an environment variable, so "is anything on" could
+    not be answered without shell access to the host - which is the question
+    somebody asks in a hurry, and the wrong moment to be reading env vars over
+    somebody's shoulder.
+    """
+    from app.models.models import Organization
+    from app.services import cadence_service, outbound_email_gate as gate
+
+    org = None
+    if organization_id:
+        org = db.query(Organization).filter(
+            Organization.id == organization_id).first()
+        if org is None:
+            raise HTTPException(status_code=404, detail="No such organization.")
+
+    email = gate.effective_report(org) if org is not None else {
+        "deployment": {s: gate.source_enabled(s) for s in gate.GATED_SOURCES},
+        "organization": None,
+        "note": ("Deployment switches only. Pass organization_id for the "
+                 "combined answer - BOTH halves must say yes to send."),
+    }
+    return {
+        "read_only": True,
+        "organization_id": organization_id,
+        "email": email,
+        "cadence_sms": {
+            "deployment_enabled": cadence_service._sending_enabled(),
+            "variable": "CADENCE_SMS_SENDING",
+            "per_customer": "the `cadences` feature entitlement",
+            "note": "Both must say yes. A missing switch means no.",
+        },
+    }
+
+
+@router.get("/lifecycle-readiness")
+def lifecycle_readiness(
+    organization_id: str = Query(...,
+                                 description="Required: this reads one customer's book."),
+    limit: int = Query(default=2000, ge=1, le=20000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_god),
+):
+    """HOW MUCH IS THE ONE-COLUMN STATUS MODEL COSTING, on real rows.
+
+    Counts the leads whose derived state cannot be expressed by any single
+    `Lead.status` value, and names which dimension is being destroyed. This is
+    the number the SS7 decision should be made from - not an argument about
+    vocabulary, a count of families whose record cannot say two true things at
+    once.
+    """
+    from app.services import lead_lifecycle
+    leads = (db.query(Lead)
+             .filter(Lead.organization_id == organization_id)
+             .limit(limit).all())
+    return lead_lifecycle.migration_readiness(db, leads)
+
 log = logging.getLogger(__name__)
 
 

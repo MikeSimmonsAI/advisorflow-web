@@ -62,7 +62,7 @@ transitions between these; recompute it and you get today's answer.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
 

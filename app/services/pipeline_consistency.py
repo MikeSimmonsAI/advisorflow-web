@@ -63,7 +63,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.models import EmailMessage, Lead, Message, PipelineConversation
+from app.models.models import EmailMessage, Message, PipelineConversation
 
 DEFINITELY_INCONSISTENT = "definitely_inconsistent"
 SUSPICIOUS = "suspicious"

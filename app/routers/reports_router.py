@@ -42,7 +42,11 @@ from app.models.models import (
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
-HOT_REPLY_CLASSIFICATIONS = (ReplyClassification.INTERESTED, ReplyClassification.CALLBACK)
+# The vocabulary comes from the module that owns it. This filter is NOT
+# `attention_filters` - it counts hot replies ever, worked or not, and
+# widens with `| is_hot` - but the two values underneath are stated once.
+from app.services.reply_classification_service import attention_enum_values
+HOT_REPLY_CLASSIFICATIONS = attention_enum_values()
 
 
 def _get_org_ids(db: Session, current_user: User, platform_id: Optional[str] = None) -> list:

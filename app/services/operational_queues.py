@@ -48,7 +48,7 @@ lead filtered out by a query can never be explained.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.orm import Session

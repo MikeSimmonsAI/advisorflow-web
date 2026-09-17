@@ -205,6 +205,21 @@ def contains_hard_stop_language(body: str) -> bool:
 ATTENTION_CLASSIFICATIONS = ("interested", "callback")
 
 
+def attention_enum_values():
+    """The same two, as ReplyClassification members.
+
+    A SIXTH AND SEVENTH COPY OF THIS TUPLE existed as `HOT_REPLY_CLASSIFICATIONS`
+    in admin_router and reports_router. Those ask a DIFFERENT question from
+    `attention_filters` - they count hot replies EVER, including ones a rep has
+    already worked, and they widen with `| is_hot` - so they are not the same
+    filter and must not be replaced by it. But the vocabulary underneath is the
+    same two values, and two more literal copies of it is how the four
+    definitions became four in the first place.
+    """
+    from app.models.models import ReplyClassification
+    return (ReplyClassification.INTERESTED, ReplyClassification.CALLBACK)
+
+
 def attention_filters(*, include_reviewed: bool = False):
     """SQLAlchemy clauses for replies that still need a human.
 
