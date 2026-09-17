@@ -132,13 +132,78 @@ def notify_hot_reply(db: Session, advisor: User, lead: Lead, reply: Reply) -> No
     return notification
 
 
-def get_unread_notifications(db: Session, user_id: str) -> list[Notification]:
-    return (
-        db.query(Notification)
+# THE BELL POLLS THIS EVERY 60 SECONDS AND IT HAD NO CEILING.
+#
+# `GET /notifications/` is the single most-called endpoint in production - about
+# 1,440 calls a day per signed-in client, roughly 53% of all HTTP traffic - and
+# this function answered every one of them with an unbounded
+# `.all()` of full ORM rows, each carrying a free-text `message` built from a
+# lead's name, phone and the entire body of their reply.
+#
+# Unread is not a small set by construction. Nothing expires a notification and
+# nothing marks one read except a human clicking it, so an advisor who ignores
+# the bell for a month is asking the server to materialise, hydrate into
+# mapped objects, and serialise their whole backlog once a minute forever. On a
+# 512 MB instance that is the wrong shape of query to put on the hottest path
+# in the system.
+#
+# The fix is the ceiling the UI already implies. The bell shows a list and a
+# count; it has never rendered more than a screenful. So the rows are capped,
+# the true count comes back as a number from SQL instead of as len() of a list
+# nobody displays, and the columns are named rather than hydrated - the caller
+# uses five of them.
+#
+# `NOTIFICATION_PAGE_SIZE` is the cap. `has_more` tells the client the list is
+# truncated; `unread_count` stays exact regardless of the cap, so the badge
+# still reads 312 while the payload carries 50.
+NOTIFICATION_PAGE_SIZE = 50
+
+
+def unread_notification_count(db: Session, user_id: str) -> int:
+    """Exact unread count, computed in SQL. Never materialises the rows."""
+    from sqlalchemy import func as _func
+    return int(
+        db.query(_func.count(Notification.id))
+        .filter(Notification.user_id == user_id, Notification.is_read == False)
+        .scalar()
+        or 0
+    )
+
+
+def get_unread_notifications(
+    db: Session, user_id: str, limit: int = NOTIFICATION_PAGE_SIZE
+) -> list[dict]:
+    """The most recent unread notifications, newest first, capped at `limit`.
+
+    Returns plain dicts of the five columns the bell renders - not ORM objects -
+    so nothing lazy-loads a Lead or a User behind the serializer's back.
+    """
+    if limit < 1:
+        limit = 1
+    rows = (
+        db.query(
+            Notification.id,
+            Notification.lead_id,
+            Notification.type,
+            Notification.message,
+            Notification.created_at,
+        )
         .filter(Notification.user_id == user_id, Notification.is_read == False)
         .order_by(Notification.created_at.desc())
+        .limit(limit)
         .all()
     )
+    return [
+        {
+            "id": r.id,
+            "lead_id": r.lead_id,
+            "type": r.type.value if hasattr(r.type, "value") else r.type,
+            "message": r.message,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "is_read": False,
+        }
+        for r in rows
+    ]
 
 
 def mark_notification_read(db: Session, notification_id: str, user_id: str) -> bool:
