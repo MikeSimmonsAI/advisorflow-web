@@ -97,6 +97,11 @@ SCHEDULER_OWNER: Dict[str, str] = {
     JobName.REVIEW_REQUEST:      ROLE_BACKEND,
     JobName.SUPPORT_INTELLIGENCE: ROLE_BACKEND,
     JobName.SESSION_CLEANUP:     ROLE_BACKEND,
+    # The prospect-facing reminder pass for brand-sales appointments. Owned by
+    # the API service for the same reason as every other loop here: one named
+    # owner, so it cannot end up running in two processes and sending a
+    # customer the same reminder twice.
+    JobName.SALES_REMINDERS:     ROLE_BACKEND,
 }
 
 # A guard rather than a comment: a loop added to JobName without an owner here

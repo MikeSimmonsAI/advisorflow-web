@@ -691,6 +691,15 @@ app.include_router(concierge_router.router)
 # shares the one public-intake rate ceiling. See site_intake_router.py.
 from app.routers import site_intake_router  # noqa: E402
 app.include_router(site_intake_router.router)
+
+# ── PUBLIC DISCOVERY / DEMO BOOKING ────────────────────────────────────────
+# Unauthenticated, and mounted beside site_intake deliberately: it is the same
+# kind of surface - a brand's own marketing site talking to the platform - and
+# it shares the one public-intake rate ceiling for the same reason. Everything
+# that decides WHO a booking involves is resolved server-side; see the router's
+# module docstring for the full posture.
+from app.routers import public_booking_router  # noqa: E402
+app.include_router(public_booking_router.router)
 app.include_router(outcomes_router.router)
 app.include_router(microsoft_router.router)
 app.include_router(compliance_router.router)
@@ -1121,6 +1130,52 @@ async def _session_cleanup_loop():
         await asyncio.sleep(24 * 3600)
 
 
+async def _sales_reminder_loop():
+    """The 24-hour and one-hour reminders before a brand-sales appointment.
+
+    WHY A LOOP AND NOT A NEW CRON SERVICE. There is already a durable job ledger
+    and a set of loops written against it, and a scheduled task that has no
+    entry in that ledger is one whose failure is invisible - which the email
+    poller demonstrated for the platform's whole life. A separate Render cron
+    for this would also be a sixth service to pay for and a second place
+    ownership could be got wrong; `service_role.SCHEDULER_OWNER` already answers
+    that question once.
+
+    WHY FIFTEEN MINUTES. The reminder windows are 24 hours and one hour, and
+    `sales_appointment_reminders.LATE_TOLERANCE_MINUTES` refuses to send one
+    that has slipped far past its moment - a "your meeting is tomorrow" message
+    arriving two hours beforehand is not a reminder, it is a confusing second
+    email. A quarter-hour pass keeps every send comfortably inside tolerance
+    while adding 96 runs a day rather than 1,440.
+
+    NOTHING HERE DECIDES WHETHER TO SEND. `process_due` does, and its delivery
+    goes through the platform's staff outbound gate, which is off by default.
+    """
+    from app.services import sales_appointment_reminders as reminders
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("sales_reminder_loop")
+    await asyncio.sleep(150)  # startup delay — offset from every other loop
+    while True:
+        try:
+            async with record_job_run(JobName.SALES_REMINDERS,
+                                      db_factory=SessionLocal) as _m:
+                db = SessionLocal()
+                try:
+                    report = reminders.process_due(db)
+                    _m.update({k: v for k, v in report.items() if k != "errors"})
+                    if report.get("sent") or report.get("failed"):
+                        _logger.info("sales reminders: %s", report)
+                finally:
+                    db.close()
+        except Exception as exc:                               # noqa: BLE001
+            # A reminder pass must never be the reason the web process dies.
+            _logger.error("sales_reminder error: %s", exc, exc_info=True)
+        await asyncio.sleep(900)  # 15 minutes
+
+
 @app.on_event("startup")
 async def on_startup():
     # 0. THE ENVIRONMENT BOUNDARY. Before the database is touched, before a
@@ -1499,6 +1554,7 @@ async def on_startup():
         JobName.CADENCE_LOOP:         _cadence_loop,
         JobName.SUPPORT_INTELLIGENCE: _support_intelligence_loop,
         JobName.SESSION_CLEANUP:      _session_cleanup_loop,
+        JobName.SALES_REMINDERS:      _sales_reminder_loop,
     }
     for _job_name in _plan["start"]:
         _factory = _loop_factories.get(_job_name)

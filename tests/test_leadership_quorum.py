@@ -417,6 +417,22 @@ def test_minimum_beyond_the_chain_length_is_a_setup_status(db_session, brand, te
 # The final recheck
 # ═══════════════════════════════════════════════════════════════════════════
 
+def test_an_uncapped_search_does_not_stop_after_one_slot(db_session, brand, team):
+    """THE REGRESSION. `slots_from_intervals` returns after its first slot when
+    given limit=0, because its guard is `len(out) >= limit`. Forwarding the
+    caller's 0 through to it meant an uncapped search found exactly one
+    candidate - and the booking path calls this uncapped to re-check one
+    specific time, so every booking except the earliest offered one was refused
+    as unavailable."""
+    day = _monday()
+    out = lq.quorum_slots(db_session, team["owner"],
+                          [team["direct"], team["senior"]], POLICY,
+                          av.local_to_utc(day, 0, TZ),
+                          av.local_to_utc(day, 23 * 60, TZ), 60, limit=0)
+    assert len(out["slots"]) > 1, (
+        "an uncapped quorum search returned %d slot(s)" % len(out["slots"]))
+
+
 def test_slot_is_still_open_returns_who_is_not(db_session, brand, team):
     day = _monday()
     out = _search(db_session, brand, team, day=day)

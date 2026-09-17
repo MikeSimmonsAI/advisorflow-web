@@ -39,7 +39,7 @@ from app.models.sales_models import (
 )
 from app.models.scheduling_models import (
     SLOT_OPPORTUNITY_OWNER, SLOT_SALES_MANAGER, SLOT_PRODUCT_SPECIALIST,
-    SLOT_ANY_REP, SLOT_LABELS,
+    SLOT_ANY_REP, SLOT_LABELS, LEADERSHIP_REPORTING_CHAIN,
 )
 
 
@@ -147,11 +147,29 @@ DEFAULT_MEETING_TYPES = [
      "description": "Longer discovery for a more complex operation.",
      "requires_video": True,
      "sort_order": 2},
+    # ── THE INBOUND TYPE. The only one open to the public by default. ──────
+    #
+    # `required_slots` is UNCHANGED and still drives the internal "Find Team
+    # Time" screen, where a human reads a candidate list and chooses. The
+    # leadership columns beside it drive the PUBLIC path, where nobody reads
+    # anything - and they are a quorum, not an intersection: the owner plus at
+    # least one leader from that owner's own reporting chain, with any other
+    # available leader invited too.
+    #
+    # The two coexist on one row on purpose. A brand's Discovery + Demo is one
+    # meeting whether a rep books it or a stranger does; what differs is who
+    # decides the attendees, not what the meeting is.
     {"key": "discovery_demo", "name": "Discovery + Demo", "duration_minutes": 60,
      "required_slots": ",".join([SLOT_OPPORTUNITY_OWNER, SLOT_SALES_MANAGER,
                                  SLOT_PRODUCT_SPECIALIST]),
      "description": "The three-person call this scheduling engine was built for.",
      "requires_video": True,
+     "leadership_policy": LEADERSHIP_REPORTING_CHAIN,
+     "owner_required": True,
+     "leadership_minimum": 1,
+     "leadership_depth": 2,
+     "include_additional_leaders": True,
+     "public_bookable": True,
      "sort_order": 3},
     {"key": "demo", "name": "Product Demo", "duration_minutes": 60,
      "required_slots": ",".join([SLOT_OPPORTUNITY_OWNER, SLOT_PRODUCT_SPECIALIST]),
@@ -215,6 +233,56 @@ def ensure_meeting_types(db: Session, brand_sales_org_id: str) -> List:
         if untouched:
             row.requires_video = True
             created = True
+
+    # ── one-time backfill of the leadership quorum (2026-09-17) ────────────
+    #
+    # THE SAME PROBLEM THE VIDEO BACKFILL ABOVE SOLVES, FOR THE SAME REASON.
+    # Idempotency by key means a brand that was seeded before this feature -
+    # which every existing brand was - would never pick up the policy, and its
+    # Discovery + Demo would stay unbookable from the website forever while
+    # looking correctly configured.
+    #
+    # THE RULE FOR EXISTING ROWS, STATED EXPLICITLY.
+    #
+    #   * Only rows whose `leadership_policy` is still NULL are considered. A
+    #     brand that has configured its own policy keeps it, full stop.
+    #   * Only rows that have NEVER been edited by hand are touched, guarded on
+    #     updated_at == created_at, exactly as the video backfill is. The moment
+    #     anybody changes a meeting type, their choice is permanent and this
+    #     never touches it again. That is what stops a deliberate "we do not
+    #     take website bookings on this type" being undone on every startup.
+    #   * `required_slots` is NOT modified. The internal Find Team Time screen
+    #     keeps behaving exactly as it does today; the quorum applies to the
+    #     public path only.
+    #   * Nothing is turned on for any OTHER meeting type. Discovery, Demo,
+    #     Proposal, Closing and Internal keep `leadership_policy` NULL and
+    #     `public_bookable` FALSE, so their behaviour is byte-for-byte what it
+    #     was before this shipped.
+    #
+    # A brand still has to have a reporting chain and a default inbound owner
+    # configured before anything can actually be booked; this backfill makes the
+    # meeting type ready, not the brand.
+    _QUORUM_KEYS = {spec["key"] for spec in DEFAULT_MEETING_TYPES
+                    if spec.get("leadership_policy")}
+    for spec in DEFAULT_MEETING_TYPES:
+        if spec["key"] not in _QUORUM_KEYS:
+            continue
+        row = existing.get(spec["key"])
+        if row is None:
+            continue
+        if getattr(row, "leadership_policy", None):
+            continue          # the brand has its own policy
+        untouched = (row.updated_at is None or row.created_at is None
+                     or row.updated_at == row.created_at)
+        if not untouched:
+            continue          # a human has edited this row
+        row.leadership_policy = spec["leadership_policy"]
+        row.owner_required = spec["owner_required"]
+        row.leadership_minimum = spec["leadership_minimum"]
+        row.leadership_depth = spec["leadership_depth"]
+        row.include_additional_leaders = spec["include_additional_leaders"]
+        row.public_bookable = spec["public_bookable"]
+        created = True
 
     if created:
         db.flush()

@@ -41,6 +41,11 @@ class JobName:
     # sweep nobody can report on is one whose failure is invisible until the
     # table is the problem.
     SESSION_CLEANUP   = "session_cleanup_loop"
+    # Customer-facing reminders for brand-sales appointments — the 24-hour and
+    # one-hour messages before a Discovery / Demo. Named here for the same
+    # reason as the two above: this one sends to a PROSPECT, so a silent stop
+    # is a customer who turns up to nothing, or does not turn up at all.
+    SALES_REMINDERS   = "sales_reminder_loop"
 
     # Render cron SERVICES. Separate names on purpose, even where the work
     # overlaps a loop above: cadence runs hourly in the web dyno AND daily as a
@@ -69,6 +74,7 @@ LOOP_JOB_NAMES = (
     JobName.REVIEW_REQUEST,
     JobName.SUPPORT_INTELLIGENCE,
     JobName.SESSION_CLEANUP,
+    JobName.SALES_REMINDERS,
 )
 
 ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES

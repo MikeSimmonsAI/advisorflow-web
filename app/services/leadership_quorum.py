@@ -50,6 +50,11 @@ from app.services import leadership_chain as lc
 
 Interval = av.Interval
 
+# The most raw candidate starts to consider when the caller asks for an
+# uncapped answer. Generous enough to cover a two-month window at a 15-minute
+# grid, bounded so an unbounded range cannot be turned into unbounded work.
+CANDIDATE_CEILING = 5000
+
 
 # ── the policy, read off a meeting type ─────────────────────────────────────
 
@@ -159,8 +164,23 @@ def quorum_slots(db: Session,
     else:
         base = av.normalize([iv for u in people for iv in free.get(u.id, [])])
 
+    # CANDIDATES ARE GENERATED GENEROUSLY, THEN FILTERED.
+    #
+    # More raw candidates than the caller's limit, because the quorum filter
+    # below discards the ones where no leader is free - taking exactly `limit`
+    # candidates would return fewer than `limit` bookable slots and look like a
+    # thin calendar.
+    #
+    # `limit=0` from the caller means "do not cap the ANSWER", and it must not
+    # be forwarded: `slots_from_intervals` returns after its first slot when
+    # given 0, because its guard is `len(out) >= limit`. Passing it through was
+    # a real defect - the booking path calls this with limit=0 to re-check one
+    # specific time, and would have found only the first candidate of the day,
+    # so every booking except the earliest offered one was refused as
+    # unavailable. Caught by a test that books a second slot.
+    candidate_cap = (limit * 4) if limit else CANDIDATE_CEILING
     raw = av.slots_from_intervals(base, duration_minutes, step_minutes,
-                                  limit=limit * 4 if limit else 0)
+                                  limit=candidate_cap)
 
     ordered_leaders = [u for u in leaders if u is not None
                        and u.id != getattr(owner, "id", None)]
