@@ -33,7 +33,8 @@ from sqlalchemy import func, distinct
 from sqlalchemy.orm import Session
 
 import json
-from app.deps import get_db, require_admin
+from app.deps import get_db, require_admin, require_tenant_user
+from app.services import lead_scope
 from app.models.models import (
     User, Lead, Message, Reply, ReplyClassification, BookingLink,
     LeadOutcome, CRMContact, Organization,
@@ -101,6 +102,58 @@ def _resolve_date_range(start_date: Optional[str], end_date: Optional[str]) -> t
         raise HTTPException(status_code=400, detail="Date range cannot exceed 1 year")
 
     return start, end
+
+
+@router.get("/email-performance")
+def email_performance(
+    days: int = Query(default=30, ge=1, le=365),
+    group_by: str = Query(default="source",
+                          description="source | user | day | status"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    """SS4 — email outcomes from authoritative delivery state.
+
+    Every report in this module aggregated `Message` and nothing else:
+    EmailMessage was not imported here at all, so there has never been any
+    email reporting in the product.
+
+    These numbers are counts of rows whose status the send path wrote from the
+    provider's answer. They are not inferred from UI events - the UI's own
+    success banner was, until recently, rendering "Sent: 0" as a green tick.
+
+    `not_available` in the response names what this genuinely cannot answer yet
+    and why, rather than returning a plausible zero: AI drafts are not
+    persisted, replies carry no email_message_id, and email refusals write no
+    row. Saying so is the honest report.
+    """
+    from datetime import datetime, timedelta
+    from app.services import activity_reporting
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
+    until = datetime.utcnow()
+    return activity_reporting.email_performance(
+        db, org_id, since=until - timedelta(days=days), until=until,
+        group_by=group_by)
+
+
+@router.get("/cadence-outcomes")
+def cadence_outcomes(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    """How much outbound was REFUSED, not just how much succeeded.
+
+    cadence_touch_logs records blocked, suppressed, skipped and failed attempts
+    as well as sent ones, so this is currently the only place the platform can
+    answer that question at all.
+    """
+    from datetime import datetime, timedelta
+    from app.services import activity_reporting
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
+    until = datetime.utcnow()
+    return activity_reporting.cadence_outcomes(
+        db, org_id, since=until - timedelta(days=days), until=until)
 
 
 @router.get("/conversion-trend")

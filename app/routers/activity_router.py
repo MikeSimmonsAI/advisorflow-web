@@ -22,6 +22,37 @@ from app.services import lead_scope
 router = APIRouter(prefix="/activity", tags=["activity"])
 
 
+@router.get("/today")
+def sent_today(
+    limit: int = Query(default=500, ge=1, le=2000),
+    tz: Optional[str] = Query(default=None,
+                              description="IANA timezone for the day boundary."),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """SS3 — everything this organization sent today, answered by the server.
+
+    The Activity screen answered this by fetching 300 rows from a 30-day
+    endpoint and filtering them in the browser. An organization sending more
+    than 300 messages a month therefore undercounted today, silently, with a
+    confident number on screen - and the day boundary came from the viewer's
+    laptop rather than the business's own clock.
+
+    Each row carries the channel, the timestamp, the delivery state, the
+    source that produced it, the human who pressed the button and the advisor
+    the family hears from - the last two being different people whenever a
+    lead belongs to a colleague. `touches_today` answers "did we contact this
+    family more than once", which nothing could answer before.
+    """
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
+    user_ids = None
+    if not lead_scope.is_manager_here(current_user, db):
+        user_ids = [current_user.id]
+    from app.services import activity_reporting
+    return activity_reporting.sent_today(
+        db, org_id, user_ids=user_ids, limit=limit, tzname=tz)
+
+
 @router.get("/sent")
 def sent_activity(
     limit: int = Query(default=200, ge=1, le=500),
