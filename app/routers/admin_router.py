@@ -16,7 +16,16 @@ from app.deps import (
     get_platform_org_ids, load_org_in_scope, load_user_in_scope,
     platform_ids_in_scope, ELEVATED_ROLES,
 )
-from app.models.models import User, Lead, Message, Reply, LeadOutcome, ReplyClassification, CadenceState, ContactRegistry, Organization, TierDefinition
+from app.models.models import (
+    User, Lead, Message, Reply, LeadOutcome, ReplyClassification, CadenceState,
+    ContactRegistry, Organization, TierDefinition,
+    # Merge moves these too. Every one of them is lead history or a live
+    # pointer at a lead, and before this they were simply left behind:
+    # email_messages cascaded to deletion (silent loss of every email ever
+    # sent to a merged duplicate), and the four with no ondelete raised
+    # IntegrityError, which rolled the whole merge back with a 500.
+    EmailMessage, VoiceCall, PipelineConversation, Notification, CRMContact,
+)
 from app.services.auth_service import hash_password
 from app.services import staff_activation as _activation
 from app.models.staff_models import PURPOSE_SETUP as _PURPOSE_SETUP, PURPOSE_RESET as _PURPOSE_RESET
@@ -1614,6 +1623,15 @@ class MergeLeadsResponse(BaseModel):
     moved_replies: int
     moved_cadence_states: int
     moved_outcomes: int
+    # Counted separately rather than folded into moved_messages: a merge that
+    # reports "3 messages moved" while silently dropping eleven emails is the
+    # defect this fix exists for, and the caller should be able to see each
+    # channel survive on its own.
+    moved_email_messages: int = 0
+    moved_voice_calls: int = 0
+    moved_pipeline_conversations: int = 0
+    moved_notifications: int = 0
+    moved_crm_contacts: int = 0
     deleted_lead_ids: list[str]
 
 
@@ -1649,6 +1667,18 @@ def _delete_merged_lead_records(db: Session, merge_leads: list[Lead]) -> None:
 
     Must delete child records with non-cascading FKs first (booking_links,
     lead_outcomes, messages, replies) before deleting the lead rows.
+
+    IF YOU ADD A TABLE WITH A lead_id FK, DECIDE HERE WHETHER IT IS HISTORY.
+    History must be MOVED by the caller before this runs. Anything left behind
+    is either cascade-deleted without a trace (that is how every email sent to
+    a merged duplicate was lost) or blocks the delete with an IntegrityError
+    that 500s the whole merge. As of this commit the moved set is: messages,
+    replies, lead_outcomes, cadence_states, contact_registry, email_messages,
+    voice_calls, pipeline_conversations, notifications, crm_contacts.
+    booking_links (and the booking_followups / survey_responses that cascade
+    from them) are still deliberately DELETED here, not moved - see the merge
+    route. import_staged_rows is ondelete="SET NULL" and keeps its row while
+    losing the lead pointer.
     """
     from app.models.models import BookingLink, LeadOutcome, Message, Reply
 
@@ -1901,6 +1931,39 @@ def merge_leads(
             {LeadOutcome.lead_id: keep_lead.id}, synchronize_session=False
         )
 
+        # EVERY TABLE THAT POINTS AT A LEAD HAS TO BE MOVED HERE, NOT SOME OF THEM.
+        #
+        # email_messages.lead_id is ondelete="CASCADE". It was never moved, so
+        # the delete below destroyed it: every email ever sent to a merged-away
+        # duplicate was permanently gone, with no error and no counter to show
+        # it had happened. SMS survived a merge and email did not.
+        #
+        # voice_calls, pipeline_conversations, notifications and crm_contacts
+        # carry no ondelete at all, so on Postgres they did the opposite -
+        # the lead delete raised IntegrityError and the whole merge 500'd and
+        # rolled back. A lead that had ever been called, or had ever produced a
+        # notification, could not be merged at all.
+        #
+        # None of these five has a unique constraint on lead_id, so reassigning
+        # many rows onto the kept lead is safe. Both leads were already proven
+        # to be in the caller's workspace org above, so VoiceCall.organization_id
+        # and PipelineConversation.organization_id stay coherent.
+        moved_email_messages = db.query(EmailMessage).filter(EmailMessage.lead_id.in_(merge_ids)).update(
+            {EmailMessage.lead_id: keep_lead.id}, synchronize_session=False
+        )
+        moved_voice_calls = db.query(VoiceCall).filter(VoiceCall.lead_id.in_(merge_ids)).update(
+            {VoiceCall.lead_id: keep_lead.id}, synchronize_session=False
+        )
+        moved_pipeline_conversations = db.query(PipelineConversation).filter(
+            PipelineConversation.lead_id.in_(merge_ids)
+        ).update({PipelineConversation.lead_id: keep_lead.id}, synchronize_session=False)
+        moved_notifications = db.query(Notification).filter(Notification.lead_id.in_(merge_ids)).update(
+            {Notification.lead_id: keep_lead.id}, synchronize_session=False
+        )
+        moved_crm_contacts = db.query(CRMContact).filter(CRMContact.lead_id.in_(merge_ids)).update(
+            {CRMContact.lead_id: keep_lead.id}, synchronize_session=False
+        )
+
         moved_cadence_states = 0
         for cadence_state in merge_cadence_states:
             cadence_state.lead_id = keep_lead.id
@@ -1925,6 +1988,11 @@ def merge_leads(
                 "moved_replies": moved_replies,
                 "moved_outcomes": moved_outcomes,
                 "moved_cadence_states": moved_cadence_states,
+                "moved_email_messages": moved_email_messages,
+                "moved_voice_calls": moved_voice_calls,
+                "moved_pipeline_conversations": moved_pipeline_conversations,
+                "moved_notifications": moved_notifications,
+                "moved_crm_contacts": moved_crm_contacts,
             },
         )
 
@@ -1935,6 +2003,11 @@ def merge_leads(
             moved_replies=moved_replies,
             moved_cadence_states=moved_cadence_states,
             moved_outcomes=moved_outcomes,
+            moved_email_messages=moved_email_messages,
+            moved_voice_calls=moved_voice_calls,
+            moved_pipeline_conversations=moved_pipeline_conversations,
+            moved_notifications=moved_notifications,
+            moved_crm_contacts=moved_crm_contacts,
             deleted_lead_ids=merge_ids,
         )
     except HTTPException:
