@@ -19,7 +19,6 @@ load_dotenv()  # Load .env before any app imports read os.environ
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -323,29 +322,72 @@ class RequestContextMiddleware:
 
 
 # ── Security headers middleware ───────────────────────────────────────────────
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next) -> Response:
-        response = await call_next(request)
-        # Force HTTPS for 1 year; include subdomains so the whole domain is covered.
-        # preload is intentionally omitted — see hstspreload.org before adding it.
-        response.headers["Strict-Transport-Security"] = (
-            "max-age=31536000; includeSubDomains"
-        )
-        # Prevent the app from being embedded in iframes (clickjacking)
-        response.headers["X-Frame-Options"] = "DENY"
-        # Stop browsers from sniffing content types (MIME confusion attacks)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        # Don't send Referer header to third-party sites
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        # Disable potentially dangerous browser features
-        response.headers["Permissions-Policy"] = (
-            "camera=(), microphone=(), geolocation=(), payment=()"
-        )
-        # Remove server fingerprint header Uvicorn/Starlette adds by default.
-        # MutableHeaders has no .pop() — use del with a guard instead.
-        if "server" in response.headers:
-            del response.headers["server"]
-        return response
+# The exact header set, kept as data so the test suite can assert on it rather
+# than re-typing the strings. Byte values because that is what ASGI carries.
+SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+    # Force HTTPS for 1 year; include subdomains so the whole domain is covered.
+    # preload is intentionally omitted — see hstspreload.org before adding it.
+    (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),
+    # Prevent the app from being embedded in iframes (clickjacking)
+    (b"x-frame-options", b"DENY"),
+    # Stop browsers from sniffing content types (MIME confusion attacks)
+    (b"x-content-type-options", b"nosniff"),
+    # Don't send Referer header to third-party sites
+    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+    # Disable potentially dangerous browser features
+    (b"permissions-policy", b"camera=(), microphone=(), geolocation=(), payment=()"),
+)
+
+# Server fingerprint header Uvicorn/Starlette adds by default. Stripped.
+_STRIPPED_HEADERS = (b"server",)
+
+
+class SecurityHeadersMiddleware:
+    """Adds the security headers to every response. Raw ASGI, deliberately.
+
+    WHY IT IS NO LONGER A BaseHTTPMiddleware.
+
+    This ran on 100% of traffic - every API call, every CORS preflight, every
+    `/ping`. BaseHTTPMiddleware implements `call_next` by starting an anyio task
+    group and piping the downstream app's ASGI messages through a pair of memory
+    object streams, then wrapping the result in a StreamingResponse. That is a
+    task, two streams and a response object allocated per request, to set five
+    constant headers and delete one.
+
+    The backend was restarting out of memory on a 512 MB instance with a ~306 MB
+    import-time baseline, so per-request allocation on the universal path was
+    worth removing rather than explaining. A plain ASGI class edits the header
+    list on the `http.response.start` message in place and allocates nothing
+    else. The behaviour is identical and `test_security_headers.py` asserts it
+    header by header, including on the 500 path and on preflights.
+
+    The same reasoning is written out at length on RequestContextMiddleware
+    above, for a different reason (ContextVars do not survive the task hop).
+    Both are raw ASGI now; neither should be converted back.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = [
+                    (k, v) for (k, v) in message.get("headers", [])
+                    if k.lower() not in _STRIPPED_HEADERS
+                ]
+                present = {k.lower() for (k, _v) in headers}
+                headers.extend(
+                    (k, v) for (k, v) in SECURITY_HEADERS if k not in present
+                )
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 app.add_middleware(SecurityHeadersMiddleware)

@@ -50,7 +50,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-import stripe
+from app.lazy_module import lazy  # see that module: stripe costs ~46 MB at import
+
+stripe = lazy("stripe")
 
 log = logging.getLogger(__name__)
 

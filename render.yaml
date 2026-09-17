@@ -104,6 +104,44 @@ services:
       # say what it is has no business doing that. So this must be set.
       - key: SERVICE_ROLE
         value: backend
+      # ── ALLOCATOR: TWO ARENAS, NOT SIXTEEN ───────────────────────────────
+      #
+      # Evidence, from the OOM diagnosis: this process reported RSS 373 MB
+      # against VmData 826 MB. That gap is not leaked Python objects - it is
+      # address space glibc's malloc has taken from the OS and not given back.
+      #
+      # glibc creates up to 8 * nproc per-thread arenas. Render's Starter plan
+      # reports the host's full core count to the container, so a process that
+      # is allowed half a CPU still gets dozens of arenas. Each one holds its
+      # own free lists and its own top-of-heap, freed memory in arena 11 cannot
+      # satisfy an allocation in arena 3, and an arena only returns memory to
+      # the OS when its own top chunk is large and contiguous. A sync FastAPI
+      # app is exactly the shape that suffers: every sync route runs in an
+      # anyio threadpool thread, so request work is spread across threads and
+      # therefore across arenas, and the heap ratchets upward instead of
+      # levelling off. That matches what the graph showed - a slow, steady
+      # climb with no plateau, on an instance serving ~2,700 requests a day.
+      #
+      # EXPECTED IMPACT: less fragmentation retention and a flatter curve, not
+      # a smaller baseline. It does not reduce the ~222 MB of imports; it
+      # attacks the ~4.3 MB/hour of growth that turned two days of uptime into
+      # a restart. A modest throughput cost is possible under heavy concurrency
+      # because threads contend for fewer arenas; at this traffic level that
+      # is not a real trade.
+      #
+      # HOW WE VERIFY: `/proc/self/status` in Render Shell, before and after.
+      # VmData should track much closer to RSS, and RSS should flatten rather
+      # than climb. Sample both at deploy and again 24h later. The backend and
+      # advisorflow-voice run the same image on the same plan, and voice sits
+      # nearly idle, so voice remains the control: if the gap closes on both,
+      # the allocator was the cause; if it closes only on the busy one, the
+      # remaining growth is request-driven and belongs in application code.
+      #
+      # ROLLBACK: delete these two lines and redeploy. It is a pure runtime
+      # environment variable - no code reads it, nothing depends on it, and
+      # removing it restores glibc's default immediately.
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       - key: DATABASE_URL
         fromDatabase:
           name: advisorflow-db
@@ -230,6 +268,10 @@ services:
       # answers the same question the same way.
       - key: SERVICE_ROLE
         value: job
+      # Cap glibc's per-thread arenas. See advisorflow-backend above for the
+      # measurement (RSS 373 MB vs VmData 826 MB) and the rollback.
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       - key: DATABASE_URL
         fromDatabase:
           name: advisorflow-db
@@ -283,6 +325,10 @@ services:
       # answers the same question the same way.
       - key: SERVICE_ROLE
         value: job
+      # Cap glibc's per-thread arenas. See advisorflow-backend above for the
+      # measurement (RSS 373 MB vs VmData 826 MB) and the rollback.
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       - key: DATABASE_URL
         fromDatabase:
           name: advisorflow-db
@@ -312,6 +358,10 @@ services:
       # answers the same question the same way.
       - key: SERVICE_ROLE
         value: job
+      # Cap glibc's per-thread arenas. See advisorflow-backend above for the
+      # measurement (RSS 373 MB vs VmData 826 MB) and the rollback.
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       - key: DATABASE_URL
         fromDatabase:
           name: advisorflow-db
@@ -357,6 +407,10 @@ services:
       # tasks.
       - key: SERVICE_ROLE
         value: voice
+      # Cap glibc's per-thread arenas. See advisorflow-backend above for the
+      # measurement (RSS 373 MB vs VmData 826 MB) and the rollback.
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       - key: DATABASE_URL
         fromDatabase:
           name: advisorflow-db

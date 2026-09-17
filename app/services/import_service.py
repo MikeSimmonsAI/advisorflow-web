@@ -40,7 +40,11 @@ Last Activity/Note, Street Address, City, State, ZIP Code, etc.
 """
 
 import json
-import pandas as pd
+# pandas is ~45 MB of RSS at import and only the spreadsheet reader
+# below touches it. See app/lazy_module.py.
+from app.lazy_module import lazy
+
+pd = lazy("pandas")
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.models import Lead, LeadTier

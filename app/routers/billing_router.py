@@ -19,7 +19,12 @@ import os
 import logging
 from typing import Optional
 
-import stripe
+# stripe is ~46 MB of RSS at import and this is the only router that
+# needs it. See app/lazy_module.py for the measurement and the reason
+# this is a proxy rather than thirteen function-level imports.
+from app.lazy_module import lazy
+
+stripe = lazy("stripe")
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session

@@ -26,7 +26,9 @@ import os
 from datetime import datetime, timedelta
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
+# googleapiclient.discovery is ~20 MB of RSS at import and is used at
+# exactly one call site, in the calendar client builder below. See
+# app/lazy_module.py for why the startup baseline matters.
 from sqlalchemy.orm import Session
 from app.models.models import User, BookingLink, Lead
 from app.utils.crypto import encrypt_value, decrypt_value
@@ -194,6 +196,7 @@ def _get_calendar_service(advisor: User):
         client_secret=GOOGLE_CLIENT_SECRET,
         scopes=SCOPES,
     )
+    from googleapiclient.discovery import build
     return build("calendar", "v3", credentials=creds)
 
 
