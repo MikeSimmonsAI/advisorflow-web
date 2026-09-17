@@ -45,6 +45,15 @@ services:
     # clearing the way for itself. It never terminates a session.
     preDeployCommand: "python -m app.migrate"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    # ── GIVE RENDER A REAL HEALTH SIGNAL ────────────────────────────────────
+    # Without this Render only checks that the port is open, which a process
+    # that booted and then lost its database answers just as cheerfully as a
+    # working one. /health returns 200 from the app itself, so a deploy that
+    # comes up broken is caught before traffic moves to it.
+    #
+    # /health answers HEAD as well as GET as of this change - an external
+    # uptime monitor was getting 405 on roughly half its probes.
+    healthCheckPath: /health
     # ── BUILD FILTER ────────────────────────────────────────────────────────
     # In August, 455 commits landed on main and 113 of them touched
     # frontend/dist and NOTHING else. Every one still triggered a full

@@ -1519,7 +1519,26 @@ def _build_metadata() -> dict:
     }
 
 
-@app.get("/health")
+# HEAD AS WELL AS GET, AND THAT IS NOT A PREFERENCE.
+#
+# RFC 9110: HEAD is identical to GET except that the server must not send a
+# body. A resource that answers GET and refuses HEAD is answering incorrectly.
+#
+# Production was doing exactly that. An external uptime monitor probes this
+# endpoint from several regions on a rotation, and the probes are split: some
+# regions send GET and get 200, others send HEAD and got
+#
+#     "HEAD /health HTTP/1.1" 405 Method Not Allowed
+#
+# every few minutes, indefinitely - roughly half of every monitor's checks
+# failing against a service that was perfectly healthy. Two costs: a log full
+# of 405s that a real problem has to be spotted among, and an availability
+# figure that was wrong in the direction that stops anyone believing it.
+#
+# FastAPI does not add HEAD to a GET route the way plain Starlette does, so it
+# has to be said. `api_route` with both methods is the whole fix; the body is
+# suppressed for HEAD by the protocol layer, so this function is unchanged.
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
     # `status` and `phase` are unchanged so nothing consuming this breaks;
     # `build` is added alongside them.
