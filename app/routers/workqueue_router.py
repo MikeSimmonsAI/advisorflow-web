@@ -5,10 +5,10 @@ Advisor daily work queue.
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
-from app.deps import get_current_user, get_db
+from app.deps import get_current_user, get_db, require_tenant_or_observer
 from app.models.models import (
     CadenceState,
     Lead,
@@ -16,6 +16,7 @@ from app.models.models import (
     Reply,
     User,
 )
+from app.services import operational_queues
 from app.services import reply_classification_service as _rcs
 
 router = APIRouter(prefix="/workqueue", tags=["workqueue"])
@@ -159,3 +160,55 @@ def get_todays_work(
             for lead in outcomes_needed_leads
         ],
     }
+
+
+# ── SS8: THE FOUR QUEUES, DERIVED ───────────────────────────────────────────
+#
+# THEY LIVE HERE ON PURPOSE.
+#
+# `/workqueue/today` above IS the follow-up queue - it was built as one, and
+# it is the only one of the six queue-ish screens in the product that derives
+# its list rather than reading a materialized table. Hanging the other three
+# off a brand-new router would have made a seventh queue surface, which is the
+# exact shape of the problem SS8 exists to undo.
+#
+# `/workqueue/today` is UNCHANGED and still serves its page. The endpoints
+# below are the wider, correctly-scoped answer; nothing has to move at once.
+
+@router.get("/queues")
+def queue_summary(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_or_observer),
+):
+    """Counts for all four queues - the tabs on a queue shell."""
+    return operational_queues.summary(db, current_user, request=request)
+
+
+@router.get("/queues/{name}")
+def queue(
+    name: str,
+    request: Request,
+    limit: int = Query(default=operational_queues.DEFAULT_LIMIT, ge=1,
+                       le=operational_queues.MAX_LIMIT),
+    include_excluded: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_or_observer),
+):
+    """One derived queue: sms | email | voice | follow_up.
+
+    include_excluded reports the leads that did NOT make the queue together
+    with the reasons qualification gave, rather than silently omitting them.
+    A rep who cannot see why a lead is missing concludes the queue is broken.
+    """
+    kwargs = {"request": request, "limit": limit}
+    if name in (operational_queues.SMS, operational_queues.EMAIL,
+                operational_queues.VOICE):
+        kwargs["include_excluded"] = include_excluded
+    try:
+        return operational_queues.get(name, db, current_user, **kwargs)
+    except ValueError as exc:
+        # A typo'd queue name returning an empty list would read as "nothing
+        # to do today", which is the most expensive wrong answer this endpoint
+        # could give.
+        raise HTTPException(status_code=400, detail=str(exc))
