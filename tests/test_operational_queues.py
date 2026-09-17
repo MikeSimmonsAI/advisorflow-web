@@ -299,3 +299,34 @@ def test_the_old_workqueue_today_still_answers(client, auth_headers):
     assert r.status_code == 200
     assert set(r.json()) == {"needs_text", "needs_reply", "cadence_due",
                              "outcomes_needed"}
+
+
+# ── the screen is reachable ─────────────────────────────────────────────────
+
+def _layout():
+    import io, os
+    return io.open(os.path.join("frontend", "src", "components", "Layout.jsx"),
+                   encoding="utf-8").read()
+
+
+def test_my_work_has_a_nav_entry():
+    """/workqueue worked for a long time with no entry in the rail. The only
+    ways in were a card on Overview and a button on the sales MyDay page, so a
+    rep who did not go through Overview could not find the one screen that
+    tells them what to do next."""
+    src = _layout()
+    assert "to: '/workqueue'" in src
+
+
+def test_the_nav_icon_exists_in_the_icon_map():
+    """Layout.jsx says it itself: a name the map does not hold renders an EMPTY
+    svg, so the entry looks like a broken link and nothing says why."""
+    src = _layout()
+    import re
+    row = re.search(r"\{ to: '/workqueue'[^}]*icon: '([a-z-]+)'", src)
+    assert row, "no /workqueue nav row with an icon"
+    name = row.group(1)
+    icon_map = src[src.index("const paths = {"):]
+    icon_map = icon_map[:icon_map.index("\n  }")]
+    assert ("%s:" % name) in icon_map or ("'%s':" % name) in icon_map, \
+        "icon %r is not in the icon map" % name

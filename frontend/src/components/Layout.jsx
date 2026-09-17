@@ -54,6 +54,13 @@ const NAV_GROUPS = [
       // `launchOnly` is answered by a single GET /launch/me on mount.
       { to: '/launch', label: 'Launch', icon: 'zap', launchOnly: true },
       { to: '/leads', label: 'Leads', icon: 'users', featureKey: 'leads' },
+      // MY WORK — /workqueue. It has existed and worked for a long time with
+      // no entry in this rail: the only ways in were a card on Overview and a
+      // button on the sales MyDay page, so a rep who did not go through
+      // Overview could not find the one screen in the product that tells them
+      // what to do next. NO featureKey: it derives from leads the caller is
+      // already entitled to and answers honestly when there is nothing to do.
+      { to: '/workqueue', label: 'My Work', icon: 'check-square' },
       { to: '/replies', label: 'Replies', icon: 'message' },
       { to: '/activity', label: 'Activity', icon: 'send' },
       { to: '/availability', label: 'Availability', icon: 'calendar', featureKey: 'availability' },
@@ -215,6 +222,8 @@ function Icon({ name }) {
     // renders an EMPTY svg rather than failing, so a nav entry with an unknown
     // icon looks like a broken link and nothing anywhere says why.
     package: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></>,
+    // Added with the "My Work" nav item, per the note above.
+    'check-square': <><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
