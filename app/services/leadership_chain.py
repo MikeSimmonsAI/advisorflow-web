@@ -25,21 +25,38 @@ Texas team changes what Josh's link offers.
 
 THOSE NAMES APPEAR IN THIS DOCSTRING AND NOWHERE ELSE IN THE MODULE.
 
-WHY THIS IS NOT A SECOND TRAVERSAL
-----------------------------------
-`compensation.upline()` already walks this exact relationship - brand-scoped,
-active-membership-only, cycle-guarded, depth-bounded - because commission
-overrides have always needed the same answer. Writing a second walker here
-would mean a rep whose manager is paid an override on their deals could be a
-different person from the manager who attends their meetings, and the two would
-drift apart the first time one was fixed.
+THE RELATIONSHIP IS SHARED WITH COMPENSATION. THE STOPPING RULE IS NOT.
+----------------------------------------------------------------------
+`compensation.upline()` walks this same column for commission overrides, and
+the two must agree about WHO IS ABOVE WHOM - a rep whose manager earns an
+override on their deals should be the same manager who attends their meetings.
+`test_leadership_chain.py` asserts that agreement directly on a healthy chart,
+so the two cannot drift.
 
-So `upline()` IS the traversal. This module adds what a MEETING needs on top of
-it, which compensation does not care about:
+They deliberately DIVERGE on one point: what to do at a seat that is no longer
+active.
 
-  * the chain member must still be an ACTIVE seat in this brand - compensation
-    pays whoever the chart names, but a meeting needs somebody who can attend
-  * the user account must be active
+    compensation stops.   Paying an override to somebody who has left the
+                          company is money the business does not owe, and
+                          continuing past them would pay their manager twice.
+
+    a meeting continues.  The question here is "who from this rep's line can
+                          actually be in the room", and the answer when the
+                          direct manager has gone is their manager - NOT
+                          "nobody", and emphatically not somebody from another
+                          line. Stopping would take a rep's booking link
+                          offline the moment their manager left, which is
+                          exactly when inbound leads must not be dropped.
+
+That is why the walk below is written here rather than delegated. It is the
+same column, the same brand scope and the same cycle guard; only the stopping
+rule differs, and it differs for a stated reason. A dead seat that is walked
+THROUGH is still recorded in `broken`, so an operator can see the chart needs
+fixing even though bookings kept working.
+
+WHAT ELSE THIS ADDS THAT COMPENSATION DOES NOT NEED
+---------------------------------------------------
+  * every returned leader must hold an ACTIVE seat AND an active account
   * the result is Users, not ids, because the availability engine takes Users
   * an empty or broken chain is an explicit, named CONFIGURATION STATUS rather
     than an empty list the caller might read as "nobody is free"
@@ -150,6 +167,29 @@ def active_membership(db: Session, user_id: str,
             .first())
 
 
+def _any_membership(db: Session, user_id: Optional[str],
+                    brand_sales_org_id: str) -> Optional[Membership]:
+    """This person's seat here whether or not it is still active.
+
+    Used ONLY to read `reports_to_user_id` so the walk can continue past a
+    manager who has left. It is never the source of a leader - `resolve` checks
+    `active_membership` separately before adding anybody. Prefers the active row
+    when both exist, matching `sales_staff.get_membership`.
+    """
+    if not user_id or not brand_sales_org_id:
+        return None
+    rows = (db.query(Membership)
+            .filter(Membership.user_id == user_id,
+                    Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+                    Membership.scope_id == brand_sales_org_id,
+                    Membership.role.in_(BRAND_SALES_ROLES))
+            .order_by(Membership.created_at.desc()).all())
+    for m in rows:
+        if m.is_active:
+            return m
+    return rows[0] if rows else None
+
+
 def _active_user(db: Session, user_id: Optional[str]) -> Optional[User]:
     if not user_id:
         return None
@@ -181,28 +221,45 @@ def resolve(db: Session, owner_user_id: Optional[str], brand_sales_org_id: str,
     if depth == 0:
         return chain
 
-    # THE TRAVERSAL IS COMPENSATION'S. Imported here rather than reimplemented -
-    # see the module docstring. It returns ids nearest-first, walks only inside
-    # this brand sales org, and stops on a repeat, which is the cycle guard.
-    from app.services.compensation import upline
-    raw_ids = upline(db, owner_user_id, brand_sales_org_id, depth)
-
     # A self-reference produces an empty walk rather than a chain of one, so it
-    # is detected here rather than inferred from the result.
+    # is detected up front rather than inferred from an empty result.
     if owner_membership.reports_to_user_id == owner_user_id:
         chain.status = CHAIN_CYCLE
         chain.broken.append({"user_id": owner_user_id, "reason": "reports_to_self"})
         return chain
 
-    for uid in raw_ids:
-        m = active_membership(db, uid, brand_sales_org_id)
-        u = _active_user(db, uid)
+    # ── the walk ────────────────────────────────────────────────────────────
+    # Same column, same brand scope and same cycle guard as compensation's;
+    # different stopping rule at a dead seat. See the module docstring.
+    #
+    # `seen` is the cycle guard and it is seeded with the owner, so a chart that
+    # points back at the person it started from terminates on the first step
+    # rather than on the depth limit.
+    seen = {owner_user_id}
+    current = owner_user_id
+    hit_cycle = False
+
+    for _ in range(depth):
+        seat = _any_membership(db, current, brand_sales_org_id)
+        nxt = getattr(seat, "reports_to_user_id", None) if seat else None
+        if not nxt:
+            break
+        if nxt in seen:
+            # A loop. Stop and say so - walking it again would return the same
+            # people a second time and, at a large depth, do it repeatedly.
+            hit_cycle = True
+            break
+        seen.add(nxt)
+        current = nxt
+
+        m = active_membership(db, nxt, brand_sales_org_id)
+        u = _active_user(db, nxt)
         if m is None or u is None:
-            # NAMED IN THE CHART, NOT USABLE IN A MEETING. Recorded and skipped -
-            # never silently replaced with somebody else, which is the whole
-            # behaviour this module exists to prevent.
+            # NAMED IN THE CHART, NOT AVAILABLE TO ATTEND. Recorded, walked
+            # through, and never replaced with somebody from another line -
+            # which is the behaviour this whole module exists to guarantee.
             chain.broken.append({
-                "user_id": uid,
+                "user_id": nxt,
                 "reason": "no_active_membership" if m is None else "inactive_user",
             })
             continue
@@ -214,13 +271,12 @@ def resolve(db: Session, owner_user_id: Optional[str], brand_sales_org_id: str,
         # send somebody looking in the wrong place.
         if chain.broken:
             chain.status = CHAIN_BROKEN_LINK
+        elif hit_cycle:
+            chain.status = CHAIN_CYCLE
         elif not owner_membership.reports_to_user_id:
             chain.status = CHAIN_NO_LEADERSHIP
         else:
-            # reports_to is set, upline returned nothing, nothing was recorded
-            # as broken: the only way to get here is a loop upline refused to
-            # walk.
-            chain.status = CHAIN_CYCLE
+            chain.status = CHAIN_BROKEN_LINK
     return chain
 
 
