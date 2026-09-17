@@ -239,8 +239,81 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   return res.text()
 }
 
+// ── ONE DASHBOARD LOAD, FORTY-FOUR ROUND TRIPS ─────────────────────────────
+//
+// MEASURED, in the production backend logs, from a single client IP inside one
+// four-second window: 22 GETs, each preceded by its own CORS preflight. Two of
+// those GETs were `/settings/profile` and two were `/settings/my-capabilities`
+// - the same question, asked twice, in the same instant, because two
+// components each fetch it on mount and neither knows about the other.
+//
+// `useWorkspaceAuthority()` and `Layout.jsx` both ask what the signed-in person
+// may administer. Both are right to ask. Neither should be the one made
+// responsible for knowing that the other exists, because that is the coupling
+// that breaks the next time somebody adds a third caller.
+//
+// SO THIS COALESCES IN FLIGHT, AND ONLY IN FLIGHT.
+//
+// While a GET is outstanding, an identical GET joins it instead of opening a
+// second connection. The moment it settles, the entry is dropped - so the next
+// call goes to the network like any other. There is no TTL, no stored response
+// and no cache to invalidate.
+//
+// THAT DISTINCTION IS THE WHOLE SAFETY ARGUMENT, and it is why this is not a
+// response cache. A cache with a TTL would mean a capability list, an
+// entitlement or a workspace membership could be read after it changed - the
+// exact failure the comments in workspaceAuthority.js and Layout.jsx are
+// written to prevent, where a nav item renders a door the server will refuse.
+// Coalescing cannot do that: every caller receives the answer to a request
+// that was already in flight when they asked, which is no staler than the
+// answer they would have received from their own request issued in the same
+// millisecond. Nothing is ever served from a previous moment.
+//
+// A FAILURE IS NOT SHARED FORWARD. The entry is dropped in `finally`, so a
+// transient error is never held and re-handed to a later caller. Callers that
+// were already joined do see the same rejection - which is what their own
+// request would have done too.
+//
+// THE KEY CARRIES THE SCOPE. Every header that narrows a request - the org
+// override, the brand, the selected workspace, observation mode - is part of
+// the key, along with the options that change how the response is handled. Two
+// reads of the same path in two different customer contexts are two different
+// questions and must never be merged. `_inFlightGets` is cleared on login and
+// logout for the same reason `_contextsPromise` is.
+const _inFlightGets = new Map()
+
+function _getDedupeKey(path, opts) {
+  // Read the same scoping values `request()` reads, so the key cannot drift
+  // from the headers actually sent.
+  const org = opts.noOrgContext ? '' : (getOrgContext()?.orgId || '')
+  const brand = getBrandContext()?.platformId || ''
+  const ws = getWorkspaceContext() || ''
+  const obs = _observationOrgId || ''
+  const flags = [opts.noOrgContext ? 1 : 0, opts.skipRedirect ? 1 : 0].join('')
+  const route = typeof window !== 'undefined' ? window.location.pathname : '/'
+  return [path, org, brand, ws, obs, flags, route].join('\u0000')
+}
+
+export function resetInFlightGets() {
+  _inFlightGets.clear()
+}
+
+function dedupedGet(path, opts = {}) {
+  const key = _getDedupeKey(path, opts)
+  const existing = _inFlightGets.get(key)
+  if (existing) return existing
+  const promise = request(path, { method: 'GET', ...opts }, 0, opts.skipRedirect || false)
+    .finally(() => {
+      // Drop it whether it resolved or rejected. Holding either would turn
+      // coalescing into caching.
+      if (_inFlightGets.get(key) === promise) _inFlightGets.delete(key)
+    })
+  _inFlightGets.set(key, promise)
+  return promise
+}
+
 export const api = {
-  get: (path, opts = {}) => request(path, { method: 'GET', ...opts }, 0, opts.skipRedirect || false),
+  get: (path, opts = {}) => dedupedGet(path, opts),
   post: (path, body) => request(path, { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body) }),
   put: (path, body) => request(path, { method: 'PUT', body: body instanceof FormData ? body : JSON.stringify(body) }),
   patch: (path, body) => request(path, { method: 'PATCH', body: body instanceof FormData ? body : JSON.stringify(body) }),
@@ -267,6 +340,9 @@ export async function login(email, password) {
   // whoever was signed in when it was fetched; carrying it across a sign-in
   // would show one person the other's workspaces until something refetched.
   resetMyContexts()
+  // Any GET still in flight was asked as the PREVIOUS token holder. Joining
+  // one now would hand this person the last person's answer.
+  resetInFlightGets()
   localStorage.setItem(KEY_USER, JSON.stringify({
     full_name: data.full_name, role: data.role, organization_id: data.organization_id,
     must_change_password: data.must_change_password,
@@ -337,6 +413,8 @@ export async function logout() {
   clearAllContext()
   // The in-memory context list goes with them for the same reason.
   resetMyContexts()
+  // And so does anything still in flight, for the same reason again.
+  resetInFlightGets()
 }
 
 // â”€â”€ Keep-alive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
