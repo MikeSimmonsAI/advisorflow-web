@@ -49,7 +49,40 @@ def _get_fresh_access_token(advisor) -> str:
     return response.json()["access_token"]
 
 
-def _fetch_recent_emails(access_token: str, since_minutes: int = 5) -> list:
+# ── THE LOOKBACK WINDOW, AND WHY IT IS NOT THE POLL INTERVAL ────────────────
+#
+# THIS POLLER HAS NO CURSOR. It does not remember where it got to; each run
+# asks Microsoft Graph for everything received in the last N minutes. So the
+# only thing standing between a lead's reply and being missed forever is that
+# the window is WIDER than the gap between runs.
+#
+# At the old `* * * * *` schedule the window was 5 minutes against a 1-minute
+# interval - a 5x overlap that hid the fragility. Moving the cron to
+# `*/5 * * * *` against a 5-minute window would have left ZERO margin, and any
+# of these would have dropped a reply on the floor:
+#
+#   - Render starting a run a few seconds late
+#   - the run itself taking 2-3 seconds before the fetch computes `since`
+#   - clock skew between Render and Graph
+#   - a run that fails and is not retried until the next slot
+#
+# 15 minutes against a 5-minute interval restores a 3x overlap. Re-reading a
+# message costs nothing: replies are deduplicated by (lead_id, body) before
+# insert and processed messages are tagged in the mailbox, so seeing one three
+# times still produces exactly one Reply row. MISSING one is permanent.
+#
+# Keep this at least 3x the cron interval in render.yaml. If the schedule
+# changes, this changes with it.
+POLL_LOOKBACK_MINUTES = 15
+
+# Graph page size. Raised from 50 with the wider window: 50 messages inside 15
+# minutes is reachable for a shared or busy mailbox, and see the ordering note
+# below for what truncation would otherwise cost.
+POLL_PAGE_SIZE = 200
+
+
+def _fetch_recent_emails(access_token: str,
+                         since_minutes: int = POLL_LOOKBACK_MINUTES) -> list:
     """
     Fetch emails received in the last N minutes from Microsoft Graph.
     Polls inbox; looks for any new message (not just Re: prefixed — leads
@@ -65,8 +98,15 @@ def _fetch_recent_emails(access_token: str, since_minutes: int = 5) -> list:
         params={
             "$filter": f"receivedDateTime ge {since}",
             "$select": "id,subject,from,receivedDateTime,body,bodyPreview,conversationId,categories",
-            "$orderby": "receivedDateTime desc",
-            "$top": 50,
+            # OLDEST FIRST, DELIBERATELY.
+            #
+            # This was `desc` with $top 50, so truncation dropped the OLDEST
+            # messages in the window - precisely the ones about to age out of
+            # it, which no later run would ever see again. Ascending means
+            # truncation drops the NEWEST, and the next run's window still
+            # covers those.
+            "$orderby": "receivedDateTime asc",
+            "$top": POLL_PAGE_SIZE,
         },
         timeout=20,
     )
@@ -128,7 +168,7 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
         logger.error("Failed to get access token for advisor %s: %s", advisor_id, e)
         return {"checked": 0, "matched": 0, "errors": 1, "error": str(e)}
 
-    emails = _fetch_recent_emails(access_token, since_minutes=5)
+    emails = _fetch_recent_emails(access_token)
     checked = len(emails)
     matched = 0
     errors = 0

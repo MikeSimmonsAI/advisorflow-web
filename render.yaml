@@ -243,13 +243,28 @@ services:
   - type: cron
     name: advisorflow-email-poller
     runtime: python
-    # SCHEDULE UNCHANGED IN THIS PASS, deliberately. Every-minute polling costs
-    # 171.26 hours of runtime a month ($1.61) — 7x more than any other cron.
-    # Moving to */3 would cut it to ~57 hours (~$0.54, saving ~$1.07/month) and
-    # was accepted in principle, but it is a behaviour change (inbound email
-    # pickup latency 60s -> 180s) and Tier 1 changes no behaviour. Decide it
-    # separately.
-    schedule: "* * * * *"   # Every 1 minute
+    # ── EVERY FIVE MINUTES, NOT EVERY MINUTE ────────────────────────────────
+    #
+    # Measured in production: runs take 2-3 seconds, poll one advisor, and
+    # overwhelmingly process zero messages. Every-minute polling was 1,440
+    # executions a day for that.
+    #
+    #     1,440/day  ->  288/day        (-80%)
+    #
+    # THE CORRECTNESS HALF, WHICH IS THE PART THAT MATTERS. This poller has no
+    # cursor - each run asks Graph for everything received in the last N
+    # minutes - so the interval is only safe while the LOOKBACK WINDOW is
+    # wider than it. The window was 5 minutes, which against this schedule
+    # would have left zero margin and dropped replies on any late start, any
+    # clock skew, or any failed run.
+    #
+    # app/services/email_poller_service.POLL_LOOKBACK_MINUTES is 15 - a 3x
+    # overlap. Re-reading a message costs nothing (replies dedupe by
+    # (lead_id, body) and processed mail is tagged); missing one is permanent.
+    #
+    # Inbound pickup latency goes from ~60s to ~300s worst case. If that is
+    # ever too slow, change BOTH this and the lookback together.
+    schedule: "*/5 * * * *"   # Every 5 minutes
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python app/jobs/run_email_poller.py"
     buildFilter: *pythonBuildFilter
