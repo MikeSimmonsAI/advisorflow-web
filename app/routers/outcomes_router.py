@@ -9,6 +9,7 @@ reply/booking counts.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from datetime import datetime
@@ -185,14 +186,25 @@ def get_outcomes_summary(
     # because authorized_lead_query gives a manager the organization.
     scoped_lead_ids = lead_scope.authorized_lead_query(db, current_user, Lead.id).subquery()
 
-    org_outcomes = (
-        db.query(LeadOutcome)
-        .filter(LeadOutcome.lead_id.in_(db.query(scoped_lead_ids.c.id)))
-        .all()
-    )
+    # COUNTED IN SQL, NOT BY LOADING THE BOOK AND MEASURING IT.
+    #
+    # This used to be `db.query(LeadOutcome).filter(...).all()` - every outcome
+    # row in the organization, hydrated into mapped objects - in order to
+    # produce two integers with `len()` and a `sum()` over a boolean. It sits on
+    # the Overview page, which is one of the ~22 requests a dashboard load
+    # fires, on a 512 MB instance that was restarting out of memory. A customer
+    # with three years of appointments was materialising three years of
+    # appointments to render two tiles.
+    #
+    # The counts are the same numbers, computed where counting belongs.
+    outcome_scope = LeadOutcome.lead_id.in_(db.query(scoped_lead_ids.c.id))
 
-    total_appointments = len(org_outcomes)
-    sales_count = sum(1 for o in org_outcomes if o.resulted_in_sale)
+    total_appointments = int(
+        db.query(func.count(LeadOutcome.id)).filter(outcome_scope).scalar() or 0)
+    sales_count = int(
+        db.query(func.count(LeadOutcome.id))
+        .filter(outcome_scope, LeadOutcome.resulted_in_sale == True)  # noqa: E712
+        .scalar() or 0)
     conversion_rate = round((sales_count / total_appointments * 100)) if total_appointments > 0 else 0
 
     # Count booked leads as pipeline - these are real, in-progress
@@ -203,13 +215,31 @@ def get_outcomes_summary(
     # Most common sale items from free-text field - split by comma,
     # count occurrences, return top 3. Genuinely useful even though
     # the field is free text.
+    #
+    # THE ONE PART THAT STILL HAS TO COME BACK AS TEXT, AND WHY IT IS SMALL.
+    #
+    # `sale_items` is free text with comma-separated entries, so the split has
+    # to happen in Python and SQL cannot do the whole job. What SQL CAN do is
+    # collapse the rows first: identical strings are grouped and counted in the
+    # database, so the loop below runs over the DISTINCT things people have
+    # typed - a few hundred at worst - rather than over every outcome ever
+    # recorded. The arithmetic is unchanged, because each distinct string is
+    # then weighted by how many rows carried it. Same answer, one short column,
+    # and the size of the result no longer tracks the age of the account.
     item_counts = {}
-    for o in org_outcomes:
-        if o.sale_items:
-            for item in o.sale_items.split(','):
-                item = item.strip().lower()
-                if item:
-                    item_counts[item] = item_counts.get(item, 0) + 1
+    grouped = (
+        db.query(LeadOutcome.sale_items, func.count(LeadOutcome.id))
+        .filter(outcome_scope, LeadOutcome.sale_items.isnot(None))
+        .group_by(LeadOutcome.sale_items)
+        .all()
+    )
+    for raw, occurrences in grouped:
+        if not raw:
+            continue
+        for item in raw.split(','):
+            item = item.strip().lower()
+            if item:
+                item_counts[item] = item_counts.get(item, 0) + int(occurrences or 0)
     top_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)[:3]
 
     return {
