@@ -433,7 +433,11 @@ def compose(db: Session, impl, org: Organization,
     # resolved. Observed live on a launch created for an unbranded workspace.
     #
     # `{team}` is the noun phrase already complete, so the sentence adds only
-    # the possessive: "Your EvoSys Pro implementation team is here to help."
+    # the possessive: "Your <platform name> implementation team is here to
+    # help." A real brand was written out here as the example, which is a
+    # customer's name in the engine's source - the rule this file is held to
+    # does not carve out comments, and it should not: an example is how the
+    # next literal gets in.
     # and, unbranded, "Your implementation team is here to help." `{brand}` is
     # unchanged, so every brand's stored override keeps meaning what it meant.
     team = ("%s implementation team" % platform.name
