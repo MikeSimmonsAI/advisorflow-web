@@ -97,7 +97,11 @@ def test_get_unread_notifications_excludes_read_ones(db_session, sample_advisor)
 
     unread = get_unread_notifications(db_session, sample_advisor.id)
     assert len(unread) == 1
-    assert unread[0].message == "First"
+    # Rows come back as plain dicts of the five columns the bell renders, not as
+    # mapped Notification objects. That is the point of the change: this
+    # endpoint is ~53% of production HTTP traffic and it was hydrating full ORM
+    # rows - including the whole reply body - once a minute per client.
+    assert unread[0]["message"] == "First"
 
 
 def test_mark_notification_read_succeeds_for_owner(db_session, sample_advisor):
