@@ -375,6 +375,22 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
             "send_email_to_lead: pass both subject and body_html to send a "
             "drafted email, or neither to render the lead's message track."
         )
+    # AN EMPTY DRAFT IS NOT A DRAFT.
+    #
+    # The check above tested for None, so `subject=""` and `body_html=""`
+    # passed as a perfectly well-formed drafted send and put a blank email in
+    # front of a family. That is not hypothetical on this path: the bulk AI
+    # composer's original defect was reading `result.message` when the API
+    # returns `reply`, which yields exactly this - a present, empty string.
+    # The screen said "Sent" and the family would have received nothing but a
+    # blank message from their funeral home.
+    #
+    # Whitespace counts as empty. A subject of one space is not a subject.
+    if subject is not None and (not subject.strip() or not (body_html or "").strip()):
+        raise ValueError(
+            "send_email_to_lead: an empty subject or body is not a draft. "
+            "Refusing to send a blank email."
+        )
     # ── THE DEMONSTRATION BOUNDARY ──────────────────────────────────────────
     # Before the compliance gate, because compliance answers questions about a
     # real family's real consent and this asks whether there is a real family
