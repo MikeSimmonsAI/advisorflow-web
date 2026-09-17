@@ -385,6 +385,63 @@ def put_features(org_id: str, req: FeaturesIn, db: Session = Depends(get_db),
     return entitlements.feature_report(org)
 
 
+class OutboundEmailSourcesIn(BaseModel):
+    """Which repaired outbound email paths this customer may use.
+
+    `sources` is required and has no default, for the same reason FeaturesIn's
+    `enabled` does: a field that defaults to something meaningful is a typo
+    away from granting it. Unknown keys are refused outright, and there is
+    deliberately no value meaning "all" - four of these contact families, and
+    "all" is not a thing anybody should be able to say in one keystroke.
+    """
+    model_config = ConfigDict(extra="forbid")
+    sources: List[str]
+
+
+@router.get("/{org_id}/outbound-email-sources")
+def get_outbound_email_sources(org_id: str, db: Session = Depends(get_db),
+                               user: User = Depends(require_god)):
+    """Both halves of the gate and the AND of them.
+
+    An operator asking "why did that customer's follow-up not go out" needs to
+    see which switch is off, not just that nothing happened.
+    """
+    from app.services import outbound_email_gate
+    org = _load(db, org_id)
+    return {
+        "organization_id": org.id,
+        "enabled": outbound_email_gate.org_enabled_sources(org),
+        "available": list(outbound_email_gate.GATED_SOURCES),
+        "effective": outbound_email_gate.effective_report(org),
+    }
+
+
+@router.put("/{org_id}/outbound-email-sources")
+def put_outbound_email_sources(org_id: str, req: OutboundEmailSourcesIn,
+                               db: Session = Depends(get_db),
+                               user: User = Depends(require_god)):
+    """Enabling a source HERE still does not send.
+
+    The deployment switch has to be on as well, and in this build no sender is
+    wired up behind either of them. This endpoint exists so that when a path is
+    restored, turning it on for one customer is a recorded decision about that
+    customer and cannot reach another.
+    """
+    from app.services import outbound_email_gate
+    org = _load(db, org_id)
+    try:
+        enabled = outbound_email_gate.set_org_sources(db, org, user, req.sources)
+    except ValueError as bad:
+        raise HTTPException(status_code=400, detail=str(bad))
+    db.commit()
+    db.refresh(org)
+    return {
+        "organization_id": org.id,
+        "enabled": enabled,
+        "effective": outbound_email_gate.effective_report(org),
+    }
+
+
 # ── STEP 5b: ADMINISTRATION - the two delegation gates ──────────────────────
 #
 # THREE STATES, THREE ENDPOINTS, ON PURPOSE. The features endpoints above

@@ -619,6 +619,9 @@ COLUMNS_TO_ADD = [
     # no default on purpose: NULL means "written before the platform recorded
     # this", which is a different fact from any real source value, and nothing
     # backfills them. See app/services/send_source.py.
+    # Per-customer outbound email enablement. Nullable, and NULL means none -
+    # see the column comment on Organization.
+    ("organizations", "outbound_email_sources", "TEXT"),
     ("messages", "sent_by_user_id", "VARCHAR"),
     ("messages", "send_source", "VARCHAR"),
     ("email_messages", "sent_by_user_id", "VARCHAR"),

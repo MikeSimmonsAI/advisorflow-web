@@ -399,6 +399,23 @@ class Organization(Base):
     # JSON array of keys from app/services/capabilities.py CAPABILITIES.
     delegated_capabilities = Column(Text, nullable=True)
 
+    # WHICH REPAIRED OUTBOUND EMAIL PATHS THIS CUSTOMER MAY USE.
+    #
+    # A JSON list of app/services/send_source.py values, and it is deliberately
+    # NOT `enabled_features`. That column's NULL means "legacy customer, keep
+    # everything", which is the right failure for a screen and exactly the
+    # wrong one for a sender: every organization that predates this column
+    # would have had four dormant outbound paths switched on the moment one
+    # was restored.
+    #
+    # `delegated_capabilities` above is the precedent that fits - NULL there
+    # means God has never delegated anything and the safe reading of "never
+    # said" is NO. Same shape, same reader, same fail-closed semantics.
+    #
+    # It is one half of the answer. app/services/outbound_email_gate.py holds
+    # the deployment half, and a send needs both.
+    outbound_email_sources = Column(Text, nullable=True)
+
     # What this org calls their non-admin users (e.g. "Agent", "Rep", "Advisor", "FSA").
     # Null = use industry default. Overrides the hardcoded "Advisor" label throughout the UI.
     member_label = Column(String(100), nullable=True)   # singular e.g. "Agent"

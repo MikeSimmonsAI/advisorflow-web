@@ -38,6 +38,7 @@ NOTHING HERE SENDS. There is no provider import in this module and there is
 no code path through it that reaches one.
 """
 
+import json
 import logging
 import os
 
@@ -95,6 +96,86 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def org_enabled_sources(org) -> list:
+    """The sources THIS customer may use. NULL means none.
+
+    Mirrors capabilities.self_managed_by line for line, including the reading
+    of NULL, because the question has the same shape: God has not said this
+    customer may use this path, and the safe reading of "never said" for
+    contacting somebody's families is no.
+
+    Unknown strings are dropped rather than honoured, so a typo in a stored
+    list cannot enable anything, and a corrupt value yields no sources at all
+    rather than a licence.
+    """
+    if org is None:
+        return []
+    raw = getattr(org, "outbound_email_sources", None)
+    if raw is None:
+        return []
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(value, list):
+        return []
+    return [s for s in value if isinstance(s, str) and s in _ENV_BY_SOURCE]
+
+
+def org_source_enabled(org, source) -> bool:
+    return source in org_enabled_sources(org)
+
+
+def set_org_sources(db, org, actor, sources):
+    """Replace a customer's outbound source list. Audited, like every other
+    entitlement change. `None` and `[]` both mean none - there is deliberately
+    no value meaning "all", because "all" is what nobody should be able to say
+    in one keystroke about four paths that contact families."""
+    from app.routers.audit_log_router import log_action
+
+    before = org_enabled_sources(org)
+    cleaned = []
+    unknown = []
+    for raw in (sources or []):
+        if raw in _ENV_BY_SOURCE:
+            if raw not in cleaned:
+                cleaned.append(raw)
+        else:
+            unknown.append(raw)
+    if unknown:
+        raise ValueError(
+            "Unknown outbound email source(s): %s. Valid: %s"
+            % (", ".join(sorted(set(unknown))), ", ".join(GATED_SOURCES)))
+    org.outbound_email_sources = json.dumps(cleaned)
+    db.flush()
+    log_action(
+        db, org.id, actor.id,
+        action="customer.outbound_email_sources_set",
+        target_type="organization", target_id=org.id,
+        platform_id=getattr(org, "platform_id", None),
+        before={"outbound_email_sources": before},
+        after={"outbound_email_sources": cleaned},
+        commit=False,
+    )
+    return cleaned
+
+
+def effective_report(org) -> dict:
+    """Both halves, per source, and the AND of them. This is what an operator
+    asking "why did that not send" should be shown."""
+    out = {}
+    for source in GATED_SOURCES:
+        deployment = source_enabled(source)
+        customer = org_source_enabled(org, source)
+        out[source] = {
+            "deployment_enabled": deployment,
+            "organization_enabled": customer,
+            "effective": bool(deployment and customer),
+            "variable": _ENV_BY_SOURCE[source],
+        }
+    return out
+
+
 def source_enabled(source) -> bool:
     """Is THIS repaired path permitted to reach a provider in this deployment?
 
@@ -114,6 +195,22 @@ def enablement_report() -> dict:
     """Every gated source and whether it is live, for a health endpoint or an
     operator asking "what can actually send right now"."""
     return {source: source_enabled(source) for source in GATED_SOURCES}
+
+
+def _org_for_lead(db, lead):
+    """The LEAD'S organization, never the caller's.
+
+    The same rule sms_service._demo_send_guard follows and for the same
+    reason: a god_admin operating inside a customer has organization_id None,
+    so reading the sender's tenancy answers the wrong question for exactly the
+    caller most able to cause damage. The family that would be contacted
+    belongs to one organization, and that organization decides.
+    """
+    from app.models.models import Organization
+    org_id = getattr(lead, "organization_id", None)
+    if not org_id:
+        return None
+    return db.query(Organization).filter(Organization.id == org_id).first()
 
 
 class EmailSendDisabled(RuntimeError):
@@ -168,13 +265,38 @@ def gate_lead_email(db, lead, *, send_source, actor_user_id=None):
     from app.services.compliance_service import check_compliance_preflight
     check_compliance_preflight(db, lead, channel="email")
 
+    # BOTH HALVES, AND THE DEPLOYMENT HALF FIRST.
+    #
+    # A deployment switch alone is not enough on a white-label platform serving
+    # several customers from one process: turning bulk AI email on for the
+    # customer who asked for it would have turned it on for every other tenant
+    # in the same deployment at the same instant.
+    #
+    # So the rule is DEPLOYMENT AND ORGANIZATION. The deployment switch says
+    # "this build may do this at all"; the organization list says "this
+    # customer bought it / asked for it / is ready for it". Neither alone
+    # sends, and one customer's list can never speak for another's.
     if not source_enabled(send_source):
         logger.info(
-            "outbound email gate PASSED but source is disabled: lead=%s "
-            "source=%s actor=%s", getattr(lead, "id", None), send_source,
-            actor_user_id,
+            "outbound email gate PASSED but source is disabled for this "
+            "deployment: lead=%s source=%s actor=%s",
+            getattr(lead, "id", None), send_source, actor_user_id,
         )
         raise EmailSendDisabled(_disabled_reason(send_source))
+
+    org = _org_for_lead(db, lead)
+    if not org_source_enabled(org, send_source):
+        logger.info(
+            "outbound email gate PASSED but source is not enabled for this "
+            "organization: lead=%s org=%s source=%s",
+            getattr(lead, "id", None), getattr(lead, "organization_id", None),
+            send_source,
+        )
+        raise EmailSendDisabled(
+            f"Outbound email for source {send_source!r} is not enabled for "
+            f"this organization. The deployment allows it; this customer has "
+            f"not been switched on for it. Nothing was sent."
+        )
 
     # The source is switched ON and the family may be contacted - and there is
     # still no sender, because restoring one is Phase 3. When that lands, the

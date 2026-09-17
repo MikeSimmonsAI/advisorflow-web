@@ -143,9 +143,13 @@ def test_compliance_is_checked_before_the_switch_is_consulted(
 
 def test_an_enabled_source_still_cannot_send_in_this_build(
         db_session, sample_org, sample_advisor, monkeypatch):
-    """Phase 2.5 adds the switch; Phase 3 adds the sender. Even switched on,
-    there is nothing behind it - and the refusal says so."""
+    """Phase 2.5 adds the switch; Phase 3 adds the sender. Even switched on at
+    BOTH halves of the gate, there is nothing behind it - and the refusal says
+    so, distinctly from a refusal at either switch."""
+    import json as _json
     _enable(monkeypatch, send_source.BULK_AI)
+    sample_org.outbound_email_sources = _json.dumps([send_source.BULK_AI])
+    db_session.commit()
     lead = _lead(db_session, sample_org, sample_advisor, phone=None)
     with patch("app.services.email_service.send_email_via_provider") as provider:
         with pytest.raises(gate.EmailSendDisabled) as caught:
