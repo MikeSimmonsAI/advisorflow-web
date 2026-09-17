@@ -22,9 +22,11 @@ MAX_HTML_BYTES = 2 * 1024 * 1024
 def public_url(base_url: str, token: str) -> str:
     """The link a rep hands to a prospect — on the BRAND's domain.
 
-    Built from the brand's own configured base url rather than a constant, so a
-    BookaBoost demo arrives on a BookaBoost address and nothing here hardcodes
-    one brand's host.
+    Built from the brand's own configured base url rather than a constant, so
+    each brand's demo arrives on that brand's own address and nothing here
+    hardcodes one brand's host. The example used to name a real brand, which is
+    a customer's name sitting in platform machinery - an example is how the
+    next literal gets in.
     """
     return "%s/demo/%s" % ((base_url or "").rstrip("/"), token)
 

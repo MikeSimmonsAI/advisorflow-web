@@ -204,3 +204,165 @@ def test_sending_is_refused_in_this_build(db_session, monkeypatch):
 def test_an_appointment_with_no_prospect_email_is_refused_before_anything(db_session):
     with pytest.raises(ValueError, match="no prospect email"):
         dc.send(db_session, _Appt(prospect_email=None))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SS11 VERIFICATION PASS — what has to be true in a real mail client
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _html(**kw):
+    return dc.build(_Appt(**kw.pop("appt", {})), kw.pop("ident", IDENT), **kw)["html"]
+
+
+def test_there_is_no_javascript_anywhere_in_the_email():
+    """Mail clients strip it, and a template that needs it is a template that
+    does not work. Anything that has to be clickable is an anchor."""
+    html = _html()
+    lowered = html.lower()
+    assert "<script" not in lowered
+    assert "javascript:" not in lowered
+    for handler in ("onclick", "onload", "onerror", "onmouseover"):
+        assert handler + "=" not in lowered
+
+
+def test_every_style_is_inline_with_no_stylesheet_of_any_kind():
+    """Gmail strips <style> in several contexts and Outlook.com rewrites it.
+    A design that depends on either is a design that renders somewhere as
+    unstyled text."""
+    lowered = _html().lower()
+    assert "<style" not in lowered
+    assert "<link" not in lowered
+    assert "@import" not in lowered
+    assert "@media" not in lowered
+    assert 'style="' in lowered
+
+
+def test_no_layout_technique_that_outlook_cannot_render():
+    """Outlook desktop uses Word's engine. Flexbox, grid, float and absolute
+    positioning collapse there - and a confirmation that collapses reads as a
+    scam, which is the opposite of what it is for."""
+    lowered = _html().lower()
+    for broken in ("display:flex", "display: flex", "display:grid",
+                   "display: grid", "position:absolute", "position:fixed",
+                   "float:left", "float:right"):
+        assert broken not in lowered, broken
+
+
+def test_nothing_the_prospect_must_see_lives_in_a_background_image():
+    """Outlook ignores CSS background-image. A button painted that way is
+    invisible there - which is the same failure as putting the CTA in the
+    graphic, arrived at by a different route."""
+    lowered = _html(graphic_url="https://cdn.test/hero.png",
+                    graphic_alt="A preview of the product").lower()
+    assert "background-image" not in lowered
+    assert "background:url" not in lowered
+
+
+def test_every_image_carries_alt_text_and_does_not_depend_on_loading():
+    """Corporate clients block images by default. The email has to be complete
+    with none of them loaded."""
+    html = _html(graphic_url="https://cdn.test/hero.png",
+                 graphic_alt="A preview of the product")
+    imgs = [html[m:html.index(">", m)] for m in
+            [i for i in range(len(html)) if html.startswith("<img", i)]]
+    assert imgs, "no image rendered"
+    for img in imgs:
+        assert "alt=" in img, img
+    # And with no graphic at all the email still has its meeting details and
+    # its link.
+    bare = _html()
+    assert "Join" in bare and "zoom.us" in bare
+
+
+def test_the_graphic_may_carry_branding_and_a_product_preview():
+    """The rule is about the CALL TO ACTION, not about images. Branding, an
+    industry visual and a product preview are exactly what the graphic is
+    for."""
+    for alt in ("BrandCo product preview", "Funeral home dashboard",
+                "A preview of the platform", "Our branding"):
+        out = dc.build(_Appt(), IDENT, graphic_url="https://cdn.test/g.png",
+                       graphic_alt=alt)
+        assert out["graphic_url"] == "https://cdn.test/g.png"
+
+
+def test_the_subject_line_is_not_empty_and_names_the_brand():
+    out = dc.build(_Appt(), IDENT)
+    assert out["subject"].strip()
+    assert IDENT["name"] in out["subject"] or "demo" in out["subject"].lower()
+
+
+# ── status, resend and audit ────────────────────────────────────────────────
+
+def test_a_resend_is_the_same_call_again_and_the_counter_tells_them_apart():
+    """There is no separate resend path to keep in step with the first one."""
+    import inspect
+    src = inspect.getsource(dc)
+    assert "demo_confirmation_count" in src
+    # One sender, not two.
+    assert src.count("def send(") == 1
+    assert "def resend(" not in src
+
+
+def test_the_appointment_carries_its_own_delivery_status():
+    appt = _Appt()
+    for field in ("demo_confirmation_sent_at", "demo_confirmation_error",
+                  "demo_confirmation_count"):
+        assert hasattr(appt, field)
+
+
+def test_the_failure_field_exists_so_a_refusal_is_visible_not_silent():
+    """A send that failed and left no trace is how the five SS10 paths stayed
+    dead for months."""
+    import inspect
+    src = inspect.getsource(dc._record)
+    assert "demo_confirmation_error" in src
+
+
+def test_preview_reaches_no_provider_and_no_gate():
+    """Preview is for a rep looking at their own work. It must not be able to
+    send, and it must not be blocked by the send switch either."""
+    import ast, inspect
+    tree = ast.parse(inspect.getsource(dc.preview))
+    names = {getattr(n.func, "id", None) or getattr(n.func, "attr", None)
+             for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    for forbidden in ("send_email_via_provider", "_send_email_resend",
+                      "gate_staff_email", "send"):
+        assert forbidden not in names
+
+
+# ── timezone ────────────────────────────────────────────────────────────────
+
+def test_the_time_is_the_prospects_and_the_zone_is_named():
+    """A confirmation that says 11:00 without saying where is a missed
+    meeting."""
+    html = _html()
+    assert "(New York)" in html
+
+
+def test_no_prospect_timezone_falls_back_to_the_appointments_own(
+        ):
+    html = dc.build(_Appt(prospect_timezone=None), IDENT)["html"]
+    assert "Chicago" in html
+
+
+def test_a_broken_timezone_does_not_take_the_email_down():
+    """An unknown IANA name is bad data, not a reason to send nothing."""
+    out = dc.build(_Appt(prospect_timezone="Mars/Olympus"), IDENT)
+    assert out["html"] and out["subject"]
+
+
+# ── org isolation ───────────────────────────────────────────────────────────
+
+def test_the_endpoints_refuse_an_appointment_that_is_not_the_callers(client):
+    for path in ("/sales/appointments/not-a-real-id/demo-confirmation/preview",
+                 "/sales/appointments/not-a-real-id/demo-confirmation"):
+        r = client.post(path)
+        assert r.status_code in (401, 403, 404), (path, r.status_code)
+
+
+def test_the_brand_comes_from_the_appointment_not_from_a_constant():
+    """Two brands, same code, two different emails."""
+    a = dc.build(_Appt(title="Platform demo"), dict(IDENT, name="Alpha Co"))["html"]
+    b = dc.build(_Appt(title="Platform demo"), dict(IDENT, name="Beta Co"))["html"]
+    assert "Alpha Co" in a and "Beta Co" not in a
+    assert "Beta Co" in b and "Alpha Co" not in b

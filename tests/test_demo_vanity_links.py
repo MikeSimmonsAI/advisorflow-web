@@ -179,3 +179,123 @@ def test_the_serialised_shape_carries_both_addresses(db_session, brand_world):
     assert out["slug"] == "countryside"
     assert out["url"] == "https://app.example.com/demo/countryside"
     assert out["token_url"].endswith(demo.token)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SS9 VERIFICATION PASS — scoping, permissions, and no customer in the code
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_a_brands_host_never_resolves_another_brands_name(db_session, brand_world):
+    """The same readable name is safe for two brands only if the lookup is
+    scoped to the brand the request arrived at."""
+    a = brand_world["brand-a"]; b = brand_world["brand-b"]
+    _publish(db_session, a["opp"], slug="countryside")
+    db_session.commit()
+
+    # Brand A's own host finds it.
+    assert ds.resolve(db_session, "countryside",
+                      brand_sales_org_id=a["brand"].id) is not None
+    # Brand B's host does not, even though the name exists.
+    assert ds.resolve(db_session, "countryside",
+                      brand_sales_org_id=b["brand"].id) is None
+
+
+def test_a_revoked_demos_name_cannot_be_resolved_by_any_brand(
+        db_session, brand_world):
+    a = brand_world["brand-a"]
+    demo = _publish(db_session, a["opp"], slug="retire-me")["demo"]
+    db_session.commit()
+    ds.revoke(db_session, demo)
+    db_session.commit()
+    for brand in (a["brand"].id, brand_world["brand-b"]["brand"].id, None):
+        assert ds.resolve(db_session, "retire-me", brand_sales_org_id=brand) is None
+
+
+def test_a_wrong_token_and_a_wrong_name_fail_identically(db_session, brand_world):
+    """Distinguishing 'expired' from 'never existed' turns this into an oracle
+    for guessing live links - which matters more now that an address can be a
+    short readable word rather than a 43-character secret."""
+    a = brand_world["brand-a"]
+    demo = _publish(db_session, a["opp"], slug="guessable")["demo"]
+    db_session.commit()
+    ds.revoke(db_session, demo)
+    db_session.commit()
+    assert ds.resolve(db_session, "guessable") is None
+    assert ds.resolve(db_session, "never-existed-at-all") is None
+    assert ds.resolve(db_session, "not-a-real-token-value") is None
+
+
+def test_taking_a_name_never_moves_another_brands_row(db_session, brand_world):
+    """Brand B publishing a name brand A already uses must leave A's row
+    untouched - not silently repoint it."""
+    a = brand_world["brand-a"]; b = brand_world["brand-b"]
+    mine = _publish(db_session, a["opp"], slug="shared-word")["demo"]
+    db_session.commit()
+    mine_id, mine_token = mine.id, mine.token
+
+    theirs = _publish(db_session, b["opp"], slug="shared-word")["demo"]
+    db_session.commit()
+
+    still = db_session.query(DemoSite).filter(DemoSite.id == mine_id).one()
+    assert still.slug == "shared-word"
+    assert still.token == mine_token
+    assert theirs.id != mine_id
+    assert ds.resolve(db_session, mine_token) is not None
+
+
+def test_the_owner_lookup_is_scoped_to_one_brand(db_session, brand_world):
+    a = brand_world["brand-a"]; b = brand_world["brand-b"]
+    _publish(db_session, a["opp"], slug="owned")
+    db_session.commit()
+    assert ds.slug_owner(db_session, a["brand"].id, "owned") is not None
+    assert ds.slug_owner(db_session, b["brand"].id, "owned") is None
+
+
+def test_a_republish_keeps_the_name_on_exactly_one_row(db_session, brand_world):
+    """Two live rows holding the same slug would make resolution arbitrary."""
+    a = brand_world["brand-a"]
+    first = _publish(db_session, a["opp"], slug="once")["demo"]
+    db_session.commit()
+    second = _publish(db_session, a["opp"], slug="once")["demo"]
+    db_session.commit()
+    holders = (db_session.query(DemoSite)
+               .filter(DemoSite.brand_sales_org_id == a["brand"].id,
+                       DemoSite.slug == "once").all())
+    assert len(holders) == 1
+    assert holders[0].id == second.id
+    # And the first demo's token still opens it - nothing already sent broke.
+    assert ds.resolve(db_session, first.token) is not None
+
+
+def test_no_customer_or_brand_is_named_in_the_demo_link_code():
+    """SS9 is platform machinery. A literal here is a customer's name in the
+    engine, and the next one gets added because the first one was allowed."""
+    import io, re
+    from pathlib import Path
+    banned = (r"\bevosys\b", r"\bbookaboost\b", r"\brestland\b",
+              r"\batlantis\b", r"\bcountryside land\b")
+    root = Path(__file__).resolve().parents[1] / "app"
+    offences = []
+    for rel in ("services/demo_sites.py", "models/demo_site_models.py"):
+        text = io.open(root / rel, encoding="utf-8").read().lower()
+        for pattern in banned:
+            if re.search(pattern, text):
+                offences.append("%s: %s" % (rel, pattern))
+    assert offences == [], offences
+
+
+def test_the_public_route_takes_a_token_or_a_name_and_nothing_else(client):
+    """A path that resolved arbitrary input would be a different surface."""
+    r = client.get("/public/demo/definitely-not-a-real-demo")
+    assert r.status_code in (404, 410), r.status_code
+
+
+def test_publishing_requires_an_authenticated_caller(client):
+    r = client.post("/sales/opportunities/does-not-exist/demo-site",
+                    json={"title": "x", "html": "<p>x</p>"})
+    assert r.status_code in (401, 403), r.status_code
+
+
+def test_revoking_requires_an_authenticated_caller(client):
+    r = client.post("/sales/demo-sites/does-not-exist/revoke")
+    assert r.status_code in (401, 403), r.status_code
