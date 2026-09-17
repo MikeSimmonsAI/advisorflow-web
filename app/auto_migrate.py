@@ -622,6 +622,9 @@ COLUMNS_TO_ADD = [
     # Per-customer outbound email enablement. Nullable, and NULL means none -
     # see the column comment on Organization.
     ("organizations", "outbound_email_sources", "TEXT"),
+    # See the column comment on BrandBillingPlan: on the Custom tier a NULL
+    # ceiling means unrecorded, not unlimited.
+    ("brand_billing_plans", "requires_entitlement_policy", "BOOLEAN DEFAULT FALSE"),
     ("messages", "sent_by_user_id", "VARCHAR"),
     ("messages", "send_source", "VARCHAR"),
     ("email_messages", "sent_by_user_id", "VARCHAR"),

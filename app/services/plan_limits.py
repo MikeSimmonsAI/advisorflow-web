@@ -282,13 +282,54 @@ def limit_for(db: Session, org: Optional[Organization], key: str) -> Optional[in
     number would invent a cap out of a purchase meant to remove one.
     """
     plan = effective_plan(db, org)
-    source = plan
-    if source is None:
-        source = current_snapshot(db, org)
+    snapshot = current_snapshot(db, org)
+
+    # THE SNAPSHOT IS AN OVERRIDE, NOT A FALLBACK, AND THAT IS THE FIX.
+    #
+    # This used to consult the snapshot only when the organization sat on NO
+    # catalogue tier. So the one supported way to record what a deal actually
+    # agreed - PUT /god/billing/customers/{id}/entitlements - was silently
+    # ignored for every customer who had a plan key, which is nearly all of
+    # them. A negotiated ceiling that the platform stores and then does not
+    # enforce is worse than not storing it.
+    #
+    # Per dimension, not wholesale: a snapshot that records max_leads and says
+    # nothing about max_users overrides the first and leaves the second to the
+    # tier, because that is what the deal said.
+    if snapshot is not None:
+        if key in _snapshot_unlimited(snapshot):
+            return None
+        snap_value = getattr(snapshot, key, None)
+        if snap_value is not None:
+            return _positive_or_none(snap_value, db, org, key)
+
+    source = plan if plan is not None else snapshot
     if source is None:
         return None
     value = getattr(source, key, None)
+
     if value is None:
+        # A NULL ON A POLICY TIER IS NOT UNLIMITED.
+        #
+        # On a published tier a NULL ceiling is the brand's own rate card
+        # saying uncapped. On the Custom tier it means nobody has written the
+        # deal down yet, and returning None there is how a Custom customer
+        # became quietly unlimited on every dimension.
+        #
+        # The fallback is the brand's entry tier, not zero. An unconfigured
+        # deal is the platform's mistake and the customer should not be the one
+        # it lands on; entitlement_state reports it as NEEDS CONFIGURATION so
+        # somebody fixes it, and until they do the ceiling is conservative
+        # rather than absent.
+        if plan is not None and getattr(plan, "requires_entitlement_policy", False):
+            floor = _entry_tier_limit(db, org, key)
+            if floor is not None:
+                log.warning(
+                    "plan_limits: %s is on policy tier %s with no recorded %s; "
+                    "falling back to the entry tier's ceiling of %s. Record the "
+                    "deal's terms via the entitlements endpoint.",
+                    getattr(org, "id", None), getattr(plan, "key", None), key, floor)
+                return floor + purchased_capacity(db, org, key)
         return None
     try:
         value = int(value)
@@ -297,6 +338,46 @@ def limit_for(db: Session, org: Optional[Organization], key: str) -> Optional[in
     if value <= 0:
         return None
     return value + purchased_capacity(db, org, key)
+
+
+def _positive_or_none(value, db, org, key):
+    """A stored ceiling, normalised, with bought capacity added."""
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return value + purchased_capacity(db, org, key)
+
+
+def _entry_tier_limit(db: Session, org: Optional[Organization], key: str):
+    """The lowest published ceiling this brand actually sells.
+
+    Used only for a policy tier whose terms have not been recorded. It is the
+    most conservative real number the brand has committed to for anybody, so it
+    cannot be accused of inventing a cap - and it is bounded above by every
+    other tier, so nobody gets more than an unconfigured deal could plausibly
+    have agreed.
+    """
+    from app.models.billing_models import BrandBillingPlan
+    platform_id = getattr(org, "platform_id", None)
+    if not platform_id:
+        return None
+    rows = (db.query(BrandBillingPlan)
+            .filter(BrandBillingPlan.platform_id == platform_id,
+                    BrandBillingPlan.is_purchasable.is_(True))
+            .all())
+    values = []
+    for row in rows:
+        raw = getattr(row, key, None)
+        try:
+            as_int = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if as_int > 0:
+            values.append(as_int)
+    return min(values) if values else None
 
 
 # Every ceiling a snapshot can record. Named here so `entitlement_state` reports
@@ -354,8 +435,51 @@ def entitlement_state(db: Session, org: Optional[Organization]) -> dict:
                 for k, v in limits.items()}
 
     plan = effective_plan(db, org)
+    snap_for_plan = current_snapshot(db, org)
+
+    if plan is not None and getattr(plan, "requires_entitlement_policy", False):
+        # A POLICY TIER REPORTS AS A NEGOTIATED AGREEMENT, NOT A RATE CARD.
+        # Its NULLs mean unrecorded, so they belong in unset_dimensions where
+        # somebody will see them, not in agreed_unlimited where they read as a
+        # decision that was never made.
+        unlimited = _snapshot_unlimited(snap_for_plan) if snap_for_plan else []
+        limits = {}
+        for dim in SNAPSHOT_DIMENSIONS:
+            value = getattr(snap_for_plan, dim, None) if snap_for_plan else None
+            limits[dim] = value
+        unset = [k for k, v in limits.items() if v is None and k not in unlimited]
+        return {
+            "source": ENTITLEMENT_SNAPSHOT if snap_for_plan else ENTITLEMENT_NONE,
+            "plan_key": plan.key,
+            "limits": limits,
+            "purchased_capacity": bought,
+            "effective_limits": {k: limit_for(db, org, k)
+                                 for k in GRANTABLE_DIMENSIONS},
+            "unset_dimensions": unset,
+            "agreed_unlimited": unlimited,
+            "policy_required": bool(unset),
+            "explanation": (
+                "On the %s tier, whose ceilings are negotiated rather than "
+                "published. %s" % (
+                    plan.key,
+                    ("Nothing has been recorded for: %s. Until it is, the "
+                     "brand's entry-tier ceilings apply - this is NEEDS "
+                     "CONFIGURATION, not a decision."
+                     % ", ".join(unset)) if unset
+                    else "Every dimension is recorded on the agreement.")),
+        }
+
     if plan is not None:
         limits = {k: getattr(plan, k, None) for k in ("max_leads", "max_users")}
+        # A snapshot overrides the tier per dimension - see limit_for - so the
+        # reported ceiling has to agree with the enforced one.
+        if snap_for_plan is not None:
+            snap_unlimited = _snapshot_unlimited(snap_for_plan)
+            for dim in limits:
+                if dim in snap_unlimited:
+                    limits[dim] = None
+                elif getattr(snap_for_plan, dim, None) is not None:
+                    limits[dim] = getattr(snap_for_plan, dim)
         return {
             "source": ENTITLEMENT_CATALOGUE,
             "plan_key": plan.key,

@@ -271,6 +271,22 @@ class BrandBillingPlan(Base):
     # Self-serve purchasable. An Enterprise tier is listed and quoted, never
     # checked out, so the checkout guard has something explicit to refuse on
     # rather than tripping over a NULL price.
+    # DOES A NULL CEILING ON THIS TIER MEAN UNLIMITED, OR UNRECORDED?
+    #
+    # On every published tier a NULL means unlimited: it is the brand's own
+    # rate card and the brand decided. On the Custom tier it means the opposite
+    # - nobody has written down what this deal agreed yet - and the two were
+    # indistinguishable, so a Custom customer resolved to unlimited on every
+    # dimension and stayed there until somebody noticed them running 40,000
+    # leads on a deal that said 5,000.
+    #
+    # True makes plan_limits consult the customer's entitlement snapshot and,
+    # where the snapshot is silent, fall back to the brand's entry tier rather
+    # than to no ceiling at all. It never blocks at zero: an unconfigured deal
+    # is a mistake by the platform, not by the customer, and the customer
+    # should not be the one it lands on.
+    requires_entitlement_policy = Column(Boolean, default=False, nullable=True)
+
     is_purchasable = Column(Boolean, default=True, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
 

@@ -881,10 +881,31 @@ def set_customer_entitlements(organization_id: str, body: EntitlementSnapshotIn,
            before=before, after=after,
            note="entitlement snapshot for %s" % org.name,
            platform_id=getattr(org, "platform_id", None))
+
+    # RAISING A CEILING HAS TO RELEASE WHAT IT WAS HOLDING BACK.
+    #
+    # lead_capacity.release_available had exactly one caller - the Stripe
+    # webhook, and only when the plan KEY changed. So recording a Custom deal's
+    # real ceiling here raised the limit and left every lead that arrived over
+    # the old one held indefinitely: the customer was entitled to them, the
+    # platform knew it, and they stayed invisible.
+    #
+    # Best-effort and after the audit on purpose. A release that fails must not
+    # turn a recorded agreement into a 500; the next capacity change or the
+    # next webhook picks the stragglers up.
+    released = {}
+    try:
+        from app.services import lead_capacity
+        released = lead_capacity.release_available(db, org, actor=user)
+    except Exception:                                            # noqa: BLE001
+        log.warning("entitlements recorded for %s but releasing held leads "
+                    "failed", org.id, exc_info=True)
+
     db.commit()
     return {"organization_id": org.id, "snapshot_id": snap.id,
             "superseded_snapshot_id": getattr(previous, "id", None),
-            "entitlement": after}
+            "entitlement": after,
+            "released_from_hold": released}
 
 
 @router.post("/brands/{platform_id}/seed")

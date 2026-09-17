@@ -182,6 +182,11 @@ EVOSYS_PLANS = [
         # is_purchasable False is what makes the checkout guard refuse this
         # tier with a clear reason instead of tripping over a NULL price.
         "is_purchasable": False,
+        # AND THIS IS WHAT STOPS THOSE NULLS MEANING UNLIMITED. On a published
+        # tier a NULL ceiling is the brand's rate card saying uncapped; here it
+        # means the deal's terms have not been recorded yet, and plan_limits
+        # must not read the two the same way.
+        "requires_entitlement_policy": True,
         "features": [],
     },
 ]
@@ -240,6 +245,12 @@ def seed(db: Session, platform_id: str, *, apply: bool = False) -> dict:
             "email_monthly_allowance": spec["email_monthly_allowance"],
             "sms_monthly_allowance": spec["sms_monthly_allowance"],
             "is_purchasable": spec["is_purchasable"],
+            # Carried through so applying the seed to an existing brand marks
+            # the Custom tier as policy-governed. Without this the column stays
+            # False on every already-seeded platform and its NULL ceilings go
+            # on meaning unlimited.
+            "requires_entitlement_policy": bool(
+                spec.get("requires_entitlement_policy", False)),
             # An EMPTY list, written deliberately: this clears the stale
             # marketing sentences off every existing row rather than leaving
             # them beside the columns that now say the same thing correctly.
