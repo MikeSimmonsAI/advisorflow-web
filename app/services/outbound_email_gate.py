@@ -298,16 +298,78 @@ def gate_lead_email(db, lead, *, send_source, actor_user_id=None):
             f"not been switched on for it. Nothing was sent."
         )
 
-    # The source is switched ON and the family may be contacted - and there is
-    # still no sender, because restoring one is Phase 3. When that lands, the
-    # send replaces this raise and every guard above it stays exactly where it
-    # is. Reaching here in this build means somebody set an environment
-    # variable ahead of the work; it is logged at warning for that reason.
-    logger.warning(
-        "outbound email source %s is ENABLED but no sender is wired up yet; "
-        "lead=%s was not contacted", send_source, getattr(lead, "id", None),
+    # CLEARED. Both switches are on, the family may be contacted, and the
+    # caller may now send.
+    #
+    # This function used to raise EmailSendDisabled here unconditionally,
+    # because there was no sender behind it. There is one now -
+    # `send_lead_email` below - so the terminal raise is gone and what stops a
+    # send is the switches, which is where that decision belongs. The shipped
+    # posture is every switch off, so in practice nothing reaches this line.
+    return None
+
+
+def send_lead_email(db, lead, *, advisor, subject, body_html, send_source,
+                    actor_user_id=None):
+    """THE RESTORED SENDER. Gate first, provider second, row always.
+
+    This is what the four repaired paths call. It is a thin composition and
+    that is the point - every guarantee below belongs to something that
+    already existed and was simply never reached from these paths:
+
+      gate_lead_email        demo boundary, compliance preflight, the
+                             deployment switch and the organization switch,
+                             in that order, before a provider is resolved.
+      send_email_to_lead     the only email function that writes the
+                             `email_messages` row the timeline, the activity
+                             feed and the sent log all read - now carrying
+                             send_source and sent_by_user_id, and raising with
+                             the provider's own error text rather than a
+                             generic rejection.
+
+    RAISES, ALWAYS, ON ANYTHING THAT IS NOT A SUCCESSFUL SEND:
+
+      ValueError                 the family may not be emailed (compliance).
+      DemoBoundaryViolation      the lead belongs to a demonstration tenant.
+      EmailSendDisabled          a switch is off, or both are on and there is
+                                 nothing behind them.
+      RuntimeError               the provider refused, with its own words.
+
+    So a caller cannot mistake a refusal for a send, and every caller's
+    success bookkeeping - a sent flag, a counter, a followup row - belongs
+    strictly after this returns.
+
+    Returns the EmailMessage row.
+    """
+    gate_lead_email(db, lead, send_source=send_source, actor_user_id=actor_user_id)
+    # Unreachable while either switch is off, which is every deployment today.
+    from app.services.email_service import send_email_to_lead
+    return send_email_to_lead(
+        db, advisor, lead,
+        subject=subject,
+        body_html=body_html,
+        send_source=send_source,
+        sent_by_user_id=actor_user_id,
+        raise_on_provider_failure=True,
     )
-    raise EmailSendDisabled(_DISABLED)
+
+
+def send_staff_email(db, advisor, recipient_email, subject, body_html, *, purpose):
+    """The internal alert. Not lead contact, and gated differently.
+
+    No compliance preflight and no organization switch: both answer questions
+    about a family's consent and a customer's entitlement, and the recipient
+    here is our own advisor. The guards that do belong are that there is
+    somebody to notify and that this deployment has the staff switch on.
+
+    Uses `_send_email_resend`, which is what the working sibling
+    ai_conversation_service._escalate_conversation already uses for exactly
+    this job. It writes no `email_messages` row, correctly - that table is
+    lead communication history and an advisor alert is not part of it.
+    """
+    gate_staff_email(recipient_email, purpose=purpose)
+    from app.services.ai_conversation_service import _send_email_resend
+    return _send_email_resend(db, advisor, recipient_email, subject, body_html)
 
 
 def gate_staff_email(recipient_email, *, purpose):
@@ -332,8 +394,5 @@ def gate_staff_email(recipient_email, *, purpose):
     if not source_enabled(STAFF_ESCALATION):
         logger.info("staff email gate PASSED but source is disabled: purpose=%s", purpose)
         raise EmailSendDisabled(_disabled_reason(STAFF_ESCALATION))
-    logger.warning(
-        "staff email source is ENABLED but no sender is wired up yet; "
-        "purpose=%s was not delivered", purpose,
-    )
-    raise EmailSendDisabled(_DISABLED)
+    # Cleared. See gate_lead_email for why this no longer raises.
+    return None

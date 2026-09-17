@@ -465,15 +465,20 @@ def process_inbound_reply(
                 subject = f"Following up, {lead.first_name or 'there'}"
                 clean = _strip_signoff(analysis["reply"])
                 html_body = _build_email_html(clean, advisor_name, org_name)
-                # Gate in, sender still out. When the sender is restored this
-                # becomes send_email_to_lead(..., subject=subject,
-                # body_html=html_body, send_source=PIPELINE_AUTO_REPLY), which
-                # writes the row itself - the hand-rolled EmailMessage that
-                # used to sit here is not needed and is gone.
-                outbound_email_gate.gate_lead_email(
+                # send_lead_email writes the email_messages row itself, so the
+                # hand-rolled EmailMessage that used to sit here - and never
+                # ran, because the ImportError fired on the import line above
+                # it - is not needed and is gone.
+                outbound_email_gate.send_lead_email(
                     db, lead,
+                    advisor=advisor,
+                    subject=subject,
+                    body_html=html_body,
                     send_source=send_source.PIPELINE_AUTO_REPLY,
-                    actor_user_id=None,  # cron / webhook: no authenticated human
+                    # A webhook or a cron. There is no authenticated human in
+                    # this request and NULL says so honestly; send_source
+                    # carries which automation it was.
+                    actor_user_id=None,
                 )
                 sent_ok = True
                 channel_used = "email"

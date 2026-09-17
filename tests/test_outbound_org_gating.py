@@ -102,18 +102,18 @@ def test_org_on_and_deployment_off_does_not_send(
     provider.assert_not_called()
 
 
-def test_both_on_passes_every_gate_and_still_does_not_send(
+def test_both_on_clears_the_gate_and_the_gate_alone_sends_nothing(
         db_session, sample_org, sample_advisor, monkeypatch):
-    """Phase 3 replaces the final raise with the sender. Until then both
-    switches on is still not a send - and the message says which stage it
-    stopped at, so an operator can tell this apart from a refusal."""
+    """With both switches on the gate returns, and returning is not sending:
+    `gate_lead_email` resolves no provider and contacts nobody. The send is the
+    caller's separate, explicit step through `send_lead_email`."""
     _deployment(monkeypatch, send_source.BULK_AI)
     sample_org.outbound_email_sources = json.dumps([send_source.BULK_AI])
     db_session.commit()
     lead = _lead(db_session, sample_org, sample_advisor)
     with patch("app.services.email_service.send_email_via_provider") as provider:
-        with pytest.raises(gate.EmailSendDisabled, match="not wired up"):
-            gate.gate_lead_email(db_session, lead, send_source=send_source.BULK_AI)
+        assert gate.gate_lead_email(
+            db_session, lead, send_source=send_source.BULK_AI) is None
     provider.assert_not_called()
 
 
@@ -135,9 +135,9 @@ def test_one_customer_enabling_a_source_never_enables_it_for_another(
     mine = _lead(db_session, sample_org, sample_advisor)
     theirs = _lead(db_session, other, neighbour_advisor, email="n-fam@example.com")
 
-    # Mine reaches the end of the gate.
-    with pytest.raises(gate.EmailSendDisabled, match="not wired up"):
-        gate.gate_lead_email(db_session, mine, send_source=send_source.BULK_AI)
+    # Mine clears the gate.
+    assert gate.gate_lead_email(db_session, mine,
+                                send_source=send_source.BULK_AI) is None
     # Theirs is stopped at the organization half.
     with pytest.raises(gate.EmailSendDisabled, match="not enabled for this organization"):
         gate.gate_lead_email(db_session, theirs, send_source=send_source.BULK_AI)
@@ -150,9 +150,8 @@ def test_enabling_one_source_for_an_org_does_not_enable_its_others(
     db_session.commit()
     lead = _lead(db_session, sample_org, sample_advisor)
 
-    with pytest.raises(gate.EmailSendDisabled, match="not wired up"):
-        gate.gate_lead_email(db_session, lead,
-                             send_source=send_source.APPOINTMENT_FOLLOWUP)
+    assert gate.gate_lead_email(
+        db_session, lead, send_source=send_source.APPOINTMENT_FOLLOWUP) is None
     for other in (send_source.BULK_AI, send_source.PIPELINE_AUTO_REPLY,
                   send_source.VOICE_BOOKING_LINK):
         with pytest.raises(gate.EmailSendDisabled, match="not enabled for this organization"):

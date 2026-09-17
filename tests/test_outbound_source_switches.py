@@ -141,21 +141,21 @@ def test_compliance_is_checked_before_the_switch_is_consulted(
         provider.assert_not_called()
 
 
-def test_an_enabled_source_still_cannot_send_in_this_build(
+def test_the_gate_clears_only_when_both_switches_are_on(
         db_session, sample_org, sample_advisor, monkeypatch):
-    """Phase 2.5 adds the switch; Phase 3 adds the sender. Even switched on at
-    BOTH halves of the gate, there is nothing behind it - and the refusal says
-    so, distinctly from a refusal at either switch."""
+    """The gate is now the only thing between the caller and the provider, so
+    what it does when everything passes matters as much as when it refuses: it
+    returns, and the caller sends. Merely clearing the gate contacts nobody -
+    `gate_lead_email` resolves no provider and sends nothing itself."""
     import json as _json
     _enable(monkeypatch, send_source.BULK_AI)
     sample_org.outbound_email_sources = _json.dumps([send_source.BULK_AI])
     db_session.commit()
     lead = _lead(db_session, sample_org, sample_advisor, phone=None)
     with patch("app.services.email_service.send_email_via_provider") as provider:
-        with pytest.raises(gate.EmailSendDisabled) as caught:
-            gate.gate_lead_email(db_session, lead, send_source=send_source.BULK_AI)
+        assert gate.gate_lead_email(
+            db_session, lead, send_source=send_source.BULK_AI) is None
     provider.assert_not_called()
-    assert "not wired up" in str(caught.value)
 
 
 def test_the_staff_alert_has_its_own_switch(monkeypatch):
@@ -323,17 +323,18 @@ def test_booking_url_sent_is_only_written_after_the_gate():
 
     gate_lines = [n.lineno for n in ast.walk(fn)
                   if isinstance(n, ast.Call)
-                  and getattr(n.func, "attr", None) == "gate_lead_email"]
+                  and getattr(n.func, "attr", None) in ("gate_lead_email",
+                                                        "send_lead_email")]
     assign_lines = [n.lineno for n in ast.walk(fn)
                     if isinstance(n, ast.Assign)
                     for t in n.targets
                     if isinstance(t, ast.Attribute) and t.attr == "booking_url_sent"]
 
-    assert len(gate_lines) == 1, "expected exactly one gate call"
+    assert len(gate_lines) == 1, "expected exactly one gated send"
     assert assign_lines, "booking_url_sent is never set - the flag would never be true"
     assert min(assign_lines) > gate_lines[0], (
-        "booking_url_sent is assigned before the gate; a refused or failed send "
-        "would again be recorded as a sent booking link")
+        "booking_url_sent is assigned before the gated send; a refused or "
+        "failed send would again be recorded as a sent booking link")
 
 
 def test_the_voice_booking_email_is_refused_while_its_source_is_off(

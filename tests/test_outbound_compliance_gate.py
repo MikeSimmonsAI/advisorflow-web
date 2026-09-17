@@ -393,17 +393,33 @@ def test_no_call_site_references_the_missing_sender_any_more():
     assert not offenders, f"the missing sender is still imported or called at: {offenders}"
 
 
-def test_the_gate_module_cannot_reach_a_provider():
-    """A structural guarantee, not a behavioural one: there is no import path
-    from this module to anything that sends."""
-    import inspect
-    from app.services import outbound_email_gate
-    src = inspect.getsource(outbound_email_gate)
-    body = "\n".join(l for l in src.splitlines()
-                     if not l.strip().startswith("#"))
-    for forbidden in ("import resend", "send_email_via_provider",
-                      "_send_email_resend", "smtplib", "twilio"):
-        assert forbidden not in body, f"{forbidden} is reachable from the gate"
+def test_the_gate_functions_themselves_cannot_reach_a_provider():
+    """A structural guarantee, narrowed to where it still belongs.
+
+    The module now also hosts the restored senders, which of course reach a
+    provider - that is their job. What must remain true is that the two GATE
+    functions do not: clearing a gate is a decision, not a send, and a caller
+    that only gates must be unable to contact anybody by accident.
+
+    Parsed per function rather than grepped over the file, so adding a sender
+    beside them cannot quietly weaken it.
+    """
+    import ast
+    import pathlib
+    tree = ast.parse(pathlib.Path("app/services/outbound_email_gate.py")
+                     .read_text(encoding="utf-8"))
+    forbidden = {"send_email_via_provider", "send_email_to_lead",
+                 "_send_email_resend", "send_email", "Emails"}
+    for name in ("gate_lead_email", "gate_staff_email"):
+        fn = next((n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == name), None)
+        assert fn is not None, f"{name} not found"
+        called = {getattr(c.func, "id", None) or getattr(c.func, "attr", None)
+                  for c in ast.walk(fn) if isinstance(c, ast.Call)}
+        imported = {a.name for n in ast.walk(fn)
+                    if isinstance(n, ast.ImportFrom) for a in n.names}
+        leak = (called | imported) & forbidden
+        assert not leak, f"{name} can reach a provider via {sorted(leak)}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

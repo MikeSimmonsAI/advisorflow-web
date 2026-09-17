@@ -20,8 +20,10 @@ from app.services.ai_conversation_service import (
 )
 from app.routers.audit_log_router import log_action
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.routers.compose_router import acting_advisor
 from app.services import outbound_email_gate
 from app.services import send_source
+from app.services.email_service import plain_text_to_html
 
 router = APIRouter(prefix="/ai-conversation", tags=["ai-conversation"])
 
@@ -246,9 +248,16 @@ def generate_batch_replies(
                     # Nothing checked DNC, allow_email or a bad address first.
                     # The gate runs now; the sender is still deliberately
                     # absent and gate_lead_email always raises.
-                    outbound_email_gate.gate_lead_email(
+                    outbound_email_gate.send_lead_email(
                         db, lead,
+                        advisor=acting_advisor(db, lead, current_user),
+                        subject=ai_result.get(
+                            "subject", f"Following up, {lead.first_name or 'there'}"),
+                        body_html=plain_text_to_html(ai_result["reply"]),
                         send_source=send_source.BULK_AI,
+                        # The human who pressed the button, which is NOT the
+                        # advisor the family hears from when the lead belongs
+                        # to a colleague. Both facts are recorded, separately.
                         actor_user_id=current_user.id,
                     )
                     sent += 1

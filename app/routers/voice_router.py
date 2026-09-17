@@ -34,6 +34,7 @@ from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 from app.routers.audit_log_router import log_action
 from app.services import outbound_email_gate
 from app.services import send_source
+from app.services.email_service import plain_text_to_html
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 logger = logging.getLogger(__name__)
@@ -313,9 +314,16 @@ async def voice_stream(
                 # reporting sent booking links for sends that never happened.
                 # It is left alone here rather than quietly rewritten; the
                 # flag belongs with the restored sender in Phase 3.
-                outbound_email_gate.gate_lead_email(
+                outbound_email_gate.send_lead_email(
                     db, lead,
+                    advisor=advisor,
+                    subject=subject,
+                    body_html=plain_text_to_html(body),
                     send_source=send_source.VOICE_BOOKING_LINK,
+                    # The advisor whose call this is. There is no authenticated
+                    # caller on a websocket, so this is an attributed actor
+                    # rather than a request user - recorded because it is the
+                    # truest available answer, not because it is a login.
                     actor_user_id=getattr(advisor, "id", None),
                 )
                 # ONLY REACHED AFTER A SEND ACTUALLY SUCCEEDS.
@@ -356,8 +364,14 @@ async def voice_stream(
             # _escalate_conversation checks exactly that before its send and
             # this path never did, so it would have handed None to the
             # provider as a recipient.
-            outbound_email_gate.gate_staff_email(
-                notification_email, purpose="voice call escalation alert"
+            outbound_email_gate.send_staff_email(
+                db, advisor, notification_email,
+                f"⚠️ Voice Call Escalated — {lead_name}",
+                f"<p>AI voice call with <strong>{lead_name}</strong> was escalated.</p>"
+                f"<p><strong>Trigger phrase:</strong> '{phrase}'</p>"
+                f"<p>The call was ended gracefully. You may want to follow up manually.</p>"
+                f"<p><a href='{FRONTEND_URL}/leads/{lead_id}'>View lead →</a></p>",
+                purpose="voice call escalation alert",
             )
         except Exception as e:
             logger.error("on_escalation_detected email error: %s", e)

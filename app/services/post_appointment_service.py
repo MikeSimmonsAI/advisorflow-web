@@ -117,11 +117,17 @@ def _send_email(db: Session, advisor: User, lead: Lead, body: str, org_name: str
         advisor_name = advisor.full_name or "Your Advisor"
         subject = f"Thank you for meeting with us, {lead.first_name or 'there'}!"
         html = _build_email_html(_strip_signoff(body), advisor_name, org_name)
-        outbound_email_gate.gate_lead_email(
+        outbound_email_gate.send_lead_email(
             db, lead,
+            advisor=advisor,
+            subject=subject,
+            body_html=html,
             send_source=send_source.APPOINTMENT_FOLLOWUP,
             actor_user_id=None,  # cron sweep: no authenticated human
         )
+        # Reached only on a confirmed send. Every refusal and every provider
+        # failure raises, so `_send_followup` cannot record thank_you_sent for
+        # a message that did not go.
         return True
     except Exception as e:
         logger.error("Post-appt email failed lead=%s: %s", lead.id, e)
