@@ -70,6 +70,14 @@ BRAND_SALES_ROLES    = (ROLE_SALES_MANAGER, ROLE_SALES_REP)
 ROLE_BRAND_EXECUTIVE = "brand_executive"
 
 
+# ── Inbound assignment modes ────────────────────────────────────────────────
+# How a website booking that carried no salesperson code finds an owner.
+# One value today; see BrandSalesOrg.inbound_assignment_mode for why the column
+# exists anyway.
+INBOUND_DEFAULT_OWNER = "default_owner"
+INBOUND_ASSIGNMENT_MODES = (INBOUND_DEFAULT_OWNER,)
+
+
 class Membership(Base):
     """A contextual role assignment. Additive to users.role, never a replacement.
 
@@ -105,6 +113,39 @@ class Membership(Base):
     # express.
     reports_to_user_id = Column(String, ForeignKey("users.id"), nullable=True)
 
+    # ── THE PUBLIC BOOKING CODE ─────────────────────────────────────────────
+    #
+    # What a salesperson puts in their email signature so a prospect can book
+    # straight into their calendar: /book/<brand>/<code>.
+    #
+    # IT LIVES ON THE MEMBERSHIP, NOT ON THE USER, for the same reason
+    # `reports_to_user_id` does. One human can sell for two brands, and a link
+    # that resolved to "this person" rather than "this person selling THIS
+    # brand" would let a prospect on one brand's website book a rep into the
+    # other brand's pipeline. Scoping it here makes cross-brand use structurally
+    # impossible rather than a check somebody has to remember to write.
+    #
+    # WHAT IT MUST NOT BE. Not the user id, not a hash of the email, not
+    # anything derived from a name. A public identifier that can be reversed or
+    # enumerated hands an outsider the brand's org chart. It is
+    # `secrets.token_urlsafe` - the same CSPRNG choice, for the same reason,
+    # that AppointmentConfirmationToken records.
+    #
+    # REVOCATION IS SEPARATE FROM MEMBERSHIP. `is_active` above answers "does
+    # this person still sell here"; `booking_code_revoked_at` answers "is this
+    # particular link still good". They are different questions: a link posted
+    # somewhere it should not have been needs to die without removing anyone
+    # from the team, and someone who leaves must stop taking bookings whether or
+    # not anyone remembers to revoke their link. BOTH are checked.
+    #
+    # ROTATION KEEPS HISTORY. Issuing a new code replaces this value; it does
+    # not touch a single appointment or opportunity, because those record the
+    # OWNER, never the code that introduced them. Nothing downstream reads it
+    # after the booking moment.
+    booking_code            = Column(String, nullable=True, unique=True)
+    booking_code_issued_at  = Column(DateTime, nullable=True)
+    booking_code_revoked_at = Column(DateTime, nullable=True)
+
     __table_args__ = (
         # A user holds a given role in a given scope at most once.
         UniqueConstraint("user_id", "scope_type", "scope_id", "role",
@@ -136,6 +177,34 @@ class BrandSalesOrg(Base):
     # this is true, and nothing is granted because it is.
     is_demo     = Column(Boolean, nullable=False, default=False,
                          server_default="0")
+
+    # ── WHO TAKES A WEBSITE BOOKING THAT ARRIVED WITHOUT A REP'S LINK ───────
+    #
+    # Somebody who lands on the brand's home page and clicks "Book a demo" has
+    # not been introduced to anybody, so there is no code in the URL and no
+    # salesperson to resolve. That booking still has to go somewhere.
+    #
+    # ONE CONFIGURED PERSON, NAMED BY THE BRAND. Not "the first manager we
+    # find", not "whoever has a free hour", and above all not a name written
+    # into the code. A default that the platform picks is a default nobody owns.
+    #
+    # NULL IS A REFUSAL, NOT A FALLBACK. With no code and no default owner the
+    # public endpoint returns a configuration error and books nothing. Assigning
+    # an arbitrary user would put a stranger's meeting on a real person's
+    # calendar and a real prospect in a pipeline nobody is watching.
+    default_inbound_owner_user_id = Column(String, ForeignKey("users.id"),
+                                           nullable=True)
+
+    # THE SEAM FOR ROUND-ROBIN, DELIBERATELY NOT THE IMPLEMENTATION.
+    #
+    # Today there is exactly one supported mode and this column always holds it.
+    # It exists so that adding round-robin or load-balanced assignment later is
+    # a new value plus a branch in ONE resolver function, rather than a rewrite
+    # of the public booking flow - which is what would happen if the flow read
+    # `default_inbound_owner_user_id` directly. Building the round-robin engine
+    # now, for a platform with no inbound volume to distribute, would be
+    # inventing requirements.
+    inbound_assignment_mode = Column(String, nullable=True)   # INBOUND_ASSIGNMENT_MODES
 
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

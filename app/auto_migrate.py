@@ -1005,6 +1005,60 @@ COLUMNS_TO_ADD = [
     # organization reach Twilio.
     ("organizations", "is_demo", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("brand_sales_orgs", "is_demo", "BOOLEAN NOT NULL DEFAULT FALSE"),
+
+    # ── INBOUND DISCOVERY / DEMO BOOKING (2026-09-17) ──────────────────────
+    #
+    # THIS BLOCK IS THE PUBLIC BOOKING FEATURE AND NOTHING ELSE. It is fenced
+    # off deliberately: there is unrelated work in progress elsewhere in this
+    # file, and a reviewer must be able to see at a glance which additions
+    # belong to which change.
+    #
+    # Every column here is additive, and every default is chosen so that the
+    # platform's behaviour on the deploy that lands them is IDENTICAL to its
+    # behaviour today. Nothing switches on because a column appeared.
+    #
+    # sales_meeting_types — the leadership quorum policy.
+    #   `leadership_policy` NULL means "this meeting type predates the feature",
+    #   which is every row in every brand right now, and NULL is the value the
+    #   quorum engine reads as "behave exactly as before". The numeric columns
+    #   are inert while it is NULL. `public_bookable` FALSE is a security
+    #   default, not a convenience one: until a brand deliberately opts a type
+    #   in, the public endpoint will book none of them - which is what stops an
+    #   internal pipeline review being bookable from the internet.
+    ("sales_meeting_types", "leadership_policy", "VARCHAR"),
+    ("sales_meeting_types", "owner_required", "BOOLEAN NOT NULL DEFAULT TRUE"),
+    ("sales_meeting_types", "leadership_minimum", "INTEGER NOT NULL DEFAULT 0"),
+    ("sales_meeting_types", "leadership_depth", "INTEGER NOT NULL DEFAULT 0"),
+    ("sales_meeting_types", "include_additional_leaders",
+     "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("sales_meeting_types", "public_bookable", "BOOLEAN NOT NULL DEFAULT FALSE"),
+
+    # memberships — the salesperson's public booking code.
+    #   All three NULL on every existing row, which means nobody has a link
+    #   until somebody issues one. The UNIQUE index is in INDEXES_TO_CREATE
+    #   below rather than inline here, because ADD COLUMN cannot carry it and a
+    #   unique constraint on a nullable column has to be created separately.
+    ("memberships", "booking_code", "VARCHAR"),
+    ("memberships", "booking_code_issued_at", "TIMESTAMP"),
+    ("memberships", "booking_code_revoked_at", "TIMESTAMP"),
+
+    # brand_sales_orgs — where a booking with no rep code goes.
+    #   NULL is a REFUSAL, not a fallback: the resolver returns a configuration
+    #   error rather than choosing somebody. See
+    #   sales_booking_codes.resolve_inbound_owner.
+    ("brand_sales_orgs", "default_inbound_owner_user_id", "VARCHAR"),
+    ("brand_sales_orgs", "inbound_assignment_mode", "VARCHAR"),
+
+    # sales_appointments — how the booking arrived, and the retry guard.
+    #   `booking_source` NULL means a salesperson booked it from inside the
+    #   product, which is every row that exists. `booking_idempotency_key` is
+    #   what makes a re-submitted web form return the original booking instead
+    #   of creating a second meeting, a second Zoom room and a second
+    #   confirmation email; its uniqueness is enforced by the index below,
+    #   because a check-then-insert has a gap two simultaneous submissions both
+    #   fit through.
+    ("sales_appointments", "booking_source", "VARCHAR"),
+    ("sales_appointments", "booking_idempotency_key", "VARCHAR"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
@@ -1186,6 +1240,56 @@ INDEXES_TO_CREATE = [
     # implementations.owner_user_id is indexed; sold_by_user_id is not, and the
     # rep's own /sales/implementations view filters on exactly that column.
     "CREATE INDEX IF NOT EXISTS ix_impl_sold_by_user_id ON implementations(sold_by_user_id)",
+
+    # THE MASTER LEAD DATABASE. Both tables were created by create_all() on the
+    # Stage 1 deploy, so they EXIST in production now and create_all() will
+    # never add an index to them. These serve the God browser's filters and
+    # the detail view's lineage lookup:
+    #   - first/last seen: the date-range filters and the default sort
+    #   - lead_id alone: the join from an occurrence back to its tenant lead
+    #     for contactability. The unique (organization_id, lead_id) constraint
+    #     leads on organization, so it cannot serve a lookup by lead_id alone.
+    #   - needs_review: the conflict-review surface
+    "CREATE INDEX IF NOT EXISTS ix_lead_occurrence_first_seen ON lead_occurrences(first_seen_at)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_occurrence_last_seen  ON lead_occurrences(last_seen_at)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_occurrence_lead_id    ON lead_occurrences(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_occurrence_source     ON lead_occurrences(source)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_occurrence_synthetic  ON lead_occurrences(is_synthetic)",
+    "CREATE INDEX IF NOT EXISTS ix_master_contacts_review     ON master_contacts(needs_review)",
+    "CREATE INDEX IF NOT EXISTS ix_master_contacts_last_seen  ON master_contacts(last_seen_at)",
+    "CREATE INDEX IF NOT EXISTS ix_master_contacts_occurrences ON master_contacts(occurrence_count)",
+
+    # ── INBOUND DISCOVERY / DEMO BOOKING (2026-09-17) ──────────────────────
+    # Separate block, same reason as the column block above.
+    #
+    # THE FIRST TWO ARE NOT PERFORMANCE INDEXES. They are the correctness
+    # guarantee for two different retry problems, and both have to be UNIQUE
+    # rather than checked in Python:
+    #
+    #   booking_code       - a second seat must not be able to hold a link that
+    #                        already resolves to somebody else.
+    #   idempotency key    - two simultaneous submissions of the same web form
+    #                        both read "no existing booking" before either
+    #                        commits. The unique index is what makes the second
+    #                        INSERT fail so the handler can return the first
+    #                        one's result instead of booking twice.
+    #
+    # Both are partial (WHERE ... IS NOT NULL) because the columns are NULL on
+    # every existing row, and a plain UNIQUE index would treat those NULLs
+    # correctly on Postgres but the intent is clearer said out loud.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_memberships_booking_code "
+    "ON memberships(booking_code) WHERE booking_code IS NOT NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_sales_appt_idempotency "
+    "ON sales_appointments(brand_sales_org_id, booking_idempotency_key) "
+    "WHERE booking_idempotency_key IS NOT NULL",
+
+    # The scheduler's own query: "which reminders are owed right now".
+    "CREATE INDEX IF NOT EXISTS ix_sales_appt_reminder_due "
+    "ON sales_appointment_reminders(status, scheduled_for)",
+    # Reporting on where bookings come from, and the public booking flow's own
+    # lookup of a brand's bookable meeting types.
+    "CREATE INDEX IF NOT EXISTS ix_sales_appt_booking_source "
+    "ON sales_appointments(brand_sales_org_id, booking_source)",
 ]
 
 

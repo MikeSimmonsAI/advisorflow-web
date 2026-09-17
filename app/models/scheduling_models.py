@@ -66,6 +66,48 @@ SLOT_LABELS = {
     SLOT_ANY_REP:            "Any Representative",
 }
 
+
+# ── LEADERSHIP POLICY ────────────────────────────────────────────────────────
+#
+# WHY THE SLOTS ABOVE ARE NOT ENOUGH, STATED PLAINLY.
+#
+# `required_slots = "opportunity_owner,sales_manager"` means "the owner AND a
+# sales manager must both be free". Two things about that are wrong for an
+# inbound booking:
+#
+#   1. `sales_manager` resolves to EVERY manager holding a membership in the
+#      brand (see meeting_roles.resolve_slot). A rep in Kentucky would have
+#      their public availability computed against managers in Texas who have
+#      never met them. As the brand grows, that is not a slowly-worsening
+#      inconvenience; it is a wrong answer that gets wronger.
+#
+#   2. It is an AND over a fixed list. The real rule is a QUORUM: the rep, plus
+#      AT LEAST ONE leader from that rep's own reporting line. Requiring every
+#      named manager means a slot is lost whenever any one of them is busy,
+#      which on a three-person chain is most of the week.
+#
+# So the policy below is a small, closed vocabulary rather than a rules
+# language. It answers exactly five questions - must the owner attend, where do
+# the leaders come from, how many are needed, how far up to look, and do extra
+# available leaders get invited - and nothing else. A general expression
+# language here would be a system nobody can reason about in exchange for
+# flexibility nobody has asked for.
+#
+# NULL is the fifth value and it is the important one: it means "this meeting
+# type predates leadership policy, behave exactly as before". Every existing row
+# in every brand is NULL, so nothing changes for anything already configured.
+
+# Leaders come from the opportunity owner's own reporting chain, walked upward
+# through brand-sales Membership.reports_to_user_id inside ONE brand sales org.
+LEADERSHIP_REPORTING_CHAIN = "reporting_chain"
+LEADERSHIP_POLICIES = (LEADERSHIP_REPORTING_CHAIN,)
+
+# THE DELIBERATE ABSENCE. There is no "any manager in the brand" policy value,
+# and adding one would be a decision to reintroduce the defect above, not a
+# feature. If a brand ever genuinely wants that, it needs its own name, its own
+# justification and its own tests - it must not arrive as a fallback that a
+# misconfigured chain quietly lands on.
+
 APPT_SCHEDULED = "scheduled"
 APPT_COMPLETED = "completed"
 APPT_CANCELLED = "cancelled"
@@ -313,6 +355,40 @@ class MeetingType(Base):
     # "whatever the brand's default is" — the usual case.
     video_provider = Column(String, nullable=True)
 
+    # ── Leadership quorum (inbound Discovery / Demo) ────────────────────────
+    # See LEADERSHIP_POLICY above for why these exist and why NULL is the
+    # default. Every column here is additive and inert until a policy is set.
+    leadership_policy = Column(String, nullable=True)   # LEADERSHIP_POLICIES
+
+    # Must the opportunity owner personally attend? Almost always yes - the
+    # prospect booked with THEM - but it is stated rather than assumed so a
+    # brand can run a pooled meeting type later without a schema change.
+    owner_required = Column(Boolean, default=True, nullable=False)
+
+    # How many leaders from the chain must be free for a slot to be offered.
+    # 0 with a policy set means "leaders are welcome but never required", which
+    # is a legitimate configuration and not the same as having no policy.
+    leadership_minimum = Column(Integer, default=0, nullable=False)
+
+    # How far up the chain to look. 2 means the rep's manager and that
+    # manager's manager. Bounded on purpose: an unbounded walk up a corporate
+    # org chart ends at somebody who has never heard of the prospect.
+    leadership_depth = Column(Integer, default=0, nullable=False)
+
+    # When more leaders than the minimum are free at the chosen time, invite
+    # them all. FALSE books only the nearest `leadership_minimum`.
+    include_additional_leaders = Column(Boolean, default=False, nullable=False)
+
+    # ── Public bookability ──────────────────────────────────────────────────
+    # WHETHER AN UNAUTHENTICATED VISITOR MAY BOOK THIS TYPE AT ALL.
+    #
+    # Defaults FALSE, and that default is a security control rather than a
+    # convenience. Without it, the public endpoint's meeting-type parameter
+    # would be a way for anyone on the internet to book "Internal Sales
+    # Meeting" onto a management team's calendar. A brand turns this on for the
+    # one or two types its website actually offers.
+    public_bookable = Column(Boolean, default=False, nullable=False)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -364,6 +440,33 @@ class SalesAppointment(Base):
     prospect_email   = Column(String, nullable=True)
     prospect_phone   = Column(String, nullable=True)
     prospect_timezone = Column(String, nullable=True)
+
+    # ── HOW THIS BOOKING ARRIVED ────────────────────────────────────────────
+    # NULL means a salesperson booked it from inside the product, which is
+    # every row that exists today. A public website booking is a materially
+    # different thing - nobody authenticated, the participants were chosen by a
+    # policy rather than by a human - and reporting that cannot tell the two
+    # apart cannot answer "is the website working".
+    booking_source = Column(String, nullable=True)   # BOOKING_SOURCES
+
+    # ── THE RETRY GUARD ─────────────────────────────────────────────────────
+    #
+    # A browser posts a booking, the connection dies, the visitor presses the
+    # button again. Without this they now have two meetings, two Zoom rooms, two
+    # confirmation emails and two entries on three people's calendars - and the
+    # second one is indistinguishable from a genuine second booking.
+    #
+    # The key is generated by the page and carried through every side effect, so
+    # the retry finds this row and returns the ORIGINAL result. The uniqueness
+    # is a database constraint rather than a lookup, because "check then insert"
+    # is two statements and two simultaneous submissions both read "no" in the
+    # gap between them. See app/services/ai_operations/idempotency.py, which
+    # states the same rule for the same reason.
+    #
+    # Scoped per brand: two brands' websites generating the same random key is
+    # vanishingly unlikely and would be a confusing failure rather than a safe
+    # one.
+    booking_idempotency_key = Column(String, nullable=True)
 
     # Confirmation is operational state, not a booking side effect.
     confirmation_status = Column(String, default=CONF_PENDING, nullable=False)
@@ -539,4 +642,96 @@ class AppointmentParticipant(Base):
         # so this is a plain composite — the column is false for almost every
         # row, which keeps it small in practice.
         Index("ix_appt_participant_conflict", "sync_conflict", "sync_conflict_at"),
+    )
+
+
+# ── HOW A BOOKING ARRIVED ────────────────────────────────────────────────────
+# NULL for every row booked from inside the product. See
+# SalesAppointment.booking_source.
+BOOKING_SOURCE_INTERNAL   = "internal"
+BOOKING_SOURCE_PUBLIC_WEB = "public_web"
+BOOKING_SOURCES = (BOOKING_SOURCE_INTERNAL, BOOKING_SOURCE_PUBLIC_WEB)
+
+
+# ── Reminder lifecycle ───────────────────────────────────────────────────────
+#
+# WHY A TABLE AND NOT TWO BOOLEAN COLUMNS.
+#
+# `BookingLink` on the customer-tenant side does it with booleans -
+# `reminder_24hr_sent`, `reminder_1hr_sent` - and that shape cannot answer the
+# questions this needs to answer. It cannot say whether a reminder was
+# deliberately skipped or simply has not fired yet; it cannot record WHY one
+# failed; it cannot survive a reschedule, because a reminder sent for the old
+# time has to be distinguishable from one owed for the new one; and adding a
+# third reminder means another column on a table that is already wide.
+#
+# Most importantly, a boolean is set by the sender AFTER it sends. Two overlapping
+# job runs both read False and both send. The unique constraint below makes the
+# claim the atomic act: whichever run inserts the row owns that reminder, and the
+# other one's INSERT fails at the database. That is the same guarantee, for the
+# same reason, that ai_operations/idempotency.py is built on.
+
+REMINDER_CONFIRMATION = "confirmation"   # sent once, at booking
+REMINDER_24H          = "reminder_24h"
+REMINDER_1H           = "reminder_1h"
+REMINDER_KINDS = (REMINDER_CONFIRMATION, REMINDER_24H, REMINDER_1H)
+
+# How far ahead of the meeting each one is owed. The confirmation is not on this
+# clock - it belongs to the booking transaction, not to the scheduler.
+REMINDER_LEAD_MINUTES = {
+    REMINDER_24H: 24 * 60,
+    REMINDER_1H:  60,
+}
+
+REMINDER_PENDING = "pending"   # claimed, not yet attempted
+REMINDER_SENT    = "sent"
+REMINDER_FAILED  = "failed"
+# Deliberately not owed. A meeting booked ninety minutes out never had a
+# 24-hour reminder to send, and recording that as "skipped" rather than leaving
+# a gap is what stops a later reader concluding the job missed one.
+REMINDER_SKIPPED   = "skipped"
+REMINDER_SUPPRESSED = "suppressed"   # cancelled meeting, or too close to another message
+REMINDER_STATUSES = (REMINDER_PENDING, REMINDER_SENT, REMINDER_FAILED,
+                     REMINDER_SKIPPED, REMINDER_SUPPRESSED)
+
+# Statuses that mean "this reminder is finished with"; a job must not retry one.
+REMINDER_SETTLED = (REMINDER_SENT, REMINDER_SKIPPED, REMINDER_SUPPRESSED)
+
+
+class AppointmentReminder(Base):
+    """One row per (appointment, reminder kind). The row IS the claim.
+
+    Created by the scheduler when a reminder becomes due, or at booking time for
+    the ones already known to be unnecessary. Never deleted - a reschedule
+    settles the old rows and the new time gets new ones, so the history reads as
+    what actually happened rather than as the current plan.
+    """
+    __tablename__ = "sales_appointment_reminders"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    appointment_id = Column(String, ForeignKey("sales_appointments.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    kind   = Column(String, nullable=False)   # REMINDER_KINDS
+    status = Column(String, default=REMINDER_PENDING, nullable=False)
+
+    # The meeting time this reminder was claimed AGAINST. A reschedule makes the
+    # old row's target stale, which is how `due_reminders` knows to issue a new
+    # one instead of treating the meeting as already reminded.
+    target_starts_at = Column(DateTime, nullable=True)
+
+    scheduled_for = Column(DateTime, nullable=True)   # when it was/is owed, UTC
+    attempted_at  = Column(DateTime, nullable=True)
+    sent_at       = Column(DateTime, nullable=True)
+    recipient     = Column(String, nullable=True)     # prospect email at send time
+    detail        = Column(Text, nullable=True)       # why skipped, or the error
+    attempts      = Column(Integer, default=0, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        # THE GUARANTEE. Not a convenience index - this is what makes a second
+        # job run lose the race instead of sending a second email.
+        UniqueConstraint("appointment_id", "kind", "target_starts_at",
+                         name="uq_appointment_reminder_kind_target"),
+        Index("ix_appointment_reminder_due", "status", "scheduled_for"),
     )
