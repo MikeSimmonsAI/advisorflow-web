@@ -7,6 +7,7 @@ from app.deps import get_db, get_current_user, require_admin, require_tenant_use
 from app.models.models import User, Lead, CadenceState, CadenceStatus
 from app.services.cadence_service import (
     start_cadence, run_due_cadences, get_cadence_summary,
+    _get_org_cadence_schedule, get_cadence_history,
 )
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 from app.services import lead_scope
@@ -87,6 +88,30 @@ def control_cadence(
 
     db.commit()
     return {"cadence_state_id": cadence_state_id, "status": state.status, "action": req.action}
+
+
+@router.get("/lead/{lead_id}/history")
+def lead_cadence_history(lead_id: str,
+                         db: Session = Depends(get_db),
+                         current_user: User = Depends(require_tenant_user)):
+    """Every attempt at every touch for one lead.
+
+    The question "which steps completed, on what channel, when, and what
+    happened to the rest" had no answer while the only state was one integer.
+    Each row carries its outcome, its reason, the provider's error where there
+    was one, and the message it produced.
+    """
+    lead = lead_scope.load_lead_in_scope(db, current_user, lead_id)
+    state = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    schedule = _get_org_cadence_schedule(db, lead.organization_id)
+    return {
+        "lead_id": lead.id,
+        "status": getattr(state, "status", None),
+        "current_touch_number": getattr(state, "current_touch_number", 0) or 0,
+        "total_touches": len(schedule),
+        "next_touch_due_at": getattr(state, "next_touch_due_at", None),
+        "history": get_cadence_history(db, lead.id),
+    }
 
 
 @router.get("/summary")
@@ -203,7 +228,10 @@ def list_active_cadences(db: Session = Depends(get_db), current_user: User = Dep
             "tier": lead.tier if lead.tier else None,
             "status": state.status,
             "current_touch_number": state.current_touch_number,
-            "total_touches": 9,
+            # WAS A HARDCODED 9. An org whose default template has five
+            # touches still rendered "4 of 9", in this response and in the
+            # frontend's own second copy of the schedule.
+            "total_touches": len(_get_org_cadence_schedule(db, lead.organization_id)),
             "next_touch_due_at": state.next_touch_due_at,
             "cadence_started_at": state.cadence_started_at,
             "advisor_name": (advisor.full_name or advisor.email) if advisor else None,

@@ -22,11 +22,19 @@ How it works:
     later once real reply data shows what's working.
 """
 
+import logging
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
+import os
+
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+
 from app.models.models import (
-    Lead, CadenceState, User, Reply
+    Lead, CadenceState, User, Reply, CadenceTouchLog
 )
+
+logger = logging.getLogger(__name__)
 
 # Day offsets since cadence start - the actual 9-touch spec.
 CADENCE_SCHEDULE_DAYS = [1, 3, 7, 10, 14, 21, 30, 45, 60]
@@ -262,17 +270,196 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
     )
 
 
-def run_due_cadences(db: Session, organization_id: str = None) -> dict:
-    """
-    Finds every active CadenceState whose next touch is due now, sends it,
-    advances the state. Intended to be called once daily (e.g. via a
-    Render cron job or background scheduler loop) - NOT per-request.
+# ── OUTCOMES ────────────────────────────────────────────────────────────────
+#
+# What happened to one attempt at one touch. Written to
+# CadenceTouchLog.outcome, and deliberately a small closed set: an operator
+# asking "why did this family not hear from us" needs an answer that is always
+# one of these, never a blank.
 
-    Returns a summary of what was sent / skipped / completed / errored,
-    for logging or an admin-facing "last cadence run" view.
+OUTCOME_SENT = "sent"                # handed to the provider, Message row written
+OUTCOME_FAILED = "failed"            # provider refused or raised; its words are kept
+OUTCOME_BLOCKED = "blocked"          # compliance refused before any provider call
+OUTCOME_SUPPRESSED = "suppressed"    # demo tenant, or a guard inside the sender
+OUTCOME_SKIPPED = "skipped"          # temporary: capacity hold, no advisor, disabled
+OUTCOME_STOPPED = "stopped"          # the cadence ended here: reply, DNC, booking
+OUTCOME_ABANDONED = "abandoned"      # retries exhausted; the cadence moves on
+
+CADENCE_OUTCOMES = (
+    OUTCOME_SENT, OUTCOME_FAILED, OUTCOME_BLOCKED, OUTCOME_SUPPRESSED,
+    OUTCOME_SKIPPED, OUTCOME_STOPPED, OUTCOME_ABANDONED,
+)
+
+# A touch that fails is retried on a backoff rather than silently swallowed or
+# retried forever. Three is enough to ride out a provider blip and few enough
+# that a permanently bad number does not occupy the runner every hour until the
+# heat death of the universe.
+MAX_ATTEMPTS_PER_TOUCH = 3
+RETRY_BACKOFF = timedelta(hours=1)
+
+
+def _sending_enabled() -> bool:
+    """MAY THIS DEPLOYMENT PLACE A CADENCE SMS AT ALL?
+
+    Default OFF, and that default is load-bearing rather than cautious.
+
+    Until this rewrite the runner called `get_twilio_client(advisor, db)` and
+    unpacked THREE values from it. That function returns a single Client, so
+    every touch raised TypeError - after the counter had already been advanced
+    and committed. The cadence has therefore never sent one message: it has
+    walked leads from touch 1 to touch 9, marked them `sent`, written no
+    `messages` row, and reported an error count nobody read.
+
+    Repairing that makes the highest-volume sender in the product start working
+    on the next deploy, against a population of leads whose due dates are
+    months in the past. Turning that on is a decision about contacting real
+    families, and it belongs to the owner, not to a bug fix. So the repair
+    ships switched off and the switch is explicit.
+
+    Per-customer control is the `cadences` feature entitlement that already
+    exists and already gates the cadence router - checked below per lead, so
+    enabling this deployment-wide still sends nothing for a customer who is not
+    entitled to cadences.
+    """
+    raw = os.environ.get("CADENCE_SMS_SENDING")
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _log_touch(db: Session, state, lead, *, touch_number, attempt_seq, outcome,
+               reason=None, channel="sms", scheduled_for=None, attempted_at=None,
+               message=None, body_preview=None, claim=False):
+    """Write one CadenceTouchLog row.
+
+    `claim=True` inserts inside a savepoint and returns None if the unique
+    index refuses it, which is how a second runner learns it lost the race
+    without a SELECT-then-INSERT gap to lose in. A failed INSERT poisons the
+    surrounding transaction on Postgres, so the savepoint is not optional -
+    same reasoning as app/services/ai_operations/idempotency.py.
+    """
+    row = CadenceTouchLog(
+        cadence_state_id=state.id,
+        lead_id=lead.id,
+        organization_id=getattr(lead, "organization_id", None),
+        touch_number=touch_number,
+        attempt_seq=attempt_seq,
+        channel=channel,
+        outcome=outcome,
+        reason=(str(reason)[:500] if reason else None),
+        scheduled_for=scheduled_for,
+        attempted_at=attempted_at,
+        body_preview=(body_preview[:240] if body_preview else None),
+    )
+    if message is not None:
+        row.message_id = getattr(message, "id", None)
+        row.provider = "twilio"
+        row.provider_message_id = getattr(message, "twilio_sid", None)
+        row.provider_error_code = getattr(message, "error_code", None)
+        row.provider_error_message = getattr(message, "error_message", None)
+    if not claim:
+        db.add(row)
+        db.flush()
+        return row
+    try:
+        with db.begin_nested():
+            db.add(row)
+            db.flush()
+        return row
+    except IntegrityError:
+        logger.info(
+            "cadence: touch %s attempt %s for lead %s was already claimed by "
+            "another runner", touch_number, attempt_seq, lead.id)
+        return None
+
+
+def _already_sent(db: Session, state, touch_number: int) -> bool:
+    """Has this touch ALREADY gone out?
+
+    The unique index stops two runners claiming the same ATTEMPT; it does not
+    by itself stop a second runner claiming attempt 2 of a touch that attempt 1
+    already delivered. This is the guard that makes the touch, not the attempt,
+    the thing that happens once.
+
+    It is checked before the claim and the claim is still inserted under the
+    unique index, so two runners that both read "not sent" a microsecond apart
+    still produce one insert and one send - the read is the fast path, the
+    index is the guarantee.
+    """
+    return db.query(CadenceTouchLog.id).filter(
+        CadenceTouchLog.cadence_state_id == state.id,
+        CadenceTouchLog.touch_number == touch_number,
+        CadenceTouchLog.outcome == OUTCOME_SENT,
+    ).first() is not None
+
+
+def _next_attempt_seq(db: Session, state, touch_number: int) -> int:
+    """Attempts are counted from FAILURES only.
+
+    A delivered touch is never retried - `_already_sent` refuses it outright -
+    so the sequence exists to number the retries of a touch that has not landed
+    yet, and MAX_ATTEMPTS_PER_TOUCH is a budget for provider failures.
+    """
+    used = (db.query(func.count(CadenceTouchLog.id))
+            .filter(CadenceTouchLog.cadence_state_id == state.id,
+                    CadenceTouchLog.touch_number == touch_number,
+                    CadenceTouchLog.outcome == OUTCOME_FAILED)
+            .scalar()) or 0
+    return used + 1
+
+
+def run_due_cadences(db: Session, organization_id: str = None) -> dict:
+    """Send every touch that is due, and record what happened to each one.
+
+    WHAT CHANGED, AND WHY EACH PART OF IT HAD TO
+
+    The counter no longer moves before the send. It moved first, and committed,
+    so a failure left `current_touch_number` claiming a message that does not
+    exist - which was every single touch, because the provider call raised
+    TypeError before it ever reached Twilio. Success state now follows a
+    confirmed send, and a failure leaves the cadence where it was.
+
+    The provider call goes through `sms_service.send_sms` instead of a
+    hand-rolled Twilio client. That was the bug's home and it is also where
+    four guards live that this path never had: the demo boundary, the
+    suppression list, correct credential resolution, and a `messages` row
+    carrying delivery state, the provider's error code and message,
+    send_source and the status callback. The cadence had none of them.
+
+    The compliance preflight runs before it, so a family on the suppression
+    list whose Lead.status was never flipped to DNC is refused rather than
+    texted nine times.
+
+    Every step writes a CadenceTouchLog row - sent, failed, blocked,
+    suppressed, skipped, stopped or abandoned. A skip used to be a bare
+    `continue`, so a lead could be re-evaluated and re-skipped hourly forever
+    with nothing recorded anywhere.
+
+    The claim row is the concurrency lock. `with_for_update(skip_locked=True)`
+    was documented as preventing double-sends and does not: its locks are
+    released by the first commit inside the loop, and there are three commits
+    per iteration and three concurrent triggers. A unique index on
+    (cadence_state, touch, attempt) does hold.
+
+    A failed touch is retried on a backoff up to MAX_ATTEMPTS_PER_TOUCH and
+    then abandoned so the cadence continues rather than wedging.
+
+    NOTHING SENDS unless this deployment has CADENCE_SMS_SENDING on AND the
+    customer holds the `cadences` feature. See `_sending_enabled`.
     """
     from app.services.lead_capacity import is_held
-    now = datetime.now(timezone.utc)
+    from app.services.compliance_service import check_compliance_preflight
+    from app.services import entitlements
+    from app.services import send_source as _src
+    from app.services.sms_service import send_sms
+    from app.models.models import Organization
+
+    # Naive UTC, matching the columns. cadence_router already does this at its
+    # one comparison; the runner used an aware value and wrote it into naive
+    # DateTime columns, which Postgres silently truncates.
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    sending_on = _sending_enabled()
+
     query = (
         db.query(CadenceState)
         .filter(
@@ -282,144 +469,247 @@ def run_due_cadences(db: Session, organization_id: str = None) -> dict:
     )
     if organization_id:
         query = query.join(Lead).filter(Lead.organization_id == organization_id)
-    due_states = query.with_for_update(skip_locked=True).all()
+    due_states = query.all()
+
     sent_count = 0
     completed_count = 0
     error_count = 0
+    blocked_count = 0
+    skipped_count = 0
     errors = []
+    org_cache = {}
 
     for state in due_states:
         lead = state.lead
+        if lead is None:
+            continue
 
-        # Defensive re-check: stop if status flag was set OR if any inbound reply
-        # record exists (self-healing in case the email poller failed to update status).
+        scheduled_for = state.next_touch_due_at
+        touch_number = state.current_touch_number + 1
+
+        # ── STOPS. The cadence ends here, and the reason is recorded. ───────
         if lead.status in ("dnc", "hot", "replied", "booked"):
-            stop_cadence_for_lead(
-                db, lead.id,
-                "stopped_dnc" if lead.status == "dnc" else "stopped_replied",
-            )
+            reason = "stopped_dnc" if lead.status == "dnc" else "stopped_replied"
+            _log_touch(db, state, lead, touch_number=touch_number, attempt_seq=1,
+                       outcome=OUTCOME_STOPPED,
+                       reason=f"lead status is {lead.status}",
+                       scheduled_for=scheduled_for)
+            stop_cadence_for_lead(db, lead.id, reason)
             continue
 
-        # PLAN CAPACITY HOLD, re-checked per step and not only at enrollment.
-        # A lead can be held AFTER it entered a cadence - it cannot today, but
-        # a future hold reason could - and a running cadence that ignored the
-        # hold would keep spending on schedule for weeks. Skipped rather than
-        # stopped: the hold is temporary and the cadence should resume where it
-        # left off once capacity exists, not be torn down and restarted.
-        if is_held(lead):
-            continue
         has_reply = db.query(Reply).filter(Reply.lead_id == lead.id).first()
         if has_reply:
+            _log_touch(db, state, lead, touch_number=touch_number, attempt_seq=1,
+                       outcome=OUTCOME_STOPPED,
+                       reason="the family replied", scheduled_for=scheduled_for)
             stop_cadence_for_lead(db, lead.id, "stopped_replied")
+            continue
+
+        # ── TEMPORARY SKIPS. Recorded, and the cadence resumes later. ───────
+        #
+        # A capacity hold is temporary, so the cadence is skipped rather than
+        # torn down - but the skip is now visible instead of being a bare
+        # `continue` that repeated silently every hour.
+        if is_held(lead):
+            _log_touch(db, state, lead, touch_number=touch_number,
+                       attempt_seq=_next_attempt_seq(db, state, touch_number),
+                       outcome=OUTCOME_SKIPPED,
+                       reason="lead is held over plan capacity",
+                       scheduled_for=scheduled_for)
+            state.next_touch_due_at = now + RETRY_BACKOFF
+            skipped_count += 1
+            db.commit()
             continue
 
         advisor = lead.assigned_to
         if not advisor:
+            _log_touch(db, state, lead, touch_number=touch_number,
+                       attempt_seq=_next_attempt_seq(db, state, touch_number),
+                       outcome=OUTCOME_SKIPPED, reason="no advisor assigned",
+                       scheduled_for=scheduled_for)
+            state.next_touch_due_at = now + RETRY_BACKOFF
+            skipped_count += 1
             error_count += 1
             errors.append(f"Lead {lead.id}: no advisor assigned")
+            db.commit()
             continue
 
-        touch_number = state.current_touch_number + 1
-
-        # Get the org's cadence schedule (template or fallback)
         schedule = _get_org_cadence_schedule(db, lead.organization_id)
         total_touches = len(schedule)
-
-        # Find the touch definition for this touch number
         touch_def = next((t for t in schedule if t["touch_number"] == touch_number), None)
         if not touch_def:
-            # Beyond the end of the template
             state.status = "completed"
             state.completed_at = now
-            db.commit()
             completed_count += 1
+            db.commit()
             continue
 
-        try:
-            # No link is minted while none may be sent: an issued-but-never-
-            # delivered token is a dead row and an audit trail that claims a
-            # family was given a booking link they never received.
-            booking = None
-            booking_url = ""
-            if SMS_LINKS_ALLOWED:
-                from app.services.sms_service import create_booking_link
-                booking = create_booking_link(db, lead, advisor)
-                from app.services.public_identity import booking_url as public_booking_url
-                booking_url = public_booking_url(db, lead.organization_id,
-                                                 booking.token)
-            body = render_cadence_message(db, lead, advisor, touch_number, booking_url, touch_def.get("message_template"))
+        # ── ENTITLEMENT AND THE DEPLOYMENT SWITCH ──────────────────────────
+        org = org_cache.get(lead.organization_id)
+        if org is None and lead.organization_id:
+            org = (db.query(Organization)
+                   .filter(Organization.id == lead.organization_id).first())
+            org_cache[lead.organization_id] = org
 
-            # Phase 1: advance state and commit BEFORE calling Twilio.
-            # If the process crashes after this commit but before the Twilio
-            # call, one touch is skipped (missed message) — acceptable.
-            # Without this ordering a crash after Twilio but before the old
-            # single commit would leave next_touch_due_at unchanged, causing
-            # the next cron run to re-send the same touch (duplicate SMS).
+        if not sending_on or not entitlements.org_has_feature(org, "cadences"):
+            reason = ("cadence SMS sending is disabled for this deployment"
+                      if not sending_on
+                      else "the organization is not entitled to cadences")
+            _log_touch(db, state, lead, touch_number=touch_number,
+                       attempt_seq=_next_attempt_seq(db, state, touch_number),
+                       outcome=OUTCOME_SKIPPED, reason=reason,
+                       scheduled_for=scheduled_for)
+            state.next_touch_due_at = now + RETRY_BACKOFF
+            skipped_count += 1
+            db.commit()
+            continue
+
+        # ── COMPLIANCE, BEFORE ANY PROVIDER IS RESOLVED ────────────────────
+        try:
+            check_compliance_preflight(db, lead, channel="sms")
+        except ValueError as blocked:
+            _log_touch(db, state, lead, touch_number=touch_number,
+                       attempt_seq=_next_attempt_seq(db, state, touch_number),
+                       outcome=OUTCOME_BLOCKED, reason=str(blocked),
+                       scheduled_for=scheduled_for, attempted_at=now)
+            state.next_touch_due_at = now + RETRY_BACKOFF
+            blocked_count += 1
+            db.commit()
+            continue
+
+        # ── THE CLAIM. One row, one send. ──────────────────────────────────
+        #
+        # A touch that already delivered is never re-sent, whatever the state
+        # counter says. That covers the crash-between-send-and-commit case as
+        # well as the concurrent-runner one: the evidence that a family was
+        # contacted is the log row, not the integer.
+        if _already_sent(db, state, touch_number):
+            logger.info(
+                "cadence: touch %s for lead %s has already been delivered; "
+                "leaving it to the runner that sent it", touch_number, lead.id)
+            continue
+
+        attempt_seq = _next_attempt_seq(db, state, touch_number)
+        if attempt_seq > MAX_ATTEMPTS_PER_TOUCH:
+            _log_touch(db, state, lead, touch_number=touch_number,
+                       attempt_seq=attempt_seq, outcome=OUTCOME_ABANDONED,
+                       reason=f"{MAX_ATTEMPTS_PER_TOUCH} attempts failed",
+                       scheduled_for=scheduled_for)
             state.current_touch_number = touch_number
-            state.last_touch_sent_at = now
-
-            if touch_number >= total_touches:
-                state.status = "completed"
-                state.completed_at = now
+            _advance_schedule(state, schedule, touch_number, total_touches, now)
+            if state.status == "completed":
                 completed_count += 1
-            else:
-                # Find next touch day offset from template schedule
-                next_touch_def = next((t for t in schedule if t["touch_number"] == touch_number + 1), None)
-                if next_touch_def:
-                    state.next_touch_due_at = state.cadence_started_at + timedelta(days=next_touch_def["day_offset"])
-                else:
-                    state.status = "completed"
-                    state.completed_at = now
-                    completed_count += 1
+            db.commit()
+            continue
 
-            lead.status = "sent"
-            db.commit()  # Phase 1 commit — state is durable before Twilio call.
+        body = render_cadence_message(
+            db, lead, advisor, touch_number, "",
+            touch_def.get("message_template"))
 
-            from app.services.sms_service import get_twilio_client
-            from app.services.twilio_callbacks import apply_status_callback
-            client, from_number, _ = get_twilio_client(advisor, db)
-            # THIS PATH NEVER ASKED FOR A DELIVERY RECEIPT. It writes a Message
-            # row below (Phase 2) with the column default delivery_status
-            # 'pending', and without a status callback Twilio had no way to
-            # report on it — so every cadence touch ever sent was stuck on
-            # 'pending' permanently. Cadence is the highest-volume sender in the
-            # product, which is most of why production showed thousands of
-            # messages and not one receipt.
-            twilio_msg = client.messages.create(**apply_status_callback(dict(
-                body=body, from_=from_number, to=lead.phone)))
-            sent_count += 1
-
-        except Exception as e:
-            error_count += 1
-            errors.append(f"Lead {lead.id}: {str(e)}")
-            db.rollback()
-            continue  # Skip Phase 2 — no twilio_msg to record.
+        claim = _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=attempt_seq, outcome=OUTCOME_SENT,
+                           scheduled_for=scheduled_for, attempted_at=now,
+                           body_preview=body, claim=True)
+        if claim is None:
+            # Another runner owns this touch. Not an error.
+            continue
+        db.commit()
 
         try:
-            # Phase 2: write the audit Message row. If this commit fails the
-            # touch-number state is already correct, so there is no re-send on
-            # the next run — only the audit record is lost, which is acceptable.
-            from app.models.models import Message
-            from app.services.message_state import normalize_provider_status
-            message = Message(
-                lead_id=lead.id, sender_id=advisor.id, body=body,
-                twilio_sid=twilio_msg.sid, twilio_status=twilio_msg.status,
-                send_state=normalize_provider_status(twilio_msg.status),
-                booking_link_id=booking.id if booking else None,
+            message = send_sms(
+                db=db, advisor=advisor, lead=lead, template=body,
+                include_booking_link=False,
+                send_source=_src.CADENCE,
+                # A cron. No authenticated human, and NULL says so honestly.
+                sent_by_user_id=None,
             )
-            db.add(message)
-            db.commit()  # Phase 2 commit — audit record only.
-        except Exception as e:
-            errors.append(f"Lead {lead.id}: audit record lost after send — {str(e)}")
+        except Exception as exc:                                 # noqa: BLE001
             db.rollback()
+            claim = db.query(CadenceTouchLog).filter(
+                CadenceTouchLog.id == claim.id).first()
+            if claim is not None:
+                is_guard = exc.__class__.__name__ == "DemoBoundaryViolation"
+                claim.outcome = OUTCOME_SUPPRESSED if is_guard else OUTCOME_FAILED
+                claim.reason = str(exc)[:500]
+            state.next_touch_due_at = now + RETRY_BACKOFF
+            error_count += 1
+            errors.append(f"Lead {lead.id}: {exc}")
+            db.commit()
+            continue
+
+        # ── SUCCESS. Only now does anything advance. ───────────────────────
+        claim.message_id = getattr(message, "id", None)
+        claim.provider = "twilio"
+        claim.provider_message_id = getattr(message, "twilio_sid", None)
+        claim.provider_error_code = getattr(message, "error_code", None)
+        claim.provider_error_message = getattr(message, "error_message", None)
+
+        state.current_touch_number = touch_number
+        state.last_touch_sent_at = now
+        _advance_schedule(state, schedule, touch_number, total_touches, now)
+        if state.status == "completed":
+            completed_count += 1
+        sent_count += 1
+        db.commit()
 
     return {
         "evaluated": len(due_states),
         "sent": sent_count,
         "completed": completed_count,
         "errors": error_count,
+        "blocked": blocked_count,
+        "skipped": skipped_count,
+        "sending_enabled": sending_on,
         "error_details": errors,
     }
+
+
+def _advance_schedule(state, schedule, touch_number, total_touches, now):
+    """Move the state to the next touch, or complete it. Success path only."""
+    if touch_number >= total_touches:
+        state.status = "completed"
+        state.completed_at = now
+        return
+    next_def = next((t for t in schedule if t["touch_number"] == touch_number + 1), None)
+    if not next_def:
+        state.status = "completed"
+        state.completed_at = now
+        return
+    base = state.cadence_started_at or now
+    if getattr(base, "tzinfo", None) is not None:
+        base = base.replace(tzinfo=None)
+    state.next_touch_due_at = base + timedelta(days=next_def["day_offset"])
+
+
+def get_cadence_history(db: Session, lead_id: str) -> list:
+    """Every attempt at every touch for one lead, oldest first.
+
+    This is the answer to "which steps completed, on what channel, when, and
+    what happened to the rest" - a question that had no answer at all while the
+    only state was one integer.
+    """
+    rows = (db.query(CadenceTouchLog)
+            .filter(CadenceTouchLog.lead_id == lead_id)
+            .order_by(CadenceTouchLog.touch_number.asc(),
+                      CadenceTouchLog.attempt_seq.asc())
+            .all())
+    return [
+        {
+            "touch_number": r.touch_number,
+            "attempt": r.attempt_seq,
+            "channel": r.channel,
+            "outcome": r.outcome,
+            "reason": r.reason,
+            "scheduled_for": r.scheduled_for,
+            "attempted_at": r.attempted_at,
+            "provider_message_id": r.provider_message_id,
+            "provider_error_code": r.provider_error_code,
+            "provider_error_message": r.provider_error_message,
+            "message_id": r.message_id,
+            "body_preview": r.body_preview,
+        }
+        for r in rows
+    ]
 
 
 def get_cadence_summary(db: Session, organization_id: str) -> dict:

@@ -1120,6 +1120,13 @@ INDEXES_TO_CREATE = [
     "CREATE INDEX IF NOT EXISTS ix_email_messages_lead_id   ON email_messages(lead_id)",
     # Reporting reads these by source over a date range ("what did the cadence
     # send today"), so the index leads with the filtered column.
+    # CADENCE PER-STEP HISTORY. The table is new, so create_all() makes it on
+    # the next deploy - but create_all() never adds an index to a table that
+    # already exists, so these ship here from day one rather than after the
+    # first production row makes it impossible.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_cadence_touch_attempt ON cadence_touch_logs(cadence_state_id, touch_number, attempt_seq)",
+    "CREATE INDEX IF NOT EXISTS ix_cadence_touch_lead ON cadence_touch_logs(lead_id, touch_number)",
+    "CREATE INDEX IF NOT EXISTS ix_cadence_touch_outcome ON cadence_touch_logs(organization_id, outcome, attempted_at)",
     "CREATE INDEX IF NOT EXISTS ix_messages_send_source ON messages(send_source, sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_email_messages_send_source ON email_messages(send_source, sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_email_messages_sent_at   ON email_messages(sent_at)",

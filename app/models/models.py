@@ -1603,6 +1603,79 @@ class MessageTemplate(Base):
 # Org-level reusable cadence templates. Each template has N touches.
 # Each touch defines: day offset, time of day, channel (sms/email/both).
 
+class CadenceTouchLog(Base):
+    """ONE ROW PER ATTEMPT AT ONE TOUCH. The cadence's missing history.
+
+    Before this, a cadence was a single integer. `CadenceState.current_touch_number`
+    said "4 of 9" and nothing anywhere said which four, on what channel, at what
+    time, whether they arrived, or why the other five had not been tried. A
+    cadence `Message` row was byte-identical to a manual one - same table, same
+    columns, same sender - and a FAILED touch wrote no row at all, so the
+    history could not be reconstructed even in principle.
+
+    It is also the concurrency lock. `uq_cadence_touch_attempt` is inserted in a
+    savepoint BEFORE the provider is called, so two runners racing on the same
+    touch produce one IntegrityError and one send, rather than two sends and a
+    counter that looks correct. That is the pattern
+    app/services/ai_operations/idempotency.py already uses and the reason it
+    uses a unique index rather than a check: a unique index is the only version
+    of the guarantee that survives two processes.
+
+    ATTEMPTS, NOT STEPS, is why the key carries `attempt_seq`. A touch that
+    fails is retried on a backoff, and each retry is its own row with its own
+    provider error, because "we tried three times and Twilio refused each time"
+    and "we never tried" are different facts and an operator has to be able to
+    tell them apart.
+
+    body_preview, never the body. The full text is on the `messages` row this
+    points at; duplicating it here would make the history a second copy of
+    customer communication to secure, retain and redact.
+    """
+
+    __tablename__ = "cadence_touch_logs"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    cadence_state_id = Column(String, ForeignKey("cadence_states.id", ondelete="CASCADE"),
+                              nullable=False, index=True)
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    # Denormalised so the reporting queries never need the join. cadence_states
+    # has no organization_id of its own.
+    organization_id = Column(String, nullable=True, index=True)
+
+    touch_number = Column(Integer, nullable=False)
+    attempt_seq = Column(Integer, nullable=False, default=1)
+    channel = Column(String, nullable=True)          # sms | email
+
+    # See CADENCE_OUTCOMES in app/services/cadence_service.py for the vocabulary
+    # and what each value means.
+    outcome = Column(String, nullable=False)
+    reason = Column(String, nullable=True)           # why skipped/suppressed/stopped
+
+    scheduled_for = Column(DateTime, nullable=True)  # when this touch was due
+    attempted_at = Column(DateTime, nullable=True)   # when we tried
+
+    # The provider's own words, kept rather than collapsed into "failed".
+    provider = Column(String, nullable=True)
+    provider_message_id = Column(String, nullable=True)
+    provider_error_code = Column(String, nullable=True)
+    provider_error_message = Column(String, nullable=True)
+
+    # The communication this produced, when it produced one.
+    message_id = Column(String, nullable=True, index=True)
+    email_message_id = Column(String, nullable=True)
+
+    body_preview = Column(String(240), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("cadence_state_id", "touch_number", "attempt_seq",
+                         name="uq_cadence_touch_attempt"),
+        Index("ix_cadence_touch_lead", "lead_id", "touch_number"),
+        Index("ix_cadence_touch_outcome", "organization_id", "outcome", "attempted_at"),
+    )
+
+
 class CadenceTemplate(Base):
     __tablename__ = "cadence_templates"
 
