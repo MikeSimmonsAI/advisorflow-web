@@ -290,8 +290,9 @@ async def voice_stream(
         """Lead agreed to book — send confirmation email/SMS."""
         logger.info("Booking detected on call for lead=%s", lead_id)
         if call:
+            # The OUTCOME is true the moment the AI hears the family agree, and
+            # it is recorded here whatever happens to the email afterwards.
             call.outcome = "booking_requested"
-            call.booking_url_sent = True
             db.commit()
 
         # Send booking link via email
@@ -317,6 +318,19 @@ async def voice_stream(
                     send_source=send_source.VOICE_BOOKING_LINK,
                     actor_user_id=getattr(advisor, "id", None),
                 )
+                # ONLY REACHED AFTER A SEND ACTUALLY SUCCEEDS.
+                #
+                # booking_url_sent was set True above, before this block, and
+                # stayed True through every ImportError - so the column has
+                # been reporting sent booking links for sends that never
+                # happened, and any report built on it overstated outbound
+                # email. It is now written here, where the only way to arrive
+                # is past the compliance gate, past the source switch and past
+                # the sender. While the source is disabled the gate raises, so
+                # this line does not run and the flag correctly stays False.
+                if call:
+                    call.booking_url_sent = True
+                    db.commit()
             except Exception as e:
                 logger.error("on_booking_detected email error: %s", e)
 

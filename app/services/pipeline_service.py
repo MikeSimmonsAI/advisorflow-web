@@ -417,13 +417,18 @@ def process_inbound_reply(
         return {"action": "booked", "pipeline_id": pipeline.id}
 
     if confidence >= threshold and pipeline.auto_respond:
-        # Auto-send with delay
-        pipeline.stage = "ai_responding"
-        pipeline.ai_responses_sent = (pipeline.ai_responses_sent or 0) + 1
-        pipeline.last_outbound_at = datetime.utcnow()
-        db.commit()
-
-        # Send the response — prefer SMS if lead has a phone, fall back to email
+        # NOTHING IS ADVANCED BEFORE THE SEND.
+        #
+        # stage, ai_responses_sent and last_outbound_at were all written and
+        # committed here, above the attempt. The email branch below then raised
+        # ImportError on a symbol that does not exist, was swallowed, and left
+        # behind a conversation that reported an AI response it had never sent
+        # and an outbound timestamp for a message that does not exist. Every
+        # one of those rows is still in the database.
+        #
+        # They are outcomes of a successful send, so they are written where the
+        # successful send is - in the `if sent_ok:` block below, in one commit
+        # with messages_sent, which was already correctly placed there.
         sent_ok = False
         channel_used = None
 
@@ -477,8 +482,13 @@ def process_inbound_reply(
 
         if sent_ok:
             pipeline.messages_sent = (pipeline.messages_sent or 0) + 1
-            if analysis["stage"]:
-                pipeline.stage = analysis["stage"]
+            pipeline.ai_responses_sent = (pipeline.ai_responses_sent or 0) + 1
+            pipeline.last_outbound_at = datetime.utcnow()
+            # analysis["stage"] is where the conversation actually got to.
+            # "ai_responding" is the fallback for a send that landed without
+            # the analysis naming a next stage - it is true only now, after
+            # something has genuinely gone out.
+            pipeline.stage = analysis["stage"] or "ai_responding"
             db.commit()
             return {
                 "action": "auto_sent",
@@ -488,6 +498,9 @@ def process_inbound_reply(
                 "pipeline_id": pipeline.id,
             }
         else:
+            # No counter moved, no timestamp was written and the stage is
+            # whatever it was before this attempt. A conversation that could
+            # not be answered has not "responded".
             logger.error("Pipeline auto-send failed on all channels for lead %s", lead.id)
             return {"action": "error", "error": "No channel available for auto-reply", "pipeline_id": pipeline.id}
     else:

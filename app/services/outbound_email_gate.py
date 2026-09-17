@@ -39,8 +39,81 @@ no code path through it that reaches one.
 """
 
 import logging
+import os
+
+from app.services import send_source as _src
 
 logger = logging.getLogger(__name__)
+
+
+# ── ONE SWITCH PER SOURCE, AND NO MASTER SWITCH ─────────────────────────────
+#
+# The first cut of this module had a single `raise EmailSendDisabled` at the
+# bottom, so restoring the sender would have been one edit that turned all
+# four dead paths on together. Bulk AI email is a human pressing a button on
+# leads they picked; the post-appointment sweep is a cron that mails whoever
+# had an appointment in the last three hours. Those two do not deserve to
+# become live in the same moment, and nothing about the first implies the
+# second is ready.
+#
+# So each gated source carries its own environment variable, each defaults to
+# off, and there is deliberately NO variable that enables several at once. To
+# turn one on you name it; nothing else moves.
+#
+# The pattern is app/services/workforce/activation.py's, including the
+# accepted truthy spellings, and it is fail-safe in the same way: an unset
+# variable, an unknown source and a typo all resolve to disabled. That is what
+# makes "no repaired email path can send in this build" a statement about the
+# code rather than a hope about the deployment.
+#
+# auto_send is deliberately ABSENT from this table. That path is already live,
+# it does not come through this gate, and putting it here would mean an
+# operator could switch off a working feature by forgetting an environment
+# variable. See `source_enabled` for what a missing entry means.
+
+STAFF_ESCALATION = "staff_escalation"
+"""Not a send_source: nothing writes a lead history row for a staff alert.
+It has its own switch so the internal escalation email can be restored
+without any customer-facing path moving with it."""
+
+_ENV_BY_SOURCE = {
+    _src.BULK_AI:              "OUTBOUND_EMAIL_BULK_AI",
+    _src.VOICE_BOOKING_LINK:   "OUTBOUND_EMAIL_VOICE_BOOKING_LINK",
+    _src.PIPELINE_AUTO_REPLY:  "OUTBOUND_EMAIL_PIPELINE_AUTO_REPLY",
+    _src.APPOINTMENT_FOLLOWUP: "OUTBOUND_EMAIL_APPOINTMENT_FOLLOWUP",
+    STAFF_ESCALATION:          "OUTBOUND_EMAIL_STAFF_ESCALATION",
+}
+
+GATED_SOURCES = tuple(_ENV_BY_SOURCE)
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Same spellings app/services/workforce/activation.py accepts."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def source_enabled(source) -> bool:
+    """Is THIS repaired path permitted to reach a provider in this deployment?
+
+    Answers the question for gated sources only. A source with no entry in the
+    table above - auto_send, cadence, manual, a typo, None - is not "allowed by
+    default", it is simply not a path this gate governs, and the honest answer
+    to "may the gate let it send" is no. Every caller of this function is
+    downstream of the gate, so failing closed is the correct reading.
+    """
+    name = _ENV_BY_SOURCE.get(source)
+    if name is None:
+        return False
+    return _env_flag(name, False)
+
+
+def enablement_report() -> dict:
+    """Every gated source and whether it is live, for a health endpoint or an
+    operator asking "what can actually send right now"."""
+    return {source: source_enabled(source) for source in GATED_SOURCES}
 
 
 class EmailSendDisabled(RuntimeError):
@@ -57,6 +130,18 @@ _DISABLED = (
     "passed and this message would have been sent; the provider call is "
     "deliberately not wired up."
 )
+
+
+def _disabled_reason(source) -> str:
+    """Name the switch in the message. An operator reading a queue row or a log
+    line should not have to go and find out which variable governs this path."""
+    name = _ENV_BY_SOURCE.get(source)
+    if name is None:
+        return (f"Outbound email source {source!r} is not one this gate can "
+                f"enable, so it cannot send.")
+    return (f"Outbound email for source {source!r} is disabled in this "
+            f"deployment ({name} is not set). The compliance gate passed; "
+            f"nothing was sent.")
 
 
 def gate_lead_email(db, lead, *, send_source, actor_user_id=None):
@@ -83,9 +168,22 @@ def gate_lead_email(db, lead, *, send_source, actor_user_id=None):
     from app.services.compliance_service import check_compliance_preflight
     check_compliance_preflight(db, lead, channel="email")
 
-    logger.info(
-        "outbound email gate PASSED but sender is disabled: lead=%s source=%s actor=%s",
-        getattr(lead, "id", None), send_source, actor_user_id,
+    if not source_enabled(send_source):
+        logger.info(
+            "outbound email gate PASSED but source is disabled: lead=%s "
+            "source=%s actor=%s", getattr(lead, "id", None), send_source,
+            actor_user_id,
+        )
+        raise EmailSendDisabled(_disabled_reason(send_source))
+
+    # The source is switched ON and the family may be contacted - and there is
+    # still no sender, because restoring one is Phase 3. When that lands, the
+    # send replaces this raise and every guard above it stays exactly where it
+    # is. Reaching here in this build means somebody set an environment
+    # variable ahead of the work; it is logged at warning for that reason.
+    logger.warning(
+        "outbound email source %s is ENABLED but no sender is wired up yet; "
+        "lead=%s was not contacted", send_source, getattr(lead, "id", None),
     )
     raise EmailSendDisabled(_DISABLED)
 
@@ -109,5 +207,11 @@ def gate_staff_email(recipient_email, *, purpose):
         raise ValueError(
             f"No notification address on file for {purpose}; nothing was sent."
         )
-    logger.info("staff email gate PASSED but sender is disabled: purpose=%s", purpose)
+    if not source_enabled(STAFF_ESCALATION):
+        logger.info("staff email gate PASSED but source is disabled: purpose=%s", purpose)
+        raise EmailSendDisabled(_disabled_reason(STAFF_ESCALATION))
+    logger.warning(
+        "staff email source is ENABLED but no sender is wired up yet; "
+        "purpose=%s was not delivered", purpose,
+    )
     raise EmailSendDisabled(_DISABLED)
