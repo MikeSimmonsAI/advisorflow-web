@@ -388,6 +388,62 @@ def _check_escalation(text: str) -> tuple:
     return False, ""
 
 
+# ── THE APPROVED FALLBACK POLICY, AND WHY IT IS NONE ────────────────────────
+#
+# When AI generation fails there is exactly one safe automated behaviour:
+# send nothing, record the failure, tell an operator. A generic substitute is
+# not a degraded personalised message - it is a different message that nobody
+# wrote and nobody approved, going out over an advisor's name.
+#
+# If a human ever writes, reviews and signs off a template for this case, it
+# goes here and _send_touch will use it. Until then this is None and the
+# automated path refuses. Deliberately a module constant rather than an
+# environment variable: an approved template is a thing somebody wrote, not a
+# switch somebody flipped at 2am.
+APPROVED_FALLBACK_TEMPLATE = None
+
+
+# ── CONFIGURATION PREFLIGHT ─────────────────────────────────────────────────
+#
+# WHY THIS RUNS BEFORE THE LOOP AND NOT INSIDE IT.
+#
+# On 2026-09-17 at 10:00 the cron found 25 due conversations and produced 25
+# identical pairs of errors - "OPENAI_API_KEY environment variable" and "No
+# sending address is configured" - one pair per lead, then exited 1. Fifty log
+# lines saying one thing: this service was never configured.
+#
+# Twenty-five attempts also means twenty-five chances for one of them to
+# behave differently. The honest response to missing configuration is to say
+# so once and touch nothing.
+REQUIRED_CONFIG = (
+    ("OPENAI_API_KEY", "generate the message"),
+    ("RESEND_API_KEY", "deliver the message"),
+)
+
+
+def preflight() -> dict:
+    """Can this process do the job at all? Read-only, no database, no provider.
+
+    Deployment-level prerequisites only. Whether a PARTICULAR organization has
+    a verified from-address is a per-org question the sender already answers
+    and refuses on; this catches the case where the answer is no for everybody
+    because the service was never given credentials.
+    """
+    import os as _os
+    missing = [name for name, _why in REQUIRED_CONFIG
+               if not (_os.environ.get(name) or "").strip()]
+    if not missing:
+        return {"ok": True, "missing": [], "reason": None}
+    why = {name: why for name, why in REQUIRED_CONFIG}
+    return {
+        "ok": False,
+        "missing": missing,
+        "reason": ("AI conversation is not configured on this service: %s. "
+                   "Nothing was processed and no message was attempted."
+                   % ", ".join("%s (needed to %s)" % (m, why[m]) for m in missing)),
+    }
+
+
 def _send_email_resend(db: Session, advisor: User, to_email: str, subject: str, body: str):
     """Send via Resend using the org's configured API key / from address.
     Raises on failure so callers can catch and handle."""
@@ -577,6 +633,14 @@ def generate_touch_email(
             "escalate": False,
             "source": "fallback",
             "error_kind": type(e).__name__,
+            # THE FLAG THE AUTOMATED SENDER READS.
+            #
+            # `source` was already "fallback" and nothing acted on it. This is
+            # unambiguous and it is checked in _send_touch, which refuses.
+            # generate_touch_email still RETURNS a body because the compose
+            # preview shows it to a human who then decides - a person looking
+            # at a draft is not the same act as a machine mailing a family.
+            "generation_failed": True,
             "touch_number": touch_number,
         }
 
@@ -653,6 +717,39 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
     if email_data.get("escalate"):
         _escalate_conversation(db, conv, lead, advisor, email_data.get("escalate_reason", ""), "")
         return {"success": False, "error": "Escalated to advisor"}
+
+    # ── AI GENERATION FAILED: NOBODY GETS MAILED ────────────────────────────
+    #
+    # This is the defect the production incident exposed. When the OpenAI call
+    # failed - on 2026-09-17 because advisorflow-ai-conversation has no
+    # OPENAI_API_KEY at all - generate_touch_email caught it and returned a
+    # hand-written English sentence, and this function went on to send it.
+    #
+    # Twenty-five families were one working Resend key away from receiving
+    #
+    #     "Hi {first_name}, I wanted to follow up regarding your
+    #      {appt_label}. I'd love to connect at your convenience."
+    #
+    # from their funeral home, over their advisor's name, indistinguishable to
+    # them from the product working. The only thing that stopped it was the
+    # sender refusing for want of a verified from-address. That is luck, not
+    # design.
+    #
+    # A GENERIC SUBSTITUTE IS NOT A DEGRADED VERSION OF A PERSONALISED
+    # MESSAGE. It is a different message, that nobody wrote and nobody
+    # approved, sent under somebody's name. The automated path refuses it.
+    #
+    # APPROVED_FALLBACK_TEMPLATE is the seam for a deliberate policy - a
+    # template a human wrote, reviewed and signed off. It is None, and while it
+    # is None this refuses. Setting it is a product decision, not a default.
+    if email_data.get("generation_failed") or email_data.get("source") == "fallback":
+        if APPROVED_FALLBACK_TEMPLATE is None:
+            reason = ("AI generation failed (%s) and there is no approved "
+                      "fallback template - refusing to send a generic message."
+                      % (email_data.get("error_kind") or "unknown"))
+            logger.error("_send_touch refused for lead %s: %s", lead.id, reason)
+            return {"success": False, "error": reason,
+                    "generation_failed": True, "sent": False}
 
     try:
         if not lead.email:
@@ -808,7 +905,27 @@ def process_scheduled_touches(db: Session, org_id: str = None) -> dict:
         org_id: If provided, only process conversations for leads belonging
                 to this org. The main loop calls this once per org so a
                 failure in one org cannot stall another.
+
+    Returns the usual counters, or - when this service is not configured to do
+    the work at all - a single aborted result having queried nothing, touched
+    nothing and attempted no delivery.
     """
+    # ── PREFLIGHT. ONE FAILURE, NOT TWENTY-FIVE. ────────────────────────────
+    # Before the query, so an unconfigured service does not walk a set of real
+    # conversations to fail identically on each one.
+    check = preflight()
+    if not check["ok"]:
+        logger.error("process_scheduled_touches aborted: %s", check["reason"])
+        return {
+            "processed": 0, "sent": 0, "skipped": 0, "errors": 0,
+            "aborted": True,
+            "missing_config": check["missing"],
+            # The key the cron's exit-code logic reads. An unconfigured service
+            # must exit non-zero: a green run that did nothing is how this went
+            # unnoticed, because every run with no work due looked identical.
+            "error": check["reason"],
+        }
+
     now = datetime.utcnow()
     query = db.query(PipelineConversation).filter(
         PipelineConversation.next_send_at <= now,
