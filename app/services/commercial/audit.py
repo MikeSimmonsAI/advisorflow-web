@@ -25,6 +25,9 @@ from sqlalchemy.orm import Session
 from app.models.commercial_models import CommercialAgreement
 from app.models.models import User
 from app.routers.audit_log_router import log_action
+import logging
+
+_log = logging.getLogger(__name__)
 
 # ── agreement lifecycle ─────────────────────────────────────────────────────
 A_AGREEMENT_CREATED   = "commercial_agreement_created"
@@ -72,7 +75,27 @@ def record(db: Session, agreement: Optional[CommercialAgreement],
            brand_sales_org_id: Optional[str] = None,
            before: Any = None, after: Any = None,
            details: Any = None, note: Optional[str] = None) -> None:
-    """Write one commercial audit entry inside the caller's transaction."""
+    """Write one commercial audit entry inside the caller's transaction.
+
+    `actor` is typed Optional and this used to pass `getattr(actor, "id", None)`
+    straight through, unguarded and with no try/except. audit_log_entries
+    .actor_user_id is NOT NULL, so the first caller to pass None would have
+    raised IntegrityError mid-transaction and taken a legitimate commercial
+    write down with it - the same failure that made onboarding invitations
+    uncommittable.
+
+    Same convention, same answer: an event with no human behind it is skipped
+    with a warning, never forged. Every present caller passes a real user, so
+    this changes nothing for any of them.
+    """
+    actor_id = getattr(actor, "id", None)
+    if not actor_id:
+        _log.warning(
+            "commercial audit skipped for %s on %s/%s: no actor. A forged "
+            "actor is worse than a missing row.",
+            action, target_type, target_id or getattr(agreement, "id", None))
+        return
+
     org_id = organization_id
     plat_id = platform_id
     brand_id = brand_sales_org_id
@@ -85,7 +108,7 @@ def record(db: Session, agreement: Optional[CommercialAgreement],
         tgt = tgt or agreement.id
 
     log_action(
-        db, org_id, getattr(actor, "id", None),
+        db, org_id, actor_id,
         action=action,
         target_type=target_type,
         target_id=tgt or "unknown",

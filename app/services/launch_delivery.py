@@ -79,10 +79,29 @@ def _audit(db: Session, impl: Implementation, actor_id: Optional[str], action: s
     action and its audit row land together or not at all. A failure to audit
     must never turn a successful write into a failed one, hence the guard —
     but it must also never silently succeed unlogged, hence the warning.
+
+    THIS PASSED `actor_id or "system"` AND THERE IS NO USER WITH ID "system".
+    audit_log_entries.actor_user_id is a NOT NULL foreign key to users, so the
+    string satisfied SQLite and violated the constraint on production
+    Postgres, where the IntegrityError was swallowed by the guard below - and
+    every actorless delivery event has therefore been silently unaudited in
+    production. The read path would have rendered it nameless anyway.
+
+    The convention this codebase already states three times over
+    (workforce/audit.py, support_remediation.py, lead_capacity.py) is that an
+    event with no human behind it is SKIPPED rather than forged, because
+    inventing a user id to satisfy a foreign key is how an audit log becomes
+    fiction. So: skip, and say so loudly enough to find.
     """
+    if not actor_id:
+        log.warning(
+            "delivery audit skipped for %s/%s: no actor. An audit row with a "
+            "forged actor is worse than a missing one, and this event has no "
+            "human behind it.", impl.id, action)
+        return
     try:
         log_action(
-            db, impl.organization_id, actor_id or "system",
+            db, impl.organization_id, actor_id,
             action=action, target_type=target_type, target_id=target_id,
             platform_id=impl.platform_id,
             brand_sales_org_id=impl.brand_sales_org_id,

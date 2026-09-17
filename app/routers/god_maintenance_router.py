@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
@@ -47,6 +47,40 @@ from app.deps import get_db, require_god
 from app.models.models import BookingLink, Lead, Message, User, VoiceCall
 
 router = APIRouter(prefix="/god/maintenance", tags=["god-maintenance"])
+
+
+# ── PIPELINE CONSISTENCY ────────────────────────────────────────────────────
+#
+# READ-ONLY, and it lives under /god/maintenance because "which of my
+# customers' AI conversations are claiming sends that never happened" is a
+# platform question, not a tenant one. Nothing here repairs anything: the
+# scan returns its own proposed cleanup plan alongside the evidence, for a
+# human to approve separately.
+
+@router.get("/pipeline-consistency")
+def pipeline_consistency(
+    organization_id: str = Query(default=None,
+                                 description="Narrow to one customer. Omit to scan the platform."),
+    verdict: str = Query(default=None,
+                         description="definitely_inconsistent | suspicious | valid"),
+    limit: int = Query(default=200, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_god),
+):
+    """Classify AI conversations against authoritative communication history.
+
+    The counters were advanced before the send for the whole period before the
+    ordering fix, so `ai_responses_sent > messages_sent` is an arithmetic
+    fingerprint of an attempt that was recorded and never left. See
+    app/services/pipeline_consistency.py for what each verdict means and why
+    there are three of them rather than two.
+    """
+    from app.services import pipeline_consistency as pc
+    if verdict and verdict not in pc.ALL_VERDICTS:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown verdict %r. Valid: %s" % (verdict, ", ".join(pc.ALL_VERDICTS)))
+    return pc.scan(db, organization_id=organization_id, limit=limit, verdict=verdict)
 
 log = logging.getLogger(__name__)
 
