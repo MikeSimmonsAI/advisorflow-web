@@ -89,13 +89,27 @@ def send_state_for(message) -> str:
     if not sid:
         return BLOCKED
 
-    raw = (getattr(message, "delivery_status", None)
-           or getattr(message, "twilio_status", None))
-    # "pending" is this codebase's own placeholder, not a Twilio status; it
-    # means "submitted, no receipt yet", which is QUEUED.
-    if (raw or "").strip().lower() == "pending":
-        return QUEUED
-    return normalize_provider_status(raw)
+    delivery = (getattr(message, "delivery_status", None) or "").strip().lower()
+    twilio = (getattr(message, "twilio_status", None) or "").strip().lower()
+
+    # "pending" IS THIS CODEBASE'S OWN PLACEHOLDER, NOT A TWILIO STATUS.
+    #
+    # The send path writes delivery_status="pending" on every row and waits for
+    # the status callback to replace it. So on a row that never got a callback
+    # - and on every row written before `send_state` existed - "pending" was
+    # being read as the answer and masking `twilio_status`, which held the
+    # provider's own word from the moment of submission. A message the carrier
+    # rejected outright rendered as "Queued", which is not a false success but
+    # is a failure nobody is looking at.
+    #
+    # The placeholder is treated as ABSENT, so the provider's own status
+    # answers when there is one. With neither, "submitted, no receipt yet" is
+    # genuinely queued.
+    if delivery and delivery != "pending":
+        return normalize_provider_status(delivery)
+    if twilio:
+        return normalize_provider_status(twilio)
+    return QUEUED
 
 
 # Presentation is defined once, here, so the transcript, the activity feed and

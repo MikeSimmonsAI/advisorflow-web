@@ -40,7 +40,7 @@ matter what arrives.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.models.models import (
@@ -160,10 +160,25 @@ def fetch(db: Session, lead_id: str, *, limit: int = DEFAULT_LIMIT,
     # pagination is: a failed or suppressed touch produced no message row, so
     # it could not appear in any history assembled from messages alone.
     if want is None or "cadence" in want:
+        # FILTER, ORDER AND EMIT ON THE SAME INSTANT.
+        #
+        # This filtered and sorted on `created_at` - when the row was written -
+        # while emitting `attempted_at` as the event's timestamp. The cursor is
+        # built from the emitted value, so the next page asked for rows created
+        # before an ATTEMPT time. Where the two differ, every touch log older
+        # than the first page became unreachable: the cursor had already moved
+        # past a column it was not paging on.
+        #
+        # In production the two are usually minutes apart and it mostly worked,
+        # which is the worst way for this to be wrong. A re-dated or backfilled
+        # row, or more touch logs than fit one page, silently dropped history
+        # for the one channel this module was written to make visible.
+        _when = func.coalesce(CadenceTouchLog.attempted_at,
+                              CadenceTouchLog.created_at)
         rows = _before(
             db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id == lead_id),
-            CadenceTouchLog.created_at, before) \
-            .order_by(desc(CadenceTouchLog.created_at)).limit(per_source).all()
+            _when, before) \
+            .order_by(desc(_when)).limit(per_source).all()
         for t in rows:
             events.append(_event(
                 SYSTEM, "cadence", t.attempted_at or t.created_at, id=t.id,

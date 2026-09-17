@@ -215,7 +215,19 @@ def add_suppression_entry(
     provenance. Re-suppressing is a no-op, which is what makes it safe to call
     from a webhook that may be delivered more than once.
     """
-    normalized = normalize_phone(phone)
+    # THE SAME NORMALIZER THE READ SIDE USES.
+    #
+    # This used to call the compliance ROUTER's validator. Write and read must
+    # agree on the stored form or an opt-out is recorded in a shape the
+    # suppression check can never match - which is the exact bug that comment
+    # in `normalize_phone` was written about. A number that cannot be
+    # normalized is refused here rather than stored unmatched: an opt-out we
+    # cannot enforce is worse than a loud failure, because it reads as honoured.
+    normalized = usable_us_phone(phone)
+    if normalized is None:
+        raise ValueError(
+            "Cannot record a suppression for %r: it is not a usable US number, "
+            "so the opt-out could never be matched against a lead." % (phone,))
     existing = (
         db.query(SuppressionEntry)
         .filter(SuppressionEntry.organization_id == organization_id, SuppressionEntry.phone == normalized)
