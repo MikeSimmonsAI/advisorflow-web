@@ -53,6 +53,7 @@ from app.services import package_pricing as _pp
 from app.models.staff_models import StaffActivation, PURPOSE_SETUP, PURPOSE_RESET
 from app.models.sales_models import (
     Membership, SCOPE_BRAND_SALES_ORG, BRAND_SALES_ROLES, ROLE_SALES_MANAGER,
+    INBOUND_DEFAULT_OWNER,
 )
 from app.routers.audit_log_router import log_action
 
@@ -94,6 +95,11 @@ def brand_detail(brand_sales_org_id: str,
         "configuration": {
             "brand_sales_org": {"id": bso.id, "name": bso.name, "slug": bso.slug,
                                 "timezone": bso.timezone, "is_active": bool(bso.is_active)},
+            # Who generic website traffic reaches. Shown here because this is
+            # the page it is set from, and because a brand with no inbound
+            # owner refuses every code-less visitor, which is invisible
+            # anywhere else.
+            "inbound_owner": _inbound_owner_row(db, bso),
             "packages": [{"id": p.id, "key": p.key, "name": p.name,
                           # `price` is the LEGACY ONE-TIME implementation charge,
                           # not a monthly rate. Both monthly rates, and the
@@ -776,6 +782,36 @@ def revoke_invite(activation_id: str,
 # brand is being asked about until the record is resolved.
 
 
+def _inbound_owner_row(db: Session, bso: BrandSalesOrg) -> Dict[str, Any]:
+    """Who currently receives code-less inbound, and whether they still can.
+
+    `seat_is_active` is read FRESH rather than trusted from the moment it was
+    set. A seat deactivated afterwards leaves this column pointing at somebody
+    who can no longer take the meeting, and the operator needs to see that on
+    the page rather than discover it from a refused booking.
+    """
+    uid = getattr(bso, "default_inbound_owner_user_id", None)
+    row: Dict[str, Any] = {
+        "user_id": uid, "full_name": None, "email": None, "role": None,
+        "seat_is_active": False, "configured": bool(uid),
+        "mode": getattr(bso, "inbound_assignment_mode", None) or INBOUND_DEFAULT_OWNER,
+    }
+    if not uid:
+        return row
+    u = db.query(User).filter(User.id == uid).first()
+    if u is not None:
+        row["full_name"] = u.full_name
+        row["email"] = u.email
+    m = (db.query(Membership)
+           .filter(Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+                   Membership.scope_id == bso.id,
+                   Membership.user_id == uid,
+                   Membership.role.in_(BRAND_SALES_ROLES))
+           .first())
+    if m is not None:
+        row["role"] = m.role
+        row["seat_is_active"] = bool(m.is_active)
+    return row
 def _sales_team_rows(db: Session, brand_sales_org_id: str):
     """Everyone with a brand-sales membership here, with their real access state."""
     mem = (db.query(Membership)
@@ -989,6 +1025,97 @@ def patch_sales_membership(membership_id: str, req: MembershipPatch,
             "team": _sales_team_rows(db, m.scope_id)}
 
 
+# -- who receives generic inbound website traffic ---------------------------
+#
+# THE ONE THING THE PUBLIC BOOKING PATH CANNOT INFER.
+#
+# A visitor arriving on a salesperson's `?code=` link is booking with that
+# salesperson, resolved from the code. A visitor arriving from the website with
+# no code has named nobody, and `sales_booking_codes.resolve_inbound_owner`
+# deliberately REFUSES rather than picking someone: an arbitrary assignment puts
+# a stranger's meeting on a real person's calendar and a real prospect into a
+# pipeline nobody is watching.
+#
+# So the brand names that person ONCE, here, and the booking path goes on
+# reading it from configuration. No person's name or id belongs in booking
+# logic, and none is written there.
+
+
+class InboundOwnerRequest(BaseModel):
+    # NULL IS A REAL VALUE, not a missing one: it clears the setting and returns
+    # the brand to refusing code-less traffic. That is why this endpoint does
+    # exactly one thing - with a single-field body there is no "absent" that
+    # needs telling apart from "null".
+    user_id: Optional[str] = Field(default=None)
+
+
+@router.patch("/brands/{brand_sales_org_id}/inbound-owner")
+def set_inbound_owner(brand_sales_org_id: str, req: InboundOwnerRequest,
+                      db: Session = Depends(get_db),
+                      god: User = Depends(require_god)):
+    """Set - or clear - the salesperson who receives generic inbound bookings.
+
+    THE MEMBERSHIP IS THE AUTHORITY, NOT THE USER ROW. Pointing this at somebody
+    with no active seat on THIS brand's sales team would hand meetings to a
+    person the brand does not employ to sell it, and would do it silently, on
+    the first visitor, rather than here where a human is present to read the
+    refusal. So both checks happen at configuration time and say which failed.
+    """
+    bso = (db.query(BrandSalesOrg)
+             .filter(BrandSalesOrg.id == brand_sales_org_id).first())
+    if bso is None:
+        raise HTTPException(status_code=404,
+                            detail="Brand sales organisation not found.")
+
+    before = {"default_inbound_owner_user_id": bso.default_inbound_owner_user_id,
+              "inbound_assignment_mode": bso.inbound_assignment_mode}
+
+    user_id = (req.user_id or "").strip() or None
+
+    if user_id is not None:
+        owner = db.query(User).filter(User.id == user_id).first()
+        if owner is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+        who = owner.full_name or owner.email
+        m = (db.query(Membership)
+               .filter(Membership.scope_type == SCOPE_BRAND_SALES_ORG,
+                       Membership.scope_id == bso.id,
+                       Membership.user_id == owner.id,
+                       Membership.role.in_(BRAND_SALES_ROLES))
+               .first())
+        if m is None:
+            raise HTTPException(
+                status_code=400,
+                detail="%s is not on this brand's sales team. Add the seat "
+                       "first, then set them as the inbound owner." % who)
+        if not m.is_active:
+            raise HTTPException(
+                status_code=400,
+                detail="%s's seat on this brand's sales team is deactivated. "
+                       "Reactivate it before routing inbound bookings to "
+                       "them." % who)
+
+    bso.default_inbound_owner_user_id = user_id
+
+    # The mode column is the seam for round-robin and today holds exactly one
+    # value. Naming an owner while the mode says something this build cannot
+    # resolve would leave a brand that looks configured and still refuses every
+    # visitor, so the supported mode is stamped alongside rather than left to
+    # drift. Clearing the owner leaves the mode alone - there is nothing to run.
+    if user_id is not None and bso.inbound_assignment_mode != INBOUND_DEFAULT_OWNER:
+        bso.inbound_assignment_mode = INBOUND_DEFAULT_OWNER
+
+    after = {"default_inbound_owner_user_id": bso.default_inbound_owner_user_id,
+             "inbound_assignment_mode": bso.inbound_assignment_mode}
+    log_action(db, None, god.id,
+               action="brand_sales_org.inbound_owner_set",
+               target_type="brand_sales_org", target_id=bso.id,
+               platform_id=bso.platform_id, brand_sales_org_id=bso.id,
+               before=before, after=after)
+    db.commit()
+    db.refresh(bso)
+    return {"inbound_owner": _inbound_owner_row(db, bso),
+            "team": _sales_team_rows(db, bso.id)}
 class SetupLinkRequest(BaseModel):
     brand_sales_org_id: str
     purpose: str = PURPOSE_SETUP          # "setup" | "reset"
