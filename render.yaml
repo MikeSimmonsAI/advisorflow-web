@@ -76,6 +76,15 @@ services:
     buildFilter: &pythonBuildFilter
       ignoredPaths:
         - "frontend/**"
+        # The EvoSys Pro public website. It is PHP, it is uploaded to GoDaddy by
+        # hand, and no Python service here reads a byte of it at build or run
+        # time - the four platform endpoints it calls are ordinary HTTP. Its
+        # absence from this list is what made a one-line CSS fix to
+        # /request-demo/ rebuild and redeploy this service and the four other
+        # Python services below for no reason. A commit that touches
+        # public-site/ AND anything not listed here still builds: Render skips
+        # only when EVERY changed file matches.
+        - "public-site/**"
         - "booking-app/**"
         - "demos/**"
         - "docs/**"
