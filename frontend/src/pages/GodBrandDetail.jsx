@@ -303,27 +303,38 @@ export default function GodBrandDetail() {
                     </select>
                   </td>
                   <td data-label="Manager">
-                    {/* A manager reports to nobody inside their own brand, so
-                        the cell is a dash rather than an empty control. The
-                        server clears the line on promotion for the same reason. */}
-                    {u.can_be_reporting_manager
-                      ? <span className="go-badge">—</span>
-                      : (
+                    {/* Everybody with a seat gets this control, managers
+                        included. A manager usually reports to nobody, but a
+                        brand whose meeting types use a reporting-chain quorum
+                        needs a leader ABOVE the person who takes the booking,
+                        and that person is normally a manager themselves. The
+                        chain walk in leadership_chain.resolve() reads exactly
+                        this column, so with no line here the walk stops on its
+                        first step and the meeting reports back unbookable.
+                        Promotion still clears the line server-side; this only
+                        makes the line settable again afterwards. Somebody
+                        cannot report to themselves, which the server refuses,
+                        so they are filtered out of their own list. */}
+                    {(() => {
+                      const options = managers.filter(m => m.user_id !== u.user_id)
+                      return (
                         <select
                           className="go-input sm"
                           value={u.reports_to_user_id || ''}
-                          disabled={busy === u.user_id || !u.membership_is_active}
+                          disabled={busy === u.user_id || !u.membership_is_active
+                                    || options.length === 0}
                           onChange={e => patchMembership(u, {
                             set_reports_to: true,
                             reports_to_user_id: e.target.value || null,
                           })}
                         >
                           <option value="">unassigned</option>
-                          {managers.map(m => (
+                          {options.map(m => (
                             <option key={m.user_id} value={m.user_id}>{m.full_name}</option>
                           ))}
                         </select>
-                      )}
+                      )
+                    })()}
                   </td>
                   <td data-label="Membership">
                     {u.membership_is_active
