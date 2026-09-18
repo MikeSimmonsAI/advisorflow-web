@@ -6,9 +6,9 @@
 | | |
 |---|---|
 | **1. Starting HEAD** | `1b36298` — matched the expected booking history (`3c0e8ad` → `1b36298`) |
-| **2. Ending HEAD** | `cec8975` |
-| **30. Local commit SHA** | `cec8975` (one commit) |
-| **31. Pushed?** | **NO** — 45 commits remain local |
+| **2. Ending HEAD** | `19e2b2a` |
+| **30. Local commit SHA** | `cec8975` (site) + `df7cca4` (report) + `19e2b2a` (this SHA correction) |
+| **31. Pushed?** | **NO** — 47 commits remain local |
 | **32. Deployed?** | **NO** |
 
 `git worktree list` shows 29 additional worktrees, all marked `prunable`. None
