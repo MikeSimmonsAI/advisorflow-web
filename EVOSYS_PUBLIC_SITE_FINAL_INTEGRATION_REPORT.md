@@ -6,8 +6,8 @@
 | | |
 |---|---|
 | **1. Starting HEAD** | `1b36298` — matched the expected booking history (`3c0e8ad` → `1b36298`) |
-| **2. Ending HEAD** | `19e2b2a` |
-| **30. Local commit SHA** | `cec8975` (site) + `df7cca4` (report) + `19e2b2a` (this SHA correction) |
+| **2. Ending HEAD** | `760b6df` — this document's own commit is the tip, so the SHA above is the commit that produced the final text |
+| **30. Local commit SHA** | **`cec8975`** — the integration itself. `df7cca4` and `760b6df` carry this report. |
 | **31. Pushed?** | **NO** — 47 commits remain local |
 | **32. Deployed?** | **NO** |
 
