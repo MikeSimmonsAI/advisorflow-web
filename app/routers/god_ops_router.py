@@ -100,6 +100,9 @@ def brand_detail(brand_sales_org_id: str,
             # owner refuses every code-less visitor, which is invisible
             # anywhere else.
             "inbound_owner": _inbound_owner_row(db, bso),
+            # Which meeting types the website may offer, and the quorum each
+            # one books. Read-only here; changed through the endpoint below.
+            "meeting_types": _meeting_type_rows(db, bso),
             "packages": [{"id": p.id, "key": p.key, "name": p.name,
                           # `price` is the LEGACY ONE-TIME implementation charge,
                           # not a monthly rate. Both monthly rates, and the
@@ -782,6 +785,34 @@ def revoke_invite(activation_id: str,
 # brand is being asked about until the record is resolved.
 
 
+def _meeting_type_rows(db: Session, bso: BrandSalesOrg) -> List[Dict[str, Any]]:
+    """Every active meeting type this brand has, and whether the WEBSITE may
+    offer it.
+
+    `public_bookable` decided whether a brand could take an inbound booking at
+    all and was visible in no screen and settable by no endpoint. A flag that
+    governs the public path and cannot be read is a flag nobody can debug: it
+    produced a brand that looked configured, answered every visitor with the
+    generic "not available right now", and gave an operator nothing to look at.
+    """
+    from app.models.scheduling_models import MeetingType
+    rows = (db.query(MeetingType)
+              .filter(MeetingType.brand_sales_org_id == bso.id,
+                      MeetingType.is_active.is_(True))
+              .order_by(MeetingType.sort_order.asc()).all())
+    return [{
+        "key": m.key, "name": m.name,
+        "duration_minutes": m.duration_minutes,
+        "is_internal": bool(m.is_internal),
+        "requires_video": bool(m.requires_video),
+        "public_bookable": bool(m.public_bookable),
+        "leadership_policy": m.leadership_policy,
+        "leadership_minimum": m.leadership_minimum,
+        "leadership_depth": m.leadership_depth,
+        "owner_required": bool(m.owner_required),
+        "include_additional_leaders": bool(m.include_additional_leaders),
+    } for m in rows]
+
 def _inbound_owner_row(db: Session, bso: BrandSalesOrg) -> Dict[str, Any]:
     """Who currently receives code-less inbound, and whether they still can.
 
@@ -1116,6 +1147,83 @@ def set_inbound_owner(brand_sales_org_id: str, req: InboundOwnerRequest,
     db.refresh(bso)
     return {"inbound_owner": _inbound_owner_row(db, bso),
             "team": _sales_team_rows(db, bso.id)}
+class MeetingTypePublicRequest(BaseModel):
+    public_bookable: bool
+
+
+@router.patch("/brands/{brand_sales_org_id}/meeting-types/{key}/public")
+def set_meeting_type_public(brand_sales_org_id: str, key: str,
+                            req: MeetingTypePublicRequest,
+                            db: Session = Depends(get_db),
+                            god: User = Depends(require_god)):
+    """Open - or close - one meeting type to booking from the public website.
+
+    WHY THIS IS A CONTROL AND NOT A BACKFILL.
+
+    `ensure_meeting_types` back-fills the quorum and this flag onto brands that
+    were seeded before the feature, guarded on the row never having been edited
+    (updated_at == created_at). That guard cannot tell a HUMAN edit from an
+    EARLIER BACKFILL\'s own write - and the requires_video backfill in the same
+    function writes to exactly these rows first. Any brand that picked up the
+    video backfill on an earlier deploy therefore has a row that looks
+    hand-edited forever, and the quorum backfill skips it for good. The brand
+    ends up permanently unbookable from its own website with nothing on any
+    screen to say why.
+
+    So the decision - "does our website offer this meeting?" - stops being
+    inferred from a timestamp and becomes a thing a person states.
+
+    ENABLING ALSO COMPLETES THE CONFIGURATION, because a type opened to the
+    public with no leadership policy would take bookings that skip the quorum
+    the type was designed around. The shipped default is applied ONLY when the
+    brand has not chosen a policy of its own; a brand\'s own policy is never
+    overwritten, in either direction.
+    """
+    from app.models.scheduling_models import MeetingType
+    from app.services.meeting_roles import DEFAULT_MEETING_TYPES
+
+    bso = (db.query(BrandSalesOrg)
+             .filter(BrandSalesOrg.id == brand_sales_org_id).first())
+    if bso is None:
+        raise HTTPException(status_code=404,
+                            detail="Brand sales organisation not found.")
+
+    mt = (db.query(MeetingType)
+            .filter(MeetingType.brand_sales_org_id == bso.id,
+                    MeetingType.key == key).first())
+    if mt is None:
+        raise HTTPException(status_code=404, detail="Meeting type not found.")
+    if mt.is_internal and req.public_bookable:
+        raise HTTPException(
+            status_code=400,
+            detail="%s is an internal meeting type. Opening it to the website "
+                   "would let anyone book onto the team\'s calendars." % mt.name)
+
+    before = {"public_bookable": bool(mt.public_bookable),
+              "leadership_policy": mt.leadership_policy}
+
+    mt.public_bookable = bool(req.public_bookable)
+
+    if req.public_bookable and not mt.leadership_policy:
+        spec = next((s for s in DEFAULT_MEETING_TYPES
+                     if s["key"] == mt.key and s.get("leadership_policy")), None)
+        if spec is not None:
+            mt.leadership_policy = spec["leadership_policy"]
+            mt.owner_required = spec["owner_required"]
+            mt.leadership_minimum = spec["leadership_minimum"]
+            mt.leadership_depth = spec["leadership_depth"]
+            mt.include_additional_leaders = spec["include_additional_leaders"]
+
+    after = {"public_bookable": bool(mt.public_bookable),
+             "leadership_policy": mt.leadership_policy}
+    log_action(db, None, god.id,
+               action="meeting_type.public_bookable_set",
+               target_type="meeting_type", target_id=mt.id,
+               platform_id=bso.platform_id, brand_sales_org_id=bso.id,
+               before=before, after=after, note=mt.key)
+    db.commit()
+    return {"meeting_types": _meeting_type_rows(db, bso)}
+
 class SetupLinkRequest(BaseModel):
     brand_sales_org_id: str
     purpose: str = PURPOSE_SETUP          # "setup" | "reset"
