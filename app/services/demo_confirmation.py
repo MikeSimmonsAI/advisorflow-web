@@ -302,7 +302,8 @@ def _context(db: Session, appt):
     return industry, rep
 
 
-def send(db: Session, appt, *, actor=None, graphic_url=None, graphic_alt=None):
+def send(db: Session, appt, *, actor=None, graphic_url=None, graphic_alt=None,
+         gate_source=None):
     """Send the confirmation, if this deployment allows it.
 
     Goes through the same gate as every other restored path, which is disabled
@@ -310,6 +311,20 @@ def send(db: Session, appt, *, actor=None, graphic_url=None, graphic_alt=None):
     is enabled, delivery and failure are both recorded on the appointment and
     in AppointmentSyncLog, exactly as send_prospect_invitation does - a resend
     is this same call again and the counter distinguishes them.
+
+    `gate_source` NAMES THE SWITCH, AND ITS DEFAULT IS THE EXISTING ONE.
+
+    This function has two callers that are not the same act. A salesperson
+    inside the product pressing "resend confirmation" is a human doing one
+    thing on purpose; the public booking flow sending one automatically to a
+    stranger who just filled in a web form is not. They should be separately
+    enableable, and the only way to do that in a module whose whole design is
+    one switch per source is to let the caller say which source it is.
+
+    The default is STAFF_ESCALATION, unchanged, so the internal resend keeps
+    exactly the gate it has always had. The public flow passes
+    PUBLIC_BOOKING_CONFIRMATION. Nobody has to remember anything: the default
+    is the old behaviour and the new behaviour is opt-in at the call site.
     """
     from app.services import outbound_email_gate
     from app.services.appointment_invites import brand_identity, _SendingOrg
@@ -323,10 +338,14 @@ def send(db: Session, appt, *, actor=None, graphic_url=None, graphic_alt=None):
     rendered = build(appt, ident, industry=industry, salesperson=rep,
                      graphic_url=graphic_url, graphic_alt=graphic_alt)
 
-    # The staff gate, deliberately: this is a brand-sales email about a demo,
-    # not outreach to a customer's lead, so there is no Lead to run the
-    # compliance preflight against and no customer entitlement that governs it.
-    outbound_email_gate.gate_staff_email(to, purpose="demo confirmation")
+    # A transactional gate rather than a lead gate, deliberately: this is a
+    # brand-sales email about a demo, not outreach to a customer's lead, so
+    # there is no Lead to run the compliance preflight against and no customer
+    # entitlement that governs it. WHICH transactional switch is the caller's
+    # to state - see the docstring.
+    outbound_email_gate.gate_transactional_email(
+        to, purpose="demo confirmation",
+        source=gate_source or outbound_email_gate.STAFF_ESCALATION)
 
     from app.services.email_service import send_email_via_provider
     identity = _SendingOrg(ident.get("from_email"),

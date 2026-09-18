@@ -33,13 +33,23 @@ background-loop registry in app/service_role.py owns which process runs it, the
 same way it owns every other scheduled job on the platform. There is no second
 scheduler here and there must not be one.
 
-DELIVERY IS GATED
------------------
-Every send goes through `outbound_email_gate.gate_staff_email`, which is off by
-default. In this build a due reminder is therefore CLAIMED, attempted, and
-recorded as `failed` with the gate's own reason - which is the honest state. The
-claim still happens, so turning the gate on later does not produce a backlog of
-reminders for meetings that have already happened.
+DELIVERY IS GATED, ON A SWITCH OF ITS OWN
+-----------------------------------------
+Every send goes through `outbound_email_gate.gate_transactional_email` on
+`PUBLIC_BOOKING_REMINDERS` - `OUTBOUND_EMAIL_PUBLIC_BOOKING_REMINDERS` - which
+is off by default and is shared with nothing.
+
+That separation is the point. "Send the prospect their booking confirmation" and
+"start sending automated reminders before every meeting" are different
+decisions with different blast radii, and a brand must be able to make the first
+without making the second. Reminders are also the path most likely to be turned
+OFF again after a while, which a shared switch would make impossible without
+taking the confirmation down with it.
+
+In this build a due reminder is therefore CLAIMED, attempted, and recorded as
+`failed` with the gate's own reason - which is the honest state. The claim still
+happens, so turning the switch on later does not produce a backlog of reminders
+for meetings that have already happened.
 """
 
 import logging
@@ -303,8 +313,9 @@ def _deliver(db: Session, appt: SalesAppointment, row: AppointmentReminder) -> N
     hours = 24 if row.kind == REMINDER_24H else 1
     subject, body = render(db, appt, hours)
 
-    outbound_email_gate.gate_staff_email(appt.prospect_email,
-                                         purpose="appointment reminder")
+    outbound_email_gate.gate_transactional_email(
+        appt.prospect_email, purpose="appointment reminder",
+        source=outbound_email_gate.PUBLIC_BOOKING_REMINDERS)
     identity = _SendingOrg(ident.get("from_email"), from_name=ident.get("name"))
     result = send_email_via_provider(
         to_email=appt.prospect_email, subject=subject, body_html=body,

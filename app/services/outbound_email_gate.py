@@ -77,12 +77,59 @@ STAFF_ESCALATION = "staff_escalation"
 It has its own switch so the internal escalation email can be restored
 without any customer-facing path moving with it."""
 
+# ── PUBLIC DISCOVERY / DEMO BOOKING ─────────────────────────────────────────
+#
+# THREE SWITCHES, BECAUSE THEY ARE THREE DECISIONS.
+#
+# These three paths first shipped sharing STAFF_ESCALATION, and that was wrong
+# for the reason the comment above this table already gives: one variable that
+# turns on several unrelated paths is precisely what this module was built to
+# avoid. Sharing it meant an operator who wanted a prospect to receive their
+# booking confirmation would, in the same edit, have enabled the AI
+# conversation service's internal escalation alerts - a completely unrelated
+# feature, on a completely unrelated schedule, that nobody was asking about.
+#
+# It was also wrong in the other direction. "Let the sales team start getting
+# notified about website bookings" and "start emailing prospects automatically"
+# are different sentences with different blast radii, and a deployment must be
+# able to say the first without saying the second.
+#
+# So each path names its own variable, and none of them implies another:
+#
+#   CONFIRMATION - the ONE branded message a prospect receives immediately
+#                  after booking. Customer-facing.
+#   INTERNAL     - the alert to the assigned salesperson and the leadership
+#                  who were actually booked, plus the emailed .ics invitation
+#                  those same people receive when they have no calendar
+#                  connected. Staff-facing, and the reason those two share a
+#                  switch is that they are one notification to one set of
+#                  people, differing only in whether it carries an attachment.
+#   REMINDERS    - the 24-hour and one-hour messages before the meeting.
+#                  Customer-facing, and deliberately separate from the
+#                  confirmation: a brand may well want the confirmation live
+#                  while it decides whether automated reminders are wanted at
+#                  all, and the reverse is a coherent position too.
+#
+# None of these is a `send_source`: like STAFF_ESCALATION, no lead history row
+# is written for any of them - a brand-sales prospect is not a customer's lead.
+PUBLIC_BOOKING_CONFIRMATION = "public_booking_confirmation"
+PUBLIC_BOOKING_INTERNAL     = "public_booking_internal"
+PUBLIC_BOOKING_REMINDERS    = "public_booking_reminders"
+
+# Handy for a health endpoint or a setup screen that wants to report on the
+# booking feature specifically rather than on all gated sources.
+PUBLIC_BOOKING_SOURCES = (PUBLIC_BOOKING_CONFIRMATION, PUBLIC_BOOKING_INTERNAL,
+                          PUBLIC_BOOKING_REMINDERS)
+
 _ENV_BY_SOURCE = {
     _src.BULK_AI:              "OUTBOUND_EMAIL_BULK_AI",
     _src.VOICE_BOOKING_LINK:   "OUTBOUND_EMAIL_VOICE_BOOKING_LINK",
     _src.PIPELINE_AUTO_REPLY:  "OUTBOUND_EMAIL_PIPELINE_AUTO_REPLY",
     _src.APPOINTMENT_FOLLOWUP: "OUTBOUND_EMAIL_APPOINTMENT_FOLLOWUP",
     STAFF_ESCALATION:          "OUTBOUND_EMAIL_STAFF_ESCALATION",
+    PUBLIC_BOOKING_CONFIRMATION: "OUTBOUND_EMAIL_PUBLIC_BOOKING_CONFIRMATION",
+    PUBLIC_BOOKING_INTERNAL:     "OUTBOUND_EMAIL_PUBLIC_BOOKING_INTERNAL",
+    PUBLIC_BOOKING_REMINDERS:    "OUTBOUND_EMAIL_PUBLIC_BOOKING_REMINDERS",
 }
 
 GATED_SOURCES = tuple(_ENV_BY_SOURCE)
@@ -372,6 +419,37 @@ def send_staff_email(db, advisor, recipient_email, subject, body_html, *, purpos
     return _send_email_resend(db, advisor, recipient_email, subject, body_html)
 
 
+def gate_transactional_email(recipient_email, *, purpose, source):
+    """The guards for a transactional email on a NAMED gated source, then refuse.
+
+    Identical in shape to `gate_staff_email` below - which now delegates here -
+    except that the caller states which switch governs it instead of inheriting
+    one. That is the whole point: a path that does not name its own source ends
+    up sharing somebody else's, and then the two can only ever be turned on
+    together.
+
+    No compliance preflight, for the same reason `gate_staff_email` has none:
+    that function answers questions about a LEAD's consent - DNC, allow_email,
+    capacity hold - and none of the recipients here is a lead. A brand-sales
+    prospect who filled in a booking form on a marketing site and asked for a
+    meeting is not a customer's family member being marketed to, and running a
+    customer-tenant consent check against them would be a category error with no
+    Lead row to run it against.
+
+    Raises ValueError when there is nobody to send to, and EmailSendDisabled
+    when the deployment has not enabled this specific source.
+    """
+    if not recipient_email:
+        raise ValueError(
+            f"No recipient address for {purpose}; nothing was sent."
+        )
+    if not source_enabled(source):
+        logger.info("transactional email gate PASSED but source is disabled: "
+                    "purpose=%s source=%s", purpose, source)
+        raise EmailSendDisabled(_disabled_reason(source))
+    return None
+
+
 def gate_staff_email(recipient_email, *, purpose):
     """Run the guards for an email to one of OUR OWN PEOPLE, then refuse.
 
@@ -391,8 +469,8 @@ def gate_staff_email(recipient_email, *, purpose):
         raise ValueError(
             f"No notification address on file for {purpose}; nothing was sent."
         )
-    if not source_enabled(STAFF_ESCALATION):
-        logger.info("staff email gate PASSED but source is disabled: purpose=%s", purpose)
-        raise EmailSendDisabled(_disabled_reason(STAFF_ESCALATION))
-    # Cleared. See gate_lead_email for why this no longer raises.
-    return None
+    # Delegates, so there is one implementation of "check the switch and refuse"
+    # rather than two that can drift. The MESSAGE for a missing recipient stays
+    # the one this function has always raised, because callers and tests read it.
+    return gate_transactional_email(recipient_email, purpose=purpose,
+                                    source=STAFF_ESCALATION)

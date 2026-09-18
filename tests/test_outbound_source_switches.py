@@ -70,6 +70,14 @@ def test_every_gated_source_is_disabled_by_default(monkeypatch):
         "pipeline_auto_reply": False,
         "appointment_followup": False,
         "staff_escalation": False,
+        # The public Discovery / Demo booking paths. Three sources rather than
+        # one because they are three decisions - a brand may want its sales
+        # team notified about website bookings without a single prospect being
+        # emailed, and may want confirmations live while it decides whether
+        # automated reminders are wanted at all.
+        "public_booking_confirmation": False,
+        "public_booking_internal": False,
+        "public_booking_reminders": False,
     }
 
 

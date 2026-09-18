@@ -54,8 +54,22 @@ GATED = [
     (src.PIPELINE_AUTO_REPLY, "OUTBOUND_EMAIL_PIPELINE_AUTO_REPLY"),
     (src.APPOINTMENT_FOLLOWUP, "OUTBOUND_EMAIL_APPOINTMENT_FOLLOWUP"),
     (gate.STAFF_ESCALATION, "OUTBOUND_EMAIL_STAFF_ESCALATION"),
+    # The public Discovery / Demo booking paths. Three of them, because a brand
+    # may want its sales team notified about website bookings without a single
+    # prospect being emailed - and because confirmations and automated
+    # reminders are separate decisions with different blast radii.
+    (gate.PUBLIC_BOOKING_CONFIRMATION,
+     "OUTBOUND_EMAIL_PUBLIC_BOOKING_CONFIRMATION"),
+    (gate.PUBLIC_BOOKING_INTERNAL, "OUTBOUND_EMAIL_PUBLIC_BOOKING_INTERNAL"),
+    (gate.PUBLIC_BOOKING_REMINDERS, "OUTBOUND_EMAIL_PUBLIC_BOOKING_REMINDERS"),
 ]
-LEAD_SOURCES = [s for s, _ in GATED if s != gate.STAFF_ESCALATION]
+
+# Sources that do NOT contact a customer's lead, and so have no Lead to run the
+# compliance preflight against. Staff escalation goes to one of our own people;
+# the booking paths go to a brand-sales prospect or to the sales team, neither
+# of which is a family in a customer's tenant.
+NON_LEAD_SOURCES = (gate.STAFF_ESCALATION,) + gate.PUBLIC_BOOKING_SOURCES
+LEAD_SOURCES = [s for s, _ in GATED if s not in NON_LEAD_SOURCES]
 
 
 def _lead(db_session, org, advisor, **kw):
@@ -380,8 +394,24 @@ def test_the_gate_functions_reach_no_provider_themselves():
 
 
 def test_every_gated_source_is_in_the_one_vocabulary():
+    """Every gated source is one of exactly two things, and nothing else.
+
+    Either it is a real `send_source` - meaning an email on it writes a row of
+    lead communication history against a customer's family - or it is in
+    NON_LEAD_SOURCES, meaning it contacts nobody's lead and there is no history
+    to write. The staff escalation alert goes to one of our own people; the
+    three public-booking paths go to a brand-sales prospect or to the sales
+    team, and a brand-sales prospect is not a customer's lead.
+
+    Stated as a rule rather than as a growing list of exemptions, because the
+    thing that must not happen is a source that is neither: one that contacts a
+    family WITHOUT writing history, which is how outbound activity becomes
+    unauditable.
+    """
     for source, _ in GATED:
-        assert source == gate.STAFF_ESCALATION or src.is_valid(source), source
+        assert source in NON_LEAD_SOURCES or src.is_valid(source), (
+            "%r is a gated source that is neither a send_source nor declared "
+            "as contacting no lead" % source)
 
 
 def test_there_is_exactly_one_variable_per_source():

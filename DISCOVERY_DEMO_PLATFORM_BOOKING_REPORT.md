@@ -363,9 +363,13 @@ and they are watching. For an **inbound** booking nobody asked and nobody is
 watching — a stranger on a website could cause mail to be sent, at any hour,
 through an ungated path.
 
-The public flow now holds that fallback to the same staff gate as every other
-message it can produce, while still syncing anyone who has a real provider
-connected (a Graph API call is not an email and is not what the gate governs).
+The public flow now holds that fallback to
+`OUTBOUND_EMAIL_PUBLIC_BOOKING_INTERNAL` — the .ics goes to the assigned
+salesperson and the booked leadership, the same people the internal
+notification goes to, so it is one notification to one set of people differing
+only in whether it carries an attachment. Anyone with a real provider connected
+is still synced regardless (a Graph API call is not an email and is not what the
+gate governs).
 **The internal path is deliberately unchanged** — that is existing behaviour and
 changing it was not asked for. It is flagged in §24.
 
@@ -390,9 +394,11 @@ to a Lead in a customer organization, and reaching across the brand-sales /
 customer-tenant boundary is the one thing the sales models are emphatic about not
 doing.
 
-**Email is prepared and gated**, same as the confirmation. It carries prospect
-name, company, date/time, timezone, assigned salesperson, primary challenge,
-meeting type and the **join** link — never the host link.
+**Email is prepared and gated** on `OUTBOUND_EMAIL_PUBLIC_BOOKING_INTERNAL`,
+which is separate from the customer confirmation's switch — a brand can let its
+sales team start seeing bookings without emailing a single prospect. It carries
+prospect name, company, date/time, timezone, assigned salesperson, primary
+challenge, meeting type and the **join** link — never the host link.
 
 **Notifying the full chain when a leader is not attending** is a real question
 and is left as a follow-up (§24) rather than guessed at: it needs a configuration
@@ -415,9 +421,10 @@ to believe a second email will be better. The public response returns
 `pending_meeting_link`, and the page can honestly say the booking is confirmed
 and details are coming.
 
-**Delivery is disabled and reported as itself**, not as a failure — `send()`
-runs the staff outbound gate, which is off by default. An operations view must
-never confuse "we chose not to send" with "sending broke".
+**Delivery is disabled and reported as itself**, not as a failure — this path
+runs `OUTBOUND_EMAIL_PUBLIC_BOOKING_CONFIRMATION`, which is off by default and
+shared with nothing. An operations view must never confuse "we chose not to
+send" with "sending broke".
 
 ---
 
@@ -687,6 +694,12 @@ needed reproducing against pre-change HEAD.
    at real inbound volume the slots endpoint is the first thing worth caching.
 8. **No public cancellation link.** The confirmation token exists and the
    confirm/decline flow works; cancel-by-prospect was not in scope.
+9. **The three gates are deployment-wide, not per-brand.** They are environment
+   variables, so a second brand on the same deployment inherits whatever the
+   first one's operator set. At one live brand that is not yet a problem; with
+   two it becomes one, and the fix is a per-brand column read alongside the
+   variable, the way `outbound_email_sources` already works for customer
+   outreach.
 
 ---
 
@@ -709,9 +722,23 @@ Nothing below is done, and none of it is code.
    `join_url: null` and the confirmation waits indefinitely.
 6. **Calendar connections** for participants, or invitations fall back to email
    — which this build holds behind the gate.
-7. **The outbound gate**, when you want customers actually emailed:
-   `OUTBOUND_EMAIL_STAFF_ESCALATION` plus the per-org switch. **Leaving it off is
-   the current, deliberate state.**
+7. **The outbound gates.** Three separate variables, each off by default, each
+   governing one path and nothing else:
+
+   | Variable | Releases |
+   |---|---|
+   | `OUTBOUND_EMAIL_PUBLIC_BOOKING_CONFIRMATION` | the customer's booking confirmation |
+   | `OUTBOUND_EMAIL_PUBLIC_BOOKING_INTERNAL` | the internal notification, and the emailed .ics invitation to those same people |
+   | `OUTBOUND_EMAIL_PUBLIC_BOOKING_REMINDERS` | the 24-hour and 1-hour reminders |
+
+   Accepted truthy spellings: `1`, `true`, `yes`, `on`. Unset is off.
+   **Leaving all three off is the current, deliberate state.**
+
+   `OUTBOUND_EMAIL_STAFF_ESCALATION` does **not** control any of them. It keeps
+   its own unrelated feature, and it still governs a salesperson pressing
+   "resend confirmation" from inside the product — a human doing one thing on
+   purpose, which is a different act from the public flow sending one
+   automatically to a stranger.
 8. **Verify the meeting-type backfill** landed on Discovery + Demo for the live
    brand and on nothing else.
 
@@ -735,8 +762,9 @@ Nothing below is done, and none of it is code.
 4. **Verify with the API** before pointing the website at it: `meeting` should
    report `bookable: true`, `slots` should return times.
 5. **Then the public website.**
-6. **The gate last**, deliberately — only when somebody decides customers should
-   receive mail.
+6. **The gates last**, deliberately, and one at a time — each is a separate
+   decision. A sensible order is INTERNAL first (the sales team starts seeing
+   bookings, no customer is emailed), then CONFIRMATION, then REMINDERS.
 
 **One mistake, corrected.** Commit `2c398b4` staged the whole of
 `auto_migrate.py` rather than only its own block, and carried in 8 index lines

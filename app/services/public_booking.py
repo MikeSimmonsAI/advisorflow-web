@@ -891,7 +891,13 @@ def _sync_calendars(db: Session, appt: SalesAppointment,
         return {"ok": False, "error": str(exc)[:200]}
 
     try:
-        mail_allowed = gate.source_enabled(gate.STAFF_ESCALATION)
+        # THE INTERNAL SWITCH GOVERNS THIS, not the confirmation one. An emailed
+        # .ics invitation goes to the assigned salesperson and the booked
+        # leadership - the same people the internal notification goes to, and
+        # nobody else. It is one notification to one set of people, differing
+        # only in whether it carries an attachment, so it shares their switch
+        # rather than having a fourth of its own.
+        mail_allowed = gate.source_enabled(gate.PUBLIC_BOOKING_INTERNAL)
     except Exception:                                            # noqa: BLE001
         mail_allowed = False
 
@@ -955,15 +961,18 @@ def _confirm(db: Session, appt: SalesAppointment) -> dict:
 
     try:
         from app.services import demo_confirmation
-        demo_confirmation.send(db, appt)
+        from app.services import outbound_email_gate
+        demo_confirmation.send(
+            db, appt,
+            gate_source=outbound_email_gate.PUBLIC_BOOKING_CONFIRMATION)
         return {"sent": True, "status": "sent"}
     except Exception as exc:                                     # noqa: BLE001
         # DISABLED DELIVERY IS THE EXPECTED OUTCOME IN THIS BUILD, not a fault.
-        # `demo_confirmation.send` runs the staff outbound gate, which is off by
-        # default and raises - so the confirmation is prepared and recorded as
-        # owed, and no customer is emailed until somebody deliberately turns the
-        # gate on. Reported separately from a real failure so the two are never
-        # confused in an operations view.
+        # This path runs OUTBOUND_EMAIL_PUBLIC_BOOKING_CONFIRMATION, which is
+        # off by default and raises - so the confirmation is prepared and
+        # recorded as owed, and no customer is emailed until somebody
+        # deliberately turns that one variable on. Reported separately from a
+        # real failure so the two are never confused in an operations view.
         from app.services.outbound_email_gate import EmailSendDisabled
         if isinstance(exc, EmailSendDisabled):
             return {"sent": False, "status": "delivery_disabled",
@@ -1037,8 +1046,9 @@ def notify_internal(db: Session, appt: SalesAppointment, opp: Opportunity,
                                from_name=ident.get("name"))
         sent = []
         for address in recipients:
-            outbound_email_gate.gate_staff_email(
-                address, purpose="inbound sales booking")
+            outbound_email_gate.gate_transactional_email(
+                address, purpose="inbound sales booking",
+                source=outbound_email_gate.PUBLIC_BOOKING_INTERNAL)
             send_email_via_provider(to_email=address, subject=subject,
                                     body_html=body, org=identity,
                                     message_type="inbound_sales_booking",
