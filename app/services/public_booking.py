@@ -162,10 +162,27 @@ def brand_sales_org_for_platform(db: Session,
     platform ever has two, this returns the oldest rather than guessing, and the
     caller's configuration error surfaces as "not configured" rather than as
     bookings landing in whichever one the database happened to return first.
+
+    A DEMONSTRATION SALES ORG IS NEVER THE ANSWER, whatever its age.
+
+    Standing up a brand's demo environment creates a second BrandSalesOrg on the
+    SAME platform - `<Brand> Sales (Demonstration)`, is_demo=True - alongside the
+    real one. Both are active, because the demo environment is meant to work. So
+    "oldest active wins" was a race between a real sales team and a synthetic
+    one, decided by which happened to be created first, and the losing case
+    routes a real prospect from the public website to a demonstration team
+    stocked with invented people.
+
+    Excluding is_demo here is the same rule the column was written for: it is
+    only ever the basis of a refusal, and nothing is granted because it is true.
+    A platform whose ONLY sales org is the demo one resolves to None, and public
+    booking reports "not configured" - which is correct. A demonstration team
+    must not take a real meeting.
     """
     return (db.query(BrandSalesOrg)
             .filter(BrandSalesOrg.platform_id == platform.id,
-                    BrandSalesOrg.is_active.is_(True))
+                    BrandSalesOrg.is_active.is_(True),
+                    BrandSalesOrg.is_demo.is_(False))
             .order_by(BrandSalesOrg.created_at.asc())
             .first())
 

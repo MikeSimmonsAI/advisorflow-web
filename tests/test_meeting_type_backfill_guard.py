@@ -221,3 +221,40 @@ def test_repeated_calls_are_stable(db_session):
     assert len(rows) == 7
     for r in rows:
         assert _edited_by_a_person(r) is False
+
+
+# ── a demonstration sales org is never what the public website resolves to ──
+
+def test_a_demo_sales_org_is_never_resolved_even_when_it_is_older(db_session):
+    """Standing up a brand's demo environment creates a SECOND active
+    BrandSalesOrg on the same platform. "Oldest active wins" made that a race a
+    real prospect could lose."""
+    from app.services import public_booking as pb
+    n = next(_SEQ)
+    p = Platform(name="P%d" % n, slug="plat-demo-%d" % n)
+    db_session.add(p); db_session.commit()
+
+    demo = BrandSalesOrg(platform_id=p.id, name="P Sales (Demonstration)",
+                         slug="demo-sales-%d" % n, is_active=True, is_demo=True,
+                         created_at=datetime.utcnow() - timedelta(days=100))
+    real = BrandSalesOrg(platform_id=p.id, name="P Sales",
+                         slug="real-sales-%d" % n, is_active=True, is_demo=False,
+                         created_at=datetime.utcnow())
+    db_session.add_all([demo, real]); db_session.commit()
+
+    resolved = pb.brand_sales_org_for_platform(db_session, p)
+    assert resolved is not None
+    assert resolved.id == real.id, "the public site resolved to the demo team"
+
+
+def test_a_platform_with_only_a_demo_org_refuses(db_session):
+    """Correct outcome: a demonstration team must not take a real meeting."""
+    from app.services import public_booking as pb
+    n = next(_SEQ)
+    p = Platform(name="P%d" % n, slug="plat-demoonly-%d" % n)
+    db_session.add(p); db_session.commit()
+    db_session.add(BrandSalesOrg(platform_id=p.id, name="P Sales (Demonstration)",
+                                 slug="demo-only-%d" % n, is_active=True,
+                                 is_demo=True))
+    db_session.commit()
+    assert pb.brand_sales_org_for_platform(db_session, p) is None
