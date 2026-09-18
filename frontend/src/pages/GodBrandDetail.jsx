@@ -26,6 +26,10 @@ export default function GodBrandDetail() {
   const [busy, setBusy] = useState('')
   const [link, setLink] = useState(null)
   const [adding, setAdding] = useState(false)
+  // null means "the operator has not touched the picker", so it shows whatever
+  // the server currently has rather than a stale local choice.
+  const [ownerPick, setOwnerPick] = useState(null)
+  const [ownerBusy, setOwnerBusy] = useState(false)
 
   const loadTeam = () => api.get('/god/ops/brands/' + brandId + '/sales-team')
     .then(r => setTeam(r.team || []))
@@ -50,6 +54,23 @@ export default function GodBrandDetail() {
       setErr(errText(e))
       await loadTeam()          // put the row back to the truth
     } finally { setBusy('') }
+  }
+
+  // The SERVER decides whether somebody may receive inbound bookings - it
+  // checks for an active seat on this brand. The browser only narrows the list
+  // to active seats so the common mistake is not offered in the first place.
+  // Both ends check, and the server's answer is what redraws the page.
+  async function saveInboundOwner(userId) {
+    setOwnerBusy(true); setErr('')
+    try {
+      const r = await api.patch('/god/ops/brands/' + brandId + '/inbound-owner',
+                                { user_id: userId || null })
+      if (r.team) setTeam(r.team)
+      setOwnerPick(null)
+      await loadBrand()
+    } catch (e) {
+      setErr(errText(e))
+    } finally { setOwnerBusy(false) }
   }
 
   // Named, because the pricing editor has to be able to redraw the catalogue
@@ -92,6 +113,7 @@ export default function GodBrandDetail() {
 
   const s = d.summary || {}
   const cfg = d.configuration || {}
+  const inboundOwner = cfg.inbound_owner || {}
 
   return (
     <div className="go-scope">
@@ -131,6 +153,54 @@ export default function GodBrandDetail() {
              tone={s.won_awaiting_provisioning > 0 ? 'alert' : undefined} />
         <Kpi label="Customers live" value={s.customers_live} tone="good" />
       </div>
+
+      {/* Who generic website traffic reaches. A brand with nobody named here
+          refuses every visitor arriving without a salesperson's link, and that
+          refusal is invisible everywhere else on this screen. */}
+      <Panel title="Inbound website bookings">
+        <div className="go-body">
+          <div className="go-facts">
+            <Fact k="Receives generic bookings"
+                  v={inboundOwner.configured
+                     ? inboundOwner.full_name +
+                       (inboundOwner.role ? ' \u00b7 ' + inboundOwner.role.replace(/_/g, ' ') : '')
+                     : null} />
+            <Fact k="Salesperson links"
+                  v="Always book with the person whose code was used" />
+          </div>
+          {!inboundOwner.configured ? (
+            <div className="go-note warn">
+              Nobody is named, so a visitor who arrives without a salesperson
+              link is refused rather than booked with an arbitrary person.
+            </div>
+          ) : null}
+          {inboundOwner.configured && !inboundOwner.seat_is_active ? (
+            <div className="go-note err">
+              This person no longer holds an active seat on this team, so
+              inbound bookings are refused until somebody else is named.
+            </div>
+          ) : null}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            <select
+              className="go-input sm"
+              disabled={ownerBusy || team === null}
+              value={ownerPick === null ? (inboundOwner.user_id || '') : ownerPick}
+              onChange={e => setOwnerPick(e.target.value)}
+            >
+              <option value="">nobody - refuse bookings with no link</option>
+              {(team || []).filter(t => t.membership_is_active).map(t => (
+                <option key={t.user_id} value={t.user_id}>{t.full_name}</option>
+              ))}
+            </select>
+            <button
+              className="go-btn sm"
+              disabled={ownerBusy}
+              onClick={() => saveInboundOwner(
+                ownerPick === null ? (inboundOwner.user_id || '') : ownerPick)}
+            >{ownerBusy ? 'Saving\u2026' : 'Save'}</button>
+          </div>
+        </div>
+      </Panel>
 
       <Panel title="Sales team">
         <div className="go-body">
