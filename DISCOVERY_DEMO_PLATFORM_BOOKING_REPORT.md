@@ -2,7 +2,7 @@
 
 **Repo:** `advisorflow-web` · **Branch:** `main`
 **Starting HEAD:** `eaf87b5` (end of the production-hardening pass)
-**Ending HEAD:** `b59b67c`
+**Ending HEAD:** `a0cce4f` (this report; amending it changed its own SHA)
 **Date:** 2026-09-17
 
 > **REAL CUSTOMER EMAILS SENT: NO**
@@ -31,7 +31,7 @@ one mistake there and how it was corrected.
 | `68616ac` | The booking transaction, the public router, reminders |
 | `0079b92` | The public endpoints from the outside, and backwards-compatibility proof |
 | `be0edc2` | Back out master-contacts indexes swept in by mistake (see §26) |
-| `b59b67c` | This report |
+| `a0cce4f` | This report |
 
 ---
 
