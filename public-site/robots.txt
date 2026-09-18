@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /private/
+Disallow: /storage/
+Sitemap: https://evosyspro.live/sitemap.xml

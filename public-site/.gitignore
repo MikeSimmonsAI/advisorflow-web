@@ -1,0 +1,15 @@
+# ── NEVER COMMIT ANYTHING IN THIS LIST ──────────────────────────────────────
+#
+# config.php holds the API base URL, the notification address, the OpenAI key
+# and the first-run Careers Manager password hash. config.example.php is the
+# template that IS tracked.
+private/config.php
+
+# Applicant data. Real people's names, phone numbers, resumes and the Careers
+# Manager password hash end up under here at runtime. The directory scaffolding
+# and its .htaccess guards are tracked; nothing written into it ever is.
+storage/careers/careers.json
+storage/careers/admin-auth.json
+storage/careers/login-attempts.json
+storage/careers/applications/
+storage/careers/resumes/
