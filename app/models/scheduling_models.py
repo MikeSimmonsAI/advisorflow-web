@@ -389,6 +389,21 @@ class MeetingType(Base):
     # one or two types its website actually offers.
     public_bookable = Column(Boolean, default=False, nullable=False)
 
+    # ── WHO LAST WROTE TO THIS ROW, SYSTEM OR PERSON ────────────────────────
+    #
+    # `updated_at` alone cannot answer that, and the difference decides whether
+    # a system default may be applied. `ensure_meeting_types` runs more than one
+    # backfill over these rows; each one moves `updated_at`, so the FIRST
+    # backfill made every row look hand-edited to every backfill after it, and
+    # the later one skipped those rows permanently. That is what left a brand
+    # with a correctly seeded Discovery + Demo that its own website could never
+    # book.
+    #
+    # This column records when the SYSTEM last wrote its defaults here. Anything
+    # that moves `updated_at` past it is a person, and a person's choice is
+    # final. NULL means the system has never stamped this row.
+    system_defaults_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

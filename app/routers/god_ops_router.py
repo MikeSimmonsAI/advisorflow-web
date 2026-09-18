@@ -1202,6 +1202,15 @@ def set_meeting_type_public(brand_sales_org_id: str, key: str,
     before = {"public_bookable": bool(mt.public_bookable),
               "leadership_policy": mt.leadership_policy}
 
+    # A PERSON IS DECIDING THIS, so make sure the system can tell.
+    # `meeting_roles._edited_by_a_person` reads a row with no
+    # `system_defaults_at` as never humanly edited - correct for a legacy
+    # row, wrong the moment somebody uses this control on one. Baselining it
+    # to creation means the write below moves `updated_at` past the stamp,
+    # and the backfills leave this row alone from here on.
+    if getattr(mt, "system_defaults_at", None) is None:
+        mt.system_defaults_at = mt.created_at
+
     mt.public_bookable = bool(req.public_bookable)
 
     if req.public_bookable and not mt.leadership_policy:

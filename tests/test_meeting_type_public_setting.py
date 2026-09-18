@@ -165,13 +165,17 @@ def test_brand_detail_shows_which_types_the_website_may_offer(client, db_session
 
 # ── the defect this control exists for ──────────────────────────────────────
 
-def test_the_control_reaches_a_row_the_backfill_cannot(client, db_session):
-    """The real production shape, reproduced.
+def test_the_control_reaches_a_row_the_backfill_will_not_touch(client, db_session):
+    """A row the brand has made its own.
 
-    A row whose updated_at has moved away from created_at - which an earlier
-    backfill's own write is enough to do - is permanently invisible to the
-    quorum backfill. Re-running ensure_meeting_types changes nothing. The
-    control sets it, and the public resolver then finds the type.
+    The backfill deliberately keeps out of a renamed or re-timed meeting type -
+    it cannot prove nobody chose those values on purpose. That protection used
+    to mean such a row could never be opened to the website at all. The control
+    is how a person says yes anyway, and the public resolver then finds it.
+
+    (The other half of this - an UNTOUCHED legacy row that the old guard skipped
+    forever - is now healed by the backfill itself, and is covered in
+    tests/test_meeting_type_backfill_guard.py.)
     """
     from app.services import public_booking as pb
 
@@ -179,19 +183,18 @@ def test_the_control_reaches_a_row_the_backfill_cannot(client, db_session):
     bso = _brand(db_session)
     mt = _mt(db_session, bso, "discovery_demo")
 
-    # The state an earlier backfill leaves behind: never touched by a person,
-    # but no longer looking untouched.
+    # The brand made this type its own: their name, their duration.
     mt.public_bookable = False
     mt.leadership_policy = None
-    mt.created_at = datetime.utcnow() - timedelta(days=30)
-    mt.updated_at = datetime.utcnow()
+    mt.name = "Our Own Discovery + Demo"
+    mt.duration_minutes = 45
     db_session.commit()
 
-    # The backfill cannot help. This is the bug.
+    # The backfill keeps out, correctly.
     ensure_meeting_types(db_session, bso.id)
     db_session.commit()
     db_session.refresh(mt)
-    assert mt.public_bookable is False, "backfill unexpectedly reached the row"
+    assert mt.public_bookable is False, "backfill overwrote a customised row"
     assert pb.resolve_meeting_type(db_session, bso) is None
 
     # The control can.

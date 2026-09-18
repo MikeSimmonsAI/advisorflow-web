@@ -1033,6 +1033,13 @@ COLUMNS_TO_ADD = [
      "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("sales_meeting_types", "public_bookable", "BOOLEAN NOT NULL DEFAULT FALSE"),
 
+    # sales_meeting_types - which writes were the system's own.
+    #   NULL on every existing row, which is exactly right: the system has never
+    #   stamped them, and since no endpoint or screen has ever been able to edit
+    #   a meeting type, every `updated_at` on those rows is a system write by
+    #   construction. See `meeting_roles._edited_by_a_person`.
+    ("sales_meeting_types", "system_defaults_at", "TIMESTAMP"),
+
     # memberships — the salesperson's public booking code.
     #   All three NULL on every existing row, which means nobody has a link
     #   until somebody issues one. The UNIQUE index is in INDEXES_TO_CREATE

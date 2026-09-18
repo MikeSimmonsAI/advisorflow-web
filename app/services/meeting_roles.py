@@ -28,6 +28,7 @@ resolves to the brand's god-level owner participant — Mike — which is exactl
 who fills it today. `resolve_slot` returns candidates plus a note saying so, so
 the UI can show how the seat was filled rather than presenting it as configured.
 """
+from datetime import datetime
 from typing import List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
@@ -194,6 +195,56 @@ DEFAULT_MEETING_TYPES = [
 ]
 
 
+def _edited_by_a_person(row, spec=None) -> bool:
+    """Has a HUMAN changed this meeting type?
+
+    THE BUG THIS REPLACES, because it was silent and it was permanent.
+
+    This used to be `updated_at == created_at`, read as "nobody has touched the
+    row". But `ensure_meeting_types` runs SEVERAL system backfills over these
+    same rows, and each one moves `updated_at`. The requires_video backfill runs
+    first and writes to exactly the rows the quorum backfill cares about - so
+    from the next call onward the quorum backfill saw a row that looked
+    hand-edited, skipped it, and skipped it forever. The brand kept a correctly
+    seeded Discovery + Demo that its own website answered with "not available
+    right now", and no screen anywhere could show why.
+
+    A system write must not be able to masquerade as a person's decision. So the
+    system stamps `system_defaults_at` whenever it writes, and only a change
+    AFTER that stamp is a person.
+
+    NULL `system_defaults_at` means the system has never stamped this row. Those
+    rows are treated as never edited by a person, and that is provable rather
+    than optimistic: until the god control shipped, NO endpoint, screen or
+    service in this codebase could write to a meeting type at all except this
+    function. Every `updated_at` on a legacy row is therefore a system write by
+    construction. The control that CAN edit one stamps `system_defaults_at`
+    itself, so a real human decision is protected from the first moment it is
+    possible to make one.
+    """
+    stamp = getattr(row, "system_defaults_at", None)
+    if stamp is not None:
+        return row.updated_at is not None and row.updated_at > stamp
+
+    # UNSTAMPED: the column is newer than the row, so there is no stamp to
+    # compare against and `updated_at` on its own is worthless - it moved for
+    # every legacy row the moment any backfill ran.
+    #
+    # So ask the question a different way: does this row still look like the one
+    # this module seeds? The system owns the shipped name and duration. A row
+    # that still carries both is the system's own, whatever its timestamps say,
+    # and may receive the defaults it missed. A row somebody has made their own -
+    # renamed, re-timed - is theirs, and the system keeps out of it even though
+    # it cannot prove when that happened.
+    if spec is None:
+        return False
+    if (row.name or "") != spec.get("name"):
+        return True
+    if row.duration_minutes != spec.get("duration_minutes"):
+        return True
+    return False
+
+
 def ensure_meeting_types(db: Session, brand_sales_org_id: str) -> List:
     """Create the default catalog for a brand the first time it is asked for.
 
@@ -205,6 +256,9 @@ def ensure_meeting_types(db: Session, brand_sales_org_id: str) -> List:
             .filter(MeetingType.brand_sales_org_id == brand_sales_org_id).all())
     existing = {m.key: m for m in rows}
     created = False
+    # Every row THIS call writes a system default to. Stamped after the flush
+    # below so no backfill can leave a row looking hand-edited to the next one.
+    system_touched = set()
     for spec in DEFAULT_MEETING_TYPES:
         if spec["key"] in existing:
             continue
@@ -228,11 +282,11 @@ def ensure_meeting_types(db: Session, brand_sales_org_id: str) -> List:
             continue
         if getattr(row, "requires_video", False):
             continue
-        untouched = (row.updated_at is None or row.created_at is None
-                     or row.updated_at == row.created_at)
-        if untouched:
-            row.requires_video = True
-            created = True
+        if _edited_by_a_person(row, spec):
+            continue
+        row.requires_video = True
+        system_touched.add(row)
+        created = True
 
     # ── one-time backfill of the leadership quorum (2026-09-17) ────────────
     #
@@ -272,10 +326,9 @@ def ensure_meeting_types(db: Session, brand_sales_org_id: str) -> List:
             continue
         if getattr(row, "leadership_policy", None):
             continue          # the brand has its own policy
-        untouched = (row.updated_at is None or row.created_at is None
-                     or row.updated_at == row.created_at)
-        if not untouched:
-            continue          # a human has edited this row
+        if _edited_by_a_person(row, spec):
+            continue          # a person has decided this; their choice stands
+        system_touched.add(row)
         row.leadership_policy = spec["leadership_policy"]
         row.owner_required = spec["owner_required"]
         row.leadership_minimum = spec["leadership_minimum"]
@@ -286,6 +339,20 @@ def ensure_meeting_types(db: Session, brand_sales_org_id: str) -> List:
 
     if created:
         db.flush()
+
+    # STAMPED AFTER THE FLUSH, and `updated_at` is written explicitly alongside.
+    # The flush is what fires `onupdate` and sets `updated_at`; stamping before
+    # it would leave the stamp fractionally behind and make the system's own
+    # write look like a person's on the very next call. Assigning both to one
+    # instant is what keeps `_edited_by_a_person` false until somebody really
+    # does edit it.
+    if system_touched:
+        stamp = datetime.utcnow()
+        for row in system_touched:
+            row.updated_at = stamp
+            row.system_defaults_at = stamp
+        db.flush()
+
     return (db.query(MeetingType)
             .filter(MeetingType.brand_sales_org_id == brand_sales_org_id,
                     MeetingType.is_active.is_(True))
