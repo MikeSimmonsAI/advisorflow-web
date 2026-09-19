@@ -70,13 +70,16 @@ ENV_VAR = "SERVICE_ROLE"
 # Every loop is currently owned by the backend. That is deliberate and it is
 # not the end state:
 #
-#   ai_conversation_loop   A dedicated cron (advisorflow-ai-conversation)
-#                          already exists - and cannot do this work today,
-#                          because it has no OPENAI_API_KEY and no sender
-#                          configured. Handing it ownership now would stop AI
-#                          conversations in production. It becomes the owner by
-#                          changing one line here, once its configuration is
-#                          fixed and its fallback behaviour is safe.
+#   ai_conversation_loop   Settled, 2026-09-19: the backend is the permanent
+#                          owner. A dedicated cron (advisorflow-ai-conversation)
+#                          used to exist and has been suspended in Render and
+#                          removed from render.yaml. It could not do this work -
+#                          no OPENAI_API_KEY, no sender - and giving it those
+#                          would have been worse than useless:
+#                          process_scheduled_touches takes no row lock, so two
+#                          executors on the same due set both send. The backend
+#                          already covers every active org every two minutes,
+#                          which is a superset of the cron's unscoped call.
 #
 #   cadence_loop           A dedicated cron (advisorflow-cadence-job) exists
 #                          but runs DAILY where this runs hourly, and cadence

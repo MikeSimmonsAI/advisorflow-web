@@ -86,14 +86,17 @@ except Exception as exc:  # noqa: BLE001
     sys.exit(1)
 
 services = {s["name"]: s for s in doc.get("services", [])}
-check("all 5 services + frontend present", len(services) == 6,
+# Four python services + the static frontend. It was five python services
+# until advisorflow-ai-conversation was retired on 2026-09-19 - the backend
+# owns ai_conversation_loop in service_role.SCHEDULER_OWNER, so the cron was a
+# redundant second executor on unlocked rows. See the note in render.yaml.
+check("all 4 services + frontend present", len(services) == 5,
       "found %d: %s" % (len(services), sorted(services)))
 
 PYTHON_SERVICES = [
     "advisorflow-backend",
     "advisorflow-cadence-job",
     "advisorflow-email-poller",
-    "advisorflow-ai-conversation",
     "advisorflow-voice",
 ]
 
@@ -104,7 +107,7 @@ for name, svc in services.items():
     check("%s does not mix paths + ignoredPaths" % name,
           not (bf.get("paths") and bf.get("ignoredPaths")))
 
-print("\n[3] the YAML anchor actually shared one object across 5 services")
+print("\n[3] the YAML anchor actually shared one object across 4 services")
 anchor = services["advisorflow-backend"].get("buildFilter")
 for name in PYTHON_SERVICES[1:]:
     check("%s resolved to the SAME filter as backend" % name,
@@ -112,8 +115,8 @@ for name in PYTHON_SERVICES[1:]:
           "got %r" % (services[name].get("buildFilter"),))
 check("anchor is declared once in the source text",
       raw.count("&pythonBuildFilter") == 1)
-check("anchor is referenced by the other four",
-      raw.count("*pythonBuildFilter") == 4,
+check("anchor is referenced by the other three",
+      raw.count("*pythonBuildFilter") == 3,
       "found %d references" % raw.count("*pythonBuildFilter"))
 
 print("\n[4] MUST BUILD - changes that have to reach production")

@@ -1,12 +1,19 @@
 """
 run_ai_conversation_job.py
 
-Processes scheduled AI conversation touches every 15 minutes.
+Processes scheduled AI conversation touches in one unscoped pass.
 Sends any cadence emails that are due based on the Day 1/2/4/6/8/10/12/14 schedule.
 
-USAGE (Render Cron Job):
-    Command: python app/jobs/run_ai_conversation_job.py
-    Schedule: */15 * * * *  (every 15 minutes)
+NOT A DEPLOYED SERVICE. This ran as the advisorflow-ai-conversation Render
+cron every 15 minutes until 2026-09-19, when that cron was suspended and its
+block removed from render.yaml. The backend owns ai_conversation_loop in
+service_role.SCHEDULER_OWNER and covers every active org every two minutes,
+which is a superset of this script's work; and process_scheduled_touches takes
+no row lock, so running both would double-send. Kept as a manual, one-shot
+entrypoint. Do not re-add it to render.yaml without adding that lock first.
+
+USAGE (manual, on demand):
+    python app/jobs/run_ai_conversation_job.py
 """
 
 import os
