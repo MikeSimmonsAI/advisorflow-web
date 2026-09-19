@@ -639,15 +639,29 @@ def _authorize_bypass(db: Session, org: Optional[Organization], key: str,
 
     # AUDITED. A bypass that left no trace would be indistinguishable from a
     # path that never enforced anything, which is the whole point of naming it.
+    # `audit_log_entries.target_id` is NOT NULL, and on the
+    # `platform_provisioning` path there is legitimately no organization yet -
+    # that is the whole point of the bypass. Passing None there did not merely
+    # lose the audit row: `log_action` flushes, the flush violated the
+    # constraint, the `except` below caught it and returned normally, and the
+    # CALLER's transaction was left in a rolled-back state that only surfaced
+    # at its own commit as PendingRollbackError. An audit failure became a
+    # data-loss failure mid-provision, which is exactly what that `except` says
+    # must not happen.
+    #
+    # When there is no organization the thing being acted on is the platform.
+    # It is named as such rather than left empty, so the row stores and the
+    # event is still recorded.
+    org_id = getattr(org, "id", None)
     try:
         from app.routers.audit_log_router import log_action
         log_action(
             db,
-            organization_id=getattr(org, "id", None),
+            organization_id=org_id,
             actor_user_id=getattr(actor, "id", None),
             action="plan_limit.bypass",
-            target_type="organization",
-            target_id=getattr(org, "id", None),
+            target_type="organization" if org_id else "platform",
+            target_id=org_id or getattr(actor, "platform_id", None) or "platform",
             details={"limit": key, "adding": adding, "reason": bypass,
                      "why": spec["why"], "actor_role": role,
                      "plan": getattr(effective_plan(db, org), "key", None)},

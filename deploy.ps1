@@ -4,11 +4,11 @@
 # Flow: clean-tree check -> main -> gates -> frontend build -> GitHub -> Render
 #
 # Usage:  .\deploy.ps1
-#         .\deploy.ps1 -Message "message for the frontend/dist commit"
+#         .\deploy.ps1 -Message "label for this deploy's banner"
 #         .\deploy.ps1 -SkipSmoke        (not recommended)
 #
-# -Message names the commit this script may create for a REBUILT frontend/dist
-# and nothing else. Your own commit keeps the message you gave it.
+# -Message is a label printed in this script's banner. It no longer creates a
+# commit: nothing is committed here. Your own commit is what ships.
 #
 # ---------------------------------------------------------------------------
 # FIXED 2026-08-25 -- DATA LOSS BUG
@@ -38,9 +38,10 @@ param(
 # already-prepared commit, and if the tree is dirty it prints the names and
 # stops without staging, committing or discarding anything.
 #
-# The one `git add` left in this file is step 5's `git add -f frontend/dist`:
-# an explicit path, holding output this script generated itself moments
-# earlier in step 4. It is not a wildcard and it cannot pick up source.
+# There is now no `git add` in this file at all. Step 5's
+# `git add -f frontend/dist` went with the committed-bundle deploy model:
+# Render builds the frontend from source and its buildFilter ignores
+# frontend/dist, so committing the artifact shipped nothing.
 # ---------------------------------------------------------------------------
 
 $ErrorActionPreference = "Continue"
@@ -388,8 +389,12 @@ if ($SkipSmoke) {
     Write-Host "  Smoke tests OK"
 }
 
-# -- Step 4: Build frontend ----------------------------------------------------
-Write-Host "[4/6] Building frontend..."
+# -- Step 4: Build frontend (COMPILE CHECK ONLY) -------------------------------
+# Render builds the real bundle from source. This build is kept because it is
+# the cheapest way to find out that the frontend does not compile BEFORE the
+# push, rather than from a failed Render build afterwards. Its output is not
+# shipped and is not committed.
+Write-Host "[4/6] Building frontend (compile check)..."
 Set-Location "$REPO\frontend"
 & npm.cmd run build 2>&1 | Select-String "built in|error during build" | ForEach-Object { "    $_" }
 if ($LASTEXITCODE -ne 0) {
@@ -402,50 +407,22 @@ Write-Host "  Build OK"
 
 # -- Step 5: Commit dist + push, then VERIFY the push contains our work ---------
 Write-Host "[5/6] Pushing to GitHub..."
-# THE ONLY `git add` IN THIS SCRIPT, AND IT NAMES ONE PATH.
+# NO `git add` IN THIS SCRIPT AT ALL, AND NOTHING IS COMMITTED HERE.
 #
-# frontend/dist is gitignored and deliberately shipped - the static site serves
-# the committed build rather than building on Render - so `-f` is required. It
-# holds output step 4 generated seconds ago from source that was already
-# committed and already passed the gates; it is not somebody's work in
-# progress, and this path cannot pick up source even if it were dirty, because
-# step 1 refused to run with a dirty tree at all.
-git add -f frontend/dist
-$staged2 = git diff --cached --name-only
-# THE MESSAGE GOES THROUGH A FILE, NOT THROUGH -m.
+# THIS STEP USED TO RUN `git add -f frontend/dist` AND COMMIT THE BUNDLE,
+# because the static site once served a committed build. It does not any more.
+# render.yaml now builds advisorflow-frontend from source -
+# `cd frontend && npm ci && npm run build`, publishing frontend/dist - and that
+# service's buildFilter lists `frontend/dist/**` under ignoredPaths on purpose:
+# "a committed dist artifact should never be the trigger - only source changes
+# matter."
 #
-# PowerShell re-parses the arguments it hands to a native command, so a double
-# quote INSIDE $Message splits it into several arguments. git then read the
-# fragments as pathspecs and failed:
+# So the old step force-added a gitignored artifact into every deploy commit,
+# and the one service it was meant to ship to was configured to ignore exactly
+# that path. It could not trigger the build it existed to trigger. It is gone.
 #
-#   error: pathspec 'access' did not match any file(s) known to git
-#
-# Every deploy message here quotes something - an HTTP body, an error string, a
-# status word - so this failed silently on every deploy that had anything worth
-# saying, the commit never happened, and the work shipped under the step 1
-# auto-save message instead. -F takes the bytes as they are.
-$MSG_FILE = Join-Path $REPO ".deploy_commit_msg.txt"
-# WriteAllText with an explicit UTF8Encoding($false) rather than Set-Content
-# -Encoding UTF8: on Windows PowerShell 5.1 that switch writes a BOM, and the
-# BOM ends up as the first character of the commit subject.
-[System.IO.File]::WriteAllText($MSG_FILE, $Message,
-    (New-Object System.Text.UTF8Encoding $false))
-if ($staged2) {
-    # The rebuilt bundle differs from the committed one. Commit just that.
-    git commit -F $MSG_FILE | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "COMMIT FAILED - refusing to push a deploy with no record of what it is."
-        Remove-Item -Force -ErrorAction SilentlyContinue $MSG_FILE
-        exit 1
-    }
-    $SHIP_SHA = (git rev-parse HEAD).Trim()
-    Write-Host "  Committed rebuilt frontend/dist"
-} else {
-    # A byte-identical rebuild. Nothing to commit, and nothing to invent: the
-    # commit the operator prepared is what ships.
-    Write-Host "  Frontend bundle unchanged - shipping the prepared commit as is"
-}
-Remove-Item -Force -ErrorAction SilentlyContinue $MSG_FILE
+# What ships is the commit the operator already made, which step 1 verified and
+# the gates passed. $SHIP_SHA has held it since the clean-tree check.
 git push origin main
 if ($LASTEXITCODE -ne 0) {
     Write-Host "PUSH FAILED - check git credentials. Your work is in $SHIP_SHA."
@@ -469,7 +446,9 @@ Write-Host "  Pushed and verified: $SHIP_SHA is on origin/main"
 Write-Host "[6/6] Triggering Render deploys..."
 $h = @{ Authorization = "Bearer $RKEY"; Accept = "application/json" }
 
-# Static site: does NOT rebuild on push, it serves the committed dist.
+# Static site: rebuilds from source on deploy (npm ci && npm run build).
+# Triggered explicitly here because a push alone may be filtered out by the
+# service's own ignoredPaths.
 try {
     Invoke-RestMethod "https://api.render.com/v1/services/$FRONTEND_SVC/deploys" `
         -Method Post -Headers $h -ContentType "application/json" -Body "{}" | Out-Null
