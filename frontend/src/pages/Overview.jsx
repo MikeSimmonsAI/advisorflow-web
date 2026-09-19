@@ -56,6 +56,11 @@ import './Overview.css'
 // fetches it. The seven labels are derived from a single noun per business
 // type, so there is nothing here to drift.
 import { metricLabels, useTerminology } from '../terminology'
+// WHICH OVERVIEW THIS WORKSPACE GETS. A vertical with a configured
+// presentation renders its own operations screen; everyone else renders the
+// platform one below, unchanged. See verticals/workspaceVertical.js.
+import { verticalFor, VERTICAL_ENERGY } from '../verticals/workspaceVertical'
+import EnergyOverview from './vertical/EnergyOverview'
 
 const STAGE_TONE = {
   new: 'var(--signal-amber)', sent: 'var(--signal-blue)', replied: 'var(--signal-blue)',
@@ -90,7 +95,7 @@ function num(n) {
   return n === null || n === undefined ? '—' : Number(n).toLocaleString('en-US')
 }
 
-export default function Overview() {
+function PlatformOverview() {
   const user = getCurrentUser()
   const navigate = useNavigate()
   const observationMode = useObservationMode()
@@ -756,4 +761,27 @@ export default function Overview() {
       )}
     </div>
   )
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WHICH OVERVIEW THIS WORKSPACE GETS.
+
+   One decision, taken from the ACTIVE workspace's industry, so every route
+   that renders `<Overview />` — and there are four of them — gets the same
+   answer without any of them having to know a vertical exists.
+
+   A workspace whose industry has no configured presentation falls straight
+   through to PlatformOverview above, which is byte-for-byte the screen it
+   had before. That is what keeps this change from being a global redesign.
+   ═══════════════════════════════════════════════════════════════════════════ */
+export default function Overview() {
+  // `useWorkspaceAuthority` rather than a bare `getBranding()`: on a first
+  // paint the branding row may not have been stored yet, and this hook
+  // re-renders when the server answers — so the vertical is picked up on
+  // that second render instead of being decided once against an empty cache.
+  const { branding } = useWorkspaceAuthority()
+  const vertical = verticalFor(branding)
+  if (vertical && vertical.key === VERTICAL_ENERGY) return <EnergyOverview />
+  return <PlatformOverview />
 }

@@ -1,0 +1,209 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   RETAIL-ENERGY WORKSPACE SKIN
+
+   Applied when <html> carries data-workspace-vertical="energy", which
+   Layout sets from the ACTIVE workspace's industry and removes the moment
+   the workspace changes. No other workspace is touched by one byte of this
+   file, and nothing here is a new design system: every rule re-points a
+   token index.css already defines, so the existing panels, tables, badges
+   and empty states render in the new palette without being rewritten.
+
+   :root[data-workspace-vertical="energy"] is (0,2,0) against the themes'
+   (0,1,0), so it wins over [data-theme="…"] regardless of bundle order.
+   Where a theme used !important on the sidebar, this has to as well.
+
+   The palette is the approved back-office design: a light operating
+   surface, white cards, navy typography, blue/cyan accents, restrained
+   borders and shadows.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root[data-workspace-vertical="energy"] {
+  /* ── Surfaces: light, white cards ── */
+  --bg-base: #f4f7fb;
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f7fafe;
+  --bg-elevated: #ffffff;
+  --bg-field: #ffffff;
+  --bg-field-soft: #f5f8fc;
+  --bg-row: #ffffff;
+  --bg-row-hover: #f2f7fd;
+  --bg-glass: rgba(15, 42, 77, 0.03);
+  --bg-glass-mid: rgba(15, 42, 77, 0.05);
+  --bg-glass-strong: rgba(15, 42, 77, 0.08);
+  --surface-inset: #f4f7fb;
+
+  /* ── Borders: restrained ── */
+  --border-subtle: #e3e9f2;
+  --border-strong: #cfd9e8;
+  --border-danger: rgba(178, 34, 52, 0.26);
+
+  /* ── Type: deep navy ── */
+  --text-primary: #0f2a4d;
+  --text-secondary: #46597a;
+  --text-tertiary: #7c8ba5;
+  --text-inverse: #ffffff;
+  --text-danger-soft: #7a1020;
+
+  /* ── Accents: blue + cyan ── */
+  --signal-blue: #1668d6;
+  --signal-blue-dim: rgba(22, 104, 214, 0.10);
+  --signal-green: #0f8a5f;
+  --signal-green-dim: rgba(15, 138, 95, 0.10);
+  --signal-red: #b22234;
+  --signal-red-dim: rgba(178, 34, 52, 0.09);
+  --signal-amber: #a8660a;
+  --signal-amber-dim: rgba(168, 102, 10, 0.11);
+  --signal-purple: #4b3ec9;
+  --signal-purple-dim: rgba(75, 62, 201, 0.10);
+
+  /* Vertical-specific tokens the Operations Overview reads. */
+  --energy-navy: #0f2a4d;
+  --energy-navy-deep: #0a1f3a;
+  --energy-cyan: #21a3c4;
+  --energy-ink: #0f2a4d;
+
+  /* ── No glow on a paper surface ── */
+  --glow-blue-sm: none; --glow-blue-md: none; --glow-blue-lg: none;
+  --glow-green-sm: none; --glow-green-md: none;
+  --glow-red-sm: none; --glow-red-md: none;
+  --glow-amber-md: none; --glow-purple-md: none;
+
+  --panel-shadow: 0 1px 2px rgba(15, 42, 77, 0.06), 0 4px 16px rgba(15, 42, 77, 0.05);
+  --panel-shadow-strong: 0 6px 28px rgba(15, 42, 77, 0.10);
+  --elevation-1: 0 1px 2px rgba(15, 42, 77, 0.07);
+  --elevation-2: 0 2px 10px rgba(15, 42, 77, 0.08);
+  --elevation-3: 0 8px 28px rgba(15, 42, 77, 0.10);
+  --elevation-4: 0 18px 48px rgba(15, 42, 77, 0.14);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+
+  color-scheme: light;
+}
+
+:root[data-workspace-vertical="energy"] body,
+:root[data-workspace-vertical="energy"] html {
+  background: #f4f7fb;
+  color: var(--text-primary);
+}
+
+/* ── The rail: deep navy, the one dark surface in the workspace ─────────── */
+:root[data-workspace-vertical="energy"] .sidebar {
+  background: #0f2a4d !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+:root[data-workspace-vertical="energy"] .sidebar .nav-item {
+  color: rgba(226, 235, 247, 0.72) !important;
+  border-radius: 8px;
+  margin: 1px 8px;
+  font-weight: 500;
+}
+:root[data-workspace-vertical="energy"] .sidebar .nav-item:hover {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+}
+:root[data-workspace-vertical="energy"] .sidebar .nav-item--active {
+  color: #ffffff !important;
+  background: #1668d6 !important;
+  border-left-color: transparent !important;
+  font-weight: 600;
+}
+:root[data-workspace-vertical="energy"] .sidebar .nav-section-label {
+  color: rgba(160, 182, 212, 0.75) !important;
+  letter-spacing: 0.13em;
+  font-size: 10px;
+  font-weight: 700;
+}
+:root[data-workspace-vertical="energy"] .sidebar .nav-divider {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.08);
+}
+:root[data-workspace-vertical="energy"] .sidebar .user-name { color: #ffffff !important; }
+:root[data-workspace-vertical="energy"] .sidebar .user-role { color: rgba(160, 182, 212, 0.8) !important; }
+:root[data-workspace-vertical="energy"] .sidebar .logout-btn,
+:root[data-workspace-vertical="energy"] .sidebar .back-to-website-btn {
+  color: rgba(226, 235, 247, 0.8) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+:root[data-workspace-vertical="energy"] .sidebar-brand,
+:root[data-workspace-vertical="energy"] .sidebar-footer {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* The workspace's own two-line wordmark, drawn from its branding row. */
+:root[data-workspace-vertical="energy"] .vertical-brand {
+  display: flex; align-items: center; gap: 11px;
+  padding: 2px 0; min-width: 0;
+}
+:root[data-workspace-vertical="energy"] .vertical-brand-glyph {
+  width: 34px; height: 34px; flex-shrink: 0;
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(140deg, #1668d6, #21a3c4);
+  color: #ffffff;
+}
+:root[data-workspace-vertical="energy"] .vertical-brand-logo {
+  width: 34px; height: 34px; flex-shrink: 0;
+  border-radius: 9px; object-fit: contain; background: #ffffff;
+}
+:root[data-workspace-vertical="energy"] .vertical-brand-text { min-width: 0; }
+:root[data-workspace-vertical="energy"] .vertical-brand-line1 {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 700; letter-spacing: 0.10em;
+  color: #ffffff; text-transform: uppercase; line-height: 1.1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+:root[data-workspace-vertical="energy"] .vertical-brand-line2 {
+  display: block;
+  font-size: 9px; font-weight: 600; letter-spacing: 0.20em;
+  color: rgba(160, 196, 236, 0.9); text-transform: uppercase;
+  margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Content chrome ─────────────────────────────────────────────────────── */
+:root[data-workspace-vertical="energy"] .top-bar {
+  background: #ffffff;
+  border-bottom: 1px solid var(--border-subtle);
+}
+:root[data-workspace-vertical="energy"] .top-bar-time { color: var(--text-primary); }
+:root[data-workspace-vertical="energy"] .top-bar-date { color: var(--text-tertiary); }
+
+:root[data-workspace-vertical="energy"] .panel {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--panel-shadow);
+}
+:root[data-workspace-vertical="energy"] .data-table th {
+  background: #f7f9fc;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+:root[data-workspace-vertical="energy"] .data-table td {
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+:root[data-workspace-vertical="energy"] .data-table tbody tr:hover td {
+  background: var(--bg-row-hover);
+}
+:root[data-workspace-vertical="energy"] .empty-state { color: var(--text-tertiary); }
+:root[data-workspace-vertical="energy"] select,
+:root[data-workspace-vertical="energy"] option,
+:root[data-workspace-vertical="energy"] .search-input,
+:root[data-workspace-vertical="energy"] .filter-select,
+:root[data-workspace-vertical="energy"] .compose-textarea {
+  background: #ffffff;
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+:root[data-workspace-vertical="energy"] .badge--blue  { background: rgba(22, 104, 214, 0.10); color: #1668d6; }
+:root[data-workspace-vertical="energy"] .badge--green { background: rgba(15, 138, 95, 0.10); color: #0f8a5f; }
+:root[data-workspace-vertical="energy"] .badge--red   { background: rgba(178, 34, 52, 0.09); color: #b22234; }
+:root[data-workspace-vertical="energy"] .badge--amber { background: rgba(168, 102, 10, 0.11); color: #a8660a; }
+
+/* The platform's light/dark switch is meaningless in a configured skin:
+   this workspace has one agreed appearance. */
+:root[data-workspace-vertical="energy"] .theme-toggle { display: none; }

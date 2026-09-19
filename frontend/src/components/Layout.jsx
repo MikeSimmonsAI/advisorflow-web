@@ -9,6 +9,11 @@ import NotificationBell from './NotificationBell'
 import ProfileOnboarding from './ProfileOnboarding'
 import GodReturnBar from './GodReturnBar'
 import ContextSwitcher from './ContextSwitcher'
+// A VERTICAL'S OWN PRESENTATION. Nav labels, groups and skin for a workspace
+// whose industry has one configured; null for everybody else, which is what
+// keeps this from being a global redesign. See verticals/workspaceVertical.js.
+import { verticalFor, navGroupsFor, brandLines } from '../verticals/workspaceVertical'
+import '../styles/vertical-energy.css'
 import './ContextSwitcher.css'
 import './Layout.css'
 
@@ -224,6 +229,14 @@ function Icon({ name }) {
     package: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></>,
     // Added with the "My Work" nav item, per the note above.
     'check-square': <><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
+    // NAMED BY CONFIGURATION, SO THEY HAVE TO EXIST HERE.
+    // `truck` and `refresh` are the icons config/workspace-views/*.json
+    // already asks for, and `trending-up` is the vertical rail's Sales
+    // Pipeline. A name this map does not hold renders an EMPTY svg — which is
+    // what those two configured screens have been drawing.
+    truck: <><rect x="1" y="3" width="15" height="13" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></>,
+    refresh: <><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></>,
+    'trending-up': <><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></>,
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -371,6 +384,28 @@ export default function Layout({ children }) {
     return () => { alive = false }
   }, [orgContext])
 
+  // ── THIS WORKSPACE'S OWN PRESENTATION ──────────────────────────────────
+  //
+  // Resolved from the ACTIVE workspace's industry, which `GET /branding/org`
+  // answers — so an operator standing inside a customer gets the customer's
+  // vertical and stepping back out returns the platform rail on the next
+  // render. `null` for every workspace without one configured, and every
+  // line below that consumes it falls through to the platform behaviour.
+  const vertical = verticalFor(branding)
+
+  // The skin is CSS keyed on an attribute, not a stylesheet swap: one
+  // attribute on <html> re-points the design tokens that index.css already
+  // defines, so panels, tables, badges and empty states follow without any
+  // of them being rewritten. Removed on unmount and whenever the workspace
+  // stops being one of these — a stale skin after a switch would paint one
+  // customer's workspace in another's colours.
+  useEffect(() => {
+    const root = document.documentElement
+    if (vertical) root.setAttribute('data-workspace-vertical', vertical.skin)
+    else root.removeAttribute('data-workspace-vertical')
+    return () => { root.removeAttribute('data-workspace-vertical') }
+  }, [vertical])
+
   function handleExitOrg() {
     clearOrgContext()
     clearBranding()
@@ -461,9 +496,20 @@ export default function Layout({ children }) {
   }
 
   const brandName = isGodAdmin ? 'AdvisorFlow' : (branding?.brand_name || PLATFORM_BRAND.displayName)
-  const logoUrl = isElevated
-    ? (PLATFORM_BRAND.logoUrl || null)
-    : (branding?.brand_logo_url || PLATFORM_BRAND.logoUrl || null)
+  // WHAT THE WORKSPACE ITSELF IS CALLED, which is not the same question as
+  // "what brand is this app". Used only by the vertical wordmark, where the
+  // answer must be the CUSTOMER even when an operator is the one looking —
+  // `orgContext.orgName` is the customer an operator entered, and a
+  // customer's own staff have no orgContext, so their branding row answers.
+  const workspaceName = orgContext?.orgName || branding?.brand_name || ''
+  const logoUrl = vertical
+    // The customer's own mark, operator or not. Falling back to the platform
+    // logo here would put the white-label product's badge on the customer's
+    // rail, which is the one thing this presentation exists to prevent.
+    ? (branding?.brand_logo_url || null)
+    : isElevated
+      ? (PLATFORM_BRAND.logoUrl || null)
+      : (branding?.brand_logo_url || PLATFORM_BRAND.logoUrl || null)
 
   // Reset logo failure state when the URL changes (e.g. org switch)
   useEffect(() => { setLogoFailed(false) }, [logoUrl])
@@ -476,8 +522,45 @@ export default function Layout({ children }) {
       <button type="button" className="sidebar-backdrop" onClick={closeSidebar} aria-label="Close navigation menu" />
 
       <aside className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}`} style={{ width: sidebarCollapsed ? 60 : undefined, minWidth: sidebarCollapsed ? 60 : undefined, transition: 'width 0.2s, min-width 0.2s', ...(isGodAdmin ? { borderRight: '1px solid rgba(245,158,11,0.3)', background: 'linear-gradient(180deg, rgba(245,158,11,0.06) 0%, transparent 120px)' } : {}) }}>
-        <div className="sidebar-brand" style={{ position: 'relative', ...(isGodAdmin ? { borderBottom: '1px solid rgba(245,158,11,0.25)' } : {}) }}>
-          {isGodAdmin ? (
+        <div className="sidebar-brand" style={{ position: 'relative', ...(isGodAdmin && !vertical ? { borderBottom: '1px solid rgba(245,158,11,0.25)' } : {}) }}>
+          {/* THE WORKSPACE'S OWN WORDMARK COMES FIRST, INCLUDING FOR AN
+              OPERATOR. Standing inside a customer of a configured vertical,
+              the rail names the CUSTOMER — the platform's own brand block
+              would tell their staff (and anybody looking over a shoulder in a
+              demo) which white-label product they are actually inside. The
+              operator's way back is unaffected: GodReturnBar sits above the
+              content and Command Center is still the first nav item. */}
+          {vertical && !sidebarCollapsed ? (
+            <div className="vertical-brand">
+              {logoUrl && !logoFailed ? (
+                <img className="vertical-brand-logo" src={logoUrl} alt=""
+                     onError={() => setLogoFailed(true)} />
+              ) : (
+                <span className="vertical-brand-glyph" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                       stroke="currentColor" strokeWidth="2"
+                       strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="12 3 21 12 12 21 3 12" />
+                  </svg>
+                </span>
+              )}
+              <span className="vertical-brand-text">
+                {brandLines(workspaceName).map((line, i) => (
+                  <span key={i} className={i === 0 ? 'vertical-brand-line1' : 'vertical-brand-line2'}>
+                    {line}
+                  </span>
+                ))}
+              </span>
+            </div>
+          ) : vertical && sidebarCollapsed ? (
+            <span className="vertical-brand-glyph" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" strokeWidth="2"
+                   strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="12 3 21 12 12 21 3 12" />
+              </svg>
+            </span>
+          ) : isGodAdmin ? (
             sidebarCollapsed ? (
               <span style={{ fontSize: 22, lineHeight: 1 }}>⚡</span>
             ) : (
@@ -653,6 +736,36 @@ export default function Layout({ children }) {
             //
             // A group name the platform does not already use becomes its own
             // section, in the order the views were configured.
+            //
+            // A VERTICAL REPLACES THE RAIL, IT DOES NOT ADD TO IT. Its groups
+            // already name every screen its operators use, in their own
+            // words, and every entry points at a route that already exists —
+            // so appending the platform's twenty items beneath would put two
+            // names on the same door. `visible()` above is applied to the
+            // vertical's items unchanged, which is what stops a rename from
+            // opening something a role or a plan had closed.
+            const verticalGroups = navGroupsFor(vertical, configuredViews)
+            if (verticalGroups) {
+              return verticalGroups.map((group) => {
+                const items = group.items.filter(visible)
+                if (items.length === 0) return null
+                return (
+                  <div key={group.label} className="nav-section">
+                    {!sidebarCollapsed && <div className="nav-section-label">{group.label}</div>}
+                    {sidebarCollapsed && <div className="nav-divider" />}
+                    {items.map((item) => (
+                      <NavLink key={item.to} to={item.to} end={item.to === '/'}
+                        className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                        onClick={closeSidebar}
+                        title={item.label}
+                      >
+                        <Icon name={item.icon} />{!sidebarCollapsed && item.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                )
+              })
+            }
             const groups = NAV_GROUPS.map((group) => ({ ...group, items: [...group.items] }))
             configuredViews.forEach((configured) => {
               const label = configured.group || 'Workspace'
@@ -690,7 +803,16 @@ export default function Layout({ children }) {
             })
           })()}
 
-          {(user?.role === 'super_admin' || isGodAdmin) && (
+          {/* PLATFORM ADMIN IS NOT PART OF A CUSTOMER'S WORKSPACE.
+              Provision Client, Templates, Cadence Builder and Org Manager are
+              platform-scope tools — none of them is about the customer whose
+              rail this is, and four of them under a customer's own wordmark
+              is the platform hierarchy leaking into the very screen that is
+              meant to be theirs. They are one click away the whole time:
+              Command Center is still the first item above, and the operator's
+              way back sits over the content. Only a configured vertical hides
+              them; every other workspace's rail is unchanged. */}
+          {(user?.role === 'super_admin' || isGodAdmin) && !vertical && (
             <>
               <div className="nav-divider" />
               {!sidebarCollapsed && <div className="nav-section-label" style={isGodAdmin ? { color: '#b45309' } : {}}>Platform Admin</div>}
