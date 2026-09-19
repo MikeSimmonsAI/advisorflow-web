@@ -137,6 +137,38 @@ def test_every_skin_rule_is_scoped_to_the_vertical_attribute():
             "every workspace on the platform" % selector)
 
 
+def test_the_skin_outranks_the_appearance_layer():
+    """MEASURED, BECAUSE GUESSING IT COST A DEPLOY.
+
+    `:root[data-appearance="dark"]` in styles/appearance.css redefines the
+    same neutral tokens this skin does, at exactly (0,2,0) — which is what
+    the skin was first written at. Equal specificity falls to source order,
+    the appearance layer happened to come last, and production rendered the
+    platform's dark palette with the vertical's rail on top of it.
+
+    The leading element selector makes every skin rule (0,2,1). This asserts
+    it stays there, because the symptom of losing it is a workspace that
+    looks almost right.
+    """
+    body = re.sub(r"/\*.*?\*/", "", _text(SKIN), flags=re.S)
+    selectors = []
+    for block in re.finditer(r"([^{}]+)\{", body):
+        chunk = block.group(1).strip()
+        if not chunk or chunk.startswith("@"):
+            continue
+        selectors.extend(s.strip() for s in chunk.split(",") if s.strip())
+    for selector in selectors:
+        assert selector.startswith('html:root[data-workspace-vertical='), (
+            "%r drops the element prefix, so it ties with "
+            ':root[data-appearance="dark"] and the cascade decides by bundle '
+            "order" % selector)
+
+    appearance = _text(ROOT / "frontend" / "src" / "styles" / "appearance.css")
+    assert ':root[data-appearance="dark"] {' in appearance, (
+        "appearance.css no longer defines the block this specificity was "
+        "measured against — re-measure before trusting the prefix")
+
+
 def test_the_skin_is_applied_and_removed_by_the_shell():
     """Set on entry and removed on exit. A skin left behind after switching
     workspace paints one customer's rail in another's colours, which is the
