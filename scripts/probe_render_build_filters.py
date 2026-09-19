@@ -100,6 +100,14 @@ PYTHON_SERVICES = [
     "advisorflow-voice",
 ]
 
+# Named, not merely absent from the list above. The backend owns
+# ai_conversation_loop and process_scheduled_touches takes no row lock, so a
+# second executor would double-send. If this name ever comes back into the
+# Blueprint, that is the defect, and it should fail here rather than ship.
+check("the retired AI conversation cron is not in the Blueprint",
+      "advisorflow-ai-conversation" not in services,
+      "found it: %s" % sorted(services))
+
 print("\n[2] every service declares a build filter")
 for name, svc in services.items():
     check("%s has buildFilter" % name, isinstance(svc.get("buildFilter"), dict))
@@ -128,12 +136,36 @@ MUST_BUILD = [
     ("job entrypoint change", ["app/jobs/run_cadence_job.py"], PYTHON_SERVICES),
     ("alembic migration", ["alembic/versions/0001_x.py"], PYTHON_SERVICES),
     ("root entrypoint", ["index.py"], PYTHON_SERVICES),
-    ("frontend build output", ["frontend/dist/assets/index-abc.js"],
+    # THE FRONTEND TRIGGER IS SOURCE, NOT THE BUILT BUNDLE. These three used
+    # to assert that a commit touching frontend/dist rebuilt the static site,
+    # which was right while dist was committed to git and served as-is. It is
+    # not committed any more: Render runs `cd frontend && npm ci && npm run
+    # build` and serves what that produces, and frontend/dist/** is in the
+    # static site's own ignoredPaths precisely so a stale artifact can never be
+    # the trigger. So the thing that must still build is every source input to
+    # that command - and the dist cases move to MUST SKIP below, where they
+    # now belong.
+    ("frontend source change", ["frontend/src/App.jsx"],
      ["advisorflow-frontend"]),
-    ("frontend index.html", ["frontend/dist/index.html"], ["advisorflow-frontend"]),
-    ("mixed backend + frontend commit",
-     ["app/main.py", "frontend/dist/index.html"],
+    ("frontend entry document", ["frontend/index.html"],
+     ["advisorflow-frontend"]),
+    ("frontend dependency change", ["frontend/package.json"],
+     ["advisorflow-frontend"]),
+    ("frontend build config change", ["frontend/vite.config.js"],
+     ["advisorflow-frontend"]),
+    # The mixed case, restated in source terms: one commit touching both sides
+    # must still reach both sides.
+    ("mixed backend + frontend source commit",
+     ["app/main.py", "frontend/src/App.jsx"],
      PYTHON_SERVICES + ["advisorflow-frontend"]),
+    # Denylist semantics, stated once where it matters: a commit is skipped
+    # only when EVERY file matches. A source change carried alongside an
+    # ignored one still builds.
+    ("frontend source alongside an ignored file",
+     ["frontend/src/App.jsx", "docs/ROADMAP.md"], ["advisorflow-frontend"]),
+    ("frontend source alongside a stale dist artifact",
+     ["frontend/src/App.jsx", "frontend/dist/index.html"],
+     ["advisorflow-frontend"]),
     ("code change alongside a doc",
      ["app/main.py", "README.md"], PYTHON_SERVICES),
 ]
@@ -145,9 +177,26 @@ for label, changed, must in MUST_BUILD:
 
 print("\n[5] MUST SKIP - the waste this pass is removing")
 MUST_SKIP = [
-    ("frontend-only commit", ["frontend/dist/assets/index-abc.js"], PYTHON_SERVICES),
+    # A COMMITTED dist ARTIFACT TRIGGERS NOTHING, ANYWHERE. dist is generated
+    # by Render, not committed, so a dist path in a diff means someone's local
+    # build leaked into a commit. Rebuilding the static site from it would
+    # publish whatever that machine happened to produce. This is the assertion
+    # that keeps frontend/dist/** in the static site's ignoredPaths.
+    ("stale dist artifact only", ["frontend/dist/assets/index-abc.js"],
+     PYTHON_SERVICES + ["advisorflow-frontend"]),
+    ("stale dist index.html only", ["frontend/dist/index.html"],
+     PYTHON_SERVICES + ["advisorflow-frontend"]),
     ("frontend src+dist commit",
      ["frontend/src/App.jsx", "frontend/dist/index.html"], PYTHON_SERVICES),
+    ("frontend source commit", ["frontend/src/App.jsx"], PYTHON_SERVICES),
+    # The public site is PHP, uploaded to GoDaddy by hand. Neither `pip install
+    # -r requirements.txt` nor `npm run build` reads a byte of it.
+    ("public-site-only commit", ["public-site/request-demo/index.php"],
+     PYTHON_SERVICES + ["advisorflow-frontend"]),
+    ("customer site + view config commit",
+     ["public-sites/atlantis-light-and-power/index.html",
+      "config/workspace-views/energy-retail-with-move-concierge.json"],
+     PYTHON_SERVICES + ["advisorflow-frontend"]),
     ("docs-only commit", ["docs/ROADMAP.md", "SUMMARY.md"],
      PYTHON_SERVICES + ["advisorflow-frontend"]),
     ("deploy-gate script change", ["scripts/probe_owner_console.py"],
@@ -161,8 +210,9 @@ MUST_SKIP = [
     # OBSERVED, NOT HYPOTHETICAL. deploy.ps1 itself makes one push. The waste
     # came from SEPARATE pushes of "chore: remove deploy scratch files", each
     # touching exactly one root-level _depN.ps1 temp wrapper - commits 79b0687,
-    # a01b265 and 638f94e on Aug 27. Each triggered a build on all six services
-    # to delete a temp file. Under this filter they build nothing.
+    # a01b265 and 638f94e on Aug 27. Each triggered a build on every service in
+    # the Blueprint (six at the time) to delete a temp file. Under this filter
+    # they build nothing.
     ("deploy scratch-file cleanup commit", ["_dep4.ps1"],
      PYTHON_SERVICES + ["advisorflow-frontend"]),
 ]

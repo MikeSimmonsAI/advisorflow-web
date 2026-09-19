@@ -202,18 +202,65 @@ def test_production_deploy_scripts_never_stage_anything(script):
         "already-prepared commit: %s" % (script, offenders))
 
 
-def test_deploy_ps1_stages_only_the_bundle_it_built_itself():
-    """deploy.ps1 is the exception and the exception is one explicit path.
+def test_deploy_ps1_stages_nothing_because_render_builds_the_frontend():
+    """deploy.ps1 used to be the one exception, and no longer is.
 
-    It builds frontend/dist in step 4 and that output is deliberately
-    committed - the static site serves the bundle rather than building on
-    Render - so it stages exactly `frontend/dist` by name. Anything else is
-    the old behaviour coming back.
+    It staged exactly `git add -f frontend/dist`, because the static site
+    served a bundle committed to git. That model is gone: render.yaml builds
+    advisorflow-frontend with `cd frontend && npm ci && npm run build`, and
+    that service's buildFilter lists `frontend/dist/**` under ignoredPaths
+    precisely so a committed artifact can never be the trigger. Committing
+    dist now ships nothing and risks publishing whatever one laptop produced.
+
+    So the contract is the same as every other deploy script: a person stages
+    and commits, the script verifies and pushes. Asserted as 'no git add at
+    all', not 'a narrower git add'.
     """
-    adds = [l.strip() for _n, l in _executable_lines(_read("deploy.ps1"))
-            if re.search(r"\bgit\s+add\b", l)]
-    assert adds == ["git add -f frontend/dist"], \
-        "deploy.ps1 should stage only frontend/dist, found: %s" % adds
+    adds = [(n, l.strip()) for n, l in _executable_lines(_read("deploy.ps1"))
+            if re.search(r"\bgit\s+(-c\s+\S+\s+)?add\b", l)]
+    assert not adds, (
+        "deploy.ps1 stages files. Render builds the frontend from source, so "
+        "there is nothing left for a deploy script to stage: %s" % adds)
+
+
+def test_deploy_ps1_commits_nothing_either():
+    """Staging nothing is only half of it. The push must ship the commit the
+    operator already made, so the script must not create one of its own."""
+    commits = [(n, l.strip()) for n, l in _executable_lines(_read("deploy.ps1"))
+               if re.search(r"\bgit\s+(-c\s+\S+\s+)?commit\b", l)]
+    assert not commits, (
+        "deploy.ps1 creates a commit: %s. A deploy ships what was already "
+        "reviewed and committed." % commits)
+
+
+def test_deploy_ps1_still_compiles_the_frontend_before_pushing():
+    """Removing the commit step must not have removed the build step.
+
+    `npm run build` stays, as a compile check: it is the cheapest way to find
+    out the frontend does not compile BEFORE the push, rather than from a red
+    Render deploy afterwards. Its output is discarded.
+    """
+    source = _read("deploy.ps1")
+    assert re.search(r"npm(\.cmd)?\s+run\s+build", source), \
+        "deploy.ps1 no longer compiles the frontend before pushing"
+    assert re.search(r"(?i)compile check", source), \
+        "the build step must say it is a check, not a deploy artifact"
+
+
+def test_render_not_the_deploy_script_produces_the_bundle():
+    """The assertion above is only safe while this stays true. If the static
+    site ever stopped building from source, dist would have to be committed
+    again and the two tests would have to move together."""
+    blueprint = _read("render.yaml")
+    frontend = blueprint.split("name: advisorflow-frontend", 1)[1]
+    frontend = frontend.split("\n  - type:", 1)[0]
+    assert re.search(r"npm\s+ci\s+&&\s+npm\s+run\s+build", frontend), \
+        "advisorflow-frontend does not build from source"
+    config = "\n".join(l for l in frontend.splitlines()
+                       if not l.strip().startswith("#"))
+    assert "frontend/dist/**" in config, \
+        "frontend/dist/** must stay in the static site's ignoredPaths - a " \
+        "committed artifact must never be the deploy trigger"
 
 
 @pytest.mark.parametrize("script", ("deploy.bat", "deploy.ps1",
