@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Commercial Cleaning Blueprint — prospecting and appointment generation for commercial cleaning companies, with a client portal that shows the work.">
+<title>Commercial Cleaning Blueprint — More Booked Walkthroughs</title>
+<style>
+:root{
+  --navy:#061426;--navy2:#0a1d34;--panel:#0f2743;--line:#284b6b;
+  --blue:#2699ff;--cyan:#49d7ff;--green:#3fd39a;--gold:#ffc34c;--red:#ff6d84;
+  --ink:#173047;--muted:#71889e;--bg:#f2f7fb;--white:#fff;
+}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--ink)}
+a{text-decoration:none;color:inherit}
+button,input,select,textarea{font:inherit}
+.wrap{width:min(1180px,calc(100% - 30px));margin:auto}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:11px 16px;border-radius:10px;font-size:12px;font-weight:900;border:1px solid transparent;cursor:pointer}
+.btn-gold{background:var(--gold);color:#18283a}
+.btn-dark{background:#102a46;color:#e9f6ff;border-color:#315675}
+.btn-blue{background:linear-gradient(90deg,#238fff,#46d6ff);color:#061525}
+.btn[disabled]{opacity:.6;cursor:progress}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:8px;font-weight:900}
+.green{background:#dcf8ed;color:#137754}.gold{background:#fff0ca;color:#8a6110}.blue{background:#e0f1ff;color:#17669e}.gray{background:#edf2f6;color:#607487}
+
+.header{position:sticky;top:0;z-index:20;background:rgba(6,20,38,.96);border-bottom:1px solid rgba(255,255,255,.08)}
+.nav{height:70px;display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px;color:#fff}
+.logo{width:42px;height:42px;border-radius:12px;background:linear-gradient(145deg,#1c8df0,#58ddff);display:grid;place-items:center;color:#061525;font-weight:1000}
+.brand strong{display:block;font-size:14px}
+.brand small{display:block;font-size:8px;letter-spacing:.15em;color:#7ea3c3;margin-top:2px}
+.links{display:flex;align-items:center;gap:20px;color:#9fb8ce;font-size:11px;font-weight:800}
+.hero{padding:76px 0 66px;background:
+radial-gradient(circle at 82% 18%,rgba(73,215,255,.15),transparent 24%),
+radial-gradient(circle at 18% 0%,rgba(38,153,255,.16),transparent 30%),
+linear-gradient(135deg,#06111f,#0b1d34 58%,#071527);color:#fff}
+.hero-grid{display:grid;grid-template-columns:1.07fr .93fr;gap:45px;align-items:center}
+.eyebrow{font-size:10px;letter-spacing:.18em;color:#64d9ff;font-weight:950;margin-bottom:12px}
+.hero h1{font-size:clamp(46px,5.7vw,72px);line-height:.97;letter-spacing:-.045em;margin:0 0 20px}
+.hero p{font-size:17px;line-height:1.65;color:#adc4d8;max-width:690px;margin:0 0 25px}
+.actions{display:flex;gap:10px;flex-wrap:wrap}
+.proof{display:flex;gap:22px;flex-wrap:wrap;margin-top:20px;color:#bad0e2;font-size:10px}.proof b{color:#fff}
+.preview{background:linear-gradient(180deg,#102945,#0b1e34);border:1px solid #315a7a;border-radius:20px;padding:18px;box-shadow:0 30px 80px rgba(0,0,0,.32)}
+.preview h3{margin:0 0 4px;font-size:15px}.preview p{font-size:9px;color:#7896b1;margin:0 0 14px}
+.preview-row{display:grid;grid-template-columns:1.2fr .9fr .8fr;padding:9px 4px;border-bottom:1px solid #1a3854;font-size:8px;color:#d9e7f3;gap:8px}
+.preview-row:last-child{border:0}
+.preview-lines{display:grid;gap:9px}
+.preview-line{display:grid;grid-template-columns:9px 1fr;gap:9px;align-items:start;font-size:9px;color:#d9e7f3}
+.preview-line i{width:8px;height:8px;border-radius:50%;margin-top:4px}
+.preview-line small{display:block;color:#7390aa;margin-top:2px;font-size:7.5px}
+.section{padding:68px 0}.section h2{font-size:38px;letter-spacing:-.035em;margin:0}
+.sub{color:#72889b;line-height:1.65;font-size:12px;max-width:700px;margin-top:10px}
+.dark{background:#071426;color:#fff}.dark .sub{color:#89a5be}
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-top:25px}
+.step{background:#0e223a;border:1px solid #284969;border-radius:15px;padding:18px}
+.step b{width:27px;height:27px;border-radius:50%;background:#174a72;display:grid;place-items:center;font-size:9px}
+.step h3{font-size:14px;margin:13px 0 6px}.step p{font-size:10px;color:#819db6;line-height:1.5;margin:0}
+.offer-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:26px}
+.offer{background:#fff;border:1px solid #d8e3ec;border-radius:16px;padding:20px;box-shadow:0 8px 24px rgba(22,52,80,.05)}
+.offer .num{font-size:9px;font-weight:950;color:#1c80c8;letter-spacing:.14em}
+.offer h3{font-size:15px;margin:10px 0 7px}.offer p{font-size:10px;line-height:1.55;color:#6f8497;margin:0}
+.problem-band{background:#eef5fa;border-top:1px solid #dbe6ee;border-bottom:1px solid #dbe6ee}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:center}
+.statement{font-size:35px;line-height:1.05;letter-spacing:-.035em;font-weight:950;margin:0}
+.checks{display:grid;gap:9px;margin-top:18px}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:11px;color:#5e7488}
+.check i{width:20px;height:20px;border-radius:50%;background:#daf7eb;color:#17815c;display:grid;place-items:center;font-style:normal;font-weight:950;flex:0 0 auto}
+.live-board{background:#07182a;color:#fff;border:1px solid #294d6c;border-radius:18px;padding:17px;box-shadow:0 25px 60px rgba(22,52,80,.15)}
+.live-title{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-bottom:11px}
+.live-title b{font-size:12px}.live-title span{font-size:8px;color:#7290a9}
+.live-event{display:grid;grid-template-columns:9px 1fr auto;gap:9px;align-items:start;padding:9px 0;border-bottom:1px solid #173650;font-size:9px}
+.live-event:last-child{border:0}
+.live-event i{width:8px;height:8px;border-radius:50%;margin-top:2px}
+.live-event small{display:block;color:#7390aa;margin-top:2px;font-size:7.5px}
+.highlight{background:linear-gradient(135deg,#0a1b30,#102d4c);color:#fff;border:1px solid #2d5575;border-radius:20px;padding:25px}
+.highlight h3{font-size:28px;line-height:1.05;margin:0 0 10px}
+.highlight p{color:#91abc3;font-size:11px;line-height:1.6;margin:0 0 16px}
+.value-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px}
+.value{background:#0e2239;border:1px solid #284967;border-radius:13px;padding:15px}
+.value b{display:block;font-size:13px;color:#49d7ff;line-height:1.3}.value span{font-size:8px;color:#7d98b0}
+.audience{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:22px}
+.audience div{background:#fff;border:1px solid #d9e3eb;border-radius:13px;padding:16px;font-size:10px;font-weight:850;color:#33506a}
+.compare{display:grid;grid-template-columns:1fr 70px 1fr;gap:15px;align-items:stretch;margin-top:24px}
+.compare-box{border:1px solid #d8e3ec;border-radius:16px;padding:20px;background:#fff}
+.compare-box h3{margin:0 0 12px;font-size:15px}
+.compare-box ul{margin:0;padding-left:17px;color:#6c8194;font-size:10px;line-height:1.8}
+.arrow-box{display:grid;place-items:center;font-size:28px;color:#1f84ca;font-weight:900}
+.cta-band{background:linear-gradient(135deg,#071426,#0a2138 60%,#0b2b46);color:#fff;padding:58px 0}
+.cta-inner{display:flex;justify-content:space-between;gap:30px;align-items:center}
+.cta-inner h2{font-size:38px;line-height:1.05;letter-spacing:-.035em;margin:0 0 10px}
+.cta-inner p{font-size:11px;color:#8fa9c0;max-width:680px;margin:0}
+footer{background:#040e1a;color:#7d97ae;padding:34px 0;font-size:10px}
+.footer-inner{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+
+.modal{position:fixed;inset:0;background:rgba(2,8,15,.78);backdrop-filter:blur(5px);display:none;align-items:center;justify-content:center;padding:20px;z-index:1000}
+.modal.open{display:flex}
+.modal-card{width:min(560px,100%);background:#081a2e;color:#fff;border:1px solid #2a4f6e;border-radius:18px;padding:24px;box-shadow:0 35px 100px rgba(0,0,0,.5);max-height:92vh;overflow-y:auto}
+.modal-card h2{margin:16px 0 6px;font-size:22px}
+.modal-card > p{font-size:11px;color:#849db4;line-height:1.6;margin:0 0 14px}
+.modal-card label{font-size:8px;letter-spacing:.1em;color:#7896b1;display:block;margin:12px 0 4px;font-weight:900}
+.modal-card input,.modal-card select,.modal-card textarea{width:100%;padding:11px;border-radius:9px;border:1px solid #294c69;background:#061322;color:#fff;font-family:inherit}
+.modal-card textarea{min-height:86px;resize:vertical}
+.modal-card .btn{width:100%;margin-top:14px}
+.consent{display:flex;gap:9px;align-items:flex-start;font-size:10px;color:#9db6cb;line-height:1.6;margin-top:14px}
+.consent input{width:17px;height:17px;flex:0 0 auto;margin-top:2px;accent-color:#2699ff}
+.form-note{font-size:10px;margin:0 0 10px;padding:10px;border-radius:9px;display:none;line-height:1.5}
+.form-note.error{display:block;background:#2a1220;border:1px solid #6b2740;color:#ff9db0}
+.form-done{text-align:center;padding:10px 0}
+.form-done .tick{width:52px;height:52px;border-radius:50%;background:#12314a;color:#3fd39a;display:grid;place-items:center;font-size:24px;font-weight:900;margin:0 auto 14px}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.close-x{float:right;background:rgba(255,255,255,.08);border:0;color:#fff;width:32px;height:32px;border-radius:9px;font-size:18px;cursor:pointer}
+
+@media(max-width:950px){.hero-grid{grid-template-columns:1fr}.flow{grid-template-columns:1fr 1fr}.offer-grid,.audience{grid-template-columns:1fr 1fr}.split{grid-template-columns:1fr}.compare{grid-template-columns:1fr}.arrow-box{transform:rotate(90deg)}.value-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){.links a:not(.btn){display:none}}
+@media(max-width:560px){.offer-grid,.audience,.value-grid,.flow{grid-template-columns:1fr}.cta-inner{display:block}.cta-inner .actions{margin-top:18px}.hero{padding-top:48px}.hero h1{font-size:43px}.statement{font-size:28px}}
+</style>
+</head>
+<body>
+  <header class="header">
+    <div class="wrap nav">
+      <div class="brand"><div class="logo">CCB</div><div><strong>Commercial Cleaning Blueprint</strong><small>TURN PROSPECTING INTO WALKTHROUGHS</small></div></div>
+      <nav class="links">
+        <a href="#offer">What We Do</a>
+        <a href="#how">How It Works</a>
+        <a href="#portal-preview">Client Portal</a>
+        <a href="#who">Who We Help</a>
+        <a class="btn btn-dark" data-portal href="#">Client Portal</a>
+        <a class="btn btn-gold" href="#" data-open-modal="strategy">Book a Strategy Call</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <div class="eyebrow">COMMERCIAL CLEANING PROSPECTING + APPOINTMENT GENERATION</div>
+        <h1>Would more commercial cleaning appointments change your business?</h1>
+        <p>Commercial Cleaning Blueprint gives commercial cleaning companies a system built to create more opportunities, keep follow-up moving, and turn more prospects into booked walkthroughs — with a clear client dashboard showing what is happening along the way.</p>
+        <div class="actions">
+          <a class="btn btn-gold" href="#" data-open-modal="strategy">Book a Strategy Call</a>
+          <a class="btn btn-dark" data-portal href="#">See the Client Portal</a>
+        </div>
+        <div class="proof">
+          <span><b>More opportunities</b></span>
+          <span><b>More follow-up</b></span>
+          <span><b>More visibility</b></span>
+          <span><b>More walkthroughs</b></span>
+        </div>
+      </div>
+
+      <div class="preview">
+        <div class="eyebrow" style="margin-bottom:8px">WHAT YOUR ACCOUNT SHOWS YOU</div>
+        <h3>Your own private client dashboard</h3>
+        <p>One place to see the work being done on your behalf — your prospects, your account, nobody else's.</p>
+        <div class="preview-lines">
+          <div class="preview-line"><i style="background:#2699ff"></i><div><b>Prospects sourced</b><small>Every commercial facility on your target list, with the decision maker.</small></div></div>
+          <div class="preview-line"><i style="background:#49d7ff"></i><div><b>Activity on each record</b><small>Calls, notes, dispositions and who worked it — attached to the prospect.</small></div></div>
+          <div class="preview-line"><i style="background:#ffc34c"></i><div><b>Follow-up that is still owed</b><small>Callbacks and unanswered attempts, with the next action and the date.</small></div></div>
+          <div class="preview-line"><i style="background:#3fd39a"></i><div><b>Booked walkthroughs</b><small>Traced back to the prospect and the conversation that produced them.</small></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="offer">
+    <div class="wrap">
+      <div class="eyebrow" style="color:#1682d2">WHAT COMMERCIAL CLEANING BLUEPRINT DELIVERS</div>
+      <h2>A system designed to help commercial cleaners book more walkthroughs.</h2>
+      <div class="sub">This is not just another CRM. It is a commercial-cleaning growth system designed to help you create more opportunities, stay on top of follow-up, and turn more prospects into booked appointments and walkthroughs.</div>
+
+      <div class="offer-grid">
+        <div class="offer"><div class="num">01 · BUILD</div><h3>Targeted Opportunity Building</h3><p>Build a focused pipeline of commercial prospects with the right facility, contact, and decision-maker information ready for outreach.</p></div>
+        <div class="offer"><div class="num">02 · WORK</div><h3>Consistent Prospecting</h3><p>Work the right prospects consistently, reach decision-makers, capture responses, and keep every viable opportunity moving forward.</p></div>
+        <div class="offer"><div class="num">03 · FOLLOW</div><h3>Follow-Up That Doesn't Die</h3><p>Callbacks, unanswered attempts, interested prospects, and next actions stay organized so opportunities do not disappear between touches.</p></div>
+        <div class="offer"><div class="num">04 · DELIVER</div><h3>More Booked Walkthroughs</h3><p>The goal is simple: create more qualified conversations and turn more of them into booked commercial-cleaning walkthroughs.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section problem-band">
+    <div class="wrap split">
+      <div>
+        <div class="eyebrow" style="color:#1682d2">THE PROBLEM TODAY</div>
+        <p class="statement">The opportunity is there. The problem is keeping it moving.</p>
+        <div class="checks">
+          <div class="check"><i>✓</i><span>Commercial prospects need to be identified and organized.</span></div>
+          <div class="check"><i>✓</i><span>Decision-makers need consistent outreach and follow-up.</span></div>
+          <div class="check"><i>✓</i><span>Opportunities need a clear system instead of scattered notes and spreadsheets.</span></div>
+          <div class="check"><i>✓</i><span>Business owners need visibility into what is happening and what is producing appointments.</span></div>
+        </div>
+      </div>
+      <div class="live-board">
+        <div class="live-title"><b>What the same workflow looks like online</b><span>YOUR ACCOUNT</span></div>
+        <div class="live-event"><i style="background:#2699ff"></i><div><b>Prospect sourced</b><small>A commercial facility in your target market, with the contact detail.</small></div><span class="badge blue">NEW</span></div>
+        <div class="live-event"><i style="background:#49d7ff"></i><div><b>Decision-maker identified</b><small>The person who actually buys the cleaning contract.</small></div><span class="badge blue">WORKING</span></div>
+        <div class="live-event"><i style="background:#ffc34c"></i><div><b>Callback requested</b><small>With the time, the reason, and whose job it is.</small></div><span class="badge gold">FOLLOW-UP</span></div>
+        <div class="live-event"><i style="background:#3fd39a"></i><div><b>Walkthrough booked</b><small>On the calendar, attached to the prospect record.</small></div><span class="badge green">BOOKED</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section dark" id="how">
+    <div class="wrap">
+      <div class="eyebrow">HOW THE SYSTEM WORKS</div>
+      <h2>Find Opportunities → Start Conversations → Follow Up → Book Walkthroughs.</h2>
+      <div class="sub">Commercial Cleaning Blueprint brings the process together so more prospects get worked, more conversations stay alive, and more walkthroughs get booked.</div>
+      <div class="flow">
+        <div class="step"><b>1</b><h3>Build the right opportunity list</h3><p>Focus on the businesses most likely to need commercial cleaning services in the markets you want to grow.</p></div>
+        <div class="step"><b>2</b><h3>Start the conversations</h3><p>Reach the right contacts, start conversations, capture intent, and keep every real opportunity organized.</p></div>
+        <div class="step"><b>3</b><h3>Stay in front of the opportunity</h3><p>Follow-up stays active across every interested or unresponsive prospect so good opportunities do not disappear.</p></div>
+        <div class="step"><b>4</b><h3>Book the walkthrough</h3><p>Turn qualified interest into booked walkthroughs, with a clear dashboard showing pipeline activity and results.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="portal-preview">
+    <div class="wrap">
+      <div class="split">
+        <div class="highlight">
+          <div class="eyebrow">CLIENT PORTAL</div>
+          <h3>Your growth system becomes visible in one dashboard.</h3>
+          <p>Every customer gets their own private, password-protected account with visibility into prospects, activity, follow-up, interested opportunities, booked walkthroughs and account-level performance. You see your own account and nothing else.</p>
+          <a class="btn btn-gold" data-portal href="#">Sign In to the Client Portal</a>
+          <div class="value-grid">
+            <div class="value"><b>Your prospects</b><span>Sourced &amp; enriched</span></div>
+            <div class="value"><b>Your follow-up</b><span>Owed &amp; dated</span></div>
+            <div class="value"><b>Your walkthroughs</b><span>Booked &amp; traced</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="eyebrow" style="color:#1682d2">WHAT THE BUSINESS OWNER CAN SEE AT A GLANCE</div>
+          <p class="statement" style="font-size:31px">“How many opportunities are being worked, what is moving forward, and how many walkthroughs are being booked?”</p>
+          <div class="checks">
+            <div class="check"><i>✓</i><span>See every prospect assigned to their account.</span></div>
+            <div class="check"><i>✓</i><span>See prospect activity, notes, and current status.</span></div>
+            <div class="check"><i>✓</i><span>See callbacks and follow-up that still need work.</span></div>
+            <div class="check"><i>✓</i><span>Track booked walkthroughs back to the original prospect.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section problem-band">
+    <div class="wrap">
+      <div class="eyebrow" style="color:#1682d2">BEFORE / AFTER</div>
+      <h2>From scattered prospecting to a system built for appointments.</h2>
+      <div class="compare">
+        <div class="compare-box">
+          <h3>Before</h3>
+          <ul>
+            <li>Spreadsheet sent by email</li>
+            <li>Client waits for updates</li>
+            <li>Notes spread across tabs</li>
+            <li>Hard to see follow-up status</li>
+            <li>Booked walkthroughs separated from prospect history</li>
+          </ul>
+        </div>
+        <div class="arrow-box">→</div>
+        <div class="compare-box">
+          <h3>With Commercial Cleaning Blueprint</h3>
+          <ul>
+            <li>Private client dashboard</li>
+            <li>Live prospect database</li>
+            <li>Activity attached to each record</li>
+            <li>Organized follow-up queue</li>
+            <li>Walkthroughs and reporting tied to the work</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="who">
+    <div class="wrap">
+      <div class="eyebrow" style="color:#1682d2">WHO THIS IS BUILT FOR</div>
+      <h2>Built for commercial cleaning companies that want a fuller pipeline.</h2>
+      <div class="sub">The prospecting model can support different commercial facility targets without changing the core client experience.</div>
+      <div class="audience">
+        <div>Office Buildings</div>
+        <div>Medical / Healthcare</div>
+        <div>Daycare / Education</div>
+        <div>Retail Centers</div>
+        <div>Property Management</div>
+        <div>Warehouses / Industrial</div>
+        <div>Churches / Nonprofits</div>
+        <div>Multi-Site Facilities</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section dark">
+    <div class="wrap" style="text-align:center">
+      <div class="eyebrow">IF YOU WANT MORE APPOINTMENTS</div>
+      <h2 style="font-size:42px;max-width:850px;margin:0 auto 12px">You need more than a list. You need a system that keeps opportunity moving.</h2>
+      <div class="sub" style="margin:0 auto 22px;max-width:760px">
+        Commercial Cleaning Blueprint is built to help you find the right prospects, stay on top of follow-up, create more qualified conversations, and turn more of those conversations into booked walkthroughs.
+      </div>
+      <div class="actions" style="justify-content:center">
+        <a class="btn btn-gold" href="#" data-open-modal="strategy">Tap In With Us</a>
+        <a class="btn btn-dark" data-portal href="#">See the Client Portal</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-band" id="strategy">
+    <div class="wrap cta-inner">
+      <div>
+        <div class="eyebrow">COMMERCIAL CLEANING BLUEPRINT</div>
+        <h2>A system built to create more appointments — and show you exactly what is working.</h2>
+        <p>Build opportunity, keep follow-up moving, create more booked walkthroughs, and give every client a professional place to see the pipeline and results.</p>
+      </div>
+      <div class="actions">
+        <a class="btn btn-gold" href="#" data-open-modal="strategy">Book a Strategy Call</a>
+        <a class="btn btn-dark" data-portal href="#">Client Portal</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap footer-inner">
+      <span>© 2026 Commercial Cleaning Blueprint.</span>
+      <span>Client accounts are private. Each cleaning company sees only its own prospects, activity and appointments.</span>
+    </div>
+  </footer>
+
+  <div class="modal" id="leadModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <button class="close-x" onclick="closeModal()" aria-label="Close">×</button>
+      <div class="brand"><div class="logo">CCB</div><div><strong>Commercial Cleaning Blueprint</strong><small>BOOK A STRATEGY CALL</small></div></div>
+      <h2 id="modalTitle">Let's talk about your pipeline</h2>
+      <p>Tell us about your cleaning company and the markets you want to grow. We'll come back to you to set up a time — nothing is scheduled from this page.</p>
+      <p class="form-note" id="formNote"></p>
+      <form id="leadForm">
+        <label for="fName">YOUR NAME</label>
+        <input id="fName" name="name" required autocomplete="name" placeholder="First and last name">
+        <label for="fCompany">CLEANING COMPANY</label>
+        <input id="fCompany" name="company" required autocomplete="organization" placeholder="Company name">
+        <label for="fEmail">EMAIL</label>
+        <input id="fEmail" name="email" type="email" required autocomplete="email" placeholder="you@example.com">
+        <label for="fPhone">PHONE</label>
+        <input id="fPhone" name="phone" type="tel" required autocomplete="tel" placeholder="(555) 555-5555">
+        <label for="fMarkets">MARKETS YOU WANT TO GROW</label>
+        <input id="fMarkets" name="markets" placeholder="Cities, counties or ZIP codes">
+        <label for="fFacilities">FACILITY TYPES YOU TARGET</label>
+        <select id="fFacilities" name="facility_focus">
+          <option value="">Select one</option>
+          <option>Office buildings</option>
+          <option>Medical / healthcare</option>
+          <option>Daycare / education</option>
+          <option>Retail centers</option>
+          <option>Property management</option>
+          <option>Warehouses / industrial</option>
+          <option>Churches / nonprofits</option>
+          <option>Multi-site facilities</option>
+          <option>A mix of the above</option>
+        </select>
+        <label for="fTeam">HOW MANY PEOPLE PROSPECT FOR YOU TODAY?</label>
+        <input id="fTeam" name="prospecting_team" placeholder="e.g. nobody yet, 1 part-time, 3 callers">
+        <label for="fMessage">ANYTHING ELSE WE SHOULD KNOW?</label>
+        <textarea id="fMessage" name="message" placeholder="Optional"></textarea>
+        <div class="hp" aria-hidden="true"><label for="website_url">Leave this empty</label><input id="website_url" name="website_url" tabindex="-1" autocomplete="off"></div>
+        <label class="consent" for="fConsent">
+          <input type="checkbox" id="fConsent" name="consent">
+          <span>By checking this box you agree that Commercial Cleaning Blueprint may contact you by phone, text message or email about your request. Message and data rates may apply. Reply STOP to opt out at any time.</span>
+        </label>
+        <button class="btn btn-blue" type="submit" id="submitBtn">Send My Request →</button>
+        <button class="btn btn-dark" type="button" onclick="closeModal()">Cancel</button>
+      </form>
+      <div class="form-done" id="formDone" hidden>
+        <div class="tick">✓</div>
+        <h2 style="margin:0 0 8px;font-size:20px">Thanks — we have your request.</h2>
+        <p style="font-size:11px;color:#9db6cb">We'll reach out to set up a time that works. Nothing has been scheduled and nothing has been charged.</p>
+        <button class="btn btn-dark" onclick="closeModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  // WHERE THIS PAGE POSTS. Same origin as the page: the platform serves both,
+  // so there is no API host written into the markup. The slug comes from the
+  // address bar, so a copy published at a second address still files to the
+  // organization that owns that address.
+  var SLUG = (window.location.pathname.split('/site/')[1] || '').split('/')[0];
+  var ENDPOINT = '/site/' + SLUG + '/inquiry';
+
+  // THE CLIENT PORTAL IS THE REAL APPLICATION. Not a mockup on this page and
+  // not a second login: the same authenticated workspace a client's people
+  // use every day, where each cleaning company sees its own organization and
+  // nothing else. This page never holds a password and never states one.
+  var PORTAL_URL = 'https://app.evosyspro.live/login';
+  Array.prototype.forEach.call(document.querySelectorAll('[data-portal]'), function (el) {
+    el.setAttribute('href', PORTAL_URL);
+    el.setAttribute('rel', 'noopener');
+  });
+
+  var modal = document.getElementById('leadModal');
+  var form = document.getElementById('leadForm');
+  var note = document.getElementById('formNote');
+  var done = document.getElementById('formDone');
+  var submitBtn = document.getElementById('submitBtn');
+  var startedAt = Math.floor(Date.now() / 1000);
+
+  function openModal() {
+    note.className = 'form-note';
+    note.textContent = '';
+    form.hidden = false;
+    done.hidden = true;
+    startedAt = Math.floor(Date.now() / 1000);
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    document.getElementById('fName').focus();
+  }
+  window.closeModal = function () {
+    modal.classList.remove('open');
+    document.body.style.overflow = '';
+  };
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-open-modal]'), function (el) {
+    el.addEventListener('click', function (e) { e.preventDefault(); openModal(); });
+  });
+  modal.addEventListener('click', function (e) { if (e.target === modal) window.closeModal(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') window.closeModal(); });
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    note.className = 'form-note';
+    note.textContent = '';
+
+    var payload = {
+      name: document.getElementById('fName').value.trim(),
+      company: document.getElementById('fCompany').value.trim(),
+      email: document.getElementById('fEmail').value.trim(),
+      phone: document.getElementById('fPhone').value.trim(),
+      markets: document.getElementById('fMarkets').value.trim(),
+      facility_focus: document.getElementById('fFacilities').value,
+      prospecting_team: document.getElementById('fTeam').value.trim(),
+      message: document.getElementById('fMessage').value.trim(),
+      request_type: 'Strategy call',
+      consent: document.getElementById('fConsent').checked,
+      page_url: window.location.href,
+      referrer: document.referrer || null,
+      website_url: document.getElementById('website_url').value,
+      form_started_at: startedAt
+    };
+    Object.keys(payload).forEach(function (k) {
+      if (payload[k] === '' ) delete payload[k];
+    });
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending…';
+
+    fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        return { ok: res.ok, body: body };
+      });
+    }).then(function (result) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Send My Request →';
+      if (result.ok) { form.hidden = true; done.hidden = false; return; }
+      note.className = 'form-note error';
+      note.textContent = (result.body && result.body.detail)
+        ? String(result.body.detail)
+        : 'We could not send that just now. Please try again in a moment.';
+    }).catch(function () {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Send My Request →';
+      note.className = 'form-note error';
+      note.textContent = 'We could not reach our system just now. Please try again in a moment.';
+    });
+  });
+})();
+</script>
+</body>
+</html>

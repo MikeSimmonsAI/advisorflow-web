@@ -443,6 +443,21 @@ class Organization(Base):
     # type: "text" | "number" | "dropdown" | "date"
     crm_custom_fields = Column(Text, nullable=True)
 
+    # The workflow screens this customer's own people recognise — JSON array of
+    # view specs. See app/services/workspace_views.py for the shape.
+    #
+    # NULL and [] MEAN DIFFERENT THINGS. NULL is "nothing said about this
+    # customer yet" and inherits the industry template's list, which is the
+    # state every organization starts in. [] is a decision — this customer has
+    # turned them all off — and is honoured as written. Same distinction as
+    # enabled_features, for the same reason: a default is indistinguishable
+    # from a choice to the person reading the screen.
+    #
+    # A view creates no table and can express nothing the lead and appointment
+    # tables cannot already answer, so a screen only one customer wants costs
+    # a row here rather than a page in the codebase.
+    workspace_views = Column(Text, nullable=True)
+
     # Org-level email sender — overrides the global RESEND_API_KEY / EMAIL_FROM_ADDRESS
     # env vars so each brand sends from its own domain (e.g. support@bookaboost.live
     # for BookaBoost, support@evosyspro.live for EvoSys Pro).

@@ -622,6 +622,11 @@ COLUMNS_TO_ADD = [
     # Per-customer outbound email enablement. Nullable, and NULL means none -
     # see the column comment on Organization.
     ("organizations", "outbound_email_sources", "TEXT"),
+    # Per-customer workflow screens. Nullable, and NULL means "inherit the
+    # industry template's list" - see the column comment on Organization. No
+    # backfill: every existing customer keeps inheriting, which is what they
+    # were doing implicitly before the column existed.
+    ("organizations", "workspace_views", "TEXT"),
     # Vanity demo links. Nullable: every existing demo keeps its token address
     # and simply has no readable name yet.
     ("demo_sites", "slug", "VARCHAR(48)"),
@@ -1247,6 +1252,24 @@ INDEXES_TO_CREATE = [
     # implementations.owner_user_id is indexed; sold_by_user_id is not, and the
     # rep's own /sales/implementations view filters on exactly that column.
     "CREATE INDEX IF NOT EXISTS ix_impl_sold_by_user_id ON implementations(sold_by_user_id)",
+
+    # THE MASTER LEAD DATABASE. Both tables were created by create_all() on the
+    # Stage 1 deploy, so they EXIST in production now and create_all() will
+    # never add an index to them. These serve the God browser's filters and
+    # the detail view's lineage lookup:
+    #   - first/last seen: the date-range filters and the default sort
+    #   - lead_id alone: the join from an occurrence back to its tenant lead
+    #     for contactability. The unique (organization_id, lead_id) constraint
+    #     leads on organization, so it cannot serve a lookup by lead_id alone.
+    #   - needs_review: the conflict-review surface
+    "CREATE INDEX IF NOT EXISTS ix_lead_occurrence_first_seen ON lead_occurrences(first_seen_at)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_occurrence_last_seen  ON lead_occurrences(last_seen_at)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_occurrence_lead_id    ON lead_occurrences(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_occurrence_source     ON lead_occurrences(source)",
+    "CREATE INDEX IF NOT EXISTS ix_lead_occurrence_synthetic  ON lead_occurrences(is_synthetic)",
+    "CREATE INDEX IF NOT EXISTS ix_master_contacts_review     ON master_contacts(needs_review)",
+    "CREATE INDEX IF NOT EXISTS ix_master_contacts_last_seen  ON master_contacts(last_seen_at)",
+    "CREATE INDEX IF NOT EXISTS ix_master_contacts_occurrences ON master_contacts(occurrence_count)",
 
     # ── INBOUND DISCOVERY / DEMO BOOKING (2026-09-17) ──────────────────────
     # Separate block, same reason as the column block above.

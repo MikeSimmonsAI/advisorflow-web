@@ -1,0 +1,71 @@
+[
+  {
+    "key": "rate-requests",
+    "label": "Rate Requests",
+    "group": "Operate",
+    "icon": "zap",
+    "title": "Rate Requests",
+    "subtitle": "Plan shopping and bill analysis, from first ask to the option that was chosen.",
+    "source": "leads",
+    "filter": {"tier": ["new_inquiry", "rate_review", "proposal_sent"], "not_status": ["dnc", "dead"]},
+    "columns": ["name", "contact", "tier", "location", "source_detail", "owner", "updated_at"],
+    "stats": [
+      {"label": "New", "filter": {"tier": ["new_inquiry"]}},
+      {"label": "In Review", "filter": {"tier": ["rate_review"]}},
+      {"label": "Options Sent", "filter": {"tier": ["proposal_sent"]}},
+      {"label": "Unassigned", "filter": {"unassigned": true}}
+    ],
+    "empty": "No open rate requests. New ones appear here as soon as they arrive from the website or an advisor logs them."
+  },
+  {
+    "key": "move-concierge",
+    "label": "Move Concierge",
+    "group": "Operate",
+    "icon": "truck",
+    "title": "Move Concierge",
+    "subtitle": "Customers who need energy plus the rest of the move, and where each handoff has reached.",
+    "source": "leads",
+    "filter": {"source_detail": ["Move Concierge"], "not_status": ["dnc", "dead"]},
+    "columns": ["name", "contact", "tier", "status", "location", "owner", "note"],
+    "stats": [
+      {"label": "Active", "filter": {"not_status": ["booked", "dead", "dnc"]}},
+      {"label": "Unassigned", "filter": {"unassigned": true}},
+      {"label": "Quiet 7+ Days", "filter": {"stale_days": 7}}
+    ],
+    "empty": "No concierge requests in progress."
+  },
+  {
+    "key": "renewals",
+    "label": "Renewals",
+    "group": "Operate",
+    "icon": "refresh",
+    "title": "Renewals",
+    "subtitle": "Accounts whose contract is coming up, before the date rather than after it.",
+    "source": "leads",
+    "filter": {"tier": ["contract_signed", "renewal_due"], "not_status": ["dnc", "dead"]},
+    "columns": ["name", "contact", "tier", "location", "owner", "last_contact_date", "updated_at"],
+    "stats": [
+      {"label": "Renewal Due", "filter": {"tier": ["renewal_due"]}},
+      {"label": "Under Contract", "filter": {"tier": ["contract_signed"]}},
+      {"label": "Not Touched in 30d", "filter": {"stale_days": 30}}
+    ],
+    "empty": "No accounts in the renewal window."
+  },
+  {
+    "key": "consultations",
+    "label": "Consultations",
+    "group": "Operate",
+    "icon": "calendar",
+    "title": "Consultations",
+    "subtitle": "Booked appointments, and who they belong to.",
+    "source": "appointments",
+    "filter": {"not_status": ["cancelled", "expired"]},
+    "columns": ["name", "contact", "booked_time", "appt_label", "status", "owner"],
+    "stats": [
+      {"label": "Upcoming", "filter": {"upcoming": true}},
+      {"label": "Confirmed", "filter": {"status": ["confirmed"]}},
+      {"label": "Awaiting Confirmation", "filter": {"status": ["booked"]}}
+    ],
+    "empty": "Nothing on the calendar yet."
+  }
+]

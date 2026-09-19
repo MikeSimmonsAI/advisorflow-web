@@ -351,6 +351,26 @@ export default function Layout({ children }) {
   }, [orgContext])
   const hasCapability = (key) => !key || (myCaps !== null && myCaps.includes(key))
 
+  // WHAT THIS WORKSPACE CALLS ITS OWN SCREENS. A vertical's workflow views
+  // are configuration - a row on the organization, or its industry's default
+  // - so the rail cannot know them from a static array. One cheap call,
+  // re-run when the workspace changes, because the whole point of keying the
+  // terminology cache by workspace is that one customer's vocabulary must not
+  // appear in another's rail.
+  //
+  // `[]` while unknown, not a spinner: an item that appears a moment late is
+  // better than one that flashes and vanishes, which is the same rule the
+  // Launch item above follows. A failure is silent for the same reason a 404
+  // on /launch/me is - most organizations legitimately have none.
+  const [configuredViews, setConfiguredViews] = useState([])
+  useEffect(() => {
+    let alive = true
+    api.get('/workspace-views', { skipRedirect: true })
+      .then(d => { if (alive) setConfiguredViews(Array.isArray(d?.views) ? d.views : []) })
+      .catch(() => { if (alive) setConfiguredViews([]) })
+    return () => { alive = false }
+  }, [orgContext])
+
   function handleExitOrg() {
     clearOrgContext()
     clearBranding()
@@ -624,7 +644,32 @@ export default function Layout({ children }) {
               if (item.featureKey !== undefined && !isFeatureEnabled(item.featureKey)) return false
               return true
             }
-            return NAV_GROUPS.map((group) => {
+            // THE WORKSPACE'S OWN SCREENS, folded into the rail beside the
+            // platform's. They are appended to their named group rather than
+            // replacing anything: a customer who calls their lead list
+            // "Prospects" still gets Leads, Work Queue and the rest, because
+            // the configured view is another way of looking at those records
+            // and not a substitute for them.
+            //
+            // A group name the platform does not already use becomes its own
+            // section, in the order the views were configured.
+            const groups = NAV_GROUPS.map((group) => ({ ...group, items: [...group.items] }))
+            configuredViews.forEach((configured) => {
+              const label = configured.group || 'Workspace'
+              let bucket = groups.find((group) => group.label === label)
+              if (!bucket) {
+                bucket = { label, items: [] }
+                // After Workspace, before Engagement - where a person looks
+                // for the thing they do all day.
+                groups.splice(1, 0, bucket)
+              }
+              bucket.items.push({
+                to: `/view/${configured.key}`,
+                label: configured.label,
+                icon: configured.icon,
+              })
+            })
+            return groups.map((group) => {
               const items = group.items.filter(visible)
               if (items.length === 0) return null
               return (

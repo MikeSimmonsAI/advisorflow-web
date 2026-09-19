@@ -692,6 +692,20 @@ app.include_router(concierge_router.router)
 from app.routers import site_intake_router  # noqa: E402
 app.include_router(site_intake_router.router)
 
+# A CUSTOMER'S OWN PUBLIC WEBSITE, and the enquiries it takes. Different
+# surface from the one above and the difference is the destination: the brand's
+# marketing site posts to a brand slug and lands in that brand's configured
+# intake organization, while these pages belong to one customer and file into
+# that customer's own workspace. Registered here, beside the other public
+# routes, because it shares their rate ceiling and their no-auth posture.
+#
+# Mounted BEFORE the authenticated routers for the same reason timeline_router
+# precedes leads_router: /site/{slug} is a top-level path and nothing else may
+# be allowed to claim it first.
+from app.routers import customer_site_router  # noqa: E402
+app.include_router(customer_site_router.router)
+app.include_router(customer_site_router.god_router)
+
 # ── PUBLIC DISCOVERY / DEMO BOOKING ────────────────────────────────────────
 # Unauthenticated, and mounted beside site_intake deliberately: it is the same
 # kind of surface - a brand's own marketing site talking to the platform - and
@@ -762,6 +776,13 @@ app.include_router(fiber_leads_router)
 app.include_router(setup_router)
 app.include_router(contacts_router)
 app.include_router(activity_router)
+# The configured workflow screens. Read-only, and every query it runs is built
+# by lead_scope, so it is exactly as scoped as the Leads page it draws from.
+# Deliberately NOT behind require_feature: a view is a way of looking at
+# records the reader can already see, so gating it would hide a screen from
+# somebody who can reach the same rows by other means.
+from app.routers import workspace_views_router  # noqa: E402
+app.include_router(workspace_views_router.router)
 app.include_router(branding_router)
 app.include_router(god_calendar_diag_router)  # read-only calendar wiring report
 app.include_router(god_maintenance_router)   # one record, dry-run first, no messages sent

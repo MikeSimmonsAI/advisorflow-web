@@ -48,6 +48,11 @@ import Replies from './pages/Replies'
 import Cadence from './pages/Cadence'
 import EmailQueue from './pages/EmailQueue'
 import Activity from './pages/Activity'
+// ONE PAGE FOR EVERY CONFIGURED WORKFLOW SCREEN. The key in the URL names a
+// view the server resolved from this workspace's own configuration, so a
+// vertical's screens cost a row rather than a route each. See
+// app/services/workspace_views.py.
+import WorkspaceView from './pages/WorkspaceView'
 import WorkQueue from './pages/WorkQueue'
 import AutoSendQueue from './pages/AutoSendQueue'
 import Reports from './pages/Reports'
@@ -960,6 +965,12 @@ export default function App() {
         <Route path="/cadence" element={<ProtectedRoute feature="cadences"><Cadence /></ProtectedRoute>} />
         <Route path="/email-queue" element={<ProtectedRoute feature="email"><EmailQueue /></ProtectedRoute>} />
         <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
+        {/* A configured workflow screen. Deliberately NOT feature-gated: a
+            view only ever shows records the reader can already reach through
+            Leads, so gating it would hide a screen from somebody who can see
+            the same rows by another door. An unknown key renders the page's
+            own "not switched on" state rather than a 404 route. */}
+        <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
         <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute feature="reports" requireAdmin><Reports /></ProtectedRoute>} />

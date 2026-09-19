@@ -280,6 +280,76 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
                 ],
             },
         },
+        # THE SCREENS AN ENERGY RETAILER ASKS FOR BY NAME. Each one is the
+        # lead or appointment table asked a different question — see
+        # app/services/workspace_views.py. Nothing here is specific to one
+        # company: every energy retailer works rate requests, watches contract
+        # end dates and keeps a consultation calendar. A screen only ONE of
+        # them wants goes on that customer's organization row instead.
+        "workspace_views": [
+            {
+                "key": "rate-requests",
+                "label": "Rate Requests",
+                "group": "Operate",
+                "icon": "zap",
+                "title": "Rate Requests",
+                "subtitle": "Plan shopping and bill analysis, from first ask "
+                            "to the option that was chosen.",
+                "source": "leads",
+                "filter": {"tier": ["new_inquiry", "rate_review",
+                                    "proposal_sent"],
+                           "not_status": ["dnc", "dead"]},
+                "columns": ["name", "contact", "tier", "location",
+                            "source_detail", "owner", "updated_at"],
+                "stats": [
+                    {"label": "New", "filter": {"tier": ["new_inquiry"]}},
+                    {"label": "In Review", "filter": {"tier": ["rate_review"]}},
+                    {"label": "Options Sent", "filter": {"tier": ["proposal_sent"]}},
+                    {"label": "Unassigned", "filter": {"unassigned": True}},
+                ],
+                "empty": "No open rate requests. New ones appear here as soon "
+                         "as they arrive from the website or an advisor logs "
+                         "them.",
+            },
+            {
+                "key": "renewals",
+                "label": "Renewals",
+                "group": "Operate",
+                "icon": "refresh",
+                "title": "Renewals",
+                "subtitle": "Accounts whose contract is coming up, before the "
+                            "date rather than after it.",
+                "source": "leads",
+                "filter": {"tier": ["contract_signed", "renewal_due"],
+                           "not_status": ["dnc", "dead"]},
+                "columns": ["name", "contact", "tier", "location", "owner",
+                            "last_contact_date", "updated_at"],
+                "stats": [
+                    {"label": "Renewal Due", "filter": {"tier": ["renewal_due"]}},
+                    {"label": "Under Contract", "filter": {"tier": ["contract_signed"]}},
+                    {"label": "Not Touched in 30d", "filter": {"stale_days": 30}},
+                ],
+                "empty": "No accounts in the renewal window.",
+            },
+            {
+                "key": "consultations",
+                "label": "Consultations",
+                "group": "Operate",
+                "icon": "calendar",
+                "title": "Consultations",
+                "subtitle": "Booked appointments, and who they belong to.",
+                "source": "appointments",
+                "filter": {"not_status": ["cancelled", "expired"]},
+                "columns": ["name", "contact", "booked_time", "appt_label",
+                            "status", "owner"],
+                "stats": [
+                    {"label": "Upcoming", "filter": {"upcoming": True}},
+                    {"label": "Confirmed", "filter": {"status": ["confirmed"]}},
+                    {"label": "Awaiting Confirmation", "filter": {"status": ["booked"]}},
+                ],
+                "empty": "Nothing on the calendar yet.",
+            },
+        ],
     },
 
     "roofing": {
@@ -464,6 +534,72 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
                        "appointments": "Service Calls",
                        "customer": "customer", "customers": "customers"},
         "onboarding_questions": [],
+        # THE SCREENS A HOME-SERVICES BUSINESS ASKS FOR BY NAME — which is the
+        # same three questions whether the trade is HVAC, landscaping or
+        # commercial cleaning: who are we working, what is still owed a next
+        # action, and what is on the calendar. See
+        # app/services/workspace_views.py.
+        "workspace_views": [
+            {
+                "key": "prospects",
+                "label": "Prospects",
+                "group": "Operate",
+                "icon": "users",
+                "title": "Prospects",
+                "subtitle": "Every business being worked, with the decision "
+                            "maker and where it currently stands.",
+                "source": "leads",
+                "filter": {"not_status": ["dnc", "dead", "not_interested"]},
+                "columns": ["name", "contact", "tier", "location", "source",
+                            "owner", "updated_at"],
+                "stats": [
+                    {"label": "New", "filter": {"tier": ["new_lead"]}},
+                    {"label": "Quoted", "filter": {"tier": ["quoted"]}},
+                    {"label": "Booked", "filter": {"tier": ["job_booked"]}},
+                    {"label": "Unassigned", "filter": {"unassigned": True}},
+                ],
+                "empty": "No prospects on this account yet.",
+            },
+            {
+                "key": "follow-up",
+                "label": "Follow-Up",
+                "group": "Operate",
+                "icon": "clock",
+                "title": "Follow-Up",
+                "subtitle": "Conversations that are alive and owed a next "
+                            "action, so none of them goes quiet by accident.",
+                "source": "leads",
+                "filter": {"status": ["sent", "replied", "hot", "queued"],
+                           "not_tier": ["job_booked"]},
+                "columns": ["name", "contact", "status", "tier", "owner",
+                            "last_contact_date", "note"],
+                "stats": [
+                    {"label": "Replied", "filter": {"status": ["replied", "hot"]}},
+                    {"label": "Awaiting Reply", "filter": {"status": ["sent", "queued"]}},
+                    {"label": "Quiet 7+ Days", "filter": {"stale_days": 7}},
+                ],
+                "empty": "Nothing waiting on a follow-up right now.",
+            },
+            {
+                "key": "walkthroughs",
+                "label": "Walkthroughs",
+                "group": "Operate",
+                "icon": "calendar",
+                "title": "Walkthroughs",
+                "subtitle": "Booked site visits, traced back to the prospect "
+                            "they came from.",
+                "source": "appointments",
+                "filter": {"not_status": ["cancelled", "expired"]},
+                "columns": ["name", "contact", "booked_time", "appt_label",
+                            "status", "owner"],
+                "stats": [
+                    {"label": "Upcoming", "filter": {"upcoming": True}},
+                    {"label": "Confirmed", "filter": {"status": ["confirmed"]}},
+                    {"label": "Awaiting Confirmation", "filter": {"status": ["booked"]}},
+                ],
+                "empty": "No walkthroughs booked yet.",
+            },
+        ],
     },
 
     "dental": {
@@ -804,6 +940,22 @@ def experience(industry: Optional[str]) -> Dict[str, Any]:
     professional onboarding, never another vertical's.
     """
     return copy.deepcopy(resolve(industry).get("experience") or {})
+
+
+def workspace_views(industry: Optional[str]) -> List[Dict[str, Any]]:
+    """The workflow screens a business in this industry expects to see.
+
+    Returns [] for an industry that has not been given any, which is the right
+    answer rather than a neutral placeholder: a screen called something
+    generic teaches the reader nothing, and an empty rail is honest about the
+    fact that nobody has said what this vertical works yet.
+
+    A customer whose `Organization.workspace_views` is set overrides this
+    entirely. That is the layer split: what the NEXT customer in this vertical
+    will also want belongs here; what only one of them wants belongs on their
+    row. See app/services/workspace_views.py.
+    """
+    return copy.deepcopy(resolve(industry).get("workspace_views") or [])
 
 
 def tier_definition_key(industry: Optional[str]) -> str:
