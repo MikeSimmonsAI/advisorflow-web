@@ -86,6 +86,7 @@ import app.models.location_models  # noqa: F401  (imported for side effects)
 import app.models.cleanup_models  # noqa: F401  (imported for side effects)
 import app.models.demo_site_models  # noqa: F401  (imported for side effects)
 import app.models.customer_site_models  # noqa: F401  (imported for side effects)
+import app.models.provider_transaction_models  # noqa: F401  (imported for side effects)
 # Lead Import Intelligence staging tables (import_batches / import_staged_rows).
 # Same Base, same reason. Without this import those tables are never created and
 # every upload silently has nowhere to write.
@@ -327,6 +328,7 @@ import app.models.location_models  # noqa: F401  (imported for side effects)
 import app.models.cleanup_models  # noqa: F401  (imported for side effects)
 import app.models.demo_site_models  # noqa: F401  (imported for side effects)
 import app.models.customer_site_models  # noqa: F401  (imported for side effects)
+import app.models.provider_transaction_models  # noqa: F401  (imported for side effects)
 # Lead Import Intelligence staging tables (import_batches / import_staged_rows).
 # Same Base, same reason. Without this import those tables are never created and
 # every upload silently has nowhere to write.

@@ -121,6 +121,28 @@ services:
       # say what it is has no business doing that. So this must be set.
       - key: SERVICE_ROLE
         value: backend
+      # ── ENERGY PROVIDER (Chariot Energy broker API) ────────────────────
+      #
+      # DECLARED HERE, NEVER VALUED HERE. `sync: false` tells Render the
+      # service wants the variable and that Render must not carry a value
+      # across from the blueprint - the value is set once in the dashboard
+      # and exists nowhere in this repository, in any log, in any test or in
+      # any prompt. See docs/CHARIOT_INTEGRATION.md.
+      #
+      # CHARIOT_ALLOW_TRANSACTIONS IS DELIBERATELY NOT DECLARED. It is the
+      # switch that permits a real enrollment - a call that changes a real
+      # person's electricity supplier and which the provider's API offers no
+      # way to cancel. Leaving it out of the blueprint means it can only ever
+      # be added by a person, in the dashboard, on purpose.
+      - key: CHARIOT_API_KEY
+        sync: false
+      # test | production. ABSENT MEANS TEST: the adapter defaults to the
+      # provider's test host, so a missing value cannot accidentally point
+      # live traffic at production.
+      - key: CHARIOT_ENV
+        sync: false
+      - key: CHARIOT_PROMO_CODE
+        sync: false
       # ── ALLOCATOR: TWO ARENAS, NOT SIXTEEN ───────────────────────────────
       #
       # Evidence, from the OOM diagnosis: this process reported RSS 373 MB
