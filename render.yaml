@@ -85,6 +85,14 @@ services:
         # public-site/ AND anything not listed here still builds: Render skips
         # only when EVERY changed file matches.
         - "public-site/**"
+        # A CUSTOMER'S OWN PUBLIC WEBSITE, and the view configurations beside
+        # it. Both are DATA, applied by a script against the database - the
+        # page is served out of `customer_sites`, not off this filesystem, and
+        # no service reads either directory at build or run time. Publishing a
+        # copy change must not rebuild five Python services for a file none of
+        # them opens. See docs/VERTICAL_INSTALL_RUNBOOK.md.
+        - "public-sites/**"
+        - "config/**"
         - "booking-app/**"
         - "demos/**"
         - "docs/**"
@@ -244,6 +252,12 @@ services:
         # cannot see. Denylist semantics are unchanged: a commit touching
         # public-site/ AND frontend/src still builds.
         - "public-site/**"
+        # Same argument as on the Python services: a customer's own website
+        # and its view configuration are data applied to the database, and
+        # `cd frontend && npm ci && npm run build` never reads a byte of
+        # either.
+        - "public-sites/**"
+        - "config/**"
         - "booking-app/**"
         - "demos/**"
         - "docs/**"

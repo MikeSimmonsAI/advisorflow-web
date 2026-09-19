@@ -127,3 +127,38 @@ def test_the_page_serves_and_its_form_files_a_lead(db_session, client, path):
         Lead.organization_id == org.id).one()
     assert lead.first_name == "Dana"
     assert lead.sms_consent is True
+
+
+@pytest.mark.parametrize("path", SITES, ids=_slug_of)
+def test_the_stored_consent_wording_is_the_wording_the_page_shows(path):
+    """The row is the evidence, and the row has to say what was on screen.
+
+    `customer_sites` copies its `consent_text` onto every lead the page
+    produces, and a client cannot change it. That protection is worth nothing
+    if the sentence stored beside the page is not the sentence the visitor
+    read, so the two are compared here rather than trusted to stay in step.
+    """
+    import html as html_module
+
+    consent_file = path.parent / "consent.txt"
+    rendered = io.open(path, encoding="utf-8").read()
+    asks_for_consent = 'name="consent"' in rendered
+
+    if not asks_for_consent:
+        assert not consent_file.exists(), (
+            "%s stores consent wording but its form never asks for consent"
+            % path.parent.name)
+        return
+
+    assert consent_file.exists(), (
+        "%s asks for consent and must ship the wording it shows"
+        % path.parent.name)
+    stored = io.open(consent_file, encoding="utf-8").read().strip()
+    assert stored, "consent.txt is empty"
+
+    # Compare the rendered text, not the markup: the page escapes "&" and
+    # wraps lines, and neither changes a word of what the visitor read.
+    flat = " ".join(html_module.unescape(
+        re.sub(r"<[^>]+>", " ", rendered)).split())
+    assert " ".join(stored.split()) in flat, (
+        "%s stores wording its page does not display" % path.parent.name)
