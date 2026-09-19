@@ -236,6 +236,14 @@ services:
       ignoredPaths:
         - "app/**"
         - "alembic/**"
+        # The EvoSys Pro public website: PHP, uploaded to GoDaddy by hand, and
+        # never read by `cd frontend && npm ci && npm run build`. It was the one
+        # sibling deployment target missing from this list while app/**,
+        # alembic/** and booking-app/** were all already here, so a
+        # public-site-only commit still rebuilt this static site for files it
+        # cannot see. Denylist semantics are unchanged: a commit touching
+        # public-site/ AND frontend/src still builds.
+        - "public-site/**"
         - "booking-app/**"
         - "demos/**"
         - "docs/**"
