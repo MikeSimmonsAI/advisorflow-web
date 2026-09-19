@@ -9,6 +9,7 @@ import NotificationBell from './NotificationBell'
 import ProfileOnboarding from './ProfileOnboarding'
 import GodReturnBar from './GodReturnBar'
 import ContextSwitcher from './ContextSwitcher'
+import WorkspaceAdminMenu from './WorkspaceAdminMenu'
 // A VERTICAL'S OWN PRESENTATION. Nav labels, groups and skin for a workspace
 // whose industry has one configured; null for everybody else, which is what
 // keeps this from being a global redesign. See verticals/workspaceVertical.js.
@@ -521,15 +522,15 @@ export default function Layout({ children }) {
       </button>
       <button type="button" className="sidebar-backdrop" onClick={closeSidebar} aria-label="Close navigation menu" />
 
-      <aside className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}`} style={{ width: sidebarCollapsed ? 60 : undefined, minWidth: sidebarCollapsed ? 60 : undefined, transition: 'width 0.2s, min-width 0.2s', ...(isGodAdmin ? { borderRight: '1px solid rgba(245,158,11,0.3)', background: 'linear-gradient(180deg, rgba(245,158,11,0.06) 0%, transparent 120px)' } : {}) }}>
+      <aside className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}`} style={{ width: sidebarCollapsed ? 60 : undefined, minWidth: sidebarCollapsed ? 60 : undefined, transition: 'width 0.2s, min-width 0.2s', ...(isGodAdmin && !vertical ? { borderRight: '1px solid rgba(245,158,11,0.3)', background: 'linear-gradient(180deg, rgba(245,158,11,0.06) 0%, transparent 120px)' } : {}) }}>
         <div className="sidebar-brand" style={{ position: 'relative', ...(isGodAdmin && !vertical ? { borderBottom: '1px solid rgba(245,158,11,0.25)' } : {}) }}>
           {/* THE WORKSPACE'S OWN WORDMARK COMES FIRST, INCLUDING FOR AN
               OPERATOR. Standing inside a customer of a configured vertical,
               the rail names the CUSTOMER — the platform's own brand block
               would tell their staff (and anybody looking over a shoulder in a
               demo) which white-label product they are actually inside. The
-              operator's way back is unaffected: GodReturnBar sits above the
-              content and Command Center is still the first nav item. */}
+              operator's way back is unaffected: every one of those actions is
+              in WorkspaceAdminMenu at the end of the top bar. */}
           {vertical && !sidebarCollapsed ? (
             <div className="vertical-brand">
               {logoUrl && !logoFailed ? (
@@ -605,8 +606,15 @@ export default function Layout({ children }) {
         </div>
 
         <nav className="sidebar-nav">
-          {/* God admin: Command Center + org switcher */}
-          {isGodAdmin && (
+          {/* God admin: Command Center + org switcher.
+              NOT INSIDE A VERTICAL WORKSPACE. The customer's rail should begin
+              with the customer's first screen; an amber Command Center entry
+              and a platform workspace selector above it are the two items that
+              made this read as somebody's admin console with the customer
+              loaded into it. Both actions are in WorkspaceAdminMenu, in the
+              top bar, one click away — and Atlantis's own staff never had
+              either, because this block was already god-only. */}
+          {isGodAdmin && !vertical && (
             <>
               <NavLink to="/god"
                 className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
@@ -860,8 +868,12 @@ export default function Layout({ children }) {
 
       <div className="content-area">
         {/* god_admin only. God Mode can launch into this app; without a way
-            back, that was a one-way trip needing a retyped URL or a re-login. */}
-        <GodReturnBar context="the customer app" />
+            back, that was a one-way trip needing a retyped URL or a re-login.
+            INSIDE A VERTICAL WORKSPACE IT IS FOLDED INTO WorkspaceAdminMenu
+            instead: a full-width amber strip above the customer's own product
+            is the platform announcing itself on their home screen, and the
+            same action lives in the one control at the end of the top bar. */}
+        {!vertical && <GodReturnBar context="the customer app" />}
         <header className="top-bar">
           <LiveClock />
           <div className="top-bar-right">
@@ -869,8 +881,10 @@ export default function Layout({ children }) {
                 customer's own staff - they have no back office to return to,
                 and offering the button would advertise a door that refuses
                 them. It appears only for somebody the server confirms holds
-                brand-sales access as well. */}
-            <ContextSwitcher current="workspace" />
+                brand-sales access as well.
+                In a vertical workspace this is one of the four actions inside
+                WorkspaceAdminMenu, so it is not also drawn as its own button. */}
+            {vertical ? <WorkspaceAdminMenu /> : <ContextSwitcher current="workspace" />}
             <ThemeToggle />
             <NotificationBell />
           </div>

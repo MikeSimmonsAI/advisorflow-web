@@ -1,0 +1,68 @@
+/* The single admin control inside a customer workspace.
+
+   Deliberately quiet: it sits at the end of the top bar, reads as a utility
+   rather than a banner, and carries no platform or brand name on its face.
+   It is the only thing left of five strips and buttons, so it has to be
+   findable by the one person who needs it and invisible to everyone else —
+   which the component handles by rendering nothing for a customer's staff. */
+
+.wam { position: relative; display: inline-flex; }
+
+.wam-trigger {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 10px 5px 9px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--text-tertiary);
+  font-family: var(--font-body);
+  font-size: 11.5px; font-weight: 600; letter-spacing: 0.03em;
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast),
+              border-color var(--transition-fast);
+}
+.wam-trigger:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--bg-glass);
+}
+.wam-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: #f5b942;
+}
+.wam-caret { opacity: 0.6; flex-shrink: 0; }
+
+.wam-menu {
+  position: absolute; top: calc(100% + 7px); right: 0; z-index: 300;
+  min-width: 226px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--elevation-3);
+  padding: 5px;
+  overflow: hidden;
+}
+.wam-menu-head {
+  padding: 7px 10px 8px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.13em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.wam-item {
+  display: flex; flex-direction: column; gap: 2px; width: 100%;
+  text-align: left; padding: 8px 10px;
+  background: transparent; border: 0; border-radius: 6px;
+  cursor: pointer; font-family: var(--font-body);
+}
+.wam-item:hover:not(:disabled) { background: var(--bg-row-hover); }
+.wam-item:disabled { opacity: 0.55; cursor: default; }
+.wam-item-name {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+}
+.wam-item-hint { font-size: 11px; color: var(--text-tertiary); }
+.wam-item--danger .wam-item-name { color: var(--signal-red); }
+
+@media (max-width: 760px) {
+  .wam-label { display: none; }
+  .wam-trigger { padding: 5px 8px; }
+  .wam-menu { right: 0; min-width: 210px; }
+}

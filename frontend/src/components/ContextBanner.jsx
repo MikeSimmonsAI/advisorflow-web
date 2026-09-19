@@ -23,8 +23,9 @@
  */
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { api, clearAllContext, getOrgContext, getBrandContext } from '../api/client'
+import { api, clearAllContext, getBranding, getOrgContext, getBrandContext } from '../api/client'
 import { classifyRoute, PLATFORM } from '../auth/routeAuthority'
+import { verticalFor } from '../verticals/workspaceVertical'
 import './ContextBanner.css'
 
 export default function ContextBanner() {
@@ -43,6 +44,24 @@ export default function ContextBanner() {
   // The selection is not cleared. It is simply not ASSERTED here: return to
   // the customer app and the banner comes back, because the context did.
   const onPlatformSurface = classifyRoute(location.pathname) === PLATFORM
+
+  // INSIDE A CONFIGURED VERTICAL WORKSPACE THE TRAIL IS THE WRONG THING TO
+  // PRINT, EVEN THOUGH IT IS TRUE.
+  //
+  // "AdvisorFlow -> EvoSys Pro -> <customer>" is the white-label chain. It is
+  // internal architecture, it is not part of the product the customer bought,
+  // and a full-width strip naming it across the top of their own home screen
+  // is precisely what a white-label layer exists to prevent — an operator
+  // demonstrating the workspace is showing the reseller structure to the
+  // room. (It renders for operators only, so this was never a leak to the
+  // customer's staff; it was the platform announcing itself on a screen that
+  // is supposed to be theirs.)
+  //
+  // The banner's real job — say whose records this screen writes, and offer
+  // the way out — is carried by WorkspaceAdminMenu in the top bar: the
+  // workspace is named in the rail's own wordmark, and Switch workspace and
+  // Return to God Mode are both in that one control. Nothing is lost.
+  const inVerticalWorkspace = Boolean(verticalFor(getBranding()))
 
   useEffect(() => {
     let live = true
@@ -72,6 +91,7 @@ export default function ContextBanner() {
 
   if (!ctx || ctx.is_neutral) return null
   if (onPlatformSurface) return null
+  if (inVerticalWorkspace) return null
 
   const trail = Array.isArray(ctx.trail) && ctx.trail.length
     ? ctx.trail

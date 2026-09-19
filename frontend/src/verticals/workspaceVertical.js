@@ -97,10 +97,6 @@ const ENERGY = {
       ],
     },
   ],
-  // Where a configured view the design does not name is appended, so moving
-  // a workspace onto this presentation can never LOSE a screen its operator
-  // configured. Keeps the rail complete without inventing a group.
-  overflowGroup: 'Operate',
 }
 
 const BY_INDUSTRY = {
@@ -125,46 +121,40 @@ export function verticalFor(branding) {
  * the SERVER says this workspace has configured.
  *
  * A `view:` the workspace has not configured is dropped rather than rendered
- * as a dead link, and any configured screen the design does not name is
- * appended to `overflowGroup` in configured order. Both rules exist so the
- * rail describes the workspace that is actually there.
+ * as a dead link, so the rail describes the workspace that is actually there.
+ *
+ * THE PRIMARY RAIL IS THE APPROVED SET, NOT EVERY SCREEN THAT EXISTS. An
+ * earlier version appended any configured view the design did not name, on
+ * the reasoning that moving a workspace onto this presentation should never
+ * lose a screen. That reasoning was wrong about what a primary navigation is
+ * for: it grows a top-level entry every time a capability is switched on, and
+ * the agreed rail stops being the agreed rail. A configured screen that is
+ * not in the design is still reachable at its own /view/<key> route and from
+ * the workflow it belongs to — it simply does not claim a place in the
+ * customer's main navigation by existing.
  */
 export function navGroupsFor(vertical, configuredViews) {
   if (!vertical) return null
   const views = Array.isArray(configuredViews) ? configuredViews : []
   const byKey = new Map(views.map(v => [v.key, v]))
-  const placed = new Set()
 
-  const groups = vertical.navGroups.map(group => ({
+  return vertical.navGroups.map(group => ({
     label: group.label,
     items: group.items.reduce((items, item) => {
       if (!item.view) { items.push(item); return items }
       const configured = byKey.get(item.view)
       if (!configured) return items
-      placed.add(item.view)
       items.push({
         to: `/view/${configured.key}`,
-        // The design's word wins over the configuration's for a screen it
-        // names, because the design IS the agreed vocabulary. Anything it
-        // does not name keeps whatever the workspace called it.
+        // The design's word wins over the configuration's, because the design
+        // IS the agreed vocabulary for this rail. The configuration still
+        // titles the screen itself.
         label: item.label || configured.label,
         icon: item.icon || configured.icon,
       })
       return items
     }, []),
   }))
-
-  const overflow = groups.find(g => g.label === vertical.overflowGroup) || groups[0]
-  views.forEach(configured => {
-    if (placed.has(configured.key)) return
-    overflow.items.push({
-      to: `/view/${configured.key}`,
-      label: configured.label,
-      icon: configured.icon,
-    })
-  })
-
-  return groups
 }
 
 /**

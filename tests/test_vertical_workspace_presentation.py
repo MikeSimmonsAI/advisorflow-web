@@ -198,3 +198,86 @@ def test_the_platform_overview_is_still_rendered_for_everyone_else():
     body = _text(ROOT / "frontend" / "src" / "pages" / "Overview.jsx")
     assert "return <PlatformOverview />" in body
     assert "verticalFor(branding)" in body
+
+
+# ── the primary rail is the approved set, and only that ─────────────────────
+
+APPROVED_RAIL = {
+    "Operate": ["Overview", "Leads & Customers", "Rate Requests",
+                "Sales Pipeline", "Move Concierge"],
+    "Work": ["Communications", "Tasks & Follow-Up", "Renewals", "Reports"],
+    "System": ["Integrations", "Team & Access", "Launch Center"],
+}
+
+
+def _energy_rail():
+    """Group -> labels, in declaration order, read out of the module."""
+    body = _text(VERTICAL)
+    block = body[body.index("const ENERGY ="):body.index("const BY_INDUSTRY")]
+    groups, current = {}, None
+    for line in block.splitlines():
+        group = re.search(r"label:\s*'([^']+)',\s*$", line)
+        item = re.search(r"\{\s*(?:to|view):\s*'[^']+',\s*label:\s*'([^']+)'", line)
+        if item and current:
+            groups[current].append(item.group(1))
+        elif group:
+            current = group.group(1)
+            groups.setdefault(current, [])
+    return groups
+
+
+def test_the_primary_rail_is_exactly_the_approved_navigation():
+    """THE FAILURE THIS CATCHES, WHICH ALREADY HAPPENED ONCE.
+
+    The first version appended every configured screen the design did not
+    name, so switching a capability on grew a top-level nav entry and the
+    agreed rail quietly stopped being the agreed rail — `Consultations`
+    appeared under Operate without anybody deciding it should.
+
+    A configured screen that is not in the design is still reachable at its
+    own /view/<key> route. It simply does not claim a place in the customer's
+    main navigation by existing.
+    """
+    assert _energy_rail() == APPROVED_RAIL
+
+
+def test_nothing_appends_unnamed_views_to_the_rail():
+    """The mechanism, not just today's output: no overflow bucket."""
+    body = _text(VERTICAL)
+    assert "overflowGroup" not in body
+    assert "overflow.items.push" not in body
+
+
+# ── one admin control, and none of the five strips it replaced ──────────────
+
+def test_a_vertical_workspace_renders_one_admin_control_not_five():
+    """Inside a configured vertical, the platform's chrome collapses into
+    WorkspaceAdminMenu: the amber god strip, the Back Office button, the
+    Command Center rail item and the org picker are all conditioned off."""
+    body = _text(LAYOUT)
+    assert "{!vertical && <GodReturnBar" in body, \
+        "the god strip still renders inside a customer's vertical workspace"
+    assert "vertical ? <WorkspaceAdminMenu /> : <ContextSwitcher" in body, \
+        "the admin control and the Back Office button are not exclusive"
+    assert "{isGodAdmin && !vertical && (" in body, \
+        "Command Center and the org picker still sit in the customer's rail"
+
+
+def test_the_admin_control_is_invisible_to_a_customers_own_staff():
+    """It is an operator affordance. A customer's user must not see a door
+    that refuses them — and must not learn there is anything above their own
+    company at all."""
+    body = _text(ROOT / "frontend" / "src" / "components" / "WorkspaceAdminMenu.jsx")
+    assert "if (!isGod && !isSuper && !hasBackOffice) return null" in body
+    assert "if (items.length === 0) return null" in body
+    # Every action it offers is one the platform already guarded elsewhere.
+    for action in ("/god", "/god/workspaces", "/god/platform/context/exit", "/sales"):
+        assert action in body, "the admin control lost %s" % action
+
+
+def test_the_hierarchy_strip_is_not_printed_over_a_customers_own_product():
+    """"AdvisorFlow -> EvoSys Pro -> <customer>" is the white-label chain.
+    True, internal, and not part of what the customer bought."""
+    body = _text(ROOT / "frontend" / "src" / "components" / "ContextBanner.jsx")
+    assert "if (inVerticalWorkspace) return null" in body
+    assert "verticalFor(getBranding())" in body
