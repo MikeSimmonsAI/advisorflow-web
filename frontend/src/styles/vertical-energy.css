@@ -89,8 +89,9 @@ html:root[data-workspace-vertical="energy"] {
   color-scheme: light;
 }
 
-html:root[data-workspace-vertical="energy"] body,
-html:root[data-workspace-vertical="energy"] html {
+/* `html` is the element the attribute is ON, so it is styled by the block
+   above; only `body` needs a descendant rule here. */
+html:root[data-workspace-vertical="energy"] body {
   background: #f4f7fb;
   color: var(--text-primary);
 }
@@ -105,6 +106,20 @@ html:root[data-workspace-vertical="energy"] .sidebar .nav-item {
   border-radius: 8px;
   margin: 1px 8px;
   font-weight: 500;
+}
+/* THE LABELS IN THIS RAIL ARE LONGER THAN THE PLATFORM'S.
+   "Leads & Customers" and "Tasks & Follow-Up" are two words where the
+   platform said one, and the row is a flex container with no shrink rule —
+   so the icon, not the text, absorbed the overflow and rendered 4px wide.
+   It looked like a bullet point beside one item and nobody could say why. */
+html:root[data-workspace-vertical="energy"] .sidebar .nav-item svg {
+  flex-shrink: 0;
+}
+/* `.nav-item--active svg { color: var(--signal-blue) }` is right on the
+   platform's rail, where the active row is a tinted background. Here the
+   active row IS that blue, so the icon was blue on blue and vanished. */
+html:root[data-workspace-vertical="energy"] .sidebar .nav-item--active svg {
+  color: #ffffff !important;
 }
 html:root[data-workspace-vertical="energy"] .sidebar .nav-item:hover {
   color: #ffffff !important;
@@ -128,10 +143,29 @@ html:root[data-workspace-vertical="energy"] .sidebar .nav-divider {
 }
 html:root[data-workspace-vertical="energy"] .sidebar .user-name { color: #ffffff !important; }
 html:root[data-workspace-vertical="energy"] .sidebar .user-role { color: rgba(160, 182, 212, 0.8) !important; }
+/* THE FOOTER IS ON THE DARK RAIL, NOT ON THE LIGHT PAGE.
+   Its controls read the neutral tokens, which this skin points at a white
+   surface with navy text — correct everywhere except here, where it put a
+   white button with near-white text on navy. Sign out was invisible. These
+   re-state the four that sit inside the rail. */
+html:root[data-workspace-vertical="energy"] .sidebar .sidebar-footer {
+  color: rgba(226, 235, 247, 0.9) !important;
+}
+html:root[data-workspace-vertical="energy"] .sidebar .user-chip {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
 html:root[data-workspace-vertical="energy"] .sidebar .logout-btn,
 html:root[data-workspace-vertical="energy"] .sidebar .back-to-website-btn {
-  color: rgba(226, 235, 247, 0.8) !important;
+  color: rgba(226, 235, 247, 0.85) !important;
+  background: transparent !important;
   border-color: rgba(255, 255, 255, 0.18) !important;
+}
+html:root[data-workspace-vertical="energy"] .sidebar .logout-btn:hover,
+html:root[data-workspace-vertical="energy"] .sidebar .back-to-website-btn:hover {
+  background: rgba(255, 255, 255, 0.09) !important;
+  color: #ffffff !important;
 }
 html:root[data-workspace-vertical="energy"] .sidebar-brand,
 html:root[data-workspace-vertical="energy"] .sidebar-footer {
@@ -173,6 +207,9 @@ html:root[data-workspace-vertical="energy"] .vertical-brand-line2 {
 /* ── Content chrome ─────────────────────────────────────────────────────── */
 html:root[data-workspace-vertical="energy"] .top-bar {
   background: #ffffff;
+  /* Reset first: the platform rule leaves top and side borders at
+     `currentColor`, which on this surface drew navy lines down two edges. */
+  border: 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 html:root[data-workspace-vertical="energy"] .top-bar-time { color: var(--text-primary); }
