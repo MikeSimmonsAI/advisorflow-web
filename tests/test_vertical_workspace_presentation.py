@@ -25,18 +25,56 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VERTICAL = ROOT / "frontend" / "src" / "verticals" / "workspaceVertical.js"
-SKIN = ROOT / "frontend" / "src" / "styles" / "vertical-energy.css"
-OVERVIEW = ROOT / "frontend" / "src" / "pages" / "vertical" / "EnergyOverview.jsx"
 LAYOUT = ROOT / "frontend" / "src" / "components" / "Layout.jsx"
 APP = ROOT / "frontend" / "src" / "App.jsx"
 VIEW_CONFIG_DIR = ROOT / "config" / "workspace-views"
+_VERTICAL_PAGES = ROOT / "frontend" / "src" / "pages" / "vertical"
+_STYLES = ROOT / "frontend" / "src" / "styles"
 
-PRESENTATION_FILES = (VERTICAL, SKIN, OVERVIEW,
-                      ROOT / "frontend" / "src" / "pages" / "vertical" / "EnergyOverview.css")
+# EVERY CONFIGURED VERTICAL, NOT THE FIRST ONE SOMEBODY WROTE.
+#
+# These guards were written against the energy workspace and every one of them
+# named its files directly. The second vertical then arrived and inherited
+# exactly none of them — which is the failure mode a guard is supposed to
+# prevent rather than demonstrate. Each entry below is
+# (attribute value, the JS constant that declares it, its skin, its dashboard)
+# and the parameterised tests run over all of them.
+VERTICALS = {
+    "energy": {
+        "declaration": "const ENERGY =",
+        "skin": _STYLES / "vertical-energy.css",
+        "overview": _VERTICAL_PAGES / "EnergyOverview.jsx",
+        "overview_css": _VERTICAL_PAGES / "EnergyOverview.css",
+    },
+    "cleaning": {
+        "declaration": "const CLEANING =",
+        "skin": _STYLES / "vertical-cleaning.css",
+        "overview": _VERTICAL_PAGES / "CleaningOverview.jsx",
+        "overview_css": _VERTICAL_PAGES / "CleaningOverview.css",
+    },
+}
+
+SKINS = [v["skin"] for v in VERTICALS.values()]
+
+PRESENTATION_FILES = tuple(
+    [VERTICAL]
+    + [v["skin"] for v in VERTICALS.values()]
+    + [v["overview"] for v in VERTICALS.values()]
+    + [v["overview_css"] for v in VERTICALS.values()]
+)
 
 
 def _text(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _block(key: str) -> str:
+    """The source of one vertical's declaration, from its const to the next."""
+    body = _text(VERTICAL)
+    start = body.index(VERTICALS[key]["declaration"])
+    rest = body[start + 1:]
+    ends = [rest.index(m) for m in ("\nconst ", "\nexport ") if m in rest]
+    return rest[:min(ends)] if ends else rest
 
 
 # ── the shell is code; the customer is a row ────────────────────────────────
@@ -58,115 +96,184 @@ def test_no_presentation_file_names_a_customer(path):
 
 # ── every renamed door opens onto a route that exists ───────────────────────
 
-def _energy_routes():
-    """The `to:` targets of the energy rail, read out of the module itself."""
-    body = _text(VERTICAL)
-    start = body.index("const ENERGY =")
-    end = body.index("const BY_INDUSTRY")
-    return re.findall(r"\{\s*to:\s*'([^']+)'", body[start:end])
+def _routes(key):
+    """The `to:` targets of one vertical's rail, read out of the module."""
+    return re.findall(r"\{\s*to:\s*'([^']+)'", _block(key))
 
 
-def test_the_vertical_rail_names_at_least_the_approved_screens():
-    """A guard against the rail being quietly emptied, not a design review."""
-    routes = _energy_routes()
-    assert len(routes) >= 8, routes
-    for required in ("/", "/leads", "/pipeline", "/replies", "/workqueue",
-                     "/reports", "/users", "/launch"):
-        assert required in routes, "the energy rail no longer opens %s" % required
+REQUIRED_ROUTES = {
+    # The energy rail is the whole back office, so most of it is required.
+    "energy": ("/", "/leads", "/pipeline", "/replies", "/workqueue",
+               "/reports", "/users", "/launch"),
+    # The cleaning rail is six entries by design. Three of them are configured
+    # screens, which are asserted separately; these are the routes.
+    "cleaning": ("/", "/activity", "/reports"),
+}
 
 
-def test_every_vertical_route_is_a_route_the_app_actually_declares():
+@pytest.mark.parametrize("key", sorted(VERTICALS))
+def test_the_vertical_rail_names_at_least_the_approved_screens(key):
+    """A guard against a rail being quietly emptied, not a design review."""
+    routes = _routes(key)
+    assert routes, "the %s rail declares no routes at all" % key
+    for required in REQUIRED_ROUTES[key]:
+        assert required in routes, "the %s rail no longer opens %s" % (key, required)
+
+
+@pytest.mark.parametrize("key", sorted(VERTICALS))
+def test_every_vertical_route_is_a_route_the_app_actually_declares(key):
     """THE FAILURE THIS CATCHES. Renaming "Leads" to "Leads & Customers" is
     presentation; pointing it somewhere that does not exist is a 404 with a
     friendly label on it. Every target below is matched against App.jsx's own
     <Route path="…"> declarations."""
     declared = set(re.findall(r'<Route\s+path="([^"]+)"', _text(APP)))
     assert declared, "App.jsx declared no routes — this test is reading the wrong file"
-    for route in _energy_routes():
+    for route in _routes(key):
         if route == "/":
             continue  # the index route is declared as path="/" or index
-        assert route in declared, "the energy rail opens %s, which App.jsx does not declare" % route
+        assert route in declared, (
+            "the %s rail opens %s, which App.jsx does not declare" % (key, route))
 
 
 # ── every configured screen it names is one a workspace can have ────────────
 
-def _energy_view_keys():
-    body = _text(VERTICAL)
-    start = body.index("const ENERGY =")
-    end = body.index("const BY_INDUSTRY")
-    return re.findall(r"\{\s*view:\s*'([^']+)'", body[start:end])
+def _view_keys(key):
+    return re.findall(r"\{\s*view:\s*'([^']+)'", _block(key))
 
 
-def test_the_view_keys_the_rail_names_exist_in_a_shipped_configuration():
-    """A `view:` the rail names and no configuration provides is an entry that
-    can never render. It is dropped at runtime rather than drawn dead, which
-    is right — and silent, which is why this says so at build time instead."""
-    keys = set(_energy_view_keys())
-    assert keys, "the energy rail names no configured screens at all"
+def _shipped_view_keys():
+    """Every screen key a workspace can actually end up with.
+
+    TWO SOURCES, BECAUSE THERE ARE TWO LAYERS. A customer's own
+    `workspace_views` column (the JSON files here) and its industry's default
+    (`industry_templates`) are both real ways a screen arrives, and reading
+    only the first is how a rail whose screens come from the template — which
+    is the preferred layer — would look like a rail naming screens nobody has.
+    """
+    from app.services import industry_templates
+
     shipped = set()
     for path in VIEW_CONFIG_DIR.glob("*.json"):
         for view in json.loads(_text(path)):
             shipped.add(view["key"])
-    missing = keys - shipped
-    assert not missing, "the rail names %s, which no shipped configuration provides" % sorted(missing)
+    for template in industry_templates.TEMPLATES.values():
+        for view in (template.get("workspace_views") or []):
+            shipped.add(view["key"])
+    return shipped
+
+
+@pytest.mark.parametrize("key", sorted(VERTICALS))
+def test_the_view_keys_the_rail_names_exist_in_a_shipped_configuration(key):
+    """A `view:` the rail names and no configuration provides is an entry that
+    can never render. It is dropped at runtime rather than drawn dead, which
+    is right — and silent, which is why this says so at build time instead."""
+    keys = set(_view_keys(key))
+    assert keys, "the %s rail names no configured screens at all" % key
+    missing = keys - _shipped_view_keys()
+    assert not missing, (
+        "the %s rail names %s, which no shipped configuration provides"
+        % (key, sorted(missing)))
+
+
+def test_a_verticals_own_industry_template_supplies_the_screens_it_names():
+    """The cleaning rail's three screens come from the `cleaning` template.
+
+    Stated separately from the test above because "some configuration
+    somewhere provides this key" is a weaker claim than the one that matters:
+    a cleaning company with NO configuration of its own still gets all three,
+    which is what makes the workspace work on the day it is created.
+    """
+    from app.services import industry_templates
+
+    supplied = {v["key"] for v in industry_templates.workspace_views("cleaning")}
+    assert set(_view_keys("cleaning")) <= supplied, (
+        "the cleaning rail names screens its own industry template does not "
+        "supply, so a new cleaning customer would open a workspace missing them")
 
 
 # ── the skin repaints ONE workspace, never the platform ─────────────────────
 
-def test_every_skin_rule_is_scoped_to_the_vertical_attribute():
-    """THE OUTCOME THIS WORK WAS TOLD NOT TO PRODUCE.
-
-    One unscoped selector in this file — `:root { --bg-base: … }`, `.sidebar
-    { … }` — repaints every customer's workspace on the platform, and it
-    would look correct in the one workspace anybody was testing. So each rule
-    has to carry the attribute that limits it.
-    """
-    body = _text(SKIN)
+def _selectors(path):
     # Strip comments so prose describing a selector cannot fail the test.
-    body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
-    selectors = []
+    body = re.sub(r"/\*.*?\*/", "", _text(path), flags=re.S)
+    out = []
     for block in re.finditer(r"([^{}]+)\{", body):
         chunk = block.group(1).strip()
         if not chunk or chunk.startswith("@"):
             continue
-        selectors.extend(s.strip() for s in chunk.split(",") if s.strip())
+        out.extend(s.strip() for s in chunk.split(",") if s.strip())
+    return out
+
+
+@pytest.mark.parametrize("path", SKINS, ids=lambda p: p.name)
+def test_every_skin_rule_is_scoped_to_the_vertical_attribute(path):
+    """THE OUTCOME THIS WORK WAS TOLD NOT TO PRODUCE.
+
+    One unscoped selector in a skin — `:root { --bg-base: … }`, `.sidebar
+    { … }` — repaints every customer's workspace on the platform, and it
+    would look correct in the one workspace anybody was testing. So each rule
+    has to carry the attribute that limits it.
+    """
+    selectors = _selectors(path)
     assert selectors, "no selectors found — this test is reading the wrong file"
     for selector in selectors:
         assert '[data-workspace-vertical=' in selector, (
-            "%r is not scoped to the vertical attribute, so it would repaint "
-            "every workspace on the platform" % selector)
+            "%s: %r is not scoped to the vertical attribute, so it would "
+            "repaint every workspace on the platform" % (path.name, selector))
 
 
-def test_the_skin_outranks_the_appearance_layer():
+@pytest.mark.parametrize("path", SKINS, ids=lambda p: p.name)
+def test_the_skin_outranks_the_appearance_layer(path):
     """MEASURED, BECAUSE GUESSING IT COST A DEPLOY.
 
     `:root[data-appearance="dark"]` in styles/appearance.css redefines the
-    same neutral tokens this skin does, at exactly (0,2,0) — which is what
-    the skin was first written at. Equal specificity falls to source order,
-    the appearance layer happened to come last, and production rendered the
+    same neutral tokens a skin does, at exactly (0,2,0) — which is what the
+    first skin was written at. Equal specificity falls to source order, the
+    appearance layer happened to come last, and production rendered the
     platform's dark palette with the vertical's rail on top of it.
 
     The leading element selector makes every skin rule (0,2,1). This asserts
     it stays there, because the symptom of losing it is a workspace that
     looks almost right.
     """
-    body = re.sub(r"/\*.*?\*/", "", _text(SKIN), flags=re.S)
-    selectors = []
-    for block in re.finditer(r"([^{}]+)\{", body):
-        chunk = block.group(1).strip()
-        if not chunk or chunk.startswith("@"):
-            continue
-        selectors.extend(s.strip() for s in chunk.split(",") if s.strip())
-    for selector in selectors:
+    for selector in _selectors(path):
         assert selector.startswith('html:root[data-workspace-vertical='), (
-            "%r drops the element prefix, so it ties with "
+            "%s: %r drops the element prefix, so it ties with "
             ':root[data-appearance="dark"] and the cascade decides by bundle '
-            "order" % selector)
+            "order" % (path.name, selector))
 
     appearance = _text(ROOT / "frontend" / "src" / "styles" / "appearance.css")
     assert ':root[data-appearance="dark"] {' in appearance, (
         "appearance.css no longer defines the block this specificity was "
         "measured against — re-measure before trusting the prefix")
+
+
+@pytest.mark.parametrize("key", sorted(VERTICALS))
+def test_a_skin_paints_only_its_own_vertical(key):
+    """One skin, one attribute value.
+
+    Two skins are loaded into the same bundle for every user on the platform,
+    so a selector in one that names the other's value — a copy-paste when the
+    second was written from the first — would let an energy workspace pick up
+    a cleaning rule, or the reverse.
+    """
+    others = [k for k in VERTICALS if k != key]
+    for selector in _selectors(VERTICALS[key]["skin"]):
+        assert ('[data-workspace-vertical="%s"]' % key) in selector, (
+            "%r does not name its own vertical" % selector)
+        for other in others:
+            assert ('[data-workspace-vertical="%s"]' % other) not in selector, (
+                "the %s skin has a selector scoped to %s: %r" % (key, other, selector))
+
+
+@pytest.mark.parametrize("key", sorted(VERTICALS))
+def test_every_skin_is_actually_loaded_by_the_shell(key):
+    """A skin nobody imports is a file, not a presentation. The attribute
+    would be set on <html> and nothing would answer it."""
+    body = _text(LAYOUT)
+    assert "styles/vertical-%s.css" % key in body, (
+        "Layout.jsx does not import the %s skin, so setting the attribute "
+        "paints nothing" % key)
 
 
 def test_the_skin_is_applied_and_removed_by_the_shell():
@@ -194,28 +301,51 @@ def test_the_platform_rail_is_still_what_everyone_else_gets():
 
 
 def test_the_platform_overview_is_still_rendered_for_everyone_else():
-    """The dashboard switch is one line and falls through by default."""
+    """The dashboard switch is one line per vertical and falls through by
+    default — the fallthrough being the line that matters, because losing it
+    is how every other customer on the platform loses their dashboard."""
     body = _text(ROOT / "frontend" / "src" / "pages" / "Overview.jsx")
     assert "return <PlatformOverview />" in body
     assert "verticalFor(branding)" in body
 
 
+@pytest.mark.parametrize("key", sorted(VERTICALS))
+def test_every_vertical_dashboard_is_reachable_from_the_overview_switch(key):
+    """A dashboard nobody routes to is a file. Each vertical's component has
+    to be imported AND named in the switch, or its workspace silently gets the
+    platform screen the whole exercise was to replace."""
+    body = _text(ROOT / "frontend" / "src" / "pages" / "Overview.jsx")
+    component = VERTICALS[key]["overview"].stem
+    assert "import %s from './vertical/%s'" % (component, component) in body, \
+        "Overview.jsx does not import %s" % component
+    assert "<%s />" % component in body, \
+        "Overview.jsx never renders %s" % component
+
+
 # ── the primary rail is the approved set, and only that ─────────────────────
 
 APPROVED_RAIL = {
-    "Operate": ["Overview", "Leads & Customers", "Rate Requests",
-                "Sales Pipeline", "Move Concierge"],
-    "Work": ["Communications", "Tasks & Follow-Up", "Renewals", "Reports"],
-    "System": ["Integrations", "Team & Access", "Launch Center"],
+    "energy": {
+        "Operate": ["Overview", "Leads & Customers", "Rate Requests",
+                    "Sales Pipeline", "Move Concierge"],
+        "Work": ["Communications", "Tasks & Follow-Up", "Renewals", "Reports"],
+        "System": ["Integrations", "Team & Access", "Launch Center"],
+    },
+    # SIX ENTRIES, ONE GROUP. This is the approved client-portal navigation
+    # exactly: the workspace has a lead importer, a reply inbox, a work queue,
+    # a pipeline board and a connector page all switched on, and none of them
+    # is in the rail, because none of them was in the design.
+    "cleaning": {
+        "Your Account": ["Dashboard", "Prospects", "VA Activity", "Follow-Up",
+                         "Walkthroughs", "Reports"],
+    },
 }
 
 
-def _energy_rail():
+def _rail(key):
     """Group -> labels, in declaration order, read out of the module."""
-    body = _text(VERTICAL)
-    block = body[body.index("const ENERGY ="):body.index("const BY_INDUSTRY")]
     groups, current = {}, None
-    for line in block.splitlines():
+    for line in _block(key).splitlines():
         group = re.search(r"label:\s*'([^']+)',\s*$", line)
         item = re.search(r"\{\s*(?:to|view):\s*'[^']+',\s*label:\s*'([^']+)'", line)
         if item and current:
@@ -226,7 +356,8 @@ def _energy_rail():
     return groups
 
 
-def test_the_primary_rail_is_exactly_the_approved_navigation():
+@pytest.mark.parametrize("key", sorted(VERTICALS))
+def test_the_primary_rail_is_exactly_the_approved_navigation(key):
     """THE FAILURE THIS CATCHES, WHICH ALREADY HAPPENED ONCE.
 
     The first version appended every configured screen the design did not
@@ -238,7 +369,7 @@ def test_the_primary_rail_is_exactly_the_approved_navigation():
     own /view/<key> route. It simply does not claim a place in the customer's
     main navigation by existing.
     """
-    assert _energy_rail() == APPROVED_RAIL
+    assert _rail(key) == APPROVED_RAIL[key]
 
 
 def test_nothing_appends_unnamed_views_to_the_rail():

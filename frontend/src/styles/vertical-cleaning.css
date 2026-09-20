@@ -1,0 +1,256 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   COMMERCIAL-CLEANING WORKSPACE SKIN
+
+   Applied when <html> carries data-workspace-vertical="cleaning", which
+   Layout sets from the ACTIVE workspace's industry and removes the moment
+   the workspace changes. No other workspace is touched by one byte of this
+   file, and nothing here is a new design system: every rule re-points a
+   token index.css already defines, so the existing panels, tables, badges
+   and empty states render in the new palette without being rewritten.
+
+   SPECIFICITY IS DELIBERATE AND WAS MEASURED, NOT GUESSED. The selector is
+   html:root[data-workspace-vertical="cleaning"] — (0,2,1) — because the two
+   layers it has to beat are both (0,2,0): [data-theme="evosyspro"] in
+   index.css and, the one that actually won the first time this was tried on
+   the energy skin, :root[data-appearance="dark"] in appearance.css. At equal
+   specificity the cascade falls to source order, which is a bundling accident
+   rather than a decision. The element selector settles it. Where a theme used
+   !important on the sidebar, this has to as well.
+
+   THE PALETTE IS THE APPROVED CLIENT-PORTAL DESIGN, WITH ONE CORRECTION.
+   That design's accent is #2699ff, which is a fine colour on its near-black
+   rail and about 2.9:1 against a white card — below the readable threshold
+   for text. So the bright blue is kept where the design puts it, on the dark
+   rail, and text and links on the light surface use a darker member of the
+   same hue. Matching a swatch exactly at the cost of legibility is not
+   honouring a design.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html:root[data-workspace-vertical="cleaning"] {
+  /* ── Surfaces: light, white cards ── */
+  --bg-base: #f2f7fb;
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f7fafd;
+  --bg-elevated: #ffffff;
+  --bg-field: #ffffff;
+  --bg-field-soft: #f4f8fc;
+  --bg-row: #ffffff;
+  --bg-row-hover: #eff6fd;
+  --bg-glass: rgba(23, 48, 71, 0.03);
+  --bg-glass-mid: rgba(23, 48, 71, 0.05);
+  --bg-glass-strong: rgba(23, 48, 71, 0.08);
+  --surface-inset: #f2f7fb;
+
+  /* ── Borders: restrained ── */
+  --border-subtle: #e1e9f1;
+  --border-strong: #ccd9e6;
+  --border-danger: rgba(176, 30, 56, 0.26);
+
+  /* ── Type: the design's ink and muted ── */
+  --text-primary: #173047;
+  --text-secondary: #435871;
+  --text-tertiary: #71889e;
+  --text-inverse: #ffffff;
+  --text-danger-soft: #7d1224;
+
+  /* ── Accents ── */
+  --signal-blue: #0b63c5;
+  --signal-blue-dim: rgba(11, 99, 197, 0.10);
+  --signal-green: #0c7a57;
+  --signal-green-dim: rgba(12, 122, 87, 0.10);
+  --signal-red: #b01e38;
+  --signal-red-dim: rgba(176, 30, 56, 0.09);
+  --signal-amber: #9a6407;
+  --signal-amber-dim: rgba(154, 100, 7, 0.11);
+  --signal-purple: #4b3ec9;
+  --signal-purple-dim: rgba(75, 62, 201, 0.10);
+
+  /* Vertical-specific tokens the workspace dashboard reads. */
+  --clean-navy: #061426;
+  --clean-navy-mid: #0a1d34;
+  --clean-panel: #0f2743;
+  --clean-line: #284b6b;
+  --clean-blue: #2699ff;
+  --clean-cyan: #49d7ff;
+  --clean-ink: #173047;
+  --clean-muted: #71889e;
+
+  /* ── No glow on a paper surface ── */
+  --glow-blue-sm: none; --glow-blue-md: none; --glow-blue-lg: none;
+  --glow-green-sm: none; --glow-green-md: none;
+  --glow-red-sm: none; --glow-red-md: none;
+  --glow-amber-md: none; --glow-purple-md: none;
+
+  --panel-shadow: 0 1px 2px rgba(23, 48, 71, 0.06), 0 4px 16px rgba(23, 48, 71, 0.05);
+  --panel-shadow-strong: 0 6px 28px rgba(23, 48, 71, 0.10);
+  --elevation-1: 0 1px 2px rgba(23, 48, 71, 0.07);
+  --elevation-2: 0 2px 10px rgba(23, 48, 71, 0.08);
+  --elevation-3: 0 8px 28px rgba(23, 48, 71, 0.10);
+  --elevation-4: 0 18px 48px rgba(23, 48, 71, 0.14);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+
+  color-scheme: light;
+}
+
+/* `html` is the element the attribute is ON, so it is styled by the block
+   above; only `body` needs a descendant rule here. */
+html:root[data-workspace-vertical="cleaning"] body {
+  background: #f2f7fb;
+  color: var(--text-primary);
+}
+
+/* ── The rail: near-black navy, the one dark surface in the workspace ───── */
+html:root[data-workspace-vertical="cleaning"] .sidebar {
+  background: #061426 !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+html:root[data-workspace-vertical="cleaning"] .sidebar .nav-item {
+  color: rgba(223, 234, 246, 0.74) !important;
+  border-radius: 8px;
+  margin: 1px 8px;
+  font-weight: 500;
+}
+/* THE SAME OVERFLOW THE ENERGY RAIL HIT. The row is a flex container with no
+   shrink rule, so a label longer than the platform's squeezes the icon rather
+   than itself, and "Walkthroughs" rendered its calendar 4px wide. */
+html:root[data-workspace-vertical="cleaning"] .sidebar .nav-item svg {
+  flex-shrink: 0;
+}
+/* The platform tints the active row and colours its icon blue. Here the
+   active row IS blue, so an unset icon would be blue on blue. */
+html:root[data-workspace-vertical="cleaning"] .sidebar .nav-item--active svg {
+  color: #ffffff !important;
+}
+html:root[data-workspace-vertical="cleaning"] .sidebar .nav-item:hover {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+}
+html:root[data-workspace-vertical="cleaning"] .sidebar .nav-item--active {
+  color: #ffffff !important;
+  background: #1b6ee0 !important;
+  border-left-color: transparent !important;
+  font-weight: 600;
+}
+html:root[data-workspace-vertical="cleaning"] .sidebar .nav-section-label {
+  color: rgba(147, 175, 205, 0.78) !important;
+  letter-spacing: 0.13em;
+  font-size: 10px;
+  font-weight: 700;
+}
+html:root[data-workspace-vertical="cleaning"] .sidebar .nav-divider {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.08);
+}
+html:root[data-workspace-vertical="cleaning"] .sidebar .user-name { color: #ffffff !important; }
+html:root[data-workspace-vertical="cleaning"] .sidebar .user-role { color: rgba(147, 175, 205, 0.82) !important; }
+/* THE FOOTER SITS ON THE DARK RAIL, NOT ON THE LIGHT PAGE. Its controls read
+   the neutral tokens, which this skin points at a white surface with navy
+   text — correct everywhere except inside the rail, where that is white on
+   navy-dark and the Sign out button disappeared on the energy skin before
+   anybody noticed. These four re-state the controls that live in there. */
+html:root[data-workspace-vertical="cleaning"] .sidebar .sidebar-footer {
+  color: rgba(223, 234, 246, 0.9) !important;
+}
+html:root[data-workspace-vertical="cleaning"] .sidebar .user-chip {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+html:root[data-workspace-vertical="cleaning"] .sidebar .logout-btn,
+html:root[data-workspace-vertical="cleaning"] .sidebar .back-to-website-btn {
+  color: rgba(223, 234, 246, 0.86) !important;
+  background: transparent !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+html:root[data-workspace-vertical="cleaning"] .sidebar .logout-btn:hover,
+html:root[data-workspace-vertical="cleaning"] .sidebar .back-to-website-btn:hover {
+  background: rgba(255, 255, 255, 0.09) !important;
+  color: #ffffff !important;
+}
+html:root[data-workspace-vertical="cleaning"] .sidebar-brand,
+html:root[data-workspace-vertical="cleaning"] .sidebar-footer {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* The workspace's own two-line wordmark, drawn from its branding row. */
+html:root[data-workspace-vertical="cleaning"] .vertical-brand {
+  display: flex; align-items: center; gap: 11px;
+  padding: 2px 0; min-width: 0;
+}
+html:root[data-workspace-vertical="cleaning"] .vertical-brand-glyph {
+  width: 34px; height: 34px; flex-shrink: 0;
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(140deg, #2699ff, #49d7ff);
+  color: #061426;
+}
+html:root[data-workspace-vertical="cleaning"] .vertical-brand-logo {
+  width: 34px; height: 34px; flex-shrink: 0;
+  border-radius: 9px; object-fit: contain; background: #ffffff;
+}
+html:root[data-workspace-vertical="cleaning"] .vertical-brand-text { min-width: 0; }
+html:root[data-workspace-vertical="cleaning"] .vertical-brand-line1 {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 700; letter-spacing: 0.10em;
+  color: #ffffff; text-transform: uppercase; line-height: 1.1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html:root[data-workspace-vertical="cleaning"] .vertical-brand-line2 {
+  display: block;
+  font-size: 9px; font-weight: 600; letter-spacing: 0.20em;
+  color: rgba(147, 199, 244, 0.92); text-transform: uppercase;
+  margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Content chrome ─────────────────────────────────────────────────────── */
+html:root[data-workspace-vertical="cleaning"] .top-bar {
+  background: #ffffff;
+  /* Reset first: the platform rule leaves top and side borders at
+     `currentColor`, which on this surface drew navy lines down two edges. */
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+html:root[data-workspace-vertical="cleaning"] .top-bar-time { color: var(--text-primary); }
+html:root[data-workspace-vertical="cleaning"] .top-bar-date { color: var(--text-tertiary); }
+
+html:root[data-workspace-vertical="cleaning"] .panel {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--panel-shadow);
+}
+html:root[data-workspace-vertical="cleaning"] .data-table th {
+  background: #f6f9fc;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+html:root[data-workspace-vertical="cleaning"] .data-table td {
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+html:root[data-workspace-vertical="cleaning"] .data-table tbody tr:hover td {
+  background: var(--bg-row-hover);
+}
+html:root[data-workspace-vertical="cleaning"] .empty-state { color: var(--text-tertiary); }
+html:root[data-workspace-vertical="cleaning"] select,
+html:root[data-workspace-vertical="cleaning"] option,
+html:root[data-workspace-vertical="cleaning"] .search-input,
+html:root[data-workspace-vertical="cleaning"] .filter-select,
+html:root[data-workspace-vertical="cleaning"] .compose-textarea {
+  background: #ffffff;
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+html:root[data-workspace-vertical="cleaning"] .badge--blue  { background: rgba(11, 99, 197, 0.10); color: #0b63c5; }
+html:root[data-workspace-vertical="cleaning"] .badge--green { background: rgba(12, 122, 87, 0.10); color: #0c7a57; }
+html:root[data-workspace-vertical="cleaning"] .badge--red   { background: rgba(176, 30, 56, 0.09); color: #b01e38; }
+html:root[data-workspace-vertical="cleaning"] .badge--amber { background: rgba(154, 100, 7, 0.11); color: #9a6407; }
+
+/* The platform's light/dark switch is meaningless in a configured skin:
+   this workspace has one agreed appearance. */
+html:root[data-workspace-vertical="cleaning"] .theme-toggle { display: none; }

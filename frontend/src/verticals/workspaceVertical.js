@@ -99,8 +99,56 @@ const ENERGY = {
   ],
 }
 
+export const VERTICAL_CLEANING = 'cleaning'
+
+/**
+ * COMMERCIAL CLEANING.
+ *
+ * ONE GROUP, SIX ENTRIES, and that is the whole approved design. The energy
+ * rail above is grouped because eleven entries need it; six do not, and
+ * inventing Operate/Work/System headings over them would be this file
+ * decorating a design rather than carrying it.
+ *
+ * The mapping to the right of each one is the existing capability it opens:
+ *
+ *   Dashboard     /                the workspace overview
+ *   Prospects     /view/<key>      configured workflow screen (leads)
+ *   VA Activity   /activity        the existing activity feed
+ *   Follow-Up     /view/<key>      configured workflow screen (leads)
+ *   Walkthroughs  /view/<key>      configured workflow screen (appointments)
+ *   Reports       /reports         the existing reporting surface
+ *
+ * WHAT IS NOT HERE IS THE POINT. This customer's workspace has a lead
+ * importer, a reply inbox, a work queue, a pipeline board, a compliance
+ * centre and a connector page, all of them switched on and all of them
+ * reachable. None of them is in the rail, because the rail is the six screens
+ * the customer was shown and agreed to. A capability existing is not a reason
+ * for it to claim a place in somebody's primary navigation.
+ *
+ * `adminOnly` and `featureKey` are carried over from the platform rail
+ * UNCHANGED, here as in the energy rail: renaming a door must not open one.
+ */
+const CLEANING = {
+  key: VERTICAL_CLEANING,
+  skin: 'cleaning',
+  navGroups: [
+    {
+      label: 'Your Account',
+      items: [
+        { to: '/', label: 'Dashboard', icon: 'grid' },
+        { view: 'prospects', label: 'Prospects', icon: 'users' },
+        { to: '/activity', label: 'VA Activity', icon: 'activity' },
+        { view: 'follow-up', label: 'Follow-Up', icon: 'repeat' },
+        { view: 'walkthroughs', label: 'Walkthroughs', icon: 'calendar' },
+        { to: '/reports', label: 'Reports', icon: 'file-text', adminOnly: true, featureKey: 'reports' },
+      ],
+    },
+  ],
+}
+
 const BY_INDUSTRY = {
   [VERTICAL_ENERGY]: ENERGY,
+  [VERTICAL_CLEANING]: CLEANING,
 }
 
 /**

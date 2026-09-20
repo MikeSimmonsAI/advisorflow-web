@@ -505,9 +505,15 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
     "home_services": {
         "key": "home_services",
         "label": "Home services (HVAC, plumbing, electrical, and similar)",
+        # `cleaning` used to resolve here. It has its own template below now —
+        # not because the screens differ (they are the same three questions)
+        # but because a commercial cleaning company's work is measured in
+        # walkthroughs and decision-makers, and reading "Service Call" and
+        # "Equipment age" in your own settings is the small wrongness this
+        # whole registry exists to stop.
         "aliases": ["hvac", "plumbing", "electrical", "pest_control",
                     "landscaping", "windows_doors", "painting", "flooring",
-                    "cleaning", "pool_spa", "tree_service", "water_treatment"],
+                    "pool_spa", "tree_service", "water_treatment"],
         "segments": ["Residential", "Commercial"],
         "lead_tiers": [
             {"value": "new_lead", "label": "New Lead", "color": "blue",
@@ -585,19 +591,186 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
                 "label": "Walkthroughs",
                 "group": "Operate",
                 "icon": "calendar",
-                "title": "Walkthroughs",
-                "subtitle": "Booked site visits, traced back to the prospect "
-                            "they came from.",
+                "title": "Site Visits",
+                "subtitle": "Visits that have a time on the calendar, traced "
+                            "back to the prospect they came from.",
                 "source": "appointments",
-                "filter": {"not_status": ["cancelled", "expired"]},
+                # A SENT BOOKING LINK IS NOT A BOOKED VISIT.
+                #
+                # This filter used to read `not_status: [cancelled, expired]`,
+                # which is every status EXCEPT those two — and the one it
+                # quietly let through was `pending`: a link that went out and
+                # that nobody has acted on. Those landed on a screen titled
+                # Site Visits and were counted in its total, so a business that
+                # had sent forty links and booked none of them opened this page
+                # and read forty.
+                #
+                # Naming the statuses that mean a time exists is also the
+                # safer shape: a status added to booking_links later joins this
+                # screen only when somebody decides it should, instead of by
+                # default. Cancelled is named deliberately — it was a real
+                # appointment and stays visible, labelled, rather than
+                # disappearing from the customer's own history.
+                "filter": {"status": ["booked", "confirmed", "cancelled"]},
                 "columns": ["name", "contact", "booked_time", "appt_label",
-                            "status", "owner"],
+                            "status", "outcome", "owner"],
                 "stats": [
-                    {"label": "Upcoming", "filter": {"upcoming": True}},
+                    {"label": "Upcoming",
+                     "filter": {"upcoming": True, "status": ["booked", "confirmed"]}},
                     {"label": "Confirmed", "filter": {"status": ["confirmed"]}},
                     {"label": "Awaiting Confirmation", "filter": {"status": ["booked"]}},
+                    # Evidence from `pipeline_conversations`, never from the
+                    # clock. See PIPELINE_KEPT_STAGES in workspace_views.
+                    {"label": "Completed",
+                     "filter": {"kept": True, "status": ["booked", "confirmed"]}},
+                    {"label": "Awaiting Outcome",
+                     "filter": {"past": True, "kept": False,
+                                "status": ["booked", "confirmed"]}},
+                    {"label": "Cancelled", "filter": {"status": ["cancelled"]}},
                 ],
-                "empty": "No walkthroughs booked yet.",
+                "empty": "No site visits on the calendar yet.",
+            },
+        ],
+    },
+
+    # ────────────────────────────────────────────────────────────────────────
+    # COMMERCIAL CLEANING — the same three screens, the business's own words.
+    #
+    # WHY THIS IS NOT JUST AN ALIAS OF home_services. It was one, and the
+    # screens were right: who are we working, what is owed a next action, what
+    # is on the calendar. What was wrong was everything around them. A
+    # janitorial company opening its settings read "Service Call",
+    # "Maintenance Visit" and a custom field for "Equipment age", and its board
+    # ran New Lead -> Scheduled -> Quoted -> Job Booked. None of that is how
+    # the work is named. The distinguishing fact of this trade is that nothing
+    # happens until somebody walks the building, so the walkthrough is the
+    # milestone the whole pipeline is organised around, and getting past a
+    # gatekeeper to the person who signs is the hard part of every call.
+    #
+    # WHAT IS DELIBERATELY SHARED. `tier_definition_key` still points at
+    # home_services, and the four lead-tier VALUES below are home_services'
+    # values unchanged — only the labels are this trade's. The stage a record
+    # is in is data; its label is presentation. Renaming the keys would have
+    # meant a second tier set to maintain and every existing row stranded
+    # outside its own column, which is the drift this registry was built to
+    # end.
+    # ────────────────────────────────────────────────────────────────────────
+    "cleaning": {
+        "key": "cleaning",
+        "label": "Commercial cleaning / janitorial",
+        "aliases": ["janitorial", "commercial_cleaning", "cleaning_services",
+                    "building_services", "facility_services", "custodial"],
+        "segments": ["Commercial", "Residential"],
+        "lead_tiers": [
+            {"value": "new_lead", "label": "New Prospect", "color": "blue",
+             "description": "Sourced, not yet worked"},
+            {"value": "scheduled", "label": "Walkthrough Set", "color": "amber",
+             "description": "Site visit on the calendar"},
+            {"value": "quoted", "label": "Proposal Sent", "color": "amber",
+             "description": "Pricing with the decision maker"},
+            {"value": "job_booked", "label": "Contract Won", "color": "green",
+             "description": "Account signed"},
+            _EMAIL_ONLY,
+        ],
+        "tier_definition_key": "home_services",
+        "appointment_types": UNIVERSAL_APPOINTMENT_TYPES + [
+            "Walkthrough", "Scope Review", "Proposal Presentation",
+            "Contract Signing", "Quality Inspection",
+        ],
+        "crm_stages": [
+            "New", "Attempted", "Contacted", "Decision Maker Found",
+            "Interested", "Follow-Up", "Walkthrough Offered",
+            "Walkthrough Booked", "Walkthrough Confirmed",
+            "Walkthrough Completed", "Proposal", "Won", "Lost",
+        ],
+        "custom_fields": [
+            {"key": "facility_type", "label": "Facility type", "kind": "text"},
+            {"key": "square_footage", "label": "Square footage", "kind": "text"},
+            {"key": "cleaning_frequency", "label": "Cleaning frequency",
+             "kind": "text"},
+        ],
+        "vocabulary": {"lead": "prospect", "leads": "prospects",
+                       "appointment": "walkthrough",
+                       "appointments": "Walkthroughs",
+                       "customer": "account", "customers": "accounts"},
+        "onboarding_questions": [],
+        "workspace_views": [
+            {
+                "key": "prospects",
+                "label": "Prospects",
+                "group": "Operate",
+                "icon": "users",
+                "title": "Prospects",
+                "subtitle": "Every business on the account, with the decision "
+                            "maker and where it currently stands.",
+                "source": "leads",
+                "filter": {"not_status": ["dnc", "dead", "not_interested"]},
+                "columns": ["name", "contact", "tier", "location", "source",
+                            "owner", "updated_at"],
+                "stats": [
+                    {"label": "Not Yet Worked", "filter": {"tier": ["new_lead"]}},
+                    {"label": "Walkthrough Set", "filter": {"tier": ["scheduled"]}},
+                    {"label": "Proposal Sent", "filter": {"tier": ["quoted"]}},
+                    {"label": "Contract Won", "filter": {"tier": ["job_booked"]}},
+                    {"label": "Unassigned", "filter": {"unassigned": True}},
+                ],
+                "empty": "No prospects on this account yet.",
+            },
+            {
+                "key": "follow-up",
+                "label": "Follow-Up",
+                "group": "Operate",
+                "icon": "clock",
+                "title": "Follow-Up",
+                "subtitle": "Conversations that are alive and owed a next "
+                            "action, so none of them goes quiet by accident.",
+                "source": "leads",
+                "filter": {"status": ["sent", "replied", "hot", "queued"],
+                           "not_tier": ["job_booked"]},
+                "columns": ["name", "contact", "status", "tier", "owner",
+                            "last_contact_date", "note"],
+                "stats": [
+                    {"label": "Replied", "filter": {"status": ["replied", "hot"]}},
+                    {"label": "Awaiting Reply", "filter": {"status": ["sent", "queued"]}},
+                    {"label": "Quiet 7+ Days", "filter": {"stale_days": 7}},
+                ],
+                "empty": "Nothing waiting on a follow-up right now.",
+            },
+            {
+                "key": "walkthroughs",
+                "label": "Walkthroughs",
+                "group": "Operate",
+                "icon": "calendar",
+                "title": "Walkthroughs",
+                "subtitle": "Site visits that have a time on the calendar, "
+                            "traced back to the prospect they came from.",
+                "source": "appointments",
+                # THE SAME CORRECTION AS home_services ABOVE, AND IT MATTERS
+                # MOST HERE. This is the number a cleaning company judges the
+                # whole service by, and "a booking link was sent" is not it. A
+                # pending link is an invitation nobody has answered; only
+                # `booked` and `confirmed` mean a walkthrough exists. Cancelled
+                # stays on the screen, named, because it happened.
+                "filter": {"status": ["booked", "confirmed", "cancelled"]},
+                "columns": ["name", "contact", "booked_time", "appt_label",
+                            "status", "outcome", "owner"],
+                "stats": [
+                    {"label": "Upcoming",
+                     "filter": {"upcoming": True, "status": ["booked", "confirmed"]}},
+                    {"label": "Confirmed", "filter": {"status": ["confirmed"]}},
+                    {"label": "Awaiting Confirmation", "filter": {"status": ["booked"]}},
+                    # "Completed" is what the pipeline was told, not what the
+                    # clock implies. A walkthrough whose time has passed with
+                    # nobody having recorded an outcome shows up in the next
+                    # counter instead — a queue, not a result.
+                    {"label": "Completed",
+                     "filter": {"kept": True, "status": ["booked", "confirmed"]}},
+                    {"label": "Awaiting Outcome",
+                     "filter": {"past": True, "kept": False,
+                                "status": ["booked", "confirmed"]}},
+                    {"label": "Cancelled", "filter": {"status": ["cancelled"]}},
+                ],
+                "empty": "No walkthroughs on the calendar yet.",
             },
         ],
     },
@@ -760,6 +933,36 @@ CRM_STAGE_OBJECTS: Dict[str, List[Dict[str, Any]]] = {
         {"key": "quoted", "label": "Quoted", "color": "#f59e0b"},
         {"key": "booked", "label": "Job Booked", "color": "#10b981"},
         {"key": "complete", "label": "Complete", "color": "#3b82f6"},
+        {"key": "lost", "label": "Lost", "color": "#374151"},
+    ],
+    # COMMERCIAL CLEANING. Longer than every other board here, and that is the
+    # process rather than an oversight: the work is a cold list walked down by
+    # people, so "we tried and got nobody" and "we reached the person who
+    # signs" are different places a record genuinely sits, and collapsing them
+    # hides where an account is actually stalling. Three of the stages are the
+    # walkthrough alone, because for this trade the site visit IS the deal.
+    #
+    # NO SCHEMA COST. `pipeline_conversations.stage` is a free string column,
+    # so a vertical's vocabulary is data. Nothing below advances by itself —
+    # a stage moves when a person or a real event moves it.
+    "cleaning": [
+        {"key": "new", "label": "New", "color": "#64748b"},
+        {"key": "attempted", "label": "Attempted", "color": "#78889c"},
+        {"key": "contacted", "label": "Contacted", "color": "#6366f1"},
+        {"key": "decision_maker_found", "label": "Decision Maker Found",
+         "color": "#8b5cf6"},
+        {"key": "interested", "label": "Interested", "color": "#f59e0b"},
+        {"key": "follow_up", "label": "Follow-Up", "color": "#f97316"},
+        {"key": "walkthrough_offered", "label": "Walkthrough Offered",
+         "color": "#0ea5e9"},
+        {"key": "walkthrough_booked", "label": "Walkthrough Booked",
+         "color": "#2699ff"},
+        {"key": "walkthrough_confirmed", "label": "Walkthrough Confirmed",
+         "color": "#49d7ff"},
+        {"key": "walkthrough_completed", "label": "Walkthrough Completed",
+         "color": "#3fd39a"},
+        {"key": "proposal", "label": "Proposal", "color": "#ffc34c"},
+        {"key": "won", "label": "Won", "color": "#10b981"},
         {"key": "lost", "label": "Lost", "color": "#374151"},
     ],
     "dental": [

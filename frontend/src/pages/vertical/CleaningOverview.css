@@ -1,0 +1,298 @@
+/* COMMERCIAL CLEANING — CLIENT DASHBOARD LAYOUT.
+
+   Layout only. Every colour is a token, so styles/vertical-cleaning.css owns
+   the palette and this file owns the arrangement. Nothing here leaks outside
+   `.co`, and nothing here needs the vertical attribute: the class prefix is
+   only ever mounted by CleaningOverview, which only ever renders inside a
+   workspace whose industry resolved to this vertical. */
+
+.co { max-width: 1480px; padding-bottom: 32px; }
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+.co-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; margin-bottom: 26px;
+}
+.co-header-title h1 {
+  margin: 0; font-family: var(--font-display);
+  font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.co-header-title p {
+  margin: 5px 0 0; font-size: 13px; color: var(--text-tertiary);
+}
+.co-header-actions {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.co-search {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-panel); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill); padding: 8px 14px;
+  color: var(--text-tertiary); min-width: 260px;
+}
+.co-search input {
+  border: 0; background: transparent; outline: none; flex: 1; min-width: 0;
+  font-size: 13px; color: var(--text-primary); font-family: var(--font-body);
+}
+.co-btn {
+  border: 1px solid var(--border-strong); background: var(--bg-panel);
+  color: var(--text-primary); font-family: var(--font-body);
+  font-size: 13px; font-weight: 600; padding: 9px 15px;
+  border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.co-btn:hover { background: var(--bg-card-hover); }
+.co-btn--primary {
+  background: var(--signal-blue); border-color: var(--signal-blue);
+  color: #ffffff;
+}
+.co-btn--primary:hover { filter: brightness(1.06); background: var(--signal-blue); }
+.co-avatar {
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--clean-navy, #061426); color: #fff;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+}
+.co-notice {
+  margin-bottom: 18px; padding: 10px 14px; font-size: 13px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: var(--bg-panel); color: var(--text-secondary);
+}
+
+/* ── greeting ───────────────────────────────────────────────────────────── */
+.co-greeting { margin-bottom: 20px; }
+.co-greeting h2 {
+  margin: 0; font-family: var(--font-display);
+  font-size: 17px; font-weight: 700; color: var(--text-primary);
+}
+.co-greeting p {
+  margin: 4px 0 0; font-size: 13px; color: var(--text-tertiary);
+}
+
+/* ── KPI row ────────────────────────────────────────────────────────────── */
+.co-kpis {
+  display: grid; gap: 14px; margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(212px, 1fr));
+}
+.co-kpi {
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); padding: 16px 17px 15px;
+  box-shadow: var(--elevation-1);
+  border-top: 3px solid var(--border-strong);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.co-kpi--blue  { border-top-color: var(--signal-blue); }
+.co-kpi--cyan  { border-top-color: var(--clean-cyan, #49d7ff); }
+.co-kpi--green { border-top-color: var(--signal-green); }
+.co-kpi--amber { border-top-color: var(--signal-amber); }
+.co-kpi--link { cursor: pointer; }
+.co-kpi--link:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--elevation-2);
+  transform: translateY(-1px);
+}
+.co-kpi--link:focus-visible { outline: 2px solid var(--signal-blue); outline-offset: 2px; }
+.co-kpi-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; min-height: 18px;
+}
+.co-kpi-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.co-kpi-tag {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--text-tertiary); background: var(--bg-glass);
+  border-radius: var(--radius-pill); padding: 2px 8px; white-space: nowrap;
+}
+.co-kpi-value {
+  font-family: var(--font-display); font-size: 30px; font-weight: 700;
+  line-height: 1; color: var(--text-primary); letter-spacing: -0.02em;
+}
+/* AN HONEST GAP LOOKS LIKE A SENTENCE, NOT LIKE A NUMBER. Rendering "Not yet
+   available" at 30px would read as a headline figure at a glance. */
+.co-kpi-value--none {
+  font-family: var(--font-body); font-size: 14px; font-weight: 600;
+  color: var(--text-tertiary); line-height: 1.35;
+}
+.co-kpi-sub { font-size: 12px; color: var(--text-tertiary); line-height: 1.45; }
+
+/* ── cards ──────────────────────────────────────────────────────────────── */
+.co-grid { display: grid; gap: 16px; margin-bottom: 18px; }
+.co-grid--split { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.co-card {
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); padding: 17px 18px 18px;
+  box-shadow: var(--elevation-1); margin-bottom: 18px;
+}
+.co-grid .co-card { margin-bottom: 0; }
+.co-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.co-card-head h3 {
+  margin: 0; font-family: var(--font-display);
+  font-size: 14px; font-weight: 700; color: var(--text-primary);
+}
+.co-card-note { font-size: 11px; color: var(--text-tertiary); }
+.co-link {
+  border: 0; background: transparent; cursor: pointer; padding: 0;
+  font-family: var(--font-body); font-size: 12px; font-weight: 600;
+  color: var(--signal-blue);
+}
+.co-link:hover { text-decoration: underline; }
+.co-empty {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 22px 4px; font-size: 13px; color: var(--text-tertiary);
+}
+.co-empty strong { color: var(--text-secondary); font-weight: 600; }
+.co-footnote {
+  margin: 14px 0 0; padding-top: 12px; font-size: 11.5px; line-height: 1.5;
+  color: var(--text-tertiary); border-top: 1px solid var(--border-subtle);
+}
+
+/* ── workflow funnel ────────────────────────────────────────────────────── */
+.co-funnel { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.co-funnel-step {
+  display: grid; align-items: center; gap: 12px;
+  grid-template-columns: 22px 92px 1fr 64px;
+  padding: 5px 4px; border-radius: var(--radius-sm);
+}
+.co-funnel-step--link { cursor: pointer; }
+.co-funnel-step--link:hover { background: var(--bg-row-hover); }
+.co-funnel-step--link:focus-visible { outline: 2px solid var(--signal-blue); outline-offset: 1px; }
+.co-funnel-rank {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-glass-mid); color: var(--text-tertiary);
+  font-size: 11px; font-weight: 700;
+}
+.co-funnel-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+.co-funnel-track {
+  height: 11px; border-radius: var(--radius-pill); overflow: hidden;
+  background: var(--bg-glass-mid); display: flex; align-items: center;
+}
+.co-funnel-fill {
+  display: block; height: 100%; min-width: 2px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--signal-blue), var(--clean-cyan, #49d7ff));
+}
+/* "not counted" is not "zero", so it does not get a bar of any length. */
+.co-funnel-gap {
+  padding-left: 8px; font-size: 10.5px; font-style: italic;
+  color: var(--text-tertiary);
+}
+.co-funnel-value {
+  text-align: right; font-family: var(--font-display);
+  font-size: 15px; font-weight: 700; color: var(--text-primary);
+}
+
+/* ── walkthrough outcomes ───────────────────────────────────────────────── */
+.co-outcomes { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.co-outcome {
+  display: grid; align-items: center; gap: 11px;
+  grid-template-columns: 8px 1fr auto;
+  padding: 9px 4px; border-bottom: 1px solid var(--border-subtle);
+}
+.co-outcome:last-child { border-bottom: 0; }
+.co-outcome-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--text-tertiary);
+}
+.co-outcome--blue  .co-outcome-dot { background: var(--signal-blue); }
+.co-outcome--cyan  .co-outcome-dot { background: var(--clean-cyan, #49d7ff); }
+.co-outcome--green .co-outcome-dot { background: var(--signal-green); }
+.co-outcome--amber .co-outcome-dot { background: var(--signal-amber); }
+.co-outcome--red   .co-outcome-dot { background: var(--signal-red); }
+.co-outcome-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.co-outcome-label {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+}
+.co-outcome-note { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.4; }
+.co-outcome-value {
+  font-family: var(--font-display); font-size: 17px; font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ── today's outreach ───────────────────────────────────────────────────── */
+.co-mini {
+  display: grid; gap: 10px; margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+}
+.co-mini-cell {
+  background: var(--bg-field-soft); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); padding: 11px 12px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.co-mini-value {
+  font-family: var(--font-display); font-size: 19px; font-weight: 700;
+  color: var(--text-primary); line-height: 1;
+}
+.co-mini-label {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.co-feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.co-feed-row {
+  display: grid; align-items: center; gap: 10px;
+  grid-template-columns: 52px minmax(0, 150px) minmax(0, 1fr);
+  padding: 8px 4px; cursor: pointer; border-radius: var(--radius-sm);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.co-feed-row:last-child { border-bottom: 0; }
+.co-feed-row:hover { background: var(--bg-row-hover); }
+.co-feed-channel {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; text-align: center;
+  border-radius: var(--radius-pill); padding: 3px 0;
+  background: var(--signal-blue-dim); color: var(--signal-blue);
+}
+.co-feed-channel--email {
+  background: var(--signal-purple-dim); color: var(--signal-purple);
+}
+.co-feed-name {
+  font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.co-feed-preview {
+  font-size: 12px; color: var(--text-tertiary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── table ──────────────────────────────────────────────────────────────── */
+.co-tablewrap { overflow-x: auto; }
+.co-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.co-table th {
+  text-align: left; padding: 8px 10px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-subtle); white-space: nowrap;
+}
+.co-table td {
+  padding: 10px; border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+.co-table tbody tr { cursor: pointer; }
+.co-table tbody tr:hover td { background: var(--bg-row-hover); }
+.co-table tbody tr:last-child td { border-bottom: 0; }
+.co-td-soft { color: var(--text-tertiary); text-transform: capitalize; }
+.co-pill {
+  display: inline-block; padding: 3px 9px; border-radius: var(--radius-pill);
+  font-size: 11px; font-weight: 600; text-transform: capitalize;
+  background: var(--bg-glass-mid); color: var(--text-secondary);
+}
+.co-pill--replied, .co-pill--hot { background: var(--signal-green-dim); color: var(--signal-green); }
+.co-pill--sent, .co-pill--queued { background: var(--signal-blue-dim); color: var(--signal-blue); }
+.co-pill--dnc, .co-pill--dead { background: var(--signal-red-dim); color: var(--signal-red); }
+
+/* ── narrow screens ─────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .co-header-actions { width: 100%; }
+  .co-search { min-width: 0; flex: 1; }
+  .co-funnel-step { grid-template-columns: 22px 1fr 56px; }
+  .co-funnel-track { grid-column: 1 / -1; }
+  .co-feed-row { grid-template-columns: 52px minmax(0, 1fr); }
+  .co-feed-preview { display: none; }
+}

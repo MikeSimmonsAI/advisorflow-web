@@ -59,8 +59,9 @@ import { metricLabels, useTerminology } from '../terminology'
 // WHICH OVERVIEW THIS WORKSPACE GETS. A vertical with a configured
 // presentation renders its own operations screen; everyone else renders the
 // platform one below, unchanged. See verticals/workspaceVertical.js.
-import { verticalFor, VERTICAL_ENERGY } from '../verticals/workspaceVertical'
+import { verticalFor, VERTICAL_ENERGY, VERTICAL_CLEANING } from '../verticals/workspaceVertical'
 import EnergyOverview from './vertical/EnergyOverview'
+import CleaningOverview from './vertical/CleaningOverview'
 
 const STAGE_TONE = {
   new: 'var(--signal-amber)', sent: 'var(--signal-blue)', replied: 'var(--signal-blue)',
@@ -783,5 +784,6 @@ export default function Overview() {
   const { branding } = useWorkspaceAuthority()
   const vertical = verticalFor(branding)
   if (vertical && vertical.key === VERTICAL_ENERGY) return <EnergyOverview />
+  if (vertical && vertical.key === VERTICAL_CLEANING) return <CleaningOverview />
   return <PlatformOverview />
 }

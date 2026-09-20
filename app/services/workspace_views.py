@@ -43,9 +43,11 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.models import BookingLink, Lead, Organization, User
+from app.models.models import (BookingLink, Lead, Organization,
+                               PipelineConversation, User)
 from app.services import industry_templates, lead_scope
 
 log = logging.getLogger(__name__)
@@ -83,10 +85,49 @@ APPOINTMENT_COLUMNS = {
     "booked_time": "Scheduled",
     "appt_label": "Type",
     "status": "Status",
+    "outcome": "Outcome",
     "owner": "Booked By",
     "tier": "Stage",
     "created_at": "Created",
 }
+
+
+# ── WHAT A BOOKING ROW ACTUALLY PROVES ───────────────────────────────────────
+#
+# `booking_links.status` runs pending -> booked -> confirmed, with expired and
+# cancelled as exits. Read plainly, it answers two questions and refuses a
+# third:
+#
+#   pending    A LINK WAS SENT. Nobody has chosen a time. There is no
+#              appointment. A screen that counts these as booked visits tells a
+#              customer they have a calendar full of site visits that do not
+#              exist, which is the defect this constant exists to name.
+#   booked     Somebody chose a time. This is an appointment.
+#   confirmed  The prospect confirmed that time. Still the same appointment.
+#   cancelled  It was called off. It happened as a booking and then stopped
+#              being one, so it stays visible and stays labelled.
+#   expired    The link lapsed unused. Same class as pending: never an
+#              appointment.
+#
+# The third question — did anybody turn up — a booking link cannot answer. It
+# carries no attended flag, no no-show and no completion timestamp, and
+# app/services/workforce_intelligence/metrics.py reached the same wall and
+# returns UNKNOWN rather than promoting confirmed bookings to completed ones.
+BOOKING_SCHEDULED = ("booked", "confirmed")
+BOOKING_NEVER_SCHEDULED = ("pending", "expired")
+
+# WHERE "IT HAPPENED" DOES COME FROM, and it is a person, not a clock.
+# `pipeline_conversations` carries a lead through booked -> confirmed -> kept
+# -> sale and stamps `appointment_kept_at` when somebody records that the visit
+# took place. That is evidence. "The booked time has passed" is not: inferring
+# attendance from the calendar would hand a business a perfect show rate on
+# walkthroughs nobody attended.
+#
+# Deliberately NOT sales_models.Opportunity. That is the brand's own sales
+# pipeline over its customers; this is a customer's pipeline over its
+# prospects. Reading one to answer the other crosses a tenancy boundary that
+# happens to type-check.
+PIPELINE_KEPT_STAGES = ("kept", "sale")
 
 # A filter key that is not here is ignored rather than guessed at. Silently
 # matching everything would be worse: a screen that looks filtered and is not.
@@ -95,7 +136,9 @@ LEAD_FILTER_KEYS = (
     "channel", "temperature", "relationship_type", "assigned", "unassigned",
     "since_days", "stale_days", "has_email", "has_phone",
 )
-APPOINTMENT_FILTER_KEYS = ("status", "not_status", "since_days", "upcoming", "past")
+APPOINTMENT_FILTER_KEYS = ("status", "not_status", "since_days", "upcoming",
+                           "past", "pipeline_stage", "not_pipeline_stage",
+                           "kept")
 
 MAX_ROWS = 500
 DEFAULT_ROWS = 100
@@ -264,9 +307,52 @@ def _apply_lead_filter(query, spec: Dict[str, Any]):
     return query
 
 
+def _pipeline_match(*conditions):
+    """EXISTS a pipeline conversation for this booking's lead, matching.
+
+    Correlated on the LEAD, because that is the only thing the two tables
+    share: `pipeline_conversations` has no booking_link_id. The second
+    condition — the conversation's organization matching the lead's — is not
+    redundant with the caller's tenancy scope. The scope already guarantees
+    which LEADS are visible; this guarantees the EVIDENCE about them came from
+    the same tenant, so a mis-set conversation row can contribute to nobody's
+    numbers rather than to the wrong customer's.
+    """
+    return (select(PipelineConversation.id)
+            .where(PipelineConversation.lead_id == BookingLink.lead_id,
+                   PipelineConversation.organization_id == Lead.organization_id,
+                   *conditions)
+            .exists())
+
+
+def _kept_match():
+    """The pipeline says somebody recorded that the visit took place."""
+    return _pipeline_match(
+        (PipelineConversation.appointment_kept_at.isnot(None))
+        | (PipelineConversation.stage.in_(PIPELINE_KEPT_STAGES)))
+
+
 def _apply_appointment_filter(query, spec: Dict[str, Any]):
     spec = {k: v for k, v in (spec or {}).items() if k in APPOINTMENT_FILTER_KEYS}
     now = datetime.utcnow()
+
+    values = _as_list(spec.get("pipeline_stage"))
+    if values:
+        query = query.filter(_pipeline_match(PipelineConversation.stage.in_(values)))
+    values = _as_list(spec.get("not_pipeline_stage"))
+    if values:
+        query = query.filter(~_pipeline_match(PipelineConversation.stage.in_(values)))
+
+    # Tri-state on purpose. True means "the pipeline says it happened", False
+    # means "the pipeline does not say so" — which is an honest queue of visits
+    # still owed an outcome, NOT a claim that nobody turned up. Absent means
+    # the question was not asked.
+    kept = spec.get("kept")
+    if kept is True:
+        query = query.filter(_kept_match())
+    elif kept is False:
+        query = query.filter(~_kept_match())
+
     values = _as_list(spec.get("status"))
     if values:
         query = query.filter(BookingLink.status.in_(values))
@@ -354,7 +440,50 @@ def _lead_row(lead: Lead, columns, owners) -> Dict[str, Any]:
     return {"id": lead.id, "lead_id": lead.id, "values": values}
 
 
-def _appointment_row(booking: BookingLink, lead: Lead, columns, owners) -> Dict[str, Any]:
+def _kept_lead_ids(db: Session, lead_ids) -> set:
+    """Which of these leads the pipeline says had their visit take place.
+
+    ONE QUERY FOR THE PAGE, in the shape `_owner_names` above already uses.
+    Asking per row would be an N+1 against a table that is only being consulted
+    to label a column.
+    """
+    wanted = sorted({i for i in lead_ids if i})
+    if not wanted:
+        return set()
+    rows = (db.query(PipelineConversation.lead_id)
+            .filter(PipelineConversation.lead_id.in_(wanted))
+            .filter((PipelineConversation.appointment_kept_at.isnot(None))
+                    | (PipelineConversation.stage.in_(PIPELINE_KEPT_STAGES)))
+            .all())
+    return {r[0] for r in rows}
+
+
+def _outcome_of(booking: BookingLink, kept: bool, now: datetime) -> str:
+    """What this row is allowed to claim, and nothing beyond it.
+
+    Every branch is something the database actually recorded. There is no
+    branch that turns a passed booking into an attendance, because no row says
+    that: "Awaiting outcome" is the honest name for a visit whose time has gone
+    by with nobody having said what happened, and it is a work queue rather
+    than a result.
+    """
+    status = (booking.status or "").strip().lower()
+    if status == "cancelled":
+        return "Cancelled"
+    if status == "expired":
+        return "Link expired"
+    if status in BOOKING_NEVER_SCHEDULED:
+        return "Not booked"
+    if kept:
+        return "Completed"
+    if booking.booked_time is not None and booking.booked_time < now:
+        return "Awaiting outcome"
+    return "Scheduled"
+
+
+def _appointment_row(booking: BookingLink, lead: Lead, columns, owners,
+                     kept_leads=frozenset(), now=None) -> Dict[str, Any]:
+    now = now or datetime.utcnow()
     name = " ".join(p for p in [(lead.first_name or "").strip(),
                                 (lead.last_name or "").strip()] if p).strip()
     values: Dict[str, Any] = {}
@@ -369,6 +498,8 @@ def _appointment_row(booking: BookingLink, lead: Lead, columns, owners) -> Dict[
             values[column] = booking.appt_label
         elif column == "status":
             values[column] = booking.status
+        elif column == "outcome":
+            values[column] = _outcome_of(booking, lead.id in kept_leads, now)
         elif column == "owner":
             values[column] = owners.get(str(booking.user_id or "")) or None
         elif column == "tier":
@@ -414,7 +545,12 @@ def render(db: Session, user: User, view: Dict[str, Any], *,
         rows = (scoped.order_by(BookingLink.booked_time.desc(), BookingLink.created_at.desc())
                 .limit(limit).all())
         owners = _owner_names(db, [b.user_id for b, _ in rows])
-        items = [_appointment_row(b, l, view["columns"], owners) for b, l in rows]
+        kept_leads = (_kept_lead_ids(db, [l.id for _, l in rows])
+                      if "outcome" in view["columns"] else frozenset())
+        now = datetime.utcnow()
+        items = [_appointment_row(b, l, view["columns"], owners,
+                                  kept_leads=kept_leads, now=now)
+                 for b, l in rows]
 
     return {
         "view": {k: view[k] for k in

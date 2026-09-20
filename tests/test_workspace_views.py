@@ -254,11 +254,246 @@ def test_a_cancelled_appointment_is_out_of_the_calendar_view(db_session, client)
 
 # ── THE VERTICALS THIS WAS BUILT FOR, AS CONFIGURATION ──────────────────────
 
-def test_the_home_services_template_covers_a_commercial_cleaning_customer(db_session):
-    """"cleaning" is an alias of home_services, so it needs no code of its own."""
+def test_the_cleaning_vertical_is_keyed_on_the_industry_not_a_customer(db_session):
+    """Commercial cleaning has its own template, and it is still CONFIGURATION.
+
+    It was an alias of home_services and the three screens were already right;
+    what it gained is its own vocabulary, not its own code. The thing this
+    asserts is the layering: the key is `cleaning`, an INDUSTRY, so every
+    cleaning company gets it and none of them is named anywhere.
+    """
     org = _org(db_session, "CleanCo", "cleanco", industry="cleaning")
     assert [v["key"] for v in wv.for_organization(org)] == [
         "prospects", "follow-up", "walkthroughs"]
+
+    # A second cleaning company, with no configuration of its own, gets the
+    # identical screens. That is what makes this a vertical rather than a
+    # customer.
+    other = _org(db_session, "Second Janitorial", "secondjan", industry="janitorial")
+    assert ([v["key"] for v in wv.for_organization(other)]
+            == [v["key"] for v in wv.for_organization(org)])
+
+
+# ── WHAT A WALKTHROUGH IS ───────────────────────────────────────────────────
+#
+# The screen these guard had a filter of `not_status: ["cancelled", "expired"]`,
+# which is "everything except those two" — and the status it therefore let in
+# was `pending`: a booking link that was SENT and that nobody has acted on. A
+# cleaning company that had sent forty links and booked nothing opened a page
+# titled Walkthroughs and read forty.
+#
+# None of the tests below should ever be relaxed to make a number larger.
+
+def _cleaning(db_session, name, slug):
+    return _org(db_session, name, slug, industry="cleaning")
+
+
+def _booking(db_session, lead, user, status, when=None, label="Walkthrough"):
+    link = BookingLink(lead_id=lead.id, user_id=user.id, status=status,
+                       booked_time=when, appt_label=label)
+    db_session.add(link)
+    db_session.commit()
+    return link
+
+
+def _walkthroughs(client, db_session, admin):
+    return client.get("/workspace-views/walkthroughs",
+                      headers=_headers(db_session, admin)).json()
+
+
+def _stats(body):
+    return {s["label"]: s["value"] for s in body["stats"]}
+
+
+def test_a_sent_booking_link_is_not_a_booked_walkthrough(db_session, client):
+    """THE DEFECT, stated as an assertion. A link is an invitation."""
+    org = _cleaning(db_session, "PendingCo", "pendingco")
+    admin = _admin(db_session, org, "pending@example.com")
+    lead = _lead(db_session, org, phone="12145550601", first="Northgate")
+    _booking(db_session, lead, admin, "pending")
+
+    body = _walkthroughs(client, db_session, admin)
+    assert body["total"] == 0
+    assert body["items"] == []
+    assert _stats(body)["Upcoming"] == 0
+    assert _stats(body)["Awaiting Confirmation"] == 0
+
+
+def test_an_expired_link_is_not_a_booked_walkthrough_either(db_session, client):
+    org = _cleaning(db_session, "ExpiredCo", "expiredco")
+    admin = _admin(db_session, org, "expired@example.com")
+    lead = _lead(db_session, org, phone="12145550602", first="Lapsed")
+    _booking(db_session, lead, admin, "expired")
+
+    assert _walkthroughs(client, db_session, admin)["total"] == 0
+
+
+def test_a_booked_or_confirmed_appointment_is_a_walkthrough(db_session, client):
+    """A time on the calendar is the thing that makes one exist."""
+    org = _cleaning(db_session, "BookedCo", "bookedco")
+    admin = _admin(db_session, org, "booked@example.com")
+    soon = datetime.utcnow() + timedelta(days=2)
+    booked = _lead(db_session, org, phone="12145550603", first="Booked")
+    confirmed = _lead(db_session, org, phone="12145550604", first="Confirmed")
+    _booking(db_session, booked, admin, "booked", soon)
+    _booking(db_session, confirmed, admin, "confirmed", soon)
+    # Sent but unanswered, sitting in the same workspace the whole time.
+    _booking(db_session, _lead(db_session, org, phone="12145550605"),
+             admin, "pending")
+
+    body = _walkthroughs(client, db_session, admin)
+    assert body["total"] == 2
+    stats = _stats(body)
+    assert stats["Confirmed"] == 1
+    assert stats["Awaiting Confirmation"] == 1
+    assert stats["Upcoming"] == 2
+
+
+def test_a_cancelled_walkthrough_stays_visible_and_stays_named(db_session, client):
+    """It happened as a booking. Deleting it from the history is its own lie."""
+    org = _cleaning(db_session, "CancelCo", "cancelco")
+    admin = _admin(db_session, org, "cancelled@example.com")
+    lead = _lead(db_session, org, phone="12145550606", first="Called")
+    _booking(db_session, lead, admin, "cancelled",
+             datetime.utcnow() + timedelta(days=1))
+
+    body = _walkthroughs(client, db_session, admin)
+    assert body["total"] == 1
+    assert _stats(body)["Cancelled"] == 1
+    # And it does not inflate the counters that mean a visit is coming.
+    assert _stats(body)["Upcoming"] == 0
+    assert _stats(body)["Confirmed"] == 0
+    assert body["items"][0]["values"]["outcome"] == "Cancelled"
+
+
+def test_a_walkthrough_is_completed_only_when_the_pipeline_says_so(db_session, client):
+    """A booked time that has passed is a question, not an attendance.
+
+    `booking_links` has no attended flag, no no-show and no completion
+    timestamp. Promoting a past booking to "completed" would hand a business a
+    perfect show rate on visits nobody turned up to.
+    """
+    from app.models.models import PipelineConversation
+
+    org = _cleaning(db_session, "KeptCo", "keptco")
+    admin = _admin(db_session, org, "kept@example.com")
+    lead = _lead(db_session, org, phone="12145550607", first="Yesterday")
+    _booking(db_session, lead, admin, "confirmed",
+             datetime.utcnow() - timedelta(days=1))
+
+    body = _walkthroughs(client, db_session, admin)
+    assert _stats(body)["Completed"] == 0
+    assert _stats(body)["Awaiting Outcome"] == 1
+    assert body["items"][0]["values"]["outcome"] == "Awaiting outcome"
+
+    # Now somebody records what happened. THAT is the evidence.
+    db_session.add(PipelineConversation(
+        organization_id=org.id, lead_id=lead.id, advisor_id=admin.id,
+        stage="walkthrough_completed",
+        appointment_kept_at=datetime.utcnow()))
+    db_session.commit()
+
+    body = _walkthroughs(client, db_session, admin)
+    assert _stats(body)["Completed"] == 1
+    assert _stats(body)["Awaiting Outcome"] == 0
+    assert body["items"][0]["values"]["outcome"] == "Completed"
+
+
+def test_kept_evidence_from_another_organization_counts_for_nobody(db_session, client):
+    """The conversation must belong to the same tenant as the lead.
+
+    Not redundant with the tenancy scope: that decides which LEADS are
+    readable. This decides that the EVIDENCE about them came from the same
+    customer, so a mis-set row contributes to nobody's numbers rather than to
+    the wrong one's.
+    """
+    from app.models.models import PipelineConversation
+
+    org = _cleaning(db_session, "EvidenceCo", "evidenceco")
+    other = _cleaning(db_session, "OtherCleanCo", "othercleanco")
+    admin = _admin(db_session, org, "evidence@example.com")
+    lead = _lead(db_session, org, phone="12145550608", first="Crossed")
+    _booking(db_session, lead, admin, "confirmed",
+             datetime.utcnow() - timedelta(days=1))
+    db_session.add(PipelineConversation(
+        organization_id=other.id, lead_id=lead.id, advisor_id=admin.id,
+        stage="kept", appointment_kept_at=datetime.utcnow()))
+    db_session.commit()
+
+    body = _walkthroughs(client, db_session, admin)
+    assert _stats(body)["Completed"] == 0
+    assert _stats(body)["Awaiting Outcome"] == 1
+
+
+def test_the_walkthrough_screen_cannot_show_another_customers_visits(db_session, client):
+    """The corrected filter did not buy itself an exemption from tenancy."""
+    mine = _cleaning(db_session, "MineClean", "mineclean")
+    theirs = _cleaning(db_session, "TheirsClean", "theirsclean")
+    admin = _admin(db_session, mine, "mineclean@example.com")
+    their_admin = _admin(db_session, theirs, "theirsclean@example.com")
+    soon = datetime.utcnow() + timedelta(days=2)
+    _booking(db_session, _lead(db_session, mine, phone="12145550609",
+                               first="Ours"), admin, "booked", soon)
+    _booking(db_session, _lead(db_session, theirs, phone="12145550610",
+                               first="Hidden"), their_admin, "booked", soon)
+
+    body = _walkthroughs(client, db_session, admin)
+    assert body["total"] == 1
+    assert body["items"][0]["values"]["name"] == "Ours Payer"
+
+
+# The one appointment screen still carrying the original defect, named here
+# rather than skipped silently. `energy/consultations` has the same
+# `not_status` filter that `home_services` and `cleaning` were corrected out
+# of, so it still counts pending booking links as consultations. It was left
+# unchanged because the only production organization on the `energy` template
+# is a live customer this pass was instructed not to touch, and correcting it
+# changes what that customer's screen reports. It is a one-line change of the
+# same shape as the two above, and it needs an authorization, not a decision.
+#
+# THIS LIST ONLY SHRINKS. An entry added to it is a screen that lies.
+KNOWN_UNCORRECTED_APPOINTMENT_VIEWS = {("energy", "consultations")}
+
+
+def test_no_configured_appointment_screen_counts_a_pending_link(db_session):
+    """Whatever a template calls it, an appointment screen names its statuses.
+
+    A guard against the defect coming back through a NEW vertical: the shape
+    that caused it was `not_status`, which admits every status nobody thought
+    to exclude — including the one that means "sent, unanswered". Naming the
+    statuses that mean a time exists fails closed instead.
+    """
+    from app.services import industry_templates
+
+    offenders = []
+    for key, template in industry_templates.TEMPLATES.items():
+        for view in (template.get("workspace_views") or []):
+            if view.get("source") != "appointments":
+                continue
+            statuses = (view.get("filter") or {}).get("status") or []
+            if statuses and "pending" not in statuses:
+                continue
+            offenders.append((key, view["key"]))
+
+    assert set(offenders) <= KNOWN_UNCORRECTED_APPOINTMENT_VIEWS, (
+        "an appointment screen counts sent booking links as appointments: %s"
+        % sorted(set(offenders) - KNOWN_UNCORRECTED_APPOINTMENT_VIEWS))
+
+
+def test_the_uncorrected_list_describes_screens_that_still_exist(db_session):
+    """An exemption for a screen nobody ships is a comment pretending to be a
+    guard. When `energy/consultations` is corrected, this fails until the entry
+    is removed — which is the only direction that list is allowed to move."""
+    from app.services import industry_templates
+
+    for industry, view_key in KNOWN_UNCORRECTED_APPOINTMENT_VIEWS:
+        views = industry_templates.TEMPLATES[industry].get("workspace_views") or []
+        view = next((v for v in views if v["key"] == view_key), None)
+        assert view is not None, "%s/%s no longer exists" % (industry, view_key)
+        statuses = (view.get("filter") or {}).get("status") or []
+        assert not statuses or "pending" in statuses, (
+            "%s/%s has been corrected — remove it from "
+            "KNOWN_UNCORRECTED_APPOINTMENT_VIEWS" % (industry, view_key))
 
 
 def test_no_source_file_in_this_feature_names_a_customer(db_session):

@@ -15,6 +15,7 @@ import WorkspaceAdminMenu from './WorkspaceAdminMenu'
 // keeps this from being a global redesign. See verticals/workspaceVertical.js.
 import { verticalFor, navGroupsFor, brandLines } from '../verticals/workspaceVertical'
 import '../styles/vertical-energy.css'
+import '../styles/vertical-cleaning.css'
 import './ContextSwitcher.css'
 import './Layout.css'
 

@@ -28,6 +28,12 @@ that only one customer can use is the thing this whole design exists to avoid.
   move services. The concierge screen selects on `source_detail`, so it shows
   the requests that arrived through the concierge path and nothing else.
 
-A commercial cleaning customer needs **no file here**: `cleaning` is an alias
-of `home_services`, whose template already supplies Prospects, Follow-Up and
-Walkthroughs. Leave `workspace_views` NULL and it inherits them.
+A commercial cleaning customer needs **no file here**: `cleaning` is its own
+template, and it already supplies Prospects, Follow-Up and Walkthroughs in
+that trade's own vocabulary. Leave `workspace_views` NULL and the customer
+inherits them — which is also what keeps every cleaning company on one
+configuration instead of a file each.
+
+(`cleaning` used to be an alias of `home_services`. It was promoted to a
+template of its own so the vertical could carry its own appointment types,
+board stages and tier labels; the screens it supplies are the same three.)

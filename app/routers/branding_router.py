@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Organization
+from app.services import industry_templates
 
 router = APIRouter(prefix="/branding", tags=["branding"])
 
@@ -187,7 +188,24 @@ def get_org_branding(
         "support_email": getattr(org, "support_email", None),
         "email_sender_name": getattr(org, "email_sender_name", None),
         "enabled_features": features,
-        "industry": getattr(org, "industry", None),
+        # THE CANONICAL KEY, NOT WHAT SOMEBODY TYPED.
+        #
+        # `organizations.industry` is stored raw — POST /god/customers writes
+        # whatever the caller sent — so this column legitimately holds
+        # "Commercial Cleaning", "Energy / Procurement" and "cleaning" for
+        # businesses in the same vertical. Every client-side consumer of this
+        # field then compares it to a canonical key: labels.js looks up
+        # INDUSTRY_MEMBER_LABELS, the sidebar tests `=== 'fiber'`, and
+        # verticals/workspaceVertical.js decides whether a workspace has a
+        # presentation of its own. Each of those fails SILENTLY on a raw
+        # value — the customer gets the platform's generic shell and nothing
+        # says why.
+        #
+        # Resolving here matches what GET /settings/terminology and
+        # /org-settings already return, so the browser sees one spelling of an
+        # industry rather than two. `normalize` falls back to GENERIC, never
+        # to whichever template happens to be first.
+        "industry": industry_templates.normalize(getattr(org, "industry", None)),
         # THE ROLE IN THIS WORKSPACE. The browser had only `users.role`, which
         # is one value for a whole human, so an org_admin of one customer was
         # drawn an administrator's sidebar inside every customer they could
