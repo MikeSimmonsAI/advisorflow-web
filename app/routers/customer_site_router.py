@@ -171,10 +171,17 @@ class SitePublishBody(BaseModel):
 
 
 def _base_url(db: Session, org: Organization) -> Optional[str]:
+    """The host this customer's pages are served from.
+
+    `app_base_url` used to answer this and it is the wrong host: that is where
+    the React app is served, and its catch-all route renders the SPA for every
+    unknown path — so the address this produced returned 200 and showed "That
+    page doesn't exist". See customer_sites.site_base_url.
+    """
     if not org.platform_id:
         return None
     platform = db.query(Platform).filter(Platform.id == org.platform_id).first()
-    return getattr(platform, "app_base_url", None) if platform else None
+    return customer_sites.site_base_url(platform)
 
 
 @god_router.get("/{organization_id}")

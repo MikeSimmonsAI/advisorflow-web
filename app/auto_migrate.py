@@ -615,6 +615,13 @@ COLUMNS_TO_ADD = [
     ("platforms", "support_phone", "VARCHAR"),
     ("platforms", "website_url", "VARCHAR"),
     ("platforms", "app_base_url", "VARCHAR"),
+    # The host a brand serves its CUSTOMERS' public pages from, which is the
+    # backend, not the app. Nullable and deliberately not backfilled from
+    # `app_base_url`: that value is the React host, and building customer site
+    # addresses out of it is the defect this column exists to end. NULL means
+    # "no site host configured for this brand" and the publisher refuses to
+    # print an absolute URL. See the column comment on Platform.
+    ("platforms", "sites_base_url", "VARCHAR"),
     # Attribution, added with the outbound-visibility work. Both nullable with
     # no default on purpose: NULL means "written before the platform recorded
     # this", which is a different fact from any real source value, and nothing

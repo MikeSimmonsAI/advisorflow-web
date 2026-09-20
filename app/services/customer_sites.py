@@ -85,10 +85,41 @@ def slug_error(slug: str) -> Optional[str]:
     return None
 
 
-def public_url(base_url: Optional[str], slug: str) -> str:
-    """The address to hand the customer. The base comes from their brand."""
+def public_url(base_url: Optional[str], slug: str) -> Optional[str]:
+    """The address to hand the customer, or None if the brand has no site host.
+
+    RETURNS None RATHER THAN A RELATIVE PATH. An empty base used to produce
+    "/site/<slug>", which reads as a URL, gets copied into an email, and
+    resolves against whatever host the reader happens to be on. There is no
+    useful absolute address to give without a configured host, and saying so
+    is the only honest answer.
+    """
     base = (base_url or "").rstrip("/")
+    if not base:
+        return None
     return "%s/site/%s" % (base, slug)
+
+
+def site_base_url(platform) -> Optional[str]:
+    """The host this brand serves customer pages from. NOT the app host.
+
+    THE ONE PLACE THAT ANSWERS THIS, because it was answered in two and both
+    were wrong in the same way: the publisher script and the god API each read
+    `platform.app_base_url`, which is where the React app lives. Its router
+    answers every unknown path with the SPA, so a customer site URL built from
+    it returned 200 and rendered "That page doesn't exist" — a broken address
+    that looked like a working one, printed as the address to hand a customer.
+
+    No fallback to `app_base_url`. Producing that URL is the defect.
+    """
+    if platform is None:
+        return None
+    value = (getattr(platform, "sites_base_url", None) or "").strip().rstrip("/")
+    if not value:
+        return None
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    return "https://" + value
 
 
 # ── PUBLISHING ───────────────────────────────────────────────────────────────

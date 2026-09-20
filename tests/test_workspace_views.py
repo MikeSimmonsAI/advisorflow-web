@@ -239,7 +239,20 @@ def test_an_appointment_view_reads_bookings_in_scope_only(db_session, client):
     assert {s["label"]: s["value"] for s in body["stats"]}["Upcoming"] == 1
 
 
-def test_a_cancelled_appointment_is_out_of_the_calendar_view(db_session, client):
+def test_a_cancelled_appointment_is_out_of_every_live_counter(db_session, client):
+    """WHAT THIS TEST USED TO SAY, AND WHY IT SAYS SOMETHING ELSE NOW.
+
+    It asserted `total == 0`: a cancelled appointment was filtered off the
+    screen entirely. That fell out of the old `not_status` filter rather than
+    from a decision, and it is the wrong answer — the appointment HAPPENED and
+    was then called off, and dropping it deletes that from the customer's own
+    history. The corrected screen keeps it, labelled.
+
+    The property this was really protecting is the one still asserted here: a
+    cancelled appointment must not be counted anywhere that means a visit is
+    coming. See test_a_cancelled_consultation_stays_visible_and_stays_named
+    below for the other half.
+    """
     org = _org(db_session, "ApptCancel", "apptcancel", industry="energy")
     admin = _admin(db_session, org, "cancel@example.com")
     lead = _lead(db_session, org, phone="12145550501")
@@ -249,7 +262,12 @@ def test_a_cancelled_appointment_is_out_of_the_calendar_view(db_session, client)
     db_session.commit()
     body = client.get("/workspace-views/consultations",
                       headers=_headers(db_session, admin)).json()
-    assert body["total"] == 0
+    stats = {s["label"]: s["value"] for s in body["stats"]}
+    assert stats["Upcoming"] == 0
+    assert stats["Confirmed"] == 0
+    assert stats["Awaiting Confirmation"] == 0
+    assert stats["Completed"] == 0
+    assert stats["Cancelled"] == 1
 
 
 # ── THE VERTICALS THIS WAS BUILT FOR, AS CONFIGURATION ──────────────────────
@@ -442,17 +460,164 @@ def test_the_walkthrough_screen_cannot_show_another_customers_visits(db_session,
     assert body["items"][0]["values"]["name"] == "Ours Payer"
 
 
-# The one appointment screen still carrying the original defect, named here
-# rather than skipped silently. `energy/consultations` has the same
-# `not_status` filter that `home_services` and `cleaning` were corrected out
-# of, so it still counts pending booking links as consultations. It was left
-# unchanged because the only production organization on the `energy` template
-# is a live customer this pass was instructed not to touch, and correcting it
-# changes what that customer's screen reports. It is a one-line change of the
-# same shape as the two above, and it needs an authorization, not a decision.
+# ── THE SAME TRUTH, ON THE OTHER VERTICAL'S SCREEN ──────────────────────────
+#
+# `energy/consultations` is the same question over the same table under a
+# different noun. These are deliberately the walkthrough assertions again
+# rather than a lighter version of them: the point of a shared vocabulary is
+# that a screen cannot quietly mean something else.
+
+def _consultations(client, db_session, admin):
+    return client.get("/workspace-views/consultations",
+                      headers=_headers(db_session, admin)).json()
+
+
+def test_a_sent_booking_link_is_not_a_consultation(db_session, client):
+    org = _org(db_session, "PendingEnergy", "pendingenergy", industry="energy")
+    admin = _admin(db_session, org, "pendingenergy@example.com")
+    _booking(db_session, _lead(db_session, org, phone="12145550701"),
+             admin, "pending")
+
+    body = _consultations(client, db_session, admin)
+    assert body["total"] == 0
+    assert _stats(body)["Upcoming"] == 0
+
+
+def test_an_expired_link_is_not_a_consultation(db_session, client):
+    org = _org(db_session, "ExpiredEnergy", "expiredenergy", industry="energy")
+    admin = _admin(db_session, org, "expiredenergy@example.com")
+    _booking(db_session, _lead(db_session, org, phone="12145550702"),
+             admin, "expired")
+    assert _consultations(client, db_session, admin)["total"] == 0
+
+
+def test_a_booked_or_confirmed_appointment_is_a_consultation(db_session, client):
+    org = _org(db_session, "BookedEnergy", "bookedenergy", industry="energy")
+    admin = _admin(db_session, org, "bookedenergy@example.com")
+    soon = datetime.utcnow() + timedelta(days=2)
+    _booking(db_session, _lead(db_session, org, phone="12145550703", first="Booked"),
+             admin, "booked", soon)
+    _booking(db_session, _lead(db_session, org, phone="12145550704", first="Confirmed"),
+             admin, "confirmed", soon)
+    _booking(db_session, _lead(db_session, org, phone="12145550705"),
+             admin, "pending")
+
+    body = _consultations(client, db_session, admin)
+    assert body["total"] == 2
+    stats = _stats(body)
+    assert stats["Confirmed"] == 1
+    assert stats["Awaiting Confirmation"] == 1
+    assert stats["Upcoming"] == 2
+
+
+def test_a_cancelled_consultation_stays_visible_and_stays_named(db_session, client):
+    org = _org(db_session, "CancelEnergy", "cancelenergy", industry="energy")
+    admin = _admin(db_session, org, "cancelenergy@example.com")
+    _booking(db_session, _lead(db_session, org, phone="12145550706", first="Called"),
+             admin, "cancelled", datetime.utcnow() + timedelta(days=1))
+
+    body = _consultations(client, db_session, admin)
+    assert body["total"] == 1
+    assert _stats(body)["Cancelled"] == 1
+    assert _stats(body)["Upcoming"] == 0
+    assert body["items"][0]["values"]["outcome"] == "Cancelled"
+
+
+def test_a_consultation_is_completed_only_when_the_pipeline_says_so(db_session, client):
+    """A booked time that has passed is a question, not an attendance — and
+    the answer comes from the same place it does for a walkthrough."""
+    from app.models.models import PipelineConversation
+
+    org = _org(db_session, "KeptEnergy", "keptenergy", industry="energy")
+    admin = _admin(db_session, org, "keptenergy@example.com")
+    lead = _lead(db_session, org, phone="12145550707", first="Yesterday")
+    _booking(db_session, lead, admin, "confirmed",
+             datetime.utcnow() - timedelta(days=1))
+
+    body = _consultations(client, db_session, admin)
+    assert _stats(body)["Completed"] == 0
+    assert _stats(body)["Awaiting Outcome"] == 1
+    assert body["items"][0]["values"]["outcome"] == "Awaiting outcome"
+
+    db_session.add(PipelineConversation(
+        organization_id=org.id, lead_id=lead.id, advisor_id=admin.id,
+        stage="kept", appointment_kept_at=datetime.utcnow()))
+    db_session.commit()
+
+    body = _consultations(client, db_session, admin)
+    assert _stats(body)["Completed"] == 1
+    assert _stats(body)["Awaiting Outcome"] == 0
+    assert body["items"][0]["values"]["outcome"] == "Completed"
+
+
+def test_the_customer_configuration_beside_the_template_was_corrected_too(db_session):
+    """THE HALF-FIX THIS CATCHES, WHICH IS THE EASY ONE TO SHIP.
+
+    A customer's `workspace_views` column REPLACES its industry's list; it
+    does not merge with it. So the energy template and the JSON file a real
+    customer was configured from each held a copy of this screen, and
+    correcting only the template would have changed nothing for the workspace
+    anybody would actually have opened to check.
+    """
+    import json as _json
+    import pathlib
+
+    from app.services import industry_templates
+
+    path = (pathlib.Path(__file__).resolve().parent.parent / "config"
+            / "workspace-views" / "energy-retail-with-move-concierge.json")
+    shipped = {v["key"]: v for v in _json.loads(path.read_text(encoding="utf-8"))}
+    template = {v["key"]: v for v in
+                industry_templates.TEMPLATES["energy"]["workspace_views"]}
+
+    assert shipped["consultations"]["filter"] == template["consultations"]["filter"], (
+        "the file a customer is configured from and the template it came from "
+        "disagree about what a consultation is")
+    assert ([s["label"] for s in shipped["consultations"]["stats"]]
+            == [s["label"] for s in template["consultations"]["stats"]])
+
+
+# NOTHING IS EXEMPT ANY MORE.
+#
+# This list held ("energy", "consultations") while that one screen still
+# carried the original `not_status` filter: the only production workspace on
+# the energy template is a live customer, and correcting it changes what that
+# customer's screen reports, so it waited for an authorization rather than
+# being decided here. It has been corrected, and the entry is gone.
 #
 # THIS LIST ONLY SHRINKS. An entry added to it is a screen that lies.
-KNOWN_UNCORRECTED_APPOINTMENT_VIEWS = {("energy", "consultations")}
+KNOWN_UNCORRECTED_APPOINTMENT_VIEWS = set()
+
+
+def _appointment_views():
+    """(source, key) -> filter, for every appointment screen that ships.
+
+    BOTH LAYERS, because a customer's own `workspace_views` column REPLACES
+    its industry's list rather than merging with it — so a template corrected
+    while the JSON beside it still says the old thing fixes nothing for the
+    customer configured from that file. That is exactly how this defect
+    survived its first correction: the energy template and
+    config/workspace-views/*.json each carried a copy, and only one of them
+    was being read by the workspace anybody would have looked at.
+    """
+    import json as _json
+    import pathlib
+
+    from app.services import industry_templates
+
+    out = {}
+    for key, template in industry_templates.TEMPLATES.items():
+        for view in (template.get("workspace_views") or []):
+            if view.get("source") == "appointments":
+                out[("template:%s" % key, view["key"])] = view.get("filter") or {}
+
+    config_dir = (pathlib.Path(__file__).resolve().parent.parent
+                  / "config" / "workspace-views")
+    for path in config_dir.glob("*.json"):
+        for view in _json.loads(path.read_text(encoding="utf-8")):
+            if view.get("source") == "appointments":
+                out[("config:%s" % path.name, view["key"])] = view.get("filter") or {}
+    return out
 
 
 def test_no_configured_appointment_screen_counts_a_pending_link(db_session):
@@ -463,37 +628,64 @@ def test_no_configured_appointment_screen_counts_a_pending_link(db_session):
     to exclude — including the one that means "sent, unanswered". Naming the
     statuses that mean a time exists fails closed instead.
     """
-    from app.services import industry_templates
-
     offenders = []
-    for key, template in industry_templates.TEMPLATES.items():
-        for view in (template.get("workspace_views") or []):
-            if view.get("source") != "appointments":
-                continue
-            statuses = (view.get("filter") or {}).get("status") or []
-            if statuses and "pending" not in statuses:
-                continue
-            offenders.append((key, view["key"]))
+    for (where, key), spec in _appointment_views().items():
+        statuses = spec.get("status") or []
+        if statuses and "pending" not in statuses:
+            continue
+        offenders.append((where, key))
 
-    assert set(offenders) <= KNOWN_UNCORRECTED_APPOINTMENT_VIEWS, (
+    assert not offenders, (
         "an appointment screen counts sent booking links as appointments: %s"
-        % sorted(set(offenders) - KNOWN_UNCORRECTED_APPOINTMENT_VIEWS))
+        % sorted(offenders))
+    assert not KNOWN_UNCORRECTED_APPOINTMENT_VIEWS, (
+        "the exemption list is not empty: %s"
+        % sorted(KNOWN_UNCORRECTED_APPOINTMENT_VIEWS))
 
 
-def test_the_uncorrected_list_describes_screens_that_still_exist(db_session):
-    """An exemption for a screen nobody ships is a comment pretending to be a
-    guard. When `energy/consultations` is corrected, this fails until the entry
-    is removed — which is the only direction that list is allowed to move."""
+def test_every_appointment_screen_counts_an_outcome_the_same_way(db_session):
+    """ONE TRUTH MODEL, NOT ONE PER VERTICAL.
+
+    Each of these screens answers the same three questions about the same
+    table. If one of them counted "Completed" from `past: true` while another
+    read the pipeline, a customer moving between them — or an operator
+    comparing two customers — would be reading two different definitions of
+    the same word, and only one of them would be true.
+    """
+    for (where, key), _spec in _appointment_views().items():
+        views = _shipped_view(where, key)
+        labels = {s["label"]: s.get("filter") or {} for s in (views.get("stats") or [])}
+        assert "Completed" in labels, "%s/%s has no completed counter" % (where, key)
+        assert labels["Completed"].get("kept") is True, (
+            "%s/%s counts Completed from something other than the pipeline's "
+            "own record that the visit happened" % (where, key))
+        assert "Awaiting Outcome" in labels, (
+            "%s/%s has nowhere to put a visit whose time has passed with no "
+            "outcome recorded, so it has to guess" % (where, key))
+        assert labels["Awaiting Outcome"].get("kept") is False, (
+            "%s/%s's awaiting-outcome queue is not the absence of evidence"
+            % (where, key))
+        assert "Cancelled" in labels, (
+            "%s/%s drops cancelled appointments instead of naming them"
+            % (where, key))
+        assert "outcome" in (views.get("columns") or []), (
+            "%s/%s does not render the outcome it now computes" % (where, key))
+
+
+def _shipped_view(where, key):
+    import json as _json
+    import pathlib
+
     from app.services import industry_templates
 
-    for industry, view_key in KNOWN_UNCORRECTED_APPOINTMENT_VIEWS:
-        views = industry_templates.TEMPLATES[industry].get("workspace_views") or []
-        view = next((v for v in views if v["key"] == view_key), None)
-        assert view is not None, "%s/%s no longer exists" % (industry, view_key)
-        statuses = (view.get("filter") or {}).get("status") or []
-        assert not statuses or "pending" in statuses, (
-            "%s/%s has been corrected — remove it from "
-            "KNOWN_UNCORRECTED_APPOINTMENT_VIEWS" % (industry, view_key))
+    kind, name = where.split(":", 1)
+    if kind == "template":
+        views = industry_templates.TEMPLATES[name].get("workspace_views") or []
+    else:
+        path = (pathlib.Path(__file__).resolve().parent.parent
+                / "config" / "workspace-views" / name)
+        views = _json.loads(path.read_text(encoding="utf-8"))
+    return next(v for v in views if v["key"] == key)
 
 
 def test_no_source_file_in_this_feature_names_a_customer(db_session):

@@ -46,6 +46,23 @@ USAGE
 
 Nothing is written without --apply. Run it without, read what it says it will
 do, then run it again with.
+
+WHERE THIS RUNS, AND WHY IT IS NOT DEPLOYED CODE
+------------------------------------------------
+The backend web service never imports this file and no route reaches it. It is
+operator tooling: a person runs it, reads what it says, and runs it again with
+--apply. So it is deliberately OUTSIDE the runtime deployment — `scripts/**`
+is in every Python service's `ignoredPaths` in render.yaml, and that is
+correct. A change here must not rebuild and restart four live services for a
+tool nobody is executing at that moment.
+
+The consequence, stated plainly because it is surprising the first time: a
+commit that touches only `scripts/**` does not reach the server. The copy on
+the instance is whatever the last app-triggered build carried. To run the
+current version against production, either let it ride along with the next
+backend deploy, or use Render's "Manual Deploy → Deploy latest commit", which
+ignores build filters. Do not edit the build filter to make this file appear
+on a server that never needs to execute it.
 """
 
 import argparse

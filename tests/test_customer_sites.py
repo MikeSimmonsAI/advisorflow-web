@@ -49,6 +49,115 @@ def _publish(db_session, org, slug="energy-co", **kw):
                       title=org.name, **kw)
 
 
+# ── WHICH HOST A CUSTOMER'S PAGE IS ACTUALLY ON ─────────────────────────────
+#
+# THE DEFECT THESE GUARD, WHICH SHIPPED AND WAS FOUND BY CLICKING THE LINK.
+#
+# A customer page is served by the BACKEND at `/site/<slug>`. The publisher
+# and the god API each built its address from `platform.app_base_url` — the
+# host the React app is served from. That static site's catch-all route
+# answers every unknown path with `index.html`, so
+# `https://app.evosyspro.live/site/atlantis-light-and-power` returned 200 and
+# rendered "That page doesn't exist" inside the logged-in application.
+#
+# Nothing in the system disagreed with that URL. It was printed as the address
+# to hand the customer, which is an address that goes on stationery.
+
+def _platform(db_session, **kw):
+    import uuid
+
+    from app.models.models import Platform
+
+    plat = Platform(name=kw.pop("name", "EvoSys Pro"),
+                    slug="p-" + uuid.uuid4().hex[:8], **kw)
+    db_session.add(plat)
+    db_session.commit()
+    return plat
+
+
+def test_the_site_host_is_never_the_app_host(db_session):
+    """A brand with an app host and no site host gets NO site URL.
+
+    Falling back to `app_base_url` is precisely how the broken address was
+    produced, so the fallback is what must not exist.
+    """
+    plat = _platform(db_session, app_base_url="https://app.example.live")
+    assert cs.site_base_url(plat) is None
+
+
+def test_the_site_host_is_the_one_configured_for_sites(db_session):
+    plat = _platform(db_session, app_base_url="https://app.example.live",
+                     sites_base_url="https://sites.example.live")
+    assert cs.site_base_url(plat) == "https://sites.example.live"
+    assert (cs.public_url(cs.site_base_url(plat), "acme-co")
+            == "https://sites.example.live/site/acme-co")
+
+
+def test_a_bare_host_is_accepted_and_made_absolute(db_session):
+    """`Platform.domain` is stored bare, so an operator will type this one bare
+    too. A scheme-less value would otherwise produce
+    "sites.example.live/site/acme-co", which is a relative path."""
+    plat = _platform(db_session, sites_base_url="sites.example.live")
+    assert cs.site_base_url(plat) == "https://sites.example.live"
+
+
+def test_a_trailing_slash_does_not_double_up(db_session):
+    plat = _platform(db_session, sites_base_url="https://sites.example.live/")
+    assert (cs.public_url(cs.site_base_url(plat), "acme-co")
+            == "https://sites.example.live/site/acme-co")
+
+
+def test_no_host_means_no_url_rather_than_a_relative_one(db_session):
+    """It used to return "/site/<slug>". That reads as an address, gets pasted
+    into an email, and resolves against whatever host the reader is on."""
+    assert cs.public_url(None, "acme-co") is None
+    assert cs.public_url("", "acme-co") is None
+
+
+def test_a_brand_with_no_platform_row_gets_no_url(db_session):
+    assert cs.site_base_url(None) is None
+
+
+def test_the_api_answer_omits_the_url_when_there_is_no_site_host(db_session):
+    """`out()` is what the god screen renders. A missing host has to surface
+    there as an absent URL, not as a path that looks like one."""
+    org = _org(db_session, "NoHostCo", "nohostco")
+    site = _publish(db_session, org, slug="nohost-co")
+    assert cs.out(site, base_url=None)["url"] is None
+
+
+def test_neither_publisher_reads_the_app_host_any_more():
+    """Both call sites, asserted at the source. They were wrong in the same
+    way, which is what happens when two places answer one question."""
+    import io
+    import pathlib
+    import tokenize
+
+    def _code(path):
+        """The file's tokens, minus comments and strings.
+
+        Both of these files EXPLAIN at length that they no longer read the app
+        host, and the explanation names it — so a plain substring search fails
+        on the sentence promising the thing it is checking for.
+        """
+        source = path.read_text(encoding="utf-8")
+        return " ".join(
+            tok.string for tok in
+            tokenize.generate_tokens(io.StringIO(source).readline)
+            if tok.type not in (tokenize.COMMENT, tokenize.STRING))
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for relative in ("scripts/publish_customer_site.py",
+                     "app/routers/customer_site_router.py"):
+        code = _code(root / relative)
+        assert "app_base_url" not in code, (
+            "%s still builds a customer site address out of the app host"
+            % relative)
+        assert "site_base_url" in code, (
+            "%s does not resolve the site host through the one place that "
+            "answers it" % relative)
+
+
 # ── PUBLISHING ──────────────────────────────────────────────────────────────
 
 def test_publishing_keeps_the_address_across_republishes(db_session):

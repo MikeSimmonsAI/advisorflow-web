@@ -98,7 +98,12 @@ def main():
             raise SystemExit("No organization with id %r." % args.org_id)
         platform = (db.query(Platform).filter(Platform.id == org.platform_id).first()
                     if org.platform_id else None)
-        base = getattr(platform, "app_base_url", None) if platform else None
+        # NOT `app_base_url`. That is the host the React app is served from,
+        # and its catch-all route answers every unknown path with the SPA — so
+        # a customer site address built from it returns 200 and renders "That
+        # page doesn't exist", which this script then printed as the address to
+        # hand the customer. See customer_sites.site_base_url.
+        base = customer_sites.site_base_url(platform)
 
         existing = customer_sites.resolve(db, args.slug)
         print("Organization : %s (%s)" % (org.name, org.id))
@@ -113,9 +118,12 @@ def main():
                  if existing is not None else "CREATE a new page"))
         if existing is not None and existing.organization_id != org.id:
             raise SystemExit("That address belongs to another customer.")
+        url = customer_sites.public_url(base, args.slug)
         print("Public URL   : %s"
-              % (customer_sites.public_url(base, args.slug) if base
-                 else "/site/%s (the brand has no app_base_url set)" % args.slug))
+              % (url or "NONE — this brand has no `sites_base_url` set, so "
+                        "there is no address to hand the customer. The page "
+                        "will still publish and still be served at "
+                        "/site/%s on the backend." % args.slug))
 
         if not args.apply:
             print("\nDRY RUN. Nothing was written. Re-run with --apply.")

@@ -337,15 +337,42 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
                 "group": "Operate",
                 "icon": "calendar",
                 "title": "Consultations",
-                "subtitle": "Booked appointments, and who they belong to.",
+                "subtitle": "Appointments that have a time on the calendar, "
+                            "and who they belong to.",
                 "source": "appointments",
-                "filter": {"not_status": ["cancelled", "expired"]},
+                # THE SAME CORRECTION AS home_services AND cleaning, and it was
+                # made here last because the only workspace on this template is
+                # a live customer.
+                #
+                # `not_status: ["cancelled", "expired"]` is every status EXCEPT
+                # those two, and the one it admitted was `pending`: a booking
+                # link that went out and that nobody has acted on. Those were
+                # counted as consultations, so a workspace that had sent links
+                # and booked nothing read a calendar full of appointments that
+                # do not exist.
+                #
+                # Naming the statuses that mean a time exists also fails
+                # closed: a status added to booking_links later joins this
+                # screen when somebody decides it should, not by default.
+                # Cancelled is named deliberately — it was a real appointment
+                # and stays visible, labelled, rather than vanishing from the
+                # customer's own history.
+                "filter": {"status": ["booked", "confirmed", "cancelled"]},
                 "columns": ["name", "contact", "booked_time", "appt_label",
-                            "status", "owner"],
+                            "status", "outcome", "owner"],
                 "stats": [
-                    {"label": "Upcoming", "filter": {"upcoming": True}},
+                    {"label": "Upcoming",
+                     "filter": {"upcoming": True, "status": ["booked", "confirmed"]}},
                     {"label": "Confirmed", "filter": {"status": ["confirmed"]}},
                     {"label": "Awaiting Confirmation", "filter": {"status": ["booked"]}},
+                    # Evidence from `pipeline_conversations`, never from the
+                    # clock. See PIPELINE_KEPT_STAGES in workspace_views.
+                    {"label": "Completed",
+                     "filter": {"kept": True, "status": ["booked", "confirmed"]}},
+                    {"label": "Awaiting Outcome",
+                     "filter": {"past": True, "kept": False,
+                                "status": ["booked", "confirmed"]}},
+                    {"label": "Cancelled", "filter": {"status": ["cancelled"]}},
                 ],
                 "empty": "Nothing on the calendar yet.",
             },

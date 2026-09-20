@@ -199,6 +199,30 @@ class Platform(Base):
     website_url         = Column(String, nullable=True)   # marketing site
     app_base_url        = Column(String, nullable=True)   # customer-facing app host
 
+    # WHERE THIS BRAND SERVES ITS CUSTOMERS' OWN WEBSITES, and it is NOT
+    # `app_base_url`.
+    #
+    # THE DEFECT THIS CLOSES. A customer's public page is served by the
+    # BACKEND at `/site/<slug>`. The publisher built its address from
+    # `app_base_url`, which is the host the React app is served from — a
+    # static site whose catch-all route answers every unknown path with the
+    # SPA. So `https://app.evosyspro.live/site/atlantis-light-and-power`
+    # resolved, returned 200, and rendered "That page doesn't exist" inside
+    # the logged-in application. The publisher printed that URL as the address
+    # to hand the customer, and nothing in the system disagreed with it.
+    #
+    # Two hosts, two jobs: the app host is where a person signs in, and this
+    # is where their customers' visitors land. Conflating them is not a
+    # configuration mistake anybody can see in a config file — it only shows
+    # up when somebody opens the link.
+    #
+    # NULL IS A REFUSAL, NOT A FALLBACK. A brand with no site host configured
+    # gets no absolute URL at all, and the publisher says so. Falling back to
+    # `app_base_url` is exactly how the broken address was produced, and a URL
+    # that 404s quietly is worse than an obviously missing one: it goes on
+    # stationery.
+    sites_base_url      = Column(String, nullable=True)   # customer public-site host
+
     # WHERE THIS BRAND'S PUBLIC LEADS LAND. Set by an operator, verified on
     # every use, and the ONLY thing allowed to answer that question.
     #

@@ -57,14 +57,17 @@
     "group": "Operate",
     "icon": "calendar",
     "title": "Consultations",
-    "subtitle": "Booked appointments, and who they belong to.",
+    "subtitle": "Appointments that have a time on the calendar, and who they belong to.",
     "source": "appointments",
-    "filter": {"not_status": ["cancelled", "expired"]},
-    "columns": ["name", "contact", "booked_time", "appt_label", "status", "owner"],
+    "filter": {"status": ["booked", "confirmed", "cancelled"]},
+    "columns": ["name", "contact", "booked_time", "appt_label", "status", "outcome", "owner"],
     "stats": [
-      {"label": "Upcoming", "filter": {"upcoming": true}},
+      {"label": "Upcoming", "filter": {"upcoming": true, "status": ["booked", "confirmed"]}},
       {"label": "Confirmed", "filter": {"status": ["confirmed"]}},
-      {"label": "Awaiting Confirmation", "filter": {"status": ["booked"]}}
+      {"label": "Awaiting Confirmation", "filter": {"status": ["booked"]}},
+      {"label": "Completed", "filter": {"kept": true, "status": ["booked", "confirmed"]}},
+      {"label": "Awaiting Outcome", "filter": {"past": true, "kept": false, "status": ["booked", "confirmed"]}},
+      {"label": "Cancelled", "filter": {"status": ["cancelled"]}}
     ],
     "empty": "Nothing on the calendar yet."
   }
