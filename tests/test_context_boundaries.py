@@ -90,16 +90,37 @@ def test_the_bare_path_platform_tools_are_listed():
 
 
 def test_the_api_client_gates_the_override_on_route_authority():
-    """THE fix. One line, and it is the whole defence."""
+    """THE fix. One decision, and it is the whole defence.
+
+    The gate used to be an expression inline in `request()`. It is now
+    `routeAuthority.orgOverrideFor`, which answers the same question with one
+    more input — an explicitly named customer, for the single request made
+    DURING a transition, when the address bar still names the screen being
+    left rather than the workspace being entered. See tests/test_workspace_
+    entry.py for what that was breaking.
+
+    What this test guards is unchanged: the client must not decide the header
+    for itself, and the route must still gate the AMBIENT selection.
+    """
     src = _read(API_CLIENT)
-    assert "shouldSendOrgOverride" in src, (
+    assert "orgOverrideFor" in src, (
         "the API client still sends X-Org-Override from wherever the user "
         "happens to be standing")
-    # The gate must actually be in the expression that decides orgCtx.
-    m = re.search(r"const orgCtx = .*", src)
-    assert m and "routeAllowsOrg" in m.group(0), (
+    m = re.search(r"const orgOverride = .*", src)
+    assert m, "the override assignment was not found in client.js"
+    assert "orgOverrideFor(" in m.group(0), (
         "the route gate is imported but not applied to the override: %s"
-        % (m.group(0) if m else "orgCtx assignment not found"))
+        % m.group(0))
+
+    # And the gate itself still exists, still asks the route, and still
+    # answers "no override" for a platform surface.
+    authority = _read(ROUTE_AUTHORITY)
+    gate = authority[authority.index("export function orgOverrideFor"):]
+    assert "shouldSendOrgOverride(pathname)" in gate, (
+        "orgOverrideFor no longer consults the route, so the ambient customer "
+        "selection would be sent from platform tools again")
+    assert "if (noOrgContext) return null" in gate, (
+        "the explicit platform-wide opt-out was dropped")
 
 
 def test_the_customer_default_is_the_safe_direction():
