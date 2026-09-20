@@ -162,6 +162,15 @@ export default function EnergyOverview() {
   // renders as the design's card with an honest body instead.
   const renewalDue = statValue(renewals, 'Renewal Due')
   const underContract = statValue(renewals, 'Under Contract')
+
+  // "NOT CONFIGURED" IS A CLAIM, AND IT IS FALSE WHILE THE ANSWER IS STILL IN
+  // FLIGHT. Each card reads its own payload, which is null both before the
+  // request returns and when the workspace genuinely has no such screen.
+  // Saying the second during the first tells the reader their workspace is
+  // misconfigured for a second and a half, every time they open the page.
+  const missing = (payload, sentence) =>
+    (payload ? null : (loading ? 'Reading this workspace…' : sentence))
+
   const kpis = [
     {
       key: 'new-leads',
@@ -178,9 +187,8 @@ export default function EnergyOverview() {
       label: 'Open Rate Requests',
       tag: hasView(VIEW_RATE_REQUESTS) ? 'Live' : null,
       value: num(rateRequests?.total ?? null),
-      sub: rateRequests
-        ? `${num(statValue(rateRequests, 'Options Sent') ?? 0)} waiting on the customer · ${num(statValue(rateRequests, 'Unassigned') ?? 0)} unassigned`
-        : 'This screen is not configured for this workspace.',
+      sub: missing(rateRequests, 'This screen is not configured for this workspace.')
+        || `${num(statValue(rateRequests, 'Options Sent') ?? 0)} waiting on the customer · ${num(statValue(rateRequests, 'Unassigned') ?? 0)} unassigned`,
       to: hasView(VIEW_RATE_REQUESTS) ? `/view/${VIEW_RATE_REQUESTS}` : null,
       tone: 'cyan',
     },
@@ -199,9 +207,8 @@ export default function EnergyOverview() {
       label: 'Renewal Watch',
       tag: hasView(VIEW_RENEWALS) ? 'Renewal window' : null,
       value: num(renewalDue ?? null),
-      sub: renewals
-        ? `${num(underContract ?? 0)} under contract in total.`
-        : 'This screen is not configured for this workspace.',
+      sub: missing(renewals, 'This screen is not configured for this workspace.')
+        || `${num(underContract ?? 0)} under contract in total.`,
       to: hasView(VIEW_RENEWALS) ? `/view/${VIEW_RENEWALS}` : null,
       tone: 'amber',
     },

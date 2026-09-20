@@ -276,6 +276,57 @@ def test_every_skin_is_actually_loaded_by_the_shell(key):
         "paints nothing" % key)
 
 
+def test_a_workspaces_vocabulary_cache_is_keyed_on_the_organization():
+    """THE BUG THIS CAUGHT, FOUND ON A LIVE CLIENT DASHBOARD.
+
+    `af_terminology` was keyed on `getWorkspaceContext()` — the
+    `X-Workspace-Id` header a member sets when switching between their own
+    workspaces. That header is NULL for an operator who enters a customer
+    through God Mode, because that context lives on the server. So every
+    customer entered that way shared one cache key, "default", and the second
+    one inherited the first one's vocabulary: a newly created cleaning
+    company's dashboard opened headed with another customer's company name.
+
+    The key has to be the organization the server actually resolved, whichever
+    way the reader got there.
+    """
+    body = _text(ROOT / "frontend" / "src" / "terminology.js")
+    assert "getBranding" in body, \
+        "terminology.js no longer reads the resolved organization"
+    assert "organization_id" in body, \
+        "the cache key does not mention the organization it is keyed on"
+
+
+def test_the_vocabulary_cache_is_dropped_wherever_the_branding_cache_is():
+    """`clearTerminology` existed and was called from NOWHERE.
+
+    The two caches answer the same question — which customer is this — so one
+    surviving a switch the other did not is a screen showing two customers at
+    once. Every site that drops the branding cache has to drop this one too.
+    """
+    for relative in ("frontend/src/components/Layout.jsx",
+                     "frontend/src/pages/god/enterCustomer.js"):
+        body = _text(ROOT / relative)
+        branding = body.count("clearBranding()")
+        vocabulary = body.count("clearTerminology()")
+        assert branding > 0, "%s no longer clears branding at all" % relative
+        assert vocabulary >= branding, (
+            "%s drops the branding cache %d time(s) and the vocabulary cache "
+            "%d — the two describe the same workspace"
+            % (relative, branding, vocabulary))
+
+
+def test_a_vertical_dashboard_does_not_call_a_loading_screen_misconfigured():
+    """A card whose payload has not arrived is not a card whose screen is
+    missing. Saying so tells a client their account is broken for as long as
+    the request takes, every time they open the page."""
+    for key in VERTICALS:
+        body = _text(VERTICALS[key]["overview"])
+        assert "const missing = (payload, sentence) =>" in body, (
+            "%s asserts 'not configured' without distinguishing 'not loaded "
+            "yet'" % VERTICALS[key]["overview"].name)
+
+
 def test_the_skin_is_applied_and_removed_by_the_shell():
     """Set on entry and removed on exit. A skin left behind after switching
     workspace paints one customer's rail in another's colours, which is the

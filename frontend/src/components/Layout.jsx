@@ -14,6 +14,9 @@ import WorkspaceAdminMenu from './WorkspaceAdminMenu'
 // whose industry has one configured; null for everybody else, which is what
 // keeps this from being a global redesign. See verticals/workspaceVertical.js.
 import { verticalFor, navGroupsFor, brandLines } from '../verticals/workspaceVertical'
+// The workspace's vocabulary cache, dropped alongside its branding cache.
+// They answer the same question and must not be allowed to disagree.
+import { clearTerminology } from '../terminology'
 import '../styles/vertical-energy.css'
 import '../styles/vertical-cleaning.css'
 import './ContextSwitcher.css'
@@ -411,6 +414,10 @@ export default function Layout({ children }) {
   function handleExitOrg() {
     clearOrgContext()
     clearBranding()
+    // The vocabulary cache describes the same workspace the branding cache
+    // does. Dropping one and keeping the other is how a customer's company
+    // name outlived the customer. See terminology.js.
+    clearTerminology()
     setOrgCtx(null)
     window.location.href = '/'
   }
@@ -440,6 +447,7 @@ export default function Layout({ children }) {
       clearOrgContext()
       clearBrandContext()
       clearBranding()
+      clearTerminology()
       setOrgCtx(null)
       window.location.href = '/god'
     } else {
@@ -454,6 +462,7 @@ export default function Layout({ children }) {
         // Fall back to local context only if the server call fails
         setOrgContext(org.id, org.name)
         clearBranding()
+        clearTerminology()
         setOrgCtx({ orgId: org.id, orgName: org.name })
         window.location.href = '/god/customer-app'
       }

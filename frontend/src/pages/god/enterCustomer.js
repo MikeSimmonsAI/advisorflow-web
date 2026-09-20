@@ -20,6 +20,10 @@
  */
 import { api, setOrgContext, setBrandContext, clearOrgContext, clearBranding,
          fetchAndStoreBranding } from '../../api/client'
+// THE SECOND CACHE THAT DESCRIBES THIS WORKSPACE. `af_branding` and
+// `af_terminology` answer the same question — which customer is this — and
+// only the first was ever dropped on a switch. See the call sites below.
+import { clearTerminology } from '../../terminology'
 
 /**
  * Enter a customer organization's context.
@@ -51,6 +55,14 @@ export async function enterCustomer(orgId, orgName) {
   // `enabled_features` — an allow-list keyed to one organization. Keeping it
   // would render the previous customer's modules under this customer's banner.
   clearBranding()
+  // AND THE VOCABULARY WITH IT, for the same reason and because of the same
+  // bug found twice. `clearTerminology` existed and was called from nowhere,
+  // so the words AND the company name from the customer entered last survived
+  // the switch — and the terminology cache key was the `X-Workspace-Id`
+  // header, which is null for an operator who entered through God Mode, so
+  // every customer entered this way shared one key. The result was a client
+  // dashboard headed with another customer's company name.
+  clearTerminology()
 
   // AND THE NEW ONE IS FETCHED BEFORE THE REDIRECT, not after the first paint.
   //
@@ -86,4 +98,5 @@ export async function exitCustomer() {
   // Same reason as entering: the allow-list left behind belongs to the
   // customer just left, and nothing outside a customer should render from it.
   clearBranding()
+  clearTerminology()
 }

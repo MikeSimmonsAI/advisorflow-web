@@ -199,15 +199,22 @@ export default function CleaningOverview() {
     ? null
     : Number(wtConfirmed || 0) + Number(wtAwaitingConfirmation || 0)
 
+  // "NOT CONFIGURED" IS A CLAIM, AND IT IS FALSE WHILE THE ANSWER IS STILL IN
+  // FLIGHT. Each of these cards reads its own payload, which is null both
+  // before the request returns and when the workspace genuinely has no such
+  // screen. Saying the second thing during the first is how a dashboard tells
+  // a client their account is misconfigured for a second and a half.
+  const missing = (payload, sentence) =>
+    (payload ? null : (loading ? 'Reading this account…' : sentence))
+
   const kpis = [
     {
       key: 'sourced',
       label: 'Prospects Sourced',
       tag: hasView(VIEW_PROSPECTS) ? 'On the account' : null,
       value: num(sourced),
-      sub: prospects
-        ? 'Businesses on this account right now, excluding dead and do-not-contact.'
-        : 'This screen is not configured for this account.',
+      sub: missing(prospects, 'This screen is not configured for this account.')
+        || 'Businesses on this account right now, excluding dead and do-not-contact.',
       to: hasView(VIEW_PROSPECTS) ? `/view/${VIEW_PROSPECTS}` : null,
       tone: 'blue',
     },
@@ -226,21 +233,23 @@ export default function CleaningOverview() {
       label: 'Follow-Ups',
       tag: hasView(VIEW_FOLLOW_UP) ? 'Active queue' : null,
       value: num(followUpTotal),
-      sub: followUp
-        ? `${num(statValue(followUp, 'Replied') ?? 0)} replied · ${num(statValue(followUp, 'Quiet 7+ Days') ?? 0)} quiet 7+ days`
-        : 'This screen is not configured for this account.',
+      sub: missing(followUp, 'This screen is not configured for this account.')
+        || `${num(statValue(followUp, 'Replied') ?? 0)} replied · ${num(statValue(followUp, 'Quiet 7+ Days') ?? 0)} quiet 7+ days`,
       to: hasView(VIEW_FOLLOW_UP) ? `/view/${VIEW_FOLLOW_UP}` : null,
       tone: 'amber',
     },
     {
       key: 'interested',
       label: 'Interested',
-      tag: interested === null ? 'Not yet available' : 'In the pipeline',
+      tag: loading ? null : (interested === null ? 'Not yet available' : 'In the pipeline'),
       value: interested === null ? null : num(interested),
-      sub: interested === null
-        ? 'This counts prospects a person moved to Interested on the pipeline '
-        + 'board. The board is not answering for this account right now.'
-        : 'Prospects a person moved to Interested or Walkthrough Offered.',
+      sub: (loading && interested === null)
+        ? 'Reading this account…'
+        : (interested === null
+            ? 'This counts prospects a person moved to Interested on the '
+            + 'pipeline board. The board is not answering for this account '
+            + 'right now.'
+            : 'Prospects a person moved to Interested or Walkthrough Offered.'),
       to: interested === null ? null : '/pipeline',
       tone: 'green',
     },
@@ -249,9 +258,8 @@ export default function CleaningOverview() {
       label: 'Walkthroughs Booked',
       tag: hasView(VIEW_WALKTHROUGHS) ? 'Time on the calendar' : null,
       value: num(booked),
-      sub: walkthroughs
-        ? `${num(wtUpcoming ?? 0)} still upcoming. A booking link that was sent and not acted on is not counted.`
-        : 'This screen is not configured for this account.',
+      sub: missing(walkthroughs, 'This screen is not configured for this account.')
+        || `${num(wtUpcoming ?? 0)} still upcoming. A booking link that was sent and not acted on is not counted.`,
       to: hasView(VIEW_WALKTHROUGHS) ? `/view/${VIEW_WALKTHROUGHS}` : null,
       tone: 'blue',
     },

@@ -38,7 +38,7 @@
  * supposed to come from.
  */
 import { useEffect, useState } from 'react'
-import { api, getWorkspaceContext } from './api/client'
+import { api, getBranding, getWorkspaceContext } from './api/client'
 
 /* ── neutral starting point ───────────────────────────────────────────────── */
 
@@ -124,10 +124,24 @@ export function metricLabels(appointmentsPlural) {
 // KEYED BY WORKSPACE. A person who holds two customer workspaces switches
 // between them in one session, and serving the first one's vocabulary inside
 // the second is a tenant leak of exactly the kind this module exists to stop.
+//
+// THE ORGANIZATION, NOT ONLY THE HEADER. `getWorkspaceContext()` is the
+// `X-Workspace-Id` a member sets when switching between their own workspaces —
+// and it is null for an operator who entered a customer through God Mode,
+// because that context lives on the SERVER. So every customer entered that way
+// shared one cache key, "default", and the second one inherited the first
+// one's vocabulary: a client dashboard that greeted the reader with another
+// customer's company name, which is how this was found.
+//
+// `branding.organization_id` is the workspace the server actually resolved,
+// however the reader got there, so it is the correct key. The header is kept
+// as a fallback for the moment before branding has loaded.
 const CACHE_PREFIX = 'af_terminology:'
 
 function cacheKey() {
-  return CACHE_PREFIX + (getWorkspaceContext() || 'default')
+  let org = null
+  try { org = (getBranding() || {}).organization_id || null } catch (e) { org = null }
+  return CACHE_PREFIX + (org || getWorkspaceContext() || 'default')
 }
 
 let memo = { key: null, value: null }
@@ -234,10 +248,30 @@ export function getTerminology() {
  */
 export function useTerminology() {
   const [term, setTerm] = useState(() => getTerminology())
+  // THE ACTIVE ORGANIZATION IS A DEPENDENCY, and it was not.
+  //
+  // The effect ran once per mount with no deps, and switching customer does
+  // not remount the screens — so the vocabulary and company name of the
+  // customer that was open first stayed on screen inside the second one. The
+  // same is true of a first paint: branding is fetched asynchronously, so the
+  // answer this hook gets before it lands is the answer for whatever was
+  // cached, and nothing re-asked afterwards.
+  //
+  // Read during render rather than subscribed to, because the components that
+  // call this already re-render when branding arrives (useWorkspaceAuthority)
+  // — so this value changes on that render and the effect re-runs then.
+  let activeOrg = null
+  try { activeOrg = (getBranding() || {}).organization_id || null } catch (e) { activeOrg = null }
+  const workspace = activeOrg || getWorkspaceContext() || 'default'
+
   useEffect(() => {
     let alive = true
+    // Re-read the cache synchronously too: the key has changed, so what is
+    // currently in state belongs to the previous workspace and must not stay
+    // on screen while the fetch is in flight.
+    setTerm(getTerminology())
     fetchTerminology().then(value => { if (alive) setTerm(value) })
     return () => { alive = false }
-  }, [])
+  }, [workspace])
   return term
 }
