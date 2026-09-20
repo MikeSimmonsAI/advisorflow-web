@@ -133,6 +133,42 @@ export function shouldSendOrgOverride(pathname) {
 }
 
 /**
+ * WHICH CUSTOMER THIS ONE REQUEST IS ABOUT — the whole decision, in one place.
+ *
+ * `request()` in api/client.js used to make this decision inline, and it had
+ * exactly one input: where the browser was standing. That is right for every
+ * request a SCREEN makes, and wrong for the one made DURING a transition.
+ *
+ * THE PRODUCTION DEFECT THAT PUT THIS FUNCTION HERE. Entering a customer from
+ * God Mode clears the branding cache and re-reads `/branding/org` so the
+ * workspace opens on the customer's own presentation. That read happens while
+ * the address bar still says `/god`, which classifies as PLATFORM — so the
+ * header was stripped from the very call whose purpose was to read the
+ * customer being entered. The server answered for the neutral owner,
+ * `industry: null` was cached, and the app then navigated into a workspace
+ * whose dashboard, rail and vocabulary are all chosen from `industry`. The
+ * customer's own screens were replaced by the platform's generic ones until
+ * somebody pressed refresh.
+ *
+ * So the rule is: an EXPLICIT customer wins, because the caller knows
+ * something the address bar does not; otherwise the route decides, exactly as
+ * before. `noOrgContext` still opts a platform-wide read out from inside
+ * customer space.
+ *
+ * Returns the organization id to send, or null for "send no override".
+ *
+ * This lives in this module — which imports nothing — so it can be exercised
+ * directly. See tests/frontend/workspaceEntry.test.mjs.
+ */
+export function orgOverrideFor(pathname, { orgId = null, noOrgContext = false,
+                                           asCustomer = null } = {}) {
+  if (asCustomer) return asCustomer
+  if (noOrgContext) return null
+  if (!shouldSendOrgOverride(pathname)) return null
+  return orgId || null
+}
+
+/**
  * Should the "VIEWING AS <customer>" banner appear here?
  *
  * Same rule, and deliberately the same function's answer: the banner must mean

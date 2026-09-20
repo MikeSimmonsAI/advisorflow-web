@@ -401,6 +401,17 @@ export default function Layout({ children }) {
   // line below that consumes it falls through to the platform behaviour.
   const vertical = verticalFor(branding)
 
+  // WHICH WORKSPACE THE ROUTED PAGE BELONGS TO.
+  //
+  // The organization the SERVER resolved, not the one stored locally: it is
+  // the same value every screen below renders from, so a page keyed on it
+  // cannot disagree with the rail beside it. The org context is in the key as
+  // well for the moment before the branding answer lands, when the two are
+  // briefly the only evidence of a switch. Used by the boundary around
+  // `children` at the bottom of this file — the comment there says why.
+  const workspaceKey = [branding?.organization_id || '',
+                        orgContext?.orgId || ''].join('|')
+
   // The skin is CSS keyed on an attribute, not a stylesheet swap: one
   // attribute on <html> re-points the design tokens that index.css already
   // defines, so panels, tables, badges and empty states follow without any
@@ -918,9 +929,24 @@ export default function Layout({ children }) {
         {/* ONE PAGE FAILING MUST NOT TAKE THE RAIL WITH IT. Keyed on the
             pathname so the boundary resets on navigation — an error boundary
             latches, and one that never clears would show its card on every
-            page after the first failure. See PageBoundary. */}
+            page after the first failure. See PageBoundary.
+
+            AND KEYED ON THE ACTIVE WORKSPACE, WHICH IS A SEPARATE FAILURE.
+            `children` is an element this component RECEIVES, so when Layout
+            re-renders from its own state — which is what happens when the
+            branding answer lands — React compares the same element object to
+            itself and skips the subtree entirely. The rail, the skin and the
+            vocabulary all updated; the page in the middle of them did not,
+            and went on showing the previous context until a manual browser
+            refresh. Naming the organization in the key makes a workspace
+            change a REMOUNT rather than an update, so the routed page cannot
+            outlive the customer it was rendered for. The pathname alone could
+            not catch it: entering a customer from God Mode and switching from
+            one customer to another both land on the same path. */}
         <main className="main-content">
-          <PageBoundary key={location.pathname}>{children}</PageBoundary>
+          <PageBoundary key={location.pathname + '\u0000' + workspaceKey}>
+            {children}
+          </PageBoundary>
         </main>
       </div>
       <ProfileOnboarding />

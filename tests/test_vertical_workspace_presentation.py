@@ -636,12 +636,23 @@ def test_a_page_failure_does_not_unmount_the_workspace_shell():
     It is keyed on the path so that navigating away from a screen that failed
     clears the failure — without that, one bad page poisons the shell for the
     rest of the session, which is the symptom this was fixing.
+
+    AND ON THE ACTIVE WORKSPACE, which a later pass added for a second reason:
+    `children` is an element Layout receives, so a Layout re-render compares it
+    to itself and skips the subtree. Entering a customer from God Mode left the
+    previous context's page mounted under a correct rail. The path could not
+    tell those apart — entering a customer and switching between two customers
+    both land on "/" — so the organization is in the key too. See
+    tests/test_workspace_entry.py.
     """
     layout = _text(LAYOUT)
     assert "import PageBoundary from './PageBoundary'" in layout, \
         "Layout.jsx no longer imports the page boundary"
-    assert "<PageBoundary key={location.pathname}>" in layout, \
+    assert "<PageBoundary key={location.pathname" in layout, \
         "the routed page is not wrapped in a boundary keyed on the route"
+    assert "workspaceKey}>" in layout, \
+        "the boundary is keyed on the route alone again, so a workspace switch " \
+        "leaves the previous customer's page mounted"
 
 
 def test_the_page_boundary_fixes_nothing_by_reloading():

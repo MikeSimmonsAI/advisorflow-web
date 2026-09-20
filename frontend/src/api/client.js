@@ -10,7 +10,7 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflo
 // copy the value to the new key, and delete the old one so existing sessions
 // survive the rename without being logged out.
 
-import { shouldSendOrgOverride } from '../auth/routeAuthority'
+import { orgOverrideFor } from '../auth/routeAuthority'
 const KEY_TOKEN    = 'af_token'
 const KEY_USER     = 'af_user'
 const KEY_BRANDING = 'af_branding'
@@ -65,7 +65,7 @@ function sleep(ms) {
 // THE OPTIONS THAT ARE OURS, NOT `fetch`'s. Everything else in `options` is
 // spread into fetch() verbatim, so anything we invent has to be named here or
 // it silently becomes a no-op property on the request init object.
-const CLIENT_ONLY_OPTIONS = ['params', 'noOrgContext', 'skipRedirect']
+const CLIENT_ONLY_OPTIONS = ['params', 'noOrgContext', 'skipRedirect', 'asCustomer']
 
 /**
  * Serialise a `params` object onto a path as a query string.
@@ -131,10 +131,31 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   // customer app does not mean picking them again — it is simply not SENT
   // where it does not belong. `noOrgContext` remains the explicit opt-out for
   // platform-wide reads made from inside customer space.
-  const routeAllowsOrg = shouldSendOrgOverride(
-    typeof window !== 'undefined' ? window.location.pathname : '/')
-  const orgCtx = (options.noOrgContext || !routeAllowsOrg) ? null : getOrgContext()
-  if (orgCtx) headers['X-Org-Override'] = orgCtx.orgId
+  //
+  // AND `asCustomer` IS THE ONE WAY TO SAY IT EXPLICITLY.
+  //
+  // THE DEFECT THAT NAMES THIS OPTION. Deciding the header from
+  // `window.location.pathname` is right for every request a SCREEN makes —
+  // the screen you are on is what the request is about. It is wrong for the
+  // one request made DURING a transition, before the browser has moved:
+  // `enterCustomer` clears the branding cache and re-reads `/branding/org`
+  // while the address bar still says `/god`, which classifies as PLATFORM, so
+  // the header was stripped from the very call whose entire purpose was to
+  // read the customer being entered. The server answered for the neutral
+  // owner — `industry: null` — that answer was cached, and the app then
+  // navigated to a workspace whose dashboard, rail and vocabulary are all
+  // chosen from `industry`. The customer got the platform's generic shell.
+  //
+  // This is a per-call, caller-supplied organization: it reopens nothing,
+  // because the leak that the route rule closed was the header being sent
+  // IMPLICITLY from wherever somebody happened to be standing. The server
+  // authorizes it exactly as before.
+  const orgOverride = orgOverrideFor(
+    typeof window !== 'undefined' ? window.location.pathname : '/',
+    { orgId: getOrgContext()?.orgId || null,
+      noOrgContext: !!options.noOrgContext,
+      asCustomer: options.asCustomer || null })
+  if (orgOverride) headers['X-Org-Override'] = orgOverride
   // THE BRAND TRAVELS WITH THE REQUEST TOO.
   //
   // A brand used to be inferred from whichever customer was selected, so
@@ -285,11 +306,17 @@ const _inFlightGets = new Map()
 function _getDedupeKey(path, opts) {
   // Read the same scoping values `request()` reads, so the key cannot drift
   // from the headers actually sent.
-  const org = opts.noOrgContext ? '' : (getOrgContext()?.orgId || '')
+  // `asCustomer` is a SCOPING value, so it belongs in the key like the rest.
+  // Left out, the entry-time read of /branding/org could be merged with a
+  // platform-context read of the same path already in flight — which is the
+  // same wrong answer this option exists to stop, arriving by another route.
+  const org = opts.asCustomer
+    || (opts.noOrgContext ? '' : (getOrgContext()?.orgId || ''))
   const brand = getBrandContext()?.platformId || ''
   const ws = getWorkspaceContext() || ''
   const obs = _observationOrgId || ''
-  const flags = [opts.noOrgContext ? 1 : 0, opts.skipRedirect ? 1 : 0].join('')
+  const flags = [opts.noOrgContext ? 1 : 0, opts.skipRedirect ? 1 : 0,
+                 opts.asCustomer ? 1 : 0].join('')
   const route = typeof window !== 'undefined' ? window.location.pathname : '/'
   return [path, org, brand, ws, obs, flags, route].join('\u0000')
 }
@@ -492,10 +519,16 @@ export function stopRefreshLoop() {
  *        without God Mode silently taking on the customer's colours, favicon
  *        and document title.
  */
-export async function fetchAndStoreBranding({ applyTheme = true } = {}) {
+export async function fetchAndStoreBranding({ applyTheme = true,
+                                              asCustomer = null } = {}) {
   try {
-    // Primary source: per-org branding set by god_admin in Command Center
-    const data = await api.get('/branding/org', { skipRedirect: true })
+    // Primary source: per-org branding set by god_admin in Command Center.
+    //
+    // `asCustomer` NAMES THE WORKSPACE THIS ANSWER IS ABOUT, and the one
+    // caller that passes it is the one that cannot rely on the address bar:
+    // entering a customer reads this while still standing on /god. See the
+    // `asCustomer` block in request().
+    const data = await api.get('/branding/org', { skipRedirect: true, asCustomer })
     const branding = {
       brand_name: data.brand_name || null,
       brand_logo_url: data.brand_logo_url || null,
@@ -526,7 +559,7 @@ export async function fetchAndStoreBranding({ applyTheme = true } = {}) {
   } catch {
     // Fall back to org-settings for backward compat
     try {
-      const data = await api.get('/org-settings/', { skipRedirect: true })
+      const data = await api.get('/org-settings/', { skipRedirect: true, asCustomer })
       const branding = {
         brand_name: data.brand_name || data.name || null,
         brand_logo_url: data.brand_logo_url || null,

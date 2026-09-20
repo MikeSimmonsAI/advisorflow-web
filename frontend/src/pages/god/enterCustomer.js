@@ -82,7 +82,26 @@ export async function enterCustomer(orgId, orgName) {
     setBrandContext(r.context.platform.id, r.context.platform.name)
   }
 
-  try { await fetchAndStoreBranding({ applyTheme: false }) } catch (_) { /* open */ }
+  // AND IT IS FETCHED AS THIS CUSTOMER, NOT AS WHEREVER WE ARE STANDING.
+  //
+  // THE DEFECT THIS CLOSES, FOUND IN PRODUCTION. `request()` decides whether
+  // to send `X-Org-Override` from `window.location.pathname` — correct for
+  // every request a screen makes, and wrong for this one, which happens
+  // DURING the transition while the address bar still reads `/god`. That
+  // classifies as a platform route, the header was stripped, and the server
+  // answered for the neutral owner: `industry: null`. That answer was cached,
+  // the app navigated into the workspace, and the customer's own dashboard,
+  // rail and vocabulary — all chosen from `industry` — fell back to the
+  // platform's generic shell. A second, later fetch from inside the workspace
+  // corrected the cache and the rail, but the routed page had already
+  // rendered and does not re-render, so it stayed the platform dashboard
+  // until a manual browser refresh.
+  //
+  // Naming the organization makes the request about the customer being
+  // entered rather than about where the browser happens to be.
+  try {
+    await fetchAndStoreBranding({ applyTheme: false, asCustomer: orgId })
+  } catch (_) { /* open */ }
 
   return r ? r.context : null
 }
