@@ -84,6 +84,24 @@ def test_today_survives_a_volume_that_defeated_the_browser_filter(
                         on=now, tzname="UTC")
     assert out["total"] == 400
 
+    # AND THE SAME ANSWER WHEN THE CALLER ONLY WANTS A FEW ROWS.
+    #
+    # The counts used to be tallied from the truncated `items` list, so
+    # `total` was not the day's count — it was the page size. A summary tile
+    # asking for one row read "1 sent today" on a day with four hundred, which
+    # is the same silent cap this endpoint was written to end, one layer in.
+    small = ar.sent_today(db_session, sample_org.id, limit=10,
+                          on=now, tzname="UTC")
+    assert small["total"] == 400, \
+        "the day's total is the page size again"
+    assert small["returned"] == 10
+    assert len(small["items"]) == 10
+    assert small["by_channel"] == {"sms": 400}
+    assert small["leads_contacted"] == 1
+    assert small["contacted_more_than_once"] == 1
+    assert small["items"][0]["touches_today"] == 400, \
+        "a row's repeat-touch count is counted off the page rather than the day"
+
 
 def test_today_separates_the_actor_from_the_family_facing_advisor(
         db_session, sample_org, sample_advisor, second_advisor):

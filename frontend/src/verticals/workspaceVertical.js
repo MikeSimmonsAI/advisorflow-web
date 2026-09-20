@@ -146,6 +146,37 @@ const CLEANING = {
   ],
 }
 
+/**
+ * THE CLEANING BOARD, IN READING ORDER, FOR PRESENTATION ONLY.
+ *
+ * `/pipeline/stats` returns `by_stage` as raw keys and counts, because
+ * `pipeline_conversations.stage` is a free string column — that is what lets a
+ * vertical have its own vocabulary without a schema change. Somebody still has
+ * to decide what order those keys read in and what a human calls them, and
+ * that is presentation, which is what this file is.
+ *
+ * THIS IS NOT A SECOND SOURCE OF TRUTH. The keys are owned by
+ * app/services/industry_templates.CRM_STAGE_OBJECTS; the counts are the
+ * server's. A key the server returns that is not listed here is still
+ * rendered, de-underscored, rather than hidden — a stage silently missing from
+ * a report is worse than one with an unpolished label.
+ */
+export const CLEANING_STAGES = [
+  { key: 'new', label: 'New' },
+  { key: 'attempted', label: 'Attempted' },
+  { key: 'contacted', label: 'Contacted' },
+  { key: 'decision_maker_found', label: 'Decision maker found' },
+  { key: 'interested', label: 'Interested' },
+  { key: 'follow_up', label: 'Follow-up' },
+  { key: 'walkthrough_offered', label: 'Walkthrough offered' },
+  { key: 'walkthrough_booked', label: 'Walkthrough booked' },
+  { key: 'walkthrough_confirmed', label: 'Walkthrough confirmed' },
+  { key: 'walkthrough_completed', label: 'Walkthrough completed' },
+  { key: 'proposal', label: 'Proposal' },
+  { key: 'won', label: 'Won' },
+  { key: 'lost', label: 'Lost' },
+]
+
 const BY_INDUSTRY = {
   [VERTICAL_ENERGY]: ENERGY,
   [VERTICAL_CLEANING]: CLEANING,

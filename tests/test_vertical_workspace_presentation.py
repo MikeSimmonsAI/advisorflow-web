@@ -51,6 +51,11 @@ VERTICALS = {
         "skin": _STYLES / "vertical-cleaning.css",
         "overview": _VERTICAL_PAGES / "CleaningOverview.jsx",
         "overview_css": _VERTICAL_PAGES / "CleaningOverview.css",
+        # A vertical may also replace the reporting screen. The platform's
+        # generic one exposes every metric the platform can compute, which for
+        # a trade that runs none of them is somebody else's report.
+        "reports": _VERTICAL_PAGES / "CleaningReports.jsx",
+        "reports_css": _VERTICAL_PAGES / "CleaningReports.css",
     },
 }
 
@@ -61,11 +66,30 @@ PRESENTATION_FILES = tuple(
     + [v["skin"] for v in VERTICALS.values()]
     + [v["overview"] for v in VERTICALS.values()]
     + [v["overview_css"] for v in VERTICALS.values()]
+    + [v[k] for v in VERTICALS.values() for k in ("reports", "reports_css")
+       if k in v]
 )
+
+# The verticals that replace the reporting screen as well as the dashboard.
+REPORTING_VERTICALS = sorted(k for k, v in VERTICALS.items() if "reports" in v)
 
 
 def _text(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _without_comments(path: pathlib.Path) -> str:
+    """The source with its prose removed.
+
+    THE TEST THAT MATCHED ITS OWN EXPLANATION. A guard that forbids a word
+    anywhere in a file also forbids the comment explaining why that word is
+    forbidden — which happened twice on this codebase and was fixed the same
+    way on the Python side, with a tokenizer. This is the JSX equivalent, and
+    it is deliberately coarse: it removes block and line comments and nothing
+    else, so anything the component could actually render still counts.
+    """
+    body = re.sub(r"/\*.*?\*/", " ", _text(path), flags=re.S)
+    return re.sub(r"^\s*//.*$", " ", body, flags=re.M)
 
 
 def _block(key: str) -> str:
@@ -463,3 +487,175 @@ def test_the_hierarchy_strip_is_not_printed_over_a_customers_own_product():
     body = _text(ROOT / "frontend" / "src" / "components" / "ContextBanner.jsx")
     assert "if (inVerticalWorkspace) return null" in body
     assert "verticalFor(getBranding())" in body
+
+
+# ── a vertical's reporting screen ───────────────────────────────────────────
+
+@pytest.mark.parametrize("key", REPORTING_VERTICALS)
+def test_every_vertical_reports_screen_is_reachable_from_the_reports_switch(key):
+    """The same guard as the dashboard switch, for the same reason.
+
+    A reporting screen nobody routes to is a file. Each vertical's component
+    has to be imported AND named in the switch, or its workspace silently
+    keeps the platform reports screen the whole exercise was to replace.
+    """
+    body = _text(ROOT / "frontend" / "src" / "pages" / "Reports.jsx")
+    component = VERTICALS[key]["reports"].stem
+    assert "import %s from './vertical/%s'" % (component, component) in body, \
+        "Reports.jsx does not import %s" % component
+    assert "<%s />" % component in body, \
+        "Reports.jsx never renders %s" % component
+
+
+def test_the_platform_reports_screen_is_still_what_everyone_else_gets():
+    """The fallthrough is the line that matters: losing it is how every other
+    customer on the platform loses their reports."""
+    body = _text(ROOT / "frontend" / "src" / "pages" / "Reports.jsx")
+    assert "return <PlatformReports />" in body
+    assert "verticalFor(branding)" in body
+
+
+def test_the_cleaning_reports_screen_shows_no_platform_only_metrics():
+    """WHAT A COMMERCIAL CLEANING COMPANY DOES NOT HAVE.
+
+    The generic reports component exposes everything the platform can count,
+    including things this trade never produces: AI auto-responses, brand-sales
+    opportunity value, revenue by period, deathcare outcomes. Displaying one
+    of them because the component offers it is how a client's own report fills
+    up with vocabulary from somebody else's business.
+    """
+    body = _without_comments(VERTICALS["cleaning"]["reports"]).lower()
+    for forbidden in ("ai auto", "auto-response", "opportunity value",
+                      "revenue by period", "arrangement", "at-need",
+                      "pre-need"):
+        assert forbidden not in body, \
+            "the cleaning reports screen displays %r" % forbidden
+
+
+def test_the_cleaning_reports_screen_invents_no_numbers():
+    """No sample data, no fabricated percentages, no demo trend.
+
+    Every rate on the screen goes through one helper that answers null for an
+    empty denominator rather than 0% — because "nobody has been contacted yet"
+    and "we contacted nobody successfully" are different facts and only one of
+    them is true on a new account.
+    """
+    body = _text(VERTICALS["cleaning"]["reports"])
+    assert "function rate(part, whole)" in body, \
+        "the cleaning reports screen no longer routes its rates through one helper"
+    assert "if (part === null || part === undefined || !whole) return null" in body, \
+        "a rate with an empty denominator no longer answers 'not yet available'"
+
+
+@pytest.mark.parametrize("key", REPORTING_VERTICALS)
+def test_a_vertical_reports_screen_reloads_when_the_workspace_changes(key):
+    """Switching customer does not remount these components.
+
+    The organization is in the effect's dependency list because a god
+    administrator entering a workspace changes the ACTIVE organization without
+    changing either the workspace header or the signed-in identity — and a
+    reporting screen that does not notice keeps the previous customer's
+    figures on screen under the new customer's name.
+    """
+    body = _text(VERTICALS[key]["reports"])
+    assert "[identityKey, workspaceKey, orgKey]" in body, \
+        "%s does not re-read when the active organization changes" % key
+
+
+def test_the_cleaning_dashboard_names_its_scope_and_not_a_god_view():
+    """NO "GOD VIEW — ALL ORGANIZATIONS" INSIDE A CUSTOMER'S WORKSPACE.
+
+    The banner that sat over a client's own figures claimed a scope those
+    figures did not have. The chip that replaced it says the true thing, and
+    it says it on the customer's dashboard where the claim was read.
+    """
+    body = _text(VERTICALS["cleaning"]["overview"])
+    assert "god view" not in body.lower()
+    assert "This account only" in body, \
+        "the cleaning dashboard no longer states the scope it reports on"
+
+
+def test_the_cleaning_dashboard_reads_the_account_name_rather_than_printing_one():
+    """THE APPROVED CONCEPT'S HEADER, WITH THE DEMO CUSTOMER TAKEN OUT.
+
+    The design puts the account's own name where a page title usually goes,
+    under a "CLIENT DASHBOARD" eyebrow. That name is the one the server
+    resolved for the ACTIVE workspace — the customer-name guard above already
+    forbids the literal, and this asserts the replacement is a read.
+    """
+    body = _text(VERTICALS["cleaning"]["overview"])
+    assert "<div className=\"co-eyebrow\">Client Dashboard</div>" in body, \
+        "the dashboard lost the eyebrow that names the screen"
+    assert "<h1>{orgName}</h1>" in body, \
+        "the dashboard heading is no longer the active account's own name"
+    assert "terminology.orgName" in body, \
+        "the account name is not read from the resolved workspace"
+
+
+def test_the_cleaning_dashboard_keeps_the_approved_panels():
+    """The two panels the approved concept puts side by side, by name.
+
+    They were both missing from the first production build — the dashboard had
+    drifted into a table of recently ADDED prospects and no VA panel at all —
+    which is what the correction pass was called for.
+    """
+    body = _text(VERTICALS["cleaning"]["overview"])
+    for panel in ("Your Workflow", "Recently Worked Prospects",
+                  "Recent VA Activity"):
+        assert ">%s<" % panel in body or "<h3>%s</h3>" % panel in body, \
+            "the cleaning dashboard no longer renders the %r panel" % panel
+
+
+def test_the_cleaning_dashboard_reads_recently_worked_from_the_prospects_view():
+    """"RECENTLY WORKED" HAS TO MEAN WORKED.
+
+    The panel used to read `/leads/?page=1&page_size=8`, which the server
+    orders `created_at DESC` — recently ADDED, under a heading that says
+    otherwise. On a freshly imported list those are the rows nobody has
+    touched. The prospects workspace view orders `updated_at DESC` through the
+    same authorized query the Prospects screen uses, so the panel and the
+    screen it links to can never disagree.
+    """
+    body = _text(VERTICALS["cleaning"]["overview"])
+    assert "prospects?.items" in body, \
+        "the panel no longer reads the prospects view's own rows"
+    assert "/leads/?page=1&page_size=8" not in body, \
+        "the panel is back on created_at ordering under a 'worked' heading"
+
+
+# ── one screen failing is not the whole application failing ─────────────────
+
+def test_a_page_failure_does_not_unmount_the_workspace_shell():
+    """WHAT A BLANK PAGE ACTUALLY WAS.
+
+    React 18 unmounts the entire tree on an error that escapes render, so one
+    reporting page throwing took the navigation rail with it and every
+    subsequent client-side navigation rendered nothing. A boundary around the
+    routed page keeps the failure the size of the page.
+
+    It is keyed on the path so that navigating away from a screen that failed
+    clears the failure — without that, one bad page poisons the shell for the
+    rest of the session, which is the symptom this was fixing.
+    """
+    layout = _text(LAYOUT)
+    assert "import PageBoundary from './PageBoundary'" in layout, \
+        "Layout.jsx no longer imports the page boundary"
+    assert "<PageBoundary key={location.pathname}>" in layout, \
+        "the routed page is not wrapped in a boundary keyed on the route"
+
+
+def test_the_page_boundary_fixes_nothing_by_reloading():
+    """THE FIXES THAT WERE RULED OUT, HELD OUT.
+
+    A boundary that reloads the window, navigates hard or retries on a timer
+    hides the exception instead of containing it — and hides it from whoever
+    has to find the cause, which on this page was a dict where a list was
+    expected. Recovery is a button the reader presses.
+    """
+    body = _text(ROOT / "frontend" / "src" / "components" / "PageBoundary.jsx")
+    for forbidden in ("window.location.reload", "window.location.href",
+                      "window.location.assign", "setTimeout"):
+        assert forbidden not in body, \
+            "PageBoundary papers over the failure with %s" % forbidden
+    assert "componentDidCatch" in body, \
+        "PageBoundary no longer logs the cause anywhere"

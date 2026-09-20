@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { useWorkspaceAuthority } from '../auth/workspaceAuthority'
+// WHICH REPORTS SCREEN THIS WORKSPACE GETS. Same one decision the Overview
+// route already takes, for the same reason: the generic reporting component
+// exposes every metric the platform can compute, and most of them mean
+// nothing to a commercial cleaning company. See verticals/workspaceVertical.js.
+import { verticalFor, VERTICAL_CLEANING } from '../verticals/workspaceVertical'
+import CleaningReports from './vertical/CleaningReports'
 import '../styles/shared.css'
 import './Reports.css'
 
@@ -8,6 +15,38 @@ function pct(v) {
   return `${n % 1 === 0 ? n : n.toFixed(1)}%`
 }
 function num(v) { return Number(v || 0).toLocaleString() }
+
+/* A LIST OF ROWS, WHATEVER THE SERVER SENT.
+ *
+ * `crm-summary.stage_counts` was a `{stage: count}` OBJECT and this page read
+ * it as an array: `(stage_counts || []).slice(0, 4)`. An object is truthy, so
+ * the `|| []` guard never fired, `.slice` is not a function on it, and the
+ * TypeError escaped render — which unmounts React's whole tree, navigation
+ * rail included. The application was a blank page until a full reload.
+ *
+ * The server now sends rows. This stays because the lesson is not "that one
+ * endpoint was wrong": a reporting payload is data from over the network, and
+ * a page that assumes its shape can take the entire app down when it changes.
+ * Anything unrecognisable becomes an empty list rather than an exception.
+ */
+function rows(value, keyName = 'stage', valueName = 'count') {
+  if (Array.isArray(value)) return value
+  if (value && typeof value === 'object') {
+    return Object.entries(value).map(([k, v]) => ({ [keyName]: k, [valueName]: Number(v) || 0 }))
+  }
+  return []
+}
+
+/* Object.entries() over a LIST OF PAIRS yields ["0", [value, count]], which
+ * renders as an index beside both halves. `value_counts` was exactly that for
+ * a while. Same treatment: accept either, render neither wrongly. */
+function pairs(value) {
+  if (Array.isArray(value)) {
+    return value.map(entry => (Array.isArray(entry) ? entry : [entry, '']))
+  }
+  if (value && typeof value === 'object') return Object.entries(value)
+  return []
+}
 
 function KpiCard({ label, value, sub, color, icon }) {
   return (
@@ -47,7 +86,7 @@ const STAGE_COLORS = {
   kept: '#1ef0a8', sale: '#ffd700', stopped: '#6b7280', dnc: '#ff4d4d',
 }
 
-export default function Reports() {
+function PlatformReports() {
   const [data, setData]         = useState(null)
   const [pipeline, setPipeline] = useState(null)
   const [outcomes, setOutcomes] = useState(null)
@@ -76,6 +115,8 @@ export default function Reports() {
   const maxReply = Math.max(...advisors.map(a => Number(a.reply_rate || 0)), 1)
   const pipeStages = pipeline?.by_stage || {}
   const totalPipe  = pipeline?.total_in_pipeline || 0
+  const stageRows  = rows(crmSummary?.stage_counts)
+  const stageMax   = Math.max(...stageRows.map(s => Number(s.count) || 0), 1)
 
   return (
     <div>
@@ -382,20 +423,20 @@ export default function Reports() {
               {/* Summary KPIs */}
               <div className="rpt-kpi-row">
                 <KpiCard icon="👤" label="Total contacts"  value={num(crmSummary.total_contacts)} color="var(--text-primary)" />
-                {(crmSummary.stage_counts || []).slice(0, 4).map(s => (
+                {stageRows.slice(0, 4).map(s => (
                   <KpiCard key={s.stage} icon="📌" label={s.stage || 'Unknown'} value={num(s.count)} color="var(--signal-blue)" />
                 ))}
               </div>
 
               {/* Stage breakdown */}
-              {crmSummary.stage_counts?.length > 0 && (
+              {stageRows.length > 0 && (
                 <section className="panel">
                   <div className="panel-header"><h2 className="panel-title">Stage breakdown</h2></div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '4px 0' }}>
-                    {crmSummary.stage_counts.map(s => (
+                    {stageRows.map(s => (
                       <div key={s.stage} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <span style={{ width: 140, fontSize: 13, color: 'var(--text-secondary)', flexShrink: 0 }}>{s.stage || '—'}</span>
-                        <Bar value={s.count} max={Math.max(...crmSummary.stage_counts.map(x => x.count), 1)} color="var(--signal-blue)" />
+                        <Bar value={s.count} max={stageMax} color="var(--signal-blue)" />
                         <span style={{ width: 48, textAlign: 'right', fontSize: 13, fontWeight: 700 }}>{num(s.count)}</span>
                       </div>
                     ))}
@@ -433,7 +474,7 @@ export default function Reports() {
                             </div>
                           </td>
                           <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                            {f.value_counts ? Object.entries(f.value_counts).slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(' · ') : '—'}
+                            {pairs(f.value_counts).slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(' · ') || '—'}
                           </td>
                         </tr>
                       ))}
@@ -451,4 +492,28 @@ export default function Reports() {
       )}
     </div>
   )
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONE DECISION, TAKEN FROM THE ACTIVE WORKSPACE'S INDUSTRY.
+
+   The screen above reports on the platform's own vocabulary — AI auto-
+   responses, booking links sent, brand-sales opportunity value. A commercial
+   cleaning company using CCB does not run any of those; it sources prospects,
+   works them, books walkthroughs and finds out what happened. Rendering the
+   platform's metric set to that customer is not a smaller version of their
+   report, it is somebody else's report.
+
+   A workspace whose industry has no configured reporting presentation falls
+   straight through to PlatformReports above, unchanged.
+   ═══════════════════════════════════════════════════════════════════════════ */
+export default function Reports() {
+  // Same hook as Overview, for the same reason: on a first paint the branding
+  // row may not be stored yet, and this re-renders when the server answers —
+  // so the vertical is picked up rather than decided once against an empty
+  // cache and then never revisited.
+  const { branding } = useWorkspaceAuthority()
+  const vertical = verticalFor(branding)
+  if (vertical && vertical.key === VERTICAL_CLEANING) return <CleaningReports />
+  return <PlatformReports />
 }

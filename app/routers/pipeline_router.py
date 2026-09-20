@@ -19,10 +19,16 @@ from app.services import lead_scope
 
 
 def _get_org_ids(db: Session, current_user: User) -> list:
-    """Return org IDs to scope queries to. god_admin sees ALL orgs."""
-    if current_user.role == "god_admin":
+    """Return org IDs to scope queries to.
+
+    THE NEUTRAL OWNER sees all orgs. An owner STANDING INSIDE A CUSTOMER sees
+    that customer — role is permission, not scope. See
+    lead_scope.god_sees_all_orgs.
+    """
+    if lead_scope.god_sees_all_orgs(current_user):
         return [str(row[0]) for row in db.query(Organization.id).all()]
-    return [str(current_user.organization_id)]
+    return [str(lead_scope.active_workspace_org_id(current_user, db)
+                or current_user.organization_id)]
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
@@ -87,9 +93,18 @@ def pipeline_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    """Get pipeline engagement stats. Advisors see only their own; admins see org-wide; god sees all orgs."""
+    """Pipeline engagement stats for THIS workspace.
+
+    Advisors see only their own; admins see org-wide; the NEUTRAL owner — one
+    standing outside every customer — sees all orgs. An owner inside a
+    customer sees that customer, because entering a workspace is the act that
+    narrows the question. This used to test `role == "god_admin"` alone, which
+    put every organization's pipeline on a client's own Reports page under a
+    banner reading "God View — All Organizations". See
+    lead_scope.god_sees_all_orgs.
+    """
     advisor_id = None if _is_elevated(current_user) else current_user.id
-    is_god = current_user.role == "god_admin"
+    is_god = lead_scope.god_sees_all_orgs(current_user)
 
     if is_god:
         # Aggregate across all orgs
@@ -114,7 +129,14 @@ def pipeline_stats(
         combined["flagged"] = combined["flagged"][:10]  # cap at 10
         return combined
 
-    return get_pipeline_stats(db, current_user.organization_id, advisor_id=advisor_id)
+    # THE ACTIVE WORKSPACE, NOT THE HOME COLUMN. `users.organization_id` is
+    # where a person lives, which is not where they are standing: a member of
+    # two customers reading it gets the first one's pipeline inside the second.
+    return get_pipeline_stats(
+        db,
+        lead_scope.active_workspace_org_id(current_user, db)
+        or current_user.organization_id,
+        advisor_id=advisor_id)
 
 
 @router.get("/forecast")

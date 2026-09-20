@@ -1,0 +1,194 @@
+/* COMMERCIAL CLEANING — CLIENT REPORTS LAYOUT.
+
+   Layout only. Every colour is a token, so styles/vertical-cleaning.css owns
+   the palette and this file owns the arrangement. Nothing here leaks outside
+   `.cr`. */
+
+.cr { max-width: 1480px; padding-bottom: 32px; }
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+.cr-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; margin-bottom: 22px;
+}
+.cr-header h1 {
+  margin: 0; font-family: var(--font-display);
+  font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.cr-header p { margin: 5px 0 0; font-size: 13px; color: var(--text-tertiary); }
+/* Says whose numbers these are, on a screen whose previous version said "God
+   View — All Organizations" over another customer's totals. */
+.cr-scope {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--signal-blue); background: var(--signal-blue-dim);
+  border-radius: var(--radius-pill); padding: 5px 12px; white-space: nowrap;
+}
+.cr-notice {
+  margin-bottom: 18px; padding: 10px 14px; font-size: 13px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: var(--bg-panel); color: var(--text-secondary);
+}
+
+/* ── KPI grid ───────────────────────────────────────────────────────────── */
+.cr-kpis {
+  display: grid; gap: 13px; margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(214px, 1fr));
+}
+.cr-kpi {
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); padding: 15px 16px 14px;
+  box-shadow: var(--elevation-1);
+  border-top: 3px solid var(--border-strong);
+  display: flex; flex-direction: column; gap: 7px;
+}
+.cr-kpi--blue  { border-top-color: var(--signal-blue); }
+.cr-kpi--cyan  { border-top-color: var(--clean-cyan, #49d7ff); }
+.cr-kpi--green { border-top-color: var(--signal-green); }
+.cr-kpi--amber { border-top-color: var(--signal-amber); }
+.cr-kpi--link { cursor: pointer; }
+.cr-kpi--link:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--elevation-2);
+  transform: translateY(-1px);
+}
+.cr-kpi--link:focus-visible { outline: 2px solid var(--signal-blue); outline-offset: 2px; }
+.cr-kpi-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; min-height: 18px;
+}
+.cr-kpi-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.cr-kpi-note {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
+  color: var(--text-tertiary); background: var(--bg-glass);
+  border-radius: var(--radius-pill); padding: 2px 8px; white-space: nowrap;
+}
+.cr-kpi-value {
+  font-family: var(--font-display); font-size: 28px; font-weight: 700;
+  line-height: 1; color: var(--text-primary); letter-spacing: -0.02em;
+}
+.cr-kpi-sub { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.45; }
+
+/* ── cards ──────────────────────────────────────────────────────────────── */
+.cr-grid {
+  display: grid; gap: 16px; margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+}
+.cr-card {
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); padding: 17px 18px 18px;
+  box-shadow: var(--elevation-1); margin-bottom: 18px;
+}
+.cr-grid .cr-card { margin-bottom: 0; }
+.cr-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.cr-card-head h2 {
+  margin: 0; font-family: var(--font-display);
+  font-size: 14px; font-weight: 700; color: var(--text-primary);
+}
+.cr-card-note { font-size: 11px; color: var(--text-tertiary); }
+.cr-link {
+  border: 0; background: transparent; cursor: pointer; padding: 0;
+  font-family: var(--font-body); font-size: 12px; font-weight: 600;
+  color: var(--signal-blue);
+}
+.cr-link:hover { text-decoration: underline; }
+.cr-empty {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 22px 4px; font-size: 13px; color: var(--text-tertiary);
+}
+.cr-empty strong { color: var(--text-secondary); font-weight: 600; }
+.cr-footnote {
+  margin: 14px 0 0; padding-top: 12px; font-size: 11.5px; line-height: 1.5;
+  color: var(--text-tertiary); border-top: 1px solid var(--border-subtle);
+}
+
+/* ── stage breakdown ────────────────────────────────────────────────────── */
+.cr-stages { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.cr-stage {
+  display: grid; align-items: center; gap: 12px;
+  grid-template-columns: 168px 1fr 52px;
+}
+.cr-stage-label {
+  font-size: 12.5px; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cr-stage-track {
+  height: 10px; border-radius: var(--radius-pill); overflow: hidden;
+  background: var(--bg-glass-mid); display: flex; align-items: center;
+}
+.cr-stage-fill {
+  display: block; height: 100%; border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--signal-blue), var(--clean-cyan, #49d7ff));
+}
+.cr-stage-value {
+  text-align: right; font-family: var(--font-display);
+  font-size: 13.5px; font-weight: 700; color: var(--text-primary);
+}
+
+/* ── outcomes ───────────────────────────────────────────────────────────── */
+.cr-outcomes { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.cr-outcome {
+  display: grid; align-items: center; gap: 11px;
+  grid-template-columns: 8px 1fr auto;
+  padding: 9px 4px; border-bottom: 1px solid var(--border-subtle);
+}
+.cr-outcome:last-child { border-bottom: 0; }
+.cr-outcome-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-tertiary); }
+.cr-outcome--blue  .cr-outcome-dot { background: var(--signal-blue); }
+.cr-outcome--cyan  .cr-outcome-dot { background: var(--clean-cyan, #49d7ff); }
+.cr-outcome--green .cr-outcome-dot { background: var(--signal-green); }
+.cr-outcome--amber .cr-outcome-dot { background: var(--signal-amber); }
+.cr-outcome--red   .cr-outcome-dot { background: var(--signal-red); }
+.cr-outcome-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cr-outcome-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.cr-outcome-note { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.4; }
+.cr-outcome-value {
+  font-family: var(--font-display); font-size: 17px; font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ── today's outreach ───────────────────────────────────────────────────── */
+.cr-mini {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+}
+.cr-mini-cell {
+  background: var(--bg-field-soft); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); padding: 11px 12px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.cr-mini-value {
+  font-family: var(--font-display); font-size: 19px; font-weight: 700;
+  color: var(--text-primary); line-height: 1;
+}
+.cr-mini-label {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+
+/* ── table ──────────────────────────────────────────────────────────────── */
+.cr-tablewrap { overflow-x: auto; }
+.cr-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cr-table th {
+  text-align: left; padding: 8px 10px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-subtle); white-space: nowrap;
+}
+.cr-table td {
+  padding: 10px; border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+.cr-table tbody tr:last-child td { border-bottom: 0; }
+
+/* ── narrow screens ─────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .cr-stage { grid-template-columns: 1fr 52px; }
+  .cr-stage-track { grid-column: 1 / -1; }
+}

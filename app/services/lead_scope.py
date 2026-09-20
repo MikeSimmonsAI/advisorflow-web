@@ -79,6 +79,36 @@ def is_god(user: User) -> bool:
     return getattr(user, "role", None) == GOD_ROLE
 
 
+def god_sees_all_orgs(user: User) -> bool:
+    """Is this the NEUTRAL owner, standing outside every customer?
+
+    THE DEFECT THIS NAMES, FOUND ON A LIVE CLIENT'S REPORTS PAGE. A customer
+    opened Reports inside their own workspace and read "God View — All
+    Organizations" over a pipeline total, an AI auto-response count and a
+    booked count belonging to every other customer on the platform — because
+    the reporting endpoints asked `current_user.role == "god_admin"` and
+    nothing else. Role alone is not scope. It answers "may this person see
+    everything", and the question the page was actually asking is "is this
+    person looking at everything right now".
+
+    `get_current_user` already draws that line: entering a customer sets
+    `organization_id` from X-Org-Override, and standing outside sets
+    `_god_all_orgs`. `authorized_lead_query` above has always honoured both,
+    which is why the Prospects and Walkthroughs screens were correctly scoped
+    on the same request that Reports was not.
+
+    Both flags are checked because they are set independently, exactly as the
+    lead query checks them. This is the ONLY thing that should widen a report
+    to the whole platform, and entering a customer is the act that narrows it.
+    Leaving the workspace is how an operator gets the platform view back — the
+    capability is unchanged, its trigger is.
+    """
+    if not is_god(user):
+        return False
+    return (getattr(user, "_god_all_orgs", False)
+            or not getattr(user, "organization_id", None))
+
+
 def is_manager(user: User) -> bool:
     """Sees the whole organization. god included."""
     return getattr(user, "role", None) in MANAGER_ROLES + (GOD_ROLE,)

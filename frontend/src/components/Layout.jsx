@@ -10,6 +10,9 @@ import ProfileOnboarding from './ProfileOnboarding'
 import GodReturnBar from './GodReturnBar'
 import ContextSwitcher from './ContextSwitcher'
 import WorkspaceAdminMenu from './WorkspaceAdminMenu'
+// A render error inside one page unmounts React's whole tree, rail included.
+// This keeps the failure inside the content area. See PageBoundary.
+import PageBoundary from './PageBoundary'
 // A VERTICAL'S OWN PRESENTATION. Nav labels, groups and skin for a workspace
 // whose industry has one configured; null for everybody else, which is what
 // keeps this from being a global redesign. See verticals/workspaceVertical.js.
@@ -912,7 +915,13 @@ export default function Layout({ children }) {
             gets you back to the control plane, the other tells you — on the
             server's authority — whose records you are about to change.
             `handleExitOrg` is still wired to the org switcher in the rail. */}
-        <main className="main-content">{children}</main>
+        {/* ONE PAGE FAILING MUST NOT TAKE THE RAIL WITH IT. Keyed on the
+            pathname so the boundary resets on navigation — an error boundary
+            latches, and one that never clears would show its card on every
+            page after the first failure. See PageBoundary. */}
+        <main className="main-content">
+          <PageBoundary key={location.pathname}>{children}</PageBoundary>
+        </main>
       </div>
       <ProfileOnboarding />
     </div>

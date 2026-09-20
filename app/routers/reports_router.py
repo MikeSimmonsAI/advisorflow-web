@@ -52,19 +52,28 @@ HOT_REPLY_CLASSIFICATIONS = attention_enum_values()
 def _get_org_ids(db: Session, current_user: User, platform_id: Optional[str] = None) -> list:
     """Return org IDs to scope queries to.
 
-    god_admin sees ALL organizations by default; when platform_id is supplied
-    the result is scoped to that brand only, so cross-brand aggregation can
-    be filtered when the operator wants one brand's numbers rather than all
-    brands combined (REPORT-04).
+    THE NEUTRAL OWNER — one standing outside every customer — sees ALL
+    organizations by default; when platform_id is supplied the result is
+    scoped to that brand only, so cross-brand aggregation can be filtered when
+    the operator wants one brand's numbers rather than all brands combined
+    (REPORT-04).
 
-    Non-god users are always scoped to their own organization.
+    AN OWNER INSIDE A CUSTOMER SEES THAT CUSTOMER. This asked
+    `role == "god_admin"` and nothing else, so entering a customer's workspace
+    did not narrow a single report: a cleaning company's own Reports page
+    aggregated every organization on the platform. Role is permission; it is
+    not scope. See lead_scope.god_sees_all_orgs.
+
+    Everyone else is scoped to the workspace they are STANDING IN, which is
+    not always the column they live in.
     """
-    if current_user.role == "god_admin":
+    if lead_scope.god_sees_all_orgs(current_user):
         q = db.query(Organization.id)
         if platform_id:
             q = q.filter(Organization.platform_id == platform_id)
         return [str(row[0]) for row in q.all()]
-    return [str(current_user.organization_id)]
+    return [str(lead_scope.active_workspace_org_id(current_user, db)
+                or current_user.organization_id)]
 
 
 def _resolve_date_range(start_date: Optional[str], end_date: Optional[str]) -> tuple[datetime, datetime]:
@@ -277,7 +286,11 @@ def engagement_vs_conversion(
     """
     start, end = _resolve_date_range(start_date, end_date)
     org_ids = _get_org_ids(db, current_user, platform_id=platform_id)
-    is_god = current_user.role == "god_admin"
+    # Drives the extra "Organization" column and the cross-org banner, so it
+    # has to mean "this reader is looking at every organization", not "this
+    # reader is allowed to". Inside a customer it is False and the report is
+    # that customer's. See lead_scope.god_sees_all_orgs.
+    is_god = lead_scope.god_sees_all_orgs(current_user)
 
     advisors = db.query(User).filter(User.organization_id.in_(org_ids), User.role.in_(["advisor", "org_admin"])).all()
     advisors_by_id = {a.id: a for a in advisors}
@@ -410,7 +423,11 @@ def by_client_list(
     """
     start, end = _resolve_date_range(start_date, end_date)
     org_ids = _get_org_ids(db, current_user, platform_id=platform_id)
-    is_god = current_user.role == "god_admin"
+    # Drives the extra "Organization" column and the cross-org banner, so it
+    # has to mean "this reader is looking at every organization", not "this
+    # reader is allowed to". Inside a customer it is False and the report is
+    # that customer's. See lead_scope.god_sees_all_orgs.
+    is_god = lead_scope.god_sees_all_orgs(current_user)
 
     UNLABELLED = "\u2014 no list label"
 
@@ -517,7 +534,11 @@ def revenue_by_period(
     """
     start, end = _resolve_date_range(start_date, end_date)
     org_ids = _get_org_ids(db, current_user, platform_id=platform_id)
-    is_god = current_user.role == "god_admin"
+    # Drives the extra "Organization" column and the cross-org banner, so it
+    # has to mean "this reader is looking at every organization", not "this
+    # reader is allowed to". Inside a customer it is False and the report is
+    # that customer's. See lead_scope.god_sees_all_orgs.
+    is_god = lead_scope.god_sees_all_orgs(current_user)
 
     sale_outcomes = (
         db.query(LeadOutcome)
@@ -580,9 +601,16 @@ def crm_summary(
     - Custom field fill rates and value breakdowns
     """
     org_ids = _get_org_ids(db, current_user, platform_id=platform_id)
-    is_god = current_user.role == "god_admin"
-    # For field schema use first org (or current user's org if available)
-    org_id = current_user.organization_id
+    # Drives the extra "Organization" column and the cross-org banner, so it
+    # has to mean "this reader is looking at every organization", not "this
+    # reader is allowed to". Inside a customer it is False and the report is
+    # that customer's. See lead_scope.god_sees_all_orgs.
+    is_god = lead_scope.god_sees_all_orgs(current_user)
+    # The custom-field schema is read from the workspace the reader is
+    # STANDING IN, not the column they live in — an operator inside a customer
+    # was shown their own home org's field schema over that customer's counts.
+    org_id = (lead_scope.active_workspace_org_id(current_user, db)
+              or current_user.organization_id)
     org = db.query(Organization).filter(Organization.id == org_id).first()
 
     # Stage breakdown
@@ -636,12 +664,33 @@ def crm_summary(
             "fill_rate_pct": fill_rate,
         }
         if field.get("type") == "dropdown":
-            stat["value_counts"] = sorted(value_counts.items(), key=lambda x: -x[1])[:10]
+            # AN OBJECT, BECAUSE THE READER CALLS Object.entries ON IT. This
+            # was `sorted(value_counts.items(), ...)` — a list of pairs — and
+            # `Object.entries` over that yields ["0", [value, count]], which
+            # renders as the index followed by both halves. Not a crash, which
+            # is why it survived: just quietly wrong text in a table cell.
+            top = sorted(value_counts.items(), key=lambda x: -x[1])[:10]
+            stat["value_counts"] = {k: v for k, v in top}
         field_stats.append(stat)
 
     return {
         "is_god_view": is_god,
         "total_contacts": total,
-        "stage_counts": stage_counts,
+        # A LIST, BECAUSE THIS WHITE-SCREENED THE ENTIRE APPLICATION.
+        #
+        # This returned the `{stage: count}` dict built above. Its only reader
+        # does `(stage_counts || []).slice(0, 4).map(s => s.stage)` — it wants
+        # an array of rows. A dict is TRUTHY, so the `|| []` guard never fired,
+        # `.slice` does not exist on an object, and the TypeError escaped
+        # render. React unmounts the whole tree on an unhandled render error,
+        # so the navigation rail went with it: the app was a blank page until
+        # a full reload rebuilt it.
+        #
+        # Named rows rather than a bare mapping because that is what the
+        # consumer reads and what a table needs, and sorted so the order is the
+        # server's decision instead of dictionary insertion order.
+        "stage_counts": [{"stage": stage, "count": count}
+                         for stage, count in sorted(stage_counts.items(),
+                                                    key=lambda kv: (-kv[1], kv[0]))],
         "custom_field_stats": field_stats,
     }

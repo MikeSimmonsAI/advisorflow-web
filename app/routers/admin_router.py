@@ -223,7 +223,11 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
     org_admin/super_admin see their own org only.
     """
     org_ids = _get_org_ids(db, current_user)
-    is_god = current_user.role == "god_admin"
+    # ROLE IS NOT SCOPE. `_get_org_ids` already narrows to the one customer an
+    # owner is standing inside; asking `role == "god_admin"` here labelled that
+    # narrowed answer "all organizations" on the customer's own screen. Same
+    # question as the scope, or the label contradicts the numbers under it.
+    is_god = lead_scope.god_sees_all_orgs(current_user)
 
     advisors = db.query(User).filter(User.organization_id.in_(org_ids), User.role == "advisor").all()
 
@@ -610,9 +614,16 @@ def team_activity(db: Session = Depends(get_db), current_user: User = Depends(re
 
 @router.get("/dashboard/metrics")
 def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """Advisor quality metrics. god_admin sees all orgs aggregated; others see their own org."""
+    """Advisor quality metrics. The NEUTRAL owner sees all orgs aggregated;
+    everyone else — including an owner standing inside a customer — sees that
+    workspace."""
     org_ids = _get_org_ids(db, current_user)
-    is_god = current_user.role == "god_admin"
+    # THIS FLAG IS WHAT DREW "God View — All Organizations" ACROSS A CLIENT'S
+    # OWN REPORTS PAGE. `_get_org_ids` was already narrowing correctly for an
+    # owner inside a customer (see deps.get_platform_org_ids), so the banner
+    # was claiming a scope the numbers underneath did not have. It has to be
+    # the same question the scope asked. See lead_scope.god_sees_all_orgs.
+    is_god = lead_scope.god_sees_all_orgs(current_user)
 
     advisors = (
         db.query(User)
@@ -668,9 +679,11 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
 
 @router.get("/dashboard/funnel")
 def dashboard_funnel(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """Lead funnel counts. god_admin sees all orgs aggregated; others see their own org."""
+    """Lead funnel counts. The NEUTRAL owner sees all orgs aggregated; everyone
+    else — including an owner standing inside a customer — sees that workspace."""
     org_ids = _get_org_ids(db, current_user)
-    is_god = current_user.role == "god_admin"
+    # See master_dashboard above: the label has to ask the scope's question.
+    is_god = lead_scope.god_sees_all_orgs(current_user)
 
     total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id.in_(org_ids)).scalar() or 0
 

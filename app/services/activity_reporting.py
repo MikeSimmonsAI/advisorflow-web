@@ -35,7 +35,7 @@ hidden.
 from datetime import datetime, time, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.models import (
@@ -146,26 +146,64 @@ def sent_today(db: Session, organization_id: str, *,
 
     _name_the_people(db, rows)
 
-    # REPEAT TOUCHES. "Did we contact this family twice today" was not
-    # answerable at all before - there was no per-lead grouping anywhere.
+    # ── THE COUNTS ARE COUNTED, NOT INFERRED FROM THE PAGE ──────────────────
+    #
+    # THE DEFECT THIS FIXES. Every figure below used to be tallied from `rows`,
+    # which is truncated to `limit` — so `total` was not "how many were sent
+    # today", it was "how many of them fit on this page", and it silently
+    # equalled the limit for any busy account. A caller asking for one row for
+    # a summary tile read a total of 1. It is the same failure this module was
+    # written to end, one layer further in: a day's count is a question for
+    # the database, not for whatever slice a screen happened to request.
+    #
+    # Two grouped queries answer all of it — per-lead counts give the total,
+    # the distinct-lead count, the repeat-touch count and each row's own
+    # `touches_today`; two more give the source breakdown.
     per_lead: Dict[str, int] = {}
-    for r in rows:
-        per_lead[r["lead_id"]] = per_lead.get(r["lead_id"], 0) + 1
-    for r in rows:
-        r["touches_today"] = per_lead[r["lead_id"]]
+    by_channel: Dict[str, int] = {}
+    for channel, model, ts in (("sms", Message, Message.sent_at),
+                               ("email", EmailMessage, EmailMessage.sent_at)):
+        grouped = (db.query(Lead.id, func.count(model.id))
+                   .join(model, model.lead_id == Lead.id)
+                   .filter(Lead.organization_id == organization_id,
+                           ts >= start, ts < end))
+        if user_ids:
+            grouped = grouped.filter(or_(model.sent_by_user_id.in_(user_ids),
+                                         model.sender_id.in_(user_ids),
+                                         Lead.assigned_to_id.in_(user_ids)))
+        for lead_id, n in grouped.group_by(Lead.id).all():
+            per_lead[lead_id] = per_lead.get(lead_id, 0) + int(n)
+            by_channel[channel] = by_channel.get(channel, 0) + int(n)
 
     by_source: Dict[str, int] = {}
-    by_channel: Dict[str, int] = {}
+    for model, ts in ((Message, Message.sent_at),
+                      (EmailMessage, EmailMessage.sent_at)):
+        grouped = (db.query(model.send_source, func.count(model.id))
+                   .join(Lead, model.lead_id == Lead.id)
+                   .filter(Lead.organization_id == organization_id,
+                           ts >= start, ts < end))
+        if user_ids:
+            grouped = grouped.filter(or_(model.sent_by_user_id.in_(user_ids),
+                                         model.sender_id.in_(user_ids),
+                                         Lead.assigned_to_id.in_(user_ids)))
+        for source, n in grouped.group_by(model.send_source).all():
+            key = source or UNRECORDED
+            by_source[key] = by_source.get(key, 0) + int(n)
+
+    # REPEAT TOUCHES. "Did we contact this family twice today" was not
+    # answerable at all before - there was no per-lead grouping anywhere.
     for r in rows:
-        by_source[r["send_source"] or UNRECORDED] = \
-            by_source.get(r["send_source"] or UNRECORDED, 0) + 1
-        by_channel[r["channel"]] = by_channel.get(r["channel"], 0) + 1
+        r["touches_today"] = per_lead.get(r["lead_id"], 1)
 
     return {
         "organization_id": organization_id,
         "timezone": tzname,
         "window": {"start": start, "end": end},
-        "total": len(rows),
+        # EVERY SEND TODAY, not every send on this page. `items` is still
+        # capped at `limit`; `returned` says so, so a caller can tell a
+        # truncated list from a complete one instead of guessing.
+        "total": sum(per_lead.values()),
+        "returned": len(rows),
         "leads_contacted": len(per_lead),
         "contacted_more_than_once": sum(1 for n in per_lead.values() if n > 1),
         "by_channel": by_channel,

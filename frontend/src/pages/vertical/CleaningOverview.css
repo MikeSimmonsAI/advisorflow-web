@@ -13,10 +13,17 @@
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: 20px; flex-wrap: wrap; margin-bottom: 26px;
 }
+/* THE EYEBROW NAMES THE SCREEN; THE HEADING NAMES THE ACCOUNT. That order is
+   the approved concept's, and it is also the honest one — the customer knows
+   what a dashboard is, and what they need to read at a glance is WHOSE. */
+.co-eyebrow {
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--signal-blue); margin-bottom: 6px;
+}
 .co-header-title h1 {
   margin: 0; font-family: var(--font-display);
-  font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
-  color: var(--text-primary);
+  font-size: 25px; font-weight: 700; letter-spacing: -0.015em;
+  color: var(--text-primary); line-height: 1.15;
 }
 .co-header-title p {
   margin: 5px 0 0; font-size: 13px; color: var(--text-tertiary);
@@ -59,14 +66,15 @@
   background: var(--bg-panel); color: var(--text-secondary);
 }
 
-/* ── greeting ───────────────────────────────────────────────────────────── */
-.co-greeting { margin-bottom: 20px; }
-.co-greeting h2 {
-  margin: 0; font-family: var(--font-display);
-  font-size: 17px; font-weight: 700; color: var(--text-primary);
-}
-.co-greeting p {
-  margin: 4px 0 0; font-size: 13px; color: var(--text-tertiary);
+/* THE SCOPE CHIP. It sits where a "God View — All Organizations" banner used
+   to sit on the reporting screens, and says the opposite thing, which is the
+   true one: a workspace shows its own organization to everybody. */
+.co-scope {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; white-space: nowrap;
+  color: var(--text-tertiary); background: var(--bg-glass);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill); padding: 5px 11px;
 }
 
 /* ── KPI row ────────────────────────────────────────────────────────────── */
@@ -92,30 +100,24 @@
   transform: translateY(-1px);
 }
 .co-kpi--link:focus-visible { outline: 2px solid var(--signal-blue); outline-offset: 2px; }
-.co-kpi-top {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; min-height: 18px;
+/* NUMBER, THEN NAME, THEN NOTE — the approved concept's order. The figure is
+   what the reader came for; the label tells them what it counts; the note is
+   where the number's qualification lives, and it is never decorative. */
+.co-kpi-value {
+  font-family: var(--font-display); font-size: 32px; font-weight: 700;
+  line-height: 1; color: var(--text-primary); letter-spacing: -0.02em;
 }
 .co-kpi-label {
   font-size: 11px; font-weight: 700; letter-spacing: 0.09em;
-  text-transform: uppercase; color: var(--text-tertiary);
+  text-transform: uppercase; color: var(--text-secondary);
 }
-.co-kpi-tag {
-  font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
-  color: var(--text-tertiary); background: var(--bg-glass);
-  border-radius: var(--radius-pill); padding: 2px 8px; white-space: nowrap;
-}
-.co-kpi-value {
-  font-family: var(--font-display); font-size: 30px; font-weight: 700;
-  line-height: 1; color: var(--text-primary); letter-spacing: -0.02em;
-}
+.co-kpi-note { font-size: 12px; color: var(--text-tertiary); line-height: 1.45; }
 /* AN HONEST GAP LOOKS LIKE A SENTENCE, NOT LIKE A NUMBER. Rendering "Not yet
    available" at 30px would read as a headline figure at a glance. */
 .co-kpi-value--none {
   font-family: var(--font-body); font-size: 14px; font-weight: 600;
   color: var(--text-tertiary); line-height: 1.35;
 }
-.co-kpi-sub { font-size: 12px; color: var(--text-tertiary); line-height: 1.45; }
 
 /* ── cards ──────────────────────────────────────────────────────────────── */
 .co-grid { display: grid; gap: 16px; margin-bottom: 18px; }
@@ -151,43 +153,44 @@
   color: var(--text-tertiary); border-top: 1px solid var(--border-subtle);
 }
 
-/* ── workflow funnel ────────────────────────────────────────────────────── */
-.co-funnel { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
-.co-funnel-step {
-  display: grid; align-items: center; gap: 12px;
-  grid-template-columns: 22px 92px 1fr 64px;
-  padding: 5px 4px; border-radius: var(--radius-sm);
+/* ── your workflow ──────────────────────────────────────────────────────── */
+/* FIVE STAGES ACROSS, as the approved concept draws them: the numbered label,
+   the count, and a bar that is a PROPORTION OF THE WIDEST STAGE rather than a
+   taper drawn to look like a funnel. The shape on screen is the account's. */
+.co-workflow {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
-.co-funnel-step--link { cursor: pointer; }
-.co-funnel-step--link:hover { background: var(--bg-row-hover); }
-.co-funnel-step--link:focus-visible { outline: 2px solid var(--signal-blue); outline-offset: 1px; }
-.co-funnel-rank {
-  width: 22px; height: 22px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--bg-glass-mid); color: var(--text-tertiary);
-  font-size: 11px; font-weight: 700;
+.co-stage {
+  display: flex; flex-direction: column; gap: 7px;
+  background: var(--bg-field-soft); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); padding: 13px 14px 14px;
 }
-.co-funnel-label {
-  font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
-  text-transform: uppercase; color: var(--text-secondary);
+.co-stage--link { cursor: pointer; }
+.co-stage--link:hover { background: var(--bg-row-hover); border-color: var(--border-strong); }
+.co-stage--link:focus-visible { outline: 2px solid var(--signal-blue); outline-offset: 1px; }
+.co-stage-label {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-tertiary);
 }
-.co-funnel-track {
-  height: 11px; border-radius: var(--radius-pill); overflow: hidden;
+.co-stage-value {
+  font-family: var(--font-display); font-size: 25px; font-weight: 700;
+  line-height: 1; color: var(--text-primary); letter-spacing: -0.02em;
+}
+.co-stage-track {
+  height: 6px; border-radius: var(--radius-pill); overflow: hidden;
   background: var(--bg-glass-mid); display: flex; align-items: center;
 }
-.co-funnel-fill {
+.co-stage-fill {
   display: block; height: 100%; min-width: 2px;
   border-radius: var(--radius-pill);
   background: linear-gradient(90deg, var(--signal-blue), var(--clean-cyan, #49d7ff));
 }
 /* "not counted" is not "zero", so it does not get a bar of any length. */
-.co-funnel-gap {
-  padding-left: 8px; font-size: 10.5px; font-style: italic;
-  color: var(--text-tertiary);
-}
-.co-funnel-value {
-  text-align: right; font-family: var(--font-display);
-  font-size: 15px; font-weight: 700; color: var(--text-primary);
+.co-stage-gap {
+  padding-left: 2px; font-size: 9.5px; font-style: italic;
+  color: var(--text-tertiary); white-space: nowrap;
 }
 
 /* ── walkthrough outcomes ───────────────────────────────────────────────── */
@@ -261,38 +264,35 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* ── table ──────────────────────────────────────────────────────────────── */
-.co-tablewrap { overflow-x: auto; }
-.co-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.co-table th {
-  text-align: left; padding: 8px 10px;
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em;
-  text-transform: uppercase; color: var(--text-tertiary);
-  border-bottom: 1px solid var(--border-subtle); white-space: nowrap;
+/* ── two-line rows (recently worked · recent VA activity) ───────────────── */
+/* THE APPROVED CONCEPT'S PANEL SHAPE: a bold line and a quiet one under it.
+   The bold line is the fact, the quiet line is the record's own detail — the
+   stage, the owner, when it last moved. Neither is narrated into a sentence
+   the data does not support. */
+.co-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.co-row {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  padding: 10px 6px; border-bottom: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
 }
-.co-table td {
-  padding: 10px; border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-primary);
+.co-row:last-child { border-bottom: 0; }
+.co-row b {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.co-table tbody tr { cursor: pointer; }
-.co-table tbody tr:hover td { background: var(--bg-row-hover); }
-.co-table tbody tr:last-child td { border-bottom: 0; }
-.co-td-soft { color: var(--text-tertiary); text-transform: capitalize; }
-.co-pill {
-  display: inline-block; padding: 3px 9px; border-radius: var(--radius-pill);
-  font-size: 11px; font-weight: 600; text-transform: capitalize;
-  background: var(--bg-glass-mid); color: var(--text-secondary);
+.co-row span {
+  font-size: 11.5px; color: var(--text-tertiary); line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis;
 }
-.co-pill--replied, .co-pill--hot { background: var(--signal-green-dim); color: var(--signal-green); }
-.co-pill--sent, .co-pill--queued { background: var(--signal-blue-dim); color: var(--signal-blue); }
-.co-pill--dnc, .co-pill--dead { background: var(--signal-red-dim); color: var(--signal-red); }
+.co-row--link { cursor: pointer; }
+.co-row--link:hover { background: var(--bg-row-hover); }
+.co-row--link:focus-visible { outline: 2px solid var(--signal-blue); outline-offset: 1px; }
 
 /* ── narrow screens ─────────────────────────────────────────────────────── */
 @media (max-width: 720px) {
   .co-header-actions { width: 100%; }
   .co-search { min-width: 0; flex: 1; }
-  .co-funnel-step { grid-template-columns: 22px 1fr 56px; }
-  .co-funnel-track { grid-column: 1 / -1; }
+  .co-workflow { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
   .co-feed-row { grid-template-columns: 52px minmax(0, 1fr); }
   .co-feed-preview { display: none; }
 }
