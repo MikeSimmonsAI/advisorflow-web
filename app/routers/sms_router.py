@@ -112,7 +112,8 @@ def draft_reply_for_lead(
     tone = (req.tone if req and req.tone else "warm")
     ai_direction = (req.ai_direction if req and req.ai_direction else None)
     sample_message = (req.sample_message if req and req.sample_message else None)
-    result = draft_reply(db, lead, current_user, tone=tone, ai_direction=ai_direction, sample_message=sample_message)
+    result = draft_reply(db, lead, current_user, tone=tone, ai_direction=ai_direction, sample_message=sample_message,
+                         actor=current_user.id)
     return result
 
 

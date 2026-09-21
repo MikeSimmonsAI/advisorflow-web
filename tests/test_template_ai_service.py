@@ -13,6 +13,17 @@ from types import SimpleNamespace
 import app.services.template_ai_service as template_ai_service
 
 
+import pytest as _pytest_bg
+
+
+@_pytest_bg.fixture(autouse=True)
+def _background_ai_on(monkeypatch):
+    """These tests exercise the service's own behaviour when a model call is
+    made, so the master background switch - off by default, see
+    tests/test_ai_spend_control.py - is on for this module."""
+    monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
+
+
 def _fake_openai_response(payload: dict) -> SimpleNamespace:
     """Builds a minimal object shaped like the OpenAI chat completion response."""
     message = SimpleNamespace(content=json.dumps(payload))

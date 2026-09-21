@@ -17,10 +17,11 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 
-from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.models.models import Lead, Reply, User, BookingLink, PipelineConversation, EmailMessage, Organization
+from app.services import ai_gateway
+from app.services.ai_gateway import BACKGROUND, MANUAL
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 from app.services.platform_utils import get_brand_name
 
@@ -190,11 +191,10 @@ APPT_LABEL_MAP = {
 }
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    return _client
+def _get_client():
+    """Test seam only. None means "the gateway's own client" - every request
+    from this module goes through app.services.ai_gateway."""
+    return None
 
 
 def _get_appt_label(lead: Lead) -> str:
@@ -539,6 +539,12 @@ PROVIDER_LEVEL_ERRORS = frozenset({
     "PermissionDeniedError",   # key valid, account not allowed
     "APIConnectionError",      # provider unreachable
     "APITimeoutError",         # provider not answering
+    # The gateway's own refusals. Nothing reached the provider, and nothing
+    # will for the rest of the pass either: the switch is off, a spend cap is
+    # hit, the model is not approved, or the provider breaker is open. Each
+    # stops the batch exactly like a dead key does - no per-lead retry.
+    "AIRefused", "AIDisabled", "ModelNotApproved", "SpendLimitReached",
+    "ProviderCircuitOpen",
 })
 
 
@@ -549,7 +555,12 @@ def generate_touch_email(
     touch_number: int,
     ai_direction: str = None,
     relationship_type: str = None,
+    mode: str = BACKGROUND,
+    actor: str = None,
 ) -> dict:
+    """`mode`/`actor`: BACKGROUND (the default, and fail-safe) for the scheduled
+    loop; MANUAL with the signed-in user's id for a compose preview or a
+    conversation a person started. See app.services.ai_gateway."""
     if touch_number >= len(TOUCH_ANGLES):
         return {"should_stop": True, "stop_reason": "Cadence complete"}
 
@@ -612,8 +623,10 @@ def generate_touch_email(
     user_msg = f"Conversation history:\n{history}\n\nThis is touch #{touch_number + 1} of 8. Generate the email now."
 
     try:
-        response = _get_client().chat.completions.create(
-            model="gpt-4o",
+        response = ai_gateway.chat_completion(
+            feature="ai_conversation.touch_email", capability="touch_email",
+            mode=mode, actor=actor, org_id=getattr(lead, "organization_id", None),
+            client=_get_client(),
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
             temperature=0.6,
             max_tokens=400,
@@ -700,8 +713,11 @@ def generate_reply_response(db: Session, lead: Lead, advisor: User, reply_body: 
     )
 
     try:
-        response = _get_client().chat.completions.create(
-            model="gpt-4o",
+        # BACKGROUND: an inbound email or SMS triggers this, not a person.
+        response = ai_gateway.chat_completion(
+            feature="ai_conversation.reply_response", capability="reply_response",
+            mode=BACKGROUND, org_id=getattr(lead, "organization_id", None),
+            client=_get_client(),
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
             temperature=0.65,
             max_tokens=350,
@@ -721,7 +737,7 @@ def generate_reply_response(db: Session, lead: Lead, advisor: User, reply_body: 
             "source": "ai",
         }
     except Exception as e:
-        logger.error("generate_reply_response error: %s", e)
+        logger.error("generate_reply_response error (%s): %s", type(e).__name__, e)
         return {
             "subject": f"Re: Following up, {lead.first_name or 'there'}",
             "body": f"Thank you for getting back to me, {lead.first_name or 'there'}. I'd love to connect — would any of the times on my booking link work for you?",
@@ -729,11 +745,16 @@ def generate_reply_response(db: Session, lead: Lead, advisor: User, reply_body: 
             "should_stop": False,
             "escalate": False,
             "source": "fallback",
+            # Read by handle_inbound_reply, which refuses to mail this canned
+            # text - the same rule _send_touch applies to touches.
+            "generation_failed": True,
+            "error_kind": type(e).__name__,
         }
 
 
-def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversation, touch_number: int) -> dict:
-    email_data = generate_touch_email(db, lead, advisor, touch_number)
+def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversation, touch_number: int,
+                mode: str = BACKGROUND, actor: str = None) -> dict:
+    email_data = generate_touch_email(db, lead, advisor, touch_number, mode=mode, actor=actor)
 
     if email_data.get("should_stop"):
         conv.stage = "stopped"
@@ -828,7 +849,12 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
         return {"success": False, "error": str(e)}
 
 
-def start_ai_conversation(db: Session, lead: Lead, advisor: User, channel: str = "email") -> dict:
+def start_ai_conversation(db: Session, lead: Lead, advisor: User, channel: str = "email",
+                          actor: str = None) -> dict:
+    """`actor` is the signed-in user who pressed Start. With it, the first touch
+    is a MANUAL AI action; without it, it is BACKGROUND and obeys the master
+    background switch. Only the first touch is manual - every later touch is
+    the scheduled loop's, and background AI governs those."""
     # "booked" is intentionally NOT blocked here — a booked lead may still need
     # AI follow-up if they want to reschedule or have pre-appointment questions.
     if lead.status == "dnc" or lead.is_duplicate:
@@ -858,7 +884,8 @@ def start_ai_conversation(db: Session, lead: Lead, advisor: User, channel: str =
     conv.flagged = False
     conv.flag_reason = None
 
-    result = _send_touch(db, lead, advisor, conv, touch_number=0)
+    result = _send_touch(db, lead, advisor, conv, touch_number=0,
+                         mode=MANUAL if actor else BACKGROUND, actor=actor)
     if not result.get("success"):
         return result
 
@@ -939,6 +966,21 @@ def process_scheduled_touches(db: Session, org_id: str = None) -> dict:
     the work at all - a single aborted result having queried nothing, touched
     nothing and attempted no delivery.
     """
+    # ── THE MASTER BACKGROUND SWITCH, BEFORE ANYTHING ELSE. ─────────────────
+    # Off by default (AI_BACKGROUND_AUTOMATION_ENABLED unset = false). With it
+    # off this pass does not query the due set, does not call the provider,
+    # does not send, and does not move a single next_send_at: conversations
+    # that are due stay exactly as they are. It logs once per process, not
+    # once every two minutes. See app.services.ai_gateway.
+    if not ai_gateway.check_background("ai_conversation_loop"):
+        return {"processed": 0, "sent": 0, "skipped": 0, "errors": 0,
+                "disabled": True}
+
+    with ai_gateway.background_pass("ai_conversation_loop"):
+        return _process_scheduled_touches(db, org_id)
+
+
+def _process_scheduled_touches(db: Session, org_id: str = None) -> dict:
     # ── PREFLIGHT. ONE FAILURE, NOT TWENTY-FIVE. ────────────────────────────
     # Before the query, so an unconfigured service does not walk a set of real
     # conversations to fail identically on each one.
@@ -1120,8 +1162,11 @@ def _handle_post_booking_reply(db: Session, lead: Lead, advisor: User, reply_bod
     escalate_reason = ""
 
     try:
-        response = _get_client().chat.completions.create(
-            model="gpt-4o",
+        # BACKGROUND: an inbound message triggers this, not a person.
+        response = ai_gateway.chat_completion(
+            feature="ai_conversation.post_booking_reply", capability="post_booking_reply",
+            mode=BACKGROUND, org_id=getattr(lead, "organization_id", None),
+            client=_get_client(),
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_msg},
@@ -1137,7 +1182,11 @@ def _handle_post_booking_reply(db: Session, lead: Lead, advisor: User, reply_bod
         ai_wants_escalate = bool(result.get("escalate", False))
         escalate_reason = result.get("escalate_reason", "")
     except Exception as e:
-        logger.error("_handle_post_booking_reply AI error: %s", e)
+        # No AI answer means no automated answer. The canned concierge line
+        # used to go out here regardless; it no longer does - the family's
+        # message waits for their advisor. Same rule as _send_touch.
+        logger.error("_handle_post_booking_reply AI error (%s): %s", type(e).__name__, e)
+        return {"action": "ai_unavailable", "error_kind": type(e).__name__}
 
     # Step 2 — escalate reschedule / cancel to advisor; do NOT auto-reply
     if ai_wants_escalate or intent in ("reschedule", "cancel"):
@@ -1172,6 +1221,13 @@ def _handle_post_booking_reply(db: Session, lead: Lead, advisor: User, reply_bod
 
 
 def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str) -> dict:
+    # BACKGROUND AI: an inbound message triggers this, not a person. With the
+    # master switch off, nothing below runs - no provider call, no reply, no
+    # stage change, no counter bump. The inbound message itself was already
+    # stored by the poller that called this; the advisor sees it as usual.
+    if not ai_gateway.check_background("ai_inbound_reply"):
+        return {"action": "ai_disabled"}
+
     conv = db.query(PipelineConversation).filter(
         PipelineConversation.lead_id == lead.id,
         PipelineConversation.advisor_id == advisor.id,
@@ -1207,6 +1263,16 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
     conv.last_inbound_at = datetime.utcnow()
 
     result = generate_reply_response(db, lead, advisor, reply_body)
+
+    # A CANNED REPLY IS NOT AN AI REPLY. When generation failed - provider
+    # down, spend cap hit, breaker open - the old path mailed the hand-written
+    # fallback to the family anyway. It now sends nothing; the reply waits in
+    # the inbox for the advisor, exactly as it would with AI off.
+    if result.get("generation_failed"):
+        db.commit()   # replies_received / last_inbound_at: the reply did arrive
+        logger.error("handle_inbound_reply: no AI reply sent for lead %s (%s)",
+                     lead.id, result.get("error_kind"))
+        return {"action": "ai_unavailable", "error_kind": result.get("error_kind")}
 
     if result.get("escalate"):
         _escalate_conversation(db, conv, lead, advisor, result.get("escalate_reason", ""), reply_body)
@@ -1275,11 +1341,16 @@ def generate_auto_reply(
     tone: str = "warm",
     ai_direction: str = None,
     relationship_type: str = None,
+    actor: str = None,
 ) -> dict:
+    # Callers are the compose preview and batch-generate endpoints, which pass
+    # the signed-in user as `actor` - a MANUAL action. Without an actor this is
+    # BACKGROUND and obeys the master switch.
     result = generate_touch_email(
         db, lead, advisor, touch_number=0,
         ai_direction=ai_direction,
         relationship_type=relationship_type,
+        mode=MANUAL if actor else BACKGROUND, actor=actor,
     )
     booking_url = _get_booking_url(db, lead, advisor)
     return {

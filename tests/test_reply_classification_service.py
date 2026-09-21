@@ -18,6 +18,17 @@ from unittest.mock import patch, MagicMock
 from app.services.reply_classification_service import classify_reply, contains_hard_stop_language, _fallback_keyword_classify
 
 
+import pytest as _pytest_bg
+
+
+@_pytest_bg.fixture(autouse=True)
+def _background_ai_on(monkeypatch):
+    """These tests exercise the service's own behaviour when a model call is
+    made, so the master background switch - off by default, see
+    tests/test_ai_spend_control.py - is on for this module."""
+    monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
+
+
 # --- Hard stop override (always-on safety net, never AI-judged) ---
 
 def test_contains_hard_stop_language_detects_stop():

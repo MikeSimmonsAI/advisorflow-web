@@ -8,7 +8,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Literal
-import openai
 import os
 import time
 import logging
@@ -243,17 +242,22 @@ async def concierge_chat(req: ConciergeRequest, request: Request,
     the concierge never quotes stale prices. See BILL-08.
     """
     _check_rate_limit(request)
+    # UNATTENDED SPEND. Anyone on the internet can call this, with no signed-in
+    # user to answer for it, so it is NOT a manual action: it is classed as
+    # BACKGROUND and obeys the master background switch and its caps. With
+    # the switch off the visitor gets the same "request a demo" answer an
+    # outage gives, and no provider request is made.
+    from app.services import ai_gateway
     try:
-        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
         # Build the live system prompt — pricing comes from DB, never hardcoded.
         system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(pricing=_pricing_blurb(db))
 
         # Only forward user/assistant turns — system role is injected exclusively below
         messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
+        response = ai_gateway.chat_completion(
+            feature="concierge.public_chat", capability="concierge_chat",
+            mode=ai_gateway.BACKGROUND,
             messages=[{"role": "system", "content": system_prompt}] + messages,
             max_tokens=400,
             temperature=0.7,

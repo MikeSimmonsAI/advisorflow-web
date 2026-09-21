@@ -40,6 +40,10 @@ def _configured(monkeypatch):
     is about rather than the preflight."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
     monkeypatch.setenv("RESEND_API_KEY", "test-key-not-real")
+    # These tests are about what the scheduled pass does WHEN IT RUNS, so the
+    # master background switch (off by default - see test_ai_spend_control)
+    # is on for them.
+    monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
 
 
 def _lead(db, org, advisor, **kw):

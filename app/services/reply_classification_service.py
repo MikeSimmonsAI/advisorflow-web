@@ -42,15 +42,15 @@ opt-out language always still applies as a hard override.
 
 import os
 import json
-from openai import OpenAI
+from app.services import ai_gateway
 
 _client = None
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+def _get_client():
+    """Test seam only. None in production means "the gateway's own client":
+    every model request from this module goes through app.services.ai_gateway,
+    which pins the model and enforces the background/manual switches."""
     return _client
 
 
@@ -97,8 +97,12 @@ def classify_reply(body: str) -> dict:
     failure must never block the actual webhook from completing.
     """
     try:
-        response = _get_client().chat.completions.create(
-            model="gpt-4o-mini",
+        # BACKGROUND: an inbound SMS webhook runs this, not a person. With the
+        # switch off the gateway refuses and the keyword fallback below
+        # classifies - no provider request is made.
+        response = ai_gateway.chat_completion(
+            feature="reply_classification", capability="reply_classification",
+            mode=ai_gateway.BACKGROUND, client=_get_client(),
             messages=[{"role": "user", "content": CLASSIFICATION_PROMPT.format(body=body)}],
             temperature=0.1,
             max_tokens=150,

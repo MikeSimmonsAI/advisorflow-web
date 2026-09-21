@@ -524,10 +524,14 @@ def handle_inbound_for_auto_send(
     if _compliance_block_reason(db, lead, "sms"):
         return "blocked"
 
+    # BACKGROUND AI: an inbound message triggers this, not a person. With the
+    # master switch off: no provider call, nothing queued, nothing sent.
+    from app.services import ai_gateway
+    if not ai_gateway.check_background("auto_send_inbound_reply"):
+        return "skipped"
+
     # Generate AI reply
     try:
-        import openai, os
-        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         system_prompt = (
             "You are a professional scheduling assistant for a financial services advisor. "
             "Reply to the lead's message below in 1-2 short, friendly sentences. "
@@ -535,8 +539,9 @@ def handle_inbound_for_auto_send(
             "If the question is about rescheduling, confirm the advisor will reach out shortly. "
             "Keep it under 160 characters if possible."
         )
-        completion = client.chat.completions.create(
-            model="gpt-4o",
+        completion = ai_gateway.chat_completion(
+            feature="auto_send.inbound_reply", capability="auto_send_reply",
+            mode=ai_gateway.BACKGROUND, org_id=advisor.organization_id,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": inbound_text},
@@ -667,8 +672,12 @@ def proactive_scan(
     if not rows:
         return {"queued": 0, "message": "No dormant leads found matching criteria"}
 
-    import openai, os
-    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    # MANUAL AI: a signed-in advisor pressed Scan. Refused up front, before a
+    # single draft, if manual AI is switched off.
+    from app.services import ai_gateway
+    if not ai_gateway.manual_enabled():
+        raise HTTPException(status_code=503,
+                            detail="AI actions are switched off on this platform.")
     queued_count = 0
 
     for row in rows:
@@ -683,8 +692,10 @@ def proactive_scan(
                 continue
 
             # AI-draft re-engagement message
-            completion = client.chat.completions.create(
-                model="gpt-4o",
+            completion = ai_gateway.chat_completion(
+                feature="auto_send.proactive_scan", capability="reengagement_draft",
+                mode=ai_gateway.MANUAL, actor=current_user.id,
+                org_id=current_user.organization_id,
                 messages=[{
                     "role": "system",
                     "content": (

@@ -15,6 +15,17 @@ from app.services.ai_analysis_service import (
 from app.models.models import Lead, LeadTier
 
 
+import pytest as _pytest_bg
+
+
+@_pytest_bg.fixture(autouse=True)
+def _background_ai_on(monkeypatch):
+    """These tests exercise the service's own behaviour when a model call is
+    made, so the master background switch - off by default, see
+    tests/test_ai_spend_control.py - is on for this module."""
+    monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
+
+
 # --- Fallback heuristic tests (pure logic, no mocking needed) ---
 
 def test_fallback_classifies_non_viable_as_dead():

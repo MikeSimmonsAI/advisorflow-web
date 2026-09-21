@@ -20,7 +20,7 @@ import random
 from datetime import datetime
 from typing import Any
 
-from openai import OpenAI
+from app.services import ai_gateway
 from sqlalchemy.orm import Session
 
 from app.models.models import (
@@ -78,10 +78,10 @@ MAX_DELAY_SECONDS = 300    # 5 minutes
 
 _client = None
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+def _get_client():
+    """Test seam only. None in production means "the gateway's own client":
+    every model request from this module goes through app.services.ai_gateway,
+    which pins the model and enforces the background/manual switches."""
     return _client
 
 
@@ -248,10 +248,13 @@ def analyze_and_respond(
     lead: Lead,
     advisor: User,
     pipeline: PipelineConversation,
+    mode: str = ai_gateway.BACKGROUND,
+    actor: str | None = None,
 ) -> dict[str, Any]:
     """
     Core function — analyzes latest reply and generates response with confidence score.
-    Returns full analysis dict.
+    Returns full analysis dict. BACKGROUND by default (inbound replies);
+    launch_pipeline passes MANUAL with the signed-in user as `actor`.
     """
     try:
         from app.models.models import Organization
@@ -320,8 +323,10 @@ def analyze_and_respond(
     )
 
     try:
-        response = _get_client().chat.completions.create(
-            model="gpt-4o",
+        response = ai_gateway.chat_completion(
+            feature="pipeline.analyze_and_respond", capability="pipeline_reply",
+            mode=mode, actor=actor, org_id=lead.organization_id,
+            client=_get_client(),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.65,
             max_tokens=350,
@@ -368,7 +373,13 @@ def process_inbound_reply(
     Called when a new inbound reply arrives.
     Finds or creates pipeline, analyzes reply, decides auto-send vs flag.
     Returns action taken.
+
+    BACKGROUND AI. With the master switch off nothing below runs: no pipeline
+    is created, no counter moves, no provider request, no auto-send, no
+    advisor alert. The inbound reply itself is already stored by the caller.
     """
+    if not ai_gateway.check_background("pipeline_inbound_reply"):
+        return {"action": "ai_disabled"}
     # Find active pipeline for this lead
     pipeline = db.query(PipelineConversation).filter(
         PipelineConversation.lead_id == lead.id,
@@ -544,10 +555,13 @@ def launch_pipeline(
     ai_direction: str,
     channel: str = "sms",
     auto_respond: bool = True,
+    actor: str | None = None,
 ) -> dict[str, Any]:
     """
     Launch the pipeline for a list of leads.
     Sends first outreach and creates pipeline records.
+
+    `actor` is the signed-in user who pressed Launch: a MANUAL AI action.
     """
     from app.services.sms_service import send_sms
 
@@ -584,7 +598,20 @@ def launch_pipeline(
             db.flush()
 
             # Generate first message
-            analysis = analyze_and_respond(db, lead, advisor, pipeline)
+            analysis = analyze_and_respond(
+                db, lead, advisor, pipeline,
+                mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND,
+                actor=actor)
+
+            # NO AI MESSAGE, NO MESSAGE. The canned fallback is not what the
+            # advisor launched; it is not sent in their name.
+            if analysis.get("source") == "fallback":
+                logger.error("Pipeline launch: no AI message for lead %s - "
+                             "nothing sent", lead.id)
+                db.delete(pipeline)
+                db.flush()
+                errors += 1
+                continue
 
             if channel in ("sms", "both") and lead.phone:
                 send_sms(

@@ -23,7 +23,7 @@ def analyze_single_lead(lead_id: str, db: Session = Depends(get_db), current_use
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    result = analyze_lead(db, lead)
+    result = analyze_lead(db, lead, actor=current_user.id)
     return result
 
 
@@ -38,7 +38,7 @@ def analyze_lead_batch(lead_ids: list[str], db: Session = Depends(get_db), curre
         raise HTTPException(status_code=400, detail="Batch limited to 25 leads per call to avoid rate limit issues.")
 
     leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(lead_ids)).all()
-    results = analyze_batch(db, leads)
+    results = analyze_batch(db, leads, actor=current_user.id)
     return {"analyzed_count": len(results), "results": results}
 
 

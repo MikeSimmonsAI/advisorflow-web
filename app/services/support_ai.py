@@ -87,12 +87,17 @@ _client = None
 
 
 def _get_client():
-    """The lazy module-global client this codebase uses everywhere else."""
-    global _client
-    if _client is None:
-        from openai import OpenAI
-        _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    """Test seam only. None in production means "the gateway's own client":
+    every model request from this module goes through app.services.ai_gateway,
+    which pins the model and enforces the background/manual switches."""
     return _client
+
+
+def _ai_mode(user):
+    """MANUAL for a signed-in person; BACKGROUND (switch-governed) without one."""
+    from app.services import ai_gateway
+    uid = getattr(user, "id", None)
+    return (ai_gateway.MANUAL if uid else ai_gateway.BACKGROUND), uid
 
 
 def model_available() -> bool:
@@ -308,7 +313,8 @@ def ask(db: Session, *, org: Organization, user: Optional[User],
                                         query=message, limit=3)
 
     # ── 1. WHICH CHECKS. The model may choose; it may not invent.
-    chosen, source = _choose_checks(db, brand, org, conversation, message)
+    chosen, source = _choose_checks(db, brand, org, conversation, message,
+                                    user=user)
 
     # ── 2. RUN THEM. Server-scoped to this organization, never to an id the
     #      model or the customer supplied.
@@ -339,7 +345,7 @@ def ask(db: Session, *, org: Organization, user: Optional[User],
     reply, reply_source = _compose(db, brand=brand, org=org,
                                    conversation=conversation, message=message,
                                    diagnostics=diagnostics, articles=articles,
-                                   fixes=fixes)
+                                   fixes=fixes, user=user)
 
     verified_fix = next((f for f in fixes if f["fixed"]), None)
     resolved_here = bool(verified_fix) or (
@@ -393,7 +399,7 @@ def _leading_service(diagnostics: Dict[str, Any]) -> Optional[str]:
 
 def _choose_checks(db: Session, brand: Dict[str, Any], org: Organization,
                    conversation: SupportConversation,
-                   message: str) -> Tuple[List[str], str]:
+                   message: str, user=None) -> Tuple[List[str], str]:
     """Ask the model which checks to run; fall back to keywords.
 
     THE RESOLUTION IS THE GUARD. Whatever the model returns goes through
@@ -415,8 +421,12 @@ def _choose_checks(db: Session, brand: Dict[str, Any], org: Organization,
         {"role": "user", "content": message[:4000]},
     ]
     try:
-        response = _get_client().chat.completions.create(
-            model=SUPPORT_MODEL, messages=messages, tools=tools,
+        from app.services import ai_gateway
+        mode, uid = _ai_mode(user)
+        response = ai_gateway.chat_completion(
+            feature="support_ai.choose_checks", capability="support_chat",
+            mode=mode, actor=uid, org_id=getattr(org, "id", None),
+            client=_get_client(), messages=messages, tools=tools,
             tool_choice="auto", temperature=0, max_tokens=200)
         calls = getattr(response.choices[0].message, "tool_calls", None) or []
         chosen = []
@@ -551,13 +561,14 @@ def _suggested_ticket(message: str, diagnostics: Dict[str, Any], cause: str,
 def _compose(db: Session, *, brand: Dict[str, Any], org: Organization,
              conversation: SupportConversation, message: str,
              diagnostics: Dict[str, Any], articles: List[Any],
-             fixes: List[Dict[str, Any]]) -> Tuple[str, str]:
+             fixes: List[Dict[str, Any]], user=None) -> Tuple[str, str]:
     if model_available():
         try:
             return _compose_with_model(db, brand=brand, org=org,
                                        conversation=conversation,
                                        message=message, diagnostics=diagnostics,
-                                       articles=articles, fixes=fixes), "model"
+                                       articles=articles, fixes=fixes,
+                                       user=user), "model"
         except Exception:                                      # noqa: BLE001
             log.warning("support_ai: model composition failed; answering from "
                         "the evidence directly", exc_info=True)
@@ -565,7 +576,7 @@ def _compose(db: Session, *, brand: Dict[str, Any], org: Organization,
 
 
 def _compose_with_model(db: Session, *, brand, org, conversation, message,
-                        diagnostics, articles, fixes) -> str:
+                        diagnostics, articles, fixes, user=None) -> str:
     turns = history(db, conversation, limit=MAX_HISTORY_TURNS)
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": _system_prompt(brand, org)}]
@@ -578,8 +589,12 @@ def _compose_with_model(db: Session, *, brand, org, conversation, message,
                                       _evidence_block(diagnostics, articles, fixes)),
     })
 
-    response = _get_client().chat.completions.create(
-        model=SUPPORT_MODEL, messages=messages, temperature=0.3, max_tokens=500)
+    from app.services import ai_gateway
+    mode, uid = _ai_mode(user)
+    response = ai_gateway.chat_completion(
+        feature="support_ai.compose", capability="support_chat",
+        mode=mode, actor=uid, org_id=getattr(org, "id", None),
+        client=_get_client(), messages=messages, temperature=0.3, max_tokens=500)
     text = (response.choices[0].message.content or "").strip()
     if not text:
         raise ValueError("empty completion")

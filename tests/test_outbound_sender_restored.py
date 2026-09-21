@@ -28,6 +28,16 @@ from app.services import send_source
 from app.services.auth_service import create_access_token, hash_password
 
 
+
+@pytest.fixture(autouse=True)
+def _background_ai_on(monkeypatch):
+    """The AI-backed senders in this module (pipeline auto-reply, the
+    post-appointment follow-up) are exercised as they behave WHEN they run, so
+    the master background-AI switch - off by default, see
+    tests/test_ai_spend_control.py - is on here. The outbound-email switches
+    this module is about are untouched and still default off."""
+    monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
+
 def _lead(db_session, org, advisor, *, phone=None, email="fam@example.com",
           status="new"):
     lead = Lead(organization_id=org.id, assigned_to_id=getattr(advisor, "id", None),
@@ -135,7 +145,7 @@ def test_the_actor_and_the_family_facing_advisor_are_recorded_separately(
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _fake_generate(db, lead, advisor, tone="warm", ai_direction=None,
-                   relationship_type=None):
+                   relationship_type=None, actor=None):
     return {"reply": "Drafted body", "subject": "Drafted subject",
             "should_stop": False, "reason": "", "source": "ai",
             "error_kind": None, "booking_url": ""}

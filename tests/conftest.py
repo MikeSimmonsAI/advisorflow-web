@@ -171,6 +171,27 @@ def _fresh_rate_limit_allowance():
     _clear()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_ai_gateway():
+    """Every test starts with the AI gateway's spend counters, breaker and
+    once-per-process log latch cleared - the same suite-wide-state problem as
+    the throttles above. The switches are NOT touched: they come from the
+    environment, which by default leaves background AI OFF, and a test that
+    needs it on says so with monkeypatch.setenv."""
+    from app.services import ai_gateway
+    ai_gateway._reset_for_tests()
+    yield
+    ai_gateway._reset_for_tests()
+
+
+@pytest.fixture()
+def ai_background_on(monkeypatch):
+    """Opt-in: background AI switched ON for one test. For tests of the
+    background features themselves (reply classification, inbound replies,
+    the scheduled loop) that predate the master switch."""
+    monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
+
+
 @pytest.fixture()
 def db_session():
     """

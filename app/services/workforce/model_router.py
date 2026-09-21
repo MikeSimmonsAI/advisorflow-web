@@ -478,6 +478,14 @@ class OpenAIProvider(BaseProvider):
     def available(self) -> bool:
         enabled = (os.environ.get("AI_WORKFORCE_LLM_ENABLED", "")
                    .strip().lower() in ("1", "true", "yes", "on"))
+        # NO UNAPPROVED MODEL, EVER. AI_WORKFORCE_OPENAI_MODEL is the one model
+        # name in this codebase an environment variable could set freely; it
+        # counts only if it is on the platform's approved list. The default
+        # (gpt-4.1-mini) is not, so this provider stays unavailable unless a
+        # reviewed code change approves a model. See app.services.ai_gateway.
+        from app.services import ai_gateway
+        if self.model_name not in ai_gateway.APPROVED_MODELS:
+            return False
         return bool(enabled and os.environ.get("OPENAI_API_KEY"))
 
     def plan(self, request: ModelRequest) -> ModelResponse:

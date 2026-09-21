@@ -42,7 +42,7 @@ overrides, no "close enough."
 
 import os
 import json
-from openai import OpenAI
+from app.services import ai_gateway
 
 _client = None
 
@@ -50,10 +50,10 @@ ELIGIBLE_CLASSIFICATIONS = {"question", "interested", "callback"}
 HARD_EXCLUDED_CLASSIFICATIONS = {"dnc", "not_interested", "wrong_number", "neutral"}
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+def _get_client():
+    """Test seam only. None in production means "the gateway's own client":
+    every model request from this module goes through app.services.ai_gateway,
+    which pins the model and enforces the background/manual switches."""
     return _client
 
 
@@ -131,8 +131,11 @@ def check_auto_send_eligibility(
     history_text = conversation_history.strip() if conversation_history else "(no prior messages)"
 
     try:
-        response = _get_client().chat.completions.create(
-            model="gpt-4o-mini",
+        # BACKGROUND: an automated send decision. A refusal lands in the
+        # except below and returns eligible=False - the safe answer.
+        response = ai_gateway.chat_completion(
+            feature="auto_send_eligibility", capability="auto_send_eligibility",
+            mode=ai_gateway.BACKGROUND, client=_get_client(),
             messages=[{
                 "role": "user",
                 "content": ELIGIBILITY_PROMPT.format(

@@ -20,7 +20,10 @@ import os
 logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"
+# The model is NOT written here. handle_realtime_session asks
+# ai_gateway.admit_realtime for it, which pins the approved voice model and
+# refuses the session outright when background AI is switched off.
+REALTIME_URL_BASE = "wss://api.openai.com/v1/realtime?model="
 
 # Escalation triggers for voice
 ESCALATION_PHRASES = [
@@ -127,6 +130,20 @@ async def handle_realtime_session(
     on_escalation_detected: async callback when escalation detected
     """
     import websockets
+    from app.services import ai_gateway
+
+    # BACKGROUND AI: an AI voice agent talking to a family with no person in
+    # the loop. With the master switch off - or the model not approved, or a
+    # spend cap hit - no Realtime session is opened and the stream ends.
+    try:
+        model = ai_gateway.admit_realtime(
+            feature="voice.realtime_call", mode=ai_gateway.BACKGROUND,
+            org_id=lead_info.get("organization_id"))
+    except ai_gateway.AIRefused as exc:
+        logger.warning("Voice Realtime session refused for lead=%s: %s",
+                       lead_info.get("id"), exc)
+        return
+    realtime_url = REALTIME_URL_BASE + model
 
     system_prompt = build_voice_system_prompt(lead_info, advisor_info, call_number)
     stream_sid = None
@@ -136,7 +153,7 @@ async def handle_realtime_session(
 
     try:
         async with websockets.connect(
-            REALTIME_URL,
+            realtime_url,
             extra_headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "OpenAI-Beta": "realtime=v1",

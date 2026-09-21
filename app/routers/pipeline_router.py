@@ -76,6 +76,7 @@ def launch(
         ai_direction=req.ai_direction,
         channel=req.channel,
         auto_respond=req.auto_respond,
+        actor=current_user.id,
     )
     log_action(db, current_user.organization_id, current_user.id,
                action="pipeline.launched", target_type="batch",

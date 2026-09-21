@@ -82,7 +82,8 @@ def start_conversation(
     lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    result = start_ai_conversation(db, lead, current_user, channel=req.channel)
+    result = start_ai_conversation(db, lead, current_user, channel=req.channel,
+                                   actor=current_user.id)
     if result.get("success"):
         log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.started", target_type="lead", target_id=req.lead_id)
     return result
@@ -125,7 +126,8 @@ def bulk_start_conversations(
             channel = req.channel
 
         try:
-            result = start_ai_conversation(db, lead, current_user, channel=channel)
+            result = start_ai_conversation(db, lead, current_user, channel=channel,
+                                           actor=current_user.id)
             if result.get("success"):
                 started.append(lead_id)
                 log_action(
@@ -214,6 +216,7 @@ def preview_auto_reply(
         tone=req.tone,
         ai_direction=req.ai_direction,
         relationship_type=req.relationship_type,
+        actor=current_user.id,
     )
     return {"lead_id": lead.id, "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(), "phone": lead.phone, **result}
 
@@ -234,6 +237,7 @@ def generate_batch_replies(
                 tone=req.tone,
                 ai_direction=req.ai_direction,
                 relationship_type=req.relationship_type,
+                actor=current_user.id,
             )
             if ai_result["should_stop"]:
                 skipped += 1

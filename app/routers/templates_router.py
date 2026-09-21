@@ -168,7 +168,8 @@ def ai_generate_template(
         db, current_user.organization_id, req.message_track, req.channel)
     try:
         return generate_template(track, req.channel, req.instruction,
-                                 track_context=_tone(db, current_user, track))
+                                 track_context=_tone(db, current_user, track),
+                                 actor=current_user.id)
     except TemplateAIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
@@ -193,6 +194,7 @@ def ai_rewrite_template(
         return rewrite_template(
             track, req.channel, req.current_body, req.current_subject, req.instruction,
             track_context=_tone(db, current_user, track),
+            actor=current_user.id,
         )
     except TemplateAIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))

@@ -250,10 +250,13 @@ def _generate_campaign_message(
     purpose: str, tone: str, org_name: str, advisor_name: str,
     lead_type: str = None, ai_direction: str = None, industry: str = "funeral",
     offer_hook: str = None, relationship_type: str = None,
+    actor: str = None, org_id: str = None,
 ) -> str:
-    """Generate an AI opening message for this campaign."""
-    from openai import OpenAI
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    """Generate an AI opening message for this campaign.
+
+    MANUAL AI when `actor` (the signed-in user) is given; BACKGROUND otherwise,
+    which obeys the master background switch. See app.services.ai_gateway."""
+    from app.services import ai_gateway
 
     all_purposes = CAMPAIGN_PURPOSES_BY_INDUSTRY.get(industry, CAMPAIGN_PURPOSES_BY_INDUSTRY["custom"])
     purpose_label = next((p["label"] for p in all_purposes if p["value"] == purpose), purpose)
@@ -301,8 +304,10 @@ Rules:
 Write the message:"""
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = ai_gateway.chat_completion(
+            feature="campaign.generate_message", capability="campaign_copy",
+            mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND,
+            actor=actor, org_id=org_id,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.65,
             max_tokens=130,
@@ -392,6 +397,7 @@ def generate_message(
         req.purpose, req.tone, org_name, advisor_name,
         lead_type=req.lead_type, ai_direction=req.ai_direction, industry=industry,
         offer_hook=req.offer_hook,
+        actor=current_user.id, org_id=current_user.organization_id,
     )
     return {"message": message, "purpose": req.purpose, "tone": req.tone}
 

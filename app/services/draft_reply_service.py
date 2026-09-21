@@ -8,7 +8,7 @@ import os
 from typing import Any
 from datetime import datetime
 
-from openai import OpenAI
+from app.services import ai_gateway
 from sqlalchemy.orm import Session
 
 from app.models.models import BookingLink, Lead, Message, Reply, User
@@ -17,10 +17,10 @@ from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 _client = None
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+def _get_client():
+    """Test seam only. None in production means "the gateway's own client":
+    every model request from this module goes through app.services.ai_gateway,
+    which pins the model and enforces the background/manual switches."""
     return _client
 
 
@@ -265,7 +265,9 @@ def draft_reply(
     tone: str = "warm",
     ai_direction: str = None,
     sample_message: str = None,
+    actor: str = None,
 ) -> dict[str, Any]:
+    # MANUAL when a signed-in user asked (`actor`); BACKGROUND otherwise.
     tone = tone if tone in TONE_INSTRUCTIONS else "warm"
     booking = get_or_create_booking_link(db, lead, advisor)
     booking_url = _booking_url(db, lead.organization_id, booking.token)
@@ -329,8 +331,10 @@ def draft_reply(
     )
 
     try:
-        response = _get_client().chat.completions.create(
-            model="gpt-4o-mini",
+        response = ai_gateway.chat_completion(
+            feature="draft_reply.sms", capability="draft_reply",
+            mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND,
+            actor=actor, org_id=lead.organization_id, client=_get_client(),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             # Was 120, which truncated a cold introduction mid-sentence before
@@ -448,14 +452,15 @@ def draft_email_options(
     tone: str = "warm",
     ai_direction: str = None,
     sample_message: str = None,
+    actor: str = None,
 ) -> dict:
     """
     Generate talking points + 3 email draft options for a lead.
+    MANUAL when a signed-in user asked (`actor`); BACKGROUND otherwise.
     Uses full lead context (tier, source year, last action, etc.) to
     personalize the message rather than using a generic template.
     Respects relationship_type as the primary AI constraint.
     """
-    from openai import OpenAI
     import json, os
 
     tone_map = {
@@ -548,15 +553,17 @@ def draft_email_options(
     advisor_name_str = advisor.full_name or "your advisor"
 
     try:
-        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         sys_msg = (
             "You are drafting outreach emails for service business advisors. "
             "When the advisor provides explicit direction, follow it LITERALLY and specifically — "
             "it overrides all other guidance. If they say 'file review', write about file review. "
             "Never substitute generic content when specific direction is given."
         )
-        response = client.chat.completions.create(
-            model="gpt-4o",
+        response = ai_gateway.chat_completion(
+            feature="draft_reply.email_options", capability="draft_reply_rich",
+            mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND,
+            actor=actor, org_id=getattr(lead, "organization_id", None),
+            client=_get_client(),
             messages=[
                 {"role": "system", "content": sys_msg},
                 {"role": "user", "content": prompt},

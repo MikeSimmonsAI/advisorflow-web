@@ -23,15 +23,13 @@ from app.services import lead_scope
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
-# ── Lazy OpenAI client (same pattern as ai_analysis_service) ─────────────
-_client = None
+# ── Model access: app.services.ai_gateway only ────────────────────────────
+from app.services import ai_gateway
+
 
 def _get_client():
-    global _client
-    if _client is None:
-        from openai import OpenAI
-        _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    return _client
+    """Test seam only. None means "the gateway's own client"."""
+    return None
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────
@@ -156,8 +154,12 @@ Respond ONLY with valid JSON, no markdown:
 }}"""
 
     try:
-        response = _get_client().chat.completions.create(
-            model="gpt-4o-mini",
+        # MANUAL: a signed-in user asked for this suggestion.
+        response = ai_gateway.chat_completion(
+            feature="objection.reply_suggestion", capability="objection_help",
+            mode=ai_gateway.MANUAL, actor=current_user.id,
+            org_id=getattr(lead, "organization_id", None),
+            client=_get_client(),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=400,

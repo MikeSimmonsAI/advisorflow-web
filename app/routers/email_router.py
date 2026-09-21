@@ -685,7 +685,8 @@ def draft_email(
     ai_direction = (req.ai_direction if req else None)
     sample_message = (req.sample_message if req else None)
 
-    return draft_email_options(db, lead, current_user, tone=tone, ai_direction=ai_direction, sample_message=sample_message)
+    return draft_email_options(db, lead, current_user, tone=tone, ai_direction=ai_direction, sample_message=sample_message,
+                               actor=current_user.id)
 
 
 @router.get("/sent-log")

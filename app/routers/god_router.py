@@ -2606,3 +2606,19 @@ def _get_job_runs_latest_superseded(
     )
 
     return {"jobs": jobs, "all_healthy": all_healthy}
+
+
+@router.get("/ai-spend-control")
+def god_ai_spend_control(god: User = Depends(require_god)) -> dict:
+    """The AI gateway's live configuration, for the platform owner.
+
+    Both switches, the approved models, the model each capability resolves to
+    right now (an env override that names an unapproved model shows as
+    REFUSED), every *MODEL* environment variable by name and value - model
+    names are not credentials - whether an OpenAI key is present (never the
+    key), the spend limits, and this process's background counters.
+
+    READ-ONLY. It changes nothing and makes no provider request.
+    """
+    from app.services import ai_gateway
+    return ai_gateway.config_report()

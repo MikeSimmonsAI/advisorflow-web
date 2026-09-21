@@ -80,7 +80,7 @@ def test_preview_returns_reply_and_forwards_the_typed_ai_direction(
 
     captured = {}
 
-    def fake_generate(db, lead_arg, advisor, tone="warm", ai_direction=None, relationship_type=None):
+    def fake_generate(db, lead_arg, advisor, tone="warm", ai_direction=None, relationship_type=None, actor=None):
         captured["tone"] = tone
         captured["ai_direction"] = ai_direction
         captured["relationship_type"] = relationship_type

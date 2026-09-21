@@ -36,6 +36,16 @@ from app.services.auth_service import create_access_token, hash_password
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
+
+@pytest.fixture(autouse=True)
+def _background_ai_on(monkeypatch):
+    """The AI-backed senders in this module (pipeline auto-reply, the
+    post-appointment follow-up) are exercised as they behave WHEN they run, so
+    the master background-AI switch - off by default, see
+    tests/test_ai_spend_control.py - is on here. The outbound-email switches
+    this module is about are untouched and still default off."""
+    monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
+
 def _lead(db_session, org, advisor, *, phone="12145557001", email=None,
           status="new", allow_email=None, manual_flag=None):
     lead = Lead(organization_id=org.id, assigned_to_id=advisor.id if advisor else None,
@@ -339,7 +349,7 @@ def test_bulk_ai_email_reports_a_block_separately_from_an_error(
                     email="fine@example.com")
 
     def fake_generate(db, lead, advisor, tone="warm", ai_direction=None,
-                      relationship_type=None):
+                      relationship_type=None, actor=None):
         return {"reply": "Drafted", "subject": "Subject", "should_stop": False,
                 "reason": "", "source": "ai", "error_kind": None, "booking_url": ""}
 

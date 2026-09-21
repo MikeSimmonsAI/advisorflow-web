@@ -22,9 +22,9 @@ platform.openai.com, so batch calls and handle 429 gracefully).
 
 import os
 import json
-from openai import OpenAI
 from sqlalchemy.orm import Session
 from app.models.models import Lead
+from app.services import ai_gateway
 
 # Lazily initialized so importing this module never crashes when
 # OPENAI_API_KEY isn't set yet (e.g. during tests, or if billing hasn't
@@ -35,11 +35,10 @@ from app.models.models import Lead
 _client = None
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    return _client
+def _get_client():
+    """Test seam only. None means "the gateway's own client" - every request
+    from this module goes through app.services.ai_gateway."""
+    return None
 
 ANALYSIS_PROMPT = """You are analyzing a cemetery/funeral home sales lead's history to classify lead quality for an advisor. Given the data below, respond with ONLY a JSON object (no markdown, no preamble):
 
@@ -64,9 +63,13 @@ def analyze_lead_quality(
     last_action: str = None,
     last_contact_date: str = None,
     notes: str = None,
+    mode: str = ai_gateway.BACKGROUND,
+    actor: str = None,
+    org_id: str = None,
 ) -> dict:
     """
-    Single-lead analysis call. Returns a dict with quality, recommended_approach,
+    Single-lead analysis call. MANUAL with `actor` from the analyze endpoints;
+    BACKGROUND (the fail-safe default) otherwise. Returns a dict with quality, recommended_approach,
     and reasoning. Falls back to a rule-based heuristic if the API call fails
     (e.g. 429 rate limit) so the pipeline doesn't hard-stop on AI errors.
     """
@@ -79,8 +82,9 @@ def analyze_lead_quality(
     )
 
     try:
-        response = _get_client().chat.completions.create(
-            model="gpt-4o-mini",
+        response = ai_gateway.chat_completion(
+            feature="ai_analysis.lead_quality", capability="lead_analysis",
+            mode=mode, actor=actor, org_id=org_id, client=_get_client(),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
             max_tokens=200,
@@ -120,7 +124,7 @@ def _fallback_heuristic(tier, status_reason, last_action, error=None) -> dict:
     }
 
 
-def analyze_lead(db: Session, lead: Lead) -> dict:
+def analyze_lead(db: Session, lead: Lead, actor: str = None) -> dict:
     """Runs analysis on a single Lead record and writes the result back to ai_lead_quality_note."""
     last_contact_str = lead.last_contact_date.isoformat() if lead.last_contact_date else None
     result = analyze_lead_quality(
@@ -129,13 +133,15 @@ def analyze_lead(db: Session, lead: Lead) -> dict:
         last_action=lead.last_action_raw,
         last_contact_date=last_contact_str,
         notes=lead.notes,
+        mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND,
+        actor=actor, org_id=getattr(lead, "organization_id", None),
     )
     lead.ai_lead_quality_note = json.dumps(result)
     db.commit()
     return result
 
 
-def analyze_batch(db: Session, leads: list[Lead]) -> dict:
+def analyze_batch(db: Session, leads: list[Lead], actor: str = None) -> dict:
     """
     Analyzes a batch of leads. Use sparingly given the current 429 rate
     limit situation on the shared OpenAI key - consider running this as a
@@ -144,5 +150,5 @@ def analyze_batch(db: Session, leads: list[Lead]) -> dict:
     """
     results = {}
     for lead in leads:
-        results[lead.id] = analyze_lead(db, lead)
+        results[lead.id] = analyze_lead(db, lead, actor=actor)
     return results

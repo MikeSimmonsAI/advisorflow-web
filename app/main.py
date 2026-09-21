@@ -1105,10 +1105,31 @@ async def _ai_conversation_loop():
         _m["orgs_processed"] = len(org_ids)
         _m["org_errors"] = _org_errors
 
+    from app.services import ai_gateway
+
+    def _gated_pass(_m):
+        # One spend budget for the whole pass, across every org it walks.
+        with ai_gateway.background_pass("ai_conversation_loop"):
+            _one_pass(_m)
+
     await asyncio.sleep(30)  # brief startup delay
     while True:
-        async with record_job_run(JobName.AI_CONVERSATION, db_factory=SessionLocal) as _m:
-            await _off_loop(_one_pass, _m)
+        # THE MASTER BACKGROUND SWITCH. Off by default. With it off the pass
+        # lists no orgs, queries no conversations, calls no provider, sends
+        # nothing and changes nothing - and logs that ONCE per process, not
+        # every two minutes. The job ledger still gets its row, marked
+        # disabled with zero provider calls, so God Mode shows the loop as
+        # alive-and-off rather than dead, and the ledger itself is the proof
+        # of what it did not do. See app.services.ai_gateway.
+        try:
+            async with record_job_run(JobName.AI_CONVERSATION, db_factory=SessionLocal) as _m:
+                if ai_gateway.check_background("ai_conversation_loop"):
+                    await _off_loop(_gated_pass, _m)
+                else:
+                    _m["disabled"] = True
+                    _m["provider_calls"] = 0
+        except Exception as exc:                               # noqa: BLE001
+            _logger.error("ai_conversation_loop error: %s", exc)
 
         await asyncio.sleep(120)  # 2 minutes
 

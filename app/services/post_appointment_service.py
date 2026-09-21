@@ -13,10 +13,10 @@ import logging
 import os
 from datetime import datetime, timedelta
 
-from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.models.models import BookingFollowup, BookingLink, Lead, User, Organization
+from app.services import ai_gateway
 from app.services import outbound_email_gate
 from app.services import send_source
 
@@ -30,9 +30,7 @@ _openai_client = None
 
 
 def _get_openai():
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    """Test seam only. None in production means "the gateway's own client"."""
     return _openai_client
 
 
@@ -62,8 +60,10 @@ Rules:
 - Respond with ONLY the message text, no quotes, no JSON"""
 
     try:
-        resp = _get_openai().chat.completions.create(
-            model="gpt-4o-mini",
+        resp = ai_gateway.chat_completion(
+            feature="post_appointment.thank_you", capability="post_appointment",
+            mode=ai_gateway.BACKGROUND, org_id=getattr(lead, "organization_id", None),
+            client=_get_openai(),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5,
             max_tokens=120,
@@ -184,7 +184,14 @@ def check_and_send_followups(db: Session) -> int:
       - no BookingFollowup row yet
 
     Returns the number of followups sent.
+
+    AN AI-PERSONALISED BACKGROUND SEND. With AI_BACKGROUND_AUTOMATION_ENABLED
+    off (the default) this returns 0 before it queries anything: no provider
+    request, no BookingFollowup row, no SMS, no email - and in particular not
+    the canned thank-you the AI-failure path would otherwise have sent.
     """
+    if not ai_gateway.check_background("post_appointment_followup"):
+        return 0
     now = datetime.utcnow()
     window_start = now - timedelta(hours=3)
 

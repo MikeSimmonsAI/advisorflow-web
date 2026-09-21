@@ -206,6 +206,9 @@ def test_no_loop_runs_its_blocking_pass_on_the_event_loop(loops, name):
 def _configured(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
     monkeypatch.setenv("RESEND_API_KEY", "test-key-not-real")
+    # The pass under test must actually run: background AI on (it is off by
+    # default - see test_ai_spend_control).
+    monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
 
 
 def _due_set(db, org, advisor, n=3):

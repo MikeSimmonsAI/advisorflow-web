@@ -20,17 +20,17 @@ import json
 import os
 from typing import Any
 
-from openai import OpenAI
+from app.services import ai_gateway
 
 from app.models.models import MessageTrack
 
 _client = None
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+def _get_client():
+    """Test seam only. None in production means "the gateway's own client":
+    every model request from this module goes through app.services.ai_gateway,
+    which pins the model and enforces the background/manual switches."""
     return _client
 
 
@@ -126,10 +126,12 @@ def _safe_parse_json(raw: str) -> dict[str, Any]:
     return parsed
 
 
-def _call_openai(prompt: str) -> dict[str, Any]:
+def _call_openai(prompt: str, actor: str | None = None) -> dict[str, Any]:
     try:
-        response = _get_client().chat.completions.create(
-            model="gpt-4o-mini",
+        response = ai_gateway.chat_completion(
+            feature="template_ai", capability="template_copy",
+            mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND,
+            actor=actor, client=_get_client(),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5,
             max_tokens=400,
@@ -159,7 +161,8 @@ def _situation(track, supplied: str | None) -> str:
 
 
 def generate_template(track, channel: str, instruction: str | None = None,
-                      track_context: str | None = None) -> dict[str, Any]:
+                      track_context: str | None = None,
+                      actor: str | None = None) -> dict[str, Any]:
     """
     Generates a new template draft from scratch for this track+channel.
     If `instruction` is given, it's folded in as additional guidance on top
@@ -174,13 +177,14 @@ def generate_template(track, channel: str, instruction: str | None = None,
         placeholders=", ".join(placeholders),
         instruction_block=instruction_block,
     )
-    parsed = _call_openai(prompt)
+    parsed = _call_openai(prompt, actor=actor)
     return _normalize_result(parsed, channel)
 
 
 def rewrite_template(track, channel: str, current_body: str,
                      current_subject: str | None, instruction: str,
-                     track_context: str | None = None) -> dict[str, Any]:
+                     track_context: str | None = None,
+                     actor: str | None = None) -> dict[str, Any]:
     """
     Rewrites the admin's current draft per a free-text instruction, e.g.
     "make this warmer" or "shorter" or "add more urgency".
@@ -200,7 +204,7 @@ def rewrite_template(track, channel: str, current_body: str,
         instruction=instruction.strip(),
         placeholders=", ".join(placeholders),
     )
-    parsed = _call_openai(prompt)
+    parsed = _call_openai(prompt, actor=actor)
     return _normalize_result(parsed, channel)
 
 
