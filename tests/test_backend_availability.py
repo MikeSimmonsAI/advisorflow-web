@@ -92,7 +92,16 @@ def _measure_responsiveness(blocking_call, block_seconds=0.6):
         await hb
         return during
 
-    return asyncio.run(scenario())
+    # A PRIVATE LOOP, NOT asyncio.run(). asyncio.run() ends by setting the
+    # thread's current event loop to None, and later test modules that call
+    # `asyncio.get_event_loop().run_until_complete(...)` then fail for a reason
+    # that has nothing to do with them — which is exactly what the first
+    # version of this file did to tests/test_god_job_runs.py in a full run.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(scenario())
+    finally:
+        loop.close()
 
 
 def test_a_pass_run_through_off_loop_leaves_the_server_responsive():
