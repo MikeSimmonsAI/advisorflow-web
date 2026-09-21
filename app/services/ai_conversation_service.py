@@ -520,6 +520,28 @@ def _build_advisor_intro_instruction(advisor_name: str, org_name: str) -> str:
     )
 
 
+# THE FAILURES THAT ARE ABOUT THE PROVIDER, NOT THE LEAD.
+#
+# When one of these comes back, every other conversation in the same pass will
+# get the same answer, so asking again is not diligence, it is load. That load
+# is what took the web service down in production: with the OpenAI account out
+# of credit, the scheduled pass asked once per due conversation, each 429
+# arriving after the SDK's own retries, and the pass ran long enough to starve
+# Render's health check. The pass now stops at the first of these, leaves every
+# remaining conversation due and untouched — nothing is skipped or advanced —
+# and the next pass tries again, which is correct when credit is restored.
+#
+# Class names, not imports, so this module does not depend on the SDK's
+# exception hierarchy staying put between versions.
+PROVIDER_LEVEL_ERRORS = frozenset({
+    "RateLimitError",          # includes insufficient_quota / credit exhausted
+    "AuthenticationError",     # key missing, revoked or wrong
+    "PermissionDeniedError",   # key valid, account not allowed
+    "APIConnectionError",      # provider unreachable
+    "APITimeoutError",         # provider not answering
+})
+
+
 def generate_touch_email(
     db: Session,
     lead: Lead,
@@ -641,6 +663,11 @@ def generate_touch_email(
             # preview shows it to a human who then decides - a person looking
             # at a draft is not the same act as a machine mailing a family.
             "generation_failed": True,
+            # AND WHETHER IT WAS THIS LEAD OR THE PROVIDER. A malformed reply
+            # for one lead says nothing about the next; an account with no
+            # credit, a rejected key or an unreachable API says the same thing
+            # to every lead in the pass. See PROVIDER_LEVEL_ERRORS.
+            "provider_unavailable": type(e).__name__ in PROVIDER_LEVEL_ERRORS,
             "touch_number": touch_number,
         }
 
@@ -749,7 +776,9 @@ def _send_touch(db: Session, lead: Lead, advisor: User, conv: PipelineConversati
                       % (email_data.get("error_kind") or "unknown"))
             logger.error("_send_touch refused for lead %s: %s", lead.id, reason)
             return {"success": False, "error": reason,
-                    "generation_failed": True, "sent": False}
+                    "generation_failed": True, "sent": False,
+                    # Carried up so the pass can stop: see PROVIDER_LEVEL_ERRORS.
+                    "provider_unavailable": bool(email_data.get("provider_unavailable"))}
 
     try:
         if not lead.email:
@@ -945,6 +974,7 @@ def process_scheduled_touches(db: Session, org_id: str = None) -> dict:
     sent = 0
     errors = 0
     skipped = 0
+    provider_halt = None
 
     for conv in due:
         try:
@@ -996,12 +1026,27 @@ def process_scheduled_touches(db: Session, org_id: str = None) -> dict:
                 sent += 1
             else:
                 errors += 1
+                # ONE PROVIDER FAILURE, NOT ONE PER LEAD. See
+                # PROVIDER_LEVEL_ERRORS. The rest of the due set stays due and
+                # untouched; the next pass tries again.
+                if result.get("provider_unavailable"):
+                    provider_halt = result.get("error")
+                    logger.error(
+                        "process_scheduled_touches halted after %d of %d: the AI "
+                        "provider is unavailable - remaining conversations "
+                        "left due for the next pass. %s",
+                        sent + skipped + errors, len(due), provider_halt)
+                    break
 
         except Exception as e:
             logger.error("process_scheduled_touches error conv=%s: %s", conv.id, e)
             errors += 1
 
-    return {"processed": len(due), "sent": sent, "skipped": skipped, "errors": errors}
+    out = {"processed": len(due), "sent": sent, "skipped": skipped, "errors": errors}
+    if provider_halt:
+        out["halted"] = True
+        out["halt_reason"] = provider_halt
+    return out
 
 
 POST_BOOKING_SYSTEM_PROMPT = """You are {advisor_name} at {org_name}, personally responding to a message from {first_name}, who has already booked a {appt_label} with you.

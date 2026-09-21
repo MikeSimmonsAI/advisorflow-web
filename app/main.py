@@ -954,6 +954,38 @@ app.include_router(ai_workforce_intelligence_god_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
+#
+# EVERY PASS BELOW RUNS OFF THE EVENT LOOP, AND THAT IS NOT A STYLE CHOICE.
+#
+# THE PRODUCTION INCIDENT THIS RULE CAME FROM. These loops are `async def`
+# because they are scheduled on the web server's event loop — the same single
+# thread that accepts every HTTP request and answers Render's /health probe.
+# Their bodies, though, are synchronous: SQLAlchemy sessions, the OpenAI SDK,
+# Twilio, SMTP. Called directly from a coroutine, a synchronous call does not
+# yield; it holds the thread until it returns, and nothing else runs.
+#
+# The AI conversation pass walks every due conversation and asks OpenAI to
+# write a touch for each. When the OpenAI account ran out of credit, every one
+# of those calls came back 429 after the SDK's own retry-with-backoff, a second
+# or two apiece, and a failed touch does not advance `next_send_at` — so the
+# whole due set was retried every two minutes. For the length of each pass the
+# web server could not answer anything. Render's health check timed out after
+# five seconds, the instance was marked failed and sent SIGTERM (exit 143), it
+# restarted, refused connections while it booted, came up, waited thirty
+# seconds, and did it again. From a browser that is a request that hangs for
+# half a minute and then dies, followed by several that fail instantly: the
+# app said "Unable to reach the server", and it was right.
+#
+# `_off_loop` runs the pass in a worker thread and awaits it, so the event
+# loop stays free to serve requests however slow a provider, a database or a
+# retry policy is. Each loop still runs one pass at a time — the await is
+# sequential — so nothing about ordering, overlap or double-sending changes.
+# Every pass opens its own session inside the thread, which is the only way a
+# SQLAlchemy session may be used across threads.
+async def _off_loop(fn, *args, **kwargs):
+    """Run a synchronous background pass without blocking the web server."""
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
 
 async def _support_intelligence_loop():
     """Support Intelligence's own pass. Runs every 6 hours.
@@ -985,16 +1017,21 @@ async def _support_intelligence_loop():
             async with record_job_run(JobName.SUPPORT_INTELLIGENCE,
                                       db_factory=SessionLocal) as _m:
                 from app.services import support_brief
-                db = SessionLocal()
-                try:
-                    result = support_brief.run_daily_intelligence(db)
-                    _m["briefs"] = len(result.get("briefs", []))
-                    _m["incidents_opened"] = len(
-                        (result.get("correlation") or {}).get("incidents_opened", []))
-                    _m["candidates"] = len(
-                        (result.get("learning") or {}).get("candidates", []))
-                finally:
-                    db.close()
+
+                def _one_pass():
+                    # Off the event loop — see `_off_loop`. The heaviest pass
+                    # in the process, and the reason it waits three minutes.
+                    db = SessionLocal()
+                    try:
+                        return support_brief.run_daily_intelligence(db)
+                    finally:
+                        db.close()
+                result = await _off_loop(_one_pass)
+                _m["briefs"] = len(result.get("briefs", []))
+                _m["incidents_opened"] = len(
+                    (result.get("correlation") or {}).get("incidents_opened", []))
+                _m["candidates"] = len(
+                    (result.get("learning") or {}).get("candidates", []))
         except Exception as exc:                               # noqa: BLE001
             _logger.warning("support_intelligence loop error: %s", exc,
                             exc_info=True)
@@ -1013,7 +1050,8 @@ async def _review_request_loop():
     while True:
         try:
             async with record_job_run(JobName.REVIEW_REQUEST, db_factory=SessionLocal) as _m:
-                sent = run_review_request_cron(engine)
+                # Off the event loop — see `_off_loop`. This one sends SMS.
+                sent = await _off_loop(run_review_request_cron, engine)
                 _m["sent"] = sent or 0
                 if sent:
                     _logger.info("review_request_cron: sent %d messages", sent)
@@ -1037,34 +1075,40 @@ async def _ai_conversation_loop():
     from app.models.models import Organization
     import logging as _log
     _logger = _log.getLogger("ai_conversation_loop")
+    def _one_pass(_m):
+        # THE WHOLE PASS, IN A WORKER THREAD. This is the loop whose blocking
+        # took the web server down — see the note above `_off_loop`. Each org
+        # still gets its own session and its own try/except, exactly as before.
+        db = SessionLocal()
+        try:
+            orgs = db.query(Organization).filter(Organization.is_active == True).all()
+            org_ids = [o.id for o in orgs]
+        except Exception as exc:
+            _logger.error("ai_conversation_loop: failed to fetch orgs: %s", exc)
+            org_ids = []
+            _m["fetch_error"] = str(exc)[:200]
+        finally:
+            db.close()
+
+        _org_errors = 0
+        for org_id in org_ids:
+            try:
+                db = SessionLocal()
+                try:
+                    process_scheduled_touches(db, org_id=org_id)
+                finally:
+                    db.close()
+            except Exception as exc:
+                _logger.error("ai_conversation_loop: org=%s error: %s", org_id, exc)
+                _org_errors += 1
+                # Isolation: continue to next org regardless of this error
+        _m["orgs_processed"] = len(org_ids)
+        _m["org_errors"] = _org_errors
+
     await asyncio.sleep(30)  # brief startup delay
     while True:
         async with record_job_run(JobName.AI_CONVERSATION, db_factory=SessionLocal) as _m:
-            db = SessionLocal()
-            try:
-                orgs = db.query(Organization).filter(Organization.is_active == True).all()
-                org_ids = [o.id for o in orgs]
-            except Exception as exc:
-                _logger.error("ai_conversation_loop: failed to fetch orgs: %s", exc)
-                org_ids = []
-                _m["fetch_error"] = str(exc)[:200]
-            finally:
-                db.close()
-
-            _org_errors = 0
-            for org_id in org_ids:
-                try:
-                    db = SessionLocal()
-                    try:
-                        process_scheduled_touches(db, org_id=org_id)
-                    finally:
-                        db.close()
-                except Exception as exc:
-                    _logger.error("ai_conversation_loop: org=%s error: %s", org_id, exc)
-                    _org_errors += 1
-                    # Isolation: continue to next org regardless of this error
-            _m["orgs_processed"] = len(org_ids)
-            _m["org_errors"] = _org_errors
+            await _off_loop(_one_pass, _m)
 
         await asyncio.sleep(120)  # 2 minutes
 
@@ -1082,12 +1126,20 @@ async def _cadence_loop():
     from app.deps import SessionLocal
     import logging as _log
     _logger = _log.getLogger("cadence_loop")
-    await asyncio.sleep(90)  # brief startup delay — offset from other loops
-    while True:
+    def _one_pass():
+        # Off the event loop — see `_off_loop`. The session is opened in the
+        # worker thread that uses it, not handed across from this coroutine.
         db = SessionLocal()
         try:
+            return run_due_cadences(db)  # organization_id=None → all orgs
+        finally:
+            db.close()
+
+    await asyncio.sleep(90)  # brief startup delay — offset from other loops
+    while True:
+        try:
             async with record_job_run(JobName.CADENCE_LOOP, db_factory=SessionLocal) as _m:
-                result = run_due_cadences(db)  # organization_id=None → all orgs
+                result = await _off_loop(_one_pass)
                 _m["sent"]      = result.get("sent", 0)
                 _m["completed"] = result.get("completed", 0)
                 _m["errors"]    = result.get("errors", 0)
@@ -1098,8 +1150,6 @@ async def _cadence_loop():
                     )
         except Exception as exc:
             _logger.error("cadence_loop: error: %s", exc)
-        finally:
-            db.close()
         await asyncio.sleep(3600)  # 1 hour
 
 
@@ -1135,16 +1185,19 @@ async def _session_cleanup_loop():
         try:
             async with record_job_run(JobName.SESSION_CLEANUP,
                                       db_factory=SessionLocal) as _m:
-                db = SessionLocal()
-                try:
-                    removed = session_service.purge_dead_sessions(db)
-                    _m["sessions_purged"] = removed
-                    _m["retain_days"] = session_service.SESSION_RETENTION_DAYS
-                    if removed:
-                        _logger.info("session_cleanup: purged %d dead sessions",
-                                     removed)
-                finally:
-                    db.close()
+                def _one_pass():
+                    # Off the event loop — see `_off_loop`.
+                    db = SessionLocal()
+                    try:
+                        return session_service.purge_dead_sessions(db)
+                    finally:
+                        db.close()
+                removed = await _off_loop(_one_pass)
+                _m["sessions_purged"] = removed
+                _m["retain_days"] = session_service.SESSION_RETENTION_DAYS
+                if removed:
+                    _logger.info("session_cleanup: purged %d dead sessions",
+                                 removed)
         except Exception as exc:                               # noqa: BLE001
             # A retention sweep must never be the reason the web process dies.
             _logger.error("session_cleanup error: %s", exc, exc_info=True)
@@ -1183,14 +1236,18 @@ async def _sales_reminder_loop():
         try:
             async with record_job_run(JobName.SALES_REMINDERS,
                                       db_factory=SessionLocal) as _m:
-                db = SessionLocal()
-                try:
-                    report = reminders.process_due(db)
-                    _m.update({k: v for k, v in report.items() if k != "errors"})
-                    if report.get("sent") or report.get("failed"):
-                        _logger.info("sales reminders: %s", report)
-                finally:
-                    db.close()
+                def _one_pass():
+                    # Off the event loop — see `_off_loop`. Delivery here is
+                    # SMTP, which is exactly the kind of call that can stall.
+                    db = SessionLocal()
+                    try:
+                        return reminders.process_due(db)
+                    finally:
+                        db.close()
+                report = await _off_loop(_one_pass)
+                _m.update({k: v for k, v in report.items() if k != "errors"})
+                if report.get("sent") or report.get("failed"):
+                    _logger.info("sales reminders: %s", report)
         except Exception as exc:                               # noqa: BLE001
             # A reminder pass must never be the reason the web process dies.
             _logger.error("sales_reminder error: %s", exc, exc_info=True)

@@ -102,6 +102,11 @@ function withQuery(path, params) {
   return path + (path.includes('?') ? '&' : '?') + query
 }
 
+// WHAT KIND OF FAILURE THIS WAS — decided in a module that imports nothing,
+// so the rule can be executed under plain node. See api/httpErrors.js.
+import { httpErrorKind as _httpErrorKind,
+         fallbackHttpMessage as _fallbackHttpMessage } from './httpErrors'
+
 async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   const token = getToken()
   const headers = { ...options.headers }
@@ -211,11 +216,30 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
       await sleep(RETRY_DELAY_MS)
       return request(path, options, attempt + 1)
     }
-    throw new Error(
+    // NO RESPONSE AT ALL — and only this, never an HTTP status.
+    //
+    // A rejected fetch means the browser was handed nothing it may read: the
+    // connection dropped, the host did not answer, or a proxy replied without
+    // CORS headers (Render's own 502/503 while an instance restarts looks
+    // exactly like that). Every HTTP answer from the application itself,
+    // including a 500, carries CORS headers — see the exception handler in
+    // app/main.py — and is reported below with its status, never here.
+    //
+    // The old wording told the reader to "check your connection". In the
+    // production incident that named this, the reader's connection was fine
+    // and the server was restarting; the sentence sent people to look at
+    // their wifi. It now says what is actually known.
+    //
+    // `kind` lets a caller tell this apart without parsing prose. There is
+    // deliberately NO `status`: auth/workspaceGuard.js reads a missing status
+    // as "no refusal occurred", which is exactly true here.
+    const err = new Error(
       isUpload
-        ? 'The upload did not complete. Nothing was imported — check your connection and try again.'
-        : 'Unable to reach the server. Please check your connection or try again in a moment.'
+        ? 'The upload did not complete. Nothing was imported — the server did not respond. Try again in a moment.'
+        : 'Unable to reach the server. It did not respond — it may be restarting. Try again in a moment.'
     )
+    err.kind = 'network'
+    throw err
   }
 
 
@@ -248,10 +272,12 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
     // information away at exactly the moment somebody needs to read it, so the
     // raw value is carried alongside. Existing callers reading `err.message`
     // are unaffected: a string detail still becomes the message.
-    const err = new Error(typeof detail === 'string' ? detail
-                          : (detail && detail.message) || 'Request failed')
+    const err = new Error(typeof detail === 'string' && detail !== 'Request failed'
+                          ? detail
+                          : (detail && detail.message) || _fallbackHttpMessage(res.status, detail))
     err.detail = detail
     err.status = res.status
+    err.kind = _httpErrorKind(res.status)
     throw err
   }
 
