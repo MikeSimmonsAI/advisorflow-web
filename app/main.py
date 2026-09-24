@@ -161,6 +161,7 @@ from app.routers.integrations_router import router as integrations_router
 from app.routers.voice_webhooks_router import router as voice_webhooks_router
 from app.routers.demo_router import router as demo_router
 from app.routers.import_batch_router import router as import_batch_router
+from app.routers.intake_router import router as intake_router
 # RESTORED: dropped by the feature/lead-import-intelligence merge. Without it
 # the entire qualification API - /qualification/preview, /qualification/lead/{id},
 # /qualification/vocabulary and the organization rules CRUD - answers 404, and
@@ -874,6 +875,10 @@ app.include_router(voice_webhooks_router)
 app.include_router(demo_router)
 app.include_router(proposal_router.router)
 app.include_router(import_batch_router,
+                   dependencies=[Depends(require_feature("imports"))])
+# Universal intake: the guided importer (stage -> analyze -> classify -> commit).
+# Same feature gate as the batch router it supersedes.
+app.include_router(intake_router,
                    dependencies=[Depends(require_feature("imports"))])
 # RESTORED alongside it. Deliberately NOT behind require_feature: qualification
 # is how the platform decides who may be contacted, and a customer whose plan

@@ -41,11 +41,18 @@ class ImportBatchStatus:
     PARTIALLY_COMMITTED = "partially_committed"
     FAILED              = "failed"
     ARCHIVED            = "archived"
+    # Universal intake only (app/services/intake):
+    MAPPING             = "mapping"             # uploaded, awaiting field mapping
+    STAGED              = "staged"              # "stage everything, do not activate"
+    ROLLED_BACK         = "rolled_back"
+    PARTIALLY_ROLLED_BACK = "partially_rolled_back"
+    CANCELLED           = "cancelled"
 
     ALL = (
         UPLOADING, PROCESSING, READY_FOR_REVIEW, REVIEWING,
         READY_TO_COMMIT, COMMITTING, COMMITTED, PARTIALLY_COMMITTED,
-        FAILED, ARCHIVED,
+        FAILED, ARCHIVED, MAPPING, STAGED, ROLLED_BACK,
+        PARTIALLY_ROLLED_BACK, CANCELLED,
     )
     COMMITTABLE = (READY_TO_COMMIT, REVIEWING, READY_FOR_REVIEW)
     TERMINAL    = (COMMITTED, PARTIALLY_COMMITTED, FAILED)
@@ -130,6 +137,44 @@ class ImportBatch(Base):
     import_list_name   = Column(String, nullable=True)
 
     status = Column(String, default=ImportBatchStatus.UPLOADING, nullable=False)
+
+    # ── UNIVERSAL INTAKE (additive; all nullable) ────────────────────────────
+    #
+    # Everything below is written only by app/services/intake. A batch created
+    # by the legacy upload paths leaves every one of these NULL and behaves
+    # exactly as it always did. `pipeline` says which engine owns the batch.
+    pipeline          = Column(String, nullable=True)     # None=legacy | "universal"
+    batch_code        = Column(String, nullable=True)     # e.g. ATL-20260924-001
+    stage             = Column(String, nullable=True)     # mapping|parsing|normalizing|...
+    progress_pct      = Column(Integer, nullable=True)
+    heartbeat_at      = Column(DateTime, nullable=True)   # background worker liveness
+
+    # Who, and in what capacity. `acting_role` is the role the importer held;
+    # `acted_as_platform_owner` is True when a God admin imported while
+    # explicitly acting on behalf of this organization.
+    acting_user_id          = Column(String, nullable=True)
+    acting_user_name        = Column(String, nullable=True)
+    acting_role             = Column(String, nullable=True)
+    acted_as_platform_owner = Column(Boolean, nullable=True)
+
+    source_label      = Column(String, nullable=True)     # "HubSpot", "CSV Import"
+    source_detail     = Column(String, nullable=True)
+    source_system     = Column(String, nullable=True)     # "hubspot" (matching key)
+    campaign_purpose  = Column(String, nullable=True)
+    offer_hook        = Column(String, nullable=True)
+    tags_json         = Column(Text, nullable=True)       # JSON list applied to the batch
+    original_row_count = Column(Integer, nullable=True)
+    headers_json      = Column(Text, nullable=True)       # the file's headers, in order
+    mapping_json      = Column(Text, nullable=True)       # {header: {kind, target}}
+    classification_json = Column(Text, nullable=True)     # rules + fallback
+    update_policy_json  = Column(Text, nullable=True)     # which fields may update existing
+    analysis_json     = Column(Text, nullable=True)       # the preview counts
+    commit_mode       = Column(String, nullable=True)
+    commit_report_json = Column(Text, nullable=True)
+    rolled_back_at    = Column(DateTime, nullable=True)
+    rolled_back_by_id = Column(String, nullable=True)
+    rollback_report_json = Column(Text, nullable=True)
+    completed_at      = Column(DateTime, nullable=True)
 
     # Row-level counters (refreshed by recount())
     total_rows    = Column(Integer, default=0)
@@ -301,6 +346,44 @@ class ImportStagedRow(Base):
     # known_mobile | known_landline | unknown (never inferred from value alone)
     phone_type = Column(String, nullable=True)
 
+    # ── UNIVERSAL INTAKE (additive; all nullable) ────────────────────────────
+    # Three status concepts, three columns - never one field for all of them:
+    #   intake_status  -> IMPORT STATUS     (ready / needs_review / blocked ...)
+    #   record_class + classification -> CRM CLASSIFICATION
+    #   sms_status / email_status     -> OUTREACH STATUS, per channel
+    intake_status        = Column(String, nullable=True)
+    status_reasons       = Column(Text, nullable=True)    # JSON list of {code, detail}
+    record_class         = Column(String, nullable=True)
+    classification       = Column(String, nullable=True)
+    classification_source = Column(String, nullable=True) # row|rule|fallback|manual
+    classification_raw   = Column(String, nullable=True)  # the cell that decided it
+    creates_lead         = Column(Boolean, nullable=True)
+    historical_customer  = Column(Boolean, nullable=True)
+    needs_enrichment     = Column(Boolean, nullable=True)
+    sms_status           = Column(String, nullable=True)
+    email_status         = Column(String, nullable=True)
+    email_status_raw     = Column(String, nullable=True)  # the source's own verdict
+    phone_line_type      = Column(String, nullable=True)
+
+    full_name            = Column(String, nullable=True)
+    company              = Column(String, nullable=True)
+    company_norm         = Column(String, nullable=True)
+    source_system        = Column(String, nullable=True)
+    source_record_id     = Column(String, nullable=True)  # exact, never normalized
+
+    match_type           = Column(String, nullable=True)  # exact|possible|new
+    match_target_type    = Column(String, nullable=True)  # org_contact|lead|staged_row
+    matched_contact_id   = Column(String, nullable=True)
+    match_keys           = Column(Text, nullable=True)    # JSON list: which keys matched
+    duplicate_resolution = Column(String, nullable=True)
+
+    normalized_json      = Column(Text, nullable=True)    # every normalized value
+    custom_fields_json   = Column(Text, nullable=True)
+    vertical_fields_json = Column(Text, nullable=True)
+    tags_json            = Column(Text, nullable=True)
+    committed_contact_id = Column(String, nullable=True)
+    commit_action        = Column(String, nullable=True)  # created|updated|skipped|...
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -323,4 +406,5 @@ class ImportStagedRow(Base):
         Index("ix_isr_committed_lead",      "committed_lead_id"),
         Index("ix_isr_merged_lead",         "merged_into_lead_id"),
         Index("ix_isr_matched_lead",        "matched_lead_id"),
+        Index("ix_isr_batch_intake",        "batch_id", "intake_status"),
     )

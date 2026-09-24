@@ -145,6 +145,10 @@ import Activate from './pages/Activate'
 import LeadScraper from './pages/LeadScraper'
 import ImportBatches from './pages/ImportBatches'
 import ImportBatchReview from './pages/ImportBatchReview'
+// UNIVERSAL INTAKE: the guided importer and its batch ledger. The legacy
+// /import-batches screens stay reachable for batches created before it.
+import ImportWizard from './pages/intake/ImportWizard'
+import ImportLedger from './pages/intake/ImportLedger'
 import MyDay from './pages/sales/MyDay'
 import SellCatalogue from './pages/sales/SellCatalogue'
 import MyPipeline from './pages/sales/MyPipeline'
@@ -961,6 +965,9 @@ export default function App() {
         <Route path="/leads/:leadId" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
         <Route path="/import-batches" element={<ProtectedRoute feature="imports" requireAdmin><ImportBatches /></ProtectedRoute>} />
         <Route path="/import-batches/:batchId" element={<ProtectedRoute requireAdmin><ImportBatchReview /></ProtectedRoute>} />
+        <Route path="/imports" element={<ProtectedRoute feature="imports" requireAdmin><ImportLedger /></ProtectedRoute>} />
+        <Route path="/imports/new" element={<ProtectedRoute feature="imports" requireAdmin><ImportWizard /></ProtectedRoute>} />
+        <Route path="/imports/:batchId" element={<ProtectedRoute feature="imports" requireAdmin><ImportWizard /></ProtectedRoute>} />
         <Route path="/replies" element={<ProtectedRoute><Replies /></ProtectedRoute>} />
         <Route path="/cadence" element={<ProtectedRoute feature="cadences"><Cadence /></ProtectedRoute>} />
         <Route path="/email-queue" element={<ProtectedRoute feature="email"><EmailQueue /></ProtectedRoute>} />

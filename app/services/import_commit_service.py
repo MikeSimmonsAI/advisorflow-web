@@ -97,6 +97,10 @@ def _apply_more_restrictive_consent(lead: Lead, row: ImportStagedRow) -> bool:
                 changed = True
     return changed
 
+class UniversalBatchError(ValueError):
+    """Raised when the legacy commit path is pointed at a universal batch."""
+
+
 def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> ImportBatch:
     """Per-row idempotent commit. Rows already COMMITTED are skipped.
     Result: COMMITTED / PARTIALLY_COMMITTED / FAILED."""
@@ -105,6 +109,12 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
     ).first()
     if not batch:
         raise ValueError(f"Batch {batch_id} not found")
+    if getattr(batch, "pipeline", None) == "universal":
+        # A universal-intake batch is committed only by app/services/intake,
+        # which knows contacts from leads. This service would turn every
+        # accepted row into a lead.
+        raise UniversalBatchError(
+            "This batch belongs to the guided importer; commit it there.")
 
     batch.status = ImportBatchStatus.COMMITTING
     db.commit()

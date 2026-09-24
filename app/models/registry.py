@@ -240,6 +240,10 @@ import app.models.launch_experience_models  # noqa: F401  (side effects)
 # learns nothing. Added to BOTH blocks in this file, per the merge-artefact
 # note above.
 import app.models.master_contact_models  # noqa: F401  (imported for side effects)
+# Universal intake (org_contacts / import_batch_files / import_record_versions /
+# intake_classifications). Contacts that are NOT leads live here. Added to BOTH
+# blocks in this file, per the merge-artefact note above.
+import app.models.intake_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -470,3 +474,7 @@ import app.models.launch_experience_models  # noqa: F401  (side effects)
 # learns nothing. Added to BOTH blocks in this file, per the merge-artefact
 # note above.
 import app.models.master_contact_models  # noqa: F401  (imported for side effects)
+# Universal intake (org_contacts / import_batch_files / import_record_versions /
+# intake_classifications). Contacts that are NOT leads live here. Added to BOTH
+# blocks in this file, per the merge-artefact note above.
+import app.models.intake_models  # noqa: F401  (imported for side effects)
