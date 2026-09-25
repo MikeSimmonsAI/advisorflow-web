@@ -35,6 +35,11 @@ import CommercialConsole from './pages/commercial/CommercialConsole'
 import BookingPage from './pages/public/BookingPage'
 import SurveyPage from './pages/public/SurveyPage'
 import AppointmentConfirmPage from './pages/public/AppointmentConfirmPage'
+// Wholesale Phase 5. The only two wholesale screens an outsider ever sees.
+// Public by design: the token in the URL is the whole authorisation, and the
+// server decides what is on the page — see wholesale_publication.py.
+import InvestorRoom from './pages/public/InvestorRoom'
+import SellerTransaction from './pages/public/SellerTransaction'
 // The app's own notice surface. Wraps the router so any page can raise a
 // notice without blocking the tab the way window.alert() does.
 import { ToastProvider } from './components/Toast'
@@ -77,6 +82,21 @@ import Proposals from './pages/Proposals'
 import ProposalEditor from './pages/ProposalEditor'
 import ProvisionClient from './pages/ProvisionClient'
 import Pipeline from './pages/Pipeline'
+// WHOLESALE REAL ESTATE. Five screens behind one feature key. `feature` on the
+// routes below is what stops a workspace without the module walking into the
+// server's 402 — the entitlement itself is enforced on every one of those
+// endpoints, exactly as entitlements.py insists it must be.
+import WholesaleCommand, { DealOperationsClosing, DealOperationsDispositions } from './pages/wholesale/WholesaleCommand'
+import WholesaleProperties from './pages/wholesale/WholesaleProperties'
+import WholesaleDeal from './pages/wholesale/WholesaleDeal'
+import WholesaleBuyers from './pages/wholesale/WholesaleBuyers'
+import WholesaleSettings from './pages/wholesale/WholesaleSettings'
+// Wholesale Phase 7 — EvoSense acquisition engine. Same feature key.
+import EvoCommand from './pages/wholesale/evosense/EvoCommand'
+import EvoInbox from './pages/wholesale/evosense/EvoInbox'
+import EvoProperty from './pages/wholesale/evosense/EvoProperty'
+import { EvoStrategies, EvoStrategyBuilder } from './pages/wholesale/evosense/EvoStrategies'
+import EvoControls from './pages/wholesale/evosense/EvoControls'
 import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
@@ -865,6 +885,14 @@ export default function App() {
             the backend HTML page — this one just lives on the brand's host so
             the prospect is not emailed an infrastructure URL. */}
         <Route path="/appointments/confirm/:token" element={<AppointmentConfirmPage />} />
+        {/* ── WHOLESALE INVESTOR AND SELLER ROOMS ──
+            No ProtectedRoute, on purpose: a cash buyer and a property owner
+            have no account in this workspace and must not need one. Each token
+            names ONE deal and ONE audience, and the payload is built by a
+            server-side whitelist — see app/services/wholesale_publication.py.
+            Neither page can widen from its token to anything else. */}
+        <Route path="/investor/:token" element={<InvestorRoom />} />
+        <Route path="/my-property/:token" element={<SellerTransaction />} />
         {/* ── CUSTOM COMMERCIAL AGREEMENTS ──
             NO ORGANIZATION ID ON THE CUSTOMER ROUTE, for the same reason the
             Launch Pad takes none: what is behind it is the commercial terms of
@@ -1004,6 +1032,27 @@ export default function App() {
         <Route path="/proposals/:proposalId" element={<ProtectedRoute requireAdmin><ProposalEditor /></ProtectedRoute>} />
         <Route path="/provision-client" element={<ProtectedRoute requireSuperAdmin><ProvisionClient /></ProtectedRoute>} />
         <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
+        {/* WHOLESALE REAL ESTATE. The deal route is registered after the two
+            list routes so "properties" and "buyers" are never read as a deal
+            id — the same ordering note the AI team routes below carry. NOT
+            requireAdmin: an acquisitions person who is not an org admin is
+            exactly who works these screens all day, and every endpoint behind
+            them resolves the workspace from the caller's own context. */}
+        <Route path="/wholesale" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleCommand /></ProtectedRoute>} />
+        <Route path="/wholesale/properties" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleProperties /></ProtectedRoute>} />
+        {/* Phase 7.2: focused views of Deal Operations - the same real deals, filtered to where they are. */}
+        <Route path="/wholesale/closing" element={<ProtectedRoute feature="wholesale_real_estate"><DealOperationsClosing /></ProtectedRoute>} />
+        <Route path="/wholesale/dispositions" element={<ProtectedRoute feature="wholesale_real_estate"><DealOperationsDispositions /></ProtectedRoute>} />
+        <Route path="/wholesale/buyers" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleBuyers /></ProtectedRoute>} />
+        <Route path="/wholesale/settings" element={<ProtectedRoute feature="wholesale_real_estate" requireAdmin><WholesaleSettings /></ProtectedRoute>} />
+        <Route path="/wholesale/deals/:dealId" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleDeal /></ProtectedRoute>} />
+        {/* Phase 7 EvoSense — discovery before a deal exists. */}
+        <Route path="/wholesale/evosense" element={<ProtectedRoute feature="wholesale_real_estate"><EvoCommand /></ProtectedRoute>} />
+        <Route path="/wholesale/evosense/inbox" element={<ProtectedRoute feature="wholesale_real_estate"><EvoInbox /></ProtectedRoute>} />
+        <Route path="/wholesale/evosense/property/:propertyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoProperty /></ProtectedRoute>} />
+        <Route path="/wholesale/evosense/strategies" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategies /></ProtectedRoute>} />
+        <Route path="/wholesale/evosense/strategies/:strategyId" element={<ProtectedRoute feature="wholesale_real_estate"><EvoStrategyBuilder /></ProtectedRoute>} />
+        <Route path="/wholesale/evosense/controls" element={<ProtectedRoute feature="wholesale_real_estate"><EvoControls /></ProtectedRoute>} />
         <Route path="/ai-hub" element={<ProtectedRoute><AIHub /></ProtectedRoute>} />
         {/* YOUR AI TEAM. NOT requireAdmin, and no organization id in the path:
             workforce_router.py resolves the workspace organization from the

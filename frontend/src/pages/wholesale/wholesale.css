@@ -1,0 +1,1941 @@
+/* Wholesale Real Estate — the module's own layout, on the platform's own tokens.
+ *
+ * PHASE 2 REWROTE THIS FILE, AND THE REASON IS WORTH RECORDING.
+ *
+ * Phase 1 shipped a parallel design system: `.ws-panel` reimplemented `.panel`,
+ * `.ws-pill` reimplemented `.badge`, `.ws-empty` reimplemented `.empty-state`,
+ * and every colour was a hard-coded LIGHT value — `var(--surface, #fff)`,
+ * `var(--text-primary, #111)` — in an application whose default theme is dark
+ * (`--bg-base: #03060f`, `--text-primary: #eef5ff`). `--surface` and
+ * `--input-bg` do not exist anywhere in this codebase, so every one of those
+ * fallbacks fired: white panels and white inputs, carrying near-white text.
+ * The build was clean the whole time, which is exactly why "it compiles" is not
+ * a review.
+ *
+ * So the JSX now carries the platform class FIRST (`class="panel ws-panel"`),
+ * and this file adds only what is genuinely wholesale on top of it. Everything
+ * here resolves through the real tokens — `--bg-card`, `--bg-field`,
+ * `--border-subtle`, `--text-primary/secondary/tertiary`, `--signal-*` — so the
+ * module wears whichever white-label theme is active instead of one of its own.
+ * A brand that redefines those tokens restyles this module for free, which is
+ * the whole point of the token layer.
+ *
+ * Scoped under `.ws-page`, because every page stylesheet in this app is bundled
+ * into one sheet and a bare `.panel` rule here would restyle the product.
+ */
+
+/* `.ws-page` composes `.page-shell` (flex column, gap 18px). This adds the
+ * reading width and the breathing room at the bottom of a long deal room. */
+.ws-page { max-width: 1240px; margin: 0 auto; padding: 4px 0 60px; }
+
+/* `.ws-title` / `.ws-subtitle` compose `.page-shell__title` / `__subtitle`.
+ * The platform title is clamp(28px, 4vw, 44px), which is right for a landing
+ * screen and too loud for a working one, so the module steps it down and
+ * otherwise inherits the family, tracking and colour. */
+.ws-page .ws-title { font-size: clamp(22px, 2.4vw, 30px); }
+.ws-page .ws-subtitle { max-width: 680px; }
+
+.ws-page .ws-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 18px; flex-wrap: wrap;
+}
+.ws-page .ws-header-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+}
+
+/* ── "What is waiting" ────────────────────────────────────────────────────
+ * One line per unfinished thing on the deal, each with the tab that answers
+ * it. Amber is reserved for the ones a person is actually blocking. */
+.ws-page .ws-nextup { list-style: none; margin: 0; padding: 0; }
+.ws-page .ws-nextup li {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 11px 14px; margin-bottom: 6px; font-size: 13px;
+  background: var(--bg-row); border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm); line-height: 1.5;
+}
+.ws-page .ws-nextup li:last-child { margin-bottom: 0; }
+.ws-page .ws-nextup li.is-warn { border-left-color: var(--signal-amber); }
+
+/* `.ws-panel` composes `.panel`, which already brings the glass background,
+ * border, radius, shadow and corner bracket. Only the rhythm is ours. */
+.ws-page .ws-panel { margin-bottom: 0; }
+.ws-page .ws-panel-title {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
+}
+/* A note is normally a footnote UNDER content, and needs room above it —
+ * a shared negative top margin made it collide with the tiles it explained.
+ * Directly beneath a panel title it is a subtitle instead, and tucks up. */
+.ws-page .ws-panel-note {
+  font-size: 12.5px; color: var(--text-tertiary); margin: 14px 0;
+  line-height: 1.55; max-width: 760px;
+}
+.ws-page .ws-panel-title + .ws-panel-note { margin-top: -6px; }
+
+/* ── Metric tiles ──────────────────────────────────────────────────────────
+ * `.ws-metric` composes `.stat-card`; the grid and the typographic scale are
+ * the module's. */
+.ws-page .ws-metrics {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 12px;
+}
+.ws-page .ws-metric { padding: 16px 18px; gap: 4px; }
+.ws-page .ws-metric-value {
+  font-family: var(--font-display); font-size: 26px; font-weight: 700;
+  line-height: 1.05; color: var(--text-primary); letter-spacing: -0.02em;
+}
+.ws-page .ws-metric-label {
+  font-size: 10px; color: var(--text-tertiary); text-transform: uppercase;
+  letter-spacing: 0.08em; font-weight: 700;
+}
+.ws-page .ws-metric-note {
+  font-size: 11px; color: var(--text-tertiary); line-height: 1.45; margin-top: 2px;
+}
+.ws-page .ws-metric.is-money .ws-metric-value { color: var(--signal-green); }
+.ws-page .ws-metric.is-attention .ws-metric-value { color: var(--signal-amber); }
+
+/* ── Pipeline board ───────────────────────────────────────────────────────── */
+/* Nineteen stages do not fit on one line at any width, and a flex row clipped
+ * the last column mid-word with nothing to say it could be scrolled. The board
+ * wraps instead: every stage count is visible without an interaction. */
+.ws-page .ws-board {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(146px, 1fr));
+  gap: 10px;
+}
+.ws-page .ws-board-col {
+  min-width: 0; background: var(--bg-row); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); padding: 12px 14px; transition: all 0.18s ease;
+}
+.ws-page .ws-board-col:hover {
+  background: var(--bg-row-hover); border-color: var(--border-strong);
+}
+.ws-page .ws-board-col.is-terminal { opacity: 0.6; }
+.ws-page .ws-board-count {
+  font-family: var(--font-display); font-size: 22px; font-weight: 700;
+  color: var(--text-primary); line-height: 1;
+}
+.ws-page .ws-board-label {
+  font-size: 11px; color: var(--text-tertiary); margin-top: 4px; line-height: 1.35;
+}
+
+/* ── Tables ───────────────────────────────────────────────────────────────
+ * The look of `table.data-table`, applied to the module's own tables: separated
+ * rows on `--bg-row`, uppercase tertiary headers, rounded end cells. */
+/* A table wider than its panel used to run off the right edge and be clipped
+ * by the panel, with nothing to say the rows continued. The squeeze starts as
+ * soon as the rail and the padding take their share — long before the phone
+ * breakpoint — so the scroller is always there and simply has nothing to do
+ * when the table fits. */
+.ws-page .ws-scroll { overflow-x: auto; max-width: 100%; }
+/* The bar is declared on the scroller itself, not left to the platform's
+ * global rule: on a system that defaults to overlay scrollbars, a table cut
+ * off at the panel edge with nothing drawn under it reads as a broken layout
+ * rather than as something you can scroll. */
+.ws-page .ws-scroll { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.ws-page .ws-scroll::-webkit-scrollbar { height: 9px; }
+.ws-page .ws-scroll::-webkit-scrollbar-track { background: transparent; }
+.ws-page .ws-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: 5px;
+}
+.ws-page .ws-scroll::-webkit-scrollbar-thumb:hover { background: var(--signal-blue); }
+
+.ws-page .ws-table {
+  width: 100%; border-collapse: separate; border-spacing: 0 6px;
+  font-size: 13px; position: relative; z-index: 1;
+}
+.ws-page .ws-table th {
+  text-align: left; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-tertiary); font-weight: 700;
+  padding: 0 14px 8px; white-space: nowrap;
+}
+.ws-page .ws-table td {
+  padding: 12px 14px; color: var(--text-primary); background: var(--bg-row);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+.ws-page .ws-table td:first-child {
+  border-left: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+.ws-page .ws-table td:last-child {
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.ws-page .ws-table tr:hover td { background: var(--bg-row-hover); }
+.ws-page .ws-table .ws-num { text-align: right; font-variant-numeric: tabular-nums; }
+.ws-page .ws-row-link { cursor: pointer; }
+
+/* ── Badges ───────────────────────────────────────────────────────────────
+ * The `.badge` look, in the module's own class so the JSX can drive it from a
+ * band name without a mapping table in every component. */
+.ws-page .ws-pill {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px;
+  border-radius: var(--radius-pill, 100px); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.06); color: var(--text-secondary);
+}
+.ws-page .ws-pill + .ws-pill { margin-left: 6px; }
+.ws-page .ws-pill.band-high,
+.ws-page .ws-pill.is-ok {
+  background: var(--signal-green-dim); color: var(--signal-green);
+  border-color: rgba(30, 240, 168, 0.22);
+}
+.ws-page .ws-pill.band-medium {
+  background: var(--signal-blue-dim); color: var(--signal-blue);
+  border-color: rgba(47, 182, 255, 0.22);
+}
+.ws-page .ws-pill.band-low { }
+.ws-page .ws-pill.band-review,
+.ws-page .ws-pill.is-warn {
+  background: var(--signal-amber-dim); color: var(--signal-amber);
+  border-color: rgba(255, 178, 56, 0.22);
+}
+.ws-page .ws-pill.band-excluded,
+.ws-page .ws-pill.is-dnc {
+  background: var(--signal-red-dim); color: var(--signal-red);
+  border-color: rgba(255, 77, 126, 0.22);
+}
+.ws-page .ws-pill.is-test {
+  background: var(--signal-purple-dim); color: var(--signal-purple);
+  border-color: rgba(157, 109, 255, 0.22);
+}
+
+/* ── PROVENANCE ───────────────────────────────────────────────────────────
+ * The one visual rule this module will not bend: a figure carries the label of
+ * where it came from, every time it is shown. */
+.ws-page .ws-source {
+  display: inline-block; margin-left: 6px; font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: 0.08em; padding: 1px 6px; border-radius: 4px; font-weight: 700;
+  vertical-align: middle; border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.05); color: var(--text-tertiary);
+}
+.ws-page .ws-source.src-estimated {
+  background: var(--signal-amber-dim); color: var(--signal-amber);
+  border-color: rgba(255, 178, 56, 0.22);
+}
+.ws-page .ws-source.src-manual {
+  background: var(--signal-purple-dim); color: var(--signal-purple);
+  border-color: rgba(157, 109, 255, 0.22);
+}
+.ws-page .ws-source.src-imported {
+  background: var(--signal-blue-dim); color: var(--signal-blue);
+  border-color: rgba(47, 182, 255, 0.22);
+}
+.ws-page .ws-source.src-verified {
+  background: var(--signal-green-dim); color: var(--signal-green);
+  border-color: rgba(30, 240, 168, 0.22);
+}
+
+/* ── Forms ────────────────────────────────────────────────────────────────── */
+.ws-page .ws-form { display: flex; flex-direction: column; gap: 14px; }
+.ws-page .ws-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px;
+}
+.ws-page .ws-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ws-page .ws-field label {
+  font-size: 11px; font-weight: 700; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.ws-page .ws-field input,
+.ws-page .ws-field select,
+.ws-page .ws-field textarea,
+.ws-page textarea,
+.ws-page .ws-panel-title input,
+.ws-page .ws-actions select {
+  padding: 9px 11px; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); font-size: 13px;
+  background: var(--bg-field); color: var(--text-primary);
+  outline: none; font-family: inherit; width: 100%; min-width: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ws-page .ws-field input:focus,
+.ws-page .ws-field select:focus,
+.ws-page .ws-field textarea:focus,
+.ws-page textarea:focus,
+.ws-page .ws-actions select:focus {
+  border-color: var(--signal-blue); box-shadow: var(--glow-blue-sm);
+}
+/* A control that is not inside a `.ws-field` — a search box in a panel header,
+ * a textarea in a flow. Same declaration block, so it cannot drift from the
+ * fields around it the way four inline `style={{...}}` attributes had. */
+.ws-page .ws-input {
+  padding: 9px 11px; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); font-size: 13px;
+  background: var(--bg-field); color: var(--text-primary);
+  outline: none; font-family: inherit; width: 100%;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ws-page .ws-input:focus {
+  border-color: var(--signal-blue); box-shadow: var(--glow-blue-sm);
+}
+.ws-page .ws-input--inline { width: auto; min-width: 220px; padding: 7px 11px; }
+
+.ws-page .ws-field input::placeholder,
+.ws-page .ws-input::placeholder,
+.ws-page textarea::placeholder { color: var(--text-tertiary); }
+/* Scoped to `.ws-field` this missed every hint that was not inside one — the
+ * sandbox note beside a checkbox rendered at full body size and read as part
+ * of the label rather than as the explanation of it. */
+.ws-page .ws-hint {
+  font-size: 11px; color: var(--text-tertiary); line-height: 1.45;
+}
+.ws-page .ws-checkbox .ws-hint { margin-left: 6px; }
+.ws-page .ws-checkbox {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 13px;
+  color: var(--text-secondary); cursor: pointer;
+}
+.ws-page .ws-checkbox input { accent-color: var(--signal-blue); }
+.ws-page .ws-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+}
+.ws-page .ws-actions select { width: auto; }
+/* In a panel title the action group is a flex ITEM, so it sized itself to its
+ * widest child and wrapped the rest underneath — a search box on one line and
+ * the controls on another, next to a heading centred across both. It takes the
+ * width the heading leaves instead, and stays on one line until there is
+ * genuinely no room. */
+.ws-page .ws-panel-title > .ws-actions {
+  flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; justify-content: flex-end;
+}
+.ws-page .ws-panel-title .ws-input--inline { flex: 0 1 320px; min-width: 140px; }
+@media (max-width: 900px) {
+  .ws-page .ws-panel-title > .ws-actions {
+    flex-wrap: wrap; justify-content: flex-start;
+  }
+}
+
+/* ── Messages ─────────────────────────────────────────────────────────────── */
+.ws-page .ws-error,
+.ws-page .ws-notice,
+.ws-page .ws-warn,
+.ws-page .ws-good {
+  padding: 11px 14px; border-radius: var(--radius-sm); font-size: 13px;
+  margin-bottom: 12px; line-height: 1.5; border: 1px solid transparent;
+  white-space: pre-wrap;
+}
+.ws-page .ws-error {
+  background: var(--signal-red-dim); border-color: var(--border-danger);
+  color: var(--text-danger-soft, #ffdce6);
+}
+.ws-page .ws-notice {
+  background: var(--signal-blue-dim); border-color: rgba(47, 182, 255, 0.24);
+  color: var(--text-primary);
+}
+.ws-page .ws-warn {
+  background: var(--signal-amber-dim); border-color: rgba(255, 178, 56, 0.24);
+  color: var(--text-primary);
+}
+.ws-page .ws-good {
+  background: var(--signal-green-dim); border-color: rgba(30, 240, 168, 0.24);
+  color: var(--text-primary);
+}
+/* An empty panel should cost one line, not a screenful. Centring a single
+   sentence inside 52px of padding made "nothing here" the biggest thing on the
+   page; it now reads as a caption under the panel title, where the eye already
+   is. `--page` keeps the old, roomier treatment for the few places where the
+   empty state IS the page. */
+.ws-page .ws-empty {
+  color: var(--text-tertiary); font-size: 12.5px; padding: 2px 0 4px;
+  text-align: left; line-height: 1.55; max-width: 70ch;
+}
+.ws-page .ws-empty--page {
+  padding: 22px 10px; text-align: center; font-size: 13px; max-width: none;
+}
+
+/* ── The math, shown ──────────────────────────────────────────────────────── */
+.ws-page .ws-steps {
+  list-style: none; margin: 0; padding: 0;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.ws-page .ws-steps li {
+  display: flex; justify-content: space-between; gap: 14px; padding: 9px 13px;
+  font-size: 13px; background: var(--bg-row);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ws-page .ws-steps li:last-child {
+  border-bottom: none; font-weight: 700; background: var(--bg-row-hover);
+}
+.ws-page .ws-steps .ws-step-label { color: var(--text-secondary); }
+.ws-page .ws-steps .ws-step-value {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  color: var(--text-primary); white-space: nowrap;
+}
+.ws-page .ws-steps .ws-step-note {
+  display: block; font-size: 10.5px; color: var(--text-tertiary);
+  font-weight: 400; margin-top: 2px;
+}
+
+/* ── Deal room ────────────────────────────────────────────────────────────── */
+.ws-page .ws-deal-head {
+  display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap;
+  align-items: flex-start;
+}
+.ws-page .ws-deal-address {
+  font-family: var(--font-display); font-size: clamp(20px, 2.2vw, 28px);
+  font-weight: 700; color: var(--text-primary); margin: 0 0 8px;
+  letter-spacing: -0.02em; line-height: 1.15;
+}
+.ws-page .ws-deal-meta {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  font-size: 12px; color: var(--text-tertiary);
+}
+
+/* Tabs, in the platform's pill-tab language. */
+.ws-page .ws-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  background: var(--surface-inset, rgba(0, 0, 0, 0.22));
+  border-radius: var(--radius-pill, 100px); padding: 3px; width: fit-content;
+  max-width: 100%;
+}
+.ws-page .ws-tab {
+  padding: 7px 16px; border-radius: var(--radius-pill, 100px); font-size: 12.5px;
+  font-weight: 700; color: var(--text-tertiary); background: none; border: none;
+  cursor: pointer; white-space: nowrap; transition: all 0.16s ease;
+}
+.ws-page .ws-tab:hover { color: var(--text-primary); }
+.ws-page .ws-tab.is-active {
+  color: var(--text-inverse, #061018);
+  background: linear-gradient(118deg, var(--signal-blue) 0%, var(--signal-purple) 100%);
+  box-shadow: var(--glow-blue-sm);
+}
+
+.ws-page .ws-kv {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px 22px;
+}
+.ws-page .ws-kv .ws-k {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-tertiary); font-weight: 700;
+}
+.ws-page .ws-kv .ws-v {
+  color: var(--text-primary); margin-top: 3px; font-size: 13px; word-break: break-word;
+}
+
+/* ── Match factors ────────────────────────────────────────────────────────── */
+.ws-page .ws-factors {
+  list-style: none; margin: 8px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.ws-page .ws-factors li {
+  font-size: 12px; color: var(--text-secondary); display: flex; gap: 8px;
+  align-items: flex-start; line-height: 1.45;
+}
+.ws-page .ws-factors .ws-f-mark { flex: 0 0 auto; font-weight: 700; width: 14px; }
+.ws-page .ws-factors .ws-f-yes { color: var(--signal-green); }
+.ws-page .ws-factors .ws-f-no { color: var(--signal-red); }
+.ws-page .ws-factors .ws-f-na { color: var(--text-tertiary); }
+
+.ws-page .ws-score {
+  font-family: var(--font-display); font-size: 17px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ws-page .ws-score.is-strong { color: var(--signal-green); }
+.ws-page .ws-score.is-mid { color: var(--signal-blue); }
+.ws-page .ws-score.is-weak { color: var(--text-tertiary); }
+
+/* ── Timeline / audit ─────────────────────────────────────────────────────── */
+.ws-page .ws-events { list-style: none; margin: 0; padding: 0; }
+.ws-page .ws-events li {
+  padding: 11px 0; border-bottom: 1px solid var(--border-subtle); font-size: 12.5px;
+}
+.ws-page .ws-events li:last-child { border-bottom: none; }
+.ws-page .ws-events .ws-ev-head {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.ws-page .ws-events .ws-ev-action { font-weight: 700; color: var(--text-primary); }
+.ws-page .ws-events .ws-ev-when {
+  color: var(--text-tertiary); font-size: 11px; margin-left: auto;
+  font-family: var(--font-mono);
+}
+.ws-page .ws-events .ws-ev-summary {
+  color: var(--text-secondary); margin-top: 4px; line-height: 1.5;
+}
+.ws-page .ws-actor {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 2px 7px; border-radius: 4px; font-weight: 700;
+  border: 1px solid var(--border-subtle);
+}
+.ws-page .ws-actor.actor-user {
+  background: var(--signal-blue-dim); color: var(--signal-blue);
+}
+.ws-page .ws-actor.actor-ai {
+  background: var(--signal-purple-dim); color: var(--signal-purple);
+}
+.ws-page .ws-actor.actor-automation {
+  background: var(--signal-green-dim); color: var(--signal-green);
+}
+.ws-page .ws-actor.actor-system,
+.ws-page .ws-actor.actor-api {
+  background: rgba(255, 255, 255, 0.06); color: var(--text-secondary);
+}
+
+/* ── Provider / channel rows ──────────────────────────────────────────────── */
+.ws-page .ws-provider-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 14px;
+  padding: 10px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px;
+  color: var(--text-primary);
+}
+.ws-page .ws-provider-row:last-child { border-bottom: none; }
+
+/* A channel carries a paragraph of explanation, so name and state share the
+ * first line and the explanation gets the full width beneath. */
+.ws-page .ws-channel-row {
+  padding: 12px 0; border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px; color: var(--text-primary);
+}
+.ws-page .ws-channel-row:last-child { border-bottom: none; }
+.ws-page .ws-channel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; font-weight: 600;
+}
+.ws-page .ws-channel-row .ws-hint { margin: 6px 0 0; max-width: 820px; }
+
+.ws-page .ws-muted { color: var(--text-tertiary); }
+.ws-page .ws-mono {
+  font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap;
+  background: var(--bg-field-soft); padding: 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle); color: var(--text-secondary);
+  line-height: 1.6; max-height: 420px; overflow: auto;
+}
+
+/* ── Narrow screens ───────────────────────────────────────────────────────── */
+@media (max-width: 860px) {
+  .ws-page { padding: 4px 0 40px; }
+  .ws-page .ws-header { flex-direction: column; align-items: stretch; }
+  .ws-page .ws-metrics { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .ws-page .ws-kv { grid-template-columns: 1fr 1fr; }
+  /* A wide table on a phone is a horizontal scroll, not a squeeze: shrinking
+   * the columns makes every one of them unreadable instead of one of them
+   * off-screen. `.ws-scroll` already does the scrolling at every width; here
+   * the columns additionally stop wrapping, so a phone gets one column
+   * off-screen rather than eight columns one word wide. */
+  .ws-page .ws-table { white-space: nowrap; }
+  .ws-page .ws-table td { vertical-align: middle; }
+}
+@media (max-width: 560px) {
+  .ws-page .ws-kv { grid-template-columns: 1fr; }
+  .ws-page .ws-grid { grid-template-columns: 1fr; }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PHASE 3 — the operating dashboard, and the surfaces it is built from
+
+   EVERY COLOUR BELOW IS A TOKEN. Not one hardcoded surface.
+
+   This matters because of the bug this section was written to fix. The shared
+   design system's `.stat-card` hardcodes
+       background: linear-gradient(145deg, rgba(14,28,62,.82), rgba(6,12,28,.76))
+   which is a dark navy that never changes. Every other shared class reads
+   `var(--bg-panel)` / `var(--border-subtle)` / `var(--text-primary)`, and each
+   brand theme redefines those — BookaBoost's is cream with near-black text and
+   is what `localhost` resolves to. So the Command Center's twenty-two
+   `.stat-card` tiles rendered as dark navy boxes on a cream page.
+
+   The module no longer uses `.stat-card` anywhere. Anything here that looks
+   like a card is built from `--bg-card` / `--bg-panel` and inherits whatever
+   the brand says those are, which is why this renders correctly on the dark
+   default AND on every light palette.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. The money. The largest thing on the page, and the only coloured one. */
+.ws-page .ws-money-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+.ws-page .ws-money {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg, 16px);
+  box-shadow: var(--elevation-1);
+  padding: 22px 24px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.ws-page .ws-money__label {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+.ws-page .ws-money__value {
+  font-family: var(--font-display); font-size: clamp(30px, 3.4vw, 42px);
+  font-weight: 800; letter-spacing: -0.03em; line-height: 1.05;
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+/* Green is reserved for money that actually landed. Nothing projected is
+ * ever green, anywhere in this module. */
+.ws-page .ws-money--collected { border-color: var(--signal-green); }
+.ws-page .ws-money--collected .ws-money__value { color: var(--signal-green); }
+.ws-page .ws-money__note {
+  font-size: 12.5px; color: var(--text-tertiary); line-height: 1.5;
+  max-width: 46ch;
+}
+
+
+/* ── 2. The workload. Deliberately smaller than the money. ───────────────── */
+.ws-page .ws-stat-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(122px, 1fr));
+  gap: 10px;
+}
+.ws-page .ws-stat {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.ws-page .ws-stat__value {
+  font-family: var(--font-display); font-size: 24px; font-weight: 700;
+  line-height: 1.1; color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+.ws-page .ws-stat__label {
+  font-size: 11.5px; color: var(--text-secondary); line-height: 1.3;
+}
+/* Amber marks a queue with a person's name on it. Red is kept for genuine
+ * problems and is not used on this row at all. */
+.ws-page .ws-stat.is-attention { border-left-color: var(--signal-amber); }
+.ws-page .ws-stat.is-attention .ws-stat__value { color: var(--signal-amber); }
+/* Red, once: a deal that has stopped moving is not a queue to work through. */
+.ws-page .ws-stat.is-risk { border-left-color: var(--signal-red); }
+.ws-page .ws-stat.is-risk .ws-stat__value { color: var(--signal-red); }
+
+/* ── 3. A deal, as a card you can act on ─────────────────────────────────── */
+/* Two to a row where there is room. Seven full-width cards pushed everything
+ * below them off the first screen for no gain: the card is not wider than its
+ * content, it was simply the only thing in the row. */
+.ws-page .ws-dealcards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+  gap: 8px;
+}
+.ws-page .ws-dealcard {
+  display: flex; gap: 14px; align-items: stretch; width: 100%;
+  text-align: left; cursor: pointer;
+  background: var(--bg-row);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.ws-page .ws-dealcard:hover {
+  background: var(--bg-row-hover); border-color: var(--border-strong);
+}
+.ws-page .ws-dealcard__photo {
+  flex: 0 0 84px; width: 84px; height: 64px; border-radius: var(--radius-sm);
+  overflow: hidden; background: var(--bg-field-soft);
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-subtle);
+}
+.ws-page .ws-dealcard__photo img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.ws-page .ws-dealcard__nophoto {
+  font-size: 10px; color: var(--text-tertiary); text-align: center;
+  padding: 0 4px; line-height: 1.3;
+}
+
+.ws-page .ws-dealcard__body {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; gap: 4px; justify-content: center;
+}
+.ws-page .ws-dealcard__addr {
+  font-size: 14px; font-weight: 600; color: var(--text-primary);
+  display: flex; align-items: center; gap: 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-page .ws-dealcard__meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px; color: var(--text-secondary);
+}
+.ws-page .ws-dealcard__fee {
+  font-variant-numeric: tabular-nums; color: var(--text-secondary);
+}
+.ws-page .ws-dealcard__action {
+  font-size: 12.5px; color: var(--text-secondary); line-height: 1.45;
+  padding-left: 10px; border-left: 3px solid var(--border-subtle);
+}
+.ws-page .ws-dealcard__action strong { color: var(--text-primary); }
+.ws-page .ws-dealcard__action.tone-attention { border-left-color: var(--signal-amber); }
+.ws-page .ws-dealcard__action.tone-attention strong { color: var(--signal-amber); }
+/* Red ONLY here, and only for a deal that is genuinely stuck on a person. */
+.ws-page .ws-dealcard__action.tone-urgent { border-left-color: var(--signal-red); }
+.ws-page .ws-dealcard__action.tone-urgent strong { color: var(--signal-red); }
+.ws-page .ws-dealcard__action.tone-ok { border-left-color: var(--signal-green); }
+
+/* ── 4. Deals that have stopped moving ───────────────────────────── */
+.ws-page .ws-risks { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px; }
+.ws-page .ws-risk {
+  width: 100%; display: grid; align-items: center; gap: 12px;
+  grid-template-columns: minmax(180px, 18%) minmax(0, 1fr) auto auto;
+  text-align: left; cursor: pointer; padding: 9px 12px;
+  background: var(--bg-row);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--signal-amber);
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease;
+}
+.ws-page .ws-risk:hover { background: var(--bg-row-hover); }
+/* Red is spent here and nowhere else on this screen: a closing date that has
+ * already gone by is a genuine problem, not a queue. */
+.ws-page .ws-risk.is-overdue { border-left-color: var(--signal-red); }
+.ws-page .ws-risk.is-overdue .ws-risk__why { color: var(--signal-red); }
+.ws-page .ws-risk__why {
+  font-size: 12px; font-weight: 600; color: var(--signal-amber);
+}
+.ws-page .ws-risk__addr { font-size: 13px; color: var(--text-primary); }
+.ws-page .ws-risk__fee {
+  font-size: 13px; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; min-width: 78px; text-align: right;
+}
+@media (max-width: 900px) {
+  .ws-page .ws-risk { grid-template-columns: 1fr auto; }
+}
+
+
+/* ── 5. The pipeline, read as a route ────────────────────────────── */
+.ws-page .ws-funnel {
+  display: flex; gap: 3px; margin-bottom: 14px;
+}
+.ws-page .ws-funnel__seg {
+  min-width: 96px; padding: 10px 12px; border-radius: var(--radius-sm);
+  display: flex; flex-direction: column; gap: 1px; overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-top: 3px solid var(--text-secondary);
+  background: var(--bg-row);
+}
+.ws-page .ws-funnel__n {
+  font-family: var(--font-display); font-size: 20px; font-weight: 700;
+  line-height: 1.05; color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.ws-page .ws-funnel__lbl {
+  font-size: 11.5px; color: var(--text-secondary); line-height: 1.25;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws-page .ws-funnel__val {
+  font-size: 11px; color: var(--signal-blue);
+  font-variant-numeric: tabular-nums; min-height: 14px;
+}
+/* One hue per phase, used on the strip and on the column heading beneath it so
+ * the two readings are obviously the same numbers. */
+.ws-page .seg-sourcing { border-top-color: #7c8aa0; }
+.ws-page .seg-seller   { border-top-color: var(--signal-blue); }
+.ws-page .seg-offer    { border-top-color: var(--signal-amber); }
+.ws-page .seg-contract { border-top-color: var(--signal-green); }
+.ws-page .seg-other    { border-top-color: var(--text-secondary); }
+
+.ws-page .ws-stagegroups {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px 14px; align-items: start;
+}
+.ws-page .ws-stagegroup { display: flex; flex-direction: column; gap: 3px; }
+.ws-page .ws-stagegroup__head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 8px; padding: 0 2px 5px;
+  border-bottom: 2px solid var(--border-subtle);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+.ws-page .ws-stagegroup__head.seg-sourcing { border-bottom-color: #7c8aa0; }
+.ws-page .ws-stagegroup__head.seg-seller   { border-bottom-color: var(--signal-blue); }
+.ws-page .ws-stagegroup__head.seg-offer    { border-bottom-color: var(--signal-amber); }
+.ws-page .ws-stagegroup__head.seg-contract { border-bottom-color: var(--signal-green); }
+.ws-page .ws-stagegroup__n {
+  font-size: 13px; color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.ws-page .ws-stagegroup.is-closed { opacity: 0.72; }
+
+.ws-page .ws-stagerow {
+  position: relative; width: 100%; cursor: pointer; text-align: left;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center; gap: 8px;
+  padding: 6px 9px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; overflow: hidden;
+}
+/* The bar is the row's own background, so a stage never costs a second line
+ * of vertical space to show its size. */
+.ws-page .ws-stagerow__fill {
+  position: absolute; inset: 0 auto 0 0; display: block;
+  background: rgba(128, 140, 160, 0.20); border-radius: var(--radius-sm);
+}
+/* The fill takes the phase's own colour so the columns and the strip above
+ * them are legibly the same numbers. The *-dim tokens are defined per theme,
+ * so this stays readable on the dark default and on every light brand. */
+.ws-page .ws-stagerow.tone-seller   .ws-stagerow__fill { background: var(--signal-blue-dim); }
+.ws-page .ws-stagerow.tone-offer    .ws-stagerow__fill { background: var(--signal-amber-dim); }
+.ws-page .ws-stagerow.tone-contract .ws-stagerow__fill { background: var(--signal-green-dim); }
+.ws-page .ws-stagerow:hover .ws-stagerow__fill { background: var(--bg-row-hover); }
+.ws-page .ws-stagerow:hover { outline: 1px solid var(--signal-blue); }
+.ws-page .ws-stagerow__label {
+  position: relative; font-size: 12px; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws-page .ws-stagerow__value {
+  position: relative; font-size: 11px; color: var(--signal-blue);
+  font-variant-numeric: tabular-nums;
+}
+.ws-page .ws-stagerow__count {
+  position: relative; font-size: 13px; font-weight: 700;
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+  min-width: 22px; text-align: right;
+}
+.ws-page .ws-stagerow.is-empty .ws-stagerow__label,
+.ws-page .ws-stagerow.is-empty .ws-stagerow__count { opacity: 0.45; }
+
+
+/* ── 5/6. Two columns, and the closing calendar ──────────────────────────── */
+.ws-page .ws-two-col {
+  display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 16px; align-items: start;
+}
+/* The active-deals table needs real width for its next-action column; below
+ * this the side column is stacked underneath rather than squeezing it. */
+@media (max-width: 1280px) {
+  .ws-page .ws-two-col { grid-template-columns: 1fr; }
+}
+
+.ws-page .ws-closings { list-style: none; margin: 0; padding: 0; }
+.ws-page .ws-closings__row {
+  display: flex; align-items: baseline; gap: 12px; width: 100%;
+  text-align: left; cursor: pointer; padding: 9px 11px; margin-bottom: 6px;
+  background: var(--bg-row); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); font-size: 13px;
+}
+.ws-page .ws-closings__row:hover {
+  background: var(--bg-row-hover); border-color: var(--border-strong);
+}
+.ws-page .ws-closings__date {
+  font-variant-numeric: tabular-nums; color: var(--signal-blue);
+  font-weight: 600; flex: 0 0 auto;
+}
+.ws-page .ws-closings__addr {
+  flex: 1 1 auto; min-width: 0; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-page .ws-closings__fee {
+  flex: 0 0 auto; color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+
+/* ── 7. Funnel counts. Small, quiet, last. ───────────────────────────────── */
+.ws-page .ws-counts {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+}
+.ws-page .ws-count {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 9px 11px; background: var(--bg-row);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+}
+.ws-page .ws-count__value {
+  font-size: 17px; font-weight: 700; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; line-height: 1.2;
+}
+.ws-page .ws-count__label {
+  font-size: 11px; color: var(--text-tertiary); text-transform: capitalize;
+}
+
+/* A toggled-on filter button should look toggled on. */
+.ws-page .btn.is-on {
+  border-color: var(--signal-blue); color: var(--signal-blue);
+}
+
+/* Qualification bands, wherever a pill shows one. */
+.ws-page .ws-pill.band-high { color: var(--signal-green); border-color: var(--signal-green); }
+.ws-page .ws-pill.band-medium { color: var(--signal-blue); border-color: var(--signal-blue); }
+.ws-page .ws-pill.band-review { color: var(--signal-amber); border-color: var(--signal-amber); }
+
+
+/* ── Active deals, as a dense table ──────────────────────────────────────────
+ * Deliberately a different density from the attention cards above it. Same
+ * data, two jobs: the cards are a short list of things to act on, this is the
+ * whole book of work, scannable in one pass. */
+.ws-page .ws-activetable td { vertical-align: middle; }
+.ws-page .ws-activetable__thumb { width: 52px; padding-right: 0; }
+.ws-page .ws-activetable__thumb img,
+.ws-page .ws-activetable__nophoto {
+  display: block; width: 44px; height: 34px; border-radius: 4px;
+  object-fit: cover; border: 1px solid var(--border-subtle);
+  background: var(--bg-field-soft);
+}
+.ws-page .ws-nextcell { font-size: 12.5px; color: var(--text-secondary); }
+.ws-page .ws-nextcell.tone-urgent { color: var(--signal-red); font-weight: 600; }
+.ws-page .ws-nextcell.tone-attention { color: var(--signal-amber); font-weight: 600; }
+
+/* ── The activity feed ───────────────────────────────────────────────────── */
+.ws-page .ws-feed { list-style: none; margin: 0; padding: 0; }
+.ws-page .ws-feed li {
+  display: flex; align-items: baseline; gap: 9px; padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle); font-size: 12.5px;
+}
+.ws-page .ws-feed li:last-child { border-bottom: none; }
+.ws-page .ws-feed__text {
+  flex: 1 1 auto; min-width: 0; color: var(--text-primary); line-height: 1.45;
+}
+.ws-page .ws-feed__when {
+  flex: 0 0 auto; color: var(--text-tertiary); font-variant-numeric: tabular-nums;
+}
+
+/* The side column stacks its own panels rather than letting the grid wrap them
+   back under the left column, which left a tall gap down the right. */
+.ws-page .ws-side {
+  display: flex; flex-direction: column; gap: 16px; min-width: 0;
+}
+
+
+/* ── The Deal Summary Header ─────────────────────────────────────────────── */
+.ws-page .ws-deal-ident { display: flex; gap: 16px; align-items: center; }
+.ws-page .ws-deal-photo {
+  flex: 0 0 116px; width: 116px; height: 86px; border-radius: var(--radius-sm);
+  overflow: hidden; background: var(--bg-field-soft);
+  border: 1px solid var(--border-subtle);
+  display: flex; align-items: center; justify-content: center;
+}
+.ws-page .ws-deal-photo img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.ws-page .ws-deal-photo__none {
+  font-size: 11px; color: var(--text-tertiary);
+}
+
+.ws-page .ws-summary {
+  display: flex; flex-direction: column; gap: 14px;
+  background: var(--bg-panel); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg, 16px); padding: 16px 18px;
+  box-shadow: var(--elevation-1);
+}
+.ws-page .ws-summary__top {
+  display: flex; gap: 16px; align-items: stretch; flex-wrap: wrap;
+}
+
+/* The six figures the deal is actually judged on. Large, evenly spaced, and
+ * separated from the detail below by a rule rather than by whitespace. */
+.ws-page .ws-keys {
+  flex: 1 1 560px; min-width: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 4px 18px; align-content: center;
+}
+.ws-page .ws-key { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ws-page .ws-key__label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-tertiary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws-page .ws-key .ws-source { align-self: flex-start; margin-top: 2px; }
+.ws-page .ws-key__value {
+  font-family: var(--font-display); font-size: 21px; font-weight: 700;
+  line-height: 1.15; color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+/* Green once, and only for money that actually landed. The spread is made
+ * prominent by size and position rather than by a colour that would read as a
+ * warning next to the amber and red used elsewhere on this screen. */
+.ws-page .ws-key.is-collected .ws-key__value { color: var(--signal-green); }
+
+
+/* Next action leads, because it is the only part that says what to DO. */
+.ws-page .ws-summary__next {
+  flex: 0 0 258px; max-width: 100%; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--bg-row); border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--border-strong);
+}
+.ws-page .ws-summary__next:hover { background: var(--bg-row-hover); }
+.ws-page .ws-summary__next-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.ws-page .ws-summary__next-title {
+  font-size: 15px; font-weight: 700; color: var(--text-primary); line-height: 1.25;
+}
+.ws-page .ws-summary__next-detail {
+  font-size: 12px; color: var(--text-secondary); line-height: 1.45;
+}
+.ws-page .ws-summary__next.tone-attention { border-left-color: var(--signal-amber); }
+.ws-page .ws-summary__next.tone-attention .ws-summary__next-title { color: var(--signal-amber); }
+.ws-page .ws-summary__next.tone-urgent { border-left-color: var(--signal-red); }
+.ws-page .ws-summary__next.tone-urgent .ws-summary__next-title { color: var(--signal-red); }
+.ws-page .ws-summary__next.tone-ok { border-left-color: var(--signal-green); }
+
+/* Everything the deal also has: still on the screen, deliberately quieter and
+ * below the rule. Nothing was removed to get the hierarchy. */
+.ws-page .ws-summary__groups {
+  min-width: 0; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  gap: 12px 22px; align-content: start;
+}
+@media (min-width: 1240px) {
+  .ws-page .ws-summary__groups { grid-template-columns: repeat(5, 1fr); }
+}
+.ws-page .ws-sumgroup { min-width: 0; }
+.ws-page .ws-sumgroup__title {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-tertiary);
+  padding-bottom: 6px; margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ws-page .ws-sumgroup__items {
+  display: flex; flex-direction: column; gap: 3px;
+}
+.ws-page .ws-sum {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; font-size: 12.5px; min-width: 0; flex-wrap: wrap;
+}
+/* Provenance goes on its own line, full width, right-aligned under the figure. */
+.ws-page .ws-sum__tag { flex: 0 0 100%; text-align: right; margin-top: -2px; }
+.ws-page .ws-sum__label {
+  color: var(--text-tertiary); flex: 0 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-page .ws-sum__value {
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+  text-align: right; flex: 0 0 auto; white-space: nowrap;
+  display: flex; align-items: baseline; gap: 5px; justify-content: flex-end;
+  max-width: 100%;
+}
+/* An email or a company name can be genuinely long. It wraps rather than being
+   cut, because half an address is worse than two lines of one. */
+.ws-page .ws-sum--wrap .ws-sum__value { white-space: normal; word-break: break-word; }
+/* The one green figure in the header, and only when money actually moved. */
+.ws-page .ws-sum.is-collected .ws-sum__value { color: var(--signal-green); font-weight: 600; }
+
+@media (max-width: 900px) {
+  .ws-page .ws-summary__next { flex: 1 1 100%; }
+  .ws-page .ws-deal-photo { flex-basis: 84px; width: 84px; height: 64px; }
+}
+
+
+/* ── Upload, gallery, confirm ────────────────────────────────────────────── */
+.ws-page .ws-drop {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 14px 16px; border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong); background: var(--bg-field-soft);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.ws-page .ws-drop.is-over {
+  border-color: var(--signal-blue); background: var(--signal-blue-dim);
+}
+.ws-page .ws-drop.is-busy { opacity: 0.7; }
+.ws-page .ws-drop__hint {
+  font-size: 11.5px; color: var(--text-tertiary); line-height: 1.5;
+}
+
+.ws-page .ws-upload-block { margin-top: 18px; }
+
+.ws-page .ws-photos {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px; margin-top: 14px;
+}
+.ws-page .ws-photo {
+  margin: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  overflow: hidden; background: var(--bg-row); position: relative;
+}
+.ws-page .ws-photo.is-cover { border-color: var(--signal-blue); }
+.ws-page .ws-photo__open {
+  display: block; width: 100%; height: 132px; padding: 0; cursor: zoom-in;
+  background: var(--bg-field-soft); border: none; overflow: hidden;
+}
+.ws-page .ws-photo__open img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.ws-page .ws-photo__badge {
+  position: absolute; top: 8px; left: 8px; z-index: 1;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; padding: 2px 7px; border-radius: 999px;
+  background: var(--signal-blue); color: var(--text-inverse);
+}
+.ws-page .ws-photo figcaption {
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
+  font-size: 12px;
+}
+.ws-page .ws-photo__caption { color: var(--text-secondary); line-height: 1.4; }
+
+.ws-page .ws-img-loading,
+.ws-page .ws-img-failed {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%; font-size: 11px; color: var(--text-tertiary);
+  background: var(--bg-field-soft);
+}
+
+.ws-page .ws-confirm {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  flex-wrap: wrap; margin-top: 12px; padding: 12px 14px;
+  border: 1px solid var(--signal-red); border-radius: var(--radius-sm);
+  background: var(--signal-red-dim); font-size: 13px;
+}
+.ws-page .ws-confirm__text { color: var(--text-primary); }
+.ws-page .ws-mono-inline {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-secondary);
+}
+
+
+/* ── The comps workspace ───────────────────────────────────────
+
+   Every colour here is a token. The subject panel is deliberately the quieter
+   of the two surfaces: the comp set is the evidence and the subject is the
+   thing being argued about, not the headline. */
+
+.ws-page .ws-compare {
+  display: grid; grid-template-columns: minmax(240px, 0.85fr) minmax(360px, 2fr);
+  gap: 14px; margin-top: 14px;
+}
+.ws-page .ws-compare__subject,
+.ws-page .ws-compare__set {
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: var(--bg-row); padding: 14px 16px;
+}
+.ws-page .ws-compare__subject { background: var(--bg-field-soft); }
+.ws-page .ws-compare__head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap; font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.ws-page .ws-compare__count {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  text-transform: none; color: var(--text-secondary);
+}
+.ws-page .ws-compare__big {
+  margin-top: 8px; font-size: 26px; font-weight: 700; line-height: 1.1;
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+.ws-page .ws-compare__unit {
+  margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--text-tertiary);
+}
+.ws-page .ws-compare__list { margin: 12px 0 0; display: grid; gap: 10px; }
+.ws-page .ws-compare__list dt {
+  font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.ws-page .ws-compare__list dd {
+  margin: 2px 0 0; font-size: 15px; font-weight: 600; color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.ws-page .ws-compare__note {
+  margin: 12px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text-tertiary);
+}
+
+.ws-page .ws-compare__figures {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px; margin-top: 12px;
+}
+.ws-page .ws-compare__figure {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle); background: var(--bg-card);
+}
+.ws-page .ws-compare__figure.is-lead { border-color: var(--signal-blue); }
+.ws-page .ws-compare__figure strong {
+  font-size: 20px; font-weight: 700; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; line-height: 1.15;
+}
+.ws-page .ws-compare__figure strong.is-small { font-size: 14px; }
+.ws-page .ws-compare__sub {
+  font-size: 10.5px; line-height: 1.45; color: var(--text-tertiary);
+}
+.ws-page .ws-compare__arv {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);
+}
+.ws-page .ws-compare__arv strong {
+  font-size: 22px; font-weight: 700; color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1000px) {
+  .ws-page .ws-compare { grid-template-columns: 1fr; }
+}
+
+/* The table. An excluded comp is dimmed, never hidden — it is still a comp
+   somebody found, and the whole point of the distinction is that excluding is
+   not deleting. */
+.ws-page .ws-comps td { vertical-align: top; }
+.ws-page .ws-comp.is-excluded td:nth-child(-n+7) { opacity: 0.55; }
+.ws-page .ws-comp__thumb-cell { width: 92px; }
+.ws-page .ws-comp__thumb-btn {
+  display: block; padding: 0; border: none; background: none; cursor: zoom-in;
+}
+.ws-page .ws-comp__thumb,
+.ws-page .ws-comp__thumb-lg {
+  display: block; width: 76px; height: 58px; object-fit: cover;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);
+  background: var(--bg-field-soft);
+}
+.ws-page .ws-comp__thumb-lg { width: 132px; height: 100px; }
+.ws-page .ws-comp__thumb.is-empty {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; color: var(--text-tertiary); text-align: center;
+}
+.ws-page .ws-comp__addr {
+  font-weight: 600; color: var(--text-primary); line-height: 1.3;
+}
+.ws-page .ws-comp__sub {
+  margin-top: 2px; font-size: 11px; color: var(--text-tertiary); line-height: 1.4;
+}
+.ws-page .ws-delta {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+  background: var(--bg-field-soft); color: var(--text-tertiary);
+}
+.ws-page .ws-delta.is-over {
+  background: var(--signal-amber-dim); color: var(--signal-amber);
+}
+.ws-page .ws-delta.is-under {
+  background: var(--signal-blue-dim); color: var(--signal-blue);
+}
+.ws-page .ws-pill.is-in-arv {
+  background: var(--signal-green-dim); color: var(--signal-green);
+  border-color: var(--signal-green);
+}
+.ws-page .ws-pill.is-muted {
+  background: var(--bg-field-soft); color: var(--text-tertiary);
+  border-color: var(--border-subtle);
+}
+.ws-page .ws-actions--wrap { flex-wrap: wrap; row-gap: 6px; }
+
+.ws-page .ws-comp__editor {
+  padding: 14px 16px; border-radius: var(--radius-sm);
+  border: 1px solid var(--signal-blue); background: var(--bg-field-soft);
+}
+.ws-page .ws-comp__editor.is-new { margin-top: 14px; }
+.ws-page .ws-comp__editor-head {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 10px;
+}
+.ws-page .ws-comp__photo-edit {
+  margin-top: 14px; display: flex; flex-direction: column; gap: 8px;
+}
+.ws-page .ws-comp__photo-current {
+  display: flex; align-items: center; gap: 12px; font-size: 11.5px;
+}
+.ws-page .ws-comp__confirm-row td { padding-top: 0; }
+.ws-page .ws-warn__list { margin: 0; padding-left: 18px; }
+.ws-page .ws-warn__list li { margin: 2px 0; }
+
+/* Delete lives on every row, so it is quiet until it is pressed. Red is spent
+   on the confirmation, where the decision actually happens. */
+.ws-page .btn.ws-btn-delete {
+  color: var(--signal-red); border-color: var(--border-subtle);
+}
+.ws-page .btn.ws-btn-delete:hover:not(:disabled) {
+  background: var(--signal-red-dim); border-color: var(--signal-red);
+}
+
+/* ── The negotiation ledger ────────────────────────────────────── */
+.ws-page .ws-position {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px; margin-top: 14px;
+}
+.ws-page .ws-position__side,
+.ws-page .ws-position__gap {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle); background: var(--bg-row);
+}
+.ws-page .ws-position__gap { background: var(--bg-field-soft); }
+.ws-page .ws-position strong {
+  font-size: 21px; font-weight: 700; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; line-height: 1.15;
+}
+.ws-page .ws-position strong.is-apart { color: var(--signal-amber); }
+.ws-page .ws-position__sub {
+  font-size: 10.5px; line-height: 1.45; color: var(--text-tertiary);
+}
+
+.ws-page .ws-offer-entry {
+  display: grid; grid-template-columns: auto 160px 1fr auto;
+  align-items: end; gap: 12px; margin-top: 16px; padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+@media (max-width: 900px) {
+  .ws-page .ws-offer-entry { grid-template-columns: 1fr; }
+}
+.ws-page .ws-toggle {
+  display: inline-flex; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-card);
+}
+.ws-page .ws-toggle__btn {
+  padding: 8px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  border: none; background: transparent; color: var(--text-secondary);
+}
+.ws-page .ws-toggle__btn + .ws-toggle__btn {
+  border-left: 1px solid var(--border-subtle);
+}
+.ws-page .ws-toggle__btn.is-on {
+  background: var(--signal-blue); color: var(--text-inverse);
+}
+
+.ws-page .ws-move {
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.ws-page .ws-move.is-us { color: var(--signal-blue); }
+.ws-page .ws-move.is-them { color: var(--text-secondary); }
+
+/* A label a screen reader needs and a sighted user does not. */
+.ws-page .ws-vis-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+/* A <select> that is both the state and the way to change it, so the row does
+   not print the same word twice. */
+.ws-page select.ws-statusedit { font-weight: 600; }
+.ws-page select.ws-statusedit.is-ok {
+  border-color: var(--signal-green); color: var(--signal-green);
+}
+.ws-page select.ws-statusedit.is-warn {
+  border-color: var(--signal-amber); color: var(--signal-amber);
+}
+.ws-page select.ws-statusedit.is-dnc {
+  border-color: var(--signal-red); color: var(--signal-red);
+}
+
+/* The caption above a group of controls that is not itself one control. */
+.ws-page .ws-fieldlabel {
+  font-size: 11px; font-weight: 700; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+
+/* ── The disposition board ────────────────────────────────────── */
+.ws-page .ws-dispo-summary {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px; margin-top: 14px;
+}
+.ws-page .ws-dispo-summary > div {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle); background: var(--bg-row);
+}
+.ws-page .ws-dispo-summary strong {
+  font-size: 19px; font-weight: 700; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; line-height: 1.2;
+}
+.ws-page .ws-dispo td { vertical-align: top; }
+.ws-page .ws-dispo__row.is-selected {
+  background: var(--signal-green-dim);
+}
+.ws-page .ws-dispo__row.is-selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--signal-green);
+}
+.ws-page .ws-spread.is-up { color: var(--signal-green); }
+.ws-page .ws-spread.is-down { color: var(--signal-red); }
+.ws-page .ws-blocked { color: var(--signal-red); }
+.ws-page .ws-trail {
+  display: flex; flex-direction: column; gap: 1px;
+}
+.ws-page .ws-trail__step { white-space: nowrap; }
+
+.ws-page .ws-respond {
+  padding: 14px 16px; border-radius: var(--radius-sm);
+  border: 1px solid var(--signal-blue); background: var(--bg-field-soft);
+}
+.ws-page .ws-respond__head {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 10px;
+}
+
+/* A decision, not a destruction — same weight of confirmation, no red. */
+.ws-page .ws-confirm.ws-confirm--decision {
+  border-color: var(--signal-blue); background: var(--signal-blue-dim);
+}
+
+/* Column widths. Left to itself the browser gave the buyer's NAME the narrowest
+   column on the board and wrapped "Lone Star Capital Homes" over three lines
+   while the proof-of-funds select had room to spare. Claiming too much was the
+   opposite mistake: it pushed the Actions column — the reason the board exists
+   — off the right edge into the scroll container. These are the widths that fit
+   the whole board on a 1512px desktop without scrolling.
+
+   The two money columns get `nowrap` because a wrapped figure is unreadable;
+   the prose columns are allowed to wrap. */
+.ws-page .ws-dispo th:nth-child(1),
+.ws-page .ws-dispo td:nth-child(1) { min-width: 178px; }
+.ws-page .ws-dispo th:nth-child(2),
+.ws-page .ws-dispo td:nth-child(2) { min-width: 196px; }
+.ws-page .ws-dispo th:nth-child(3),
+.ws-page .ws-dispo td:nth-child(3),
+.ws-page .ws-dispo th:nth-child(4),
+.ws-page .ws-dispo td:nth-child(4) { min-width: 96px; white-space: nowrap; }
+.ws-page .ws-dispo th:nth-child(6),
+.ws-page .ws-dispo td:nth-child(6) { min-width: 88px; }
+.ws-page .ws-dispo td:nth-child(6) .ws-comp__sub { white-space: nowrap; }
+.ws-page .ws-dispo th:nth-child(7),
+.ws-page .ws-dispo td:nth-child(7) { min-width: 132px; }
+/* A <select> sizes itself to its longest option; "Verified by a person" was
+   making the proof-of-funds column the widest on the board. */
+.ws-page .ws-dispo select { max-width: 152px; }
+
+/* ── The assignment ledger ────────────────────────────────────── */
+.ws-page .ws-ledger {
+  margin-top: 14px; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-row);
+}
+.ws-page .ws-ledger__line {
+  display: grid; grid-template-columns: 26px 1fr auto; align-items: baseline;
+  gap: 10px; padding: 10px 16px;
+}
+.ws-page .ws-ledger__line + .ws-ledger__line {
+  border-top: 1px solid var(--border-subtle);
+}
+/* The three outcomes of the chain carry an accent rail; the last line, the
+ * money that actually landed, is the terminus and is drawn as one. */
+.ws-page .ws-ledger__line.is-strong {
+  background: var(--bg-field-soft);
+  box-shadow: inset 3px 0 0 var(--border-strong);
+}
+.ws-page .ws-ledger__line.is-terminal {
+  border-top: 2px solid var(--border-strong);
+  background: var(--bg-field-soft);
+  box-shadow: inset 3px 0 0 var(--border-strong);
+  padding-top: 13px; padding-bottom: 13px;
+}
+.ws-page .ws-ledger__line.is-terminal .ws-ledger__value { font-size: 24px; font-weight: 700; }
+.ws-page .ws-ledger__line.is-terminal .ws-ledger__label {
+  font-weight: 700; color: var(--text-primary);
+}
+.ws-page .ws-ledger__sign {
+  font-size: 15px; font-weight: 700; color: var(--text-tertiary); text-align: center;
+}
+.ws-page .ws-ledger__label {
+  font-size: 13px; color: var(--text-secondary); line-height: 1.4;
+}
+.ws-page .ws-ledger__line.is-strong .ws-ledger__label {
+  font-weight: 700; color: var(--text-primary);
+}
+.ws-page .ws-ledger__note {
+  display: block; font-size: 10.5px; color: var(--text-tertiary);
+}
+.ws-page .ws-ledger__value {
+  font-size: 17px; font-weight: 600; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ws-page .ws-ledger__line.is-strong .ws-ledger__value { font-size: 20px; font-weight: 700; }
+.ws-page .ws-ledger__value.is-good { color: var(--signal-green); }
+.ws-page .ws-ledger__value.is-bad { color: var(--signal-red); }
+
+/* ── The seller conversation ──────────────────────────────────── */
+.ws-page .ws-thread {
+  list-style: none; margin: 14px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.ws-page .ws-thread__order { font-size: 11px; font-weight: 600; }
+.ws-page .ws-thread__item { display: flex; }
+.ws-page .ws-thread__item.is-in { justify-content: flex-start; }
+.ws-page .ws-thread__item.is-out { justify-content: flex-end; }
+.ws-page .ws-thread__bubble {
+  max-width: min(72%, 680px); padding: 10px 14px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: var(--bg-row);
+}
+.ws-page .ws-thread__item.is-out .ws-thread__bubble {
+  background: var(--signal-blue-dim); border-color: var(--signal-blue);
+}
+.ws-page .ws-thread__meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.ws-page .ws-thread__who {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+.ws-page .ws-thread__at { font-size: 11px; color: var(--text-tertiary); }
+.ws-page .ws-thread__body {
+  font-size: 13.5px; line-height: 1.55; color: var(--text-primary);
+  white-space: pre-wrap; word-break: break-word;
+}
+
+@media (max-width: 760px) {
+  .ws-page .ws-thread__bubble { max-width: 100%; }
+}
+
+/* ── The property list ───────────────────────────────────────── */
+.ws-page .ws-proplist td { vertical-align: top; }
+/* Widths chosen so the whole row fits a 1512px desktop. The first attempt
+   claimed more than the panel had and pushed "Last activity" — and with it the
+   answer to "has anyone touched this?" — into the scroll container. */
+.ws-page .ws-proplist th, .ws-page .ws-proplist td { padding-left: 10px; padding-right: 10px; }
+.ws-page .ws-proplist th:nth-child(2),
+.ws-page .ws-proplist td:nth-child(2) { min-width: 226px; }
+.ws-page .ws-proplist th:nth-child(3),
+.ws-page .ws-proplist td:nth-child(3) { min-width: 104px; }
+.ws-page .ws-proplist th:nth-child(5),
+.ws-page .ws-proplist td:nth-child(5),
+.ws-page .ws-proplist th:nth-child(6),
+.ws-page .ws-proplist td:nth-child(6) { min-width: 104px; white-space: nowrap; }
+.ws-page .ws-proplist th:nth-child(7),
+.ws-page .ws-proplist td:nth-child(7) { min-width: 178px; }
+.ws-page .ws-proplist th:nth-child(8),
+.ws-page .ws-proplist td:nth-child(8) { min-width: 92px; }
+.ws-page .ws-proplist__ident { display: flex; gap: 10px; align-items: flex-start; }
+.ws-page .ws-proplist__thumb {
+  flex: 0 0 64px; width: 64px; height: 48px; overflow: hidden;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);
+  background: var(--bg-field-soft);
+  display: flex; align-items: center; justify-content: center;
+}
+.ws-page .ws-proplist__thumb img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.ws-page .ws-proplist__nophoto {
+  font-size: 9.5px; color: var(--text-tertiary); text-align: center;
+}
+.ws-page .ws-next { font-size: 12.5px; font-weight: 600; }
+.ws-page .ws-next--urgent { color: var(--signal-red); }
+.ws-page .ws-next--attention { color: var(--signal-amber); }
+.ws-page .ws-next--ok { color: var(--text-secondary); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   PHASE 4 — operator density
+
+   Phase 3 was built to be READ. This module is used for eight hours a day, and
+   a screen you live in wants less air, tighter type and fewer words between you
+   and the control. Nothing below changes what anything does.
+   ═════════════════════════════════════════════════════════════════════ */
+
+/* Panels sit closer together and give back the padding a reading page needs
+   and a working one does not. */
+.ws-page { gap: 14px; }
+.ws-page .ws-panel { padding: 16px 18px; }
+.ws-page .ws-panel + .ws-panel { margin-top: 0; }
+.ws-page .ws-panel-title {
+  margin-bottom: 10px; font-size: 14.5px; letter-spacing: -0.01em;
+}
+.ws-page .ws-grid { gap: 10px; }
+.ws-page .ws-form { gap: 10px; }
+
+/* The two levels of secondary text. Both are visibly SECONDARY — that is the
+   whole point of adding them. */
+.ws-page .ws-note {
+  margin: 0 0 10px; font-size: 12px; line-height: 1.5;
+  color: var(--text-tertiary); max-width: 74ch;
+}
+.ws-page .ws-note.is-warn { color: var(--signal-amber); }
+.ws-page .ws-note strong { color: var(--text-secondary); font-weight: 650; }
+
+/* A disclosure followed by a field label collided with it: the details element
+ * carried no trailing space of its own. */
+.ws-page .ws-why { margin: 8px 0 12px; }
+.ws-page .ws-why:last-child { margin-bottom: 0; }
+.ws-page .ws-why > summary {
+  cursor: pointer; list-style: none; display: inline-flex; align-items: center;
+  gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--text-tertiary); padding: 2px 0;
+}
+.ws-page .ws-why > summary::-webkit-details-marker { display: none; }
+.ws-page .ws-why > summary::before {
+  content: '\203A'; display: inline-block; font-size: 14px; line-height: 1;
+  transition: transform 0.12s ease;
+}
+.ws-page .ws-why[open] > summary::before { transform: rotate(90deg); }
+.ws-page .ws-why > summary:hover { color: var(--text-secondary); }
+.ws-page .ws-why__body {
+  margin-top: 6px; padding-left: 14px; font-size: 12px; line-height: 1.55;
+  color: var(--text-tertiary); max-width: 74ch;
+  border-left: 1px solid var(--border-subtle);
+}
+.ws-page .ws-why__body p { margin: 0 0 8px; }
+.ws-page .ws-why__body p:last-child { margin-bottom: 0; }
+
+/* The existing long-form note keeps working, but at the new weight, so any
+   panel not yet converted still reads as secondary rather than as a headline. */
+.ws-page .ws-panel-note {
+  font-size: 12px; margin: 0 0 10px; max-width: 74ch; line-height: 1.5;
+}
+
+/* Tables: a working density, not a reading one. */
+.ws-page .ws-table th {
+  font-size: 10px; letter-spacing: 0.07em; padding-top: 8px; padding-bottom: 8px;
+}
+.ws-page .ws-table td { padding-top: 9px; padding-bottom: 9px; font-size: 12.5px; }
+.ws-page .ws-comp__sub { font-size: 11px; line-height: 1.4; }
+
+/* Environment notices are facts about the deployment, not instructions to the
+   operator. They stay visible and stop shouting. */
+.ws-page .ws-notice {
+  font-size: 12px; padding: 8px 12px; line-height: 1.5;
+}
+
+/* ── The document drawer ──────────────────────────────────────── */
+.ws-page .ws-docs td { vertical-align: top; }
+.ws-page .ws-docs th:nth-child(1),
+.ws-page .ws-docs td:nth-child(1) { min-width: 190px; }
+.ws-page .ws-docs th:nth-child(2),
+.ws-page .ws-docs td:nth-child(2) { min-width: 200px; }
+.ws-page .ws-docs th:nth-child(4),
+.ws-page .ws-docs td:nth-child(4) { min-width: 170px; }
+.ws-page .ws-docs select { max-width: 170px; }
+.ws-page .ws-doc__title { font-weight: 600; color: var(--text-primary); }
+.ws-page .ws-doc__file {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-secondary);
+  word-break: break-all;
+}
+/* A remembered filename is not a held file, and the difference is the reason
+   this column exists. */
+.ws-page .ws-doc__file.is-reference { color: var(--text-tertiary); }
+.ws-page .ws-doc__warn { color: var(--signal-amber); }
+.ws-page .ws-doc__counts {
+  font-size: 11.5px; font-weight: 600; color: var(--text-tertiary);
+}
+.ws-page .ws-doc__addhead {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 8px;
+}
+
+/* ── The match list ──────────────────────────────────────────── */
+.ws-page .ws-matches td { vertical-align: top; }
+.ws-page .ws-matches th:nth-child(2),
+.ws-page .ws-matches td:nth-child(2) { min-width: 170px; }
+.ws-page .ws-matches th:nth-child(4),
+.ws-page .ws-matches td:nth-child(4) { min-width: 165px; }
+.ws-page .ws-matches th:nth-child(7),
+.ws-page .ws-matches td:nth-child(7) { min-width: 130px; }
+.ws-page .ws-match.is-excluded td:not(:last-child) { opacity: 0.55; }
+
+/* Inside a table cell the disclosure needs to not push the row around. */
+.ws-page .ws-why--inline { margin: 0; }
+.ws-page .ws-why--inline > summary { white-space: nowrap; }
+.ws-page .ws-why--inline .ws-why__body { min-width: 260px; }
+
+
+/* ── The seller workspace ────────────────────────────────────────────────────
+ * Seven full-width panels stacked to 2,300 pixels, three of them mostly empty
+ * space to the right of a text box. The conversation and the record it is
+ * scored from belong in one column; the cadence and the permissions are
+ * settings FOR that conversation rather than part of it, so they sit beside
+ * it instead of pushing it further down the page. Nothing was removed. */
+.ws-page .ws-seller {
+  display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 14px; align-items: start;
+}
+.ws-page .ws-seller__main,
+.ws-page .ws-seller__side {
+  display: flex; flex-direction: column; gap: 14px; min-width: 0;
+}
+@media (max-width: 1180px) {
+  .ws-page .ws-seller { grid-template-columns: 1fr; }
+}
+
+/* A second heading inside a panel, for a group that used to be its own. */
+.ws-page .ws-subhead {
+  margin: 16px 0 10px; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+
+/* Two boxes that looked alike and did opposite things, made into one choice. */
+.ws-page .ws-seg {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--bg-row); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.ws-page .ws-seg__btn {
+  cursor: pointer; border: 0; background: transparent;
+  padding: 5px 11px; border-radius: calc(var(--radius-sm) - 2px);
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+}
+.ws-page .ws-seg__btn:hover { color: var(--text-primary); }
+.ws-page .ws-seg__btn.is-on {
+  background: var(--bg-panel); color: var(--text-primary);
+  box-shadow: var(--elevation-1);
+}
+.ws-page .ws-kv--tight { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+.ws-page .ws-comp__dist { white-space: nowrap; }
+
+
+/* The negotiation, read as a ledger: a coloured rail per party so the back and
+ * forth is visible as a shape rather than as a column of words. */
+.ws-page .ws-move-row > td:first-child {
+  border-left: 3px solid var(--border-subtle);
+}
+/* Ink for our move, amber for theirs: the two read apart on the dark default
+ * and on the light brand palettes, where blue and amber do not. */
+.ws-page .ws-move-row.is-us > td:first-child { border-left-color: var(--text-primary); }
+.ws-page .ws-move-row.is-them > td:first-child { border-left-color: var(--signal-amber); }
+
+
+/* ── Phase 5. The gallery: many photos, categorised, ordered, and published
+ * one at a time. The "Shared" badge is the publication boundary made visible:
+ * an operator should be able to see, without clicking anything, exactly which
+ * pictures of somebody's house an outsider can open. */
+.ws-page .ws-gallery-bar {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; font-size: 12px; color: var(--text-secondary);
+  margin: 10px 0 8px;
+}
+.ws-page .ws-shared-count { color: var(--signal-green); font-weight: 600; }
+/* Two badges can be true at once — a shared cover photo — so they sit in a row
+ * rather than each claiming the same corner. */
+.ws-page .ws-photo__badges {
+  position: absolute; top: 8px; left: 8px; z-index: 1;
+  display: flex; gap: 4px; pointer-events: none;
+}
+.ws-page .ws-photo__badges .ws-photo__badge { position: static; }
+.ws-page .ws-photo__badge.is-shared {
+  background: var(--signal-green-dim); color: var(--signal-green);
+}
+.ws-page .ws-photo.is-shared { border-color: var(--signal-green); }
+.ws-page .ws-photo__cat { display: block; margin: 6px 0 4px; }
+.ws-page .ws-photo__cat select { width: 100%; }
+.ws-page .ws-photo__share { font-size: 12px; margin-bottom: 6px; }
+.ws-page .ws-linkpath {
+  font-size: 11.5px; color: var(--text-secondary); word-break: break-all;
+}
+.ws-page .ws-actor.actor-api {
+  background: var(--signal-blue-dim); color: var(--signal-blue);
+}
+/* A column of choices, not a sentence of them. */
+.ws-page .ws-checks { display: flex; flex-direction: column; gap: 4px; }
+.ws-page .ws-collected { color: var(--signal-green); font-weight: 650; }
+.ws-page .ws-short { color: var(--signal-red); font-weight: 650; }
+
+
+/* ── Phase 5. Approvals, in the order a deal actually runs.
+ * Three identical buttons said all three were equally valid. The next one is
+ * primary; the others carry the sentence explaining what they are waiting for,
+ * and a tick that makes asking anyway a deliberate act rather than a slip. */
+.ws-page .ws-approvals { display: flex; flex-direction: column; gap: 10px; }
+.ws-page .ws-approval {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+.ws-page .ws-approval.is-next {
+  border-color: var(--border-subtle); background: var(--bg-row);
+}
+.ws-page .ws-approval__gap {
+  font-size: 12px; color: var(--signal-amber); display: inline-flex;
+  align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.ws-page .ws-approval__gap .ws-checkbox { font-size: 12px; }
+.ws-page .ws-doc__share { font-size: 11.5px; display: flex; gap: 6px; }
+/* Phase 5. The raw figure stays in the box; this reads it back underneath. */
+.ws-page .ws-reads {
+  font-size: 11.5px; color: var(--text-secondary);
+  font-variant-numeric: tabular-nums; margin-top: 2px;
+}
+
+/* ── Intake priority (Phase 5, A18) ───────────────────────────────────────────
+   The identifying fields are one block at full weight; everything a CSV column,
+   a provider or a later visit can supply is folded behind one line. No field
+   was removed and the fold is one click, so nothing is further away than it
+   was — it is just no longer competing with the address for attention. */
+.ws-page .ws-grid--intake {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.ws-page .ws-field--wide { grid-column: span 2; }
+@media (max-width: 720px) {
+  .ws-page .ws-field--wide { grid-column: auto; }
+}
+
+.ws-page .ws-intake-more {
+  border-top: 1px solid var(--border-subtle); padding-top: 10px;
+}
+.ws-page .ws-intake-more > summary {
+  cursor: pointer; list-style: none; display: inline-flex; align-items: center;
+  gap: 6px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--text-tertiary); padding: 2px 0;
+}
+.ws-page .ws-intake-more > summary::-webkit-details-marker { display: none; }
+.ws-page .ws-intake-more > summary::before {
+  content: '\203A'; display: inline-block; font-size: 14px; line-height: 1;
+  transition: transform 0.12s ease;
+}
+.ws-page .ws-intake-more[open] > summary::before { transform: rotate(90deg); }
+.ws-page .ws-intake-more > summary:hover { color: var(--text-secondary); }
+.ws-page .ws-intake-more__body { margin-top: 10px; }
+.ws-page .ws-intake-more__body .ws-note { margin-top: 0; margin-bottom: 10px; }
+
+/* ── Seller assistant (Phase 5, A14) ─────────────────────────────────────────
+   What it looks for and when it hands back, side by side, because those are the
+   two questions somebody has about it. Neither is editable: the reader writes
+   into fixed columns and escalates on fixed conditions, and a control that
+   changed neither would be decoration. */
+.ws-page .ws-assistant {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 10px 0 4px;
+}
+@media (max-width: 900px) {
+  .ws-page .ws-assistant { grid-template-columns: 1fr; gap: 14px; }
+}
+.ws-page .ws-assistant h4 {
+  margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+.ws-page .ws-assistant__list { margin: 0; }
+.ws-page .ws-assistant__list > div {
+  display: grid; grid-template-columns: 116px 1fr; gap: 10px;
+  padding: 5px 0; border-top: 1px solid var(--border-subtle);
+}
+.ws-page .ws-assistant__list > div:first-child { border-top: 0; }
+.ws-page .ws-assistant__list dt {
+  font-size: 12px; font-weight: 600; color: var(--text-primary);
+}
+.ws-page .ws-assistant__list dd {
+  margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-tertiary);
+}
+.ws-page .ws-assistant__esc {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.ws-page .ws-assistant__esc li {
+  font-size: 12px; line-height: 1.5; color: var(--text-tertiary);
+  padding-left: 12px; position: relative;
+}
+.ws-page .ws-assistant__esc li::before {
+  content: ''; position: absolute; left: 0; top: 7px;
+  width: 4px; height: 4px; border-radius: 50%; background: var(--border-strong);
+}
+.ws-page .ws-assistant__esc strong { color: var(--text-primary); font-weight: 600; }
+
+/* ── The contract desk (Phase 5, A6) ──────────────────────────────────────────
+   Facts laid out for transcription. A blank is drawn as a blank and keeps the
+   note saying where that fact actually comes from — the whole point is that
+   what is MISSING travels with what is known. */
+.ws-page .ws-templates {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px; margin: 10px 0;
+}
+.ws-page .ws-templates.is-empty {
+  display: block; font-size: 12px; color: var(--text-tertiary);
+  border: 1px dashed var(--border-subtle); border-radius: var(--radius-sm);
+  padding: 12px; line-height: 1.55;
+}
+.ws-page .ws-template {
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 4px;
+}
+.ws-page .ws-template.is-retired { opacity: 0.6; }
+.ws-page .ws-template__name {
+  font-size: 13px; font-weight: 650; color: var(--text-primary);
+  display: flex; align-items: center; gap: 8px;
+}
+.ws-page .ws-template__guidance {
+  font-size: 12px; line-height: 1.5; color: var(--text-secondary);
+  border-left: 2px solid var(--border-subtle); padding-left: 8px; margin-top: 2px;
+}
+.ws-page .ws-template .ws-actions { margin-top: 6px; }
+.ws-page .ws-template-add { margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle); }
+
+.ws-page .ws-fill {
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  margin: 12px 0 4px;
+}
+.ws-page .ws-fill__head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+.ws-page .ws-fill__group { padding: 8px 12px 10px; }
+.ws-page .ws-fill__group + .ws-fill__group { border-top: 1px solid var(--border-subtle); }
+.ws-page .ws-fill__group h4 {
+  margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.ws-page .ws-fill dl { margin: 0; }
+.ws-page .ws-fill dl > div {
+  display: grid; grid-template-columns: 220px 1fr; gap: 12px; padding: 3px 0;
+}
+.ws-page .ws-fill dt { font-size: 12px; color: var(--text-secondary); }
+.ws-page .ws-fill dd {
+  margin: 0; font-size: 12.5px; color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.ws-page .ws-fill dl > div.is-blank dd { font-variant-numeric: normal; }
+.ws-page .ws-fill__note {
+  display: block; font-size: 11.5px; color: var(--text-tertiary); line-height: 1.45;
+}
+@media (max-width: 760px) {
+  .ws-page .ws-fill dl > div { grid-template-columns: 1fr; gap: 0; }
+}
+
+/* The lifecycle control sits under the status pill, not beside it: it is the
+   next move, not a second reading of the current one. */
+.ws-page .ws-docs .ws-statusedit { margin-top: 5px; }
+
+/* Signature state, under the lifecycle rather than beside it. */
+.ws-page .ws-doc__sig { margin-top: 8px; }
+.ws-page .ws-doc__sig > label {
+  display: block; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 3px;
+}
+
+/* Fill-sheet field states (Phase 6). Three, not two: a value that is on file
+   but has not been checked against the deed is neither done nor missing, and
+   collapsing it either way is how a wrong party name reaches a signature. */
+.ws-page .ws-fill__group h4 {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+}
+.ws-page .ws-fill__flag {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: none;
+}
+.ws-page .ws-fill__flag.is-ok { color: var(--success, #0f7b52); }
+.ws-page .ws-fill__flag.is-open { color: var(--warning, #b7791f); }
+.ws-page .ws-fill dl > div.is-missing dd { color: var(--text-tertiary); }
+.ws-page .ws-fill dl > div.is-needs_review dd { color: var(--text-primary); }
+.ws-page .ws-fill__tag {
+  display: inline-block; margin-left: 8px; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--warning, #b7791f);
+  border: 1px solid currentColor; border-radius: 4px; padding: 0 5px;
+  vertical-align: 1px;
+}
+
+/* Payment state on the deal header: a word, at word weight, beside figures at
+   figure weight. Phase 6 — "closed" and "paid" are different facts and the
+   header was answering only the first. */
+.ws-page .ws-key--state { grid-column: span 2; }
+@media (max-width: 1280px) { .ws-page .ws-key--state { grid-column: span 1; } }
+.ws-page .ws-key__state {
+  font-size: 13px; font-weight: 700; line-height: 1.3; margin-top: 4px;
+  color: var(--text-secondary);
+}
+.ws-page .ws-key__state.tone-attention { color: var(--warning, #b7791f); }
+.ws-page .ws-key__state.tone-collected { color: var(--success, #0f7b52); }
+
+/* The offer formula, said in English above the boxes that set it. */
+.ws-page .ws-formula {
+  border-left: 3px solid var(--accent, #b7791f); padding: 2px 0 2px 12px;
+  margin: 0 0 14px;
+}
+.ws-page .ws-formula__line { font-size: 14px; line-height: 1.6; }
+.ws-page .ws-formula__eg {
+  font-size: 12.5px; line-height: 1.55; color: var(--text-secondary);
+  margin-top: 4px;
+}
+.ws-page .ws-toggle-col {
+  display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px;
+}
+
+/* ── What the investor sent through their own deal room link ───────────────
+   Phase 6.1. A sub-row under the buyer it came from, not four more columns on
+   a table that is already seven wide. Deliberately quiet — it is context on a
+   row the operator is comparing against four others, not a second headline. */
+.ws-page .ws-dispo__sub > td {
+  padding-top: 0; border-top: 0;
+}
+.ws-page .ws-sent {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 22px;
+  padding: 9px 12px; margin: 0 0 6px; border-radius: 8px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.06));
+  border-left: 3px solid var(--accent, #b7791f);
+  font-size: 12.5px; line-height: 1.5;
+}
+.ws-page .ws-sent__tag {
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+.ws-page .ws-sent__item { display: inline-flex; align-items: baseline; gap: 6px; }
+.ws-page .ws-sent__k { color: var(--text-secondary); }
+.ws-page .ws-sent__v { font-weight: 650; }
+.ws-page .ws-sent__v a { color: inherit; }
+/* The one sentence that keeps a forwarded link from looking like a CRM edit. */
+.ws-page .ws-sent__note {
+  flex-basis: 100%; color: var(--text-secondary); font-size: 12px;
+}

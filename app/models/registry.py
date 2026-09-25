@@ -240,6 +240,28 @@ import app.models.launch_experience_models  # noqa: F401  (side effects)
 # learns nothing. Added to BOTH blocks in this file, per the merge-artefact
 # note above.
 import app.models.master_contact_models  # noqa: F401  (imported for side effects)
+# Wholesale Real Estate (wholesale_settings / _properties / _seller_profiles /
+# _deals / _comps / _approvals / _documents / _buyers / _buy_boxes /
+# _buyer_matches / _buyer_outreach / _enrichment_requests / _events). Same Base,
+# same reason as every line above.
+#
+# Dropping this line has the quiet consequence rather than the loud one: no
+# tables, so `resolve_settings` raises on the first read and every wholesale
+# screen fails on first use. Worse, `wholesale_events` is the module's own audit
+# trail and the ONLY place an action taken by the AI or by an automation can be
+# recorded at all — `audit_log_entries.actor_user_id` is NOT NULL and cannot
+# hold one. A missing table there is a missing audit trail, not a missing
+# screen. Added to BOTH blocks in this file, per the merge-artefact note above.
+import app.models.wholesale_models  # noqa: F401  (imported for side effects)
+# The external-access tables (wholesale_share_links / _share_views). Registered
+# here for the same reason as the line above: without them the buyer and seller
+# rooms have nowhere to record a link or a view, and a revoked link would have
+# no row to be revoked on.
+import app.models.wholesale_share_models  # noqa: F401  (imported for side effects)
+# EvoSense Acquisition Engine (evosense_*): strategies, canonical properties,
+# observations, signals, owner graph, scores, cost ledger, engagements. Phase 7.
+# Added to BOTH blocks in this file, per the merge-artefact note above.
+import app.models.evosense_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -470,3 +492,25 @@ import app.models.launch_experience_models  # noqa: F401  (side effects)
 # learns nothing. Added to BOTH blocks in this file, per the merge-artefact
 # note above.
 import app.models.master_contact_models  # noqa: F401  (imported for side effects)
+# Wholesale Real Estate (wholesale_settings / _properties / _seller_profiles /
+# _deals / _comps / _approvals / _documents / _buyers / _buy_boxes /
+# _buyer_matches / _buyer_outreach / _enrichment_requests / _events). Same Base,
+# same reason as every line above.
+#
+# Dropping this line has the quiet consequence rather than the loud one: no
+# tables, so `resolve_settings` raises on the first read and every wholesale
+# screen fails on first use. Worse, `wholesale_events` is the module's own audit
+# trail and the ONLY place an action taken by the AI or by an automation can be
+# recorded at all — `audit_log_entries.actor_user_id` is NOT NULL and cannot
+# hold one. A missing table there is a missing audit trail, not a missing
+# screen. Added to BOTH blocks in this file, per the merge-artefact note above.
+import app.models.wholesale_models  # noqa: F401  (imported for side effects)
+# The external-access tables (wholesale_share_links / _share_views). Registered
+# here for the same reason as the line above: without them the buyer and seller
+# rooms have nowhere to record a link or a view, and a revoked link would have
+# no row to be revoked on.
+import app.models.wholesale_share_models  # noqa: F401  (imported for side effects)
+# EvoSense Acquisition Engine (evosense_*): strategies, canonical properties,
+# observations, signals, owner graph, scores, cost ledger, engagements. Phase 7.
+# Added to BOTH blocks in this file, per the merge-artefact note above.
+import app.models.evosense_models  # noqa: F401  (imported for side effects)

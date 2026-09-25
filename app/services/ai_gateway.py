@@ -122,6 +122,13 @@ CAPABILITY_MODELS: Dict[str, str] = {
     "post_appointment":       "gpt-4o-mini",  # post-appointment follow-up
     "reply_classification":   "gpt-4o-mini",  # classify an inbound reply
     "template_copy":          "gpt-4o-mini",  # template generation
+    # Reads one property owner's message into structured answers — intent,
+    # price, timeline, condition, occupancy. Extraction, not conversation, so
+    # the cheaper model is the right one: the richer model's advantage is in
+    # what it WRITES, and this capability writes nothing. It has a real
+    # deterministic fallback (app/services/wholesale_ai.py), so a refusal here
+    # degrades the reading rather than stopping the module.
+    "wholesale_seller_qualify": "gpt-4o-mini",
     "voice_call":             "gpt-4o-realtime-preview",
 }
 

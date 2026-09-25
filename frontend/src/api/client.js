@@ -11,6 +11,7 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflo
 // survive the rename without being logged out.
 
 import { orgOverrideFor } from '../auth/routeAuthority'
+import { applyWorkspaceTheme } from '../theme.js'
 const KEY_TOKEN    = 'af_token'
 const KEY_USER     = 'af_user'
 const KEY_BRANDING = 'af_branding'
@@ -374,6 +375,33 @@ export const api = {
   upload: (path, formData) => request(path, { method: 'POST', body: formData }),
 }
 
+// ── Authenticated binary fetch ───────────────────────────────────────────────
+//
+// `request()` above parses JSON, which is right for every endpoint that returns
+// any. A stored file does not: it returns bytes behind the same Authorization
+// header as everything else.
+//
+// This exists because an <img src="/wholesale/files/..."> CANNOT send that
+// header — the browser issues a plain unauthenticated GET — so a private
+// document served that way would either 401 or, worse, have to be made public
+// to render. Fetching the bytes here and handing back an object URL keeps the
+// endpoint authenticated and keeps the token out of the URL, which is the one
+// place it must never appear.
+//
+// Callers own the returned URL and must URL.revokeObjectURL() it when done.
+export async function fetchObjectUrl(path) {
+  const token = getToken()
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    const err = new Error(res.status === 404 ? 'File not found' : 'Could not load file')
+    err.status = res.status
+    throw err
+  }
+  return URL.createObjectURL(await res.blob())
+}
+
 export async function login(email, password) {
   const form = new URLSearchParams()
   form.append('username', email)
@@ -578,6 +606,9 @@ export async function fetchAndStoreBranding({ applyTheme = true,
       industry: data.industry ?? null,
       workspace_role: data.workspace_role ?? null,
       organization_id: data.organization_id ?? null,
+      // The white-label platform this workspace belongs to. Used only where
+      // the hostname is not a brand domain (see theme.js shellTheme).
+      platform: data.platform ?? null,
     }
     localStorage.setItem(KEY_BRANDING, JSON.stringify(branding))
     if (applyTheme) { applyBrandingCSS(branding); applyBrandingDOM(branding) }
@@ -658,6 +689,10 @@ export function applyBrandingCSS(branding) {
 
 export function applyBrandingDOM(branding) {
   if (!branding) return
+
+  // A host that is not a brand domain (localhost) wears the workspace's own
+  // platform brand instead of falling through to BookaBoost.
+  applyWorkspaceTheme(branding)
 
   // Swap favicon if org has one set
   if (branding.favicon_url) {

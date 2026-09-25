@@ -104,3 +104,7 @@ reconciliation_findings*.csv
 .g37.log
 .latency.log
 .datascan.log
+
+# Wholesale media written by MEDIA_STORAGE_BACKEND=local. Real
+# uploaded files; never part of the source tree.
+.local_media/

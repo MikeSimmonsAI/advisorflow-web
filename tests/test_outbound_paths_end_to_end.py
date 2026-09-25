@@ -62,13 +62,19 @@ GATED = [
      "OUTBOUND_EMAIL_PUBLIC_BOOKING_CONFIRMATION"),
     (gate.PUBLIC_BOOKING_INTERNAL, "OUTBOUND_EMAIL_PUBLIC_BOOKING_INTERNAL"),
     (gate.PUBLIC_BOOKING_REMINDERS, "OUTBOUND_EMAIL_PUBLIC_BOOKING_REMINDERS"),
+    # The wholesale module's buyer deal sheet. A cash buyer is a business
+    # contact of this customer's, not a family in their tenant, so it has no
+    # Lead to run the compliance preflight against and is declared below.
+    (gate.WHOLESALE_BUYER_DISPOSITION,
+     "OUTBOUND_EMAIL_WHOLESALE_BUYER_DISPOSITION"),
 ]
 
 # Sources that do NOT contact a customer's lead, and so have no Lead to run the
 # compliance preflight against. Staff escalation goes to one of our own people;
 # the booking paths go to a brand-sales prospect or to the sales team, neither
 # of which is a family in a customer's tenant.
-NON_LEAD_SOURCES = (gate.STAFF_ESCALATION,) + gate.PUBLIC_BOOKING_SOURCES
+NON_LEAD_SOURCES = ((gate.STAFF_ESCALATION, gate.WHOLESALE_BUYER_DISPOSITION)
+                    + gate.PUBLIC_BOOKING_SOURCES)
 LEAD_SOURCES = [s for s, _ in GATED if s not in NON_LEAD_SOURCES]
 
 

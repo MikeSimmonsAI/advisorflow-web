@@ -166,6 +166,34 @@ from app.routers.import_batch_router import router as import_batch_router
 # /qualification/vocabulary and the organization rules CRUD - answers 404, and
 # the God Mode Lead Qualification screen has nothing to call.
 from app.routers import qualification_router  # noqa: E402
+# WHOLESALE REAL ESTATE — a PLATFORM module, not a brand's feature.
+#
+# Two routers, one prefix (/wholesale) and one feature key
+# (`wholesale_real_estate` in app/services/entitlements.py). Split by side of
+# the deal: acquisition (properties, sellers, enrichment, analysis, offers,
+# approvals, documents) and disposition (buyers, buy boxes, matching, outreach,
+# assignment). Every route in both is gated by require_tenant_user AND
+# require_feature, and every write additionally by require_not_observation.
+#
+# Nothing here is EvoSys-Pro-specific or BookaBoost-specific: a brand switches
+# the module on per customer organization, and the code is shared. See
+# app/models/wholesale_models.py for why the seller is a Lead rather than a
+# second contact database.
+from app.routers.wholesale_router import router as wholesale_router  # noqa: E402
+from app.routers.wholesale_buyers_router import router as wholesale_buyers_router  # noqa: E402
+from app.routers.wholesale_files_router import router as wholesale_files_router  # noqa: E402
+# Phase 5. The investor room and the seller page. TWO routers from one module:
+# `wholesale_rooms_router` carries the same gates as the rest of the module,
+# `wholesale_rooms_public` carries none because the token in the URL is the
+# entire authorisation — see that file's docstring for why they are not one.
+from app.routers.wholesale_rooms_router import router as wholesale_rooms_router  # noqa: E402
+from app.routers.wholesale_rooms_router import public_router as wholesale_rooms_public  # noqa: E402
+# Phase 5. Contract templates, the document lifecycle and signature
+# requests. Nothing in it drafts a contract — see its docstring.
+from app.routers.wholesale_contracts_router import router as wholesale_contracts_router  # noqa: E402
+# Phase 7. EvoSense Acquisition Engine - strategies, discovery, cost-aware
+# enrichment and seller intelligence BEFORE a deal exists. Same feature gate.
+from app.routers.evosense_router import router as evosense_router  # noqa: E402
 # Executive Suite — brand-scoped read-only portal for brand executives.
 # Separate from god_router (owner control plane) and sales_router (brand sales
 # workspace). No tenant Layout; no god controls; no cross-brand visibility.
@@ -951,6 +979,26 @@ app.include_router(god_ai_deployment_router)
 app.include_router(ai_workforce_intelligence_router)
 app.include_router(ai_workforce_intelligence_brand_router)
 app.include_router(ai_workforce_intelligence_god_router)
+# Wholesale Real Estate. Both routers carry require_feature on the APIRouter
+# itself, so there is no route in either that a customer without the module can
+# reach — the entitlement is not re-stated per handler, where one omission would
+# be invisible in review.
+app.include_router(wholesale_router)
+app.include_router(wholesale_buyers_router)
+# Files — photos, documents, proof of funds. One upload path and one
+# authenticated serve path for the whole module; see the router's docstring for
+# why no stored object is ever given a public URL.
+app.include_router(wholesale_files_router)
+# Publication and external access. The gated half joins the module's own prefix;
+# the public half is mounted on /wholesale-rooms so it can never inherit — or
+# be assumed to inherit — the feature gate above it.
+app.include_router(wholesale_rooms_router)
+app.include_router(wholesale_rooms_public)  # public — token IS the authorization
+# Contract templates and the document lifecycle. Same gates as the rest of
+# the module; it stores the customer's own forms and never writes one.
+app.include_router(wholesale_contracts_router)
+# Phase 7 EvoSense - same gates as the rest of the Wholesale module.
+app.include_router(evosense_router)
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
@@ -1273,6 +1321,45 @@ async def _sales_reminder_loop():
             # A reminder pass must never be the reason the web process dies.
             _logger.error("sales_reminder error: %s", exc, exc_info=True)
         await asyncio.sleep(900)  # 15 minutes
+
+
+async def _evosense_hunt_loop():
+    """Wholesale Phase 7.1: EvoSense hunts on its own.
+
+    Every 15 minutes: run each ACTIVE strategy that is due (daily by default,
+    per-strategy cadence), and retry seller replies whose reading is pending.
+    Same shape as every loop above - the platform job ledger records each pass,
+    the work runs off the event loop, and nothing here decides anything:
+    `evosense.scheduler.run_due` checks the kill switches, takes each strategy's
+    atomic lock, and calls the SAME `hunt.run_strategy` as the Run hunt button.
+    """
+    from app.services.evosense import scheduler as evosense_scheduler
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("evosense_hunt_loop")
+    await asyncio.sleep(210)  # startup delay — offset from every other loop
+    while True:
+        try:
+            async with record_job_run(JobName.EVOSENSE_HUNT,
+                                      db_factory=SessionLocal) as _m:
+                def _one_pass():
+                    # Off the event loop — see `_off_loop`. A hunt calls data
+                    # providers; that is exactly the kind of call that stalls.
+                    db = SessionLocal()
+                    try:
+                        return evosense_scheduler.run_due(db)
+                    finally:
+                        db.close()
+                report = await _off_loop(_one_pass)
+                _m.update(report)
+                if report.get("ran") or report.get("failed"):
+                    _logger.info("evosense hunts: %s", report)
+        except Exception as exc:                               # noqa: BLE001
+            # A hunt pass must never be the reason the web process dies.
+            _logger.error("evosense_hunt error: %s", exc, exc_info=True)
+        await asyncio.sleep(evosense_scheduler.TICK_SECONDS)
 
 
 @app.on_event("startup")
@@ -1654,6 +1741,7 @@ async def on_startup():
         JobName.SUPPORT_INTELLIGENCE: _support_intelligence_loop,
         JobName.SESSION_CLEANUP:      _session_cleanup_loop,
         JobName.SALES_REMINDERS:      _sales_reminder_loop,
+        JobName.EVOSENSE_HUNT:        _evosense_hunt_loop,
     }
     for _job_name in _plan["start"]:
         _factory = _loop_factories.get(_job_name)

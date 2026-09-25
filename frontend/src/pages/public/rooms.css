@@ -1,0 +1,626 @@
+/* THE EXTERNAL PAGES.
+ *
+ * Two pages, one stylesheet, and deliberately NOT the operator theme.
+ *
+ * WHY THIS IS SEPARATE. Everything under `.ws-page` is a dense operator
+ * workspace tuned for somebody who lives in it all day. These pages are read
+ * once, by a stranger, usually while they decide whether to spend six figures.
+ * Inheriting the admin theme is how an investor ends up looking at a CRM
+ * screen with fields removed.
+ *
+ * WHAT PHASE 6.1 CHANGED, AND WHY.
+ * Phase 6 got the content right and the CANVAS wrong. Everything lived in one
+ * 1040px column of stacked rounded rectangles, so on a 1550px monitor the page
+ * was a narrow strip of small cards with a third of the screen empty on either
+ * side — a phone layout that had been allowed to grow a margin. Reviewed in
+ * person, it read as an internal tool, not as a property somebody is selling.
+ *
+ * So the page is now built as a LAYOUT rather than a stack:
+ *
+ *   ≥1180px   split hero (photograph | the deal), then a two-column body with
+ *             a sticky decision rail that never leaves the screen
+ *   ≥ 900px   split hero, single-column body, decision rail becomes a panel
+ *   < 900px   one column, larger type, sticky action bar at the bottom
+ *
+ * Type is scaled deliberately rather than uniformly: the address and the
+ * asking price carry the page, section labels stay quiet, and body copy sits
+ * at 16px because it is prose a stranger reads once.
+ *
+ * Every selector here starts `.wr`, so nothing leaks either way.
+ *
+ * BRANDING. `--wr-accent` is set inline from the payload by the page
+ * component; the value below is only the fallback for an organization that has
+ * set no colour. Nothing here hardcodes a brand.
+ */
+
+.wr {
+  /* Fallbacks only. The page overrides --wr-accent from the server payload. */
+  --wr-accent: #12603f;
+  --wr-accent-ink: #ffffff;
+  --wr-ink: #14161a;
+  --wr-ink-2: #464c55;
+  /* MEASURED, NOT CHOSEN BY EYE. #737a85 on white is 4.33:1 — under the 4.5
+     AA threshold, and it is the colour of every label, eyebrow and caption on
+     both pages, so almost all the small text on an external page was failing
+     by a hair. #666d78 is 5.0:1 on white and 4.8:1 on the page background,
+     which is the one it actually sits on in the footer. */
+  --wr-ink-3: #666d78;
+  --wr-line: #e2e5ea;
+  --wr-line-soft: #eef0f3;
+  --wr-bg: #f4f6f8;
+  --wr-card: #ffffff;
+  --wr-good: #0f7b52;
+  --wr-radius: 16px;
+  --wr-shadow: 0 1px 2px rgba(20, 22, 26, 0.04),
+               0 10px 30px -14px rgba(20, 22, 26, 0.18);
+  /* One number decides the page width everywhere — masthead, body and footer
+     line up because they all read it. */
+  --wr-width: 1280px;
+
+  min-height: 100vh;
+  background: var(--wr-bg);
+  color: var(--wr-ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+
+.wr * { box-sizing: border-box; }
+.wr :focus-visible { outline: 2px solid var(--wr-accent); outline-offset: 2px; }
+
+/* ── The masthead. Whose page this is. ─────────────────────────────────────
+   A page with no name on it reads as a phishing attempt, so this is never
+   empty: an organization with no logo and no name still gets the wordmark
+   row, and the row simply says less. */
+.wr__mast {
+  background: var(--wr-card);
+  border-bottom: 1px solid var(--wr-line);
+  position: relative; z-index: 5;
+}
+.wr__mast-in {
+  max-width: var(--wr-width); margin: 0 auto; padding: 16px 28px;
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+}
+.wr__brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.wr__brand img { max-height: 40px; max-width: 230px; display: block; }
+.wr__brand-mark {
+  width: 36px; height: 36px; border-radius: 10px; flex: none;
+  background: var(--wr-accent); color: var(--wr-accent-ink);
+  display: grid; place-items: center;
+  font-size: 15px; font-weight: 800; letter-spacing: 0.02em;
+}
+.wr__brand-name {
+  font-size: 17px; font-weight: 700; letter-spacing: -0.015em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wr__mast-contact {
+  font-size: 13px; color: var(--wr-ink-3); text-align: right;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.wr__mast-contact a { color: var(--wr-ink-2); text-decoration: none; }
+.wr__mast-contact a:hover { text-decoration: underline; }
+
+.wr__shell { max-width: var(--wr-width); margin: 0 auto; padding: 24px 28px 110px; }
+
+/* ── The body layout ───────────────────────────────────────────────────────
+   Main column and a rail. The rail holds the thing the reader is here to do:
+   on the investor page the five actions, on the seller page the practical
+   detail. It is sticky on a wide screen because the investor page is 2,500px
+   long and the decision should not require scrolling to the bottom of it. */
+.wr__layout { display: block; }
+.wr__main > *:last-child { margin-bottom: 0; }
+
+/* ── Hero ──────────────────────────────────────────────────────────────────
+   The cover photo IS the page opening. An investor decides whether to keep
+   reading from the picture and the price, in that order. */
+.wr__hero {
+  background: var(--wr-card); border: 1px solid var(--wr-line);
+  border-radius: var(--wr-radius); box-shadow: var(--wr-shadow);
+  overflow: hidden; margin-bottom: 20px;
+}
+.wr__cover {
+  position: relative; display: block; width: 100%; padding: 0; border: 0;
+  background: #dfe3e8; cursor: zoom-in; aspect-ratio: 16 / 10;
+  overflow: hidden; max-height: 460px;
+}
+.wr__cover img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.wr__cover-count {
+  position: absolute; right: 14px; bottom: 14px;
+  background: rgba(16, 18, 21, 0.74); color: #fff;
+  font-size: 13px; font-weight: 600; padding: 7px 13px; border-radius: 999px;
+  backdrop-filter: blur(4px);
+}
+.wr__cover--none {
+  display: grid; place-items: center; cursor: default;
+  color: var(--wr-ink-3); font-size: 14px;
+  background: repeating-linear-gradient(45deg, #e9ecef 0 12px, #e4e8ec 12px 24px);
+}
+
+.wr__hero-body { padding: 24px 26px 26px; }
+.wr__eyebrow {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--wr-accent); margin-bottom: 8px;
+}
+.wr__title {
+  margin: 0; font-size: 32px; line-height: 1.14; font-weight: 800;
+  letter-spacing: -0.025em;
+}
+.wr__sub { margin: 7px 0 0; color: var(--wr-ink-2); font-size: 16px; }
+.wr__chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 16px; }
+.wr__chip {
+  font-size: 13px; font-weight: 600; color: var(--wr-ink-2);
+  background: var(--wr-line-soft); border-radius: 999px; padding: 6px 13px;
+}
+/* The accent chip carries the operator's own colour, which can be anything
+   they chose — including something light. Tinting the background only 9% and
+   darkening the text keeps the pair readable whatever that colour is, rather
+   than assuming a dark brand. */
+.wr__chip--accent {
+  background: color-mix(in srgb, var(--wr-accent) 9%, white);
+  color: color-mix(in srgb, var(--wr-accent) 82%, black);
+}
+
+/* ── The investment snapshot ───────────────────────────────────────────────
+   Asking price is the headline and is drawn as one. Everything beside it is
+   context, at context weight. Nothing here is computed: every figure is a
+   published field, and a field the operator did not publish is not rendered
+   rather than being rendered as a zero. */
+.wr__price {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 32px;
+  margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--wr-line-soft);
+}
+.wr__price-main .wr__price-label,
+.wr__price-side .wr__price-label {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--wr-ink-3); margin-bottom: 2px;
+}
+.wr__price-main .wr__price-value {
+  font-size: 46px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.04;
+  font-variant-numeric: tabular-nums;
+}
+.wr__price-side { display: flex; flex-wrap: wrap; gap: 28px; }
+.wr__price-side .wr__price-value {
+  font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+/* The primary action, in the hero, on the first screen. An investor who has
+   decided in five seconds should not have to find the bottom of the page. */
+.wr__hero-cta { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 12px; }
+
+/* ── Panels ─────────────────────────────────────────────────────────────── */
+.wr__panel {
+  background: var(--wr-card); border: 1px solid var(--wr-line);
+  border-radius: var(--wr-radius); box-shadow: var(--wr-shadow);
+  padding: 24px 26px; margin-bottom: 20px;
+}
+.wr__panel-title {
+  font-size: 12px; font-weight: 800; letter-spacing: 0.11em;
+  text-transform: uppercase; color: var(--wr-ink-3);
+  padding-bottom: 12px; margin-bottom: 18px;
+  border-bottom: 1px solid var(--wr-line-soft);
+}
+/* A heading INSIDE a panel, so two related things can share one box instead
+   of becoming two boxes. Phase 6 had a rounded rectangle per paragraph. */
+.wr__sub-title {
+  font-size: 15px; font-weight: 750; letter-spacing: -0.01em;
+  margin: 0 0 8px; color: var(--wr-ink);
+}
+.wr__split { display: grid; gap: 26px; }
+.wr__prose {
+  margin: 0; font-size: 16px; line-height: 1.68; color: var(--wr-ink-2);
+  max-width: 68ch; white-space: pre-wrap;
+}
+
+/* Fast facts. Bigger values, quieter labels, and enough columns on a wide
+   screen that eight facts read as one block rather than a list. */
+.wr__facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 20px 24px;
+}
+/* A grid item's default min-width is auto, so one long unbreakable value —
+   an email address, in practice — refuses to shrink and pushes the whole
+   page sideways. Found at 820px on the seller portal, where the contact
+   email overflowed the shell. Both halves of the fix are load-bearing. */
+.wr__facts > * { min-width: 0; }
+.wr__fact-label {
+  font-size: 12.5px; color: var(--wr-ink-3); margin-bottom: 3px;
+}
+.wr__fact-value {
+  font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em; overflow-wrap: anywhere;
+}
+.wr__fact-value a { color: var(--wr-accent); text-decoration: none; }
+.wr__fact-value a:hover { text-decoration: underline; }
+
+/* ── Gallery ───────────────────────────────────────────────────────────── */
+.wr__thumbs {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px;
+}
+.wr__thumb {
+  padding: 0; border: 1px solid var(--wr-line); background: #dfe3e8;
+  border-radius: 12px; overflow: hidden; cursor: zoom-in; display: block;
+  aspect-ratio: 4 / 3; position: relative;
+}
+.wr__thumb img { width: 100%; height: 100%; object-fit: cover; display: block;
+                 transition: transform 0.25s ease; }
+.wr__thumb:hover { border-color: var(--wr-accent); }
+.wr__thumb:hover img { transform: scale(1.04); }
+.wr__thumb-cap {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(transparent, rgba(16, 18, 21, 0.8));
+  color: #fff; font-size: 12.5px; font-weight: 600; text-align: left;
+  padding: 22px 10px 8px; line-height: 1.35;
+}
+
+/* Lightbox: click to enlarge, next/previous, captions, keyboard. */
+.wr__lb {
+  position: fixed; inset: 0; z-index: 60; background: rgba(12, 14, 17, 0.95);
+  display: grid; grid-template-rows: 1fr auto; align-items: center;
+}
+.wr__lb-stage {
+  display: grid; place-items: center; padding: 56px 72px 12px; min-height: 0;
+}
+.wr__lb-stage img {
+  max-width: 100%; max-height: calc(100vh - 160px);
+  object-fit: contain; border-radius: 8px; display: block;
+}
+.wr__lb-bar {
+  padding: 12px 20px 26px; color: #e8eaee; text-align: center;
+  font-size: 15px; line-height: 1.45;
+}
+.wr__lb-count { display: block; color: #9aa1ab; font-size: 13px; margin-top: 4px; }
+.wr__lb-nav, .wr__lb-x {
+  position: absolute; background: rgba(255, 255, 255, 0.12); color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 999px;
+  width: 48px; height: 48px; font-size: 22px; line-height: 1; cursor: pointer;
+  display: grid; place-items: center;
+}
+.wr__lb-nav:hover, .wr__lb-x:hover { background: rgba(255, 255, 255, 0.24); }
+.wr__lb-nav--prev { left: 16px; top: 50%; transform: translateY(-50%); }
+.wr__lb-nav--next { right: 16px; top: 50%; transform: translateY(-50%); }
+.wr__lb-x { top: 16px; right: 16px; font-size: 20px; }
+
+/* ── Comparable sales ──────────────────────────────────────────────────────
+   Money and areas are numbers being compared down a column, so they are
+   tabular and right-aligned. Phase 6 left everything left-aligned at 14px,
+   which is why it read as a spreadsheet fragment. */
+.wr__scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.wr__table { width: 100%; border-collapse: collapse; min-width: 640px; }
+.wr__table th {
+  text-align: left; font-size: 11.5px; font-weight: 800; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--wr-ink-3);
+  padding: 0 16px 10px 0; border-bottom: 1px solid var(--wr-line);
+  white-space: nowrap;
+}
+.wr__table td {
+  padding: 15px 16px 15px 0; font-size: 15.5px;
+  border-bottom: 1px solid var(--wr-line-soft);
+  font-variant-numeric: tabular-nums;
+}
+.wr__table tr:last-child td { border-bottom: 0; }
+.wr__table td:first-child { font-weight: 650; }
+.wr__table th.wr--num, .wr__table td.wr--num { text-align: right; padding-right: 0; }
+.wr__table tbody tr:hover td { background: var(--wr-line-soft); }
+
+/* ── Documents ─────────────────────────────────────────────────────────── */
+.wr__docs { list-style: none; margin: 0; padding: 0; }
+.wr__docs li {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 0; border-bottom: 1px solid var(--wr-line-soft); font-size: 16px;
+}
+.wr__docs li:last-child { border-bottom: 0; }
+.wr__doc-name { font-weight: 650; min-width: 0; }
+.wr__doc-sub {
+  display: block; font-size: 13px; color: var(--wr-ink-3); font-weight: 400;
+  margin-top: 2px;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.wr__btn {
+  appearance: none; font: inherit; font-size: 15.5px; font-weight: 650;
+  padding: 13px 22px; border-radius: 11px; cursor: pointer;
+  border: 1px solid var(--wr-line); background: var(--wr-card);
+  color: var(--wr-ink); text-decoration: none; display: inline-block;
+  text-align: center; line-height: 1.2;
+}
+.wr__btn:hover { border-color: var(--wr-ink-3); }
+.wr__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.wr__btn--primary {
+  background: var(--wr-accent); border-color: var(--wr-accent);
+  color: var(--wr-accent-ink);
+}
+.wr__btn--primary:hover { filter: brightness(1.08); border-color: var(--wr-accent); }
+.wr__btn--quiet { border-color: transparent; color: var(--wr-ink-3); }
+.wr__btn--sm { padding: 9px 16px; font-size: 14px; }
+.wr__btn--wide { width: 100%; }
+.wr__actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+/* ── The decision ──────────────────────────────────────────────────────────
+   One panel, five actions, and a clear primary. PASS is deliberately the
+   quietest thing on it: it is a real option and it must be easy to find, but
+   it should not compete with the action the page exists to produce. */
+.wr__respond { border-color: var(--wr-accent); }
+.wr__respond .wr__panel-title { color: var(--wr-accent); }
+.wr__choices { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.wr__choice {
+  text-align: left; padding: 15px 17px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--wr-line); background: var(--wr-card); font: inherit;
+  min-height: 44px;
+}
+.wr__choice:hover { border-color: var(--wr-accent); }
+.wr__choice:disabled { opacity: 0.5; cursor: not-allowed; }
+.wr__choice-name { font-size: 15.5px; font-weight: 700; }
+.wr__choice-note {
+  font-size: 13px; color: var(--wr-ink-3); margin-top: 4px; line-height: 1.45;
+}
+.wr__choice--primary {
+  border-color: var(--wr-accent); border-width: 1.5px;
+  background: color-mix(in srgb, var(--wr-accent) 7%, white);
+}
+.wr__choice--primary .wr__choice-name { color: var(--wr-accent); }
+.wr__choice--quiet {
+  background: transparent; border-color: transparent;
+  border-top: 1px solid var(--wr-line-soft); border-radius: 0;
+  padding-left: 0; padding-right: 0; margin-top: 4px;
+}
+.wr__choice--quiet .wr__choice-name { color: var(--wr-ink-2); font-weight: 600; }
+.wr__choice--quiet:hover { border-color: transparent; border-top-color: var(--wr-line); }
+
+.wr__form { display: grid; gap: 16px; }
+.wr__form-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+.wr__field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.wr__field label { font-size: 13.5px; font-weight: 650; color: var(--wr-ink-2); }
+.wr__input {
+  font: inherit; font-size: 16px; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--wr-line); background: #fff; color: var(--wr-ink);
+  width: 100%; min-height: 46px;
+}
+.wr__input:focus-visible {
+  outline: 2px solid var(--wr-accent); outline-offset: -1px; border-color: transparent;
+}
+textarea.wr__input { resize: vertical; min-height: 86px; }
+.wr__hint { font-size: 13px; color: var(--wr-ink-3); line-height: 1.5; }
+.wr__req { color: #b4271e; font-weight: 700; }
+
+.wr__confirm {
+  background: #e9f6f0; border: 1px solid #b6ddcb; color: #0d5c3d;
+  border-radius: 11px; padding: 13px 16px; font-size: 15px; margin: 0 0 16px;
+}
+.wr__error {
+  background: #fdeceb; border: 1px solid #f2c0bd; color: #91231c;
+  border-radius: 11px; padding: 13px 16px; font-size: 15px; margin: 0 0 16px;
+}
+.wr__note { font-size: 14.5px; color: var(--wr-ink-3); margin: 0 0 12px; }
+.wr__note strong { color: var(--wr-ink); font-weight: 650; }
+
+/* A standing summary of what this investor has already told us. */
+.wr__yours {
+  border: 1px solid var(--wr-line); border-radius: 12px; padding: 14px 16px;
+  margin-bottom: 16px; background: var(--wr-line-soft);
+}
+.wr__yours-line { font-size: 15px; }
+.wr__yours-detail {
+  display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px;
+  font-size: 13.5px; color: var(--wr-ink-2);
+}
+
+/* ── Seller: the latest update ─────────────────────────────────────────────
+   The one sentence a worried homeowner opens the page for. It was a 15px
+   paragraph in a box the same size as the file-number box. */
+.wr__update {
+  background: color-mix(in srgb, var(--wr-accent) 5%, white);
+  border-color: color-mix(in srgb, var(--wr-accent) 25%, var(--wr-line));
+}
+.wr__update .wr__panel-title { color: var(--wr-accent); }
+.wr__update-text {
+  margin: 0; font-size: 19px; line-height: 1.6; color: var(--wr-ink);
+  max-width: 62ch; white-space: pre-wrap; font-weight: 500;
+}
+.wr__update-empty { margin: 0; font-size: 16px; color: var(--wr-ink-2); }
+
+/* ── Seller progress ───────────────────────────────────────────────────────
+   Vertical on a phone, a horizontal rail on a wide screen, same markup and
+   same three states. The connector line is drawn between the dots so the
+   sequence reads as a path rather than as five unrelated rows. */
+.wr__steps { list-style: none; margin: 0; padding: 0; }
+.wr__step {
+  display: flex; align-items: center; gap: 15px; padding: 15px 0;
+  border-bottom: 1px solid var(--wr-line-soft); position: relative;
+}
+.wr__step:last-child { border-bottom: 0; }
+.wr__step-dot {
+  width: 26px; height: 26px; border-radius: 50%; flex: none;
+  border: 2px solid var(--wr-line); background: #fff;
+  display: grid; place-items: center; font-size: 13px; color: #fff;
+}
+.wr__step.is-done .wr__step-dot { background: var(--wr-good); border-color: var(--wr-good); }
+.wr__step.is-current .wr__step-dot {
+  background: var(--wr-accent); border-color: var(--wr-accent);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--wr-accent) 15%, transparent);
+}
+.wr__step-name { font-size: 16.5px; font-weight: 650; flex: 1; }
+.wr__step.is-upcoming .wr__step-name { color: var(--wr-ink-3); font-weight: 500; }
+.wr__step-state {
+  font-size: 11.5px; font-weight: 800; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--wr-ink-3);
+}
+.wr__step.is-done .wr__step-state { color: var(--wr-good); }
+.wr__step.is-current .wr__step-state { color: var(--wr-accent); }
+
+.wr__foot {
+  font-size: 13.5px; color: var(--wr-ink-3); line-height: 1.65;
+  margin: 26px 0 0; max-width: 78ch;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ≥ 900px — the hero splits and the page stops being a phone
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 900px) {
+  .wr__hero--split {
+    display: grid; grid-template-columns: 1.15fr 1fr; align-items: stretch;
+  }
+  .wr__hero--split .wr__cover {
+    aspect-ratio: auto; max-height: none; height: 100%; min-height: 440px;
+    border-radius: 0;
+  }
+  .wr__hero--split .wr__hero-body {
+    padding: 34px 36px; display: flex; flex-direction: column;
+    justify-content: center;
+  }
+  .wr__title { font-size: 38px; }
+  .wr__price-main .wr__price-value { font-size: 50px; }
+  .wr__price { gap: 26px 36px; }
+  .wr__price-side { gap: 20px 32px; }
+  .wr__split--two { grid-template-columns: 1fr 1fr; }
+
+  /* The ladder becomes a path. */
+  .wr__steps--rail { display: flex; align-items: flex-start; gap: 0; }
+  .wr__steps--rail .wr__step {
+    flex: 1; flex-direction: column; align-items: center; text-align: center;
+    gap: 10px; padding: 4px 8px 0; border-bottom: 0;
+  }
+  /* The connector, drawn behind the dots and only between them. */
+  .wr__steps--rail .wr__step::before {
+    content: ''; position: absolute; top: 17px; left: -50%; width: 100%;
+    height: 2px; background: var(--wr-line);
+  }
+  .wr__steps--rail .wr__step:first-child::before { display: none; }
+  .wr__steps--rail .wr__step.is-done::before,
+  .wr__steps--rail .wr__step.is-current::before { background: var(--wr-good); }
+  .wr__steps--rail .wr__step-dot { position: relative; z-index: 1; }
+  .wr__steps--rail .wr__step-name { flex: none; font-size: 15.5px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ≥ 1180px — two columns, and the decision follows the reader
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 1180px) {
+  .wr__layout {
+    display: grid; grid-template-columns: minmax(0, 1fr) 372px;
+    gap: 24px; align-items: start;
+  }
+  .wr__rail { position: sticky; top: 24px; }
+  .wr__rail .wr__panel { margin-bottom: 20px; }
+  .wr__rail .wr__panel:last-child { margin-bottom: 0; }
+  /* The rail is the whole point of the wide layout: the five actions are on
+     the screen at every scroll position, so nothing is hidden behind 2,000px
+     of property detail. */
+  .wr__rail--scroll { max-height: calc(100vh - 48px); overflow-y: auto; }
+  /* In a 372px rail, two columns of long-form dates ("Sun, September 20,
+     2026") wrap mid-value and read as damage. One column per line. */
+  .wr__rail .wr__facts { grid-template-columns: 1fr; gap: 16px; }
+  .wr__facts--wide { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .wr__title { font-size: 40px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ≥ 1700px — one step wider, and no further
+   ══════════════════════════════════════════════════════════════════════════
+   The review monitor is 3840px. At a 1280px cap that is 1,280px of empty
+   grey on each side, which is the complaint this phase started from. One
+   step to 1400 uses the room without turning body copy into a 100-character
+   line — the reason there is a cap at all. Above this the page deliberately
+   stops growing and centres: a property description is prose, and prose has
+   a comfortable measure regardless of how big the screen is. */
+@media (min-width: 1700px) {
+  .wr { --wr-width: 1400px; }
+  .wr__layout { grid-template-columns: minmax(0, 1fr) 400px; gap: 28px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   < 900px — one column, and the action bar comes back
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 899px) {
+  .wr__mast-in { padding: 14px 16px; }
+  .wr__shell { padding: 16px 16px 104px; }
+  .wr__title { font-size: 27px; }
+  .wr__hero-body { padding: 20px 18px 22px; }
+  .wr__panel { padding: 20px 18px; border-radius: 14px; margin-bottom: 16px; }
+  .wr__price { gap: 22px; margin-top: 18px; padding-top: 16px; }
+  .wr__price-main .wr__price-value { font-size: 38px; }
+  .wr__price-side { gap: 20px; }
+  .wr__price-side .wr__price-value { font-size: 19px; }
+  .wr__lb-stage { padding: 60px 12px 8px; }
+  .wr__lb-nav--prev { left: 8px; }
+  .wr__lb-nav--next { right: 8px; }
+  .wr__thumbs { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .wr__mast-contact { display: none; }
+
+  /* EVERY TAP TARGET ON A PHONE IS AT LEAST 44px TALL.
+   *
+   * Measured, not assumed: at 390px the "Open" link on a document was 32px
+   * and the owner's phone number and email were 17px — on the one page an
+   * owner opens on a phone to call the person selling their house. The
+   * buttons were already fine; these three were inline text that happened to
+   * be links, which is exactly the kind of thing a desktop review never
+   * catches.
+   *
+   * Desktop is left alone: a mouse does not need 44px. */
+  .wr__docs li { padding: 7px 0; }
+  .wr__docs .wr__btn--sm,
+  .wr__fact-value a {
+    min-height: 44px; display: inline-flex; align-items: center;
+  }
+  .wr__fact-value a { padding: 2px 0; }
+}
+
+/* The decision follows the reader down a phone, because the page is long and
+   the decision is the point of it. Above 1180px the sticky RAIL does this job
+   and the bar would be redundant, so it is hidden there. */
+.wr__sticky {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: var(--wr-card); border-top: 1px solid var(--wr-line);
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  display: none; gap: 12px; box-shadow: 0 -6px 22px -12px rgba(20, 22, 26, 0.34);
+}
+.wr__sticky .wr__btn { flex: 1; min-height: 48px; }
+@media (max-width: 1179px) { .wr__sticky { display: flex; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .wr *, .wr *::before, .wr *::after {
+    transition: none !important; animation: none !important;
+  }
+}
+
+/* ── PHASE 7.2: THE SAME PRODUCT FAMILY, IN THE CUSTOMER'S REGISTER ──────────
+ * These pages stay light, calm and simple - they are read once, by a seller or
+ * an investor, not lived in by an operator. What they now share with the
+ * operator product is its TYPE (Space Grotesk display, Inter text), its
+ * numbers (tabular figures), its shape language (softer radii, quiet layered
+ * shadows) and its brand accent. Internal economics are still never here:
+ * that is decided by the server payload, not by this stylesheet. */
+.wr { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; --wr-radius: 18px;
+  --wr-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 18px 40px -22px rgba(15, 23, 42, 0.28);
+  background:
+    radial-gradient(900px 300px at 12% -60px, color-mix(in srgb, var(--wr-accent) 9%, transparent), transparent 70%),
+    var(--wr-bg); }
+.wr__choice { color: var(--wr-ink); }
+.wr__mast { background: rgba(255, 255, 255, 0.86); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--wr-line-soft); box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02); }
+.wr__brand-mark { border-radius: 10px; box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--wr-accent) 60%, transparent); }
+.wr__brand-name, .wr__title, .wr__panel-title, .wr__price-value, .wr__fact-value {
+  font-family: 'Space Grotesk', 'Inter', sans-serif; }
+.wr__title { letter-spacing: -0.025em; }
+.wr__price-value, .wr__fact-value { font-variant-numeric: tabular-nums; letter-spacing: -0.015em; }
+.wr__eyebrow { letter-spacing: 0.16em; }
+.wr__panel, .wr__hero { border-color: var(--wr-line-soft); }
+.wr__chip { border-radius: 999px; }
+/* CONTRAST, WHATEVER THE BRAND. The accent a customer picks is used as-is for
+ * borders and tints, but TEXT in the accent and white text ON the accent use a
+ * darkened form of it, so a bright brand colour cannot fall under WCAG AA
+ * (EvoSys blue #087cff on white is 3.9:1; its strong form is 5.7:1). */
+.wr { --wr-accent-strong: color-mix(in srgb, var(--wr-accent) 78%, black); }
+.wr__eyebrow, .wr__fact-value a, .wr__respond .wr__panel-title, .wr__choice--primary .wr__choice-name,
+.wr__update .wr__panel-title, .wr__step.is-current .wr__step-state { color: var(--wr-accent-strong); }
+.wr__brand-mark, .wr__btn--primary { background: var(--wr-accent-strong); border-color: var(--wr-accent-strong); }
+
+/* Phase 7.3 — the contextual banner (shared EvoSys hero, light system). */
+.wr .wr__banner { margin-bottom: 18px; }
+.wr .wr__banner .evo-herobox { margin-bottom: 0; min-height: 132px; }
+.wr .wr__banner .evo-herobox__title { font-size: clamp(24px, 2.4vw, 34px); }

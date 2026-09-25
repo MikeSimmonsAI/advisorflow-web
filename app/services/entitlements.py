@@ -61,6 +61,15 @@ FEATURES: Dict[str, str] = {
     "ai_assist":    "AI drafting, classification and suggestions",
     "compliance":   "Suppression lists and DNC handling",
     "case_files":   "Case files / family file review",
+    # A PLATFORM MODULE, NOT A BRAND'S FEATURE. The wholesale engine is shared
+    # code gated by this one key, so EvoSys Pro, BookaBoost and any future
+    # white-label brand enable it per customer organization rather than forking
+    # a copy. It REQUIRES `leads` (see REQUIRES below) because a property owner
+    # IS a Lead in this platform — that is what gives the module DNC, consent,
+    # suppression and message history without a second implementation of any of
+    # them. An organization with this key and no `leads` is the incoherent
+    # configuration the WUPA note below records, in a new shape.
+    "wholesale_real_estate": "Wholesale real estate acquisition and disposition",
 
     # ── Admin features: sellable, and still only FEATURES ───────────────────
     #
@@ -124,6 +133,7 @@ REQUIRES = {
     "imports":        ("leads",),
     "crm_connectors": ("crm",),
     "case_files":     ("leads",),
+    "wholesale_real_estate": ("leads",),
 }
 
 

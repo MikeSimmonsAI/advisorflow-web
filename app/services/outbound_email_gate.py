@@ -121,7 +121,28 @@ PUBLIC_BOOKING_REMINDERS    = "public_booking_reminders"
 PUBLIC_BOOKING_SOURCES = (PUBLIC_BOOKING_CONFIRMATION, PUBLIC_BOOKING_INTERNAL,
                           PUBLIC_BOOKING_REMINDERS)
 
+# ── WHOLESALE BUYER DISPOSITION ─────────────────────────────────────────────
+#
+# The deal sheet a wholesaler emails to a cash buyer. Its own switch, for the
+# reason the table above gives twice already, and with two specifics worth
+# naming:
+#
+#   IT IS NOT A `send_source`. A cash buyer is a counterparty, not a customer's
+#   lead — no `email_messages` row is written for one, and running a family's
+#   consent preflight against a buyer would be the same category error
+#   `gate_staff_email` refuses to make. `wholesale_buyer_outreach` is where a
+#   buyer's send history lives.
+#
+#   IT DEFAULTS OFF LIKE EVERYTHING ELSE HERE. A brand-new outbound path does
+#   not become live by virtue of having been written, and "no wholesale email
+#   can leave this build" needs to be a fact about the code rather than a hope
+#   about the deployment. The wholesale module reports the switch by name on
+#   its Settings screen and on every blocked row, so an operator is never left
+#   guessing which variable to set.
+WHOLESALE_BUYER_DISPOSITION = "wholesale_buyer_disposition"
+
 _ENV_BY_SOURCE = {
+    WHOLESALE_BUYER_DISPOSITION: "OUTBOUND_EMAIL_WHOLESALE_BUYER_DISPOSITION",
     _src.BULK_AI:              "OUTBOUND_EMAIL_BULK_AI",
     _src.VOICE_BOOKING_LINK:   "OUTBOUND_EMAIL_VOICE_BOOKING_LINK",
     _src.PIPELINE_AUTO_REPLY:  "OUTBOUND_EMAIL_PIPELINE_AUTO_REPLY",

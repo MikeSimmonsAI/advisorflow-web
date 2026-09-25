@@ -46,6 +46,11 @@ class JobName:
     # reason as the two above: this one sends to a PROSPECT, so a silent stop
     # is a customer who turns up to nothing, or does not turn up at all.
     SALES_REMINDERS   = "sales_reminder_loop"
+    # Wholesale Phase 7.1: EvoSense runs every ACTIVE acquisition strategy when
+    # it is due (daily by default) and retries seller replies whose reading is
+    # pending. Named for the same reason as the loops above: a hunt that spends
+    # money must be one the ledger can report on.
+    EVOSENSE_HUNT     = "evosense_hunt_loop"
 
     # Render cron SERVICES. Separate names on purpose, even where the work
     # overlaps a loop above: cadence runs hourly in the web dyno AND daily as a
@@ -75,6 +80,7 @@ LOOP_JOB_NAMES = (
     JobName.SUPPORT_INTELLIGENCE,
     JobName.SESSION_CLEANUP,
     JobName.SALES_REMINDERS,
+    JobName.EVOSENSE_HUNT,
 )
 
 ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES

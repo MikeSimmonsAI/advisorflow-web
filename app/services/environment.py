@@ -183,4 +183,10 @@ def banner_payload() -> dict:
         "banner": ("DEMO MODE - Simulated Environment. No real messages, "
                    "calls, calendar events, or charges will occur."
                    if env == ENV_DEMO else None),
+        # LOCAL REVIEW (Phase 7.2). True when this process is running on a
+        # local SQLite database - which production never does (Render runs
+        # PostgreSQL). The shell shows one quiet "LOCAL REVIEW" indicator so
+        # nobody reviewing on their own machine wonders whether they are
+        # looking at production. Reveals nothing beyond that one fact.
+        "local_review": env != ENV_DEMO and database_host() == "sqlite",
     }

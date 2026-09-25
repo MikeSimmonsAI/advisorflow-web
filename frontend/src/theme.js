@@ -40,6 +40,51 @@ export function detectTheme() {
 }
 
 /**
+ * The brand the HOSTNAME names, or null when the host is not a brand domain
+ * (localhost, a preview host, an IP). Unlike detectTheme() this never guesses:
+ * null means "the address bar does not say", which is exactly when the
+ * signed-in workspace's own platform should decide (Phase 7.2).
+ */
+export function hostTheme() {
+  if (typeof window === 'undefined') return null
+  const host = window.location.hostname.toLowerCase()
+  if (host.includes('advisorflow') && !host.includes('onrender')) return THEMES.ADVISORFLOW
+  if (host.includes('evosyspro')) return THEMES.EVOSYSPRO
+  if (host.includes('harmonyhustle')) return THEMES.HARMONYHUSTLE
+  if (host.includes('bookaboost')) return THEMES.BOOKABOOST
+  return null
+}
+
+/**
+ * The theme the application shell should wear for this workspace.
+ *
+ * A brand domain decides its own chrome, always. Only when the host names no
+ * brand does the workspace's platform (GET /branding/org -> platform) decide,
+ * and only when neither says anything does the historical default apply.
+ */
+export function shellTheme(branding) {
+  const fromHost = hostTheme()
+  if (fromHost) return fromHost
+  const fromWorkspace = branding && branding.platform && branding.platform.theme
+  if (fromWorkspace && BRAND_CONFIG[fromWorkspace]) return fromWorkspace
+  return detectTheme()
+}
+
+/**
+ * Apply the workspace platform's theme to the document when the host is not a
+ * brand domain. A no-op on every brand domain.
+ */
+export function applyWorkspaceTheme(branding) {
+  if (typeof document === 'undefined' || hostTheme()) return
+  const p = branding && branding.platform
+  if (!p || !p.theme || !BRAND_CONFIG[p.theme]) return
+  applyTheme(p.theme)
+  if (p.accent_color) {
+    document.documentElement.style.setProperty('--brand-platform-accent', p.accent_color)
+  }
+}
+
+/**
  * Apply the detected theme to the document root.
  * Sets data-theme attribute + updates the browser tab title + injects favicon.
  */
@@ -85,6 +130,12 @@ export function initTheme() {
   const theme = (cached && cached.theme) || detectTheme()
   applyTheme(theme)
   if (cached) applyBrandPayload(cached)
+  // The signed-in workspace's platform, from the last /branding/org answer,
+  // so a non-brand host (localhost) paints the right brand on the first frame.
+  try {
+    const org = JSON.parse(localStorage.getItem('af_branding') || 'null')
+    applyWorkspaceTheme(org)
+  } catch { /* storage blocked */ }
   return theme
 }
 

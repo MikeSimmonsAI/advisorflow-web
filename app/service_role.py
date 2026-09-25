@@ -105,6 +105,12 @@ SCHEDULER_OWNER: Dict[str, str] = {
     # owner, so it cannot end up running in two processes and sending a
     # customer the same reminder twice.
     JobName.SALES_REMINDERS:     ROLE_BACKEND,
+    # Wholesale Phase 7.1. EvoSense's scheduled strategy hunts. The backend,
+    # once, for the same reason: a hunt buys data and can start outreach, and
+    # two processes running it would race for the same due strategy (the
+    # per-strategy lock would refuse the second, but the right answer is that
+    # there is never a second).
+    JobName.EVOSENSE_HUNT:       ROLE_BACKEND,
 }
 
 # A guard rather than a comment: a loop added to JobName without an owner here

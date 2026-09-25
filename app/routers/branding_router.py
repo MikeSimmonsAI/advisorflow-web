@@ -119,6 +119,28 @@ def get_branding(request: Request, db: Session = Depends(get_db)):
     return payload
 
 
+def _platform_brand(db, org):
+    """The presentation of the platform (white-label brand) an organization
+    belongs to, or None. Never raises: branding must not break a login."""
+    if not getattr(org, "platform_id", None):
+        return None
+    try:
+        from app.models.models import Platform
+        from app.services.brand_config import config_for_slug
+        row = db.query(Platform).filter(Platform.id == org.platform_id).first()
+        if row is None or not row.slug:
+            return None
+        cfg = config_for_slug(db, row.slug)
+        return {"slug": row.slug,
+                "display_name": cfg.get("display_name"),
+                "short_name": cfg.get("short_name"),
+                "logo_url": cfg.get("logo_url"),
+                "accent_color": cfg.get("accent_color"),
+                "theme": cfg.get("theme_slug") or row.slug}
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @router.get("/org")
 def get_org_branding(
     current_user: User = Depends(get_current_user),
@@ -212,4 +234,16 @@ def get_org_branding(
         # reach. The server decides this; the client renders it.
         "workspace_role": effective_role(current_user, db),
         "organization_id": org.id,
+        # THE BRAND THIS WORKSPACE BELONGS TO (Phase 7.2).
+        #
+        # The shell used to know its brand ONLY from the browser's hostname:
+        # app.evosyspro.live -> EvoSys Pro, and every other host - localhost
+        # included - fell through to BookaBoost. An EvoSys Pro customer opened
+        # on any host that is not a brand domain was therefore drawn as
+        # BookaBoost. The organization already says which platform it belongs
+        # to (`organizations.platform_id`); this hands that answer to the
+        # browser. The frontend uses it ONLY when the hostname is not itself a
+        # brand domain, so a brand domain still decides its own chrome exactly
+        # as before and no brand can be shown on another brand's host.
+        "platform": _platform_brand(db, org),
     }
