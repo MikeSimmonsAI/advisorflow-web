@@ -326,6 +326,21 @@ function Masthead({ brand }) {
             : <span className="wr__brand-mark" aria-hidden="true">{initial}</span>}
           {brand.name ? <span className="wr__brand-name">{brand.name}</span> : null}
         </div>
+        {/* The company's configured public contact (Wholesale Settings >
+            Public contact) - the same source as the Investor Deal Room. Never a
+            platform or another organization's number; absent means absent. */}
+        {(brand.support_phone || brand.support_email) ? (
+          <div className="wr__mast-contact">
+            {brand.support_phone ? (
+              <a href={`tel:${brand.support_phone.replace(/[^\d+]/g, '')}`}>
+                {brand.support_phone}
+              </a>
+            ) : null}
+            {brand.support_email ? (
+              <a href={`mailto:${brand.support_email}`}>{brand.support_email}</a>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   )

@@ -182,3 +182,10 @@ html.wsx-canvas body::before, html.wsx-canvas body::after { display: none !impor
   /* the rail's white runs the full height of long pages, not just the viewport */
   .layout.layout--wholesale { background: linear-gradient(90deg, #fff 0, #fff calc(var(--sidebar-width) - 1px), #e5eaf2 calc(var(--sidebar-width) - 1px), #e5eaf2 var(--sidebar-width), #f3f6fb var(--sidebar-width)); }
 }
+
+/* Product identity under the brand mark (Phase 7.3 closeout naming). */
+.layout--wholesale .wsx-brand { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.layout--wholesale .wsx-brand .brand-mark { align-self: flex-start; }
+.wsx-product { display: flex; flex-direction: column; align-items: center; line-height: 1.25; text-align: center; }
+.wsx-product__name { font: 700 13px 'Inter', -apple-system, sans-serif; color: #0f2448; letter-spacing: -0.005em; }
+.wsx-product__engine { font: 600 10.5px 'Inter', sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #5d6b82; }

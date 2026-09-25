@@ -1151,6 +1151,11 @@ COLUMNS_TO_ADD = [
     ("wholesale_buyer_outreach", "respondent_email", "VARCHAR"),
     ("wholesale_buyer_outreach", "respondent_phone", "VARCHAR"),
     ("wholesale_settings", "ai_tone", "VARCHAR"),
+    # Phase 7.3 closeout: the organization's own public Wholesale contact.
+    # Nullable, no default: an existing organization shows no public contact
+    # until somebody configures one.
+    ("wholesale_settings", "public_contact_phone", "VARCHAR"),
+    ("wholesale_settings", "public_contact_email", "VARCHAR"),
 
     ("wholesale_documents", "buyer_visible", "BOOLEAN DEFAULT FALSE"),
     ("wholesale_documents", "seller_visible", "BOOLEAN DEFAULT FALSE"),

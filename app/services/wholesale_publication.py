@@ -120,7 +120,8 @@ def branding(db: Session, deal) -> Dict[str, Any]:
            .filter(Organization.id == deal.organization_id).first())
     if org is None:
         return {"name": None, "logo_url": None, "accent": None,
-                "support_email": None, "support_phone": None, "website": None}
+                "support_email": None, "support_phone": None, "website": None,
+                "contact_source": None}
 
     platform = {}
     if getattr(org, "platform_id", None):
@@ -142,21 +143,35 @@ def branding(db: Session, deal) -> Dict[str, Any]:
                      or platform.get("logo_url") or None),
         "accent": (getattr(org, "brand_color_primary", None)
                    or platform.get("accent_color") or None),
-        # Contact of last resort, so a page is never a dead end. The seller
-        # page prefers the named person the operator put on the deal; this is
-        # only the fallback underneath it.
-        "support_email": platform.get("support_email") or None,
-        # PHASE 7.3: NO PLATFORM PHONE ON A WHOLESALE PAGE. The platform's
-        # support line is the software vendor's number (for EvoSys Pro it is
-        # the line another business answers), not the wholesaler's. An
-        # investor or seller who calls it reaches the wrong company. There is
-        # no wholesale-specific public phone configured anywhere yet, so the
-        # honest value is none: the page shows no phone rather than a wrong
-        # one. The seller page still shows the named contact the operator put
-        # on the deal (seller_room_contact_*), which is the right number.
-        "support_phone": None,
+        # THE PUBLIC CONTACT IS THE ORGANIZATION'S OWN, OR NOTHING.
+        #
+        # Resolved ONLY from this organization's Wholesale settings
+        # (`public_contact_phone` / `public_contact_email`, Wholesale Settings >
+        # Public contact). There is deliberately no fallback to the platform
+        # (brand) support line or address, and never to another organization:
+        # a white-label customer who has configured nothing shows no public
+        # contact rather than the software vendor's or another tenant's. See
+        # `public_contact()` and tests/test_wholesale_p73_public_contact.py.
+        **public_contact(db, org.id),
         "website": platform.get("website_url") or None,
     }
+
+
+def public_contact(db: Session, organization_id: str) -> Dict[str, Any]:
+    """This organization's configured public Wholesale contact.
+
+    Returns support_phone / support_email (the keys the public pages already
+    read) and `contact_source`: "wholesale_settings" when anything is
+    configured, else None. Reads the settings row WITHOUT creating one — a
+    public page must never write — and never looks anywhere else.
+    """
+    from app.models.wholesale_models import WholesaleSettings
+    row = (db.query(WholesaleSettings)
+           .filter(WholesaleSettings.organization_id == organization_id).first())
+    phone = (getattr(row, "public_contact_phone", None) or "").strip() or None
+    email = (getattr(row, "public_contact_email", None) or "").strip() or None
+    return {"support_phone": phone, "support_email": email,
+            "contact_source": "wholesale_settings" if (phone or email) else None}
 
 
 def _address(prop) -> Dict[str, Any]:

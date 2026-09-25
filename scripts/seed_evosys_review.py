@@ -195,6 +195,22 @@ class Api:
             "application/json") else r.text)
 
 
+# EvoSys Wholesale's approved public phone (Phase 7.3 closeout). Configured on
+# the review organization THROUGH the Wholesale public-contact setting - the
+# same path any organization uses - never hardcoded in a page. The public
+# EMAIL is deliberately left unset: the dedicated wholesale@evosyspro.live alias
+# has not been confirmed to exist in Microsoft 365, and a public page must not
+# show an address nobody receives (nor substitute the platform support box).
+REVIEW_PUBLIC_PHONE = "469-553-7417"
+
+
+def ensure_public_contact(api):
+    s = api.get("/settings")
+    if not s.get("public_contact_phone"):          # never overwrite an operator's edit
+        api.patch("/settings", {"public_contact_phone": REVIEW_PUBLIC_PHONE})
+        say("public phone  %s (Wholesale Settings > Public contact)" % REVIEW_PUBLIC_PHONE)
+
+
 def ensure_buyers(api):
     existing = {b["company_name"]: b for b in
                 api.get("/buyers", include_test=True, active_only=False, limit=1000)["buyers"]}
@@ -403,6 +419,7 @@ def main() -> int:
             say("evosense      %s properties" % n)
             ensure_promoted(db, org, user)
             api = Api(c, {"Authorization": "Bearer %s" % create_access_token(user, db)})
+            ensure_public_contact(api)
             buyers = ensure_buyers(api)
             made = ensure_deals(api, buyers)
             ensure_closing_dates(api, made)

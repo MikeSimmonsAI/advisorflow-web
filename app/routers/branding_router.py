@@ -126,7 +126,7 @@ def _platform_brand(db, org):
         return None
     try:
         from app.models.models import Platform
-        from app.services.brand_config import config_for_slug
+        from app.services.brand_config import config_for_slug, product_name
         row = db.query(Platform).filter(Platform.id == org.platform_id).first()
         if row is None or not row.slug:
             return None
@@ -136,7 +136,10 @@ def _platform_brand(db, org):
                 "short_name": cfg.get("short_name"),
                 "logo_url": cfg.get("logo_url"),
                 "accent_color": cfg.get("accent_color"),
-                "theme": cfg.get("theme_slug") or row.slug}
+                "theme": cfg.get("theme_slug") or row.slug,
+                # Commercial product names this brand sells (EvoSysPro ->
+                # "EvoSys Wholesale"). None when the brand has not named one.
+                "products": {"wholesale": product_name(row.slug, "wholesale")}}
     except Exception:  # noqa: BLE001
         return None
 

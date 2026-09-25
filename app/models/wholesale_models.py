@@ -204,6 +204,15 @@ class WholesaleSettings(Base):
     # consulted at all. See `wholesale_ai._SYSTEM_PROMPT`.
     ai_tone = Column(String, nullable=True)   # professional | conversational | direct
 
+    # ── Public contact (Phase 7.3 closeout) ──────────────────────────────────
+    # What the Investor Deal Room and the Seller Portal show as THIS
+    # organization's public phone and email. Organization-owned on purpose:
+    # there is NO fallback to the platform (brand) support line or to any other
+    # organization, so a white-label customer with nothing configured shows no
+    # public contact rather than somebody else's. NULL = not configured.
+    public_contact_phone = Column(String, nullable=True)
+    public_contact_email = Column(String, nullable=True)
+
     # ── Cost control ────────────────────────────────────────────────────────
     # A cap of 0 means "no paid calls at all", which is the honest default for a
     # module built to run lean. NULL means unlimited and has to be typed in on

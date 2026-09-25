@@ -17,7 +17,7 @@ import './ds/evo-pages.css'
 const SECTIONS = [
   ['rules', 'Deal rules'], ['markets', 'Markets'], ['approvals', 'Approvals'], ['automation', 'Automation'],
   ['providers', 'Providers'], ['outreach', 'Buyer outreach'], ['budget', 'Budget'], ['pipeline', 'Pipeline'],
-  ['contracts', 'Contracts'], ['assistant', 'Seller assistant'],
+  ['contracts', 'Contracts'], ['assistant', 'Seller assistant'], ['contact', 'Public contact'],
 ]
 
 const PROVIDER_GROUPS = {
@@ -374,6 +374,7 @@ export default function WholesaleSettings() {
       <div id="set-contracts" hidden={tab !== 'contracts'}><TemplateLibrary /></div>
 
       <div id="set-assistant" hidden={tab !== 'assistant'}><AiAssistantPanel value={value} set={set} /></div>
+      <div id="set-contact" hidden={tab !== 'contact'}><PublicContactPanel value={value} set={set} /></div>
 
       <div className="evo-actionbar">
         <button type="button" className="evo-btn evo-btn--primary" disabled={!dirty || busy} onClick={save}>
@@ -456,6 +457,46 @@ const ASSISTANT_READS = [
   ['The why', 'Motivation, reason for selling, anything said about a mortgage'],
   ['The people', 'Who else decides, when they are reachable'],
 ]
+
+/* THE ORGANIZATION'S OWN PUBLIC CONTACT (Phase 7.3 closeout).
+ *
+ * What the Investor Deal Room and the Seller Portal show as this company's
+ * phone and email. There is no fallback: blank here means those pages show no
+ * public contact - never the platform's support line and never another
+ * organization's.
+ */
+function PublicContactPanel({ value, set }) {
+  const phone = value('public_contact_phone') || ''
+  const email = value('public_contact_email') || ''
+  return (
+    <div className="panel ws-panel">
+      <div className="panel-title ws-panel-title">
+        <span>Public contact</span>
+        <span className={`ws-pill ${phone || email ? 'is-ok' : 'is-muted'}`}>
+          {phone || email ? 'Shown to investors and sellers' : 'Not configured'}
+        </span>
+      </div>
+      <Note>
+        Shown on the Investor Deal Room and the Seller Portal as how to reach this
+        company. Leave a field blank to show nothing - these pages never fall back to
+        another number or address.
+      </Note>
+      <div className="ws-grid">
+        <div className="ws-field">
+          <label htmlFor="ws-public-phone">Public phone</label>
+          <input id="ws-public-phone" className="ws-input" type="tel" autoComplete="off"
+                 value={phone} onChange={(e) => set('public_contact_phone', e.target.value)} />
+        </div>
+        <div className="ws-field">
+          <label htmlFor="ws-public-email">Public email</label>
+          <input id="ws-public-email" className="ws-input" type="email" autoComplete="off"
+                 value={email} onChange={(e) => set('public_contact_email', e.target.value)} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 function AiAssistantPanel({ value, set }) {
   const on = !!value('ai_qualification_enabled')

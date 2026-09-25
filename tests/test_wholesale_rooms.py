@@ -535,7 +535,7 @@ def test_branding_carries_no_deal_information(client, auth_headers, world):
     brand = ok(client.get("/wholesale-rooms/buyer/%s" % link["token"]))["brand"]
 
     assert set(brand) == {"name", "logo_url", "accent", "support_email",
-                          "support_phone", "website"}
+                          "support_phone", "website", "contact_source"}
     blob = json.dumps(brand)
     for secret in (SELLER_SECRET, SELLER_NAME, INTERNAL_NOTE,
                    str(MAO_VALUE), str(ASSIGNMENT_FEE), str(CONTRACT_PRICE)):

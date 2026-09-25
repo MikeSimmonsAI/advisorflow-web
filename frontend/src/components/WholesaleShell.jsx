@@ -77,6 +77,39 @@ export function WholesaleUser({ user, photo }) {
   )
 }
 
+/**
+ * The product identity under the brand mark: the brand's commercial name for
+ * the module (EvoSysPro -> "EvoSys Wholesale") and the engine that powers it.
+ * EvoSense is the acquisition engine, never the platform or the product name.
+ */
+export function WholesaleProductLine({ name }) {
+  return (
+    <span className="wsx-product">
+      <span className="wsx-product__name">{name}</span>
+      <span className="wsx-product__engine">Powered by EvoSense</span>
+    </span>
+  )
+}
+
+/**
+ * The browser tab names the product while a wholesale screen is showing
+ * ("EvoSys Wholesale"), and gives the previous title back on the way out.
+ */
+export function useWholesaleTitle(active, product) {
+  useEffect(() => {
+    if (!active || typeof document === 'undefined') return undefined
+    const previous = document.title
+    const apply = () => { if (document.title !== product) document.title = product }
+    apply()
+    // A late theme/brand payload can rewrite the title after mount; keep the
+    // product name while this screen is up.
+    const obs = typeof MutationObserver !== 'undefined' && document.querySelector('title')
+      ? new MutationObserver(apply) : null
+    if (obs) obs.observe(document.querySelector('title'), { childList: true, characterData: true, subtree: true })
+    return () => { if (obs) obs.disconnect(); document.title = previous }
+  }, [active, product])
+}
+
 /** Paints the page canvas light while a wholesale screen is showing. */
 export function useWholesaleCanvas(active) {
   useEffect(() => {

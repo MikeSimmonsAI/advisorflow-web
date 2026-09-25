@@ -127,6 +127,25 @@ FROZEN_BRAND_DEFAULTS = {
     },
 }
 
+# ── COMMERCIAL PRODUCT NAMES, PER BRAND ─────────────────────────────────────
+#
+# The platform (brand) is one thing, a product/module running inside it is
+# another: EvoSysPro -> EvoSys Wholesale -> EvoSense (the acquisition engine).
+# A module's customer-facing name belongs to the BRAND that sells it, so it is
+# looked up by platform slug and never assumed. A brand with no entry gets
+# None, and the UI shows the neutral module name ("Wholesale") rather than
+# borrowing another brand's product name. Internal/technical names (routes,
+# packages, tables) are deliberately NOT derived from this.
+PRODUCT_NAMES = {
+    "evosyspro": {"wholesale": "EvoSys Wholesale"},
+}
+
+
+def product_name(slug: Optional[str], module: str) -> Optional[str]:
+    """The brand's commercial name for a module, or None. Never guesses."""
+    return PRODUCT_NAMES.get((slug or "").strip().lower(), {}).get(module)
+
+
 # What a brand with no row and no frozen entry gets. Every value is either
 # neutral or None; nothing here impersonates a brand that does exist.
 UNKNOWN_BRAND = {

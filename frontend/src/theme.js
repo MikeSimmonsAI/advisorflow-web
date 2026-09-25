@@ -63,11 +63,36 @@ export function hostTheme() {
  * and only when neither says anything does the historical default apply.
  */
 export function shellTheme(branding) {
+  return shellThemeSource(branding).theme
+}
+
+/**
+ * The shell theme AND where it came from - the answer the permanent
+ * brand-resolution gate checks (scripts/review/brand_gate.py):
+ *
+ *   'host'       a brand domain decided (app.evosyspro.live, ...)
+ *   'workspace'  the authenticated organization's platform decided
+ *   'default'    NOTHING said anything and the historical hostname default was
+ *                used. On a non-brand host with a signed-in workspace this is a
+ *                FALLBACK, and the gate fails it.
+ */
+export function shellThemeSource(branding) {
   const fromHost = hostTheme()
-  if (fromHost) return fromHost
+  if (fromHost) return { theme: fromHost, source: 'host' }
   const fromWorkspace = branding && branding.platform && branding.platform.theme
-  if (fromWorkspace && BRAND_CONFIG[fromWorkspace]) return fromWorkspace
-  return detectTheme()
+  if (fromWorkspace && BRAND_CONFIG[fromWorkspace]) return { theme: fromWorkspace, source: 'workspace' }
+  return { theme: detectTheme(), source: 'default' }
+}
+
+/**
+ * The brand's commercial name for a product/module (EvoSysPro -> "EvoSys
+ * Wholesale"), from the workspace's platform as the server states it. null when
+ * the brand has not named one - callers then show the neutral module name and
+ * never borrow another brand's product name.
+ */
+export function productName(branding, module) {
+  const p = branding && branding.platform
+  return (p && p.products && p.products[module]) || null
 }
 
 /**
@@ -253,6 +278,10 @@ export async function hydrateBrand(apiBase) {
       /* storage blocked - the fetch still themed this page */
     }
     applyBrandPayload(brand)
+    // On a host that is not a brand domain (localhost), the signed-in
+    // workspace's platform outranks whatever this host-level answer said, in
+    // whichever order the two arrive. No-op on a brand domain.
+    try { applyWorkspaceTheme(JSON.parse(localStorage.getItem('af_branding') || 'null')) } catch { /* storage blocked */ }
     return brand
   } catch {
     return null

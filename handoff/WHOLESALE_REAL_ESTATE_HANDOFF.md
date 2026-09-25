@@ -2207,3 +2207,42 @@ LIGHT premium operating system against the ONE approved mockup board. No busines
    their source in `CREDITS.md`. Never put a stock house behind a specific address.
 3. The focused shell must never delete a platform item — fold it under EvoSys Platform.
 4. No public wholesale page shows the platform's phone. When a wholesale public contact setting exists, use it.
+
+## 71. Phase 7.3 closeout: naming, public contact, brand-resolution gate
+
+1. **Product naming hierarchy (commercial, not technical):** EvoSysPro (platform/brand) -> **EvoSys Wholesale**
+   (the product) -> **EvoSense** (its acquisition/intelligence engine). The product name is brand-owned:
+   `brand_config.PRODUCT_NAMES` / `product_name(slug, module)`, exposed on `GET /branding/org` as
+   `platform.products.wholesale`. Brands without an entry get `None` and the UI shows the neutral "Wholesale".
+   Customer-facing changes: the sidebar shows "EvoSys Wholesale · Powered by EvoSense" under the brand mark,
+   and the browser tab reads "EvoSys Wholesale" on every /wholesale screen. Internal names (routes
+   `/wholesale/evosense/*`, `app/services/evosense/*`, models, tables) are unchanged on purpose.
+2. **Public Wholesale contact:** `wholesale_settings.public_contact_phone` / `public_contact_email`
+   (Wholesale Settings > Public contact; `PATCH /wholesale/settings`, validated). Resolved ONLY from the
+   organization's own settings by `wholesale_publication.public_contact()` into the room payload's
+   `brand.support_phone/support_email` with `brand.contact_source = "wholesale_settings"`. **No fallback** to the
+   platform support line/address or to any other organization; missing = none shown. The review seed sets the
+   approved EvoSys Wholesale phone **469-553-7417** through this setting (only if unset). The Seller Portal masthead
+   now shows the same configured contact as the Investor Deal Room (hidden at phone widths by the existing
+   responsive rule).
+3. **wholesale@evosyspro.live:** not configured anywhere in the repo; not verifiable from the Microsoft 365
+   connector (signed in as support@evosyspro.live; no mail to that address; no People/alias scope). **WHOLESALE
+   EMAIL ALIAS REQUIRES EXTERNAL CREATION.** The email field is ready; set it in Wholesale Settings once the alias
+   exists. The platform support address is no longer used on wholesale public pages.
+4. **Brand-resolution gate (permanent):** `theme.shellThemeSource()` reports where the shell brand came from
+   (`host` | `workspace` | `default`); `Layout` stamps `data-brand-theme/-source/-platform`, `data-org-id`,
+   `data-product` on the layout root. `scripts/review/brand_gate.py` (reusable, any module/tenant) checks org,
+   platform, source, html theme, tab title, sidebar, website link, forbidden tenant names, and public-contact
+   source; `p73look.py` runs it on every screen and writes `brand-gate-report.json`. Unit coverage:
+   `tests/test_brand_resolution_gate.py`, `tests/frontend/brandResolution.test.mjs`,
+   `tests/test_wholesale_p73_public_contact.py`. Also fixed: "Back to website" used the hostname brand
+   (BookaBoost on localhost) and now uses the workspace brand; a late host-level `/branding` answer can no
+   longer override the workspace theme on a non-brand host.
+
+## 72. Rules a later phase must keep
+
+1. A screen that renders the wrong tenant/platform brand FAILS acceptance. Run `brand_gate` in every browser
+   acceptance run; `shell_source` must be `workspace` (or `host` on a brand domain), never `default`.
+2. Never hardcode EvoSysPro (or any brand) for localhost; brand comes from the authenticated org's platform.
+3. Public contact comes only from the organization's Wholesale settings. No platform or cross-tenant fallback.
+4. EvoSense names the engine only. Product identity is the brand's product name (EvoSys Wholesale for EvoSysPro).

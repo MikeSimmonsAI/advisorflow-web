@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
 import { isManagerRole, roleOf, workspaceFeatures } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
-import { detectTheme, shellTheme, BRAND_CONFIG, THEMES } from '../theme.js'
+import { detectTheme, shellTheme, shellThemeSource, productName, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
 import ProfileOnboarding from './ProfileOnboarding'
@@ -13,7 +13,7 @@ import WorkspaceAdminMenu from './WorkspaceAdminMenu'
 // A render error inside one page unmounts React's whole tree, rail included.
 // This keeps the failure inside the content area. See PageBoundary.
 import PageBoundary from './PageBoundary'
-import { isWholesalePath, WholesaleSearch, WholesaleEnvironment, WholesaleUser, useWholesaleCanvas } from './WholesaleShell'
+import { isWholesalePath, WholesaleSearch, WholesaleEnvironment, WholesaleUser, useWholesaleCanvas, useWholesaleTitle, WholesaleProductLine } from './WholesaleShell'
 // A VERTICAL'S OWN PRESENTATION. Nav labels, groups and skin for a workspace
 // whose industry has one configured; null for everybody else, which is what
 // keeps this from being a global redesign. See verticals/workspaceVertical.js.
@@ -580,6 +580,15 @@ export default function Layout({ children }) {
   // otherwise the platform the organization belongs to (Phase 7.2 - this is
   // what stopped an EvoSys Pro workspace rendering as BookaBoost locally).
   const SHELL_BRAND = BRAND_CONFIG[shellTheme(branding)] || PLATFORM_BRAND
+  // THE BRAND-RESOLUTION GATE READS THIS. Which theme the shell resolved and
+  // WHERE it came from ('host' | 'workspace' | 'default'), stamped on the
+  // layout root so every acceptance run can prove the authenticated workspace's
+  // platform - not a hostname default - decided the brand (brand_gate.py).
+  const shellResolution = shellThemeSource(branding)
+  // The commercial product name this brand gives the Wholesale module
+  // (EvoSysPro -> "EvoSys Wholesale"); the neutral module name otherwise.
+  const WHOLESALE_PRODUCT = productName(branding, 'wholesale') || 'Wholesale'
+  useWholesaleTitle(inWholesale, WHOLESALE_PRODUCT)
   const brandName = isGodAdmin ? 'AdvisorFlow' : (branding?.brand_name || SHELL_BRAND.displayName)
   // WHAT THE WORKSPACE ITSELF IS CALLED, which is not the same question as
   // "what brand is this app". Used only by the vertical wordmark, where the
@@ -600,7 +609,10 @@ export default function Layout({ children }) {
   useEffect(() => { setLogoFailed(false) }, [logoUrl])
 
   return (
-    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}`}>
+    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}`}
+         data-brand-theme={shellResolution.theme} data-brand-source={shellResolution.source}
+         data-brand-platform={branding?.platform?.slug || ''} data-org-id={branding?.organization_id || ''}
+         data-product={inWholesale ? WHOLESALE_PRODUCT : undefined}>
       <button type="button" className="mobile-menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation menu">
         <span /><span /><span />
       </button>
@@ -659,19 +671,22 @@ export default function Layout({ children }) {
             )
           ) : logoUrl && !logoFailed ? (
             sidebarCollapsed ? null : (
-              <img
-                src={logoUrl}
-                alt={brandName}
-                style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
-                onError={() => setLogoFailed(true)}
-              />
+              <span className={inWholesale ? 'wsx-brand' : undefined} style={inWholesale ? undefined : { display: 'contents' }}>
+                <img
+                  src={logoUrl}
+                  alt={brandName}
+                  style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
+                  onError={() => setLogoFailed(true)}
+                />
+                {inWholesale ? <WholesaleProductLine name={WHOLESALE_PRODUCT} /> : null}
+              </span>
             )
           ) : (
             sidebarCollapsed ? (
               <SignalPulse color="blue" size={9} />
             ) : (
               inWholesale
-                ? <span><span className="brand-mark">{brandName}</span><span className="wsx-brand-sub">Wholesale</span></span>
+                ? <span className="wsx-brand"><span className="brand-mark">{brandName}</span><WholesaleProductLine name={WHOLESALE_PRODUCT} /></span>
                 : <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
             )
           )}
@@ -991,9 +1006,12 @@ export default function Layout({ children }) {
               </div>
             )}
           </div>
-          {!sidebarCollapsed && PLATFORM_BRAND.websiteUrl && (
+          {/* The workspace's own brand's website - on a non-brand host (localhost)
+              the hostname default would have linked an EvoSysPro workspace to
+              another brand's site. */}
+          {!sidebarCollapsed && SHELL_BRAND.websiteUrl && (
             <a
-              href={PLATFORM_BRAND.websiteUrl}
+              href={SHELL_BRAND.websiteUrl}
               className="back-to-website-btn"
               target="_blank"
               rel="noopener noreferrer"

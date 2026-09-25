@@ -23,6 +23,7 @@ import csv
 import io
 import json
 import logging
+import re
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional
 
@@ -457,6 +458,10 @@ class SettingsPatch(BaseModel):
     ai_persona_name: Optional[str] = None
     ai_direction: Optional[str] = None
     ai_tone: Optional[str] = None
+    # Phase 7.3 closeout. The organization's public Wholesale contact, shown on
+    # the Investor Deal Room and the Seller Portal. Empty string clears it.
+    public_contact_phone: Optional[str] = None
+    public_contact_email: Optional[str] = None
 
 
 _JSON_SETTINGS = ("markets", "target_states", "target_counties", "target_cities",
@@ -498,6 +503,8 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
         # `wholesale_ai.TONES`.
         "ai_tone": getattr(s, "ai_tone", None),
         "ai_tones": list(wholesale_ai.TONES),
+        "public_contact_phone": getattr(s, "public_contact_phone", None),
+        "public_contact_email": getattr(s, "public_contact_email", None),
     }
     for field in _JSON_SETTINGS:
         out[field] = _jsonl(getattr(s, field))
@@ -549,6 +556,9 @@ def patch_settings(payload: SettingsPatch, request: Request,
                 detail="Unknown enrichment provider %r. Available: %s"
                        % (data["enrichment_provider"],
                           ", ".join(sorted(enrichment.PROVIDERS))))
+    for key in ("public_contact_phone", "public_contact_email"):
+        if key in data:
+            data[key] = _clean_public_contact(key, data[key])
     if data.get("high_threshold") is not None and data.get("medium_threshold") is not None \
             and data["high_threshold"] <= data["medium_threshold"]:
         raise HTTPException(status_code=400,
@@ -567,6 +577,25 @@ def patch_settings(payload: SettingsPatch, request: Request,
     db.commit()
     db.refresh(s)
     return settings_json(s)
+
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
+
+
+def _clean_public_contact(key: str, value: Optional[str]) -> Optional[str]:
+    """Public contact values are shown to strangers, so they are validated.
+    Blank means NOT CONFIGURED (NULL) - never an empty string that renders."""
+    v = (value or "").strip()
+    if not v:
+        return None
+    if key == "public_contact_email":
+        if not _EMAIL_RE.match(v) or len(v) > 254:
+            raise HTTPException(status_code=400, detail="That public email address is not valid.")
+        return v.lower()
+    digits = re.sub(r"\D", "", v)
+    if len(digits) < 10 or len(digits) > 15 or re.search(r"[^\d\s()+.\-]", v):
+        raise HTTPException(status_code=400, detail="That public phone number is not valid.")
+    return v
 
 
 def _validate_stage_payload(stages: List[Dict[str, Any]]) -> None:
