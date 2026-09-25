@@ -46,6 +46,7 @@ import { api, getBranding, getCurrentUser, getOrgContext } from '../api/client'
 import {
   featureEnabled, featuresOf, isManagerRole, isOperator, operatorRouteExempt,
   roleOf, routeFeatureDenied, workspaceFeatures,
+  WHOLESALE_FEATURE, productOffered, canEnterProduct,
 } from './workspaceRules'
 
 // Re-exported so every existing import site keeps working and there is still
@@ -53,6 +54,7 @@ import {
 export {
   featureEnabled, featuresOf, isManagerRole, isOperator, operatorRouteExempt,
   roleOf, routeFeatureDenied, workspaceFeatures,
+  WHOLESALE_FEATURE, productOffered, canEnterProduct,
 }
 
 /* ── the whole answer ─────────────────────────────────────────────────────── */

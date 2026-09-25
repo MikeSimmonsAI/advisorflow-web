@@ -109,6 +109,34 @@ export function routeFeatureDenied(feature, branding, user, orgContext) {
   return enabled !== null && !enabled.includes(feature)
 }
 
+/* ── rule 3: may this person ENTER a product of the platform ──────────────── */
+
+/**
+ * EvoSys Wholesale is a PRODUCT of the EvoSysPro platform, not a module of any
+ * one workspace. The entry into it is shown when both hold:
+ *
+ *   1. the active workspace's platform offers the product
+ *      (`/branding/org` → `platform.products[module]`, from brand_config.py), and
+ *   2. the workspace is entitled to it, OR the person is the platform owner.
+ *
+ * (2) is the same answer `routeFeatureDenied` and the server's
+ * `require_feature` already give: god_admin passes both. The sidebar used to
+ * apply the CUSTOMER's allow-list to the owner while the route and the API
+ * exempted him, so the owner could open every Wholesale screen by URL and had
+ * no way to find one. One rule now answers all three.
+ */
+export const WHOLESALE_FEATURE = 'wholesale_real_estate'
+
+export function productOffered(branding, module) {
+  const p = branding && branding.platform
+  return !!(p && p.products && p.products[module])
+}
+
+export function canEnterProduct(branding, user, orgContext, module, featureKey) {
+  if (!productOffered(branding, module)) return false
+  return !routeFeatureDenied(featureKey, branding, user, orgContext)
+}
+
 /* ── role ─────────────────────────────────────────────────────────────────── */
 
 /**

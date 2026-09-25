@@ -25,6 +25,7 @@ import { dirname, join } from 'node:path'
 
 import {
   featureEnabled, isManagerRole, roleOf, routeFeatureDenied,
+  canEnterProduct, productOffered, WHOLESALE_FEATURE,
 } from '../../frontend/src/auth/workspaceRules.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -178,6 +179,72 @@ check('an ordinary advisor is not a manager role', () => {
   eq(isManagerRole(roleOf(ENABLED, ADVISOR)), false, 'advisor')
   eq(isManagerRole(roleOf({ ...ENABLED, workspace_role: 'org_admin' }, ORGADMIN)),
      true, 'org_admin')
+})
+
+/* ── 4. EvoSys Wholesale is a PRODUCT the owner can find ──────────────────── */
+
+const EVOSYS = { products: { wholesale: 'EvoSys Wholesale' } }
+const OTHER_PLATFORM = { products: {} }
+// WUPA in production: an EvoSysPro workspace with an allow-list that does not
+// name the module. The owner could open every screen by URL and find none.
+const WUPA = { enabled_features: ['leads', 'campaigns'], platform: EVOSYS,
+               workspace_role: 'org_admin', organization_id: 'org-wupa' }
+const enter = (b, u, ctx) => canEnterProduct(b, u, ctx, 'wholesale', WHOLESALE_FEATURE)
+
+check('the product entry key is the server key', () => {
+  eq(WHOLESALE_FEATURE, 'wholesale_real_estate', 'key')
+})
+
+check('the owner can enter EvoSys Wholesale inside an unentitled EvoSysPro workspace', () => {
+  eq(enter(WUPA, GOD, { orgId: 'org-wupa' }), true, 'god in WUPA')
+  // and that is exactly what the route and the server already allowed
+  eq(routeFeatureDenied(WHOLESALE_FEATURE, WUPA, GOD, { orgId: 'org-wupa' }), false, 'route')
+})
+
+check('the entry and the route never disagree', () => {
+  const cases = [
+    [WUPA, GOD], [WUPA, ADVISOR], [WUPA, ORGADMIN],
+    [{ ...ENABLED, platform: EVOSYS }, ADVISOR],
+    [{ ...NOT_ENABLED, platform: EVOSYS }, ADVISOR],
+    [{ ...LEGACY, platform: EVOSYS }, ADVISOR],
+  ]
+  for (const [b, u] of cases) {
+    eq(enter(b, u, { orgId: b.organization_id }),
+       !routeFeatureDenied(WHOLESALE_FEATURE, b, u, { orgId: b.organization_id }),
+       u.role + ' in ' + b.organization_id)
+  }
+})
+
+check('a customer user of an unentitled workspace does not see the product', () => {
+  eq(enter(WUPA, ADVISOR, null), false, 'advisor')
+  eq(enter(WUPA, ORGADMIN, null), false, 'org admin')
+})
+
+check('an entitled EvoSysPro workspace sees the product', () => {
+  eq(enter({ ...ENABLED, platform: EVOSYS }, ADVISOR, null), true, 'entitled')
+})
+
+check('a platform that does not offer the product never shows it — not even to the owner', () => {
+  eq(productOffered({ ...LEGACY, platform: OTHER_PLATFORM }, 'wholesale'), false, 'offered')
+  eq(enter({ ...LEGACY, platform: OTHER_PLATFORM }, ADVISOR, null), false, 'legacy other platform')
+  eq(enter({ ...ENABLED, platform: OTHER_PLATFORM }, GOD, { orgId: 'x' }), false, 'god other platform')
+  eq(enter({ ...ENABLED }, ADVISOR, null), false, 'no platform at all')
+})
+
+check('the sidebar renders ONE product entry, not the wholesale groups', () => {
+  if (!/data-product-entry="wholesale"/.test(layout)) throw new Error('no product entry in Layout.jsx')
+  if (!/navFeatureEnabled\(item\.featureKey\)/.test(layout)) {
+    throw new Error('nav items do not ask the product rule')
+  }
+  if (!/platformRail = groups\.filter\(\(group\) => !isWsGroup\(group\)\)/.test(layout)) {
+    throw new Error('the platform rail still renders the wholesale groups')
+  }
+})
+
+check('God Mode has an EvoSys Wholesale entry', () => {
+  const god = readFileSync(join(REPO, 'frontend', 'src', 'pages', 'GodShell.jsx'), 'utf8')
+  if (!/label: 'EvoSys Wholesale', action: 'wholesale'/.test(god)) throw new Error('no JUMP entry')
+  if (!/action === 'wholesale'/.test(god)) throw new Error('JUMP entry not rendered')
 })
 
 /* ── report ───────────────────────────────────────────────────────────────── */

@@ -91,6 +91,11 @@ const JUMP = [
   // duplicates primary navigation belongs in primary navigation, once.
   { label: 'Customer App',    action: 'customer_app', icon: 'grid',
     hint: 'The tenant application, as an organization sees it' },
+  // EVOSYS WHOLESALE — a PRODUCT of EvoSysPro, entered from the owner's rail.
+  // Not a link for the same reason as Customer App: its records belong to one
+  // organization, so it opens in the selected workspace, or asks for one first.
+  { label: 'EvoSys Wholesale', action: 'wholesale', icon: 'briefcase',
+    hint: 'EvoSysPro product: EvoSense acquisition and wholesale deal operations, in the selected workspace' },
 ]
 
 /**
@@ -508,6 +513,24 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
               return (
                 <button key="customer-app"
                   className="gm-nav-item gm-jump"
+                  title={collapsed ? label + ' — ' + hint : hint}
+                  style={{ justifyContent: collapsed ? 'center' : 'flex-start',
+                           padding: collapsed ? '10px 0' : '9px 14px',
+                           background: 'none', border: 'none', cursor: 'pointer',
+                           color: 'inherit', fontFamily: 'inherit', fontSize: 'inherit',
+                           width: '100%', textAlign: 'left' }}
+                  onClick={() => navigate(dest)}
+                >
+                  <Ico d={ICONS[icon]} size={14} />
+                  {!collapsed && <span className="gm-nav-label">{label}</span>}
+                </button>
+              )
+            }
+            if (action === 'wholesale') {
+              const dest = orgSession?.org_id ? '/wholesale/evosense' : '/god/customers'
+              return (
+                <button key="wholesale"
+                  className="gm-nav-item gm-jump" data-product-entry="wholesale"
                   title={collapsed ? label + ' — ' + hint : hint}
                   style={{ justifyContent: collapsed ? 'center' : 'flex-start',
                            padding: collapsed ? '10px 0' : '9px 14px',

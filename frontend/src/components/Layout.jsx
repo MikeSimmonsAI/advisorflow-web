@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
-import { isManagerRole, roleOf, workspaceFeatures } from '../auth/workspaceAuthority'
+import { isManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
 import { detectTheme, shellTheme, shellThemeSource, productName, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
@@ -401,6 +401,14 @@ export default function Layout({ children }) {
   // guard evaluate the same expression. See auth/workspaceRules.js.
   const enabledFeatures = workspaceFeatures(branding, user, orgContext)
   const isFeatureEnabled = (key) => !key || enabledFeatures === null || enabledFeatures.includes(key)
+
+  // EVOSYS WHOLESALE IS A PRODUCT OF THE PLATFORM, entered from one place.
+  // Offered by the workspace's platform (EvoSysPro), and entitled OR the
+  // owner — the same answer the route guard and `require_feature` give, so the
+  // owner is never shown screens he can open but cannot find. Every Wholesale
+  // nav item asks this instead of the bare allow-list. See workspaceRules.js.
+  const canEnterWholesale = canEnterProduct(branding, user, orgContext, 'wholesale', WHOLESALE_FEATURE)
+  const navFeatureEnabled = (key) => (key === WHOLESALE_FEATURE ? canEnterWholesale : isFeatureEnabled(key))
 
   // WHAT THIS PERSON MAY ADMINISTER, ANSWERED BY THE SERVER.
   //
@@ -833,7 +841,7 @@ export default function Layout({ children }) {
               // `capability` asks what the server says you may administer.
               if (item.capability) return hasCapability(item.capability)
               if (item.adminOnly && !isOrgAdmin) return false
-              if (item.featureKey !== undefined && !isFeatureEnabled(item.featureKey)) return false
+              if (item.featureKey !== undefined && !navFeatureEnabled(item.featureKey)) return false
               return true
             }
             // THE WORKSPACE'S OWN SCREENS, folded into the rail beside the
@@ -944,7 +952,25 @@ export default function Layout({ children }) {
                 </>
               )
             }
-            return groups.map((group) => {
+            // OUTSIDE the product, its screens are ONE entry — the product —
+            // not two more groups of platform modules. Inside /wholesale the
+            // shell above shows its own navigation (EvoSense, Operations).
+            const isWsGroup = (group) => group.items.some((item) => isWholesalePath(item.to))
+            const platformRail = groups.filter((group) => !isWsGroup(group))
+            const productEntry = canEnterWholesale ? (
+              <div key="evosys-products" className="nav-section nav-section--products">
+                {!sidebarCollapsed && <div className="nav-section-label">Products</div>}
+                {sidebarCollapsed && <div className="nav-divider" />}
+                <NavLink to="/wholesale/evosense" data-product-entry="wholesale"
+                  className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                  onClick={closeSidebar}
+                  title={WHOLESALE_PRODUCT + ' — EvoSense acquisition and wholesale deal operations'}
+                >
+                  <Icon name="home" />{!sidebarCollapsed && WHOLESALE_PRODUCT}
+                </NavLink>
+              </div>
+            ) : null
+            const rendered = platformRail.map((group) => {
               const items = group.items.filter(visible)
               if (items.length === 0) return null
               return (
@@ -963,6 +989,9 @@ export default function Layout({ children }) {
                 </div>
               )
             })
+            // Directly after the workspace's first group, where the owner
+            // looks first — one entry, named by the platform's brand config.
+            return [...rendered.slice(0, 1), productEntry, ...rendered.slice(1)]
           })()}
 
           {/* PLATFORM ADMIN IS NOT PART OF A CUSTOMER'S WORKSPACE.
