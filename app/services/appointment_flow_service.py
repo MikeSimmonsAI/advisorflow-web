@@ -23,8 +23,15 @@ logger = logging.getLogger(__name__)
 # app.services.public_identity, which resolves per organization.
 
 
-def _send_sms_safe(advisor: User, to_phone: str, body: str) -> None:
-    """Send an SMS, swallowing errors so flow never breaks on a messaging failure."""
+def _send_sms_safe(advisor: User, to_phone: str, body: str, db=None, org_id=None) -> None:
+    """Send an SMS, swallowing errors so flow never breaks on a messaging failure.
+
+    `db` + `org_id` are passed for LEAD-facing sends: a Wholesale seller is
+    never texted from here (see app/services/wholesale_sms.refusal_for_phone)."""
+    if db is not None and org_id:
+        from app.services import wholesale_sms
+        if wholesale_sms.refusal_for_phone(db, org_id, to_phone, path="appointment_flow"):
+            return
     try:
         from twilio.rest import Client
         from app.utils.crypto import decrypt_value
@@ -69,7 +76,7 @@ def on_booking_confirmed(db: Session, lead: Lead, advisor: User, booking_link: B
             f"Hi {lead.first_name or lead_name}, your appointment with {advisor_name} at {org_name} "
             f"is confirmed for {appt_time}. Reply STOP to opt out."
         )
-        _send_sms_safe(advisor, lead.phone, body)
+        _send_sms_safe(advisor, lead.phone, body, db=db, org_id=lead.organization_id)
 
     # 2. Confirmation email to lead
     if lead.email:
@@ -109,7 +116,7 @@ def on_booking_cancelled(db: Session, lead: Lead, advisor: User, booking_link: B
             f"Hi {lead.first_name or lead_name}, your appointment with {advisor_name} has been cancelled. "
             f"Reply or call us to reschedule."
         )
-        _send_sms_safe(advisor, lead.phone, body)
+        _send_sms_safe(advisor, lead.phone, body, db=db, org_id=lead.organization_id)
 
     # Reopen cadence if it was paused/stopped due to booking
     try:

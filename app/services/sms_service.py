@@ -552,6 +552,17 @@ def send_sms(
     if is_phone_suppressed(db, lead.organization_id, lead.phone):
         raise ValueError(f"Lead {lead.id}'s phone number is on the suppression list - blocked from sending.")
 
+    # ── THE WHOLESALE SELLER SMS PROGRAM GATE ───────────────────────────────
+    # A Wholesale seller is texted ONLY with program consent, never outside
+    # the recipient's hours, and ONLY through the program's Messaging Service.
+    # Raises WholesaleSmsBlocked (a ValueError) with machine-readable reasons.
+    # Returns None for every other lead, which leaves this function unchanged
+    # for them. See app/services/wholesale_sms.py.
+    from app.services import wholesale_sms
+    program_sender = wholesale_sms.enforce_for_lead(db, lead, path=send_source or "send_sms")
+    if program_sender is not None:
+        include_booking_link = False            # the program registers no links
+
     booking_url = ""
     booking_link = None
     # A booking link that cannot be sent must not be minted either: a token
@@ -566,7 +577,11 @@ def send_sms(
 
     body = compose_body(template, lead, advisor, booking_url)
 
-    client, from_phone, _ = _resolve_twilio_creds(advisor, db)
+    if program_sender is not None:
+        client, _messaging_service_sid = program_sender
+        from_phone = None
+    else:
+        client, from_phone, _ = _resolve_twilio_creds(advisor, db)
 
     # StatusCallback: Twilio POSTs delivery receipts here.
     #
@@ -576,11 +591,18 @@ def send_sms(
     # every message stayed on 'pending' forever. Resolution now lives in
     # app/services/twilio_callbacks.py, which accepts the other spellings this
     # codebase already uses and logs an ERROR rather than failing quietly.
-    create_kwargs = apply_status_callback(dict(
-        body=body,
-        from_=from_phone,
-        to=lead.phone,
-    ))
+    if program_sender is not None:
+        create_kwargs = apply_status_callback(dict(
+            body=body,
+            messaging_service_sid=_messaging_service_sid,
+            to=lead.phone,
+        ))
+    else:
+        create_kwargs = apply_status_callback(dict(
+            body=body,
+            from_=from_phone,
+            to=lead.phone,
+        ))
 
     twilio_msg = client.messages.create(**create_kwargs)
 
@@ -647,6 +669,12 @@ def send_mms(
     from app.services.compliance_service import is_phone_suppressed
     if is_phone_suppressed(db, lead.organization_id, lead.phone):
         raise ValueError(f"Lead {lead.id}'s phone is on the suppression list - blocked.")
+
+    # The Wholesale seller SMS program registers text only. A Wholesale seller
+    # never receives MMS, consented or not. See app/services/wholesale_sms.py.
+    from app.services import wholesale_sms
+    if wholesale_sms.is_program_lead(db, lead):
+        raise wholesale_sms.WholesaleSmsBlocked(["PROGRAM_MMS_NOT_REGISTERED"])
 
     booking_url = ""
     booking_link = None

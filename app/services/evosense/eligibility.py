@@ -19,6 +19,9 @@ On top of those, EvoSense's own rules:
     already a Wholesale deal
     REAL cold SMS                           refused unless the strategy carries the
                                             organization's compliance confirmation
+    SELLER SMS PROGRAM                      and, for any real SMS, the number must hold
+                                            program consent of record (wholesale_sms):
+                                            a found number is NEVER consent
 
 A strategy cannot override any of these. There is no "force" parameter.
 """
@@ -129,6 +132,26 @@ def check(db, prop: EvoSenseProperty, cp, strategy, *, channel: str = "sms",
                              "Organization confirmed cold-outreach compliance for this strategy",
                              "Real cold SMS is refused until the strategy's outreach policy "
                              "records the organization's compliance confirmation."))
+        # FINDING A NUMBER IS NOT CONSENT. A real SMS to a real owner also
+        # needs the Wholesale seller SMS program to permit this exact number:
+        # consent of record from the seller inquiry form, no opt-out, no DNC,
+        # no suppression, program on, Messaging Service configured. Contact
+        # Confidence above says we probably have the right person; it says
+        # nothing about permission, and nothing a strategy sets can change
+        # that. QUIET_HOURS is not a reason to refuse ENROLMENT - the send-time
+        # gate enforces the recipient's clock on every message.
+        if channel == "sms" and cp.kind == "phone":
+            from app.services import wholesale_sms as WS
+            gate = WS.check_eligibility(db, org_id, cp.value)
+            already = {c["code"] for c in checks if not c["ok"]}
+            program_blocks = [r for r in gate["reasons"]
+                              if r != WS.QUIET_HOURS and r not in already]
+            for code in program_blocks:
+                checks.append(_check(code, False, "Seller SMS program permits this number",
+                                     "Seller SMS program: %s" % code.replace("_", " ")))
+            if not program_blocks:
+                checks.append(_check("SMS_PROGRAM", True,
+                                     "Seller SMS program permits this number"))
     return _result(checks, prop, cp)
 
 

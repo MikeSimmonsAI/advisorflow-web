@@ -140,7 +140,11 @@ def _send_reminder(booking, org, advisor, hours: int, db) -> None:
     )
 
     lead_phone = getattr(lead, "phone", None)
-    if lead_phone:
+    # A Wholesale seller is texted only by the seller SMS program, never from
+    # here. See app/services/wholesale_sms.py.
+    from app.services import wholesale_sms
+    if lead_phone and not wholesale_sms.refusal_for_phone(
+            db, lead.organization_id, lead_phone, path="appointment_reminder"):
         _send_sms(lead_phone, sms_body, org, advisor)
 
     lead_email = getattr(lead, "email", None)

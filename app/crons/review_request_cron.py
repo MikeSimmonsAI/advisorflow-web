@@ -125,6 +125,12 @@ def run_review_request_cron(engine) -> int:
                 from app.services.sms_content_policy import enforce_sms_content_policy
                 # The survey URL is still a URL to a carrier filter.
                 msg_kwargs["body"] = enforce_sms_content_policy(msg_kwargs["body"])
+                # A Wholesale seller is texted only by the seller SMS program,
+                # never from here. See app/services/wholesale_sms.py.
+                from app.services import wholesale_sms
+                if wholesale_sms.refusal_for_phone(db, row.organization_id, row.phone,
+                                                   path="review_request"):
+                    continue
                 client.messages.create(**msg_kwargs)
 
                 # Create BookingFollowup record so survey_router can look it up

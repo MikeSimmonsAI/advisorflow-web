@@ -52,6 +52,7 @@ PIPELINE_AUTO_REPLY = "pipeline_auto_reply"
 APPOINTMENT_FOLLOWUP = "appointment_followup"
 VOICE_BOOKING_LINK = "voice_booking_link"
 AI_EMPLOYEE = "ai_employee"
+WHOLESALE_PROGRAM = "wholesale_program"
 
 # ── Not a real send ─────────────────────────────────────────────────────────
 DEMO = "demo"
@@ -68,6 +69,7 @@ ALL_SOURCES = (
     APPOINTMENT_FOLLOWUP,
     VOICE_BOOKING_LINK,
     AI_EMPLOYEE,
+    WHOLESALE_PROGRAM,
     DEMO,
 )
 
@@ -88,6 +90,7 @@ _LABELS = {
     APPOINTMENT_FOLLOWUP: ("Appointment", "Confirmation, reminder, thank-you or review request tied to an appointment."),
     VOICE_BOOKING_LINK: ("Voice booking", "Sent during or after an AI voice call."),
     AI_EMPLOYEE: ("AI employee", "Sent by an AI workforce employee."),
+    WHOLESALE_PROGRAM: ("Wholesale program", "A Wholesale seller SMS program message (e.g. opt-in confirmation), sent through the program gate."),
     DEMO: ("Demo", "Simulated. No provider was ever called."),
 }
 

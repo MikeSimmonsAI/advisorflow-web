@@ -262,6 +262,10 @@ import app.models.wholesale_share_models  # noqa: F401  (imported for side effec
 # observations, signals, owner graph, scores, cost ledger, engagements. Phase 7.
 # Added to BOTH blocks in this file, per the merge-artefact note above.
 import app.models.evosense_models  # noqa: F401  (imported for side effects)
+# Program-scoped SMS consent of record (sms_consent_records). The Wholesale send
+# gate reads it; without the table every program send fails closed as
+# NO_SMS_CONSENT. Added to BOTH blocks in this file.
+import app.models.sms_consent_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -514,3 +518,5 @@ import app.models.wholesale_share_models  # noqa: F401  (imported for side effec
 # observations, signals, owner graph, scores, cost ledger, engagements. Phase 7.
 # Added to BOTH blocks in this file, per the merge-artefact note above.
 import app.models.evosense_models  # noqa: F401  (imported for side effects)
+# Program-scoped SMS consent of record. See the first block.
+import app.models.sms_consent_models  # noqa: F401  (imported for side effects)

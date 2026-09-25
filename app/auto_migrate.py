@@ -1156,6 +1156,15 @@ COLUMNS_TO_ADD = [
     # until somebody configures one.
     ("wholesale_settings", "public_contact_phone", "VARCHAR"),
     ("wholesale_settings", "public_contact_email", "VARCHAR"),
+    # Public seller inquiry + seller SMS program. All additive. The program
+    # defaults OFF, so an existing organization texts nobody under it until an
+    # admin configures a Messaging Service and switches it on.
+    ("wholesale_settings", "public_intake_key", "VARCHAR"),
+    ("wholesale_settings", "sms_program_enabled", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_settings", "sms_sender_number", "VARCHAR"),
+    ("wholesale_settings", "sms_messaging_service_sid", "VARCHAR"),
+    ("wholesale_settings", "sms_campaign_sid", "VARCHAR"),
+    ("wholesale_settings", "sms_brand_sid", "VARCHAR"),
 
     ("wholesale_documents", "buyer_visible", "BOOLEAN DEFAULT FALSE"),
     ("wholesale_documents", "seller_visible", "BOOLEAN DEFAULT FALSE"),
@@ -1305,6 +1314,8 @@ INDEXES_TO_CREATE = [
     "CREATE INDEX IF NOT EXISTS ix_voice_calls_provider_call_id ON voice_calls(provider_call_id)",
     "CREATE INDEX IF NOT EXISTS ix_voice_calls_campaign_id      ON voice_calls(campaign_id)",
     "CREATE INDEX IF NOT EXISTS ix_voice_calls_booking_link_id  ON voice_calls(booking_link_id)",
+    # One organization per public seller-intake key. NULLs do not collide.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_wholesale_settings_intake_key ON wholesale_settings(public_intake_key)",
     "CREATE INDEX IF NOT EXISTS ix_messages_lead_id      ON messages(lead_id)",
     "CREATE INDEX IF NOT EXISTS ix_messages_sent_at      ON messages(sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_messages_sender_id    ON messages(sender_id)",

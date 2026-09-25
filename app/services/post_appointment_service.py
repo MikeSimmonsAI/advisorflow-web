@@ -156,7 +156,13 @@ def _send_followup(db: Session, booking: BookingLink, lead: Lead, advisor: User)
     channel = "none"
 
     # Prefer SMS; fall back to email
-    if lead.phone and advisor.twilio_phone_number and advisor.twilio_auth_token_encrypted:
+    # A Wholesale seller is texted only by the seller SMS program, never from
+    # an advisor's number here. See app/services/wholesale_sms.py.
+    from app.services import wholesale_sms
+    program_refused = bool(lead.phone) and bool(wholesale_sms.refusal_for_phone(
+        db, lead.organization_id, lead.phone, path="post_appointment"))
+    if (lead.phone and not program_refused and advisor.twilio_phone_number
+            and advisor.twilio_auth_token_encrypted):
         sent = _send_sms(advisor, lead, message)
         channel = "sms"
 

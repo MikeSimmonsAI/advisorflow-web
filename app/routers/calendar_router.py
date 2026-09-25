@@ -619,7 +619,15 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
             # below with a plain reason rather than silently borrowing one.
             from app.services.sms_service import _resolve_twilio_creds
             _client, _from, _caller_id = _resolve_twilio_creds(advisor, db)
-            if _from:
+            # A Wholesale seller is texted only by the seller SMS program,
+            # never from an advisor or org number. See wholesale_sms.py.
+            from app.services import wholesale_sms
+            _program_refusal = wholesale_sms.refusal_for_phone(
+                db, lead.organization_id, lead.phone, path="booking_confirmed")
+            if _program_refusal:
+                lead_sms_result = {"success": False, "note": "wholesale program",
+                                   "reasons": _program_refusal}
+            elif _from:
                 _client.messages.create(body=_sms_text, from_=_from, to=lead.phone)
                 if booking:
                     booking.confirmation_sent = True

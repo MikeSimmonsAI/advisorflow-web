@@ -213,6 +213,23 @@ class WholesaleSettings(Base):
     public_contact_phone = Column(String, nullable=True)
     public_contact_email = Column(String, nullable=True)
 
+    # ── Public seller inquiry + seller SMS program ──────────────────────────
+    # `public_intake_key` is how a public seller-inquiry form reaches THIS
+    # organization: the website's server posts to
+    # /site-intake/wholesale/{key}/seller-inquiry, and the key is looked up
+    # here. No organization id, no display name, nothing a browser chooses.
+    # NULL = this organization accepts no public seller inquiries.
+    public_intake_key = Column(String, nullable=True, unique=True)
+    # The seller SMS program. OFF by default and fail-closed: nothing is texted
+    # under this program until an admin turns it on AND a Messaging Service is
+    # configured AND the recipient holds program consent. The sender number is
+    # recorded for display/audit; sends go through the Messaging Service.
+    sms_program_enabled = Column(Boolean, nullable=False, default=False)
+    sms_sender_number = Column(String, nullable=True)
+    sms_messaging_service_sid = Column(String, nullable=True)   # MG...
+    sms_campaign_sid = Column(String, nullable=True)            # CM... (after approval)
+    sms_brand_sid = Column(String, nullable=True)               # BN...
+
     # ── Cost control ────────────────────────────────────────────────────────
     # A cap of 0 means "no paid calls at all", which is the honest default for a
     # module built to run lean. NULL means unlimited and has to be typed in on

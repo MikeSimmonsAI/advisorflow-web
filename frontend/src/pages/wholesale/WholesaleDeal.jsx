@@ -202,6 +202,33 @@ function KV({ label, children }) {
 }
 
 
+/* SMS CONSENT OF RECORD for this deal's seller - read from the server's
+ * consent records, never inferred from the seller having a phone number. */
+function SmsConsentKVs({ dealId }) {
+  const [c, setC] = useState(null)
+  useEffect(() => {
+    if (!dealId) return undefined
+    let live = true
+    api.get(`/wholesale/sms/consents?deal_id=${encodeURIComponent(dealId)}`)
+      .then((r) => { if (live) setC(r) }).catch(() => { if (live) setC({ error: true }) })
+    return () => { live = false }
+  }, [dealId])
+  if (!c || c.error) return <KV label="SMS consent">{c?.error ? 'Unavailable' : null}</KV>
+  const latest = (c.consents || [])[0]
+  const label = c.status === 'opted_in' ? 'YES' : c.status === 'opted_out' ? 'Opted out' : 'NO'
+  return (
+    <>
+      <KV label="SMS consent">
+        <span className={`ws-pill ${c.status === 'opted_in' ? 'is-ok' : 'is-muted'}`}>{label}</span>
+      </KV>
+      <KV label="Consent given">{latest ? shortDate(latest.consented_at) : null}</KV>
+      <KV label="Consent source">{latest ? (latest.source_url || latest.form_id) : null}</KV>
+      {latest?.opted_out_at ? <KV label="Opted out">{shortDate(latest.opted_out_at)}{latest.opt_out_keyword ? ` (${latest.opt_out_keyword})` : ''}</KV> : null}
+    </>
+  )
+}
+
+
 /* WHAT IS WAITING ON A PERSON, read off this deal's own record.
  *
  * Every line below is a fact already on this screen somewhere — a pending
@@ -324,6 +351,11 @@ function Overview({ room, goTo, reload }) {
             <KV label="Completeness">
               {seller.completeness === null ? null : seller.completeness + '%'}
             </KV>
+            <KV label="Prefers">{seller.preferred_contact_method ? humanize(seller.preferred_contact_method) : null}</KV>
+            <KV label="Came in via">
+              {p?.acquisition_source === 'seller_inquiry' ? 'Seller inquiry form' : humanize(p?.acquisition_source || '')}
+            </KV>
+            <SmsConsentKVs dealId={deal?.id} />
           </div>
         </div>
       ) : (

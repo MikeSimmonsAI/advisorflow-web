@@ -15,5 +15,12 @@ return [
   // Settings and the working hash lives in admin-auth.json.
   'CAREERS_ADMIN_PASSWORD_HASH' => '',
   'SMS_OPTIN_WEBHOOK_URL' => '',
-  'SUPPORT_WEBHOOK_URL' => ''
+  'SUPPORT_WEBHOOK_URL' => '',
+  // EvoSys Wholesale seller page (/sell). The full intake URL INCLUDING the
+  // organization's intake key - a secret: it lives only here, never in a page:
+  // https://<api-host>/site-intake/wholesale/<intake-key>/seller-inquiry
+  'WHOLESALE_SELLER_INTAKE_URL' => '',
+  // Optional public contact shown on /sell. Blank shows nothing.
+  'WHOLESALE_PUBLIC_PHONE' => '',
+  'WHOLESALE_PUBLIC_EMAIL' => ''
 ];

@@ -462,6 +462,51 @@ class SettingsPatch(BaseModel):
     # the Investor Deal Room and the Seller Portal. Empty string clears it.
     public_contact_phone: Optional[str] = None
     public_contact_email: Optional[str] = None
+    # Public seller inquiry + seller SMS program. Admin-only (see patch).
+    public_intake_key: Optional[str] = None
+    sms_program_enabled: Optional[bool] = None
+    sms_sender_number: Optional[str] = None
+    sms_messaging_service_sid: Optional[str] = None
+    sms_campaign_sid: Optional[str] = None
+    sms_brand_sid: Optional[str] = None
+
+
+_SMS_PROGRAM_FIELDS = ("public_intake_key", "sms_program_enabled", "sms_sender_number",
+                       "sms_messaging_service_sid", "sms_campaign_sid", "sms_brand_sid")
+_ADMIN_ROLES = ("org_admin", "super_admin", "god_admin")
+_SID_RULES = {"sms_messaging_service_sid": "MG", "sms_campaign_sid": "CM",
+              "sms_brand_sid": "BN"}
+_INTAKE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{24,64}$")
+
+
+def _clean_sms_program(db: Session, org_id: str, data: Dict[str, Any]) -> None:
+    """Validate the program fields in place. Blank = not configured (NULL)."""
+    for key, prefix in _SID_RULES.items():
+        if key in data:
+            v = (data[key] or "").strip()
+            if v and not re.fullmatch(prefix + r"[0-9a-fA-F]{32}", v):
+                raise HTTPException(status_code=400,
+                                    detail="%s must look like %s followed by 32 hex characters."
+                                           % (key, prefix))
+            data[key] = v or None
+    if "sms_sender_number" in data:
+        v = (data["sms_sender_number"] or "").strip()
+        from app.services import wholesale_sms
+        if v and not wholesale_sms.normalize_e164(v):
+            raise HTTPException(status_code=400, detail="That SMS sender number is not valid.")
+        data["sms_sender_number"] = wholesale_sms.normalize_e164(v) if v else None
+    if "public_intake_key" in data:
+        v = (data["public_intake_key"] or "").strip()
+        if v and not _INTAKE_KEY_RE.match(v):
+            raise HTTPException(status_code=400,
+                                detail="The intake key must be 24-64 letters, digits, - or _.")
+        if v and (db.query(WholesaleSettings.id)
+                  .filter(WholesaleSettings.public_intake_key == v,
+                          WholesaleSettings.organization_id != org_id).first() is not None):
+            raise HTTPException(status_code=409, detail="That intake key is already in use.")
+        data["public_intake_key"] = v or None
+    if "sms_program_enabled" in data:
+        data["sms_program_enabled"] = bool(data["sms_program_enabled"])
 
 
 _JSON_SETTINGS = ("markets", "target_states", "target_counties", "target_cities",
@@ -505,6 +550,16 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
         "ai_tones": list(wholesale_ai.TONES),
         "public_contact_phone": getattr(s, "public_contact_phone", None),
         "public_contact_email": getattr(s, "public_contact_email", None),
+        # The intake key lets a server post seller inquiries into this org, so
+        # it is never echoed back in full - only whether it is set.
+        "public_intake_key_set": bool(getattr(s, "public_intake_key", None)),
+        "public_intake_key_hint": ("…" + s.public_intake_key[-4:])
+                                  if getattr(s, "public_intake_key", None) else None,
+        "sms_program_enabled": bool(getattr(s, "sms_program_enabled", False)),
+        "sms_sender_number": getattr(s, "sms_sender_number", None),
+        "sms_messaging_service_sid": getattr(s, "sms_messaging_service_sid", None),
+        "sms_campaign_sid": getattr(s, "sms_campaign_sid", None),
+        "sms_brand_sid": getattr(s, "sms_brand_sid", None),
     }
     for field in _JSON_SETTINGS:
         out[field] = _jsonl(getattr(s, field))
@@ -559,6 +614,13 @@ def patch_settings(payload: SettingsPatch, request: Request,
     for key in ("public_contact_phone", "public_contact_email"):
         if key in data:
             data[key] = _clean_public_contact(key, data[key])
+    if any(k in data for k in _SMS_PROGRAM_FIELDS):
+        # Who may switch on texting, or point a public form at this workspace,
+        # is an administrator question, not an advisor one.
+        if (getattr(user, "role", None) or "").lower() not in _ADMIN_ROLES:
+            raise HTTPException(status_code=403,
+                                detail="Only an administrator can change the seller SMS program.")
+        _clean_sms_program(db, org_id, data)
     if data.get("high_threshold") is not None and data.get("medium_threshold") is not None \
             and data["high_threshold"] <= data["medium_threshold"]:
         raise HTTPException(status_code=400,

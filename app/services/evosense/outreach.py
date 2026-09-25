@@ -25,10 +25,14 @@ from app.services.evosense import contacts as CT
 from app.services.evosense import eligibility as EL
 from app.services.evosense import strategy as ST
 
-OPENER = ("Hi {first}, this is {sender}, a local home buyer. Are you the owner of {address}? "
-          "If you'd ever consider selling, I'd be glad to make a fair cash offer. "
-          "Reply STOP to opt out.")
-FOLLOW_UP = ("Hi {first}, {sender} again about {address}. When we spoke you said: "
+# The opening message is a FOLLOW-UP TO THE SELLER'S OWN INQUIRY. EvoSense only
+# ever reaches a real owner by SMS when that number holds seller-program consent
+# (see eligibility.py + wholesale_sms.py), so there is no cold opener here and
+# none may be added: the registered campaign does not cover one.
+OPENER = ("{sender}: Thanks for your property inquiry about {address}. Can you confirm "
+          "the condition and your preferred timeline to sell? Reply STOP to opt out, "
+          "HELP for help.")
+FOLLOW_UP = ("{sender}: Following up on {address}. When we spoke you said: "
              "“{context}”. Is now a better time to talk? Reply STOP to opt out.")
 
 
@@ -137,8 +141,11 @@ def start(db, prop, strategy, *, user=None, channel: str = "sms",
                            EvoSenseMessage.direction == "inbound")
                    .order_by(EvoSenseMessage.created_at.desc()).first())
         ctx = last_in.body if last_in else None
+    from app.services import wholesale_sms
     body = (FOLLOW_UP if ctx else OPENER).format(
-        first=first or "there", sender="your local buyer", address=prop.street_address or "your property",
+        first=first or "there",
+        sender=wholesale_sms.program_brand(db, prop.organization_id)["brand"],
+        address=prop.street_address or "your property",
         context=(ctx or "")[:140])
 
     if elig["mode"] == "sandbox_simulated":

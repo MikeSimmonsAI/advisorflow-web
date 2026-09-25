@@ -61,6 +61,8 @@ def _get_client():
 # NOT in this list on purpose - that's its own not_interested category,
 # not an automatic DNC trigger (see module docstring).
 HARD_STOP_KEYWORDS = ["stop", "unsubscribe", "remove me"]
+# Whole-message opt-outs (see contains_hard_stop_language).
+STANDARD_OPT_OUT_WORDS = {"cancel", "end", "quit", "optout", "opt out", "opt-out", "revoke", "stopall"}
 
 VALID_CLASSIFICATIONS = ("interested", "callback", "dnc", "not_interested", "wrong_number", "question", "neutral")
 
@@ -178,7 +180,13 @@ def contains_hard_stop_language(body: str) -> bool:
     not_interested category instead of an automatic DNC trigger.
     """
     body_lower = body.lower()
-    return any(kw in body_lower for kw in HARD_STOP_KEYWORDS)
+    if any(kw in body_lower for kw in HARD_STOP_KEYWORDS):
+        return True
+    # Twilio's standard opt-out keywords, which the carrier layer already
+    # honours on its own. Matched only as the WHOLE message, because as
+    # substrings "end", "quit" and "cancel" appear in ordinary replies
+    # ("weekend", "cancel my appointment") that are not opt-outs.
+    return body_lower.strip().strip(".!").strip() in STANDARD_OPT_OUT_WORDS
 
 
 # ── ONE DEFINITION OF "THIS REPLY STILL NEEDS A PERSON" ──────────────────────

@@ -719,6 +719,12 @@ app.include_router(concierge_router.router)
 # shares the one public-intake rate ceiling. See site_intake_router.py.
 from app.routers import site_intake_router  # noqa: E402
 app.include_router(site_intake_router.router)
+# PUBLIC SELLER INQUIRY (Wholesale) + the operator's seller SMS consent view.
+# The destination organization comes only from a configured intake key. See
+# wholesale_seller_intake_router.py and app/services/wholesale_sms.py.
+from app.routers import wholesale_seller_intake_router  # noqa: E402
+app.include_router(wholesale_seller_intake_router.public_router)
+app.include_router(wholesale_seller_intake_router.ops_router)
 
 # A CUSTOMER'S OWN PUBLIC WEBSITE, and the enquiries it takes. Different
 # surface from the one above and the difference is the destination: the brand's

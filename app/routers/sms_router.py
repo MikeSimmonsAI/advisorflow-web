@@ -387,8 +387,24 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
     ).order_by(Lead.updated_at.desc()).first()
 
     if not lead:
-        # Unknown sender - log nothing actionable, just acknowledge Twilio
+        # Unknown sender - nothing to route. A STOP is still honoured: the
+        # number is suppressed for this organization and any program consent
+        # it holds is withdrawn, so a lead created later cannot be texted.
         logger.info("[sms_webhook] inbound from a number with no matching lead")
+        if lead_phone and contains_hard_stop_language(Body):
+            try:
+                from app.services import wholesale_sms
+                from app.services.compliance_service import add_suppression_entry_from_reply
+                wholesale_sms.record_opt_out(db, org_id, lead_phone,
+                                             keyword=(Body or "").strip()[:40],
+                                             reason="Replied STOP (no lead)",
+                                             source="reply_stop")
+                db.commit()
+                add_suppression_entry_from_reply(db, org_id, lead_phone,
+                                                 reason=f"Replied: {Body[:200]}")
+            except Exception:
+                db.rollback()
+                logger.exception("stop handling failed for unmatched sender %s", MessageSid)
         return {"status": "no_lead"}
 
     # PHASE 7.1 (1/3) — ONE MESSAGE, ONE REPLY. Twilio retries a webhook it did
@@ -474,6 +490,16 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
                 add_suppression_entry_from_reply(db, lead.organization_id, lead.phone, reason=f"Replied: {Body[:200]}")
             except Exception:
                 pass  # never let a suppression-list failure break the Twilio webhook response
+            # Program consent of record is withdrawn too, with the keyword and
+            # time, so the consent evidence itself says it ended and when.
+            try:
+                from app.services import wholesale_sms
+                wholesale_sms.record_opt_out(db, lead.organization_id, lead.phone,
+                                             keyword=(Body or "").strip()[:40],
+                                             reason=f"Replied: {Body[:200]}",
+                                             source="reply_stop")
+            except Exception:
+                logger.exception("wholesale_sms: opt-out record failed for %s", MessageSid)
     elif classification == ReplyClassification.INTERESTED:
         lead.status = "hot"
         stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_REPLIED)

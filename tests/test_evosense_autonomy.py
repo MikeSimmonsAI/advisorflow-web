@@ -229,6 +229,20 @@ def real_conversation(db_session, sample_org, sample_advisor):
                                            message="person:Pat Q Realowner|owner"),
                        __import__("app.services.evosense.providers", fromlist=["x"]).PROVIDERS["manual"])
     EV.rescore(db, prop, s)
+    # A FOUND NUMBER IS NOT CONSENT: without the seller SMS program's consent
+    # of record, a real owner is refused, however good the contact data is.
+    blocked = OU.start(db, prop, s)
+    assert not blocked["started"] and "NO_SMS_CONSENT" in blocked["blocks"], blocked
+    # This owner opted in on the seller inquiry form, and the program is set up.
+    from app.models.wholesale_models import WholesaleSettings
+    from app.services import wholesale_sms
+    db.add(WholesaleSettings(organization_id=org, sms_program_enabled=True,
+                             sms_messaging_service_sid="MG" + "a" * 32))
+    wholesale_sms.record_consent(db, org, phone_raw="2145550100",
+                                 disclosure_text="... Reply STOP ... HELP ... rates may apply.",
+                                 disclosure_version="test", form_version="test",
+                                 source_url="https://evosyspro.live/sell", ip=None, user_agent=None)
+    db.commit()
     out = OU.start(db, prop, s)
     assert out["started"], out
     db.commit()

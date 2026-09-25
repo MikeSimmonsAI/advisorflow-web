@@ -18,6 +18,7 @@ const SECTIONS = [
   ['rules', 'Deal rules'], ['markets', 'Markets'], ['approvals', 'Approvals'], ['automation', 'Automation'],
   ['providers', 'Providers'], ['outreach', 'Buyer outreach'], ['budget', 'Budget'], ['pipeline', 'Pipeline'],
   ['contracts', 'Contracts'], ['assistant', 'Seller assistant'], ['contact', 'Public contact'],
+  ['sms', 'Seller SMS'],
 ]
 
 const PROVIDER_GROUPS = {
@@ -130,6 +131,9 @@ export default function WholesaleSettings() {
           payload[k] = v
         }
       })
+      // A cleared intake-key box means "leave it", never "disconnect the
+      // public seller page" - that would silently drop every inquiry.
+      if (payload.public_intake_key === '') delete payload.public_intake_key
       setSettings(await api.patch('/wholesale/settings', payload))
       setDraft({})
       setNotice('Settings saved.')
@@ -375,6 +379,9 @@ export default function WholesaleSettings() {
 
       <div id="set-assistant" hidden={tab !== 'assistant'}><AiAssistantPanel value={value} set={set} /></div>
       <div id="set-contact" hidden={tab !== 'contact'}><PublicContactPanel value={value} set={set} /></div>
+      <div id="set-sms" hidden={tab !== 'sms'}>
+        <SellerSmsPanel value={value} set={set} draft={draft} savedAt={settings} />
+      </div>
 
       <div className="evo-actionbar">
         <button type="button" className="evo-btn evo-btn--primary" disabled={!dirty || busy} onClick={save}>
@@ -493,6 +500,97 @@ function PublicContactPanel({ value, set }) {
                  value={email} onChange={(e) => set('public_contact_email', e.target.value)} />
         </div>
       </div>
+    </div>
+  )
+}
+
+
+/* THE SELLER SMS PROGRAM (A2P 10DLC, Low Volume Mixed).
+ *
+ * Off until an administrator turns it on, and even then nothing is sent to a
+ * seller unless the server's gate passes: program consent from the seller
+ * inquiry form, no STOP, no DNC or suppression, the seller's own daytime, and
+ * a Messaging Service configured here. Finding a phone number is never
+ * consent. The readiness pills come from the server, not from this form.
+ */
+const SMS_FIELDS = [
+  ['sms_sender_number', 'Dedicated SMS number', 'The Twilio number assigned to this program. Shown for reference; sends go through the Messaging Service.', 'tel'],
+  ['sms_messaging_service_sid', 'Messaging Service SID', 'MG… — the Messaging Service that holds the dedicated number.', 'text'],
+  ['sms_campaign_sid', 'Campaign SID', 'CM… — added after the campaign is approved. Recorded on each consent for audit.', 'text'],
+  ['sms_brand_sid', 'Brand SID', 'BN… — the approved A2P brand. Optional; for audit.', 'text'],
+]
+
+function SellerSmsPanel({ value, set, draft, savedAt }) {
+  const [status, setStatus] = useState(null)
+  useEffect(() => {
+    let live = true
+    api.get('/wholesale/sms/status').then((s) => { if (live) setStatus(s) }).catch(() => {})
+    return () => { live = false }
+  }, [savedAt])
+  const on = !!value('sms_program_enabled')
+  const keyDraft = draft.public_intake_key
+  return (
+    <div className="panel ws-panel">
+      <div className="panel-title ws-panel-title">
+        <span>Seller SMS program</span>
+        <span className={`ws-pill ${status?.can_send ? 'is-ok' : 'is-warn'}`}>
+          {status?.can_send ? 'Ready to send to opted-in sellers' : 'Not sending'}
+        </span>
+      </div>
+      <Note>
+        Texts go only to sellers who checked the optional SMS box on your seller
+        inquiry page, and only through this program's Messaging Service. A phone
+        number found by research, enrichment or import is never permission to text.
+      </Note>
+      {status ? (
+        <div className="ws-toggle-col" aria-live="polite">
+          <div className="ws-provider-row"><span>Program switch</span>
+            <span className={`ws-pill ${status.enabled ? 'is-ok' : 'is-muted'}`}>{status.enabled ? 'on' : 'off'}</span></div>
+          <div className="ws-provider-row"><span>Messaging Service</span>
+            <span className={`ws-pill ${status.messaging_service_configured ? 'is-ok' : 'is-warn'}`}>
+              {status.messaging_service_configured ? 'configured' : 'not configured'}</span></div>
+          <div className="ws-provider-row"><span>Public seller page</span>
+            <span className={`ws-pill ${status.public_intake_enabled ? 'is-ok' : 'is-muted'}`}>
+              {status.public_intake_enabled ? 'connected' : 'not connected'}</span></div>
+          {status.kill_switch ? <div className="ws-provider-row"><span>Server kill switch</span>
+            <span className="ws-pill is-warn">engaged</span></div> : null}
+        </div>
+      ) : null}
+      <label className="ws-checkbox">
+        <input type="checkbox" checked={on}
+               onChange={(e) => set('sms_program_enabled', e.target.checked)} />
+        Send program messages to opted-in sellers
+      </label>
+      <div className="ws-grid">
+        {SMS_FIELDS.map(([key, label, hint, type]) => (
+          <div className="ws-field" key={key}>
+            <label htmlFor={`sms-${key}`}>{label}</label>
+            <input id={`sms-${key}`} className="ws-input" type={type} autoComplete="off"
+                   value={value(key) || ''} onChange={(e) => set(key, e.target.value)} />
+            <span className="ws-hint">{hint}</span>
+          </div>
+        ))}
+        <div className="ws-field">
+          <label htmlFor="sms-intake-key">Seller page intake key</label>
+          <input id="sms-intake-key" className="ws-input" type="password" autoComplete="off"
+                 placeholder={value('public_intake_key_set')
+                   ? `Set (${value('public_intake_key_hint')}) — type to replace` : 'Not set'}
+                 value={keyDraft || ''} onChange={(e) => set('public_intake_key', e.target.value)} />
+          <span className="ws-hint">
+            Links your public seller page to this workspace. It lives in the website
+            server's config and is never shown in full here.
+          </span>
+        </div>
+      </div>
+      <Why label="What stops a message, every time">
+        <p className="ws-comp__sub">
+          No consent of record, a STOP or other opt-out, the do-not-contact or
+          suppression list, outside 9am–8pm in the seller's own time zone, this
+          switch off, or no Messaging Service. Each is checked on the server before
+          every send and reported by name. No assistant, cadence or automation can
+          skip it.
+        </p>
+      </Why>
     </div>
   )
 }
