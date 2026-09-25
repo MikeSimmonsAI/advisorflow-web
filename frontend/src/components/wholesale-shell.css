@@ -1,0 +1,191 @@
+/* ═══ Focused Wholesale shell (Phase 7.3) ═══════════════════════════════════
+   Applies ONLY under `.layout--wholesale` (a /wholesale path outside a
+   configured vertical). The platform's own design tokens are re-pointed to the
+   light system on the shell, so anything the rail and top bar already render
+   (notification bell, context switcher, org picker) follows without being
+   rewritten, and the platform's other screens are untouched. */
+
+html.wsx-canvas, html.wsx-canvas body { background: #f3f6fb !important; }
+html.wsx-canvas body::before, html.wsx-canvas body::after { display: none !important; }
+
+.layout.layout--wholesale {
+  --bg-base: #f3f6fb;
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f6f8fc;
+  --bg-elevated: #ffffff;
+  --bg-field: #ffffff;
+  --bg-field-soft: #f6f8fc;
+  --bg-row: #ffffff;
+  --bg-row-hover: #f5f8fd;
+  --bg-glass: #ffffff;
+  --bg-glass-mid: #f6f8fc;
+  --bg-glass-strong: #eef3fa;
+  --surface-inset: #f6f8fc;
+  --border-subtle: #e5eaf2;
+  --border-strong: #d3dbe7;
+  --border: #e5eaf2;
+  --text-primary: #0f1e3a;
+  --text-secondary: #44536b;
+  --text-tertiary: #5d6b82;
+  --text-muted: #5d6b82;
+  --text-inverse: #ffffff;
+  --signal-blue: #1f6fe5;
+  --signal-blue-dim: #e8f0fd;
+  --signal-green: #16a34a;
+  --signal-red: #dc2f45;
+  --signal-amber: #d97706;
+  --signal-purple: #6d4fe0;
+  --panel-shadow: 0 1px 2px rgba(15, 30, 58, .05), 0 8px 24px -12px rgba(15, 30, 58, .12);
+  --glow-blue-sm: none; --glow-blue-md: none; --glow-green-sm: none;
+  --elevation-1: none; --elevation-2: none;
+  --wsx-primary: var(--brand-primary, var(--brand-platform-accent, #1f6fe5));
+  --wsx-primary-ink: color-mix(in srgb, var(--wsx-primary) 80%, black);
+  --wsx-primary-soft: color-mix(in srgb, var(--wsx-primary) 10%, white);
+  background: #f3f6fb;
+  color: #0f1e3a;
+}
+
+/* ── sidebar ─────────────────────────────────────────────────────────── */
+.layout--wholesale .sidebar {
+  background: #ffffff;
+  border-right: 1px solid #e5eaf2;
+  box-shadow: 1px 0 0 rgba(15, 30, 58, .02);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  scrollbar-color: #d3dbe7 transparent;
+  padding: 20px 14px;
+}
+.layout--wholesale .sidebar::before { display: none; }
+.layout--wholesale .sidebar-brand { padding: 4px 8px 20px; }
+.layout--wholesale .brand-mark {
+  background: none; -webkit-text-fill-color: currentColor; color: #0f2448;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; font-size: 19px; letter-spacing: -0.02em;
+}
+.wsx-brand-sub { display: block; font-size: 10.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #5d6b82; margin-top: 2px; }
+.layout--wholesale .sidebar-nav { gap: 2px; scrollbar-color: #d3dbe7 transparent; }
+.layout--wholesale .sidebar-nav::-webkit-scrollbar-thumb { background: #d3dbe7; }
+.layout--wholesale .nav-section { margin-bottom: 14px; }
+.layout--wholesale .nav-section-label {
+  color: #5d6b82; font-size: 11px; letter-spacing: .06em; text-transform: none; font-weight: 700; padding: 6px 12px 6px;
+}
+.layout--wholesale .nav-item {
+  color: #44536b; font-weight: 600; font-size: 13.5px; padding: 10px 12px; border: 0; border-radius: 10px; min-height: 40px;
+}
+.layout--wholesale .nav-item svg { color: #7a8aa3; flex: none; }
+.layout--wholesale .nav-item:hover { background: #f3f6fb; color: #0f1e3a; transform: none; border: 0; }
+.layout--wholesale .nav-item--active,
+.layout--wholesale .nav-item--active:hover {
+  background: var(--wsx-primary-soft); color: var(--wsx-primary-ink); box-shadow: none; border: 0;
+}
+.layout--wholesale .nav-item--active::before { display: none; }
+.layout--wholesale .nav-item--active::after { display: none; }
+.layout--wholesale .nav-item--active svg { color: var(--wsx-primary-ink); }
+.layout--wholesale .nav-divider { background: #e5eaf2; margin: 10px 4px; }
+
+/* the folded platform area */
+.wsx-platform { margin-top: 6px; border-top: 1px solid #e5eaf2; padding-top: 10px; }
+.wsx-platform__toggle {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 40px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; cursor: pointer;
+  font: 700 11px/1 'Inter', sans-serif; letter-spacing: .06em; color: #5d6b82; text-align: left;
+}
+.wsx-platform__toggle:hover { background: #f3f6fb; color: #0f1e3a; }
+.wsx-platform__toggle svg { width: 14px; height: 14px; transition: transform .15s ease; }
+.wsx-platform__toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.wsx-platform__hint { display: block; font-weight: 500; letter-spacing: 0; font-size: 11.5px; color: #5d6b82; margin-top: 3px; }
+.wsx-platform__list { padding-top: 4px; }
+.wsx-platform__group { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #5d6b82; padding: 8px 12px 4px; }
+.layout--wholesale .wsx-platform .nav-item { font-size: 13px; min-height: 36px; padding: 8px 12px; }
+
+/* footer */
+.layout--wholesale .sidebar-footer { border-top: 1px solid #e5eaf2; }
+.layout--wholesale .user-chip { background: #f6f8fc; border: 1px solid #e5eaf2; box-shadow: none; backdrop-filter: none; border-radius: 12px; }
+.layout--wholesale .user-avatar { background: var(--wsx-primary); color: #fff; box-shadow: none; }
+.layout--wholesale .user-avatar::after { border-color: #fff; box-shadow: none; }
+.layout--wholesale .user-role { color: #0f7a3a; }
+.layout--wholesale .logout-btn { background: #fff; border: 1px solid #d3dbe7; color: #44536b; min-height: 40px; }
+.layout--wholesale .logout-btn:hover { border-color: #dc2f45; color: #b3203a; }
+.layout--wholesale .back-to-website-btn { color: #44536b; opacity: 1; }
+.layout--wholesale .back-to-website-btn:hover { background: #f3f6fb; color: #0f1e3a; }
+
+/* ── top bar ─────────────────────────────────────────────────────────── */
+.layout--wholesale .top-bar {
+  background: rgba(255, 255, 255, .92);
+  backdrop-filter: blur(10px) saturate(140%); -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border-bottom: 1px solid #e5eaf2;
+  justify-content: space-between; gap: 16px; padding: 12px 40px; min-height: 66px;
+}
+.layout--wholesale .top-bar-right { gap: 10px; }
+.layout--wholesale .main-content { max-width: 1480px; padding: 24px 40px 56px; }
+
+.wsx-search { position: relative; flex: 1 1 420px; max-width: 560px; min-width: 0; }
+.wsx-search svg { position: absolute; left: 14px; top: 50%; width: 17px; height: 17px; transform: translateY(-50%); color: #7a8aa3; pointer-events: none; }
+.wsx-search input {
+  width: 100%; height: 42px; padding: 0 14px 0 40px; border-radius: 11px; border: 1px solid #d3dbe7; background: #f6f8fc;
+  font: 500 14px 'Inter', -apple-system, sans-serif; color: #0f1e3a;
+}
+.wsx-search input::placeholder { color: #6b7a92; }
+.wsx-search input:focus { outline: none; background: #fff; border-color: var(--wsx-primary); box-shadow: 0 0 0 3px var(--wsx-primary-soft); }
+.wsx-sr { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.wsx-env {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px;
+  font: 700 11px/1 'Inter', sans-serif; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap;
+  color: #9a5200; background: #fdf1dc; box-shadow: inset 0 0 0 1px #f3d9a8;
+}
+.wsx-env__dot { width: 7px; height: 7px; border-radius: 50%; background: #d97706; }
+.wsx-env__short { display: none; }
+
+.wsx-user { display: inline-flex; align-items: center; gap: 10px; padding-left: 12px; border-left: 1px solid #e5eaf2; min-width: 0; }
+.wsx-user__avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; overflow: hidden; flex: none;
+  background: var(--wsx-primary); color: #fff; font: 700 14px 'Inter', sans-serif; }
+.wsx-user__avatar img { width: 100%; height: 100%; object-fit: cover; }
+.wsx-user__text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.wsx-user__name { font: 700 13px 'Inter', sans-serif; color: #0f1e3a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.wsx-user__role { font-size: 11.5px; color: #5d6b82; text-transform: capitalize; }
+
+/* the bell and the context switcher on a light bar */
+.layout--wholesale .top-bar button { color: #44536b; }
+
+/* ── responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 1180px) {
+  .wsx-user__text { display: none; }
+}
+@media (max-width: 1024px) {
+  .layout--wholesale .top-bar { padding: 12px 24px; }
+  .layout--wholesale .main-content { padding: 20px 24px 48px; }
+  .wsx-env__long { display: none; }
+  .wsx-env__short { display: inline; }
+}
+@media (max-width: 768px) {
+  .layout--wholesale .mobile-menu-btn { background: #fff; border: 1px solid #d3dbe7; box-shadow: 0 4px 14px -6px rgba(15, 30, 58, .25); width: 44px; height: 44px; top: 11px; }
+  .layout--wholesale .mobile-menu-btn span { background: #0f1e3a; }
+  .layout--wholesale .sidebar-backdrop { background: rgba(15, 30, 58, .38); backdrop-filter: blur(2px); }
+  .layout--wholesale .sidebar-close-btn { background: #fff; border-color: #d3dbe7; color: #44536b; width: 44px; height: 44px; }
+  .layout--wholesale .top-bar { padding: 10px 14px 10px 68px; min-height: 66px; flex-wrap: nowrap; }
+  .layout--wholesale .main-content { padding: 16px 14px 32px; }
+  .wsx-search { flex: 1 1 auto; }
+  .wsx-search input { height: 44px; font-size: 16px; }
+  .wsx-user { display: none; }
+  .layout--wholesale .nav-item { min-height: 44px; }
+}
+@media (max-width: 480px) {
+  .wsx-env { padding: 0 9px; }
+  .wsx-env__short { display: none; }
+  .wsx-env { width: 30px; justify-content: center; padding: 0; }
+}
+
+/* The page canvas is already light, so the workspace no longer needs to
+   cancel the shell's padding to paint its own background. */
+.layout--wholesale .evo-app.evo-app.evo-app { margin: 0; padding: 0; min-height: 0; background: transparent; }
+@media (min-width: 769px) {
+  /* the rail's white runs the full height of long pages, not just the viewport */
+  .layout.layout--wholesale { background: linear-gradient(90deg, #fff 0, #fff calc(var(--sidebar-width) - 1px), #e5eaf2 calc(var(--sidebar-width) - 1px), #e5eaf2 var(--sidebar-width), #f3f6fb var(--sidebar-width)); }
+}
+
+/* Product identity under the brand mark (Phase 7.3 closeout naming). */
+.layout--wholesale .wsx-brand { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.layout--wholesale .wsx-brand .brand-mark { align-self: flex-start; }
+.wsx-product { display: flex; flex-direction: column; align-items: center; line-height: 1.25; text-align: center; }
+.wsx-product__name { font: 700 13px 'Inter', -apple-system, sans-serif; color: #0f2448; letter-spacing: -0.005em; }
+.wsx-product__engine { font: 600 10.5px 'Inter', sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #5d6b82; }

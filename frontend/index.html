@@ -14,7 +14,21 @@
         if (h.includes('evosyspro'))     { name = 'EvoSys Pro';    color = '%23087cff'; letter = 'E';  fsize = '18' }
         if (h.includes('advisorflow'))   { name = 'AdvisorFlow';   color = '%23f59e0b'; letter = 'AF'; fsize = '14' }
         if (h.includes('harmonyhustle')) { name = 'Harmony Hustle';color = '%2310b981'; letter = 'HH'; fsize = '13' }
-        document.title = name
+        // THE EXTERNAL WHOLESALE PAGES ARE NOT OURS TO BRAND.
+        //
+        // These two routes are opened by an investor or a property owner who
+        // has never heard of this software and is not our customer. The page
+        // itself carries the OPERATOR's name (wholesale_publication.branding),
+        // but this block runs first, from the hostname, and put the vendor's
+        // name in the tab, the history entry and the link preview. Found by
+        // opening a real investor link and reading the tab, not the code.
+        //
+        // We do not know the operator's name yet — it arrives with the payload
+        // — so the honest thing is to set nothing and let the page set it once
+        // it knows. A neutral mark, no name, no substitute.
+        var ext = /^\/(investor|my-property)\//.test(location.pathname)
+        if (ext) { letter = ''; color = '%23e2e8f0' }
+        if (!ext) document.title = name
         // Inject favicon immediately — before JS bundle loads
         var svg = "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='" + color + "'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='" + fsize + "' font-weight='700' fill='white' text-anchor='middle'%3E" + letter + "%3C/text%3E%3C/svg%3E"
         var link = document.createElement('link')
@@ -92,6 +106,11 @@
         if (h.includes('evosyspro'))     { name = 'EvoSys Pro';    color = '#087cff' }
         if (h.includes('advisorflow'))   { name = 'AdvisorFlow';   color = '#f59e0b' }
         if (h.includes('harmonyhustle')) { name = 'Harmony Hustle';color = '#10b981' }
+        // Same rule as the title block above: on the external wholesale pages
+        // the splash shows the pulse and the loading bar and NO name. An
+        // investor waiting a second and a half for the page to mount should
+        // not be reading the name of the wholesaler's software supplier.
+        if (/^\/(investor|my-property)\//.test(location.pathname)) name = ''
         var el = document.getElementById('bb-splash-name')
         if (el) el.textContent = name
         var pulse = document.querySelector('.bb-splash-pulse')

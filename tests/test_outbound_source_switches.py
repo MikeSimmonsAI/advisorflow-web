@@ -88,6 +88,11 @@ def test_every_gated_source_is_disabled_by_default(monkeypatch):
         "public_booking_confirmation": False,
         "public_booking_internal": False,
         "public_booking_reminders": False,
+        # The wholesale module's buyer deal sheet. Added by the wholesale
+        # engine and listed here for the same reason as the rest: this test is
+        # the statement that a NEW outbound path cannot be introduced without
+        # somebody deciding, in this file, that it defaults to off.
+        "wholesale_buyer_disposition": False,
     }
 
 

@@ -347,16 +347,7 @@ async def inbound_webhook(
                 .first())
         org_id = _org.id if _org else None
 
-    if org_id is not None:
-        # `advisor` stays None on the shared-sender path ON PURPOSE. The reply
-        # belongs to whoever owns the LEAD, and the handler below already
-        # resolves that from `lead.assigned_to_id`; inventing an advisor here
-        # would attach a family's reply to whichever colleague owns the number.
-        lead = db.query(Lead).filter(
-            Lead.phone == lead_phone,
-            Lead.organization_id == org_id,
-        ).order_by(Lead.updated_at.desc()).first()
-    else:
+    if org_id is None:
         # Nobody owns this Twilio number — misconfigured, or a number that
         # belongs to something else entirely. Return early rather than doing a
         # cross-org lead lookup which could apply DNC flags or AI pipeline
@@ -366,10 +357,65 @@ async def inbound_webhook(
                        twilio_to)
         return _twiml_ack()
 
+    process_inbound_sms(db, org_id=org_id, advisor=advisor, From=From, Body=Body,
+                        MessageSid=MessageSid)
+    return _twiml_ack()
+
+
+def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: str,
+                        MessageSid: str) -> dict:
+    """Everything the inbound webhook does once it knows WHICH ORGANIZATION the
+    message arrived for. Split out of `inbound_webhook` in Wholesale Phase 7.1
+    so there is exactly one inbound path: the Twilio webhook calls it after the
+    signature guard and the receiving-number lookup, and EvoSense's SANDBOX
+    "simulate a seller reply" calls it with the caller's own organization.
+    Nothing here changed meaning in that move; three things were added and are
+    marked PHASE 7.1 below."""
+    from app.services.dedup_service import normalize_phone
+    from app.services.cadence_service import stop_cadence_for_lead
+    from app.services.reply_classification_service import classify_reply, contains_hard_stop_language
+    from app.models.models import CadenceStatus, ReplyClassification
+    lead_phone = normalize_phone(From)
+
+    # `advisor` stays None on the shared-sender path ON PURPOSE. The reply
+    # belongs to whoever owns the LEAD, and the handler below already
+    # resolves that from `lead.assigned_to_id`; inventing an advisor here
+    # would attach a family's reply to whichever colleague owns the number.
+    lead = db.query(Lead).filter(
+        Lead.phone == lead_phone,
+        Lead.organization_id == org_id,
+    ).order_by(Lead.updated_at.desc()).first()
+
     if not lead:
         # Unknown sender - log nothing actionable, just acknowledge Twilio
         logger.info("[sms_webhook] inbound from a number with no matching lead")
-        return _twiml_ack()
+        return {"status": "no_lead"}
+
+    # PHASE 7.1 (1/3) — ONE MESSAGE, ONE REPLY. Twilio retries a webhook it did
+    # not see answered; the same MessageSid must not become a second Reply, a
+    # second classification or a second pipeline run. Scoped to this
+    # organization's leads. A retried message is still offered to EvoSense,
+    # whose routing is idempotent per reply, so an evaluation that failed the
+    # first time is not lost either.
+    if MessageSid:
+        _seen = (db.query(Reply).join(Lead, Lead.id == Reply.lead_id)
+                 .filter(Reply.twilio_sid == MessageSid,
+                         Lead.organization_id == org_id).first())
+        if _seen is not None:
+            _route_to_evosense(db, org_id, lead, _seen)
+            return {"status": "duplicate", "reply_id": _seen.id}
+
+    # PHASE 7.1 (2/3) — does an EvoSense acquisition conversation own this
+    # sender? If so EvoSense reads the reply (after it is saved, below) and the
+    # platform's AI pipeline does NOT auto-reply to a property owner EvoSense is
+    # working. Hard-stop, DNC and suppression handling below are unchanged and
+    # apply to every message, EvoSense's included.
+    try:
+        from app.services.evosense import inbound as _evosense_inbound
+        _evosense_owned = _evosense_inbound.owns_lead(db, org_id, lead)
+    except Exception:                                       # noqa: BLE001
+        logger.exception("evosense: ownership check failed for %s", MessageSid)
+        _evosense_owned = False
 
     # Hard legal opt-out check ALWAYS runs first and overrides anything
     # the AI classifier returns - see reply_classification_service.py's
@@ -400,7 +446,7 @@ async def inbound_webhook(
         _reply_advisor = advisor or (
             db.query(User).filter(User.id == lead.assigned_to_id).first() if lead.assigned_to_id else None
         )
-        if _reply_advisor:
+        if _reply_advisor and not _evosense_owned:
             if lead.status == "booked":
                 from app.services.ai_conversation_service import handle_inbound_reply
                 handle_inbound_reply(db, lead, _reply_advisor, Body)
@@ -460,7 +506,22 @@ async def inbound_webhook(
 
     logger.info("twilio inbound: lead=%s hot=%s classification=%s",
                 lead.id, is_hot, classification.value)
-    return _twiml_ack()
+
+    # PHASE 7.1 (3/3) — the reply is committed; now EvoSense may read it.
+    # After the commit on purpose: an EvoSense or AI failure can never lose the
+    # seller's message, and never turns into a 500 that makes Twilio retry.
+    if _evosense_owned:
+        _route_to_evosense(db, org_id, lead, reply)
+    return {"status": "processed", "reply_id": reply.id, "evosense": _evosense_owned}
+
+
+def _route_to_evosense(db: Session, org_id: str, lead, reply) -> None:
+    try:
+        from app.services.evosense import inbound as _evosense_inbound
+        _evosense_inbound.route_reply(db, org_id, lead, reply)
+    except Exception:                                       # noqa: BLE001
+        db.rollback()
+        logger.exception("evosense: inbound reply %s saved but not routed", reply.id)
 
 
 @router.patch("/replies/{reply_id}/mark-reviewed")

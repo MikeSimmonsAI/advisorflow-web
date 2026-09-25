@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
 import { isManagerRole, roleOf, workspaceFeatures } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
-import { detectTheme, BRAND_CONFIG, THEMES } from '../theme.js'
+import { detectTheme, shellTheme, shellThemeSource, productName, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
 import NotificationBell from './NotificationBell'
 import ProfileOnboarding from './ProfileOnboarding'
@@ -13,6 +13,7 @@ import WorkspaceAdminMenu from './WorkspaceAdminMenu'
 // A render error inside one page unmounts React's whole tree, rail included.
 // This keeps the failure inside the content area. See PageBoundary.
 import PageBoundary from './PageBoundary'
+import { isWholesalePath, WholesaleSearch, WholesaleEnvironment, WholesaleUser, useWholesaleCanvas, useWholesaleTitle, WholesaleProductLine } from './WholesaleShell'
 // A VERTICAL'S OWN PRESENTATION. Nav labels, groups and skin for a workspace
 // whose industry has one configured; null for everybody else, which is what
 // keeps this from being a global redesign. See verticals/workspaceVertical.js.
@@ -122,6 +123,46 @@ const NAV_GROUPS = [
       // with the other four.
       { to: '/re-engagement', label: 'Re-engagement', icon: 'thermometer', featureKey: 'leads' },
       { to: '/compliance', label: 'DNC List', icon: 'shield-check', featureKey: 'compliance' },
+    ],
+  },
+  // ── WHOLESALE REAL ESTATE ────────────────────────────────────────────────
+  //
+  // Its own group, because it is a whole operating mode rather than one more
+  // screen: a workspace that runs it works here all day, and a workspace that
+  // does not never sees the group at all.
+  //
+  // `featureKey` on every item and NO adminOnly on the first three. The
+  // entitlement key is real — `wholesale_real_estate` is registered in
+  // app/services/entitlements.py, which is the test the note above the
+  // Proposals item says to apply before putting a key here. Settings is
+  // adminOnly because the offer formula, the approval gates and the provider
+  // configuration are administrative; the day-to-day screens are not, and
+  // making them so would hide the product from the acquisitions person who
+  // actually uses it.
+  // Phase 7.2: ONE product, TWO operating worlds. EvoSense FINDS the deal
+  // (acquisition); Wholesale Operations MOVES it (deals already in the
+  // transaction workflow). There is no longer a "Command Center" in each:
+  // Acquisition Command is EvoSense's, Deal Operations is the transaction
+  // board. Contracts & Closing and Dispositions are focused views of the
+  // deals that are actually in those stages - not new pages.
+  {
+    label: 'Acquisition · EvoSense',
+    items: [
+      { to: '/wholesale/evosense', label: 'Acquisition Command', icon: 'target', featureKey: 'wholesale_real_estate', end: true },
+      { to: '/wholesale/evosense/inbox', label: 'Discovery Inbox', icon: 'search', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/evosense/strategies', label: 'Strategies', icon: 'zap', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/evosense/controls', label: 'Providers & Controls', icon: 'shield-check', featureKey: 'wholesale_real_estate' },
+    ],
+  },
+  {
+    label: 'Wholesale Operations',
+    items: [
+      { to: '/wholesale', label: 'Deal Operations', icon: 'activity', featureKey: 'wholesale_real_estate', end: true },
+      { to: '/wholesale/properties', label: 'Properties', icon: 'home', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/buyers', label: 'Cash Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/closing', label: 'Contracts & Closing', icon: 'file-text', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/dispositions', label: 'Dispositions', icon: 'send', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/settings', label: 'Wholesale Settings', icon: 'sliders', adminOnly: true, featureKey: 'wholesale_real_estate' },
     ],
   },
   {
@@ -235,6 +276,10 @@ function Icon({ name }) {
     // renders an EMPTY svg rather than failing, so a nav entry with an unknown
     // icon looks like a broken link and nothing anywhere says why.
     package: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></>,
+    // Added with the Wholesale nav group, per the note above: a name this map
+    // does not hold renders an EMPTY svg, so the entry would look like a broken
+    // link and nothing anywhere would say why.
+    home: <><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" /></>,
     // Added with the "My Work" nav item, per the note above.
     'check-square': <><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
     // NAMED BY CONFIGURATION, SO THEY HAVE TO EXIST HERE.
@@ -271,8 +316,10 @@ function LiveClock() {
   )
 }
 
-function ThemeToggle() {
-  const isBrandTheme = PLATFORM_THEME !== THEMES.BOOKABOOST
+function ThemeToggle({ branding }) {
+  // A branded shell (brand domain, or a workspace whose platform has its own
+  // theme) owns data-theme; only the BookaBoost default offers light/dark.
+  const isBrandTheme = shellTheme(branding) !== THEMES.BOOKABOOST
   const [dark, setDark] = useState(() => {
     if (isBrandTheme) return true
     const saved = localStorage.getItem('af_theme')
@@ -401,6 +448,15 @@ export default function Layout({ children }) {
   // line below that consumes it falls through to the platform behaviour.
   const vertical = verticalFor(branding)
 
+  // PHASE 7.3 — THE FOCUSED WHOLESALE SHELL. Inside /wholesale (and never
+  // inside a configured vertical, whose rail is its own) the rail shows the
+  // two wholesale worlds and folds every other platform screen under
+  // "EvoSys Platform". Nothing is removed: the same items, the same
+  // visibility rules, one click further away. See WholesaleShell.jsx.
+  const inWholesale = !vertical && isWholesalePath(location.pathname)
+  const [platformOpen, setPlatformOpen] = useState(false)
+  useWholesaleCanvas(inWholesale)
+
   // WHICH WORKSPACE THE ROUTED PAGE BELONGS TO.
   //
   // The organization the SERVER resolved, not the one stored locally: it is
@@ -520,7 +576,20 @@ export default function Layout({ children }) {
     window.location.href = '/login'
   }
 
-  const brandName = isGodAdmin ? 'AdvisorFlow' : (branding?.brand_name || PLATFORM_BRAND.displayName)
+  // The brand of THIS WORKSPACE's shell: the host's brand on a brand domain,
+  // otherwise the platform the organization belongs to (Phase 7.2 - this is
+  // what stopped an EvoSys Pro workspace rendering as BookaBoost locally).
+  const SHELL_BRAND = BRAND_CONFIG[shellTheme(branding)] || PLATFORM_BRAND
+  // THE BRAND-RESOLUTION GATE READS THIS. Which theme the shell resolved and
+  // WHERE it came from ('host' | 'workspace' | 'default'), stamped on the
+  // layout root so every acceptance run can prove the authenticated workspace's
+  // platform - not a hostname default - decided the brand (brand_gate.py).
+  const shellResolution = shellThemeSource(branding)
+  // The commercial product name this brand gives the Wholesale module
+  // (EvoSysPro -> "EvoSys Wholesale"); the neutral module name otherwise.
+  const WHOLESALE_PRODUCT = productName(branding, 'wholesale') || 'Wholesale'
+  useWholesaleTitle(inWholesale, WHOLESALE_PRODUCT)
+  const brandName = isGodAdmin ? 'AdvisorFlow' : (branding?.brand_name || SHELL_BRAND.displayName)
   // WHAT THE WORKSPACE ITSELF IS CALLED, which is not the same question as
   // "what brand is this app". Used only by the vertical wordmark, where the
   // answer must be the CUSTOMER even when an operator is the one looking —
@@ -534,13 +603,16 @@ export default function Layout({ children }) {
     ? (branding?.brand_logo_url || null)
     : isElevated
       ? (PLATFORM_BRAND.logoUrl || null)
-      : (branding?.brand_logo_url || PLATFORM_BRAND.logoUrl || null)
+      : (branding?.brand_logo_url || SHELL_BRAND.logoUrl || null)
 
   // Reset logo failure state when the URL changes (e.g. org switch)
   useEffect(() => { setLogoFailed(false) }, [logoUrl])
 
   return (
-    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}`}>
+    <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}${inWholesale ? ' layout--wholesale' : ''}`}
+         data-brand-theme={shellResolution.theme} data-brand-source={shellResolution.source}
+         data-brand-platform={branding?.platform?.slug || ''} data-org-id={branding?.organization_id || ''}
+         data-product={inWholesale ? WHOLESALE_PRODUCT : undefined}>
       <button type="button" className="mobile-menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open navigation menu">
         <span /><span /><span />
       </button>
@@ -599,18 +671,23 @@ export default function Layout({ children }) {
             )
           ) : logoUrl && !logoFailed ? (
             sidebarCollapsed ? null : (
-              <img
-                src={logoUrl}
-                alt={brandName}
-                style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
-                onError={() => setLogoFailed(true)}
-              />
+              <span className={inWholesale ? 'wsx-brand' : undefined} style={inWholesale ? undefined : { display: 'contents' }}>
+                <img
+                  src={logoUrl}
+                  alt={brandName}
+                  style={{ height: 72, maxWidth: 180, objectFit: 'contain', borderRadius: 6, display: 'block', margin: '0 auto' }}
+                  onError={() => setLogoFailed(true)}
+                />
+                {inWholesale ? <WholesaleProductLine name={WHOLESALE_PRODUCT} /> : null}
+              </span>
             )
           ) : (
             sidebarCollapsed ? (
               <SignalPulse color="blue" size={9} />
             ) : (
-              <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
+              inWholesale
+                ? <span className="wsx-brand"><span className="brand-mark">{brandName}</span><WholesaleProductLine name={WHOLESALE_PRODUCT} /></span>
+                : <><SignalPulse color="blue" size={9} /><span className="brand-mark">{brandName}</span></>
             )
           )}
           <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close">×</button>
@@ -786,7 +863,7 @@ export default function Layout({ children }) {
                     {!sidebarCollapsed && <div className="nav-section-label">{group.label}</div>}
                     {sidebarCollapsed && <div className="nav-divider" />}
                     {items.map((item) => (
-                      <NavLink key={item.to} to={item.to} end={item.to === '/'}
+                      <NavLink key={item.to} to={item.to} end={item.to === '/' || !!item.end}
                         className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
                         onClick={closeSidebar}
                         title={item.label}
@@ -814,6 +891,59 @@ export default function Layout({ children }) {
                 icon: configured.icon,
               })
             })
+            const renderItem = (item) => (
+              <NavLink key={item.to} to={item.to} end={item.to === '/' || !!item.end}
+                className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
+                onClick={closeSidebar}
+                title={item.label}
+              >
+                <Icon name={item.icon} />{!sidebarCollapsed && item.label}
+              </NavLink>
+            )
+            if (inWholesale) {
+              const isWs = (group) => group.items.some((item) => isWholesalePath(item.to))
+              const wsGroups = groups.filter(isWs)
+              const platformGroups = groups.filter((group) => !isWs(group))
+                .map((group) => ({ ...group, items: group.items.filter(visible) }))
+                .filter((group) => group.items.length > 0)
+              return (
+                <>
+                  {wsGroups.map((group) => {
+                    const items = group.items.filter(visible)
+                    if (items.length === 0) return null
+                    return (
+                      <div key={group.label} className="nav-section">
+                        {!sidebarCollapsed && <div className="nav-section-label">{group.label}</div>}
+                        {sidebarCollapsed && <div className="nav-divider" />}
+                        {items.map(renderItem)}
+                      </div>
+                    )
+                  })}
+                  {platformGroups.length > 0 && (
+                    <div className="wsx-platform">
+                      <button type="button" className="wsx-platform__toggle" aria-expanded={platformOpen}
+                              aria-controls="wsx-platform-list" onClick={() => setPlatformOpen((o) => !o)}
+                              title="Every other EvoSys screen: leads, replies, AI team, compliance, settings">
+                        {sidebarCollapsed ? '⋯' : (
+                          <span>EvoSys Platform<span className="wsx-platform__hint">Leads, AI team, compliance &amp; more</span></span>
+                        )}
+                        {!sidebarCollapsed && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>}
+                      </button>
+                      {platformOpen && (
+                        <div className="wsx-platform__list" id="wsx-platform-list">
+                          {platformGroups.map((group) => (
+                            <div key={group.label}>
+                              {!sidebarCollapsed && <div className="wsx-platform__group">{group.label}</div>}
+                              {group.items.map(renderItem)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )
+            }
             return groups.map((group) => {
               const items = group.items.filter(visible)
               if (items.length === 0) return null
@@ -822,7 +952,7 @@ export default function Layout({ children }) {
                   {!sidebarCollapsed && <div className="nav-section-label">{group.label}</div>}
                   {sidebarCollapsed && <div className="nav-divider" />}
                   {items.map((item) => (
-                    <NavLink key={item.to} to={item.to} end={item.to === '/'}
+                    <NavLink key={item.to} to={item.to} end={item.to === '/' || !!item.end}
                       className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}
                       onClick={closeSidebar}
                       title={item.label}
@@ -876,9 +1006,12 @@ export default function Layout({ children }) {
               </div>
             )}
           </div>
-          {!sidebarCollapsed && PLATFORM_BRAND.websiteUrl && (
+          {/* The workspace's own brand's website - on a non-brand host (localhost)
+              the hostname default would have linked an EvoSysPro workspace to
+              another brand's site. */}
+          {!sidebarCollapsed && SHELL_BRAND.websiteUrl && (
             <a
-              href={PLATFORM_BRAND.websiteUrl}
+              href={SHELL_BRAND.websiteUrl}
               className="back-to-website-btn"
               target="_blank"
               rel="noopener noreferrer"
@@ -899,8 +1032,9 @@ export default function Layout({ children }) {
             same action lives in the one control at the end of the top bar. */}
         {!vertical && <GodReturnBar context="the customer app" />}
         <header className="top-bar">
-          <LiveClock />
+          {inWholesale ? <WholesaleSearch /> : <LiveClock />}
           <div className="top-bar-right">
+            {inWholesale && <WholesaleEnvironment />}
             {/* The way BACK OUT of a customer workspace. Renders nothing for a
                 customer's own staff - they have no back office to return to,
                 and offering the button would advertise a door that refuses
@@ -909,8 +1043,11 @@ export default function Layout({ children }) {
                 In a vertical workspace this is one of the four actions inside
                 WorkspaceAdminMenu, so it is not also drawn as its own button. */}
             {vertical ? <WorkspaceAdminMenu /> : <ContextSwitcher current="workspace" />}
-            <ThemeToggle />
+            {/* The Wholesale product is one light design (the approved
+                board), so its screens do not offer the dark/light switch. */}
+            {!inWholesale && <ThemeToggle branding={isElevated ? null : branding} />}
             <NotificationBell />
+            {inWholesale && <WholesaleUser user={user} photo={profilePhoto} />}
           </div>
         </header>
         {/* THE SECOND CONTEXT BANNER WAS REMOVED, NOT THE FIRST.

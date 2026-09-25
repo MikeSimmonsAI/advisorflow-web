@@ -137,6 +137,7 @@ BACKGROUND_LOOPS = (
     "_support_intelligence_loop", "_review_request_loop",
     "_ai_conversation_loop", "_cadence_loop",
     "_session_cleanup_loop", "_sales_reminder_loop",
+    "_evosense_hunt_loop",
 )
 
 # The synchronous work each loop exists to do. None of these may be called in
@@ -145,6 +146,7 @@ BACKGROUND_LOOPS = (
 BLOCKING_WORK = {
     "process_scheduled_touches", "run_due_cadences", "run_review_request_cron",
     "purge_dead_sessions", "process_due", "run_daily_intelligence",
+    "run_due",
 }
 
 

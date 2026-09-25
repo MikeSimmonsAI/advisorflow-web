@@ -1078,6 +1078,114 @@ COLUMNS_TO_ADD = [
     #   fit through.
     ("sales_appointments", "booking_source", "VARCHAR"),
     ("sales_appointments", "booking_idempotency_key", "VARCHAR"),
+
+    # ── Wholesale buyer outreach: what the provider said (Phase 2) ──────────
+    #
+    # The table itself is created by `create_all` because it is new, so these
+    # would normally not be needed. They are here because the table is NOT new
+    # in every database that matters: a Phase 1 build has already booted and
+    # created `wholesale_buyer_outreach` without them, and `create_all` never
+    # adds a column to a table that already exists — which is the exact failure
+    # this module's docstring was written about.
+    ("wholesale_buyer_outreach", "provider_message_id", "VARCHAR"),
+    ("wholesale_buyer_outreach", "provider_error", "VARCHAR"),
+    ("wholesale_buyer_outreach", "provider_result", "TEXT"),
+    ("wholesale_buyer_outreach", "attempts", "INTEGER DEFAULT 0"),
+    ("wholesale_buyer_outreach", "last_attempt_at", "TIMESTAMP"),
+
+    # ── Wholesale Phase 3 ───────────────────────────────────────────────────
+    # Same reasoning as the Phase 2 block above: these tables exist in every
+    # database that has already booted a Phase 1 or Phase 2 build, and
+    # `create_all` does not add columns to a table it did not just create.
+    # Every entry is ADDITIVE and nullable (or carries a default) — nothing
+    # here drops, renames or rewrites a column.
+    ("wholesale_buyer_outreach", "delivered_at", "TIMESTAMP"),
+    ("wholesale_buyer_outreach", "opened_at", "TIMESTAMP"),
+    ("wholesale_buyer_outreach", "pof_status", "VARCHAR"),
+    ("wholesale_buyer_outreach", "pof_file_id", "VARCHAR"),
+    ("wholesale_buyer_outreach", "is_selected", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_buyer_outreach", "target_close_date", "DATE"),
+
+    ("wholesale_comps", "year_built", "INTEGER"),
+
+    ("wholesale_documents", "file_id", "VARCHAR"),
+    ("wholesale_documents", "buyer_id", "VARCHAR"),
+
+    ("wholesale_deals", "contract_date", "DATE"),
+    ("wholesale_deals", "seller_signed_at", "DATE"),
+    ("wholesale_deals", "buyer_signed_at", "DATE"),
+    ("wholesale_deals", "effective_date", "DATE"),
+    ("wholesale_deals", "earnest_money", "NUMERIC(14,2)"),
+    ("wholesale_deals", "earnest_money_due", "DATE"),
+    ("wholesale_deals", "earnest_money_received_at", "DATE"),
+    ("wholesale_deals", "option_fee", "NUMERIC(12,2)"),
+    ("wholesale_deals", "closing_deadline", "DATE"),
+    ("wholesale_deals", "title_escrow_officer", "VARCHAR"),
+    ("wholesale_deals", "title_phone", "VARCHAR"),
+    ("wholesale_deals", "title_email", "VARCHAR"),
+    ("wholesale_deals", "title_commitment_received_at", "DATE"),
+    ("wholesale_deals", "title_issues", "TEXT"),
+    ("wholesale_deals", "closing_time", "VARCHAR"),
+    ("wholesale_deals", "closing_location", "VARCHAR"),
+    ("wholesale_deals", "closing_status", "VARCHAR"),
+    ("wholesale_deals", "other_costs", "NUMERIC(14,2)"),
+    ("wholesale_deals", "lost_reason_detail", "TEXT"),
+    ("wholesale_deals", "buyer_selected_at", "TIMESTAMP"),
+    ("wholesale_deals", "buyer_selected_by_id", "VARCHAR"),
+    ("wholesale_deals", "economics_locked", "BOOLEAN DEFAULT FALSE"),
+
+    # ── Phase 5. The publication boundary and the money that actually landed.
+    # Every boolean here defaults FALSE so an existing deal is published to
+    # nobody until somebody publishes it. A migration that defaulted these to
+    # TRUE would retroactively expose every deal in every workspace.
+    ("wholesale_files", "category", "VARCHAR"),
+    ("wholesale_files", "buyer_visible", "BOOLEAN DEFAULT FALSE"),
+
+    # ── Phase 6. The owner-visible photo flag, and what an investor actually
+    # said when they answered from their own link. Same rule as Phase 5: the
+    # boolean defaults FALSE, so nothing already sitting in a workspace becomes
+    # visible to anybody merely because a migration ran.
+    ("wholesale_files", "seller_visible", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_buyer_outreach", "offer_financing", "VARCHAR"),
+    ("wholesale_buyer_outreach", "respondent_name", "VARCHAR"),
+    ("wholesale_buyer_outreach", "respondent_email", "VARCHAR"),
+    ("wholesale_buyer_outreach", "respondent_phone", "VARCHAR"),
+    ("wholesale_settings", "ai_tone", "VARCHAR"),
+    # Phase 7.3 closeout: the organization's own public Wholesale contact.
+    # Nullable, no default: an existing organization shows no public contact
+    # until somebody configures one.
+    ("wholesale_settings", "public_contact_phone", "VARCHAR"),
+    ("wholesale_settings", "public_contact_email", "VARCHAR"),
+
+    ("wholesale_documents", "buyer_visible", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_documents", "seller_visible", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_documents", "viewed_at", "TIMESTAMP"),
+    ("wholesale_documents", "superseded_by_id", "VARCHAR"),
+
+    ("wholesale_deals", "buyer_room_published", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_deals", "buyer_room_published_at", "TIMESTAMP"),
+    ("wholesale_deals", "buyer_room_published_by_id", "VARCHAR"),
+    ("wholesale_deals", "buyer_room_summary", "TEXT"),
+    ("wholesale_deals", "buyer_room_condition", "TEXT"),
+    ("wholesale_deals", "buyer_room_asking_price", "NUMERIC(14,2)"),
+    ("wholesale_deals", "buyer_room_show_arv", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_deals", "buyer_room_show_repairs", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_deals", "buyer_room_show_comps", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_deals", "seller_room_published", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_deals", "seller_room_published_at", "TIMESTAMP"),
+    ("wholesale_deals", "seller_room_published_by_id", "VARCHAR"),
+    ("wholesale_deals", "seller_room_message", "TEXT"),
+    ("wholesale_deals", "seller_room_contact_name", "VARCHAR"),
+    ("wholesale_deals", "seller_room_contact_phone", "VARCHAR"),
+    ("wholesale_deals", "seller_room_contact_email", "VARCHAR"),
+    ("wholesale_deals", "title_file_number", "VARCHAR"),
+    ("wholesale_deals", "funding_status", "VARCHAR"),
+    ("wholesale_deals", "funded_at", "TIMESTAMP"),
+    ("wholesale_deals", "fee_collected_at", "TIMESTAMP"),
+    ("wholesale_deals", "fee_payment_method", "VARCHAR"),
+    ("wholesale_deals", "fee_payment_reference", "VARCHAR"),
+    ("wholesale_deals", "fee_recorded_by_id", "VARCHAR"),
+    ("wholesale_deals", "fee_variance_note", "TEXT"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
