@@ -44,7 +44,12 @@ CATALOG: Dict[str, Dict[str, Any]] = {
     "OUT_OF_STATE_OWNER":   {"label": "Out-of-state owner", "points": 8, "current_days": 365, "stale_days": 730, "derived": True},
     "HIGH_EQUITY":          {"label": "High equity", "points": 0, "current_days": 180, "stale_days": 365, "derived": True},
     "FREE_AND_CLEAR":       {"label": "Free and clear", "points": 6, "current_days": 180, "stale_days": 365, "derived": True},
-    "LONG_OWNERSHIP":       {"label": "Long ownership", "points": 10, "current_days": 3650, "stale_days": 7300, "derived": True},
+    # A STATE, not an event: its evidence date is when the ownership began,
+    # so its freshness is measured from when the record last confirmed it
+    # (observed_at). Measured from the deed date, a longer ownership would
+    # read as staler evidence - exactly backwards.
+    "LONG_OWNERSHIP":       {"label": "Long ownership", "points": 10, "current_days": 365, "stale_days": 730, "derived": True,
+                             "state": True},
     "TAX_DELINQUENT":       {"label": "Tax delinquent", "points": 12, "current_days": 365, "stale_days": 730},
     "PRE_FORECLOSURE":      {"label": "Pre-foreclosure", "points": 16, "current_days": 120, "stale_days": 240},
     "PROBATE":              {"label": "Probate", "points": 12, "current_days": 365, "stale_days": 730},
@@ -117,7 +122,10 @@ def freshness(sig, when: Optional[datetime] = None) -> str:
     if sig.stale_at and when >= sig.stale_at:
         return STALE
     policy = CATALOG.get(sig.signal_type, {"current_days": 180, "stale_days": 365})
-    base = sig.effective_at or sig.observed_at or when
+    if policy.get("state"):
+        base = sig.observed_at or sig.effective_at or when
+    else:
+        base = sig.effective_at or sig.observed_at or when
     age = (when - base).days
     if age <= policy["current_days"]:
         return CURRENT

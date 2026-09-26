@@ -258,3 +258,19 @@ def test_enrichment_refuses_institutional_and_truncated_owners(db_session, sampl
     assert out["religious_org"].decision == C.D_INSUFFICIENT and "institution" in out["religious_org"].reasons
     assert out["joint"].decision == C.D_INSUFFICIENT and "truncated" in out["joint"].reasons
     assert out["estate_indicated"].decision == C.D_INSUFFICIENT and "estate" in out["estate_indicated"].reasons
+
+
+def test_long_ownership_freshness_follows_confirmation_not_the_deed_date():
+    """A 36-year ownership confirmed by this year's tax roll is CURRENT
+    evidence. Measured from the 1990 deed it read as stale and scored 0."""
+    sig = _sig("LONG_OWNERSHIP", source=SIG.DERIVED_SOURCE, days=5)
+    sig.effective_at = datetime(1990, 6, 1)
+    assert SIG.freshness(sig, NOW) == SIG.CURRENT
+    r = _score([sig], prop=_sprop(ownership_years=36))
+    assert r["value"] == SIG.CATALOG["LONG_OWNERSHIP"]["points"]
+    sig.observed_at = NOW - timedelta(days=800)          # nobody has re-confirmed it in two years
+    assert SIG.freshness(sig, NOW) == SIG.STALE
+    # an EVENT is still dated by the event
+    ev = _sig("CODE_VIOLATION", days=5)
+    ev.effective_at = NOW - timedelta(days=400)
+    assert SIG.freshness(ev, NOW) == SIG.STALE
