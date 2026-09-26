@@ -211,9 +211,19 @@ class TarrantTaxRollReader:
                             "value": "tax-roll litigation indicator set (%s)" % lit,
                             "raw": "LITIG=%s" % lit, "observed_days_ago": observed_days})
         deed = _mdY(r["deed_date"])
+        # The roll has no situs city / ZIP. When the owner's mailing street IS
+        # the situs street, the mailing city and ZIP are the property's own -
+        # recorded with that basis. Otherwise they stay UNKNOWN here.
+        from app.services.evosense.identity import normalize_street
+        situs_city = situs_zip = city_basis = None
+        if mail and normalize_street(mail)[0] and normalize_street(mail)[0] == normalize_street(situs(r))[0]:
+            situs_city = (r["ocity"] or "").title() or None
+            situs_zip = re.sub(r"\D", "", r["ozip"])[:5] or None
+            city_basis = "owner mailing address is the property"
         rec = {
             "source_reference": "TCTAX:%s:%s" % (apn(r["account"]), as_of.strftime("%Y%m%d") if as_of else "na"),
-            "street_address": situs(r), "state": "TX", "county": "Tarrant",
+            "street_address": situs(r), "city": situs_city, "zip_code": situs_zip,
+            "state": "TX", "county": "Tarrant",
             "parcel_apn": apn(r["account"]),
             "property_type": RESIDENTIAL_SPTB.get(r["sptb"]),
             "year_built": int(r["year_built"]) if r["year_built"].isdigit() and int(r["year_built"]) > 1800 else None,
@@ -226,7 +236,8 @@ class TarrantTaxRollReader:
             "_adapter_version": self.adapter_version,
             "_evidence": {"account": r["account"], "sptb": r["sptb"], "legal": r["legal"],
                           "prior_due": c["prior_due"], "current_due": c["current_due"],
-                          "delinquency_date": r["delq_date"], "status": r["status"] or None},
+                          "delinquency_date": r["delq_date"], "status": r["status"] or None,
+                          "city_basis": city_basis},
         }
         return rec
 

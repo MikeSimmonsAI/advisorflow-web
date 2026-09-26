@@ -302,6 +302,11 @@ def test_tax_roll_reads_only_real_delinquency_and_excludes_what_the_tax_office_s
     # a current-year-only delinquency is dated by the roll's own delinquency date
     cur = {s["type"]: s for s in res["records"][1]["signals"]}["TAX_DELINQUENT"]
     assert cur["effective_at"] == "%d-02-01" % TODAY.year
+    # owner lives there: the mailing city/ZIP are the property's, with that basis
+    r2 = res["records"][1]
+    assert (r2["city"], r2["zip_code"]) == ("Fort Worth", "76102")
+    assert r2["_evidence"]["city_basis"] == "owner mailing address is the property"
+    assert r["city"] is None and r["zip_code"] is None       # absentee: unknown, not guessed
 
 
 def test_tax_roll_record_cap_is_hard(dfw_files):
