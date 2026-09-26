@@ -1099,9 +1099,13 @@ async def import_properties(request: Request,
     # not fit are reported by row number with the reason. Throwing here would
     # lose the whole file's work to a limit that only ever stops the NEXT
     # addition, which is the rule plan_limits states for itself.
-    from app.services import plan_limits
-    capacity = plan_limits.counter_for_org_id(db, org_id, plan_limits.LIMIT_LEADS)
-    capacity_blocked = []
+    # The owners are captured AFTER the properties, all together, as one
+    # Universal Intake batch (svc.attach_imported_owners): one matcher across
+    # the whole file and the workspace, one batch the org can roll back, and
+    # the plan's lead allowance counted once. Past the allowance the property
+    # is kept and the row reported - the limit stops the NEXT addition, it
+    # never throws away the file.
+    pending: List[Dict[str, Any]] = []
 
     for i, row in enumerate(reader, start=2):
         data: Dict[str, Any] = {"acquisition_source": source,
@@ -1139,28 +1143,36 @@ async def import_properties(request: Request,
                                    actor_type=ACTOR_USER)
         created += 1
 
-        if (contact.get("phone") or contact.get("email")) and capacity.has_room(1):
+        if contact.get("phone") or contact.get("email"):
             contact.setdefault("last_name", data.get("owner_name") or "")
-            svc.attach_seller(db, org_id, user, prop, contact, capacity=capacity)
-            deal = svc.deal_for_property(db, org_id, prop.id)
-            if deal is not None and settings.auto_stage_on_enrichment:
-                svc._set_stage_unchecked(db, deal, "ready_for_outreach",
-                                         actor_type=ACTOR_AUTOMATION)
-        elif contact.get("phone") or contact.get("email"):
-            # The property is kept; the owner is not created. Reported, never
-            # silently dropped — a row that vanished without a reason is how an
-            # import of 500 becomes 412 and nobody finds out for a month.
-            capacity_blocked.append({"row": i, "property_id": prop.id})
-            deal = svc.deal_for_property(db, org_id, prop.id)
-            if deal is not None:
-                svc._set_stage_unchecked(db, deal, "enrichment_needed",
-                                         actor_type=ACTOR_AUTOMATION)
+            pending.append({"row": i, "property_id": prop.id, "contact": contact})
         else:
             deal = svc.deal_for_property(db, org_id, prop.id)
             if deal is not None:
                 svc._set_stage_unchecked(db, deal, "enrichment_needed",
                                          actor_type=ACTOR_AUTOMATION)
 
+    # The properties are Wholesale's half and are kept whatever happens next.
+    db.commit()
+
+    def _owner_attached(prop):
+        deal = svc.deal_for_property(db, org_id, prop.id)
+        if deal is not None and settings.auto_stage_on_enrichment:
+            svc._set_stage_unchecked(db, deal, "ready_for_outreach",
+                                     actor_type=ACTOR_AUTOMATION)
+
+    owners = svc.attach_imported_owners(db, org_id, user, pending,
+                                        source_detail=list_name or file.filename,
+                                        list_name=list_name, on_attached=_owner_attached)
+    capacity_blocked = owners["capacity_blocked"]
+    for blocked in capacity_blocked:
+        # The property is kept; the owner is not created. Reported, never
+        # silently dropped — a row that vanished without a reason is how an
+        # import of 500 becomes 412 and nobody finds out for a month.
+        deal = svc.deal_for_property(db, org_id, blocked["property_id"])
+        if deal is not None:
+            svc._set_stage_unchecked(db, deal, "enrichment_needed",
+                                     actor_type=ACTOR_AUTOMATION)
     db.commit()
     return {
         "created": created,
@@ -1171,6 +1183,8 @@ async def import_properties(request: Request,
                           if unmapped else None),
         "source": source,
         "is_test": is_test,
+        "owners_attached": owners["attached"],
+        "intake_batch_id": owners["intake_batch_id"],
         "capacity_blocked": capacity_blocked,
         "capacity_note": (
             "%d row(s) carried contact details but this plan's active-lead "

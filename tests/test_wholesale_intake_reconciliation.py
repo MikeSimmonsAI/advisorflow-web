@@ -555,3 +555,74 @@ def test_an_intake_failure_never_loses_an_operator_added_owner(client, world, mo
     assert db.query(Lead).one().last_name == "Owner"
     err = db.query(WholesaleEvent).filter_by(action="seller.intake_error").one()
     assert "simulated failure" in err.details and "555" not in err.details
+
+
+# ── the Wholesale property CSV: the person half goes through intake ─────────
+
+def _import(client, h, csv_text):
+    import io
+    return client.post("/wholesale/properties/import", headers=h,
+                       files={"file": ("owners.csv", io.BytesIO(csv_text.encode()), "text/csv")})
+
+
+def test_a_property_csv_captures_its_owners_as_one_intake_batch(client, world):
+    from app.models.import_models import ImportBatch
+    from app.models.intake_models import OrgContact
+    db, o = world["db"], world["orgs"]
+    h = _headers(db, _user(db, o["evo"]))
+    # Pat already wrote in through /sell.
+    post(client, form(submission_id="csv-pre"))
+    r = _import(client, h,
+                "Address,City,State,Zip,First Name,Last Name,Phone,Email\n"
+                "1 Csv St,Dallas,TX,75201,Gus,Grant,2145550301,gus@example.com\n"
+                "2 Csv St,Dallas,TX,75201,Gus,Grant,2145550301,gus@example.com\n"
+                "3 Csv St,Dallas,TX,75201,Pat,Seller,(214) 555-0123,pat@example.com\n")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["created"] == 3 and body["owners_attached"] == 3 and body["intake_batch_id"]
+    # Gus twice in the file is one person; Pat is the person already here.
+    assert db.query(Lead).count() == 2 and db.query(OrgContact).count() == 2
+    assert db.query(WholesaleSellerProfile).count() == 4        # Pat's /sell one + 3
+    gus = db.query(Lead).filter_by(first_name="Gus").one()
+    assert gus.import_batch_id == body["intake_batch_id"] and gus.phone == "12145550301"
+    assert gus.source_category == "wholesale" and gus.relationship_type == "cold_lead"
+    assert gus.org_contact_id and db.query(ImportBatch).filter_by(
+        id=body["intake_batch_id"]).one().created_by_id is not None
+    assert db.query(WholesaleEvent).filter_by(action="import.intake_error").count() == 0
+
+
+def test_an_intake_failure_never_loses_an_imported_owner(client, world, monkeypatch):
+    from app.services.intake import capture as CAP
+    db, o = world["db"], world["orgs"]
+    h = _headers(db, _user(db, o["evo"]))
+
+    def boom(*a, **k):
+        raise RuntimeError("simulated failure [parameters: ('+12145550302',)]")
+    monkeypatch.setattr(CAP, "capture_many", boom)
+    r = _import(client, h, "Address,State,First Name,Last Name,Phone\n"
+                           "5 Csv St,TX,Hal,Holt,2145550302\n")
+    assert r.status_code == 200, r.text
+    assert r.json()["owners_attached"] == 1 and r.json()["intake_batch_id"] is None
+    assert db.query(Lead).one().last_name == "Holt"
+    err = db.query(WholesaleEvent).filter_by(action="import.intake_error").one()
+    assert "simulated failure" in err.details and "555" not in err.details
+
+
+def test_rolling_back_the_owner_batch_keeps_leads_that_have_a_seller(client, world):
+    from app.models.import_models import ImportBatch
+    from app.services.intake import rollback as RB
+    from app.services.intake.capture import user_context
+    from app.models.models import Organization
+    db, o = world["db"], world["orgs"]
+    admin = _user(db, o["evo"])
+    h = _headers(db, admin)
+    body = _import(client, h, "Address,State,First Name,Last Name,Phone\n"
+                              "7 Csv St,TX,Ida,Ives,2145550303\n").json()
+    batch = db.query(ImportBatch).filter_by(id=body["intake_batch_id"]).one()
+    plan = RB.plan(db, batch)
+    lead_items = [i for i in plan["items"] if i["target_type"] == "lead"]
+    assert lead_items and all(i["outcome"] != "remove" for i in lead_items)
+    RB.execute(db, batch, user_context(db.query(Organization).get(o["evo"].id), admin))
+    db.commit()
+    assert db.query(Lead).count() == 1 and db.query(WholesaleSellerProfile).count() == 1
+    assert db.query(WholesaleDeal).count() == 1

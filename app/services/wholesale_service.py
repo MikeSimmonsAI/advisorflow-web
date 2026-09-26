@@ -407,6 +407,114 @@ def attach_seller(db: Session, org_id: str, user: Optional[User],
     return profile
 
 
+def _adopt_intake_lead(lead, prop: WholesaleProperty, user: Optional[User],
+                       data: Dict[str, Any]) -> None:
+    """What only Wholesale knows about a person intake just created for it."""
+    lead.source_category = data.get("source_category") or "wholesale"
+    lead.relationship_type = data.get("relationship_type") or lead.relationship_type \
+        or "cold_lead"
+    if not lead.assigned_to_id:
+        lead.assigned_to_id = prop.assigned_to_id or getattr(user, "id", None)
+    if prop.is_test:
+        # A test property's seller is a test lead (app/services/test_records.py).
+        lead.is_test = True
+        lead.test_note = "Wholesale sandbox record"
+    if data.get("notes") and not lead.notes:
+        lead.notes = data["notes"]
+
+
+def _link_contact(db: Session, org_id: str, contact_id: Optional[str], lead_id: str) -> None:
+    """Intake kept a contact but made no Lead, and the direct path made one:
+    link them so the person is still one record."""
+    if not contact_id:
+        return
+    from app.models.intake_models import OrgContact
+    c = (db.query(OrgContact).filter(OrgContact.id == contact_id,
+                                     OrgContact.organization_id == org_id).first())
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org_id).first()
+    if c is not None and lead is not None and not c.lead_id:
+        c.lead_id = lead.id
+        lead.org_contact_id = c.id
+
+
+def attach_imported_owners(db: Session, org_id: str, user: Optional[User],
+                           pending: List[Dict[str, Any]], *, source_detail: Optional[str],
+                           list_name: Optional[str], on_attached=None) -> Dict[str, Any]:
+    """The PERSON half of a Wholesale property CSV, through Universal Intake.
+
+    `pending` is one item per row that carried an owner's phone or email:
+    {"row": <file row number>, "property_id": ..., "contact": {first_name,
+    last_name, phone, email}}. The properties themselves are already written
+    (and committed) by the caller - they are Wholesale/EvoSense's half.
+
+    All the owners go into ONE intake batch: one matcher across the whole file
+    and the workspace (the same owner on three properties is one person, one
+    Lead), org contacts, and a single batch the organization can roll back.
+    Rolling it back never removes a Lead that has a seller profile - intake's
+    rollback keeps any lead with downstream rows - and never touches a deal.
+
+    Past the plan's lead allowance the contact is kept, no Lead is made, and
+    the row is returned in `capacity_blocked` (the property stays). If intake
+    fails outright, every owner goes through the direct path exactly as before
+    and the error is recorded without personal data. `on_attached(prop)` is
+    called for each property that got its owner.
+    """
+    from app.models.models import Organization
+    from app.services import plan_limits
+    result = {"intake_batch_id": None, "capacity_blocked": [], "attached": 0,
+              "intake_error": None}
+    if not pending:
+        return result
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    rows = None
+    try:
+        from app.services.intake.capture import capture_many
+        props = {p["property_id"]: get_property(db, org_id, p["property_id"]) for p in pending}
+        records = []
+        for p in pending:
+            prop = props[p["property_id"]]
+            c = p["contact"]
+            records.append({"first_name": c.get("first_name"), "last_name": c.get("last_name"),
+                            "phone": c.get("phone"), "email": c.get("email"),
+                            "street_address": prop.street_address, "city": prop.city,
+                            "state": prop.state, "zip_code": prop.zip_code})
+        many = capture_many(db, org, records, source="wholesale", source_detail=source_detail,
+                            list_name=list_name or "Wholesale property import",
+                            classification="cold_prospect", actor_label="Wholesale import",
+                            user=user)
+        result["intake_batch_id"] = many.batch_id
+        rows = {r.index: r for r in many.rows}
+    except Exception as exc:  # noqa: BLE001 - intake must never lose an imported owner
+        db.rollback()
+        from app.services.wholesale_seller_intake import _safe_error
+        log.exception("wholesale import: universal intake failed; direct path used")
+        result["intake_error"] = _safe_error(exc)
+        log_event(db, org_id, "import.intake_error", actor_type=ACTOR_USER,
+                  actor_user_id=getattr(user, "id", None),
+                  summary="Universal Intake failed; owners were added directly",
+                  details={"error": result["intake_error"]}, mirror_to_platform_audit=False)
+        rows = None
+
+    capacity = plan_limits.counter_for_org_id(db, org_id, plan_limits.LIMIT_LEADS)
+    for k, p in enumerate(pending):
+        prop = get_property(db, org_id, p["property_id"])
+        cr = rows.get(k) if rows is not None else None
+        if cr is not None and cr.lead is not None:
+            if cr.lead_created:
+                _adopt_intake_lead(cr.lead, prop, user, {})
+            attach_seller(db, org_id, user, prop, dict(p["contact"], lead_id=cr.lead.id))
+        elif capacity.has_room(1):
+            profile = attach_seller(db, org_id, user, prop, p["contact"], capacity=capacity)
+            _link_contact(db, org_id, getattr(cr, "contact_id", None), profile.lead_id)
+        else:
+            result["capacity_blocked"].append({"row": p["row"], "property_id": prop.id})
+            continue
+        result["attached"] += 1
+        if on_attached is not None:
+            on_attached(prop)
+    return result
+
+
 def add_owner(db: Session, org_id: str, user: Optional[User], prop: WholesaleProperty,
               data: Dict[str, Any]) -> WholesaleSellerProfile:
     """An operator adds an owner by hand (no `lead_id`): WHO THE PERSON IS goes
@@ -447,17 +555,7 @@ def add_owner(db: Session, org_id: str, user: Optional[User], prop: WholesalePro
             actor_label="Wholesale owner", external=False, explicit=True, user=user)
         lead, contact_id = cap.lead, cap.contact_id
         if lead is not None and cap.lead_created:
-            # What only Wholesale knows about a person it just brought in.
-            lead.source_category = data.get("source_category") or "wholesale"
-            lead.relationship_type = data.get("relationship_type") or lead.relationship_type \
-                or "cold_lead"
-            if not lead.assigned_to_id:
-                lead.assigned_to_id = prop.assigned_to_id or getattr(user, "id", None)
-            if prop.is_test:
-                lead.is_test = True
-                lead.test_note = "Wholesale sandbox record"
-            if data.get("notes") and not lead.notes:
-                lead.notes = data["notes"]
+            _adopt_intake_lead(lead, prop, user, data)
     except Exception as exc:  # noqa: BLE001 - intake must never lose an operator's owner
         db.rollback()
         from app.services.wholesale_seller_intake import _safe_error
@@ -471,14 +569,7 @@ def add_owner(db: Session, org_id: str, user: Optional[User], prop: WholesalePro
     prop = get_property(db, org_id, prop_id)
     if lead is None:
         profile = attach_seller(db, org_id, user, prop, data)
-        if contact_id:
-            from app.models.intake_models import OrgContact
-            c = (db.query(OrgContact).filter(OrgContact.id == contact_id,
-                                             OrgContact.organization_id == org_id).first())
-            new_lead = db.query(Lead).filter(Lead.id == profile.lead_id).first()
-            if c is not None and new_lead is not None and not c.lead_id:
-                c.lead_id = new_lead.id
-                new_lead.org_contact_id = c.id
+        _link_contact(db, org_id, contact_id, profile.lead_id)
         return profile
     return attach_seller(db, org_id, user, prop, dict(data, lead_id=lead.id))
 

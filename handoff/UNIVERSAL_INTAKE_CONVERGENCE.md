@@ -116,7 +116,7 @@ not about who the person is.
 | 1. Merge `feature/universal-intake` into main | **DONE** (merge commit on `feat/universal-intake-converge`; only conflict was `app/models/registry.py`, both sides kept) |
 | 2. Single-record intake entry point | **DONE** — `app/services/intake/capture.py` `capture_one()`: a one-row batch through the unchanged engine (create_batch → run_analysis → run_commit). |
 | 3. `/sell` onto it | **DONE** — `wholesale_seller_intake.submit` calls `capture_one`; `_existing_lead` deleted. Wholesale keeps property identity, role on the property, deal lifecycle, notifications. |
-| 4. Operator attach + Wholesale CSV | **operator attach DONE** (`wholesale_service.add_owner`, see below); Wholesale CSV still open |
+| 4. Operator attach + Wholesale CSV | **DONE** — operator attach (`wholesale_service.add_owner`) and the property CSV (`attach_imported_owners` via `intake.capture.capture_many`), see below |
 | 5. EvoSense `converged_contact_ref` | open |
 | 6. Seller edits write through to `org_contacts` | **DONE** (`intake/contacts.apply_manual_edit`, see below) |
 | 7. Capacity semantics | **DECIDED (Mike, 2026-09-26) and DONE** — see below |
@@ -217,8 +217,32 @@ for EXTERNAL arrivals via `run_commit(..., hold_when_full=True)` /
     links it to that contact.
 * `capture_one` has two new parameters: `explicit` (a deliberate request gets a
   Lead even on a POSSIBLE match) and `user` (a real actor context).
-* **Still open:** the Wholesale property CSV (step 4b). Each row's person half
-  should go through intake, with batch rollback retracting EvoSense
-  observations. Also open: step 5 (EvoSense `converged_contact_ref`) and
-  step 8 (retiring the direct Lead construction in `attach_seller` once CSV is
-  converged; it remains the fail-safe path until then).
+
+### Step 4b — the Wholesale property CSV (2026-09-26, night)
+* `POST /wholesale/properties/import` now handles each file in two halves:
+  1. The PROPERTY half is written and committed first (Wholesale/EvoSense). It
+     is kept whatever happens to the owners.
+  2. The PERSON half is every row with an owner phone or email. All of them go
+     to `wholesale_service.attach_imported_owners`, which calls
+     `intake.capture.capture_many` to make ONE intake batch for the file.
+* That gives one matcher across the whole file and the workspace. The same
+  owner on three rows is one contact, one Lead and three seller profiles. An
+  owner who is already in the workspace (for example from `/sell`) is reused.
+* A POSSIBLE match gets its own Lead, marked for review. An existing
+  do-not-contact person stays on their record, and every block still applies.
+* Past the plan's lead allowance, the contact is kept with no Lead, and the row
+  is reported in `capacity_blocked`. The property stays, in ENRICHMENT NEEDED.
+* The response now includes `owners_attached` and `intake_batch_id`.
+* **Rollback:** intake's rollback keeps any Lead that has downstream rows, and
+  a seller profile counts as one. Rolling back the owner batch therefore never
+  removes a seller's Lead and never touches a deal (this is tested). The CSV
+  path writes no EvoSense observations, so there is nothing to retract for it.
+  If EvoSense ingest ever starts carrying `intake_batch_id`, its retraction
+  belongs in step 5.
+* **Fail-safe:** if intake errors, every owner in the file goes through the
+  direct path exactly as before. An `import.intake_error` event is logged
+  without personal data.
+* **Still open:** step 5 (EvoSense `converged_contact_ref`). Also step 8:
+  `attach_seller` still builds a Lead directly, but only as the fail-safe path
+  for all three entry points. Remove it once production has shown clean
+  captures for a while.

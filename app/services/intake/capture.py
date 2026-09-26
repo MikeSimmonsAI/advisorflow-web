@@ -185,3 +185,112 @@ def _batch(db, batch_id, org_id):
     from app.models.import_models import ImportBatch
     return (db.query(ImportBatch).filter(ImportBatch.id == batch_id,
                                          ImportBatch.organization_id == org_id).one())
+
+
+@dataclass
+class CapturedRow:
+    index: int                       # position in the caller's list
+    contact_id: Optional[str]
+    lead: Any
+    match: str                       # new | existing | possible | blocked_existing | duplicate | not_imported
+    lead_created: bool = False
+
+
+@dataclass
+class ManyResult:
+    batch_id: str
+    rows: List[CapturedRow]
+
+
+def capture_many(db: Session, org, records: List[Dict[str, Any]], *, source: str,
+                 source_detail: Optional[str] = None, list_name: Optional[str] = None,
+                 classification: str = "cold_prospect", actor_label: str = "Import",
+                 user=None) -> ManyResult:
+    """Capture MANY people deliberately added by a present operator (a module's
+    own file import, e.g. Wholesale's property CSV) as ONE intake batch.
+
+    Same engine and same rules as any import - one matcher, org contacts,
+    fill-blanks, a single batch the organization can roll back - plus what a
+    deliberate add means: an existing do-not-contact person is kept on their
+    existing record (every block still applies), and a POSSIBLE match is kept
+    separate, marked for review, and still gets its Lead. The plan limit is the
+    normal bulk rule: past it the contact is kept and no Lead is made, and the
+    caller reports that row. COMMITS.
+
+    Returns one CapturedRow per input record, in order (row N of the file is
+    records[N-2]); an in-file duplicate resolves to the row it duplicates."""
+    from app.models.models import Lead
+    ctx = user_context(org, user) if user is not None else system_context(org, actor_label)
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(HEADERS)
+    for r in records:
+        w.writerow([("" if r.get(k) is None else str(r.get(k))) for k in _KEYS])
+    batch = ENG.create_batch(db, ctx, content=buf.getvalue().encode("utf-8"),
+                             filename="capture-%s.csv" % stamp, source=source,
+                             source_detail=source_detail, list_name=list_name,
+                             display_name="%s %s" % (actor_label, stamp))
+    cfg = json.loads(batch.classification_json or "{}")
+    cfg["fallback"] = classification
+    batch.classification_json = json.dumps(cfg)
+    db.commit()
+    ENG.run_analysis(db, batch.id, org.id)
+
+    staged = (db.query(ImportStagedRow).filter(ImportStagedRow.batch_id == batch.id,
+                                              ImportStagedRow.organization_id == org.id).all())
+    pre = {}
+    for row in staged:
+        pre[row.id] = {IntakeStatus.EXISTING_MATCH: "existing", IntakeStatus.NEEDS_REVIEW: "possible",
+                       IntakeStatus.BLOCKED: "blocked_existing",
+                       IntakeStatus.DUPLICATE: "duplicate"}.get(row.intake_status, "new")
+        if row.intake_status == IntakeStatus.BLOCKED:
+            row.intake_status = IntakeStatus.APPROVED
+            row.duplicate_resolution = DuplicateResolution.UPDATE_EXISTING
+            row.review_note = ("Added by an operator for an existing do-not-contact record: "
+                               "kept on that record; every outreach block still applies.")
+        elif row.intake_status == IntakeStatus.NEEDS_REVIEW:
+            row.duplicate_resolution = DuplicateResolution.KEEP_SEPARATE
+    db.commit()
+
+    COMMIT.run_commit(db, batch.id, org.id, ctx, CommitMode.READY_AND_REVIEW,
+                      include_enrichment=True, hold_when_full=False)
+    db.expire_all()
+    staged = (db.query(ImportStagedRow).filter(ImportStagedRow.batch_id == batch.id,
+                                              ImportStagedRow.organization_id == org.id).all())
+    by_id = {r.id: r for r in staged}
+    catalog = None
+    b = None
+    try:
+        from app.services import plan_limits
+        capacity = plan_limits.counter_for_org_id(db, org.id, plan_limits.LIMIT_LEADS)
+    except Exception:  # noqa: BLE001
+        capacity = None
+
+    out: List[CapturedRow] = []
+    for row in sorted(staged, key=lambda r: r.row_number):
+        src = row
+        if row.duplicate_of_staged_row_id and row.duplicate_of_staged_row_id in by_id:
+            src = by_id[row.duplicate_of_staged_row_id]
+        contact = (db.query(OrgContact).filter(OrgContact.id == src.committed_contact_id,
+                                               OrgContact.organization_id == org.id).first()
+                   if src.committed_contact_id else None)
+        lead_id = src.committed_lead_id or getattr(contact, "lead_id", None)
+        lead = (db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org.id).first()
+                if lead_id else None)
+        created = bool(lead is not None and lead.import_batch_id == batch.id and src is row)
+        if lead is None and contact is not None and src is row and row.creates_lead:
+            # A review row an operator deliberately added: its own Lead, still
+            # marked for review on the contact. Plan limit applies (no hold).
+            if catalog is None:
+                catalog, b = ENG.org_catalog(db, org.id), _batch(db, batch.id, org.id)
+            lead = COMMIT.activate_lead(db, b, row, contact, catalog, ctx.actor_name, capacity,
+                                        hold_when_full=False)
+            if lead is not None:
+                row.committed_lead_id = lead.id
+                created = True
+        match = pre.get(row.id, "new") if (contact is not None or lead is not None) else "not_imported"
+        out.append(CapturedRow(index=row.row_number - 2, contact_id=getattr(contact, "id", None),
+                               lead=lead, match=match, lead_created=created))
+    db.commit()
+    return ManyResult(batch_id=batch.id, rows=out)
