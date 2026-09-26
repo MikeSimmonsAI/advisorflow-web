@@ -75,6 +75,10 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 _ZIP_RE = re.compile(r"^\d{5}(-\d{4})?$")
 
 
+class _HeldNoConfirmation(Exception):
+    pass
+
+
 class IntakeRefused(Exception):
     """No destination. Operator-facing reason; the public caller never sees it."""
 
@@ -331,16 +335,19 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
         if lead is not None:
             seller_data["lead_id"] = lead.id
         profile = svc.attach_seller(db, org_id, None, prop, seller_data, actor_type=ACTOR_API,
-                                    set_primary=primary)
+                                    set_primary=primary, external_arrival=True)
     except HTTPException as exc:
-        # Plan capacity or another refusal from the canonical path. The public
-        # caller gets the neutral refusal; the operator gets the reason.
+        # A refusal from the canonical path (plan capacity no longer refuses an
+        # external arrival - it HOLDS). The public caller gets the neutral
+        # refusal; the operator gets the reason.
         db.rollback()
         raise IntakeRefused("canonical wholesale path refused: %s %s"
                             % (exc.status_code, exc.detail))
 
     lead = db.query(Lead).filter(Lead.id == profile.lead_id,
                                  Lead.organization_id == org_id).first()
+    from app.services import lead_capacity
+    held = lead_capacity.is_held(lead)
     if matched_by:
         # A RETURNING person: fill what was blank, keep what they wrote, and
         # stop calling somebody who just reached out a cold lead.
@@ -360,6 +367,9 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
     reference = _reference(getattr(deal, "id", None) or prop.id)
 
     consent = None
+    # The consent is EVIDENCE and is always recorded. The confirmation text is
+    # an outbound message, so a capacity-held seller is not sent one (the send
+    # path refuses held leads anyway; this records why, instead of an error).
     if d["sms_consent"]:
         consent = ws.record_consent(
             db, org_id, phone_raw=d["phone_raw"], disclosure_text=d["disclosure_text"],
@@ -371,6 +381,8 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
         # else: until the program is on and a Messaging Service is configured
         # it is refused, and the reason is recorded on the consent itself.
         try:
+            if held:
+                raise _HeldNoConfirmation()
             names = ws.program_brand(db, org_id)
             body = ws.OPT_IN_CONFIRMATION.format(brand=names["brand"])
             result = ws.send_program_sms(db, lead, body,
@@ -378,6 +390,8 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
                                          send_source="wholesale_program")
             consent.confirmation_status = ("sent" if result.get("sent")
                                            else ",".join(result.get("reasons") or ["NOT_SENT"]))
+        except _HeldNoConfirmation:
+            consent.confirmation_status = "LEAD_CAPACITY_HELD"
         except Exception as exc:                            # noqa: BLE001
             log.exception("wholesale intake: confirmation SMS failed for consent %s", consent.id)
             consent.confirmation_status = "ERROR"
@@ -398,6 +412,7 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
                  "source_url": d.get("source_url"), "repeat": repeat,
                  "reengaged": reengaged, "additional_contact": additional,
                  "matched_by": matched_by, "assigned_to_id": assignee_id,
+                 "capacity_held": held,
                  "notes": d.get("notes")})
 
     name = d["full_name"] or "A seller"
@@ -408,10 +423,17 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
     lead_in = {"new": "New seller inquiry", "repeat": "Returning seller inquiry",
                "re-engaged": "Seller re-engaged (previous deal was closed/dead)",
                "additional contact": "New contact for a property that already has a seller - verify"}[kind]
-    WN.notify(db, org_id, kind=NotificationType.WHOLESALE_INQUIRY,
-              message="%s: %s - %s (%s). Ref %s" % (lead_in, name, svc.address_line(prop), detail, reference),
-              lead_id=lead.id, link=WN.deal_link(getattr(deal, "id", None)), assignee_id=assignee_id)
+    if held:
+        lead_in += (" - WAITING: your plan's lead limit is full, so this seller is held "
+                    "(kept, not contacted) until capacity is available or the plan is upgraded")
+    WN.inquiry(db, org_id, kind=kind, held=held,
+               message="%s: %s - %s (%s). Ref %s" % (lead_in, name, svc.address_line(prop), detail, reference),
+               lead_id=lead.id, deal_id=getattr(deal, "id", None), assignee_id=assignee_id,
+               details={"reference": reference, "name": name, "address": svc.address_line(prop),
+                        "condition": d.get("property_condition"), "timeline": d.get("timeline"),
+                        "sms_consent": bool(consent), "kind": kind})
     db.commit()
+    WN.send_pending_email(db)
     return {"reference": reference,
             "action": "updated" if repeat and not reengaged else "created",
             "sms_consent_recorded": consent is not None}

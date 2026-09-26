@@ -477,6 +477,8 @@ class SettingsPatch(BaseModel):
     # Who a public seller inquiry is assigned to (a user of this workspace).
     # Empty string clears it (unassigned: the workspace admins are notified).
     inquiry_assignee_id: Optional[str] = None
+    inquiry_email_enabled: Optional[bool] = None
+    inquiry_email_recipients: Optional[str] = None
 
 
 _SMS_PROGRAM_FIELDS = ("public_intake_key", "sms_program_enabled", "sms_sender_number",
@@ -569,6 +571,8 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
         "sms_campaign_sid": getattr(s, "sms_campaign_sid", None),
         "sms_brand_sid": getattr(s, "sms_brand_sid", None),
         "inquiry_assignee_id": getattr(s, "inquiry_assignee_id", None),
+        "inquiry_email_enabled": bool(getattr(s, "inquiry_email_enabled", False)),
+        "inquiry_email_recipients": getattr(s, "inquiry_email_recipients", None),
     }
     for field in _JSON_SETTINGS:
         out[field] = _jsonl(getattr(s, field))
@@ -649,6 +653,16 @@ def patch_settings(payload: SettingsPatch, request: Request,
             # 404-shaped: an id from another workspace is not confirmed to exist.
             raise HTTPException(status_code=400, detail="That user is not in this workspace.")
         data["inquiry_assignee_id"] = v or None
+    if "inquiry_email_recipients" in data:
+        addrs = [a.strip().lower() for a in (data["inquiry_email_recipients"] or "")
+                 .replace(";", ",").split(",") if a.strip()]
+        bad = [a for a in addrs if not _EMAIL_RE.match(a) or len(a) > 254]
+        if bad or len(addrs) > 10:
+            raise HTTPException(status_code=400, detail="Enter up to 10 valid email addresses, "
+                                "separated by commas." + (" Not valid: %s" % ", ".join(bad[:3]) if bad else ""))
+        data["inquiry_email_recipients"] = ", ".join(addrs) or None
+    if "inquiry_email_enabled" in data:
+        data["inquiry_email_enabled"] = bool(data["inquiry_email_enabled"])
     if data.get("high_threshold") is not None and data.get("medium_threshold") is not None \
             and data["high_threshold"] <= data["medium_threshold"]:
         raise HTTPException(status_code=400,
@@ -956,6 +970,31 @@ def update_property(property_id: str, payload: PropertyIn, request: Request,
     db.commit()
     db.refresh(prop)
     return property_json(prop)
+
+
+class TestFlagIn(BaseModel):
+    is_test: bool
+    note: Optional[str] = None
+    confirm: str = ""
+
+
+@router.post("/properties/{property_id}/test-flag")
+def set_property_test_flag(property_id: str, payload: TestFlagIn,
+                           db: Session = Depends(get_db),
+                           user: User = Depends(require_tenant_user),
+                           _guard: User = Depends(require_not_observation)):
+    """Mark a property (and its deals, seller profiles and seller Leads) as a
+    TEST record, or clear it. Workspace admins only; the street address must be
+    typed to confirm. Reversible, audited, deletes nothing."""
+    org_id = svc.write_org_id(db, user)
+    prop = svc.get_property(db, org_id, property_id)
+    if (getattr(user, "role", None) or "").lower() not in _ADMIN_ROLES + ("admin", "owner"):
+        raise HTTPException(status_code=403, detail="Only a workspace admin can change test marking.")
+    if (payload.confirm or "").strip().lower() != (prop.street_address or "").strip().lower():
+        raise HTTPException(status_code=422, detail="Type the property's street address to confirm.")
+    out = svc.set_test_flag(db, org_id, prop, payload.is_test, note=payload.note, user=user)
+    db.commit()
+    return out
 
 
 # ── CSV import ──────────────────────────────────────────────────────────────

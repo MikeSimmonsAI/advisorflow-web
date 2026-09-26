@@ -306,6 +306,10 @@ def attacks(ids):
 
         # ── Phase 3: files. A stored document is the thing worth stealing. ──
         ("get", "/wholesale/properties/%s/photos" % p, None),
+        # Marking somebody else's property as a test record would silence
+        # their real seller.
+        ("post", "/wholesale/properties/%s/test-flag" % p,
+         {"is_test": True, "confirm": "anything"}),
         ("get", "/wholesale/files/%s" % ids["file_id"], None),
         ("patch", "/wholesale/files/%s" % ids["file_id"], {"caption": "taken"}),
         ("delete", "/wholesale/files/%s" % ids["file_id"], None),

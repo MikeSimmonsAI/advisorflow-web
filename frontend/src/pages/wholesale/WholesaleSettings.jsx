@@ -541,7 +541,28 @@ function InquiryRoutingPanel({ value, set }) {
             {users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.role ? ` (${u.role.replace(/_/g, ' ')})` : ''}</option>)}
           </select>
         </div>
+        <div className="ws-field">
+          <label htmlFor="ws-inquiry-email-on">Email notifications</label>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
+            <input id="ws-inquiry-email-on" type="checkbox" style={{ width: 'auto' }}
+                   checked={!!value('inquiry_email_enabled')}
+                   onChange={(e) => set('inquiry_email_enabled', e.target.checked)} />
+            Email when a new, returning or capacity-held seller inquiry arrives
+          </label>
+        </div>
+        <div className="ws-field" style={{ gridColumn: '1 / -1' }}>
+          <label htmlFor="ws-inquiry-email-to">Send inquiry emails to</label>
+          <input id="ws-inquiry-email-to" type="text" autoComplete="off"
+                 placeholder="Blank = the assignee above, or the workspace admins"
+                 value={value('inquiry_email_recipients') || ''}
+                 onChange={(e) => set('inquiry_email_recipients', e.target.value)} />
+        </div>
       </div>
+      <Note>
+        Emails say an inquiry is waiting and link to it; they never include the
+        seller's phone number or message. Text-message alerts to staff are not
+        available yet.
+      </Note>
     </div>
   )
 }

@@ -282,7 +282,8 @@ def attach_seller(db: Session, org_id: str, user: Optional[User],
                   prop: WholesaleProperty, data: Dict[str, Any], *,
                   actor_type: str = ACTOR_USER,
                   capacity: Optional[Any] = None,
-                  set_primary: bool = True) -> WholesaleSellerProfile:
+                  set_primary: bool = True,
+                  external_arrival: bool = False) -> WholesaleSellerProfile:
     """Attach an owner to a property — as a Lead, plus a wholesale profile.
 
     THE PERSON BECOMES A LEAD. That is the decision recorded in the models
@@ -308,8 +309,13 @@ def attach_seller(db: Session, org_id: str, user: Optional[User],
     """
     from app.services import plan_limits
 
+    # USER-INITIATED vs EXTERNAL ARRIVAL (app/services/lead_capacity.py).
+    # A person at the customer adding an owner is refused at the plan limit.
+    # A seller who reached out on their own (the public form) is NEVER
+    # discarded: the Lead is written and HELD - kept, not counted, and blocked
+    # from every send, cadence and AI path until capacity exists.
     creating_new_lead = not data.get("lead_id")
-    if creating_new_lead:
+    if creating_new_lead and not external_arrival:
         if capacity is not None:
             capacity.take(1)
         else:
@@ -354,6 +360,9 @@ def attach_seller(db: Session, org_id: str, user: Optional[User],
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
+        if external_arrival:
+            from app.services import lead_capacity
+            lead_capacity.hold_if_over_capacity(db, lead, counter=capacity)
         db.add(lead)
         db.flush()
         # The platform's master contact record, same transaction, same reason
@@ -426,6 +435,56 @@ def apply_seller_fields(profile: WholesaleSellerProfile, data: Dict[str, Any],
         profile.asking_price_source = VALUE_MANUAL
     if "asking_price" in data and data["asking_price"] is None and allow_clear:
         profile.asking_price_source = None
+
+
+def set_test_flag(db: Session, org_id: str, prop: WholesaleProperty, is_test: bool, *,
+                  note: Optional[str], user: Optional[User]) -> Dict[str, Any]:
+    """Mark a property - its deals, seller profiles and seller Leads - as a TEST
+    record, or back. Nothing is deleted; the audit trail stays whole.
+
+    A test record keeps every row and every event, and `test_records` keeps it
+    out of every outreach path, cadence and performance report. A seller Lead
+    is flagged only when ALL of its seller profiles are on test properties: a
+    real person who also appears on a test property is never silenced.
+    """
+    from app.models.models import Lead as _Lead
+    note = (note or "").strip()[:250] or None
+    changed = {"property": prop.id, "deals": [], "profiles": [], "leads": [], "leads_kept_real": []}
+    prop.is_test = is_test
+    prop.test_note = note if is_test else None
+    deals = (db.query(WholesaleDeal).filter(WholesaleDeal.organization_id == org_id,
+                                             WholesaleDeal.property_id == prop.id).all())
+    for d in deals:
+        d.is_test = is_test
+        changed["deals"].append(d.id)
+        if is_test:
+            stop_cadence_quietly(db, org_id, d, "test record")
+    profiles = (db.query(WholesaleSellerProfile)
+                .filter(WholesaleSellerProfile.organization_id == org_id,
+                        WholesaleSellerProfile.property_id == prop.id).all())
+    db.flush()
+    for p in profiles:
+        p.is_test = is_test
+        changed["profiles"].append(p.id)
+        lead = db.query(_Lead).filter(_Lead.id == p.lead_id, _Lead.organization_id == org_id).first()
+        if lead is None:
+            continue
+        others = (db.query(WholesaleSellerProfile.id)
+                  .join(WholesaleProperty, WholesaleProperty.id == WholesaleSellerProfile.property_id)
+                  .filter(WholesaleSellerProfile.organization_id == org_id,
+                          WholesaleSellerProfile.lead_id == lead.id,
+                          WholesaleProperty.is_test.isnot(True)).count())
+        if is_test and others:
+            changed["leads_kept_real"].append(lead.id)
+            continue
+        lead.is_test = is_test
+        lead.test_note = (note or "Wholesale test record") if is_test else None
+        changed["leads"].append(lead.id)
+    log_event(db, org_id, "property.test_flag", actor_type=ACTOR_USER,
+              actor_user_id=getattr(user, "id", None), property_id=prop.id,
+              summary=("Marked as a TEST record" if is_test else "Test marking removed")
+              + ((": " + note) if note else ""), details=changed)
+    return changed
 
 
 def reopen_deal(db: Session, org_id: str, prop: WholesaleProperty, previous: WholesaleDeal, *,

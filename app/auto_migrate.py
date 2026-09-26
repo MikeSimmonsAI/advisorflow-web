@@ -1163,6 +1163,8 @@ COLUMNS_TO_ADD = [
     ("wholesale_settings", "public_intake_key", "VARCHAR"),
     # Intake reconciliation: who a public seller inquiry is assigned to.
     ("wholesale_settings", "inquiry_assignee_id", "VARCHAR"),
+    ("wholesale_settings", "inquiry_email_enabled", "BOOLEAN DEFAULT FALSE"),
+    ("wholesale_settings", "inquiry_email_recipients", "TEXT"),
     ("wholesale_seller_profiles", "appointment_at", "TIMESTAMP"),
     ("wholesale_settings", "sms_program_enabled", "BOOLEAN DEFAULT FALSE"),
     ("wholesale_settings", "sms_sender_number", "VARCHAR"),

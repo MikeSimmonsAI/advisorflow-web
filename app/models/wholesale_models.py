@@ -223,6 +223,11 @@ class WholesaleSettings(Base):
     # Who a public seller inquiry is assigned to (a user of THIS organization).
     # NULL = unassigned; the workspace admins are notified instead.
     inquiry_assignee_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Email the workspace about new / re-engaged / held seller inquiries (see
+    # wholesale_notify). OFF by default. Recipients: comma-separated; blank =
+    # the assignee, else the workspace admins.
+    inquiry_email_enabled = Column(Boolean, nullable=False, default=False)
+    inquiry_email_recipients = Column(Text, nullable=True)
     # The seller SMS program. OFF by default and fail-closed: nothing is texted
     # under this program until an admin turns it on AND a Messaging Service is
     # configured AND the recipient holds program consent. The sender number is
