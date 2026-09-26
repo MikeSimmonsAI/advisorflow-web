@@ -148,3 +148,38 @@ for EXTERNAL arrivals via `run_commit(..., hold_when_full=True)` /
   failed the flush on `audit_log_entries.actor_user_id NOT NULL`; system
   captures are recorded in the capturing module's event trail and
   `import_record_versions` instead.
+
+### Production rollout, 2026-09-26 — incident and schema findings
+* **62eff53 broke `/sell` in production** (visitors saw "couldn't send"). It was
+  reverted within minutes (5e6be82), and `/sell` was verified working again.
+  Outage window: about 14:30–14:50 CT. Any real seller who submitted in that
+  window got an error and was not captured; ask them to resubmit if anyone
+  reports it.
+* **Re-landed as 7de601f with a fail-safe.** If `capture_one` raises for any
+  reason, the submission rolls back the intake attempt, logs a
+  `seller_inquiry.intake_error` event with a sanitized error, and falls back to
+  the legacy lead match plus `attach_seller(external_arrival=True)`. That path
+  still includes the capacity hold. A seller is never lost because intake
+  failed.
+* **The fail-safe exposed two schema drifts in production's `import_batches`:**
+  1. Model columns missing (`created_by_id`, …), because the table predates the
+     Lead Import Intelligence model. Fixed by fcc335a, which adds every
+     `import_batches` / `import_staged_rows` model column to `COLUMNS_TO_ADD`.
+  2. A legacy `kind` column left NOT NULL by the historical source-records model
+     (f7a6b50). No current model writes it. Fixed by 9954a4e, which adds it to
+     `NULLABILITY_TO_RELAX`. Both were reproduced on local Postgres using the
+     legacy table shape.
+  The same drift means **the legacy Import Center could not have created a
+  batch on production either** until these fixes. That was pre-existing, not
+  caused by convergence.
+* **Keep the fail-safe** until several real submissions show `intake_batch_id`
+  and no `intake_error` event. After that, reduce it to logging plus the
+  capacity-held path. Don't delete it outright: a seller inquiry must never
+  depend on the import pipeline being healthy.
+* **Verified in production after 9954a4e:** a ZZTEST `/sell` submission
+  (600 Smoketest Street, SI-CF666A59) recorded `intake_batch_id`,
+  `org_contact_id` and `intake_match=new`, with `intake_error=null` and no
+  `intake_error` event. The Lead was stored as `12145550166` (platform format)
+  with source `wholesale_seller_inquiry`, and the one-row batch was `committed`.
+  `/intake/batches` returns 200 for EVO. Every ZZTEST property (300, 400, 500
+  and 600 Smoketest Street) is test-flagged.
