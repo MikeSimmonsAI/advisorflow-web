@@ -100,9 +100,12 @@ def test_flagship_reply_becomes_facts_intent_handoff_and_promotion(db_session, w
     assert prop.status == C.S_NEEDS_YOU
     from app.services.evosense import economics as ECO
     eco = ECO.preliminary(db, prop)
-    assert eco["mao"] is not None and eco["asking"] == 150000
+    # A sandbox AVM is a modelled estimate, not comps: no ARV, so NO MAO -
+    # even with the seller's asking price and a repair estimate on file.
+    assert eco["mao"] is None and eco["asking"] == 150000 and eco["blocked"] == "no_verified_arv"
     labels = {l["label"]: l["truth_label"] for l in eco["lines"]}
     assert labels["Repairs"] == "SYSTEM ESTIMATE" and labels["Seller asking"] == "SELLER STATED"
+    assert labels["ARV"] == "INSUFFICIENT COMPARABLE SALES"
 
     leads_before = db.query(Lead).filter(Lead.organization_id == org).count()
     out = PR.promote(db, org, prop, user)

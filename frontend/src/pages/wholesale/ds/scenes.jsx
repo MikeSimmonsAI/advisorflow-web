@@ -504,15 +504,17 @@ const SCENES = {
 
 export const SCENE_NAMES = Object.keys(SCENES)
 
-const PHOTO_FILES = import.meta.glob('./photos/*.jpg', { eager: true, import: 'default' })
+// Page-banner photographs only. The old house*.jpg "representative property"
+// photos are deliberately NOT bundled: no property is ever shown with a
+// picture of a different house (see PropertyThumb).
+const PHOTO_FILES = import.meta.glob(['./photos/*.jpg', '!./photos/house*.jpg'], { eager: true, import: 'default' })
 export const PHOTOS = Object.fromEntries(Object.entries(PHOTO_FILES)
   .map(([path, url]) => [path.replace('./photos/', '').replace('.jpg', ''), url]))
 
-/** Representative house photos for properties with no photo of their own. */
-export const HOUSE_PHOTOS = Object.keys(PHOTOS).filter((k) => k.startsWith('house')).sort().map((k) => PHOTOS[k])
-
-export function Scene({ name, id }) {
-  if (PHOTOS[name]) {
+/** `drawn`: force the illustrated scene even when a photo exists. Pages about
+ * ONE property use it, so no photograph ever sits behind a specific address. */
+export function Scene({ name, id, drawn }) {
+  if (PHOTOS[name] && !drawn) {
     return <img className="evo-scene-photo" src={PHOTOS[name]} alt="" aria-hidden="true" decoding="async" />
   }
   const draw = SCENES[name] || SCENES.skyline

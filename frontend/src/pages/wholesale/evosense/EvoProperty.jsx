@@ -6,8 +6,9 @@
  *   INTELLIGENCE   the three EvoSense scores, each opening its deterministic WHY
  *   CONVERSATION   the real timeline: SELLER SAID vs SYSTEM EXTRACTED
  *   SELLER FACTS   every extracted fact with its provenance (the seller's words)
- *   DEAL INTEL     asking, value used as ARV, repairs, MAO, assignment target,
- *                  spread - every estimate labelled as one, internal only
+ *   DEAL INTEL     asking, appraisal district tax value (reference only), ARV
+ *                  (verified comps or "Insufficient comparable sales"), repairs,
+ *                  MAO (only from a verified ARV), assignment target, spread
  *   WHY FOUND      the signals, with evidence and freshness
  *   OWNER/CONTACT  identity, relationship, phone/email, validation, confidence
  *   DATA INTEL     sources, freshness, conflicts, provider, cost
@@ -143,7 +144,7 @@ export default function EvoProperty() {
 
       {/* 1 ── HERO (board: the property workspace banner) ───────────────── */}
       <Hero
-        scene="parcel"
+        scene="parcel" sceneDrawn
         eyebrow="EvoSense · Property Intelligence"
         title={<span id="prop-title">{p.address}{p.unit ? ` #${p.unit}` : ''}</span>}
         sub={`${place} ${p.zip_code || ''}${p.county ? ` · ${p.county} County` : ''}`}
@@ -160,7 +161,7 @@ export default function EvoProperty() {
       <section className="evo-phero" aria-label="Property snapshot">
         <div className="evo-phero__media">
           <PropertyThumb address={p.address} size="hero" lazy={false}
-                         label={p.is_test ? 'Sandbox · no photo on file' : 'No photo on file'} />
+                         label={p.is_test ? 'Sandbox · property image unavailable' : undefined} />
         </div>
         <div className="evo-phero__body">
           <div className="evo-chips">
@@ -171,7 +172,12 @@ export default function EvoProperty() {
           </div>
           <h2 className="evo-panel__title">Key numbers</h2>
           <dl className="evo-phero__facts">
-            <div><dt>Value</dt><dd>{money(f.estimated_value.value)}<small>{f.estimated_value.value ? 'provider reported' : 'missing'}</small></dd></div>
+            {f.appraisal ? (
+              <div><dt>Tax value</dt><dd>{money(f.appraisal.value)}<small title="What the county appraisal district certified for property tax. Not a market value and never an ARV.">{f.appraisal.label || 'Appraisal district tax value'}</small></dd></div>
+            ) : (
+              <div><dt>Market estimate</dt><dd>{money(f.estimated_value.value)}<small>{f.estimated_value.value ? 'modelled estimate' : 'none on file'}</small></dd></div>
+            )}
+            <div><dt>ARV</dt><dd className="is-quiet">—<small>{(f.arv && f.arv.label) || 'Insufficient comparable sales'}</small></dd></div>
             <div><dt>Equity</dt><dd>{f.equity_pct.value != null ? `${f.equity_pct.value}%` : '—'}<small>{f.equity_pct.value != null ? (f.equity_pct.truth || '').toLowerCase().split(' (')[0] : 'missing'}</small></dd></div>
             <div><dt>Occupancy</dt><dd>{f.occupancy.value ? humanize(f.occupancy.value) : '—'}<small>{f.occupancy.source || 'not reported'}</small></dd></div>
             <div><dt>Size</dt><dd>{f.physical.bedrooms || '—'}bd · {f.physical.bathrooms || '—'}ba<small>{f.physical.square_feet ? `${Number(f.physical.square_feet).toLocaleString()} sq ft` : 'sq ft unknown'}{f.physical.year_built ? ` · ${f.physical.year_built}` : ''}</small></dd></div>
@@ -306,12 +312,14 @@ export default function EvoProperty() {
           {/* 7 ── DEAL INTELLIGENCE ────────────────────────────────────── */}
           <Panel title="Deal intelligence" id="deal" hint="Preliminary and internal · never shown to a seller or investor">
             <div className="evo-econ">
-              {[['Seller asking', line('Seller asking')], ['Value used as ARV', line('Value (used as ARV)')],
+              {[['Seller asking', line('Seller asking')],
+                ['Appraisal district tax value', line('Appraisal District Tax Value')],
+                ['ARV', line('ARV')],
                 ['Repairs', line('Repairs')], ['Preliminary MAO', line('Preliminary MAO')],
                 ['Assignment target', line('Wholesale fee')]].map(([label, l]) => (
                 <div key={label} className="evo-econ__cell">
                   <div className="evo-econ__k">{label}</div>
-                  <div className="evo-econ__v">{money(l.value)}</div>
+                  <div className="evo-econ__v">{l.value != null ? money(l.value) : (l.display || '—')}</div>
                   <div className="evo-econ__t"><Truth>{l.truth_label}</Truth></div>
                 </div>
               ))}
@@ -428,7 +436,7 @@ export default function EvoProperty() {
             <dl className="evo-kv" style={{ fontSize: 13 }}>
               <dt>Found by</dt><dd>{d.attribution.first_strategy || '—'}</dd>
               <dt>Sources</dt><dd>{d.attribution.sources.length}</dd>
-              <dt>Value as of</dt><dd>{f.estimated_value.at ? shortDate(f.estimated_value.at) : '—'}</dd>
+              <dt>Tax value year</dt><dd>{f.appraisal && f.appraisal.year ? f.appraisal.year : '—'}</dd>
               <dt>Conflicts</dt><dd style={{ color: d.conflicts.length ? 'var(--evo-warning-ink)' : undefined }}>{d.conflicts.length || 'none'}</dd>
             </dl>
             <div className="evo-divider" />

@@ -194,7 +194,7 @@ export default function EvoInbox() {
                                   onClick={(e) => e.stopPropagation()}>{p.address}{p.unit ? ` #${p.unit}` : ''}</Link>
                             <span className="evo-prop__sub">
                               {[p.city, p.state].filter(Boolean).join(', ')} {p.zip_code}
-                              {p.estimated_value ? ` · ${moneyK(p.estimated_value)}` : ''}
+                              {p.appraisal ? ` · ${moneyK(p.appraisal.value)} tax value` : p.estimated_value ? ` · ${moneyK(p.estimated_value)} est.` : ''}
                               {p.equity_pct !== null && p.equity_pct !== undefined ? ` · ${p.equity_pct}% equity` : ''}
                             </span>
                             {((mixed && p.is_test) || p.has_conflicts) ? (

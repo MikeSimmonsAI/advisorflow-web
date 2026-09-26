@@ -41,14 +41,23 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
         raise HTTPException(status_code=409, detail="Confirm the property identity first.")
     owner = CT.primary_owner(db, prop)
     from app.services.evosense import evaluate as EV
+    from app.services.evosense import valuation as VAL
     stacked = [s for s in EV.stacked_signals(db, prop) if s["freshness"] != SIG.STALE]
+    # An appraisal district TAX value never becomes the deal's "estimated
+    # value" (and so can never drift into an ARV). It travels as a labelled
+    # note; only a market estimate fills the value field.
+    vals = VAL.view(prop)
+    market = vals["market_value"]
+    appraisal = vals["appraisal"]
+    tax_note = ("%s: $%s — a property-tax value, not a market value and not an ARV. "
+                % (appraisal["label"], format(appraisal["value"], ","))) if appraisal else ""
     data = {
         "street_address": prop.street_address, "unit": prop.unit, "city": prop.city,
         "state": prop.state, "zip_code": prop.zip_code, "county": prop.county,
         "parcel_apn": prop.parcel_apn, "property_type": prop.property_type,
         "bedrooms": prop.bedrooms, "bathrooms": prop.bathrooms, "square_feet": prop.square_feet,
-        "year_built": prop.year_built, "estimated_value": prop.estimated_value,
-        "estimated_value_source": VALUE_IMPORTED if prop.estimated_value is not None else None,
+        "year_built": prop.year_built, "estimated_value": market,
+        "estimated_value_source": VALUE_IMPORTED if market is not None else None,
         "mortgage_balance": prop.mortgage_balance,
         "mortgage_source": VALUE_IMPORTED if prop.mortgage_balance is not None else None,
         "ownership_type": owner.owner_type if owner else None,
@@ -60,8 +69,8 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
         "occupancy_status": prop.occupancy,
         "acquisition_source": "evosense",
         "source_detail": "EvoSense discovery %s" % prop.id,
-        "notes": "Found by EvoSense. Signals: %s. %s" % (
-            ", ".join(s["label"] for s in stacked) or "none",
+        "notes": "Found by EvoSense. Signals: %s. %s%s" % (
+            ", ".join(s["label"] for s in stacked) or "none", tax_note,
             "SANDBOX DATA — not live." if prop.is_test else ""),
         "is_test": bool(prop.is_test),
         "test_note": "EvoSense sandbox promotion" if prop.is_test else None,

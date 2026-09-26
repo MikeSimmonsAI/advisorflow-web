@@ -33,6 +33,7 @@ from app.services.evosense import providers as PV
 from app.services.evosense import scoring as SC
 from app.services.evosense import signals as SIG
 from app.services.evosense import strategy as ST
+from app.services.evosense import valuation as VAL
 
 
 def _iso(dt):
@@ -270,7 +271,8 @@ def _needs_detail(db, org_id: str, prop, *, first: bool = False) -> Dict[str, An
     out = {"state": prop.state, "zip_code": prop.zip_code, "property_type": prop.property_type,
            "opportunity_score": prop.opportunity_score,
            "contact_confidence": prop.contact_confidence,
-           "estimated_value": prop.estimated_value, "equity_pct": prop.equity_pct,
+           "estimated_value": VAL.market_value(prop),
+           "appraisal": _appraisal_json(VAL.view(prop)["appraisal"]), "equity_pct": prop.equity_pct,
            "occupancy": prop.occupancy, "status_bucket": prop.status}
     try:
         out["signals"] = [s["label"] for s in EV.stacked_signals(db, prop)
@@ -351,10 +353,24 @@ def bucket_counts(db, org_id: str, strategy_id: Optional[str] = None) -> Dict[st
     return {s: int(n) for s, n in q.group_by(EvoSenseProperty.status).all()}
 
 
+def _appraisal_json(a) -> Optional[Dict[str, Any]]:
+    if not a:
+        return None
+    return {"value": a["value"], "year": a.get("year"), "label": a.get("label"),
+            "district": a.get("district"), "source": a.get("source"),
+            "land": a.get("land"), "improvements": a.get("improvements"), "at": _iso(a.get("at"))}
+
+
 def row(p, signals: Optional[List[str]] = None, strategy_name: Optional[str] = None) -> Dict[str, Any]:
+    vals = VAL.view(p)
     return {"id": p.id, "address": p.street_address, "unit": p.unit, "city": p.city, "state": p.state,
             "zip_code": p.zip_code, "county": p.county, "property_type": p.property_type,
-            "estimated_value": p.estimated_value, "equity_pct": p.equity_pct,
+            # A MARKET estimate only. An appraisal district tax value is its
+            # own field, labelled as exactly that, and is never an ARV.
+            "estimated_value": vals["market_value"],
+            "appraisal": _appraisal_json(vals["appraisal"]),
+            "arv": {"value": None, "label": VAL.ARV_INSUFFICIENT},
+            "equity_pct": p.equity_pct,
             "opportunity_score": p.opportunity_score, "opportunity_band": SC.band(p.opportunity_score),
             "data_confidence": p.data_confidence, "contact_confidence": p.contact_confidence,
             "seller_intent": p.seller_intent, "signal_count": p.signal_count,
@@ -549,14 +565,17 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
                                                   EvoSenseFeedback.property_id == prop.id)
                 .order_by(EvoSenseFeedback.created_at.desc()).all())
     ranks = C.jload(prop.fact_ranks, {}) or {}
+    vals = VAL.view(prop)
     first_strategy = (db.query(EvoSenseStrategy).filter(EvoSenseStrategy.id == prop.first_strategy_id).first()
                       if prop.first_strategy_id else None)
     return {
         "property": row(prop, strategy_name=getattr(strategy, "name", None)),
         "facts": {
-            "estimated_value": {"value": prop.estimated_value, "source": prop.estimated_value_source,
-                                "truth": C.TRUTH_LABELS[C.T_PROVIDER] if prop.estimated_value else "MISSING",
-                                "at": _iso(prop.estimated_value_at)},
+            "estimated_value": {"value": vals["market_value"], "source": vals["market_value_source"],
+                                "truth": "MARKET ESTIMATE (modelled)" if vals["market_value"] else "MISSING",
+                                "at": _iso(prop.estimated_value_at) if vals["market_value"] else None},
+            "appraisal": _appraisal_json(vals["appraisal"]),
+            "arv": VAL.arv(db, prop),
             "mortgage_balance": {"value": prop.mortgage_balance, "source": prop.mortgage_source,
                                  "truth": C.TRUTH_LABELS[C.T_PROVIDER] if prop.mortgage_balance is not None else "MISSING"},
             "equity_pct": {"value": prop.equity_pct, "source": prop.equity_basis,

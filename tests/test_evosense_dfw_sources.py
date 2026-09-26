@@ -401,6 +401,8 @@ def test_pilot_discovers_joins_and_scores_real_shaped_records(client, db_session
     assert set(obs) >= {"tarrant_tax_roll", "tad", "census_geocoder", "fw_code_violations"}
     assert p.city == "Fort Worth" and p.zip_code == "76102"
     assert p.estimated_value == 160000 and "appraisal district" in p.estimated_value_source
+    from app.services.evosense import valuation as VAL
+    assert VAL.view(p)["market_value"] is None and VAL.appraisal_value(p) == 160000
     # value known, mortgage unknown: NO equity, NO high-equity, NO free-and-clear
     assert p.equity_pct is None and p.mortgage_balance is None
     types = {x.signal_type for x in db.query(EvoSenseSignal)

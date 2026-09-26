@@ -725,7 +725,11 @@ div.evo-pcard:hover { transform: none; }
 .evo-tile__desc { margin: 0; font-size: 13px; color: var(--evo-text-secondary); line-height: 1.45; }
 .evo-tile__foot { margin-top: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding-top: 6px; }
 .evo-scene-photo { width: 100%; height: 100%; object-fit: cover; object-position: center 55%; display: block; }
-/* representative photo marker on small thumbnails */
-.evo-thumb.is-representative .evo-thumb__rep { position: absolute; right: 2px; bottom: 2px; width: 13px; height: 13px; border-radius: 4px;
-  display: grid; place-items: center; font: 800 8px/1 var(--evo-font); color: #fff; background: rgba(15, 30, 58, .72); }
-.evo-thumb.is-representative .evo-thumb__label { background: rgba(15, 30, 58, .78); color: #fff; }
+/* "Property image unavailable": plainly not a photograph */
+.evo-thumb.is-unavailable { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  color: var(--evo-text-tertiary); background: repeating-linear-gradient(135deg, #f3f6fa 0 10px, #eef2f7 10px 20px); }
+.evo-thumb.is-unavailable .evo-thumb__icon { width: 20px; height: 20px; flex: none; }
+.evo-thumb--card.is-unavailable .evo-thumb__icon, .evo-thumb--hero.is-unavailable .evo-thumb__icon,
+.evo-thumb--lg.is-unavailable .evo-thumb__icon { width: 34px; height: 34px; }
+.evo-thumb__none { font-size: 11.5px; font-weight: 700; letter-spacing: .04em; color: var(--evo-text-secondary); text-align: center; padding: 0 10px; }
+.evo-thumb__credit { position: absolute; right: 8px; bottom: 6px; font-size: 10px; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }

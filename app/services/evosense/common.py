@@ -53,6 +53,7 @@ H_DEGRADED = "DEGRADED"
 H_RATE_LIMITED = "RATE_LIMITED"
 H_DISABLED = "DISABLED"
 H_MISSING_CREDENTIALS = "MISSING_CREDENTIALS"
+H_BLOCKED = "BLOCKED"            # platform-wide: the public source refused our servers
 
 # ── Truth states — every material value says which of these it is ───────────
 T_KNOWN = "known"

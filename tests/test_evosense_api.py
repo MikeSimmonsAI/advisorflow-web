@@ -78,7 +78,8 @@ def test_command_center_inbox_and_property_pages(client, auth_headers, db_sessio
     assert {f["fact_type"] for f in d["seller_facts"]} >= {"asking_price", "estate_context"}
     assert all(f["truth"] == "SELLER STATED" for f in d["seller_facts"])
     assert d["contacts"][0]["connector_label"] == "SANDBOX"
-    assert d["spent_cents"] >= 18 and d["economics"]["mao"] is not None
+    assert d["spent_cents"] >= 18 and d["economics"]["mao"] is None     # no verified ARV, no MAO
+    assert d["economics"]["arv"]["label"] == "Insufficient comparable sales"
     assert d["handoff"]["status"] == "open"
 
 

@@ -158,8 +158,7 @@ def _source_failed(db, org_id, strategy, provider, cfg, exc, counts, user):
     from app.services.evosense.sources import base as SRC
     if isinstance(exc, SRC.SourceError):
         code, msg = exc.code, exc.message
-        PV.record_failure(cfg, "%s: %s" % (code, msg[:200]),
-                          rate_limited_for=exc.retry_after if code == SRC.RATE_LIMITED else None)
+        PV.note_source_failure(db, provider, cfg, code, msg, retry_after=exc.retry_after)
     else:
         code, msg = type(exc).__name__, str(exc)[:200]
         PV.record_failure(cfg, "%s: %s" % (code, msg))
@@ -323,11 +322,13 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
             applicable = [p for p in props if provider.applies(_target(p))]
             if not applicable:
                 continue
-            health = PV.health_state(provider, cfg)
+            health = PV.health_state(provider, cfg, blocked=PV.platform_blocked(db, key, cfg))
             if health != C.H_CONNECTED:
+                why = ("%s is blocked platform-wide (the source refused the platform's requests); "
+                       "not called." % provider.label) if health == C.H_BLOCKED else \
+                    "%s is %s; not called." % (provider.label, health.replace("_", " ").lower())
                 for p in applicable:
-                    _lookup_decision(db, p, strategy, provider, cap, C.L_SKIP_PROVIDER_DOWN,
-                                     "%s is %s; not called." % (provider.label, health.replace("_", " ").lower()),
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_SKIP_PROVIDER_DOWN, why,
                                      outcome="skipped")
                     tally["skipped_down"] += 1
                 db.commit()

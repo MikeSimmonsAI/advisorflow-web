@@ -791,7 +791,8 @@ def verify_source(payload: VerifyIn, db: Session = Depends(get_db),
     _admin(user)
     if source_key not in PV.PROVIDERS:
         raise HTTPException(status_code=404, detail="Unknown source")
-    res = PV.verify_source(db, org_id, source_key)
+    res = PV.verify_source(db, org_id, source_key,
+                           platform_admin=getattr(user, "role", None) in PV.PLATFORM_ADMIN_ROLES)
     C.log_event(db, org_id, "source.verified" if res.get("ok") else "source.verify_failed", user=user,
                 actor_type=C.ACTOR_USER, summary="%s verify: %s" % (
                     source_key, "ok" if res.get("ok") else "%s %s" % (res.get("code"), res.get("error"))))

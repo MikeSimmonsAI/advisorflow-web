@@ -817,3 +817,43 @@ class EvoSenseHuntSchedule(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
     __table_args__ = (Index("ix_es_sched_org_due", "organization_id", "next_due_at"),)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Platform layer — shared public-source reachability
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EvoSenseSourceAccess(Base):
+    """PLATFORM-LEVEL access state of one PUBLIC source adapter.
+
+    THE ONE DELIBERATE EXCEPTION TO THE TENANT RULE ABOVE, and why it is safe.
+    A public source that refuses the platform's servers (TAD answering 403)
+    refuses EVERY tenant: the block is a fact about our egress, not about any
+    organization. Recording it once stops twenty tenants from each hammering a
+    server that has already said no.
+
+    It holds NO tenant data: no organization id, no property, no record, no
+    count or timestamp attributable to a tenant's activity, and the stored
+    reason is a generic code + host phrase ("AUTH_FAILED: www.tad.org refused
+    the request (403)"). Every tenant sees the same row; nothing in it says who
+    tripped it. Tenant enablement, usage, budgets and history stay in
+    `evosense_provider_configs` (organization-scoped).
+
+    blocked   true after an authorization refusal (401/403). While blocked the
+              adapter is never called automatically - not by hunts, not by
+              lookups. Only a PLATFORM admin's explicit Verify (one request)
+              may test it again; a success clears the block.
+    """
+
+    __tablename__ = "evosense_source_access"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    provider_key = Column(String, nullable=False, unique=True)
+    blocked = Column(Boolean, nullable=False, default=False)
+    blocked_code = Column(String, nullable=True)        # AUTH_FAILED
+    blocked_reason = Column(String, nullable=True)      # generic, host-level; never tenant data
+    blocked_at = Column(DateTime, nullable=True)
+    last_probe_at = Column(DateTime, nullable=True)     # platform-admin verify only
+    last_probe_ok_at = Column(DateTime, nullable=True)
+    cleared_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)

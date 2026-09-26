@@ -145,6 +145,7 @@
   color: var(--evo-text-tertiary); }
 .evo-phero__facts dd { margin: 4px 0 0; font: 800 18px var(--evo-font); color: var(--evo-navy);
   font-variant-numeric: tabular-nums; }
+.evo-phero__facts dd.is-quiet { color: var(--evo-text-tertiary); }
 .evo-phero__facts dd small { display: block; font: 500 11px var(--evo-font); color: var(--evo-text-tertiary); margin-top: 2px; }
 .evo-nextcard { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
   padding: 16px 18px; border-radius: 14px; margin-bottom: var(--evo-gap);

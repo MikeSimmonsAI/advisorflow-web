@@ -9,15 +9,16 @@
  *   Score/Scores  the three EvoSense scores - one component, three accents
  *   Status        one status vocabulary for EvoSense buckets AND deal stages
  *   Chips, Tag    signals and truth labels (SANDBOX, ESTIMATE, LIVE ...)
- *   PropertyThumb real photo when one exists, otherwise a designed placeholder
- *                 that never pretends to be the house
+ *   PropertyThumb a real, provenance-carrying photo of THIS property when one
+ *                 exists; otherwise "Property image unavailable" - never
+ *                 a stock or representative house
  *   Panel, Empty, Alert, Skeleton, Drawer, Seg, Tabs, Feed, Search
  */
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink } from 'react-router-dom'
 import { fetchEnvironment } from '../../../api/demo'
-import { Scene, HOUSE_PHOTOS } from './scenes'
+import { Scene } from './scenes'
 import './evo-ds.css'
 
 // ── the two operating worlds + settings ────────────────────────────────────
@@ -93,11 +94,11 @@ export function EvoApp({ world = 'acquisition', children, side }) {
  * subtitle, optional quote, meta chips, actions and an optional score ring.
  * `meta` is [{ label, tone: 'live'|'paused'|undefined }] or plain nodes.
  */
-export function Hero({ scene = 'skyline', art, eyebrow, title, sub, quote, meta, actions, score, children, compact, level = 'h1' }) {
+export function Hero({ scene = 'skyline', sceneDrawn, art, eyebrow, title, sub, quote, meta, actions, score, children, compact, level = 'h1' }) {
   const H = level
   return (
     <header className={`evo-herobox${compact ? ' evo-herobox--compact' : ''}${actions ? ' has-actions' : ''}${score ? ' has-score' : ''}`}>
-      <div className="evo-herobox__art">{art || <Scene name={scene} />}</div>
+      <div className="evo-herobox__art">{art || <Scene name={scene} drawn={sceneDrawn} />}</div>
       <div className="evo-herobox__body">
         {eyebrow ? <p className="evo-herobox__eyebrow">{eyebrow}</p> : null}
         <H className="evo-herobox__title">{title}</H>
@@ -135,13 +136,14 @@ export function Ring({ kind = 'opportunity', value, size, title }) {
 
 /**
  * The board's image-led property card (Top Opportunities, strategy results,
- * dispositions). Image is a real photo or the honest placeholder.
+ * dispositions). Image is a real photo of the property or "Property image
+ * unavailable" - never a stand-in house.
  */
 export function PropCard({ onOpen, href, src, address, place, score, scoreKind = 'opportunity', status, facts, money: amounts, foot }) {
   const body = (
     <>
       <div className="evo-pcard__media">
-        <PropertyThumb src={src} address={address} size="card" label={src ? null : 'No photo on file'} />
+        <PropertyThumb src={src} address={address} size="card" />
         {score !== undefined ? <span className="evo-pcard__ring"><Ring kind={scoreKind} value={score} /></span> : null}
         {status ? <span className="evo-pcard__status">{status}</span> : null}
       </div>
@@ -379,12 +381,16 @@ function hash(s) {
   return h
 }
 /**
- * A real photo when one exists. Otherwise a DESIGNED PLACEHOLDER: a parcel
- * outline over a street grid, tinted per address so a list does not read as
- * a wall of identical boxes. It is plainly not a photograph and it never
- * claims to be the house.
+ * A real photo of THIS property when one exists (an operator's upload or a
+ * verified subject-property image, each carrying its own provenance).
+ *
+ * Otherwise: "Property image unavailable". Never a stock photo, never a
+ * "representative" house - a picture of a different house next to an address
+ * reads as that address no matter what the caption says. The unavailable
+ * state is plainly not a photograph: a quiet panel with a line icon and the
+ * words, so an operator can tell at a glance there is no image, not guess.
  */
-export function PropertyThumb({ src, address, size, label, lazy = true }) {
+export function PropertyThumb({ src, address, size, label, lazy = true, credit }) {
   const [failed, setFailed] = useState(false)
   const cls = `evo-thumb${size ? ' evo-thumb--' + size : ''}`
   if (src && !failed) {
@@ -393,28 +399,23 @@ export function PropertyThumb({ src, address, size, label, lazy = true }) {
         <img src={src} alt={address ? `Photo of ${address}` : 'Property photo'} loading={lazy ? 'lazy' : 'eager'}
              decoding="async" onError={() => setFailed(true)} />
         {label ? <span className="evo-thumb__label">{label}</span> : null}
+        {credit ? <span className="evo-thumb__credit">{credit}</span> : null}
       </span>
     )
   }
-  // No photo of this property on file: a REPRESENTATIVE house photograph,
-  // chosen per address so a list does not repeat one picture, and always
-  // labelled as representative (visibly on anything larger than a table
-  // thumbnail, and in the accessible name and tooltip everywhere). It is never
-  // presented as the property itself.
-  const pool = HOUSE_PHOTOS
-  if (pool.length) {
-    const pick = pool[hash(address) % pool.length]
-    const what = address ? `Representative photo — not ${address}` : 'Representative photo — not this property'
-    const showLabel = size && size !== 'sm'
-    return (
-      <span className={`${cls} is-representative`} title="Representative photo. No photo of this property is on file yet.">
-        <img src={pick} alt={what} loading={lazy ? 'lazy' : 'eager'} decoding="async" />
-        {showLabel ? <span className="evo-thumb__label">Representative photo{label && /sandbox/i.test(label) ? ' · Sandbox' : ''}</span> : null}
-        {!showLabel ? <span className="evo-thumb__rep" aria-hidden="true">R</span> : null}
-      </span>
-    )
-  }
-  return <span className={cls} role="img" aria-label={address ? `No photo on file for ${address}` : 'No property photo on file'} />
+  const text = label || 'Property image unavailable'
+  const showText = size && size !== 'sm'
+  return (
+    <span className={`${cls} is-unavailable`} role="img"
+          aria-label={address ? `${text} for ${address}` : text} title={text}>
+      <svg className="evo-thumb__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor"
+              strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M4 4 20 20" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+      {showText ? <span className="evo-thumb__none">{text}</span> : null}
+    </span>
+  )
 }
 
 // ── glyphs (line icons for tiles; decorative) ─────────────────────────────

@@ -102,7 +102,7 @@ export default function WholesaleDeal() {
           it is a parcel-map illustration, which can never be mistaken for it. */}
       <Hero
         art={cover ? <AuthImage path={cover.url} alt="" /> : null}
-        scene="parcel"
+        scene="parcel" sceneDrawn
         eyebrow={`Wholesale Operations · ${deal.stage_label || 'Deal'}`}
         title={property?.street_address || property?.address || '(no address)'}
         sub={[[property?.city, property?.state].filter(Boolean).join(', '), property?.zip_code].filter(Boolean).join(' ') || null}
@@ -135,7 +135,7 @@ export default function WholesaleDeal() {
         <div className="evo-keynums__media">
           {cover
             ? <span className="evo-thumb evo-thumb--hero"><AuthImage path={cover.url} alt={property?.address || 'Property'} /></span>
-            : <PropertyThumb address={property?.address} size="hero" label="No photo on file" />}
+            : <PropertyThumb address={property?.address} size="hero" />}
         </div>
         <div className="evo-keynums__body">
           <h2 className="evo-keynums__title">Key numbers</h2>

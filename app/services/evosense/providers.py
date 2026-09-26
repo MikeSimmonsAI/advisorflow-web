@@ -683,7 +683,8 @@ def config(db, org_id: str, key: str):
     return row
 
 
-def health_state(p: AcquisitionProvider, cfg, when: Optional[datetime] = None) -> str:
+def health_state(p: AcquisitionProvider, cfg, when: Optional[datetime] = None, *,
+                 blocked: bool = False) -> str:
     when = when or C.now()
     if p.connector_kind == C.INTERFACE_ONLY:
         return C.H_NOT_CONNECTED
@@ -691,6 +692,8 @@ def health_state(p: AcquisitionProvider, cfg, when: Optional[datetime] = None) -
         return C.H_MISSING_CREDENTIALS
     if not cfg.enabled:
         return C.H_DISABLED
+    if blocked:
+        return C.H_BLOCKED
     if cfg.rate_limited_until and cfg.rate_limited_until > when:
         return C.H_RATE_LIMITED
     if cfg.degraded_until and cfg.degraded_until > when:
@@ -700,6 +703,107 @@ def health_state(p: AcquisitionProvider, cfg, when: Optional[datetime] = None) -
 
 DEGRADE_AFTER = 3            # consecutive failures
 DEGRADE_FOR = timedelta(minutes=15)
+
+
+# ── Platform layer: shared public-source access ─────────────────────────────
+# A public source that refuses the platform's servers refuses every tenant.
+# The block is recorded once, platform-wide, holding no tenant data (see
+# EvoSenseSourceAccess), and it stops EVERY automatic call to that source.
+
+PLATFORM_ADMIN_ROLES = ("god_admin", "super_admin")
+
+
+def is_public_source(p: AcquisitionProvider) -> bool:
+    return isinstance(p, PublicRecordSource) and not p.required_env and not p.costs
+
+
+def access_row(db, key: str, *, create: bool = False):
+    from app.models.evosense_models import EvoSenseSourceAccess
+    q = db.query(EvoSenseSourceAccess).filter(EvoSenseSourceAccess.provider_key == key)
+    row = q.first()
+    if row is None and create:
+        # One row per source, platform-wide. Two requests racing to create it
+        # meet the unique key; the loser reads the winner's row.
+        from sqlalchemy.exc import IntegrityError
+        try:
+            with db.begin_nested():
+                row = EvoSenseSourceAccess(provider_key=key, blocked=False)
+                db.add(row)
+                db.flush()
+        except IntegrityError:
+            row = q.first()
+    return row
+
+
+def block_platform(db, key: str, code: str, reason: str):
+    """Record that a public source refused the platform. Idempotent. The reason
+    must be the generic code + host phrase the adapter produced - never
+    anything naming a tenant, a property or a record."""
+    row = access_row(db, key, create=True)
+    if not row.blocked:
+        row.blocked = True
+        row.blocked_at = C.now()
+        C.log.warning("evosense: public source %s blocked platform-wide (%s)", key, code)
+    row.blocked_code = code
+    row.blocked_reason = (reason or code)[:250]
+    return row
+
+
+def clear_platform_block(db, key: str):
+    row = access_row(db, key)
+    if row is not None and row.blocked:
+        row.blocked = False
+        row.cleared_at = C.now()
+    return row
+
+
+def _auth_refused_last(cfg) -> bool:
+    """A tenant row whose latest outcome is an authorization refusal (state
+    recorded before the platform layer existed)."""
+    reason = (getattr(cfg, "last_failure_reason", None) or "")
+    if not reason.startswith("AUTH_FAILED"):
+        return False
+    ok, bad = cfg.last_success_at, cfg.last_failure_at
+    return bad is not None and (ok is None or bad > ok)
+
+
+def platform_blocked(db, key: str, cfg=None) -> bool:
+    """Is this public source blocked for the whole platform? A tenant row whose
+    latest outcome was a 401/403 (recorded before this layer existed) raises
+    the block too, so the first read after deploy already stops the calls."""
+    p = PROVIDERS.get(key)
+    if p is None or not is_public_source(p):
+        return False
+    row = access_row(db, key)
+    if row is not None and row.blocked:
+        return True
+    if cfg is not None and _auth_refused_last(cfg):
+        block_platform(db, key, "AUTH_FAILED", cfg.last_failure_reason)
+        return True
+    return False
+
+
+def platform_access(db, key: str) -> Optional[Dict[str, Any]]:
+    """What any tenant may see about the platform block: state and the generic
+    reason. Nothing else."""
+    row = access_row(db, key)
+    if row is None:
+        return None
+    return {"blocked": bool(row.blocked), "code": row.blocked_code if row.blocked else None,
+            "reason": row.blocked_reason if row.blocked else None,
+            "since": row.blocked_at.isoformat() + "Z" if row.blocked and row.blocked_at else None,
+            "last_platform_probe_at": row.last_probe_at.isoformat() + "Z" if row.last_probe_at else None}
+
+
+def note_source_failure(db, provider: AcquisitionProvider, cfg, code: str, message: str,
+                        retry_after: Optional[int] = None) -> None:
+    """Record a source failure on the tenant row and, for an authorization
+    refusal from a public source, on the platform layer."""
+    from app.services.evosense.sources import base as SRC
+    record_failure(cfg, "%s: %s" % (code, (message or "")[:200]),
+                   rate_limited_for=retry_after if code == SRC.RATE_LIMITED else None)
+    if code == SRC.AUTH_FAILED and is_public_source(provider):
+        block_platform(db, provider.key, code, "%s: %s" % (code, (message or "")[:200]))
 
 
 def record_success(cfg):
@@ -736,7 +840,7 @@ def route(db, org_id: str, capability: str, *, exclude: tuple = (),
         if p.connector_kind == C.SANDBOX and not sandbox_allowed:
             continue
         cfg = config(db, org_id, key)
-        if health_state(p, cfg) != C.H_CONNECTED:
+        if health_state(p, cfg, blocked=platform_blocked(db, key, cfg)) != C.H_CONNECTED:
             continue
         overrides = C.jload(cfg.cost_overrides, {}) or {}
         rate = (cfg.successes_total or 0) / cfg.calls_total if cfg.calls_total else 1.0
@@ -757,7 +861,7 @@ def status_report(db, org_id: str) -> Dict[str, Any]:
             "connector_label": C.CONNECTOR_LABELS[p.connector_kind],
             "capabilities": list(p.capabilities), "coverage": p.coverage,
             "costs": {c: p.cost(c, overrides) for c in p.capabilities if p.cost(c, overrides)},
-            "status": health_state(p, cfg), "enabled": bool(cfg.enabled),
+            "status": health_state(p, cfg, blocked=platform_blocked(db, key, cfg)), "enabled": bool(cfg.enabled),
             "priority": cfg.priority,
             "missing_env_count": len(p.missing_config()),
             "last_success_at": cfg.last_success_at.isoformat() + "Z" if cfg.last_success_at else None,
@@ -800,11 +904,13 @@ REG_FAILED = "FAILED"
 REG_NOT_CONFIGURED = "NOT CONFIGURED"
 REG_MANUAL_ONLY = "MANUAL ONLY"
 REG_UNVERIFIED = "UNVERIFIED"          # enabled, but no probe or run has succeeded yet
-REGISTRY_STATES = (REG_HEALTHY, REG_DEGRADED, REG_FAILED, REG_NOT_CONFIGURED, REG_MANUAL_ONLY,
-                   REG_UNVERIFIED)
+REG_BLOCKED = "BLOCKED"                # refused the platform (401/403); no automatic call
+REGISTRY_STATES = (REG_HEALTHY, REG_DEGRADED, REG_FAILED, REG_BLOCKED, REG_NOT_CONFIGURED,
+                   REG_MANUAL_ONLY, REG_UNVERIFIED)
 
 
-def registry_state(p: AcquisitionProvider, cfg, when: Optional[datetime] = None) -> Dict[str, str]:
+def registry_state(p: AcquisitionProvider, cfg, when: Optional[datetime] = None, *,
+                   blocked: bool = False, block_reason: Optional[str] = None) -> Dict[str, str]:
     """HEALTHY only after a verified success that is newer than any failure.
     A source is never shown as operational on the strength of being enabled."""
     when = when or C.now()
@@ -823,6 +929,10 @@ def registry_state(p: AcquisitionProvider, cfg, when: Optional[datetime] = None)
         return {"state": REG_NOT_CONFIGURED, "why": "Missing credentials"}
     if not cfg.enabled:
         return {"state": REG_NOT_CONFIGURED, "why": "Disabled for this organization"}
+    if blocked:
+        return {"state": REG_BLOCKED,
+                "why": "Blocked platform-wide: %s. Automatic calls stopped; a platform admin may re-test."
+                       % (block_reason or "the source refused the platform's requests")}
     if cfg.rate_limited_until and cfg.rate_limited_until > when:
         return {"state": REG_DEGRADED, "why": "Rate limited by the source until %s UTC"
                 % cfg.rate_limited_until.strftime("%Y-%m-%d %H:%M")}
@@ -847,7 +957,9 @@ def source_registry(db, org_id: str) -> Dict[str, Any]:
         if p.connector_kind == C.SANDBOX:
             continue
         cfg = config(db, org_id, key)
-        st = registry_state(p, cfg)
+        blocked = platform_blocked(db, key, cfg)
+        st = registry_state(p, cfg, blocked=blocked,
+                            block_reason=(platform_access(db, key) or {}).get("reason") if blocked else None)
         rows.append({
             "key": key, "label": p.label, "state": st["state"], "why": st["why"],
             "connector_kind": p.connector_kind, "enabled": bool(cfg.enabled),
@@ -873,30 +985,47 @@ def source_registry(db, org_id: str) -> Dict[str, Any]:
             "last_record_count": cfg.last_record_count,
             "calls_total": cfg.calls_total, "successes_total": cfg.successes_total,
         })
-    order = {REG_HEALTHY: 0, REG_DEGRADED: 1, REG_UNVERIFIED: 2, REG_FAILED: 3, REG_MANUAL_ONLY: 4,
-             REG_NOT_CONFIGURED: 5}
+    order = {REG_HEALTHY: 0, REG_DEGRADED: 1, REG_UNVERIFIED: 2, REG_FAILED: 3, REG_BLOCKED: 3,
+             REG_MANUAL_ONLY: 4, REG_NOT_CONFIGURED: 5}
     rows.sort(key=lambda r: (order.get(r["state"], 9), r["jurisdiction"], r["label"]))
     return {"sources": rows, "states": list(REGISTRY_STATES)}
 
 
-def verify_source(db, org_id: str, key: str) -> Dict[str, Any]:
+def verify_source(db, org_id: str, key: str, *, platform_admin: bool = False) -> Dict[str, Any]:
     """A cheap, real probe (a zip's directory, a one-row query, one geocode).
-    Success is what makes a source HEALTHY; failure is recorded with its code."""
+    Success is what makes a source HEALTHY; failure is recorded with its code.
+
+    A source BLOCKED platform-wide is not probed on a tenant's request: the
+    server has already refused the platform, and asking again on behalf of
+    every tenant is exactly the hammering the block exists to stop. A platform
+    admin may re-test it with ONE request; a success clears the block."""
     from app.services.evosense.sources import base as SB_
     p = PROVIDERS[key]
     cfg = config(db, org_id, key)
     if not isinstance(p, PublicRecordSource):
         return {"key": key, "ok": False, "error": "Only automated public sources can be verified"}
-    cfg.last_attempt_at = C.now()
+    blocked = platform_blocked(db, key, cfg)
+    if blocked and not platform_admin:
+        acc = platform_access(db, key) or {}
+        return {"key": key, "ok": False, "code": "PLATFORM_BLOCKED",
+                "error": "Blocked platform-wide (%s). The source is not called again until a platform "
+                         "admin re-tests it." % (acc.get("reason") or "authorization refused")}
+    now = C.now()
+    cfg.last_attempt_at = now
+    row = access_row(db, key, create=blocked) if blocked else None
+    if row is not None:
+        row.last_probe_at = now
     try:
         detail = p.verify()
     except SB_.SourceError as exc:
-        record_failure(cfg, "%s: %s" % (exc.code, exc.message),
-                       rate_limited_for=exc.retry_after if exc.code == SB_.RATE_LIMITED else None)
+        note_source_failure(db, p, cfg, exc.code, exc.message, retry_after=exc.retry_after)
         return {"key": key, "ok": False, "code": exc.code, "error": exc.message}
     except Exception as exc:  # noqa: BLE001 - recorded, never raised to the operator raw
         record_failure(cfg, "%s: %s" % (type(exc).__name__, str(exc)[:160]))
         return {"key": key, "ok": False, "code": "ERROR", "error": str(exc)[:200]}
     record_success(cfg)
     cfg.last_verified_at = C.now()
+    if row is not None:
+        row.last_probe_ok_at = cfg.last_verified_at
+        clear_platform_block(db, key)
     return {"key": key, "ok": True, "detail": detail}

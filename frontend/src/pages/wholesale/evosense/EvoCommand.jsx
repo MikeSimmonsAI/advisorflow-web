@@ -201,7 +201,10 @@ export default function EvoCommand() {
                       score={p.opportunity_score} status={<Status status={p.status} />}
                       facts={[['Contact', p.contact_confidence ?? '—'], ['Intent', p.seller_intent ?? '—'],
                               ['Type', p.property_type ? humanize(p.property_type) : '—']]}
-                      money={[['Est. value', money(p.estimated_value, 'not yet'), p.estimated_value == null ? 'quiet' : ''],
+                      money={[p.appraisal
+                                ? [p.appraisal.label || 'Appraisal district tax value', money(p.appraisal.value), '']
+                                : ['Market estimate', money(p.estimated_value, 'none on file'), p.estimated_value == null ? 'quiet' : ''],
+                              ['ARV', (p.arv && p.arv.label) || 'Insufficient comparable sales', 'quiet'],
                               ['Equity', p.equity_pct != null ? `${Math.round(p.equity_pct)}%` : 'unknown', p.equity_pct == null ? 'quiet' : 'pos']]}
                       foot={<>{p.is_test ? <SandboxTag /> : null}<span className="evo-next">{p.next_action || '—'}</span></>} />
           ))}
@@ -296,7 +299,7 @@ function NeedsYouHero({ n, onOpen }) {
   return (
     <section className="evo-hero" aria-labelledby="needs-you-title">
       <div className="evo-hero__media">
-        <PropertyThumb address={n.address} size="hero" label={n.is_test ? 'Sandbox · no photo' : 'No photo on file'} />
+        <PropertyThumb address={n.address} size="hero" label={n.is_test ? 'Sandbox · property image unavailable' : undefined} />
       </div>
       <div className="evo-hero__body">
         <div className="evo-hero__top">
@@ -322,8 +325,8 @@ function NeedsYouHero({ n, onOpen }) {
           <dl className="evo-hero__eco">
             <div><dt>Seller asking</dt><dd className="evo-money">{money(eco.asking, 'not stated')}</dd>
               <dd className="evo-hero__truth">{eco.asking != null ? 'seller stated' : ''}</dd></div>
-            <div><dt>Estimated MAO</dt><dd className="evo-money">{money(eco.mao, 'insufficient')}</dd>
-              <dd className="evo-hero__truth"><Tag kind="estimate">Estimate</Tag></dd></div>
+            <div><dt>Preliminary MAO</dt><dd className="evo-money">{money(eco.mao, 'Not calculated')}</dd>
+              <dd className="evo-hero__truth">{eco.mao != null ? <Tag kind="estimate">Estimate</Tag> : 'needs a verified ARV'}</dd></div>
             <div><dt>Spread</dt><dd className={`evo-money ${eco.spread > 0 ? 'is-pos' : eco.spread < 0 ? 'is-neg' : ''}`}>
               {eco.spread != null ? (eco.spread >= 0 ? '+' : '−') + money(Math.abs(eco.spread)) : '—'}</dd>
               <dd className="evo-hero__truth">preliminary</dd></div>
