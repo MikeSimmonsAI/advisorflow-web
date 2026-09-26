@@ -26,15 +26,6 @@ def record(db, ctx, action: str, batch_id: str, details: Optional[dict] = None,
            *, note: Optional[str] = None, commit: bool = False,
            before: Any = None, after: Any = None):
     from app.routers.audit_log_router import log_action
-    if not getattr(ctx, "actor_id", None):
-        # A SYSTEM capture (a public web form, a webhook) has no signed-in
-        # actor, and `audit_log_entries.actor_user_id` cannot be NULL. Those
-        # captures are recorded by the capturing module's own event trail
-        # (e.g. wholesale_events) and by import_record_versions; writing a row
-        # here would fail the flush and take the capture down with it.
-        log.info("intake audit (system actor %s): %s batch=%s",
-                 getattr(ctx, "actor_name", None), action, batch_id)
-        return None
     payload = dict(ctx.audit_details())
     payload.update(details or {})
     try:

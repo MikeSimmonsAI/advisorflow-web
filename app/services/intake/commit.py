@@ -349,24 +349,11 @@ _SMS_RANK = {"ready": 1, "pending_validation": 1, "no_phone": 0, "review": 2, "l
              "invalid": 3, "opted_out": 4, "suppressed": 4, "dnc": 5}
 
 
-def _lead_phone(e164: Optional[str]) -> Optional[str]:
-    """A Lead's phone in the PLATFORM's format, not intake's E.164.
-
-    Every lead reader - the inbound SMS webhook's sender lookup, suppression,
-    dedupe - compares against `dedup_service.normalize_phone` ("12145550123").
-    A lead written as "+12145550123" is invisible to all of them: a reply from
-    that person would not find their record. The org contact keeps E.164."""
-    if not e164:
-        return None
-    from app.services.dedup_service import normalize_phone
-    return normalize_phone(e164) or e164
-
-
 def _update_matched_lead(db, batch, row, lead) -> List[str]:
     """Blank-fill a matched lead and apply more-restrictive consent. Versioned."""
     before, changed = {}, []
     fill = {"first_name": row.first_name, "last_name": row.last_name,
-            "phone": _lead_phone(row.phone_normalized), "phone_raw": row.phone_raw,
+            "phone": row.phone_normalized, "phone_raw": row.phone_raw,
             "email": row.email_normalized if row.email_status not in _BAD_EMAIL else None,
             "street_address": row.street_address, "city": row.city, "state": row.state,
             "zip_code": row.zip_code}
@@ -390,29 +377,16 @@ def _update_matched_lead(db, batch, row, lead) -> List[str]:
     return changed
 
 
-def activate_lead(db, batch, row, contact: OrgContact, cat, ctx_name: str, capacity=None,
-                  hold_when_full: bool = False):
+def activate_lead(db, batch, row, contact: OrgContact, cat, ctx_name: str, capacity=None):
     """Create the Lead for an opportunity contact, or return None when the
     plan's lead ceiling is reached. The capacity claim lives HERE, beside the
-    only line that creates the lead, so no caller can create one unchecked.
-
-    `hold_when_full` is the EXTERNAL ARRIVAL rule (app/services/lead_capacity):
-    a person who reached out on their own - a web form, a webhook - is never
-    left without a lead because of a plan number. The lead is created HELD:
-    kept, not counted toward the plan, and blocked from every send, cadence
-    and AI path until capacity exists (lead_capacity.release_available). A
-    bulk import (a person at the customer, present to decide) keeps the old
-    rule: contact kept, no lead, reported as held_for_capacity."""
+    only line that creates the lead, so no caller can create one unchecked."""
     from app.models.models import Lead
     from app.services import master_contacts
-    held = False
     if capacity is not None:
         if not capacity.has_room(1):
-            if not hold_when_full:
-                return None
-            held = True
-        else:
-            capacity.take(1)
+            return None
+        capacity.take(1)
     cd = cat.get(row.classification)
     norm = _j(row.normalized_json, {})
     custom = {}
@@ -428,7 +402,7 @@ def activate_lead(db, batch, row, contact: OrgContact, cat, ctx_name: str, capac
     manual_flag = manual_reason = None
     if row.email_status in _BAD_EMAIL and email:
         manual_flag, manual_reason = "bad_email", f"import: {row.email_status}"
-    phone = _lead_phone(row.mobile_phone_normalized or row.phone_normalized)
+    phone = row.mobile_phone_normalized or row.phone_normalized
     lead = Lead(
         organization_id=batch.organization_id,
         first_name=row.first_name, last_name=row.last_name,
@@ -455,11 +429,6 @@ def activate_lead(db, batch, row, contact: OrgContact, cat, ctx_name: str, capac
         custom_fields=json.dumps(custom) if custom else None,
         org_contact_id=contact.id, import_batch_id=batch.id,
     )
-    if held:
-        from app.services import lead_capacity
-        lead.capacity_state = lead_capacity.OVER_CAPACITY
-        lead.capacity_held_at = datetime.utcnow()
-        lead.capacity_hold_reason = lead_capacity.REASON_MAX_LEADS
     db.add(lead)
     db.flush()
     contact.lead_id = lead.id
@@ -500,7 +469,7 @@ def _ensure_custom_field_defs(db, batch):
 
 
 def run_commit(db: Session, batch_id: str, org_id: str, ctx, mode: str,
-               include_enrichment: bool, hold_when_full: bool = False) -> ImportBatch:
+               include_enrichment: bool) -> ImportBatch:
     from app.services.intake import audit
     batch = (db.query(ImportBatch)
              .filter(ImportBatch.id == batch_id, ImportBatch.organization_id == org_id).first())
@@ -628,14 +597,12 @@ def run_commit(db: Session, batch_id: str, org_id: str, ctx, mode: str,
                     ok, why = may_activate_lead(row, contact)
                     if ok:
                         lead = activate_lead(db, batch, row, contact, cat, ctx.actor_name,
-                                             capacity, hold_when_full=hold_when_full)
+                                             capacity)
                         if lead is None:
                             ok, why = False, "plan_capacity_reached"
                             report["held_for_capacity"] += 1
                         else:
                             report["leads_created"] += 1
-                            if getattr(lead, "capacity_state", None):
-                                report["held_for_capacity"] += 1
                     if not ok and row.creates_lead:
                         report["lead_not_activated"][why] = \
                             report["lead_not_activated"].get(why, 0) + 1
