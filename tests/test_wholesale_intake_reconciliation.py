@@ -53,7 +53,7 @@ def test_a_returning_person_is_matched_by_email_and_keeps_what_they_wrote(client
     lead = db.query(Lead).one()
     assert "Tenant moves out" in lead.notes and "roof leaks" in lead.notes
     assert db.query(WholesaleProperty).count() == 2
-    assert _events(db)[-1].details and '"matched_by": "email"' in _events(db)[-1].details
+    assert _events(db)[-1].details and '"matched_by": "intake exact match"' in _events(db)[-1].details
 
 
 def test_a_different_person_never_displaces_the_seller_of_record(client, world):
@@ -332,6 +332,14 @@ def test_a_real_seller_on_another_property_is_never_silenced(client, world):
 def full_plan(monkeypatch):
     from app.services import plan_limits
     real = plan_limits.check
+    real_counter = plan_limits.counter_for_org_id
+
+    def counter(db, org_id, key):
+        c = real_counter(db, org_id, key)
+        if key == plan_limits.LIMIT_LEADS:
+            c.has_room = lambda n=1: False
+        return c
+    monkeypatch.setattr(plan_limits, "counter_for_org_id", counter)
 
     def check(db, org, resource, adding=1, **kw):
         if resource == plan_limits.LIMIT_LEADS:
@@ -401,3 +409,36 @@ def test_inquiry_email_is_off_until_the_workspace_turns_it_on(client, world, mon
     post(client, form(submission_id="e4", street_address="88 Birch St", full_name="Kim Seller",
                       phone="(214) 555-0177", email="kim@example.com"))
     assert [t for t, _, _ in sent] == ["boss@evo.test"]
+
+
+def test_a_seller_inquiry_goes_through_universal_intake(client, world):
+    from app.models.import_models import ImportBatch
+    from app.models.intake_models import OrgContact
+    db = world["db"]
+    post(client, form(submission_id="ui-1"))
+    lead = db.query(Lead).one()
+    contact = db.query(OrgContact).one()
+    assert lead.org_contact_id == contact.id and contact.lead_id == lead.id
+    batch = db.query(ImportBatch).filter_by(id=lead.import_batch_id).one()
+    assert batch.source_system == "website" and batch.import_list_name == "Seller inquiries"
+    det = _events(db)[-1].details
+    assert batch.id in det and contact.id in det
+    # a repeat is one contact, one lead, two capture batches (both rollback-able)
+    post(client, form(submission_id="ui-2", timeline="asap"))
+    assert db.query(OrgContact).count() == 1 and db.query(Lead).count() == 1
+    assert db.query(ImportBatch).count() == 2
+
+
+def test_an_intake_failure_never_loses_the_seller(client, world, monkeypatch):
+    from app.services.intake import capture as CAP
+    db = world["db"]
+
+    def boom(*a, **k):
+        raise RuntimeError("simulated engine failure [parameters: ('+12145550123', 'pat@example.com')]")
+    monkeypatch.setattr(CAP, "capture_one", boom)
+    r = post(client, form(submission_id="boom-1"))
+    assert r.status_code == 201
+    assert db.query(Lead).count() == 1 and db.query(WholesaleDeal).count() == 1
+    err = db.query(WholesaleEvent).filter_by(action="seller_inquiry.intake_error").one()
+    assert "simulated engine failure" in err.details
+    assert "555" not in err.details and "pat@example.com" not in err.details

@@ -22,9 +22,11 @@ NO UNCONTROLLED DUPLICATES - AND A RETURNING SELLER IS RE-ENGAGED
   * the same property in this org is reused, not re-created. The address is
     compared NORMALIZED ("St" = "Street", "N" = "North", a suffix one side
     omits, the unit) within the same ZIP;
-  * the same person in this org - matched by phone, then by email - reuses
-    that Lead. Their name is filled in if it was blank and the inquiry is
-    appended to their notes with its date, so nothing they wrote is lost;
+  * the same person in this org is decided by UNIVERSAL INTAKE
+    (app/services/intake/capture.py): one matcher for the whole platform, an
+    org contact record, fill-blanks updates, a rollback-able batch. An exact
+    match reuses that Lead; a possible match is kept separate for review. The
+    inquiry is appended to the Lead's notes with its date;
   * a DIFFERENT person inquiring about a property that already has a seller is
     attached as an additional contact. The deal's seller of record is never
     displaced by a web form; the operator is told to verify;
@@ -230,9 +232,11 @@ def _existing_property(db: Session, org_id: str, street: str, zip_code: str,
     return None
 
 
-def _existing_lead(db: Session, org_id: str, e164: str, email: Optional[str] = None):
-    """(lead, matched_by). Phone first - it is what consent and suppression key
-    on - then email. Only this organization's non-test leads."""
+def _legacy_lead_match(db: Session, org_id: str, e164: str, email: Optional[str] = None):
+    """FALLBACK ONLY - used when Universal Intake capture fails, so an inquiry
+    is never lost to an intake error. Phone first, then email; this org's
+    non-test leads. Remove once capture has run clean in production (see
+    handoff/UNIVERSAL_INTAKE_CONVERGENCE.md)."""
     forms = [e164, e164[1:], e164[2:]]
     lead = (db.query(Lead)
             .filter(Lead.organization_id == org_id, Lead.phone.in_(forms),
@@ -249,6 +253,15 @@ def _existing_lead(db: Session, org_id: str, e164: str, email: Optional[str] = N
         if lead is not None:
             return lead, "email"
     return None, None
+
+
+def _safe_error(exc: BaseException) -> str:
+    """An exception as a diagnostic line WITHOUT the data it may carry: the
+    SQLAlchemy "[parameters: ...]" block (phone numbers, emails) is dropped."""
+    import re as _re
+    msg = str(exc).split("[parameters:")[0]
+    msg = _re.sub(r"\s+", " ", msg).strip()
+    return ("%s: %s" % (type(exc).__name__, msg))[:900]
 
 
 def _assignee(db: Session, org_id: str, settings: WholesaleSettings) -> Optional[str]:
@@ -289,8 +302,46 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
     host = urlparse(d.get("source_url") or "").hostname or None
     assignee_id = _assignee(db, org_id, settings)
     prop = _existing_property(db, org_id, d["street_address"], d["zip_code"])
-    lead, matched_by = _existing_lead(db, org_id, d["phone"], d.get("email"))
-    repeat = prop is not None and lead is not None
+    # WHO THIS PERSON IS is Universal Intake's answer, not Wholesale's: the one
+    # matcher, the org contact record, fill-blanks updates, a rollback-able
+    # batch, and the capacity HOLD for an external arrival. Wholesale keeps
+    # only what intake cannot know: which property, and this person's role on it.
+    from app.services.intake.capture import CaptureResult, capture_one
+    intake_error = None
+    try:
+        cap = capture_one(db, org, {
+            "first_name": first, "last_name": last.strip() or None, "email": d.get("email"),
+            "phone": d["phone"], "street_address": d["street_address"], "city": d["city"],
+            "state": d["state"], "zip_code": d["zip_code"], "notes": d.get("notes")},
+            source="website", source_detail=("%s/sell" % host) if host else "public seller form",
+            list_name="Seller inquiries", classification="new_inquiry",
+            actor_label=ACTOR_LABEL, external=True)
+        if cap.lead is None:
+            raise RuntimeError("universal intake produced no lead (batch %s, match %s)"
+                               % (cap.batch_id, cap.match))
+    except Exception as exc:  # noqa: BLE001 - an intake error must never lose the seller
+        # FAIL SAFE: record why (without the person's data) and fall back to
+        # the direct path, which still holds at capacity rather than refusing.
+        db.rollback()
+        intake_error = _safe_error(exc)
+        log.exception("wholesale intake: universal capture failed; using fallback")
+        prop = _existing_property(db, org_id, d["street_address"], d["zip_code"])
+        fl, fmatch = _legacy_lead_match(db, org_id, d["phone"], d.get("email"))
+        cap = CaptureResult(batch_id=None, contact_id=None, lead=fl,
+                            match="existing" if fl is not None else "new")
+        svc.log_event(db, org_id, "seller_inquiry.intake_error", actor_type=ACTOR_API,
+                      actor_label=ACTOR_LABEL, summary="Universal Intake capture failed; the "
+                      "inquiry was taken through the fallback path",
+                      details={"error": intake_error, "submission_id": d.get("submission_id")})
+        db.commit()
+    lead = cap.lead
+    matched_by = {"existing": "intake exact match", "blocked_existing": "intake exact match (do-not-contact record)"}.get(cap.match)
+    if lead is not None and cap.lead_created:
+        # A person first seen through this form is in the Wholesale seller SMS
+        # PROGRAM (wholesale_sms.PROGRAM_SOURCE_CATEGORIES) - the category the
+        # program's consent scoping reads.
+        lead.source_category = ws.SOURCE_CATEGORY
+    repeat = prop is not None and matched_by is not None
     reengaged = additional = False
     stamp = datetime.utcnow().strftime("%Y-%m-%d")
     inquiry_line = "%s - Seller inquiry via %s.%s" % (
@@ -346,21 +397,17 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
 
     lead = db.query(Lead).filter(Lead.id == profile.lead_id,
                                  Lead.organization_id == org_id).first()
+    if cap.batch_id is None and cap.lead is None:
+        lead.source_category = ws.SOURCE_CATEGORY
     from app.services import lead_capacity
     held = lead_capacity.is_held(lead)
-    if matched_by:
-        # A RETURNING person: fill what was blank, keep what they wrote, and
-        # stop calling somebody who just reached out a cold lead.
-        if not lead.email and d["email"]:
-            lead.email = d["email"]
-        if not lead.first_name and first:
-            lead.first_name = first
-        if not lead.last_name and last.strip():
-            lead.last_name = last.strip()
-        lead.notes = _append_note(lead.notes, inquiry_line)
-        if (lead.relationship_type or "cold_lead") == "cold_lead":
-            lead.relationship_type = "warm_lead"
-        lead.updated_at = datetime.utcnow()
+    # Every inquiry is kept on the person, dated - the first and every repeat.
+    # (Blank-filling a returning person's name/email is intake's job.)
+    lead.notes = _append_note(lead.notes, inquiry_line)
+    if (lead.relationship_type or "cold_lead") == "cold_lead":
+        # somebody who just reached out is not a cold lead
+        lead.relationship_type = "warm_lead"
+    lead.updated_at = datetime.utcnow()
     if assignee_id and not lead.assigned_to_id:
         lead.assigned_to_id = assignee_id
     deal = svc.deal_for_property(db, org_id, prop.id)
@@ -412,6 +459,9 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
                  "source_url": d.get("source_url"), "repeat": repeat,
                  "reengaged": reengaged, "additional_contact": additional,
                  "matched_by": matched_by, "assigned_to_id": assignee_id,
+                 "intake_batch_id": cap.batch_id, "org_contact_id": cap.contact_id,
+                 "intake_match": cap.match, "intake_notes": cap.notes,
+                 "intake_error": intake_error,
                  "capacity_held": held,
                  "notes": d.get("notes")})
 
