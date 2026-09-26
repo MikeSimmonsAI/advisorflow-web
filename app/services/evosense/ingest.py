@@ -41,21 +41,86 @@ def source_rank(provider, capability: str) -> int:
 
 # ── owner parsing (deterministic; never invents a beneficial owner) ────────
 
-def owner_type_of(name: str) -> str:
+INSTITUTIONAL = ("government", "religious_org", "nonprofit")
+OWNER_TYPE_LABELS = {
+    "individual": "Individual", "joint": "Joint owners", "llc": "LLC", "corporation": "Company",
+    "trust": "Trust", "estate": "Estate", "estate_indicated": "Estate indicated by name (unverified)",
+    "life_estate": "Life estate", "multiple_owners": "Multiple owners (ET AL)",
+    "government": "Government", "religious_org": "Religious organization", "nonprofit": "Nonprofit / association",
+    "unknown": "Unknown",
+}
+REVIEW_FLAG_LABELS = {
+    "INSTITUTIONAL_OWNER": "Institutional owner — not a typical seller; excluded from scoring by default",
+    "ESTATE_INDICATED": "Name indicates an estate (\"EST\"). Unverified — confirm probate / heirs before any contact.",
+    "LIFE_ESTATE": "Life estate — a life tenant and remainder owners; confirm who can sell before any contact.",
+    "MULTIPLE_OWNERS_ETAL": "Recorded \"ET AL\" — more owners than are named; confirm all decision makers.",
+    "NAME_TRUNCATED": "The source cut this owner's name at its field width. Confirm the full name before any lookup.",
+}
+
+_RELIGIOUS = re.compile(r" (CHURCH|MINISTRIES|MINISTRY|MISSIONARY|BAPTIST|METHODIST|CATHOLIC|DIOCESE|PARISH|"
+                        r"TEMPLE|MOSQUE|MASJID|SYNAGOGUE|CONGREGATION|TABERNACLE|KINGDOM HALL|"
+                        r"JEHOVAHS? WITNESS|ASSEMBLY OF GOD|CHURCH OF CHRIST|EPISCOPAL|LUTHERAN|"
+                        r"PRESBYTERIAN|PENTECOSTAL|APOSTOLIC) ")
+_NONPROFIT = re.compile(r" (FOUNDATION|HABITAT FOR HUMANITY|HOMEOWNERS ASSOCIATION|HOMEOWNERS ASSN|"
+                        r"OWNERS ASSOCIATION|HOA|COMMUNITY DEVELOPMENT|NONPROFIT|NON PROFIT|LAND BANK) ")
+_GOVERNMENT = re.compile(r" (CITY|COUNTY|STATE) OF | HOUSING AUTHORITY | ISD | SCHOOL DISTRICT | "
+                         r"UNITED STATES | US GOVT | SECRETARY OF HOUSING | HUD | WATER DISTRICT | "
+                         r"MUNICIPAL UTILITY ")
+
+
+def _norm_name(name: str) -> str:
     n = " %s " % re.sub(r"[.,]", " ", (name or "").upper())
-    n = re.sub(r"\s+", " ", n)
+    return re.sub(r"\s+", " ", n)
+
+
+def owner_flags(name: str, *, truncated: bool = False) -> List[str]:
+    """Review flags read from how a record NAMES the owner. Each is a reason
+    for a person to look, never evidence that scores."""
+    n = _norm_name(name)
+    flags = []
+    otype = owner_type_of(name)
+    if otype in INSTITUTIONAL:
+        flags.append("INSTITUTIONAL_OWNER")
+    if " LIFE ESTATE " in n or " LIFE EST " in n:
+        flags.append("LIFE_ESTATE")
+    elif re.search(r" (EST|ESTATE|DECD|DEC D|DECEASED|HEIRS?) ", n) and otype != "estate":
+        flags.append("ESTATE_INDICATED")
+    if re.search(r" (ETAL|ET AL) ", n):
+        flags.append("MULTIPLE_OWNERS_ETAL")
+    if truncated:
+        flags.append("NAME_TRUNCATED")
+    return flags
+
+
+def owner_type_of(name: str) -> str:
+    """Deterministic owner type from the name of record. Institutional owners
+    (government, religious organizations, nonprofits / associations) are
+    recognised first; a name carrying an estate, life-estate or ET AL marker
+    is NOT typed "individual", because the person named may not be the one
+    who can sell."""
+    n = _norm_name(name)
     if not name:
         return "unknown"
     if n.strip().startswith("ESTATE OF") or " ESTATE " in n and " HEIRS" in n:
         return "estate"
-    if re.search(r" (CITY|COUNTY|STATE) OF | HOUSING AUTHORITY | ISD ", n):
+    if _GOVERNMENT.search(n):
         return "government"
+    if _RELIGIOUS.search(n):
+        return "religious_org"
+    if _NONPROFIT.search(n):
+        return "nonprofit"
+    if " LIFE ESTATE " in n or " LIFE EST " in n:
+        return "life_estate"
     if re.search(r" (TRUST|TRUSTEE|TR) ", n):
         return "trust"
     if re.search(r" (LLC|L L C) ", n):
         return "llc"
     if re.search(r" (INC|CORP|CORPORATION|CO|LP|LTD|LLP|HOLDINGS|PROPERTIES|INVESTMENTS) ", n):
         return "corporation"
+    if re.search(r" (EST|DECD|DECEASED|HEIRS?) ", n):
+        return "estate_indicated"
+    if re.search(r" (ETAL|ET AL) ", n):
+        return "multiple_owners"
     if re.search(r" (&|AND) ", n):
         return "joint"
     toks = [t for t in n.split() if t]
@@ -94,6 +159,7 @@ def upsert_owner(db, org_id: str, prop: EvoSenseProperty, data: Dict[str, Any], 
     owner = q.filter(EvoSenseOwner.mailing_key == mk).first() if mk else q.first()
     if owner is None and mk:
         owner = same_owner_other_spelling(db, org_id, prop, name, mk)
+    truncated = bool(data.get("name_truncated"))
     if owner is None:
         otype = data.get("owner_type") or owner_type_of(name)
         owner = EvoSenseOwner(
@@ -104,6 +170,7 @@ def upsert_owner(db, org_id: str, prop: EvoSenseProperty, data: Dict[str, Any], 
             # An entity with no legitimately known people is UNRESOLVED, and
             # stays that way until a real source names someone.
             resolution="unresolved" if otype in ("llc", "corporation", "trust") else "resolved",
+            name_truncated=truncated, review_flags=C.jdump(owner_flags(name, truncated=truncated)) or None,
             is_test=is_test)
         db.add(owner)
         db.flush()
@@ -112,6 +179,10 @@ def upsert_owner(db, org_id: str, prop: EvoSenseProperty, data: Dict[str, Any], 
                                   name_key=name_key(full), role=role, source=source,
                                   is_test=is_test))
         db.flush()
+    elif rank >= RANK_HUMAN and owner.name_truncated:
+        # a person typed the owner's full name: the truncation is resolved
+        owner.name_truncated = False
+        owner.review_flags = C.jdump(owner_flags(owner.display_name or name)) or None
 
     link = (db.query(EvoSenseOwnership)
             .filter(EvoSenseOwnership.organization_id == org_id,
@@ -182,11 +253,16 @@ def same_owner_other_spelling(db, org_id: str, prop, name: str, mk: str) -> Opti
 
 
 def _persons_for(name: str, otype: str):
+    """People named by the record itself. An estate-indicated or life-estate
+    name, and an institution, name nobody who can be assumed to sell."""
     if otype == "individual":
         return [(name, "owner")]
     if otype == "joint":
         parts = [p.strip() for p in re.split(r"\s(?:&|and|AND)\s", name) if p.strip()]
         return [(p, "co_owner") for p in parts]
+    if otype == "multiple_owners":
+        named = re.sub(r"\s+(ETAL|ET AL)\b.*$", "", name.strip(), flags=re.I).strip()
+        return [(named, "co_owner")] if named else []
     return []
 
 
@@ -204,8 +280,9 @@ def add_conflict(prop, field: str, incoming: Dict, existing) -> None:
 
 # ── the ingest ──────────────────────────────────────────────────────────────
 
-FACTS = ("property_type", "bedrooms", "bathrooms", "square_feet", "year_built",
+FACTS = ("property_type", "bedrooms", "bathrooms", "half_bathrooms", "square_feet", "year_built",
          "latitude", "longitude", "county", "parcel_apn")
+DERIVATION_VERSION = "derive/v3"
 
 
 def _set_fact(prop, field, value, rank, source, prop_ranks):
@@ -321,10 +398,14 @@ def ingest(db, org_id: str, provider, capability: str, rec: Dict[str, Any], *,
 def attach_to(db, prop, provider, capability, rec, obs, rank, *, user=None, cost_cents=0):
     """Apply one record's facts, owner and signals to a canonical property."""
     ranks = C.jload(prop.fact_ranks, {}) or {}
+    city_was = prop.city
     for f in ("street_address", "city", "state", "zip_code", "unit"):
         v = rec.get(f)
         if v and not getattr(prop, f):
             setattr(prop, f, v if f != "state" else str(v).upper()[:2])
+    if prop.city and not city_was:
+        basis = (rec.get("_evidence") or {}).get("city_basis") if isinstance(rec.get("_evidence"), dict) else None
+        prop.situs_city_basis = basis or "%s situs record" % provider.key
     if rec.get("zip_code") and prop.zip_code and "-" in str(rec["zip_code"]) and "-" not in prop.zip_code:
         pass   # ZIP+4 from a feed does not replace a clean ZIP5
     for f in FACTS:
@@ -339,7 +420,23 @@ def attach_to(db, prop, provider, capability, rec, obs, rank, *, user=None, cost
                              "parcel_apn": prop.parcel_apn, "county": prop.county})
     db.flush()
 
+    appr = rec.get("appraisal") or {}
     val = rec.get("valuation") or {}
+    if val.get("value") is not None and _appraisal_basis(val.get("basis")):
+        # a caller still handing a TAX value in as "valuation": it is an appraisal
+        appr = {"value": val["value"], "basis": val.get("basis"), "district": None, "year": None}
+        val = {k: v for k, v in val.items() if k != "value"}
+    if appr.get("value") is not None and (prop.appraisal_value is None or rank >= RANK_RECORDS):
+        prop.appraisal_value = int(appr["value"])
+        prop.appraisal_land_value = appr.get("land")
+        prop.appraisal_improvement_value = appr.get("improvements")
+        prop.appraisal_year = appr.get("year")
+        prop.appraisal_source = "%s (%s)" % (provider.key, appr.get("basis") or "appraisal district tax value")
+        prop.appraisal_at = C.now()
+        if prop.estimated_value is not None and _appraisal_basis(prop.estimated_value_source):
+            # a pre-split row carried the tax value as an "estimate": clear it
+            prop.estimated_value = prop.estimated_value_source = prop.estimated_value_at = None
+            prop.equity_pct = prop.equity_basis = None
     if val.get("value") is not None:
         cur = prop.estimated_value
         if cur is None or rank >= RANK_RECORDS:
@@ -352,14 +449,17 @@ def attach_to(db, prop, provider, capability, rec, obs, rank, *, user=None, cost
     if val.get("mortgage") is not None and (prop.mortgage_balance is None or rank >= RANK_RECORDS):
         prop.mortgage_balance = int(val["mortgage"])
         prop.mortgage_source = provider.key
-    if prop.estimated_value and prop.mortgage_balance is not None and prop.estimated_value > 0:
+    # Equity only from a MARKET estimate and a reported mortgage - never from
+    # a tax value, never from a missing mortgage.
+    if prop.estimated_value and prop.mortgage_balance is not None and prop.estimated_value > 0 \
+            and not _appraisal_basis(prop.estimated_value_source):
         prop.equity_pct = int(round(100.0 * (prop.estimated_value - prop.mortgage_balance)
                                     / prop.estimated_value))
         prop.equity_basis = "computed"
-    sale = _parse_date(rec.get("last_sale_date"))
-    if sale and (prop.last_sale_date is None or rank >= RANK_RECORDS):
-        prop.last_sale_date = sale
-        prop.ownership_years = max(0, int((C.now() - sale).days // 365.25))
+    deed = _parse_date(rec.get("deed_transfer_date") or rec.get("last_sale_date"))
+    if deed and (prop.last_deed_transfer_date is None or rank >= RANK_RECORDS):
+        prop.last_deed_transfer_date = deed.date()
+        prop.ownership_years = max(0, int((C.now() - deed).days // 365.25))
     if rec.get("occupancy") and (prop.occupancy is None or rank >= RANK_RECORDS):
         prop.occupancy = rec["occupancy"]
         prop.occupancy_source = provider.key
@@ -369,7 +469,13 @@ def attach_to(db, prop, provider, capability, rec, obs, rank, *, user=None, cost
                      observation_id=obs.id if obs else None, rank=rank,
                      is_test=prop.is_test, user=user)
     _apply_signals(db, prop, provider, rec, obs.id if obs else None, cost_cents, user=user)
+    prop.derivation_version = DERIVATION_VERSION
     prop.last_observed_at = C.now()
+
+
+def _appraisal_basis(text) -> bool:
+    from app.services.evosense.valuation import is_appraisal_basis
+    return is_appraisal_basis(text)
 
 
 def _apply_signals(db, prop, provider, rec, observation_id, cost_cents, user=None):
@@ -390,9 +496,27 @@ def _apply_signals(db, prop, provider, rec, observation_id, cost_cents, user=Non
                                "adapter_version": rec.get("_adapter_version"),
                                "limitations": s.get("limitations")},
                    cost_cents=cost_cents if len(rec.get("signals") or []) == 1 else 0,
+                   evidence_basis=s.get("evidence_basis"), case_status=s.get("case_status"),
+                   rule_version=rec.get("_adapter_version"),
                    user=user)
     db.flush()
     from app.models.evosense_models import EvoSenseSignal
+    if observation_id:
+        # The same record, read again under newer rules, may say something
+        # different (a case now CLOSED is history, not a current violation).
+        # Evidence this record no longer states is retracted - kept, not deleted.
+        emitted = {(s["type"], s.get("ref") or rec.get("source_reference")) for s in rec.get("signals") or []}
+        for old in (db.query(EvoSenseSignal)
+                    .filter(EvoSenseSignal.organization_id == prop.organization_id,
+                            EvoSenseSignal.property_id == prop.id,
+                            EvoSenseSignal.source == provider.key,
+                            EvoSenseSignal.observation_id == observation_id,
+                            EvoSenseSignal.active.is_(True)).all()):
+            if (old.signal_type, old.source_reference) not in emitted:
+                old.active = False
+                old.retracted_at = C.now()
+                old.retracted_reason = "no longer stated by %s under %s" % (
+                    provider.key, rec.get("_adapter_version") or "the current adapter")
     prop.signal_count = (db.query(EvoSenseSignal)
                          .filter(EvoSenseSignal.organization_id == prop.organization_id,
                                  EvoSenseSignal.property_id == prop.id,

@@ -337,7 +337,17 @@ export default function EvoControls() {
                     onClick={() => patch({ score_weights: null }, 'Weights reset to the defaults.')}>Reset to defaults</button>
           </div>
           <p className="evo-muted evo-small" style={{ margin: '10px 0 0' }}>Points each current signal adds (−30 to 30). Aging evidence counts half;
-            stale evidence counts nothing. A changed weight changes the score version, so older scores stay explainable. AI never sets a score.</p>
+            stale evidence counts nothing. A changed weight changes THIS workspace&apos;s score version only, so older scores stay explainable. AI never sets a score.
+            {(ctl.never_scored || []).length ? <> {ctl.never_scored.map((k) => humanize(k.toLowerCase())).join(' and ')} are shown as evidence but never scored, whatever the weight.</> : null}</p>
+          {ctl.scoring_options ? (
+            <label className="evo-field" style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" checked={!!ctl.scoring_options.exclude_institutional} disabled={busy}
+                     onChange={(e) => patch({ scoring_options: { ...ctl.scoring_options, exclude_institutional: e.target.checked } },
+                       'Scoring option saved. Properties re-score on their next evaluation.')} />
+              <span>Exclude institutional owners (government, religious organizations, nonprofits / associations) from scoring
+                <span className="evo-muted"> · platform default: on</span></span>
+            </label>
+          ) : null}
         </Panel>
 
         <Panel title="Compliance guarantees" hint="enforced by the server, not by this screen">

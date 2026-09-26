@@ -4,10 +4,15 @@ export and the City of Dallas 311 service-request feed (Code Compliance).
     DCAD   https://www.dallascad.org/DataProducts.aspx   (free zip, no account)
     311    https://www.dallasopendata.com  dataset d7e7-envw (Socrata, public)
 
-What DCAD can honestly tell EvoSense: owner of record, situs, appraised value,
-homestead, and the appraiser's CDU condition rating. A POOR / VERY POOR /
-UNDESIRABLE rating is recorded as DISTRESSED_CONDITION evidence — the
-appraisal district's judgment, labelled as exactly that.
+What DCAD can honestly tell EvoSense: owner of record, situs, the appraisal
+district's TAX value (land + improvements), homestead, the last DEED TRANSFER
+date (no price: Texas deed records carry none), and the appraiser's CDU rating.
+
+CDU is Condition, Desirability and Utility - ONE composite appraiser opinion
+of a building, rated for the appraisal year. POOR / VERY POOR is recorded as
+CDU_POOR; UNDESIRABLE (which speaks to desirability, not physical distress) as
+CDU_UNDESIRABLE. Neither is called "distressed", and each is dated to the
+appraisal year, not to the day EvoSense read the file.
 
 Owners DCAD marks EXCLUDE_OWNER = Y (confidential under Texas Tax Code
 §25.025) are never read into EvoSense: the property may be discovered, the
@@ -31,7 +36,8 @@ from app.services.evosense.sources import base as B
 DCAD_PAGE = "https://www.dallascad.org/DataProducts.aspx"
 DCAD_BASE = "https://www.dallascad.org/ViewPDFs.aspx?type=3&id="
 DCAD_PATH = r"\\DCAD.ORG\WEB\WEBDATA\WEBFORMS\DATA PRODUCTS\DCAD{year}_CURRENT.ZIP"
-DISTRESSED_CDU = {"POOR": 75, "VERY POOR": 85, "UNDESIRABLE": 80}
+DISTRESSED_CDU = {"POOR": 75, "VERY POOR": 85, "UNDESIRABLE": 80}   # the CDU ratings discovery reads
+CDU_SIGNAL = {"POOR": "CDU_POOR", "VERY POOR": "CDU_POOR", "UNDESIRABLE": "CDU_UNDESIRABLE"}
 SFR_SPTD = ("A11",)          # DCAD SPTD code for single-family residence
 
 
@@ -56,7 +62,7 @@ def _d(v: str) -> Optional[datetime]:
 
 
 class DcadReader:
-    adapter_version = "dcad_certified/1"
+    adapter_version = "dcad_certified/2"
 
     def locate(self, year: Optional[int] = None) -> str:
         return DCAD_BASE + urllib.parse.quote(DCAD_PATH.format(year=year or datetime.utcnow().year))
@@ -117,6 +123,14 @@ class DcadReader:
                     break
         stats["%s_missing" % slot] = len(need)
 
+    def record_from_raw(self, raw: Dict[str, Any], *, homestead: Optional[bool], url: str = DCAD_PAGE) -> Dict[str, Any]:
+        """Re-derive a record from the raw evidence an observation preserved.
+        The raw keeps RES_DETAIL, ACCOUNT_INFO and the value row; the homestead
+        answer (from APPLIED_STD_EXEMPT) was kept as evidence alongside it."""
+        c = {"res": raw.get("RES_DETAIL") or {}, "info": raw.get("ACCOUNT_INFO") or {},
+             "val": raw.get("ACCOUNT_APPRL_YEAR") or {}, "homestead": homestead}
+        return self.record(c, url)
+
     def record(self, c, url) -> Dict[str, Any]:
         res, info, val, ex = c["res"], c["info"], c.get("val") or {}, c.get("exempt")
         acct = res["ACCOUNT_NUM"].strip()
@@ -138,7 +152,7 @@ class DcadReader:
                                       if x and x.strip()),
                      "mailing_street": mail, "mailing_city": (info.get("OWNER_CITY") or "").strip().title() or None,
                      "mailing_state": state_code(st), "mailing_zip": re.sub(r"\D", "", info.get("OWNER_ZIPCODE") or "")[:5] or None}
-        cdu = res["CDU_RATING_DESC"].strip().upper()
+        cdu = (res.get("CDU_RATING_DESC") or "").strip().upper()
         yr = res.get("APPRAISAL_YR") or val.get("APPRAISAL_YR")
 
         def i(v):
@@ -147,23 +161,28 @@ class DcadReader:
             except (TypeError, ValueError):
                 return None
         deed = _d(info.get("DEED_TXFR_DATE"))
-        homestead = bool(ex and (ex.get("HOMESTEAD_EFF_DT") or "").strip())
+        homestead = c.get("homestead") if "homestead" in c else bool(ex and (ex.get("HOMESTEAD_EFF_DT") or "").strip())
         rec = {
             "source_reference": "DCAD:%s:%s" % (acct, yr or "na"),
             "street_address": street or None, "unit": unit, "city": city, "state": "TX",
             "zip_code": zip5, "county": "Dallas", "parcel_apn": acct,
             "property_type": "single_family",
             "bedrooms": i(res.get("NUM_BEDROOMS")) or None,
-            "bathrooms": i(res.get("NUM_FULL_BATHS")) or None,
+            "bathrooms": i(res.get("NUM_FULL_BATHS")) or None,          # FULL baths
+            "half_bathrooms": i(res.get("NUM_HALF_BATHS")) or None,
             "square_feet": i(res.get("TOT_LIVING_AREA_SF")) or None,
             "year_built": i(res.get("YR_BUILT")) if (i(res.get("YR_BUILT")) or 0) > 1800 else None,
-            "last_sale_date": deed.strftime("%Y-%m-%d") if deed else None,
+            # a DEED TRANSFER date - the record states no price and no sale
+            "deed_transfer_date": deed.strftime("%Y-%m-%d") if deed else None,
             "occupancy": "owner_occupied" if homestead else None,
             "owner": owner,
-            "signals": [{"type": "DISTRESSED_CONDITION", "confidence": DISTRESSED_CDU[cdu],
-                         "value": "DCAD %s condition rating: %s" % (yr or "", cdu),
-                         "raw": "CDU_RATING_DESC=%s;DEPRECIATION_PCT=%s" % (cdu, res.get("DEPRECIATION_PCT")),
-                         "observed_days_ago": 0}],
+            "signals": ([{"type": CDU_SIGNAL[cdu], "confidence": DISTRESSED_CDU[cdu],
+                          "value": "DCAD %s CDU rating: %s (condition, desirability & utility — appraiser's opinion)"
+                                   % (yr or "", cdu),
+                          "raw": "CDU_RATING_DESC=%s;DEPRECIATION_PCT=%s" % (cdu, res.get("DEPRECIATION_PCT")),
+                          "effective_at": "%s-01-01" % yr if yr and str(yr).isdigit() else None,
+                          "evidence_basis": "DCAD appraisal year %s rating" % (yr or "?"),
+                          "observed_days_ago": 0}] if cdu in CDU_SIGNAL else []),
             "_raw": {"RES_DETAIL": res, "ACCOUNT_INFO": {k: v for k, v in info.items()
                                                          if not (confidential and k.startswith("OWNER"))},
                      "ACCOUNT_APPRL_YEAR": {k: val.get(k) for k in ("TOT_VAL", "IMPR_VAL", "LAND_VAL",
@@ -173,8 +192,11 @@ class DcadReader:
             "_evidence": {"cdu": cdu, "homestead": homestead, "owner_confidential": confidential},
         }
         if i(val.get("TOT_VAL")):
-            rec["valuation"] = {"value": i(val["TOT_VAL"]), "mortgage": None,
-                                "basis": "DCAD %s appraised value (appraisal district, not a market estimate)" % (yr or "")}
+            # The appraisal district's TAX value. Never a market value, never an ARV.
+            rec["appraisal"] = {"value": i(val["TOT_VAL"]), "land": i(val.get("LAND_VAL")),
+                                "improvements": i(val.get("IMPR_VAL")),
+                                "year": int(yr) if yr and str(yr).isdigit() else None, "district": "DCAD",
+                                "basis": "DCAD %s certified appraisal (property-tax value)" % (yr or "")}
         return rec
 
 
@@ -185,7 +207,8 @@ DALLAS_311_PAGE = "https://www.dallasopendata.com/d/d7e7-envw"
 
 
 class Dallas311Reader:
-    adapter_version = "dallas_311/1"
+    adapter_version = "dallas_311/2"
+    OPEN_STATUSES = ("new", "open", "in progress", "in-progress", "assigned", "pending")
 
     def lookup(self, street: str, *, days: int = 365) -> Dict[str, Any]:
         s = re.sub(r"\s+", " ", (street or "").upper()).strip()
@@ -200,6 +223,9 @@ class Dallas311Reader:
         return {"cases": rows}
 
     def to_record(self, target: Dict[str, Any], cases: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Each request is its own evidence. An OPEN request is a current code
+        complaint; a CLOSED one is code HISTORY - shown, never scored as a
+        current problem. A "Proactive" request was opened by the city itself."""
         if not cases:
             return None
         newest = cases[0]
@@ -210,10 +236,20 @@ class Dallas311Reader:
                 age = max(0, (datetime.utcnow() - datetime.strptime(created, "%Y-%m-%d")).days)
             except ValueError:
                 age = 0
-            sigs.append({"type": "CODE_COMPLAINT", "confidence": 55,
-                         "value": "311 %s (%s) — %s" % (c.get("service_request_type") or "request",
-                                                         created, (c.get("status") or "").lower()),
-                         "raw": "SR=%s" % c.get("service_request_number"), "observed_days_ago": age,
+            status = (c.get("status") or "").strip()
+            is_open = status.lower() in self.OPEN_STATUSES
+            method = (c.get("method_received_description") or "").strip()
+            how = " · city-initiated" if method.lower() == "proactive" else (" · %s" % method.lower() if method else "")
+            closed = (c.get("closed_date") or "")[:10]
+            sigs.append({"type": "CODE_COMPLAINT" if is_open else "CODE_HISTORY",
+                         "confidence": 55 if is_open else 50,
+                         "value": "311 %s (opened %s%s) — %s%s" % (
+                             c.get("service_request_type") or "request", created, how, status.lower() or "status unknown",
+                             (", closed %s" % closed) if closed and not is_open else ""),
+                         "raw": "SR=%s;STATUS=%s" % (c.get("service_request_number"), status),
+                         "observed_days_ago": age, "effective_at": created or None,
+                         "evidence_basis": "311 request created date",
+                         "case_status": status.lower() or None,
                          "ref": "DAL311:%s" % c.get("service_request_number")})
         return {"source_reference": "DAL311:%s" % newest.get("service_request_number"),
                 "street_address": target.get("street_address"), "city": target.get("city"),
@@ -221,4 +257,4 @@ class Dallas311Reader:
                 "parcel_apn": target.get("parcel_apn"), "signals": sigs,
                 "_raw": cases[:5], "_source_url": DALLAS_311_PAGE, "_source_updated_at": None,
                 "_adapter_version": self.adapter_version,
-                "_evidence": {"note": "311 requests are complaints, not confirmed violations"}}
+                "_evidence": {"note": "311 requests are complaints or city inspections, not confirmed violations"}}

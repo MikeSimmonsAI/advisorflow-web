@@ -7,6 +7,21 @@ was observed, how confident the source was, and it ages:
     CURRENT  -> AGING (counts half) -> STALE (counts nothing, stays visible)
 
 History is never erased when a signal goes stale.
+
+DERIVATION RULES v3 (derive/v3). Missing, failed, ambiguous or unavailable
+evidence NEVER becomes affirmative evidence:
+  * absentee owner needs a KNOWN mailing address that is KNOWN to differ from
+    the property (a suffix-less "2427 LILLIAN" is the same place as "2427
+    LILLIAN ST"); an ambiguous comparison, a PO box or a homestead exemption
+    (the owner's declared residence) produces no signal
+  * a CLOSED code case / 311 request is CODE_HISTORY (0 points), not a
+    current violation or complaint
+  * an appraisal district CDU rating is labelled as exactly that and dated to
+    its appraisal year; UNDESIRABLE is not "distressed"
+  * a deed transfer is a deed transfer ("sold" is never implied); one inside
+    the last year is RECENT_DEED_TRANSFER, which subtracts
+  * a tax balance past a NON-standard delinquency date is TAX_TERMS_UNVERIFIED
+    (0 points) until a person verifies the terms
 """
 from __future__ import annotations
 
@@ -48,6 +63,16 @@ CATALOG: Dict[str, Dict[str, Any]] = {
     "ACTIVE_LISTING":       {"label": "Active listing", "points": -12, "current_days": 60, "stale_days": 120},
     "RECENT_SALE":          {"label": "Recent sale", "points": -10, "current_days": 365, "stale_days": 730},
     "OTHER":                {"label": "Other evidence", "points": 0, "current_days": 180, "stale_days": 365},
+    # derive/v3 additions (property_opportunity/v3 platform defaults; each tenant may override)
+    "CDU_POOR":             {"label": "Appraisal district CDU rating: poor", "points": 4,
+                             "current_days": 365, "stale_days": 730},
+    "CDU_UNDESIRABLE":      {"label": "Appraisal district CDU rating: undesirable", "points": 0,
+                             "current_days": 365, "stale_days": 730},
+    "CODE_HISTORY":         {"label": "Code history (closed)", "points": 0, "current_days": 365, "stale_days": 730},
+    "TAX_TERMS_UNVERIFIED": {"label": "Tax balance — terms unverified", "points": 0,
+                             "current_days": 365, "stale_days": 730},
+    "RECENT_DEED_TRANSFER": {"label": "Recent deed transfer", "points": -10, "current_days": 365,
+                             "stale_days": 730, "derived": True},
 }
 
 # The acquisition spec's signal families. EvoSense's stored keys predate the
@@ -65,8 +90,13 @@ FAMILY = {
     "FAILED_LISTING": "RECENT_FAILED_LISTING", "PRICE_REDUCTION": "ACTIVE_LISTING",
     "ACTIVE_LISTING": "ACTIVE_LISTING", "RECENT_SALE": "RECENT_SALE",
     "MANUAL_OPERATOR_SIGNAL": "OTHER", "OTHER": "OTHER",
+    "CDU_POOR": "APPRAISER_RATING", "CDU_UNDESIRABLE": "APPRAISER_RATING", "CODE_HISTORY": "CODE_HISTORY",
+    "TAX_TERMS_UNVERIFIED": "TAX_DELINQUENT", "RECENT_DEED_TRANSFER": "RECENT_SALE",
 }
-DERIVED_RULE_VERSION = "derive/v2"
+# Evidence that is SHOWN but never scored as current distress, whatever a
+# tenant's weights say: it is history or unverified, by definition.
+NEVER_SCORED = ("CODE_HISTORY", "TAX_TERMS_UNVERIFIED")
+DERIVED_RULE_VERSION = "derive/v3"
 DERIVED_LIMITATIONS = {
     "ABSENTEE_OWNER": "Mailing address differs from the property. It does not prove the house is vacant "
                       "or rented; a PO box never counts.",
@@ -74,7 +104,10 @@ DERIVED_LIMITATIONS = {
     "HIGH_EQUITY": "ESTIMATED from a reported value and a reported mortgage. Never computed when the "
                    "mortgage is unknown.",
     "FREE_AND_CLEAR": "Only when a source reports a zero mortgage. Never inferred from a missing mortgage.",
-    "LONG_OWNERSHIP": "From the last recorded deed / sale date.",
+    "LONG_OWNERSHIP": "From the last recorded DEED TRANSFER date. A transfer is not necessarily a sale, "
+                      "and Texas deed records carry no price.",
+    "RECENT_DEED_TRANSFER": "A deed transfer inside the last year - often a recent purchase (possibly by an "
+                            "investor), an inheritance or a refinance-related transfer. Counts against the property.",
 }
 DERIVED_SOURCE = "evosense_derived"
 
@@ -118,10 +151,21 @@ def stack(signals, when: Optional[datetime] = None) -> List[Dict[str, Any]]:
             "observed_at": best.observed_at.isoformat() + "Z" if best.observed_at else None,
             "derived": best.source == DERIVED_SOURCE,
             "family": FAMILY.get(stype, "OTHER"),
+            "scored": stype not in NEVER_SCORED,
+            # the SOURCE's own date for the evidence, as a plain date - never
+            # shifted by a time zone - and what that date is
+            "evidence_date": _date_str(getattr(best, "effective_at", None)),
+            "evidence_basis": getattr(best, "evidence_basis", None),
+            "case_status": getattr(best, "case_status", None),
+            "record_sources": sorted({record_source(s) for s in items}),
             "evidence": [{
                 "id": s.id, "source": s.source, "connector": s.connector_kind,
                 "source_reference": s.source_reference,
                 "observed_at": s.observed_at.isoformat() + "Z" if s.observed_at else None,
+                "evidence_date": _date_str(getattr(s, "effective_at", None)),
+                "evidence_basis": getattr(s, "evidence_basis", None),
+                "case_status": getattr(s, "case_status", None),
+                "rule_version": getattr(s, "rule_version", None),
                 "freshness": freshness(s, when), "confidence": s.confidence,
                 "value": s.normalized_value, "raw": s.raw_value,
                 "provenance": C.jload(s.provenance, None), "cost_cents": s.cost_cents,
@@ -132,11 +176,29 @@ def stack(signals, when: Optional[datetime] = None) -> List[Dict[str, Any]]:
     return out
 
 
+def _date_str(dt) -> Optional[str]:
+    if dt is None:
+        return None
+    return dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
+
+
+def record_source(sig) -> str:
+    """Which SOURCE a piece of evidence ultimately rests on. A derived signal
+    rests on the record that supplied its facts (the assessor / tax record
+    naming the owner), so absentee + long ownership read from ONE county row
+    count as one source, not two independent ones."""
+    if sig.source != DERIVED_SOURCE:
+        return sig.source
+    prov = C.jload(sig.provenance, {}) if isinstance(sig.provenance, str) else (sig.provenance or {})
+    return (prov or {}).get("record_source") or DERIVED_SOURCE
+
+
 def upsert(db, prop, signal_type: str, *, source: str, connector_kind: str = None,
            source_reference: str = None, observation_id: str = None,
            observed_at: datetime = None, effective_at: datetime = None,
            confidence: int = None, strength: int = None, raw_value: Any = None,
            normalized_value: Any = None, provenance: Dict = None, cost_cents: int = 0,
+           evidence_basis: str = None, case_status: str = None, rule_version: str = None,
            user=None):
     """Create or refresh one signal. The same source re-reporting the same
     signal refreshes it; a different source adds independent evidence."""
@@ -173,9 +235,97 @@ def upsert(db, prop, signal_type: str, *, source: str, connector_kind: str = Non
     row.normalized_value = None if normalized_value is None else str(normalized_value)[:200]
     row.provenance = C.jdump(provenance)
     row.cost_cents = cost_cents or 0
+    row.evidence_basis = evidence_basis
+    row.case_status = case_status
+    row.rule_version = rule_version or (DERIVED_RULE_VERSION if source == DERIVED_SOURCE else row.rule_version)
+    row.retracted_at = row.retracted_reason = None
     row.active = True
     row.created_by_id = getattr(user, "id", None) or row.created_by_id
     return row
+
+
+US_STATES = frozenset((
+    "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND "
+    "OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR GU VI").split())
+_PO_BOX = re.compile(r"^(P\s*O\s*BOX|POST OFFICE BOX|BOX)\b")
+
+
+def derive_specs(prop, owner=None, *, owner_source: Optional[str] = None,
+                 when: Optional[datetime] = None) -> Dict[str, Any]:
+    """PURE derivation (derive/v3): from facts to signal specs, no database.
+    Returns {"make": {type: spec}, "retract": [types], "unknown": {type: why}}.
+    The live engine (`derive`) and the reprocessor call this same function,
+    so a dry run shows exactly what the engine would write."""
+    from app.services.evosense.identity import normalize_street, same_address
+    when = when or C.now()
+    make: Dict[str, Dict[str, Any]] = {}
+    unknown: Dict[str, str] = {}
+    base_prov = {"rule_version": DERIVED_RULE_VERSION, "record_source": owner_source}
+
+    if owner is not None and owner.mailing_street:
+        mail_street = normalize_street(owner.mailing_street)[0]
+        prov = dict(base_prov, **{
+            "owner_mailing": ", ".join(x for x in (owner.mailing_street, owner.mailing_city,
+                                                   owner.mailing_state, owner.mailing_zip) if x),
+            "property": ", ".join(x for x in (prop.street_address, prop.city, prop.zip_code) if x),
+            "rule": "mailing address differs from property",
+            "limitations": DERIVED_LIMITATIONS["ABSENTEE_OWNER"]})
+        same = same_address(owner.mailing_street, prop.street_address, owner.mailing_zip, prop.zip_code)
+        if _PO_BOX.match(mail_street or ""):
+            unknown["ABSENTEE_OWNER"] = "The owner's mailing address is a PO box; it says nothing about residence."
+        elif getattr(prop, "occupancy", None) == "owner_occupied":
+            unknown["ABSENTEE_OWNER"] = ("A homestead exemption is on file (the owner's declared residence); "
+                                         "a different mailing address does not make the owner absentee.")
+        elif same is None:
+            unknown["ABSENTEE_OWNER"] = "The mailing and property addresses cannot be compared reliably."
+        elif same is False:
+            make["ABSENTEE_OWNER"] = {"confidence": 80, "value": "mailing address differs", "provenance": prov}
+        mstate = (owner.mailing_state or "").strip().upper()
+        if mstate in US_STATES and prop.state and mstate != prop.state.upper():
+            make["OUT_OF_STATE_OWNER"] = {
+                "confidence": 85, "value": "mailing state %s" % mstate,
+                "provenance": dict(prov, rule="mailing state differs from property state",
+                                   limitations=DERIVED_LIMITATIONS["OUT_OF_STATE_OWNER"])}
+        elif mstate and mstate not in US_STATES:
+            unknown["OUT_OF_STATE_OWNER"] = "The mailing state '%s' is not a recognised U.S. state." % mstate
+    else:
+        unknown["ABSENTEE_OWNER"] = "No owner mailing address is known."
+
+    if prop.equity_pct is not None and prop.equity_pct >= 50:
+        make["HIGH_EQUITY"] = {
+            "confidence": 70 if prop.equity_basis == "computed" else 75,
+            "value": "%s%% (ESTIMATED)" % prop.equity_pct,
+            "provenance": dict(base_prov, equity_basis=prop.equity_basis,
+                               value_source=prop.estimated_value_source,
+                               mortgage_source=prop.mortgage_source, truth="ESTIMATED",
+                               limitations=DERIVED_LIMITATIONS["HIGH_EQUITY"])}
+    if prop.mortgage_balance == 0 and prop.mortgage_source and prop.equity_pct is not None:
+        make["FREE_AND_CLEAR"] = {
+            "confidence": 70, "value": "source reports a $0 mortgage",
+            "provenance": dict(base_prov, mortgage_source=prop.mortgage_source,
+                               limitations=DERIVED_LIMITATIONS["FREE_AND_CLEAR"])}
+
+    deed = getattr(prop, "last_deed_transfer_date", None)
+    if deed is not None:
+        deed_dt = datetime(deed.year, deed.month, deed.day)
+        years = max(0, int((when - deed_dt).days // 365.25))
+        dprov = dict(base_prov, deed_transfer_date=deed.strftime("%Y-%m-%d"))
+        if years >= 10:
+            make["LONG_OWNERSHIP"] = {
+                "confidence": 85, "value": "%s years (deed transfer %s)" % (years, deed.strftime("%m/%d/%Y")),
+                "effective_at": deed_dt, "evidence_basis": "deed transfer date",
+                "provenance": dict(dprov, limitations=DERIVED_LIMITATIONS["LONG_OWNERSHIP"])}
+        if (when - deed_dt).days <= 365:
+            make["RECENT_DEED_TRANSFER"] = {
+                "confidence": 85, "value": "deed transfer %s (price not public)" % deed.strftime("%m/%d/%Y"),
+                "effective_at": deed_dt, "evidence_basis": "deed transfer date",
+                "provenance": dict(dprov, limitations=DERIVED_LIMITATIONS["RECENT_DEED_TRANSFER"])}
+    elif prop.ownership_years is not None and getattr(prop, "last_sale_date", None) is not None:
+        unknown["LONG_OWNERSHIP"] = "Only a legacy date is on file; re-derive to read the deed transfer date."
+
+    derivable = ("ABSENTEE_OWNER", "OUT_OF_STATE_OWNER", "HIGH_EQUITY", "FREE_AND_CLEAR", "LONG_OWNERSHIP",
+                 "RECENT_DEED_TRANSFER")
+    return {"make": make, "retract": [t for t in derivable if t not in make], "unknown": unknown}
 
 
 def derive(db, prop, owner=None) -> List[str]:
@@ -183,76 +333,30 @@ def derive(db, prop, owner=None) -> List[str]:
 
     Derived signals are only as good as the facts under them, so their
     confidence is the lowest of their inputs, and they carry those inputs."""
-    made: List[str] = []
-    from app.models.evosense_models import EvoSenseSignal
-
-    def retract(stype):
+    from app.models.evosense_models import EvoSenseOwnership, EvoSenseSignal
+    owner_source = None
+    if owner is not None:
+        link = (db.query(EvoSenseOwnership)
+                .filter(EvoSenseOwnership.organization_id == prop.organization_id,
+                        EvoSenseOwnership.property_id == prop.id,
+                        EvoSenseOwnership.owner_id == owner.id,
+                        EvoSenseOwnership.is_current.is_(True)).first())
+        owner_source = link.source if link is not None else None
+    spec = derive_specs(prop, owner, owner_source=owner_source)
+    for stype in spec["retract"]:
         for s in (db.query(EvoSenseSignal)
                   .filter(EvoSenseSignal.organization_id == prop.organization_id,
                           EvoSenseSignal.property_id == prop.id,
                           EvoSenseSignal.signal_type == stype,
-                          EvoSenseSignal.source == DERIVED_SOURCE).all()):
+                          EvoSenseSignal.source == DERIVED_SOURCE,
+                          EvoSenseSignal.active.is_(True)).all()):
             s.active = False
-
-    if owner is not None and owner.mailing_street:
-        from app.services.evosense.identity import normalize_street
-        mail_street = normalize_street(owner.mailing_street)[0]
-        prop_street = normalize_street(prop.street_address)[0]
-        same_street = bool(mail_street) and mail_street == prop_street
-        mz, pz = (owner.mailing_zip or "")[:5], (prop.zip_code or "")[:5]
-        # UNKNOWN is not NO: with no property ZIP the street alone decides; a
-        # PO box (or no property street) decides nothing.
-        po_box = bool(re.match(r"^(P\s*O\s*BOX|POST OFFICE BOX|BOX)\b", mail_street or ""))
-        prov = {"owner_mailing": ", ".join(x for x in (owner.mailing_street, owner.mailing_city,
-                                                        owner.mailing_state, owner.mailing_zip) if x),
-                "property": ", ".join(x for x in (prop.street_address, prop.city, prop.zip_code) if x),
-                "rule": "mailing address differs from property", "rule_version": DERIVED_RULE_VERSION,
-                "limitations": DERIVED_LIMITATIONS["ABSENTEE_OWNER"]}
-        if po_box or not prop_street:
-            retract("ABSENTEE_OWNER")
-        elif not same_street or (mz and pz and mz != pz):
-            upsert(db, prop, "ABSENTEE_OWNER", source=DERIVED_SOURCE, confidence=80,
-                   normalized_value="mailing address differs", provenance=prov)
-            made.append("ABSENTEE_OWNER")
-        else:
-            retract("ABSENTEE_OWNER")
-        if owner.mailing_state and prop.state and owner.mailing_state.upper() != prop.state.upper():
-            upsert(db, prop, "OUT_OF_STATE_OWNER", source=DERIVED_SOURCE, confidence=85,
-                   normalized_value="mailing state %s" % owner.mailing_state.upper(),
-                   provenance={**prov, "rule": "mailing state differs from property state",
-                               "limitations": DERIVED_LIMITATIONS["OUT_OF_STATE_OWNER"]})
-            made.append("OUT_OF_STATE_OWNER")
-        else:
-            retract("OUT_OF_STATE_OWNER")
-    if prop.equity_pct is not None:
-        if prop.equity_pct >= 50:
-            upsert(db, prop, "HIGH_EQUITY", source=DERIVED_SOURCE,
-                   confidence=70 if prop.equity_basis == "computed" else 75,
-                   normalized_value="%s%% (ESTIMATED)" % prop.equity_pct,
-                   provenance={"equity_basis": prop.equity_basis,
-                               "value_source": prop.estimated_value_source,
-                               "mortgage_source": prop.mortgage_source,
-                               "truth": "ESTIMATED", "rule_version": DERIVED_RULE_VERSION,
-                               "limitations": DERIVED_LIMITATIONS["HIGH_EQUITY"]})
-            made.append("HIGH_EQUITY")
-        else:
-            retract("HIGH_EQUITY")
-        if prop.mortgage_balance == 0 and prop.mortgage_source:
-            upsert(db, prop, "FREE_AND_CLEAR", source=DERIVED_SOURCE, confidence=70,
-                   normalized_value="source reports a $0 mortgage",
-                   provenance={"mortgage_source": prop.mortgage_source,
-                               "rule_version": DERIVED_RULE_VERSION,
-                               "limitations": DERIVED_LIMITATIONS["FREE_AND_CLEAR"]})
-            made.append("FREE_AND_CLEAR")
-    if prop.ownership_years is not None:
-        if prop.ownership_years >= 10:
-            upsert(db, prop, "LONG_OWNERSHIP", source=DERIVED_SOURCE, confidence=85,
-                   normalized_value="%s years" % prop.ownership_years,
-                   provenance={"last_sale_date": prop.last_sale_date.isoformat()
-                               if prop.last_sale_date else None,
-                               "rule_version": DERIVED_RULE_VERSION,
-                               "limitations": DERIVED_LIMITATIONS["LONG_OWNERSHIP"]})
-            made.append("LONG_OWNERSHIP")
-        else:
-            retract("LONG_OWNERSHIP")
-    return made
+            s.retracted_at = C.now()
+            s.retracted_reason = (spec["unknown"].get(stype) or "no longer supported by the facts") + \
+                " (%s)" % DERIVED_RULE_VERSION
+    for stype, m in spec["make"].items():
+        upsert(db, prop, stype, source=DERIVED_SOURCE, confidence=m["confidence"],
+               normalized_value=m["value"], provenance=m["provenance"],
+               effective_at=m.get("effective_at"), evidence_basis=m.get("evidence_basis"),
+               rule_version=DERIVED_RULE_VERSION)
+    return list(spec["make"])

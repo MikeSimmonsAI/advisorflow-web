@@ -152,7 +152,7 @@ export default function EvoProperty() {
           { label: statusLabel(p.status) },
           f.physical.property_type ? { label: humanize(f.physical.property_type) } : null,
           f.physical.bedrooms ? { label: `${f.physical.bedrooms} beds` } : null,
-          f.physical.bathrooms ? { label: `${f.physical.bathrooms} baths` } : null,
+          f.physical.bathrooms ? { label: `${f.physical.bathrooms} full bath${Number(f.physical.bathrooms) === 1 ? '' : 's'}${f.physical.half_bathrooms ? ` + ${f.physical.half_bathrooms} half` : ''}` } : null,
           f.physical.square_feet ? { label: `${Number(f.physical.square_feet).toLocaleString()} sq ft` } : null,
         ]}
         score={<><Ring kind="opportunity" size="lg" value={p.opportunity_score} /><span>Opportunity score</span></>}
@@ -180,11 +180,18 @@ export default function EvoProperty() {
             <div><dt>ARV</dt><dd className="is-quiet">—<small>{(f.arv && f.arv.label) || 'Insufficient comparable sales'}</small></dd></div>
             <div><dt>Equity</dt><dd>{f.equity_pct.value != null ? `${f.equity_pct.value}%` : '—'}<small>{f.equity_pct.value != null ? (f.equity_pct.truth || '').toLowerCase().split(' (')[0] : 'missing'}</small></dd></div>
             <div><dt>Occupancy</dt><dd>{f.occupancy.value ? humanize(f.occupancy.value) : '—'}<small>{f.occupancy.source || 'not reported'}</small></dd></div>
-            <div><dt>Size</dt><dd>{f.physical.bedrooms || '—'}bd · {f.physical.bathrooms || '—'}ba<small>{f.physical.square_feet ? `${Number(f.physical.square_feet).toLocaleString()} sq ft` : 'sq ft unknown'}{f.physical.year_built ? ` · ${f.physical.year_built}` : ''}</small></dd></div>
-            <div><dt>Owned</dt><dd>{f.ownership_years.value != null ? `${f.ownership_years.value} yrs` : '—'}<small>{f.ownership_years.last_sale_date ? `sold ${shortDate(f.ownership_years.last_sale_date)}` : 'no sale date'}</small></dd></div>
+            <div><dt>Size</dt><dd>{f.physical.bedrooms || '—'}bd · {f.physical.bathrooms || '—'}{f.physical.half_bathrooms ? `/${f.physical.half_bathrooms}` : ''}ba<small>{f.physical.half_bathrooms ? 'full / half baths · ' : 'full baths · '}{f.physical.square_feet ? `${Number(f.physical.square_feet).toLocaleString()} sq ft` : 'sq ft unknown'}{f.physical.year_built ? ` · ${f.physical.year_built}` : ''}</small></dd></div>
+            <div><dt>Owned</dt><dd>{f.ownership_years.value != null ? `${f.ownership_years.value} yrs` : '—'}<small title={(f.deed_transfer || {}).note}>{f.deed_transfer && f.deed_transfer.date ? `deed transfer ${shortDate(f.deed_transfer.date)} · price not public` : 'no deed transfer date'}</small></dd></div>
           </dl>
         </div>
       </section>
+
+      {(d.review_flags || []).length ? (
+        <Alert kind="warn">
+          <strong>Review before anything else:</strong>
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{d.review_flags.map((r) => <li key={r.code}>{r.label}</li>)}</ul>
+        </Alert>
+      ) : null}
 
       {/* 10 ── NEXT ACTION (placed first: it is what the operator came for) ─ */}
       <section className="evo-nextcard" aria-label="Next action">
@@ -336,10 +343,11 @@ export default function EvoProperty() {
           </Panel>
 
           {/* 3 ── WHY FOUND ────────────────────────────────────────────── */}
-          <Panel title="Why EvoSense found it" id="signals" hint="Evidence, not truth · aging counts half, stale counts nothing">
+          <Panel title="Why EvoSense found it" id="signals" hint="Evidence, not truth · aging counts half, stale counts nothing · dates are the source's own">
             {!d.signals.length ? <p className="evo-muted" style={{ margin: 0 }}>No signals.</p> : (
+              <>
               <ul className="evo-signal-list">
-                {d.signals.map((s) => (
+                {d.signals.filter((s) => s.scored !== false).map((s) => (
                   <li key={s.signal_type} className={`evo-signal-item${s.freshness === 'stale' ? ' is-stale' : ''}`}>
                     <span className="evo-signal-item__name">{s.label}{s.value ? <span className="evo-muted" style={{ fontWeight: 400 }}> · {s.value}</span> : null}</span>
                     <span className="evo-chips">
@@ -348,14 +356,7 @@ export default function EvoProperty() {
                       {s.derived ? <Tag kind="estimate">derived</Tag> : <Tag>record</Tag>}
                     </span>
                     <span className="evo-signal-item__meta">
-                      {s.evidence.map((e) => [
-                        e.source === 'evosense_derived' ? 'computed from facts' : e.source,
-                        e.connector ? humanize(e.connector) : null,
-                        e.observed_at ? shortDate(e.observed_at) : null,
-                        e.confidence ? `${e.confidence}% confidence` : null,
-                        e.provenance && e.provenance.rule ? e.provenance.rule : null,
-                        e.provenance && e.provenance.rule_version ? e.provenance.rule_version : null,
-                      ].filter(Boolean).join(' · ')).join('  |  ')}
+                      {s.evidence.map((e) => evidenceLine(e)).join('  |  ')}
                     </span>
                     {(s.evidence.find((e) => e.provenance && e.provenance.limitations) || {}).provenance ? (
                       <span className="evo-signal-item__meta" style={{ fontStyle: 'italic' }}>
@@ -364,6 +365,22 @@ export default function EvoProperty() {
                   </li>
                 ))}
               </ul>
+              {d.signals.some((s) => s.scored === false) ? (
+                <>
+                  <p className="evo-hero__label" style={{ marginTop: 14 }}>Record history &amp; unverified — shown, not scored</p>
+                  <ul className="evo-signal-list">
+                    {d.signals.filter((s) => s.scored === false).map((s) => (
+                      <li key={s.signal_type} className="evo-signal-item is-stale">
+                        <span className="evo-signal-item__name">{s.label}</span>
+                        <span className="evo-signal-item__meta">
+                          {s.evidence.map((e) => `${e.value || ''} · ${evidenceLine(e)}`).join('  |  ')}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              </>
             )}
           </Panel>
 
@@ -387,8 +404,13 @@ export default function EvoProperty() {
               <div key={o.id} style={{ marginBottom: 14 }}>
                 <div className="evo-strong" style={{ fontSize: 16 }}>{o.name}{' '}
                   {o.in_conflict ? <Tag kind="danger">Conflict</Tag> : null}{!o.current ? <Tag>Former</Tag> : null}</div>
-                <div className="evo-muted evo-small">{humanize(o.owner_type)} · <span style={{ color: o.resolution === 'unresolved' ? 'var(--evo-warning-ink)' : undefined }}>{o.resolution_label}</span>
+                <div className="evo-muted evo-small">{o.owner_type_label || humanize(o.owner_type)} · <span style={{ color: o.resolution === 'unresolved' ? 'var(--evo-warning-ink)' : undefined }}>{o.resolution_label}</span>
                   {o.properties_owned_here > 1 ? ` · owns ${o.properties_owned_here} properties here` : ''}</div>
+                {(o.review_flags || []).length ? (
+                  <div className="evo-chips" style={{ marginTop: 6 }}>
+                    {o.review_flags.map((r) => <Tag key={r.code} kind="danger" title={r.label}>{humanize(r.code.toLowerCase())}</Tag>)}
+                  </div>
+                ) : null}
                 <dl className="evo-kv" style={{ marginTop: 10, fontSize: 13 }}>
                   <dt>Mailing</dt><dd style={{ textAlign: 'right', whiteSpace: 'normal' }}>{o.mailing || '—'}</dd>
                   <dt>Sources</dt><dd>{o.sources.join(', ') || '—'}</dd>
@@ -437,6 +459,8 @@ export default function EvoProperty() {
               <dt>Found by</dt><dd>{d.attribution.first_strategy || '—'}</dd>
               <dt>Sources</dt><dd>{d.attribution.sources.length}</dd>
               <dt>Tax value year</dt><dd>{f.appraisal && f.appraisal.year ? f.appraisal.year : '—'}</dd>
+              <dt>City known from</dt><dd style={{ whiteSpace: 'normal', textAlign: 'right' }}>{f.situs_city_basis || '—'}</dd>
+              <dt>Rules</dt><dd>{d.derivation_version || 'before derive/v3'}</dd>
               <dt>Conflicts</dt><dd style={{ color: d.conflicts.length ? 'var(--evo-warning-ink)' : undefined }}>{d.conflicts.length || 'none'}</dd>
             </dl>
             <div className="evo-divider" />
@@ -569,6 +593,21 @@ export default function EvoProperty() {
       </Drawer>
     </EvoApp>
   )
+}
+
+/** One piece of evidence, with the SOURCE's date (a plain calendar date, never
+ * shifted by the viewer's time zone) and what that date is. */
+function evidenceLine(e) {
+  const date = e.evidence_date ? shortDate(e.evidence_date) : (e.observed_at ? `read ${shortDate(e.observed_at)}` : null)
+  return [
+    e.source === 'evosense_derived' ? 'computed from facts' : e.source,
+    e.connector ? humanize(e.connector) : null,
+    date, e.evidence_basis || null,
+    e.case_status ? `status: ${e.case_status}` : null,
+    e.confidence ? `${e.confidence}% confidence` : null,
+    e.provenance && e.provenance.rule ? e.provenance.rule : null,
+    e.rule_version || (e.provenance && e.provenance.rule_version) || null,
+  ].filter(Boolean).join(' · ')
 }
 
 function k2name(k) {

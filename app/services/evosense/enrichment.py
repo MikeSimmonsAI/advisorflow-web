@@ -82,6 +82,23 @@ def decide(db, prop: EvoSenseProperty, strategy, *, user=None,
     if owner is None:
         return _decision(db, prop, strategy, owner, C.D_INSUFFICIENT,
                          ["No owner of record is known, so there is nobody to look up."], user=user)
+    from app.services.evosense.ingest import INSTITUTIONAL, OWNER_TYPE_LABELS
+    flags = C.jload(getattr(owner, "review_flags", None), []) or []
+    if owner.owner_type in INSTITUTIONAL:
+        return _decision(db, prop, strategy, owner, C.D_INSUFFICIENT,
+                         ["The owner of record is an institution (%s), not a typical seller. No contact "
+                          "lookup is made." % OWNER_TYPE_LABELS.get(owner.owner_type, owner.owner_type).lower()],
+                         user=user)
+    if getattr(owner, "name_truncated", False):
+        return _decision(db, prop, strategy, owner, C.D_INSUFFICIENT,
+                         ["The source cut this owner's name at its field width (\"%s\"). A lookup on a "
+                          "truncated name finds the wrong person; confirm the full name first."
+                          % owner.display_name], user=user)
+    if not approved and ({"ESTATE_INDICATED", "LIFE_ESTATE"} & set(flags)):
+        return _decision(db, prop, strategy, owner, C.D_INSUFFICIENT,
+                         ["The name of record indicates %s. Confirm who can sell before paying for a "
+                          "lookup (approve it to look up anyway)."
+                          % ("an estate" if "ESTATE_INDICATED" in flags else "a life estate")], user=user)
 
     cps = (db.query(EvoSenseContactPoint)
            .filter(EvoSenseContactPoint.organization_id == org_id,

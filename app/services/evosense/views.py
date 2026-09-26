@@ -37,7 +37,49 @@ from app.services.evosense import valuation as VAL
 
 
 def _iso(dt):
-    return dt.isoformat() + "Z" if dt else None
+    """A timestamp as UTC ISO ("...Z"). A DATE stays a plain date
+    ("2009-05-04"): appending a time zone to a calendar date is what showed
+    a May 4 deed transfer as May 3 in Central time."""
+    if not dt:
+        return None
+    from datetime import date as _date, datetime as _dt
+    if isinstance(dt, _date) and not isinstance(dt, _dt):
+        return dt.isoformat()
+    return dt.isoformat() + "Z"
+
+
+def deed_transfer(prop) -> Dict[str, Any]:
+    d = getattr(prop, "last_deed_transfer_date", None)
+    legacy = None
+    if d is None and getattr(prop, "last_sale_date", None) is not None:
+        legacy = prop.last_sale_date.date()
+    when = d or legacy
+    return {"date": when.isoformat() if when else None,
+            "label": "Deed transfer (price not public)",
+            "note": ("Texas deed records carry no sale price, and a transfer is not necessarily a sale."
+                     + (" Read from a record stored before re-derivation." if legacy and not d else "")),
+            "truth": "PUBLIC RECORD" if when else "MISSING"}
+
+
+def review_flags(db, org_id: str, prop, owners=None) -> List[Dict[str, str]]:
+    """Reasons a PERSON should look before anything else happens - never
+    evidence that scores."""
+    from app.services.evosense.ingest import REVIEW_FLAG_LABELS
+    out, seen = [], set()
+    for o in (owners if owners is not None else CT.current_owners(db, prop)):
+        for code in C.jload(getattr(o, "review_flags", None), []) or []:
+            if code not in seen:
+                seen.add(code)
+                out.append({"code": code, "label": REVIEW_FLAG_LABELS.get(code, code.replace("_", " ").title())})
+    has_terms = (db.query(EvoSenseSignal.id)
+                 .filter(EvoSenseSignal.organization_id == org_id, EvoSenseSignal.property_id == prop.id,
+                         EvoSenseSignal.signal_type == "TAX_TERMS_UNVERIFIED",
+                         EvoSenseSignal.active.is_(True)).first())
+    if has_terms is not None:
+        out.append({"code": "TAX_TERMS_UNVERIFIED",
+                    "label": "A tax balance is past a non-standard delinquency date — verify the terms "
+                             "(installments, deferral or a corrected bill) before treating it as delinquency."})
+    return out
 
 
 def _ratio(a, b):
@@ -141,7 +183,11 @@ def controls_payload(ctl, db=None, org_id: Optional[str] = None) -> Dict[str, An
         "last_hunt_at": _iso(ctl.last_hunt_at),
         "score_weights": C.jload(getattr(ctl, "score_weights", None), None),
         "default_weights": {k: v["points"] for k, v in SIG.CATALOG.items()},
-        "score_version": SC.PO_VERSION}
+        "scoring_options": SC.clean_options(C.jload(getattr(ctl, "scoring_options", None), None)),
+        "default_options": dict(SC.DEFAULT_OPTIONS),
+        "never_scored": list(SIG.NEVER_SCORED),
+        "score_version": SC.version_for(C.jload(getattr(ctl, "score_weights", None), None),
+                                        C.jload(getattr(ctl, "scoring_options", None), None))}
     if db is not None and org_id:
         out["channels"] = channel_truth(db, org_id, ctl)
     return out
@@ -581,8 +627,13 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
                                EvoSenseOwnership.is_current.is_(True)).scalar() or 0)
         persons = db.query(EvoSensePerson).filter(EvoSensePerson.organization_id == org_id,
                                                   EvoSensePerson.owner_id == o.id).all()
+        from app.services.evosense.ingest import OWNER_TYPE_LABELS, REVIEW_FLAG_LABELS
         owners.append({
             "id": o.id, "name": o.display_name, "owner_type": o.owner_type,
+            "owner_type_label": OWNER_TYPE_LABELS.get(o.owner_type, o.owner_type),
+            "name_truncated": bool(getattr(o, "name_truncated", False)),
+            "review_flags": [{"code": c, "label": REVIEW_FLAG_LABELS.get(c, c)}
+                             for c in (C.jload(getattr(o, "review_flags", None), []) or [])],
             "resolution": o.resolution,
             "resolution_label": "UNRESOLVED ENTITY" if o.resolution == "unresolved" else "RESOLVED",
             "mailing": ", ".join(x for x in (o.mailing_street, o.mailing_city, o.mailing_state,
@@ -672,16 +723,20 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
             "equity_pct": {"value": prop.equity_pct, "source": prop.equity_basis,
                            "truth": "SYSTEM ESTIMATE (value − mortgage)" if prop.equity_basis == "computed"
                            else ("PROVIDER REPORTED" if prop.equity_pct is not None else "MISSING")},
-            "ownership_years": {"value": prop.ownership_years, "last_sale_date": _iso(prop.last_sale_date),
-                                "truth": "PROVIDER REPORTED" if prop.last_sale_date else "MISSING"},
+            "ownership_years": {"value": prop.ownership_years, "deed_transfer": deed_transfer(prop),
+                                "truth": "PUBLIC RECORD (deed transfer)" if deed_transfer(prop)["date"] else "MISSING"},
+            "deed_transfer": deed_transfer(prop),
+            "situs_city_basis": getattr(prop, "situs_city_basis", None),
             "occupancy": {"value": prop.occupancy, "source": prop.occupancy_source},
             "physical": {k: (float(getattr(prop, k)) if getattr(prop, k) is not None and k in ("bedrooms", "bathrooms")
                              else getattr(prop, k))
-                         for k in ("property_type", "bedrooms", "bathrooms", "square_feet", "year_built",
-                                   "parcel_apn", "county")},
+                         for k in ("property_type", "bedrooms", "bathrooms", "half_bathrooms", "square_feet",
+                                   "year_built", "parcel_apn", "county")},
             "ranks": ranks,
         },
         "conflicts": C.jload(prop.conflicts, []) or [],
+        "review_flags": review_flags(db, org_id, prop),
+        "derivation_version": getattr(prop, "derivation_version", None),
         "identity_reviews": [{"id": r.id, "reason": r.reason, "candidates": C.jload(r.candidate_property_ids, [])}
                              for r in reviews],
         "signals": stacked,

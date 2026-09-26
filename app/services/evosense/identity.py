@@ -64,6 +64,55 @@ def normalize_street(street: Optional[str]) -> Tuple[str, Optional[str]]:
     return " ".join(toks), unit
 
 
+_SUFFIX_ABBR = set(_SUFFIX.values())
+
+
+def _split_suffix(norm: str) -> Tuple[str, Optional[str]]:
+    """'2427 LILLIAN ST' -> ('2427 LILLIAN', 'ST'); '2427 LILLIAN' -> ('2427 LILLIAN', None).
+    A trailing direction after the suffix ('... ST N') keeps both."""
+    toks = norm.split()
+    if len(toks) >= 3 and toks[-1] in _SUFFIX_ABBR:
+        return " ".join(toks[:-1]), toks[-1]
+    if len(toks) >= 4 and toks[-1] in _DIR.values() and toks[-2] in _SUFFIX_ABBR:
+        return " ".join(toks[:-2] + [toks[-1]]), toks[-2]
+    return norm, None
+
+
+def same_address(street_a: Optional[str], street_b: Optional[str],
+                 zip_a: Optional[str] = None, zip_b: Optional[str] = None) -> Optional[bool]:
+    """Is mailing address A the same place as street address B?
+
+        True    the same normalized street; or the same house number and
+                street name where ONE side simply omits the suffix
+                ("2427 LILLIAN" vs "2427 LILLIAN ST") and no ZIP disagrees
+        False   a different house number, a different street name, a
+                different suffix on both sides, or a different ZIP
+        None    UNKNOWN - either side is missing or has no house number.
+                UNKNOWN is never read as "different": it produces no signal.
+    """
+    a, ua = normalize_street(street_a)
+    b, ub = normalize_street(street_b)
+    if not a or not b:
+        return None
+    za = re.sub(r"\D", "", str(zip_a or ""))[:5]
+    zb = re.sub(r"\D", "", str(zip_b or ""))[:5]
+    zips_differ = bool(za and zb and za != zb)
+    na, nb = a.split()[0], b.split()[0]
+    if not re.match(r"^\d", na) or not re.match(r"^\d", nb):
+        return None
+    if (ua or None) != (ub or None) and ua and ub:
+        return False
+    if a == b:
+        return not zips_differ
+    if na != nb:
+        return False
+    core_a, suf_a = _split_suffix(a)
+    core_b, suf_b = _split_suffix(b)
+    if core_a == core_b and (suf_a is None or suf_b is None):
+        return not zips_differ
+    return False
+
+
 def normalize_apn(apn: Optional[str]) -> Optional[str]:
     if not apn:
         return None

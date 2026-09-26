@@ -28,7 +28,7 @@ exactly like `WholesaleProperty.is_test` and `Lead.is_test`.
 import threading
 from datetime import datetime, timedelta
 
-from sqlalchemy import (Boolean, Column, DateTime, ForeignKey, Index, Integer,
+from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Index, Integer,
                         Numeric, String, Text, UniqueConstraint)
 
 from app.models.models import Base, gen_uuid
@@ -144,6 +144,7 @@ class EvoSenseControl(Base):
     org_monthly_budget_cents = Column(Integer, nullable=True)
     owner_touch_cap_days = Column(Integer, nullable=False, default=7)   # one touch per owner per N days
     score_weights = Column(Text, nullable=True)                 # JSON {signal_type: points}; NULL = catalog
+    scoring_options = Column(Text, nullable=True)               # JSON {exclude_institutional: bool}; NULL = platform defaults
     last_hunt_at = Column(DateTime, nullable=True)
     last_hunt_status = Column(String, nullable=True)
     last_command_view_at = Column(DateTime, nullable=True)
@@ -218,11 +219,23 @@ class EvoSenseProperty(Base):
     # physical
     property_type = Column(String, nullable=True)
     bedrooms = Column(Numeric(5, 1), nullable=True)
-    bathrooms = Column(Numeric(5, 1), nullable=True)
+    bathrooms = Column(Numeric(5, 1), nullable=True)          # FULL baths as the source counts them
+    half_bathrooms = Column(Integer, nullable=True)           # half baths, kept apart (never folded in)
     square_feet = Column(Integer, nullable=True)
     year_built = Column(Integer, nullable=True)
+    situs_city_basis = Column(String, nullable=True)          # how the situs city/ZIP is known
 
-    # economics (each with provenance)
+    # APPRAISAL DISTRICT TAX VALUE (DCAD / TAD). A property-tax value, kept in
+    # its own columns so it can never pose as a market value or an ARV.
+    appraisal_value = Column(Integer, nullable=True)
+    appraisal_land_value = Column(Integer, nullable=True)
+    appraisal_improvement_value = Column(Integer, nullable=True)
+    appraisal_year = Column(Integer, nullable=True)
+    appraisal_source = Column(String, nullable=True)
+    appraisal_at = Column(DateTime, nullable=True)
+
+    # economics (each with provenance). `estimated_value` is a MARKET
+    # ESTIMATE only (an AVM, an operator's figure) - never a tax value.
     estimated_value = Column(Integer, nullable=True)
     estimated_value_source = Column(String, nullable=True)
     estimated_value_at = Column(DateTime, nullable=True)
@@ -230,7 +243,10 @@ class EvoSenseProperty(Base):
     mortgage_source = Column(String, nullable=True)
     equity_pct = Column(Integer, nullable=True)
     equity_basis = Column(String, nullable=True)      # provider | computed | missing
-    last_sale_date = Column(DateTime, nullable=True)
+    last_sale_date = Column(DateTime, nullable=True)          # LEGACY: was a deed date mislabelled "sale"
+    # The last recorded DEED TRANSFER (a date, not a time). Texas deed records
+    # carry no sale price, and a transfer is not necessarily a sale.
+    last_deed_transfer_date = Column(Date, nullable=True)
     ownership_years = Column(Integer, nullable=True)
     occupancy = Column(String, nullable=True)         # vacant|owner_occupied|tenant|unknown
     occupancy_source = Column(String, nullable=True)
@@ -257,6 +273,7 @@ class EvoSenseProperty(Base):
     archive_reason = Column(String, nullable=True)
 
     fact_ranks = Column(Text, nullable=True)          # JSON {field: source rank}
+    derivation_version = Column(String, nullable=True)  # derive/v3 - which rules produced the derived state
     # conflicts the operator should see
     has_conflicts = Column(Boolean, nullable=False, default=False)
     conflicts = Column(Text, nullable=True)           # JSON list
@@ -364,6 +381,14 @@ class EvoSenseSignal(Base):
     provenance = Column(Text, nullable=True)            # JSON
     cost_cents = Column(Integer, nullable=False, default=0)
     active = Column(Boolean, nullable=False, default=True)   # False = retracted, kept
+    # `effective_at` is the SOURCE's date for the evidence (case opened, 311
+    # request created, appraisal year, deed transfer); `evidence_basis` says
+    # which, so a date is never presented as something it is not.
+    evidence_basis = Column(String, nullable=True)
+    case_status = Column(String, nullable=True)           # open|closed|new|... as the source states it
+    rule_version = Column(String, nullable=True)          # adapter or derivation rules that produced it
+    retracted_reason = Column(String, nullable=True)
+    retracted_at = Column(DateTime, nullable=True)
     created_by_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)
 
@@ -396,6 +421,10 @@ class EvoSenseOwner(Base):
     mailing_zip = Column(String, nullable=True)
     mailing_key = Column(String, nullable=True)
     resolution = Column(String, nullable=False, default="resolved")  # resolved|unresolved
+    # The source cut the name at its field width ("MURILLO GLOR"). A truncated
+    # name is never sent to a contact lookup until a person confirms it.
+    name_truncated = Column(Boolean, nullable=False, default=False)
+    review_flags = Column(Text, nullable=True)       # JSON [ESTATE_INDICATED, LIFE_ESTATE, ...]
     last_enriched_at = Column(DateTime, nullable=True)
     last_touch_at = Column(DateTime, nullable=True)      # owner-level frequency cap
     is_test = Column(Boolean, nullable=False, default=False)
@@ -857,3 +886,39 @@ class EvoSenseSourceAccess(Base):
     last_probe_ok_at = Column(DateTime, nullable=True)
     cleared_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class EvoSenseReprocessRun(Base):
+    """One re-derivation of an organization's EvoSense records from their
+    PRESERVED raw evidence under a newer rule version.
+
+        dry_run   a snapshot of the current derived state + the computed
+                  before/after diff. Writes NOTHING to the derived records.
+        applied   the diff was written (old signals deactivated with a reason,
+                  never deleted; old scores kept as history).
+        rolled_back  the applied run was reversed from its snapshot.
+
+    Raw observations, their hashes and provenance are never modified by any
+    stage. Organization-scoped like everything else here: a run, its snapshot
+    and its rollback touch one tenant only."""
+
+    __tablename__ = "evosense_reprocess_runs"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    strategy_id = Column(String, nullable=True)
+    rule_version = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="dry_run")   # dry_run|applied|rolled_back|failed
+    property_count = Column(Integer, nullable=False, default=0)
+    snapshot = Column(Text, nullable=True)        # JSON: the derived state BEFORE (for rollback)
+    diff = Column(Text, nullable=True)            # JSON: per-property before/after
+    summary = Column(Text, nullable=True)         # JSON: counts
+    applied_changes = Column(Text, nullable=True) # JSON: ids written on apply (for rollback)
+    created_by_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=_now)
+    applied_at = Column(DateTime, nullable=True)
+    applied_by_id = Column(String, nullable=True)
+    rolled_back_at = Column(DateTime, nullable=True)
+    rolled_back_by_id = Column(String, nullable=True)
+
+    __table_args__ = (Index("ix_es_reproc_org_created", "organization_id", "created_at"),)

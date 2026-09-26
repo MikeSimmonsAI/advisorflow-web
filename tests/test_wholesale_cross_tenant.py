@@ -193,6 +193,12 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     es_ids["es_routing_review_id"] = evosense_inbound.open_routing_review(
         db_session, sample_org.id, es_lead, es_reply, [es_eng, other_eng])["review_id"]
 
+    # Priority 3: a re-derivation dry run of A's.
+    from app.services.evosense import reprocess as evosense_reprocess
+    es_ids["es_reprocess_run_id"] = evosense_reprocess.dry_run(
+        db_session, sample_org.id, user=sample_advisor).id
+    db_session.commit()
+
     return {
         **es_ids,
         "file_id": photo["id"],
@@ -379,6 +385,14 @@ def evosense_attacks(ids):
         ("get", "%s/properties/%s/observations/%s/raw" % (base, ep, ids["es_observation_id"]), None),
         ("post", "%s/strategies/%s/pilot-archive" % (base, es), None),
         ("post", "%s/strategies/%s/pilot-restore" % (base, es), None),
+        # Priority 3: a re-derivation run is a snapshot of every property's
+        # derived state; applying or rolling back someone else's would rewrite
+        # their records.
+        ("get", "%s/reprocess/%s" % (base, ids["es_reprocess_run_id"]), None),
+        ("post", "%s/reprocess/%s/apply" % (base, ids["es_reprocess_run_id"]),
+         {"confirm": "APPLY %s" % ids["es_reprocess_run_id"]}),
+        ("post", "%s/reprocess/%s/rollback" % (base, ids["es_reprocess_run_id"]),
+         {"confirm": "ROLLBACK %s" % ids["es_reprocess_run_id"]}),
     ]
 
 

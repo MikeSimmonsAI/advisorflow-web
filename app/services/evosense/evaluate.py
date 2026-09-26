@@ -33,6 +33,13 @@ def score_weights(db, org_id: str):
     return C.jload(getattr(row, "score_weights", None), None) if row is not None else None
 
 
+def score_options(db, org_id: str):
+    """The organization's scoring options (None = the platform defaults)."""
+    from app.models.evosense_models import EvoSenseControl
+    row = db.query(EvoSenseControl).filter(EvoSenseControl.organization_id == org_id).first()
+    return C.jload(getattr(row, "scoring_options", None), None) if row is not None else None
+
+
 def stacked_signals(db, prop):
     rows = (db.query(EvoSenseSignal)
             .filter(EvoSenseSignal.organization_id == prop.organization_id,
@@ -49,7 +56,8 @@ def rescore(db, prop: EvoSenseProperty, strategy=None) -> Dict[str, Any]:
     SIG.derive(db, prop, owner)
     db.flush()
     stacked = stacked_signals(db, prop)
-    po = SC.property_opportunity(prop, stacked, strategy, weights=score_weights(db, prop.organization_id))
+    po = SC.property_opportunity(prop, stacked, strategy, weights=score_weights(db, prop.organization_id),
+                                 owner=owner, options=score_options(db, prop.organization_id))
     SC.record(db, prop, "property_opportunity", po, strategy_id=getattr(strategy, "id", None))
     dc = SC.data_confidence(prop, stacked, owner_known=owner is not None)
     SC.record(db, prop, "data_confidence", dc)

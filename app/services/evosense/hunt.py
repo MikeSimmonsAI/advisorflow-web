@@ -226,7 +226,9 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             other = db.query(EvoSenseStrategy).filter(EvoSenseStrategy.id == prop.best_strategy_id).first()
             if other is not None and other.status == "active":
                 mine = SC.property_opportunity(prop, EV.stacked_signals(db, prop), strategy,
-                                              weights=EV.score_weights(db, org_id))["value"] or 0
+                                              weights=EV.score_weights(db, org_id),
+                                              owner=EV.CT.primary_owner(db, prop),
+                                              options=EV.score_options(db, org_id))["value"] or 0
                 if mine <= (prop.opportunity_score or 0):
                     continue
         prop.best_strategy_id = strategy.id

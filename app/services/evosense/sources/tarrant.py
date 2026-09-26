@@ -87,6 +87,29 @@ def state_code(v: str) -> Optional[str]:
     return STATE_NAMES.get(v)
 
 
+OWNER_WIDTH = 30
+
+
+def name_truncated(line: str) -> bool:
+    """The roll's owner fields are 30 characters wide. A field filled to its
+    last character ("ANDRADE ANGEL AND MURILLO GLOR") was cut off by the
+    layout, not by the owner's name ending there."""
+    for name, a, n in MASTER:
+        if name in ("owner1", "owner2") and len(line) >= a - 1 + n:
+            field = line[a - 1:a - 1 + n]
+            if field.strip() and field[-1] != " ":
+                return True
+    return False
+
+
+def standard_delinquency(d: Optional[datetime]) -> bool:
+    """Texas taxes are delinquent on February 1 of the year after the tax
+    year. A later date means a split / installment payment, a deferral, or a
+    corrected or supplemental bill - terms that must be verified, not read
+    as ordinary delinquency."""
+    return bool(d and d.month == 2 and d.day == 1)
+
+
 def situs(r: Dict[str, str]) -> Optional[str]:
     no = (r.get("street_no") or "").lstrip("0")
     name = re.sub(r"\s+", " ", r.get("street_name") or "").strip()
@@ -123,7 +146,7 @@ def classify(r: Dict[str, str], today: datetime) -> Dict[str, Any]:
 class TarrantTaxRollReader:
     """Discovery: residential accounts with delinquent taxes on the current roll."""
 
-    adapter_version = "tarrant_tax_roll/1"
+    adapter_version = "tarrant_tax_roll/2"
 
     def locate(self) -> str:
         override = B.local_override("tarrant_tax_roll")
@@ -185,6 +208,13 @@ class TarrantTaxRollReader:
         return {"records": records, "stats": dict(stats), "source_url": url,
                 "source_updated_at": as_of}
 
+    def record_from_raw(self, line: str, url: str, as_of: Optional[datetime]) -> Optional[Dict[str, Any]]:
+        """Re-derive a record from the raw fixed-width line an observation
+        preserved, judged as of the roll's own date."""
+        r = parse_master(line)
+        c = classify(r, as_of or datetime.utcnow())
+        return self.record(r, c, line, url, as_of)
+
     def record(self, r, c, line, url, as_of) -> Dict[str, Any]:
         owner = " ".join(x for x in (r["owner1"], r["owner2"]) if x).strip()
         mail = B.mailing_line(r["addr1"], r["addr2"])
@@ -199,24 +229,38 @@ class TarrantTaxRollReader:
                 c["delinquent_since"].strftime("%m/%d/%Y") if c["delinquent_since"] else "the due date",
                 format(c["current_due"], ",.2f")))
         observed_days = max(0, (datetime.utcnow() - as_of).days) if as_of else 0
-        signals = [{"type": "TAX_DELINQUENT", "confidence": 90, "value": "; ".join(bits),
-                    "raw": "PRIOR_DUE=%s;CUR_DUE=%s;DELQ_DATE=%s;STATUS=%s" % (
-                        r["prior_due"], r["cur_due"], r["delq_date"], r["status"] or "-"),
-                    "effective_at": c["delinquent_since"].strftime("%Y-%m-%d")
-                    if c["delinquent_since"] and not c["prior_due"] else None,
-                    "observed_days_ago": observed_days}]
+        raw_tax = "PRIOR_DUE=%s;CUR_DUE=%s;DELQ_DATE=%s;STATUS=%s;EXEMPT=%s" % (
+            r["prior_due"], r["cur_due"], r["delq_date"], r["status"] or "-", r.get("exempt") or "-")
+        # Prior years unpaid, or the current year unpaid past the STANDARD
+        # February 1 delinquency date: tax delinquency the roll states plainly.
+        # Only the current year, past a NON-standard date: the terms need
+        # verifying first (installments, deferral, a late or corrected bill),
+        # so it is shown as evidence with no points.
+        verified = c["prior_due"] > 0 or standard_delinquency(c["delinquent_since"])
+        when = c["delinquent_since"].strftime("%Y-%m-%d") if c["delinquent_since"] and not c["prior_due"] else None
+        if verified:
+            signals = [{"type": "TAX_DELINQUENT", "confidence": 90, "value": "; ".join(bits), "raw": raw_tax,
+                        "effective_at": when, "evidence_basis": "tax roll delinquency date" if when else
+                        "tax roll prior-year balance", "observed_days_ago": observed_days}]
+        else:
+            signals = [{"type": "TAX_TERMS_UNVERIFIED", "confidence": 50,
+                        "value": "; ".join(bits) + " — non-standard delinquency date; verify the terms with the "
+                                                   "tax office (installments, deferral or a corrected bill)",
+                        "raw": raw_tax, "effective_at": when, "evidence_basis": "tax roll delinquency date",
+                        "observed_days_ago": observed_days}]
         lit = (r.get("litig") or "").strip().upper()
         if lit and lit not in ("N", "0", "00"):
             signals.append({"type": "TAX_SUIT", "confidence": 70,
                             "value": "tax-roll litigation indicator set (%s)" % lit,
                             "raw": "LITIG=%s" % lit, "observed_days_ago": observed_days})
         deed = _mdY(r["deed_date"])
-        # The roll has no situs city / ZIP. When the owner's mailing street IS
-        # the situs street, the mailing city and ZIP are the property's own -
-        # recorded with that basis. Otherwise they stay UNKNOWN here.
-        from app.services.evosense.identity import normalize_street
+        # The roll has no situs city / ZIP. When the owner's mailing address IS
+        # the situs (the same house number and street, even when one side omits
+        # the "ST"), the mailing city and ZIP are the property's own - recorded
+        # with that basis. Otherwise they stay UNKNOWN here.
+        from app.services.evosense.identity import same_address
         situs_city = situs_zip = city_basis = None
-        if mail and normalize_street(mail)[0] and normalize_street(mail)[0] == normalize_street(situs(r))[0]:
+        if mail and same_address(mail, situs(r)) is True:
             situs_city = (r["ocity"] or "").title() or None
             situs_zip = re.sub(r"\D", "", r["ozip"])[:5] or None
             city_basis = "owner mailing address is the property"
@@ -227,8 +271,9 @@ class TarrantTaxRollReader:
             "parcel_apn": apn(r["account"]),
             "property_type": RESIDENTIAL_SPTB.get(r["sptb"]),
             "year_built": int(r["year_built"]) if r["year_built"].isdigit() and int(r["year_built"]) > 1800 else None,
-            "last_sale_date": deed.strftime("%Y-%m-%d") if deed else None,
+            "deed_transfer_date": deed.strftime("%Y-%m-%d") if deed else None,
             "owner": {"name": owner or None, "mailing_street": mail,
+                      "name_truncated": name_truncated(line),
                       "mailing_city": r["ocity"] or None, "mailing_state": state_code(r["ostate"]),
                       "mailing_zip": re.sub(r"\D", "", r["ozip"])[:5] or None},
             "signals": signals,
@@ -262,7 +307,7 @@ def _norm_addr(v: str) -> str:
 class TadReader:
     """Lookup by account (APN): owner of record, situs city, value, facts."""
 
-    adapter_version = "tad_property_data/1"
+    adapter_version = "tad_property_data/2"
 
     def lookup_many(self, accounts: Iterable[str], *, scan_limit: int = 1_500_000) -> Dict[str, Any]:
         wanted = {apn(a) for a in accounts if a}
@@ -360,7 +405,7 @@ class TadReader:
             "bathrooms": (lambda b: b if b else None)(i(row.get("Num_Bathrooms"))),
             "square_feet": i(row.get("Living_Area")) or None,
             "year_built": i(row.get("Year_Built")) if (i(row.get("Year_Built")) or 0) > 1800 else None,
-            "last_sale_date": deed.strftime("%Y-%m-%d") if deed else None,
+            "deed_transfer_date": deed.strftime("%Y-%m-%d") if deed else None,
             "owner": {"name": row["Owner_Name"].strip() or None,
                       "mailing_street": row["Owner_Address"].strip() or None,
                       "mailing_city": ocity, "mailing_state": ost,
@@ -373,7 +418,9 @@ class TadReader:
                           "appraisal_year": row.get("Appraisal_Year")},
         }
         if total:
-            rec["valuation"] = {"value": total, "mortgage": None,
-                                "basis": "TAD %s appraised value (appraisal district, not a market estimate)"
-                                % (row.get("Appraisal_Year") or "")}
+            yr = row.get("Appraisal_Year") or ""
+            rec["appraisal"] = {"value": total, "land": i(row.get("Land_Value")),
+                                "improvements": i(row.get("Improvement_Value")),
+                                "year": int(yr) if str(yr).isdigit() else None, "district": "TAD",
+                                "basis": "TAD %s appraisal (property-tax value)" % yr}
         return rec

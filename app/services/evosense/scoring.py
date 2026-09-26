@@ -24,12 +24,18 @@ from app.services.evosense import common as C
 from app.services.evosense import signals as SIG
 from app.services.evosense import strategy as ST
 
-PO_VERSION = "property_opportunity/v2"
+PO_VERSION = "property_opportunity/v3"
 # v2 = v1 + organization-configurable signal weights (fingerprinted into the
 # version string when present) + the DFW public-record signals; signals with
 # negative weight (active listing, recent sale) subtract and never count
 # toward the multiple-signal bonus.
-DC_VERSION = "data_confidence/v1"
+# v3 = derive/v3 evidence: closed code cases and unverified tax terms never
+# score; the appraiser's CDU rating is its own signal (POOR 4, UNDESIRABLE 0);
+# a recent deed transfer subtracts 10; the multiple-signal bonus counts
+# INDEPENDENT SOURCES, not signal types (absentee + long ownership read from
+# one county row are one source); unknown facts are "not scored", never a
+# penalty; institutional owners are excluded by default (tenant option).
+DC_VERSION = "data_confidence/v2"
 CC_VERSION = "contact_confidence/v1"
 SI_VERSION = "seller_intent/v1"
 
@@ -90,19 +96,53 @@ def clean_weights(raw: Any) -> Dict[str, int]:
     return out
 
 
-def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
-                         weights: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+DEFAULT_OPTIONS = {"exclude_institutional": True}
+
+
+def clean_options(raw: Any) -> Dict[str, Any]:
+    out = dict(DEFAULT_OPTIONS)
+    for k, v in (raw or {}).items():
+        if k in DEFAULT_OPTIONS:
+            out[k] = bool(v)
+    return out
+
+
+def version_for(weights: Optional[Dict[str, int]] = None, options: Optional[Dict[str, Any]] = None) -> str:
+    """The score version THIS tenant's configuration produces: the platform
+    version, plus a fingerprint of any weight / option override. A tenant
+    changing its configuration changes only its own version string."""
     weights = clean_weights(weights)
+    opts = clean_options(options)
     fp = weights_fingerprint(weights)
-    PO_VERSION = globals()["PO_VERSION"] + ("+w" + fp if fp else "")
+    ofp = weights_fingerprint({k: int(v) for k, v in opts.items()}) if opts != DEFAULT_OPTIONS else None
+    return globals()["PO_VERSION"] + ("+w" + fp if fp else "") + ("+o" + ofp if ofp else "")
+
+
+def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
+                         weights: Optional[Dict[str, int]] = None, *, owner=None,
+                         options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    from app.services.evosense import valuation as VAL
+    from app.services.evosense.identity import same_address
+    from app.services.evosense.ingest import INSTITUTIONAL, OWNER_TYPE_LABELS
+    weights = clean_weights(weights)
+    opts = clean_options(options)
+    PO_VERSION = version_for(weights, opts)
     factors: List[Dict[str, Any]] = []
+    vals = VAL.view(prop)
     inputs = {"signals": {s["signal_type"]: s["freshness"] for s in stacked},
-              "equity_pct": prop.equity_pct, "estimated_value": prop.estimated_value,
+              "equity_pct": prop.equity_pct, "market_value": vals["market_value"],
+              "appraisal_tax_value": (vals["appraisal"] or {}).get("value"),
               "ownership_years": prop.ownership_years, "property_type": prop.property_type,
+              "owner_type": getattr(owner, "owner_type", None),
               "strategy_id": getattr(strategy, "id", None),
               "strategy_version": getattr(strategy, "version", None),
-              "weights": weights or None}
+              "weights": weights or None, "options": opts if opts != DEFAULT_OPTIONS else None}
     live = {s["signal_type"]: s for s in stacked if s["freshness"] != SIG.STALE}
+
+    if owner is not None and opts["exclude_institutional"] and getattr(owner, "owner_type", None) in INSTITUTIONAL:
+        return {"value": 0, "label": "excluded", "version": PO_VERSION, "inputs": inputs,
+                "factors": [_f(0, "Institutional owner (%s) — excluded by default; a workspace admin can change "
+                                  "this" % OWNER_TYPE_LABELS.get(owner.owner_type, owner.owner_type).lower())]}
 
     if strategy is not None:
         inside, why = ST.geography_match(strategy, prop)
@@ -115,7 +155,8 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
                     "factors": [_f(0, "Excluded by strategy: %s" % ", ".join(
                         SIG.CATALOG[s]["label"] for s in excluded))]}
 
-    if not live and prop.estimated_value is None and prop.equity_pct is None:
+    scored_live = [s for s in live.values() if s["signal_type"] not in SIG.NEVER_SCORED]
+    if not scored_live and vals["market_value"] is None and vals["appraisal"] is None and prop.equity_pct is None:
         return {"value": None, "label": "insufficient", "version": PO_VERSION, "inputs": inputs,
                 "factors": [_f(0, "Insufficient evidence: no current signal, no value, no equity")]}
 
@@ -123,14 +164,18 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
     for s in stacked:
         stype = s["signal_type"]
         spec = SIG.CATALOG.get(stype, {})
+        label = spec.get("label", stype)
+        if stype in SIG.NEVER_SCORED:
+            factors.append(_f(0, "%s — shown, not scored" % label,
+                              {"signal": stype, "sources": s["sources"], "evidence_date": s.get("evidence_date")}))
+            continue
         pts = weights.get(stype, spec.get("points", 0))
         if stype == "LONG_OWNERSHIP":
-            pts = 10 if (prop.ownership_years or 0) >= 15 else 6
-            label = "Owned %s years" % prop.ownership_years if prop.ownership_years else spec["label"]
+            full = weights.get(stype, spec.get("points", 0))
+            pts = full if (prop.ownership_years or 0) >= 15 else int(round(full * 0.6))
+            label = "Owned %s years (since deed transfer)" % prop.ownership_years if prop.ownership_years else label
         elif stype == "HIGH_EQUITY":
             continue                       # equity is scored once, below, from the number
-        else:
-            label = spec.get("label", stype)
         if s["freshness"] == SIG.AGING:
             pts = int(pts / 2)
             label += " (aging evidence, half weight)"
@@ -141,7 +186,11 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
         if pts:
             total += pts
             factors.append(_f(pts, label, {"signal": stype, "sources": s["sources"],
+                                           "record_sources": s.get("record_sources"),
+                                           "evidence_date": s.get("evidence_date"),
                                            "observed_at": s["observed_at"]}))
+        elif spec.get("points", 0) == 0 and stype not in ("OTHER",):
+            factors.append(_f(0, "%s — 0 points under this configuration" % label, {"signal": stype}))
 
     eq_pts = _equity_points(prop.equity_pct)
     if prop.equity_pct is not None:
@@ -160,46 +209,69 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
             total -= 25
             factors.append(_f(-25, "Property type %s is not in this strategy" %
                               prop.property_type.replace("_", "-")))
-        v = prop.estimated_value
-        if v is not None and (strategy.min_value is not None or strategy.max_value is not None):
+        elif types and not prop.property_type:
+            factors.append(_f(0, "Property type unknown — not scored"))
+        if strategy.min_value is not None or strategy.max_value is not None:
             lo = strategy.min_value if strategy.min_value is not None else 0
             hi = strategy.max_value if strategy.max_value is not None else 10 ** 12
-            if lo <= v <= hi:
+            v, what = vals["market_value"], "Market estimate"
+            if v is None and vals["appraisal"] is not None:
+                v, what = vals["appraisal"]["value"], "Appraisal district tax value"
+            if v is None:
+                factors.append(_f(0, "No value on file — strategy value range not scored"))
+            elif lo <= v <= hi:
                 total += 7
-                factors.append(_f(7, "Strategy value match ($%s)" % format(v, ",")))
+                factors.append(_f(7, "%s $%s within the strategy range" % (what, format(v, ","))))
             else:
                 total -= 20
-                factors.append(_f(-20, "Value $%s outside strategy range" % format(v, ",")))
-        pref = [s for s in ST.lst(strategy, "preferred_signals") if s in live]
+                factors.append(_f(-20, "%s $%s outside the strategy range" % (what, format(v, ","))))
+        pref = [s for s in ST.lst(strategy, "preferred_signals") if s in live and s not in SIG.NEVER_SCORED]
         if pref:
             bonus = min(6, 2 * len(pref))
             total += bonus
             factors.append(_f(bonus, "Preferred signals present: %s" % ", ".join(
                 SIG.CATALOG[s]["label"] for s in pref)))
         geo = getattr(strategy, "owner_geography", None) or "any"
+        mail = getattr(owner, "mailing_street", None) if owner is not None else None
         if geo == "absentee" and "ABSENTEE_OWNER" not in live:
-            total -= 10
-            factors.append(_f(-10, "Strategy wants absentee owners; this owner's mailing address is the property"))
+            same = same_address(mail, prop.street_address, getattr(owner, "mailing_zip", None), prop.zip_code) \
+                if mail else None
+            if same is True:
+                total -= 10
+                factors.append(_f(-10, "Strategy wants absentee owners; this owner's mailing address is the property"))
+            else:
+                factors.append(_f(0, "Strategy wants absentee owners; the owner's residence is unknown — not scored"))
         elif geo == "out_of_state" and "OUT_OF_STATE_OWNER" not in live:
-            total -= 10
-            factors.append(_f(-10, "Strategy wants out-of-state owners"))
-        if strategy.min_ownership_years and (prop.ownership_years or 0) < strategy.min_ownership_years:
-            total -= 10
-            factors.append(_f(-10, "Owned fewer than %s years" % strategy.min_ownership_years))
+            mstate = (getattr(owner, "mailing_state", None) or "").upper() if owner is not None else ""
+            if mstate and prop.state and mstate == prop.state.upper():
+                total -= 10
+                factors.append(_f(-10, "Strategy wants out-of-state owners; this owner's mailing state is %s" % mstate))
+            else:
+                factors.append(_f(0, "Strategy wants out-of-state owners; the mailing state is unknown — not scored"))
+        if strategy.min_ownership_years:
+            if prop.ownership_years is None:
+                factors.append(_f(0, "Ownership length unknown — strategy minimum not scored"))
+            elif prop.ownership_years < strategy.min_ownership_years:
+                total -= 10
+                factors.append(_f(-10, "Owned %s years; the strategy wants at least %s"
+                                  % (prop.ownership_years, strategy.min_ownership_years)))
 
     def _positive(t):
-        return weights.get(t, SIG.CATALOG.get(t, {}).get("points", 0)) > 0 or t == "LONG_OWNERSHIP"
-    independent = {s["signal_type"] for s in stacked if s["freshness"] == SIG.CURRENT
-                   and not s["derived"] and _positive(s["signal_type"])}
-    derived_live = {s["signal_type"] for s in stacked if s["freshness"] == SIG.CURRENT and s["derived"]
-                    and s["signal_type"] != "HIGH_EQUITY"}
-    distinct = len(independent) + len(derived_live)
-    if distinct >= 3 and len(independent) >= 2:
+        return t not in SIG.NEVER_SCORED and t != "HIGH_EQUITY" and (
+            weights.get(t, SIG.CATALOG.get(t, {}).get("points", 0)) > 0 or t == "LONG_OWNERSHIP")
+    # INDEPENDENT SOURCES, not signal types. Absentee owner and long ownership
+    # read from one county row rest on ONE source.
+    sources = set()
+    for s in stacked:
+        if s["freshness"] == SIG.CURRENT and _positive(s["signal_type"]):
+            sources.update(s.get("record_sources") or s["sources"])
+    sources.discard(SIG.DERIVED_SOURCE)
+    if len(sources) >= 3:
         total += 7
-        factors.append(_f(7, "Multiple independent signals (%s)" % distinct))
-    elif distinct >= 2:
+        factors.append(_f(7, "Evidence from %s independent sources (%s)" % (len(sources), ", ".join(sorted(sources)))))
+    elif len(sources) == 2:
         total += 3
-        factors.append(_f(3, "Two signals"))
+        factors.append(_f(3, "Evidence from 2 independent sources (%s)" % ", ".join(sorted(sources))))
 
     value = _clamp(total)
     if strategy is not None:
@@ -216,11 +288,16 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
 # ── DATA CONFIDENCE ─────────────────────────────────────────────────────────
 
 def data_confidence(prop, stacked: List[Dict[str, Any]], owner_known: bool) -> Dict[str, Any]:
+    from app.services.evosense import valuation as VAL
     factors = []
     pts = 0
-    if prop.estimated_value is not None:
+    vals = VAL.view(prop)
+    if vals["market_value"] is not None:
         pts += 20
-        factors.append(_f(20, "Value reported (%s)" % (prop.estimated_value_source or "source")))
+        factors.append(_f(20, "Market estimate on file (%s)" % (vals["market_value_source"] or "source")))
+    elif vals["appraisal"] is not None:
+        pts += 10
+        factors.append(_f(10, "Appraisal district tax value on record (a tax value, not a market value)"))
     else:
         factors.append(_f(0, "No value"))
     if prop.equity_pct is not None:
@@ -230,7 +307,7 @@ def data_confidence(prop, stacked: List[Dict[str, Any]], owner_known: bool) -> D
     if owner_known:
         pts += 15
         factors.append(_f(15, "Owner of record known"))
-    current = [s for s in stacked if s["freshness"] == SIG.CURRENT]
+    current = [s for s in stacked if s["freshness"] == SIG.CURRENT and s["signal_type"] not in SIG.NEVER_SCORED]
     stale = [s for s in stacked if s["freshness"] == SIG.STALE]
     if current:
         pts += min(25, 10 * len(current))
@@ -240,7 +317,7 @@ def data_confidence(prop, stacked: List[Dict[str, Any]], owner_known: bool) -> D
         factors.append(_f(-10, "%s stale signal(s)" % len(stale)))
     sources = set()
     for s in stacked:
-        sources.update(x for x in s["sources"] if x != SIG.DERIVED_SOURCE)
+        sources.update(x for x in (s.get("record_sources") or s["sources"]) if x != SIG.DERIVED_SOURCE)
     if len(sources) >= 2:
         pts += 15
         factors.append(_f(15, "%s independent sources" % len(sources)))
@@ -249,7 +326,7 @@ def data_confidence(prop, stacked: List[Dict[str, Any]], owner_known: bool) -> D
         factors.append(_f(-20, "Sources conflict"))
     if any(x == C.SANDBOX for s in stacked for x in [e.get("connector") for e in s["evidence"]]):
         factors.append(_f(0, "SANDBOX data — not a live source"))
-    if prop.estimated_value is None and not current:
+    if vals["market_value"] is None and vals["appraisal"] is None and not current:
         label = "insufficient"
     elif pts >= 70:
         label = "high"

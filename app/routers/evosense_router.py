@@ -847,6 +847,7 @@ class ControlsPatch(BaseModel):
     org_monthly_budget_cents: Optional[int] = None
     owner_touch_cap_days: Optional[int] = None
     score_weights: Optional[Dict[str, int]] = None
+    scoring_options: Optional[Dict[str, bool]] = None
 
 
 @router.patch("/controls")
@@ -860,6 +861,12 @@ def patch_controls(payload: ControlsPatch, db: Session = Depends(get_db),
             _admin(user)
             from app.services.evosense import scoring as SC
             ctl.score_weights = C.jdump(SC.clean_weights(v)) if v else None
+            continue
+        if k == "scoring_options":
+            _admin(user)
+            from app.services.evosense import scoring as SC
+            opts = SC.clean_options(v) if v else None
+            ctl.scoring_options = C.jdump(opts) if opts and opts != SC.DEFAULT_OPTIONS else None
             continue
         if k.startswith("paused_"):
             if v is None:
@@ -877,6 +884,91 @@ def patch_controls(payload: ControlsPatch, db: Session = Depends(get_db),
                 details=data)
     db.commit()
     return V.controls_payload(ctl, db, org_id)
+
+
+# ── Re-derivation (Priority 3): dry run, then an explicit, confirmed apply ──
+#
+# Admin-only and organization-scoped. A dry run writes nothing but the run
+# record; apply and rollback each require the operator to type the run id.
+
+class ReprocessIn(BaseModel):
+    strategy_id: Optional[str] = None
+
+
+class ConfirmIn(BaseModel):
+    confirm: str = ""
+
+
+def _run_or_404(db, org_id, run_id):
+    from app.services.evosense import reprocess as RP
+    run = RP.get_run(db, org_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return run
+
+
+@router.post("/reprocess/dry-run")
+def reprocess_dry_run(payload: ReprocessIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import reprocess as RP
+    _admin(user)
+    org_id = svc.write_org_id(db, user)
+    if payload.strategy_id:
+        ST.get(db, org_id, payload.strategy_id)          # 404 for another tenant's strategy
+    run = RP.dry_run(db, org_id, strategy_id=payload.strategy_id, user=user)
+    db.commit()
+    return RP.run_json(run)
+
+
+@router.get("/reprocess")
+def reprocess_runs(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.models.evosense_models import EvoSenseReprocessRun
+    from app.services.evosense import reprocess as RP
+    org_id = _read_org(db, user)
+    rows = (db.query(EvoSenseReprocessRun).filter(EvoSenseReprocessRun.organization_id == org_id)
+            .order_by(EvoSenseReprocessRun.created_at.desc()).limit(50).all())
+    return {"items": [RP.run_json(r, with_diff=False) for r in rows]}
+
+
+@router.get("/reprocess/{run_id}")
+def reprocess_run(run_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense import reprocess as RP
+    org_id = _read_org(db, user)
+    return RP.run_json(_run_or_404(db, org_id, run_id))
+
+
+@router.post("/reprocess/{run_id}/apply")
+def reprocess_apply(run_id: str, payload: ConfirmIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import reprocess as RP
+    org_id = svc.write_org_id(db, user)
+    run = _run_or_404(db, org_id, run_id)
+    _admin(user)
+    if payload.confirm != "APPLY %s" % run.id:
+        raise HTTPException(status_code=422, detail="Type APPLY %s to confirm." % run.id)
+    try:
+        out = RP.apply(db, org_id, run, user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    db.commit()
+    return out
+
+
+@router.post("/reprocess/{run_id}/rollback")
+def reprocess_rollback(run_id: str, payload: ConfirmIn, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import reprocess as RP
+    org_id = svc.write_org_id(db, user)
+    run = _run_or_404(db, org_id, run_id)
+    _admin(user)
+    if payload.confirm != "ROLLBACK %s" % run.id:
+        raise HTTPException(status_code=422, detail="Type ROLLBACK %s to confirm." % run.id)
+    try:
+        out = RP.rollback(db, org_id, run, user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    db.commit()
+    return out
 
 
 @router.get("/events")

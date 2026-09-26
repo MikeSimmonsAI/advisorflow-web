@@ -381,7 +381,7 @@ class TarrantTaxRollSource(PublicRecordSource):
     public_url = "https://www.tarrantcountytx.gov/en/tax/property-tax/tarrant-county-tax-roll.html"
     refresh = "Published daily"
     freshness_days = 30
-    adapter_version = "tarrant_tax_roll/1"
+    adapter_version = "tarrant_tax_roll/2"
 
     def search(self, capability, query):
         from app.services.evosense.sources.tarrant import TarrantTaxRollReader
@@ -426,7 +426,7 @@ class TadSource(PublicRecordSource):
     public_url = "https://www.tad.org/resources/data-downloads"
     refresh = "Published weekly (appraisal year)"
     freshness_days = 120
-    adapter_version = "tad_property_data/1"
+    adapter_version = "tad_property_data/2"
 
     def applies(self, target):
         return (target.get("county") or "").lower() == "tarrant" and bool(target.get("parcel_apn"))
@@ -466,7 +466,7 @@ class DcadSource(PublicRecordSource):
     public_url = "https://www.dallascad.org/DataProducts.aspx"
     refresh = "Certified roll, refreshed by DCAD through the year"
     freshness_days = 180
-    adapter_version = "dcad_certified/1"
+    adapter_version = "dcad_certified/2"
 
     def search(self, capability, query):
         from app.services.evosense.sources.dallas import DcadReader
@@ -535,7 +535,7 @@ class FortWorthCodeSource(PublicRecordSource):
     public_url = "https://data.fortworthtexas.gov/"
     refresh = "Updated by the city (near daily)"
     freshness_days = 30
-    adapter_version = "fw_code_violations/1"
+    adapter_version = "fw_code_violations/2"
 
     def applies(self, target):
         return (target.get("city") or "").strip().lower() == "fort worth" and bool(target.get("street_address"))
@@ -568,7 +568,7 @@ class Dallas311Source(PublicRecordSource):
     public_url = "https://www.dallasopendata.com/d/d7e7-envw"
     refresh = "Updated by the city (daily)"
     freshness_days = 30
-    adapter_version = "dallas_311/1"
+    adapter_version = "dallas_311/2"
 
     def applies(self, target):
         return (target.get("city") or "").strip().lower() == "dallas" and bool(target.get("street_address"))

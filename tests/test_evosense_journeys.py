@@ -384,7 +384,7 @@ def test_scores_are_versioned_explained_and_never_overwritten(db_session, world)
     cur = db.query(EvoSenseScore).filter(EvoSenseScore.property_id == prop.id,
                                          EvoSenseScore.score_type == "property_opportunity",
                                          EvoSenseScore.is_current.is_(True)).one()
-    assert cur.version == "property_opportunity/v2"
+    assert cur.version == "property_opportunity/v3"
     factors = C.jload(cur.factors)
     assert factors and all("label" in f and "points" in f for f in factors)
     n = db.query(EvoSenseScore).filter(EvoSenseScore.property_id == prop.id).count()

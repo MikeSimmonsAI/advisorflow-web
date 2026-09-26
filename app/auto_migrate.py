@@ -1185,6 +1185,28 @@ COLUMNS_TO_ADD = [
     ("evosense_provider_configs", "last_attempt_at", "TIMESTAMP"),
     ("evosense_provider_configs", "last_record_count", "INTEGER"),
     ("evosense_provider_configs", "last_verified_at", "TIMESTAMP"),
+    # EvoSense property truth (derivation rules v3). All additive and nullable
+    # or defaulted FALSE: an existing row simply has no appraisal columns, no
+    # deed-transfer date and no signal evidence basis until it is re-derived
+    # (evosense_reprocess_runs), and its raw evidence is never touched.
+    ("evosense_properties", "half_bathrooms", "INTEGER"),
+    ("evosense_properties", "situs_city_basis", "VARCHAR"),
+    ("evosense_properties", "appraisal_value", "INTEGER"),
+    ("evosense_properties", "appraisal_land_value", "INTEGER"),
+    ("evosense_properties", "appraisal_improvement_value", "INTEGER"),
+    ("evosense_properties", "appraisal_year", "INTEGER"),
+    ("evosense_properties", "appraisal_source", "VARCHAR"),
+    ("evosense_properties", "appraisal_at", "TIMESTAMP"),
+    ("evosense_properties", "last_deed_transfer_date", "DATE"),
+    ("evosense_properties", "derivation_version", "VARCHAR"),
+    ("evosense_owners", "name_truncated", "BOOLEAN DEFAULT FALSE"),
+    ("evosense_owners", "review_flags", "TEXT"),
+    ("evosense_signals", "evidence_basis", "VARCHAR"),
+    ("evosense_signals", "case_status", "VARCHAR"),
+    ("evosense_signals", "rule_version", "VARCHAR"),
+    ("evosense_signals", "retracted_reason", "VARCHAR"),
+    ("evosense_signals", "retracted_at", "TIMESTAMP"),
+    ("evosense_controls", "scoring_options", "TEXT"),
 
     ("wholesale_documents", "buyer_visible", "BOOLEAN DEFAULT FALSE"),
     ("wholesale_documents", "seller_visible", "BOOLEAN DEFAULT FALSE"),

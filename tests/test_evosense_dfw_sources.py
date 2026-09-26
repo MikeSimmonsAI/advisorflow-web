@@ -298,7 +298,7 @@ def test_tax_roll_reads_only_real_delinquency_and_excludes_what_the_tax_office_s
     sig = {s["type"]: s for s in r["signals"]}
     assert "prior-year taxes due $1,250.40" in sig["TAX_DELINQUENT"]["value"]
     assert "TAX_SUIT" in sig
-    assert r["_raw"] == dfw_files["lines"][0] and r["_adapter_version"] == "tarrant_tax_roll/1"
+    assert r["_raw"] == dfw_files["lines"][0] and r["_adapter_version"] == "tarrant_tax_roll/2"
     # a current-year-only delinquency is dated by the roll's own delinquency date
     cur = {s["type"]: s for s in res["records"][1]["signals"]}["TAX_DELINQUENT"]
     assert cur["effective_at"] == "%d-02-01" % TODAY.year
@@ -401,7 +401,9 @@ def test_pilot_discovers_joins_and_scores_real_shaped_records(client, db_session
            .filter(EvoSenseObservation.property_id == p.id).all()}
     assert set(obs) >= {"tarrant_tax_roll", "tad", "census_geocoder", "fw_code_violations"}
     assert p.city == "Fort Worth" and p.zip_code == "76102"
-    assert p.estimated_value == 160000 and "appraisal district" in p.estimated_value_source
+    # the TAD value is an APPRAISAL DISTRICT TAX VALUE in its own columns
+    assert p.appraisal_value == 160000 and p.appraisal_year == TODAY.year and "TAD" in p.appraisal_source
+    assert p.estimated_value is None
     from app.services.evosense import valuation as VAL
     assert VAL.view(p)["market_value"] is None and VAL.appraisal_value(p) == 160000
     # value known, mortgage unknown: NO equity, NO high-equity, NO free-and-clear
@@ -415,7 +417,7 @@ def test_pilot_discovers_joins_and_scores_real_shaped_records(client, db_session
     t = obs["tarrant_tax_roll"]
     assert t.raw_payload == dfw_files["lines"][0]
     assert t.content_hash == hashlib.sha256(t.raw_payload.encode()).hexdigest()
-    assert t.adapter_version == "tarrant_tax_roll/1" and t.processing_status == "ingested"
+    assert t.adapter_version == "tarrant_tax_roll/2" and t.processing_status == "ingested"
     assert t.source_url
 
     # the two spellings of the same owner are one owner, not a conflict
@@ -434,17 +436,24 @@ def test_pilot_discovers_joins_and_scores_real_shaped_records(client, db_session
     assert "ABSENTEE_OWNER" not in t3
     assert p3.zip_code is None             # the geocoder's only match was in another county: no guess
 
-    # Dallas: DCAD condition + 311 complaint; the confidential owner is never read
+    # Dallas: DCAD CDU rating + a CLOSED 311 request (history, not a current
+    # complaint); the confidential owner is never read
     d1 = _prop(db, org, "D1", "Dallas")
     t4 = {x.signal_type for x in db.query(EvoSenseSignal)
           .filter(EvoSenseSignal.property_id == d1.id, EvoSenseSignal.active.is_(True)).all()}
-    assert {"DISTRESSED_CONDITION", "CODE_COMPLAINT", "ABSENTEE_OWNER"} <= t4
+    assert {"CDU_POOR", "CODE_HISTORY", "ABSENTEE_OWNER"} <= t4
+    assert not t4 & {"DISTRESSED_CONDITION", "CODE_COMPLAINT"}
+    cdu = db.query(EvoSenseSignal).filter(EvoSenseSignal.property_id == d1.id,
+                                          EvoSenseSignal.signal_type == "CDU_POOR").one()
+    assert cdu.effective_at.strftime("%Y-%m-%d") == "%d-01-01" % TODAY.year and "appraisal year" in cdu.evidence_basis
+    assert str(d1.last_deed_transfer_date) == "1999-06-01"
     assert "OUT_OF_STATE_OWNER" not in t4                      # Houston is in Texas
     from app.models.evosense_models import EvoSenseOwner
     ow = db.query(EvoSenseOwner).join(EvoSenseOwnership, EvoSenseOwnership.owner_id == EvoSenseOwner.id) \
         .filter(EvoSenseOwnership.property_id == d1.id).one()
     # DCAD's first mailing line continues the name; the street is the next line
     assert ow.display_name == "GARCIA MARIA LIFE ESTATE" and ow.mailing_street == "77 FAR RD"
+    assert ow.owner_type == "life_estate" and "LIFE_ESTATE" in json.loads(ow.review_flags)
     assert d1.zip_code == "75208" and d1.city == "Dallas"
     d3 = _prop(db, org, "D3", "Dallas")
     assert not db.query(EvoSenseOwnership).filter(EvoSenseOwnership.property_id == d3.id).count()
@@ -470,7 +479,7 @@ def test_pilot_discovers_joins_and_scores_real_shaped_records(client, db_session
     raw = ok(client.get("/wholesale/evosense/properties/%s/observations/%s/raw"
                         % (p.id, prov["tarrant_tax_roll"]["id"]), headers=h))
     assert raw["raw"] == dfw_files["lines"][0]
-    assert d["scores"]["property_opportunity"]["version"].startswith("property_opportunity/v2")
+    assert d["scores"]["property_opportunity"]["version"].startswith("property_opportunity/v3")
 
 
 def test_pilot_record_cap_is_a_hard_cap(client, db_session, sample_org, dfw_files, fake_apis):

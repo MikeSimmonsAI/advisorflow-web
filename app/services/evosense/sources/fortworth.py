@@ -22,7 +22,7 @@ FIELDS = ("Case_ID", "Violation_ID", "Violation_Address", "Complaint_Type_Descri
 
 
 class FortWorthCodeReader:
-    adapter_version = "fw_code_violations/1"
+    adapter_version = "fw_code_violations/2"
 
     def lookup(self, street: str, *, days: int = 730) -> Dict[str, Any]:
         s = re.sub(r"\s+", " ", (street or "").upper()).strip()
@@ -42,6 +42,9 @@ class FortWorthCodeReader:
         return {"cases": [f.get("attributes") or {} for f in feats]}
 
     def to_record(self, target: Dict[str, Any], cases: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """An OPEN city case is a current CODE_VIOLATION. A CLOSED case is code
+        HISTORY: real, shown with its dates, never scored as a current
+        violation. Each case is dated by the city's own created date."""
         if not cases:
             return None
         sigs, seen = [], set()
@@ -54,12 +57,15 @@ class FortWorthCodeReader:
             created = datetime.utcfromtimestamp(ts / 1000.0) if isinstance(ts, (int, float)) else None
             status = (c.get("Case_Current_Status") or c.get("Violation_Current_Status") or "").strip()
             open_case = status.lower() not in ("closed", "")
-            sigs.append({"type": "CODE_VIOLATION", "confidence": 90 if open_case else 70,
+            sigs.append({"type": "CODE_VIOLATION" if open_case else "CODE_HISTORY",
+                         "confidence": 90 if open_case else 70,
                          "value": "Fort Worth case %s: %s (%s%s)" % (
                              cid, c.get("Complaint_Type_Description") or "violation", status.lower() or "status unknown",
                              ", opened %s" % created.strftime("%m/%d/%Y") if created else ""),
                          "raw": "CASE=%s;STATUS=%s" % (cid, status), "ref": "FWCODE:%s" % cid,
                          "effective_at": created.strftime("%Y-%m-%d") if created else None,
+                         "evidence_basis": "city case created date",
+                         "case_status": status.lower() or None,
                          "observed_days_ago": 0})
             if len(sigs) >= 5:
                 break
