@@ -90,6 +90,10 @@ def acting_advisor(db: Session, lead: Lead, caller: User) -> User:
     return caller
 
 
+class _SellerNoBooking(Exception):
+    pass
+
+
 @router.get("/{lead_id}/context")
 def compose_context(lead_id: str,
                     db: Session = Depends(get_db),
@@ -175,7 +179,12 @@ def compose_context(lead_id: str,
 
     # ── the booking link, exactly as it will be sent ─────────────────────────
     booking = {"url": None, "booking_link_id": None, "reason": None}
+    from app.services import wholesale_seller_context as WSC
+    seller = WSC.is_seller(db, lead)
     try:
+        if seller:
+            # A seller is scheduled by a person - never a self-service link.
+            raise _SellerNoBooking()
         from app.services.sms_service import get_or_create_booking_link
         from app.services.public_identity import booking_url as public_booking_url
         # The link names a calendar. It must be the ADVISOR's, never the
@@ -189,6 +198,9 @@ def compose_context(lead_id: str,
                        "No branded public address is configured for this "
                        "organization, so a booking link cannot be built."),
         }
+    except _SellerNoBooking:
+        booking["reason"] = ("This lead is a Wholesale property seller. Sellers are not sent a "
+                             "booking link; schedule the call or walkthrough with them directly.")
     except Exception as e:
         log.exception("compose: could not build booking link for lead %s", lead_id)
         booking["reason"] = "The booking link could not be built: %s" % e
@@ -207,6 +219,8 @@ def compose_context(lead_id: str,
         "channels": channels,
         "sms_sender": sender,
         "booking": booking,
+        # Lead -> Wholesale: the properties / deals this person is a seller on.
+        "wholesale": WSC.links_for_lead(db, lead) if seller else [],
         "email_sender": email_sender,
         # The composer must not offer a booking link for a channel that will
         # not carry one. The frontend reads this to hide the "Include booking

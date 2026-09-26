@@ -433,6 +433,17 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         logger.exception("evosense: ownership check failed for %s", MessageSid)
         _evosense_owned = False
 
+    # A Wholesale SELLER outside EvoSense: their reply is read onto the seller
+    # record and a person is told - it is never answered by the generic
+    # (funeral-planning) auto-responder. STOP / DNC below applies unchanged.
+    _wholesale_seller = False
+    if not _evosense_owned:
+        try:
+            from app.services import wholesale_seller_context as _wsc
+            _wholesale_seller = _wsc.is_seller(db, lead)
+        except Exception:                                   # noqa: BLE001
+            logger.exception("wholesale: seller check failed for %s", MessageSid)
+
     # Hard legal opt-out check ALWAYS runs first and overrides anything
     # the AI classifier returns - see reply_classification_service.py's
     # module docstring for why this is non-negotiable.
@@ -462,7 +473,7 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         _reply_advisor = advisor or (
             db.query(User).filter(User.id == lead.assigned_to_id).first() if lead.assigned_to_id else None
         )
-        if _reply_advisor and not _evosense_owned:
+        if _reply_advisor and not _evosense_owned and not _wholesale_seller:
             if lead.status == "booked":
                 from app.services.ai_conversation_service import handle_inbound_reply
                 handle_inbound_reply(db, lead, _reply_advisor, Body)
@@ -538,6 +549,13 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
     # seller's message, and never turns into a 500 that makes Twilio retry.
     if _evosense_owned:
         _route_to_evosense(db, org_id, lead, reply)
+    elif _wholesale_seller and classification != ReplyClassification.DNC:
+        try:
+            from app.services import wholesale_seller_context as _wsc
+            _wsc.handle_inbound_reply(db, lead, reply)
+        except Exception:                                   # noqa: BLE001
+            db.rollback()
+            logger.exception("wholesale: seller reply handling failed for %s", MessageSid)
     return {"status": "processed", "reply_id": reply.id, "evosense": _evosense_owned}
 
 

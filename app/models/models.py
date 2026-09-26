@@ -136,6 +136,9 @@ class NotificationType(str, enum.Enum):
     BOOKING_CONFIRMED = "booking_confirmed"
     CADENCE_COMPLETED = "cadence_completed"
     REPLY_RECEIVED = "reply_received"
+    # A property owner asked a Wholesale workspace to look at their house
+    # (the public seller form). In-app only; see wholesale_notify.
+    WHOLESALE_INQUIRY = "wholesale_inquiry"
 
 
 # ---------------------------------------------------------------------------
@@ -1617,6 +1620,9 @@ class Notification(Base):
 
     type = Column(SAEnum(NotificationType), nullable=False)
     message = Column(Text, nullable=False)
+    # Where clicking it goes, when that is not the lead page (a Wholesale
+    # inquiry opens its deal). NULL = the lead, as before.
+    link = Column(String, nullable=True)
     is_sent = Column(Boolean, default=False)
     sent_at = Column(DateTime, nullable=True)
     is_read = Column(Boolean, default=False)

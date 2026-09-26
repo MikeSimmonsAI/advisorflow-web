@@ -187,6 +187,7 @@ def get_unread_notifications(
             Notification.type,
             Notification.message,
             Notification.created_at,
+            Notification.link,
         )
         .filter(Notification.user_id == user_id, Notification.is_read == False)
         .order_by(Notification.created_at.desc())
@@ -200,6 +201,7 @@ def get_unread_notifications(
             "type": r.type.value if hasattr(r.type, "value") else r.type,
             "message": r.message,
             "created_at": r.created_at.isoformat() if r.created_at else None,
+            "link": r.link,
             "is_read": False,
         }
         for r in rows

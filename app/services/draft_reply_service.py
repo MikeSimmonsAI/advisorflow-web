@@ -269,8 +269,15 @@ def draft_reply(
 ) -> dict[str, Any]:
     # MANUAL when a signed-in user asked (`actor`); BACKGROUND otherwise.
     tone = tone if tone in TONE_INSTRUCTIONS else "warm"
-    booking = get_or_create_booking_link(db, lead, advisor)
-    booking_url = _booking_url(db, lead.organization_id, booking.token)
+    # A Wholesale SELLER is a Lead, but the conversation is about their house:
+    # no funeral framing, no booking link, and what they already told us.
+    from app.services import wholesale_seller_context as WSC
+    seller_ctx = WSC.context_for_lead(db, lead)
+    if seller_ctx:
+        booking, booking_url = None, ""
+    else:
+        booking = get_or_create_booking_link(db, lead, advisor)
+        booking_url = _booking_url(db, lead.organization_id, booking.token)
     history, latest_reply = _conversation_history(db, lead)
 
     history_text = "\n".join(
@@ -297,6 +304,8 @@ def draft_reply(
     # Relationship context is the PRIMARY AI guardrail
     rel_type = getattr(lead, "relationship_type", None) or "cold_lead"
     relationship_context = RELATIONSHIP_TYPE_CONTEXT.get(rel_type, RELATIONSHIP_TYPE_CONTEXT["cold_lead"])
+    if seller_ctx:
+        relationship_context = seller_ctx["relationship"]
 
     direction = ai_direction.strip() if ai_direction and ai_direction.strip() else "(none — follow relationship context and tone)"
 
@@ -322,13 +331,15 @@ def draft_reply(
         lead_type=lead.message_track or lead.tier or "not specified",
         ai_direction=direction,
         sample_message_section=sample_section,
-        booking_url=booking_url,
+        booking_url=booking_url or "(none - do not include a booking or scheduling link)",
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
         phone=lead.phone or "",
         latest_reply=latest_reply_text,
         history=history_text,
     )
+    if seller_ctx:
+        prompt += "\n" + WSC.prompt_block(seller_ctx) + "\n"
 
     try:
         response = ai_gateway.chat_completion(
@@ -348,10 +359,12 @@ def draft_reply(
         import re as _re
         suggested = _re.sub(r'https?://\S+', '', parsed.get("suggested_reply", "")).strip()
         if not suggested:
-            suggested = _fallback_reply(lead, advisor, booking_url, tone, org_name)
+            suggested = (WSC.fallback_reply(lead, advisor_name, org_name, seller_ctx) if seller_ctx
+                         else _fallback_reply(lead, advisor, booking_url, tone, org_name))
         source = "ai"
     except Exception:
-        suggested = _fallback_reply(lead, advisor, booking_url, tone, org_name)
+        suggested = (WSC.fallback_reply(lead, advisor_name, org_name, seller_ctx) if seller_ctx
+                     else _fallback_reply(lead, advisor, booking_url, tone, org_name))
         source = "fallback"
 
     # THE CAP FOLLOWS THE STRATEGY.
@@ -376,9 +389,10 @@ def draft_reply(
 
     return {
         "suggested_reply": suggested,
-        "booking_url": booking_url,
-        "booking_link_id": booking.id,
+        "booking_url": booking_url or None,
+        "booking_link_id": getattr(booking, "id", None),
         "source": source,
+        "wholesale_seller": bool(seller_ctx),
     }
 
 
@@ -490,6 +504,10 @@ def draft_email_options(
     # Relationship context — primary AI guardrail
     rel_type = getattr(lead, "relationship_type", None) or "cold_lead"
     relationship_context = RELATIONSHIP_TYPE_CONTEXT.get(rel_type, RELATIONSHIP_TYPE_CONTEXT["cold_lead"])
+    from app.services import wholesale_seller_context as WSC
+    seller_ctx = WSC.context_for_lead(db, lead)
+    if seller_ctx:
+        relationship_context = seller_ctx["relationship"]
 
     direction = ai_direction.strip() if ai_direction and ai_direction.strip() else "(none — follow relationship context and tone)"
 
@@ -540,6 +558,8 @@ def draft_email_options(
         status_reason=lead.status_reason_raw or "none on file",
         notes=(lead.notes or "none")[:200],
     )
+    if seller_ctx:
+        prompt += "\n" + WSC.prompt_block(seller_ctx) + "\n"
 
     def _clean_body(body: str, real_name: str) -> str:
         """Replace any [Your Name] / [Name] bracket placeholders with the real advisor name."""

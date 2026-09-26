@@ -341,6 +341,17 @@ def _build_lead_context(lead: Lead) -> str:
         cf_lines = "; ".join(f"{k}: {v}" for k, v in list(extra_cf.items())[:5])
         parts.append(f"Extra context: {cf_lines}")
 
+    # A Wholesale seller: what they told us about the property, and the
+    # seller guardrails (no price, no commitment, no booking link).
+    try:
+        from sqlalchemy.orm import object_session
+        from app.services import wholesale_seller_context as WSC
+        block = WSC.block_for_lead(object_session(lead), lead)
+        if block:
+            parts.append(block)
+    except Exception:  # noqa: BLE001 - context is an enrichment, never a failure
+        pass
+
     return "\n".join(parts) if parts else "No additional context."
 
 

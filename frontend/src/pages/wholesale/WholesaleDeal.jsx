@@ -474,7 +474,18 @@ function SellerTab({ room, act, busy }) {
             <KV label="Mortgage / liens">{seller.mortgage_note}</KV>
             <KV label="Decision makers">{seller.decision_makers}</KV>
             <KV label="Best callback time">{seller.best_callback_time}</KV>
+            <KV label="Appointment">
+              {seller.appointment_status
+                ? `${fmtLabel(seller.appointment_status, null)}${seller.appointment_at ? ' · ' + fmtWhen(seller.appointment_at) : ''}`
+                : null}
+            </KV>
           </div>
+          {seller.notes ? (
+            <>
+              <div className="ws-subhead">Notes</div>
+              <pre className="ws-notes">{seller.notes}</pre>
+            </>
+          ) : null}
         </div>
 
         {/* 2. THE COMPOSER. Two boxes that looked identical and did opposite
@@ -554,6 +565,10 @@ function SellerTab({ room, act, busy }) {
       </div>
 
       <div className="ws-seller__side">
+        {/* 0. CORRECT WHAT WE KNOW. The owner's contact details and answers,
+            editable - an inquiry's typo or a wrong number is fixed here, not
+            by re-entering the person. */}
+        <SellerEditor seller={seller} act={act} busy={busy} />
         {/* 4. THE CADENCE and 5. THE PERMISSIONS. Both are settings for the
             conversation rather than part of it, so they sit beside it. */}
         <CadencePanel dealId={deal.id} cadence={room.cadence} act={act} busy={busy} />
@@ -577,6 +592,124 @@ function SellerTab({ room, act, busy }) {
           </Note>
         </div>
       </div>
+    </div>
+  )
+}
+
+
+const SELLER_SELECTS = {
+  preferred_contact_method: ['phone', 'sms', 'email'],
+  timeline: ['asap', '30_days', '60_days', '90_days', '6_months', 'no_rush'],
+  property_condition: ['excellent', 'good', 'fair', 'poor', 'distressed'],
+  appointment_status: ['none', 'requested', 'scheduled', 'completed', 'no_show', 'cancelled'],
+}
+const SELLER_EDIT_FIELDS = [
+  ['first_name', 'First name'], ['last_name', 'Last name'], ['phone', 'Phone'], ['email', 'Email'],
+  ['preferred_contact_method', 'Prefers'], ['timeline', 'Timeline'],
+  ['property_condition', 'Condition'], ['asking_price', 'Asking price (their number)'],
+  ['reason_for_selling', 'Reason for selling'], ['motivation', 'Motivation'],
+  ['occupancy', 'Occupancy'], ['major_repairs', 'Major repairs'],
+  ['decision_makers', 'Decision makers'], ['best_callback_time', 'Best callback time'],
+  ['appointment_status', 'Appointment'], ['appointment_at', 'Appointment time'],
+]
+
+function toLocalInput(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/* Editing a seller. Only fields that changed are sent; a box emptied is sent
+ * as null and CLEARS the value. A new phone number is checked against the
+ * workspace's other contacts, and SMS consent does not carry to it. "Booked"
+ * for a seller is an appointment a person schedules here - never a
+ * self-service booking link. */
+function SellerEditor({ seller, act, busy }) {
+  const initial = () => Object.fromEntries(SELLER_EDIT_FIELDS.map(([k]) => [
+    k, k === 'appointment_at' ? toLocalInput(seller[k]) : (seller[k] ?? '')]))
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState(initial)
+  const [note, setNote] = useState('')
+  const [errs, setErrs] = useState({})
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => { if (!open) setForm(initial()) }, [seller, open])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function save() {
+    const start = initial()
+    const body = {}
+    for (const [k] of SELLER_EDIT_FIELDS) {
+      if (String(form[k] ?? '') === String(start[k] ?? '')) continue
+      let v = typeof form[k] === 'string' ? form[k].trim() : form[k]
+      if (v === '') v = null
+      else if (k === 'asking_price') v = Number(String(v).replace(/[$,\s]/g, ''))
+      else if (k === 'appointment_at') v = new Date(v).toISOString().slice(0, 19)
+      body[k] = v
+    }
+    if (note.trim()) body.notes = note.trim()
+    if (!Object.keys(body).length) { setOpen(false); return }
+    setErrs({}); setMsg(null)
+    let consentNote = null
+    const okSaved = await act(async () => {
+      try {
+        const out = await api.patch(`/wholesale/sellers/${seller.id}`, body)
+        consentNote = out?.consent_note || null
+      } catch (e) {
+        if (e?.detail?.errors) setErrs(e.detail.errors)
+        throw e
+      }
+    }, 'Seller details saved.')
+    if (okSaved) {
+      setOpen(false); setNote('')
+      if (consentNote) setMsg(consentNote)
+    }
+  }
+
+  return (
+    <div className="panel ws-panel">
+      <div className="panel-title ws-panel-title">
+        <span>Seller details</span>
+        {seller.lead_id ? <Link className="ws-link" to={`/leads/${seller.lead_id}`}>Open contact record</Link> : null}
+      </div>
+      {msg ? <div className="ws-warn">{msg}</div> : null}
+      {!open ? (
+        <div className="ws-actions">
+          <button className="btn" disabled={busy} onClick={() => setOpen(true)}>Edit seller details</button>
+        </div>
+      ) : (
+        <>
+          <div className="ws-grid">
+            {SELLER_EDIT_FIELDS.map(([key, label]) => (
+              <div className="ws-field" key={key}>
+                <label htmlFor={`sed-${key}`}>{label}</label>
+                {SELLER_SELECTS[key] ? (
+                  <select id={`sed-${key}`} value={form[key] || ''}
+                          onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}>
+                    <option value="">— not stated —</option>
+                    {SELLER_SELECTS[key].map((o) => <option key={o} value={o}>{humanize(o)}</option>)}
+                  </select>
+                ) : (
+                  <input id={`sed-${key}`} value={form[key] ?? ''}
+                         type={key === 'appointment_at' ? 'datetime-local' : 'text'}
+                         inputMode={key === 'asking_price' ? 'decimal' : undefined}
+                         onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))} />
+                )}
+                {errs[key] ? <span className="ws-field__err">{errs[key]}</span> : null}
+              </div>
+            ))}
+            <div className="ws-field" style={{ gridColumn: '1 / -1' }}>
+              <label htmlFor="sed-note">Add a note (dated and signed; earlier notes are kept)</label>
+              <textarea id="sed-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+            </div>
+          </div>
+          <div className="ws-actions" style={{ marginTop: 10 }}>
+            <button className="btn btn--primary" disabled={busy} onClick={save}>Save</button>
+            <button className="btn" disabled={busy} onClick={() => { setOpen(false); setErrs({}) }}>Cancel</button>
+          </div>
+        </>
+      )}
     </div>
   )
 }

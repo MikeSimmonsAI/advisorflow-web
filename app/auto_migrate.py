@@ -446,6 +446,7 @@ COLUMNS_TO_ADD = [
     ("replies", "classification_confidence", "VARCHAR"),
     ("replies", "classification_reasoning", "TEXT"),
     ("notifications", "send_failure_reason", "TEXT"),
+    ("notifications", "link", "VARCHAR"),
     ("lead_outcomes", "has_preneed_planning", "BOOLEAN"),
     ("lead_outcomes", "has_insurance_funding", "BOOLEAN"),
     ("lead_outcomes", "is_veteran", "BOOLEAN"),
@@ -1160,6 +1161,9 @@ COLUMNS_TO_ADD = [
     # defaults OFF, so an existing organization texts nobody under it until an
     # admin configures a Messaging Service and switches it on.
     ("wholesale_settings", "public_intake_key", "VARCHAR"),
+    # Intake reconciliation: who a public seller inquiry is assigned to.
+    ("wholesale_settings", "inquiry_assignee_id", "VARCHAR"),
+    ("wholesale_seller_profiles", "appointment_at", "TIMESTAMP"),
     ("wholesale_settings", "sms_program_enabled", "BOOLEAN DEFAULT FALSE"),
     ("wholesale_settings", "sms_sender_number", "VARCHAR"),
     ("wholesale_settings", "sms_messaging_service_sid", "VARCHAR"),
@@ -1319,6 +1323,7 @@ ENUM_VALUES_TO_ADD = [
     # row can carry it, so this must be here rather than implied by the model.
     ("suppressionsource", "VOICE_OPT_OUT"),
     ("notificationtype", "REPLY_RECEIVED"),
+    ("notificationtype", "WHOLESALE_INQUIRY"),
 ]
 
 

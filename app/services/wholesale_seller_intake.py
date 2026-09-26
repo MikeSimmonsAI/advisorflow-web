@@ -15,13 +15,28 @@ WHAT IT CREATES - THE CANONICAL WHOLESALE RECORDS, NOT A SIDE TABLE
 same two calls an operator's "add property" makes, so the inquiry appears in
 the operator's normal EvoSys Wholesale pipeline with every existing guard.
 
-NO UNCONTROLLED DUPLICATES
---------------------------
+NO UNCONTROLLED DUPLICATES - AND A RETURNING SELLER IS RE-ENGAGED
+------------------------------------------------------------------
   * the same `submission_id` twice (a double click, a refresh, a retry) returns
     the first result and writes nothing;
-  * the same property (street + ZIP) in this org is reused, not re-created;
-  * the same phone number in this org reuses that Lead, not a second person.
-A repeat inquiry updates the seller profile's answers and is logged as a repeat.
+  * the same property in this org is reused, not re-created. The address is
+    compared NORMALIZED ("St" = "Street", "N" = "North", a suffix one side
+    omits, the unit) within the same ZIP;
+  * the same person in this org - matched by phone, then by email - reuses
+    that Lead. Their name is filled in if it was blank and the inquiry is
+    appended to their notes with its date, so nothing they wrote is lost;
+  * a DIFFERENT person inquiring about a property that already has a seller is
+    attached as an additional contact. The deal's seller of record is never
+    displaced by a web form; the operator is told to verify;
+  * a property whose last deal is CLOSED or DEAD gets a NEW deal (a new cycle,
+    "re-engaged"), never a silent attach to a lost deal nobody looks at.
+
+WHO IS TOLD
+-----------
+The records are assigned to the organization's configured inquiry assignee
+(`WholesaleSettings.inquiry_assignee_id`) when there is one, and the assignee -
+or, unassigned, the workspace admins - get an in-app notification that opens
+the deal (`wholesale_notify`). Nothing is emailed or texted to staff from here.
 
 SMS CONSENT IS SEPARATE AND OPTIONAL
 ------------------------------------
@@ -52,7 +67,9 @@ ACTOR_LABEL = "Public seller inquiry form"
 EVENT_RECEIVED = "seller_inquiry.received"
 
 CONDITIONS = ("excellent", "good", "fair", "poor", "distressed")
-TIMELINES = ("asap", "30_days", "90_days", "6_months", "no_rush")
+# `60_days` is accepted because the reply reader (wholesale_ai) can establish
+# it; a form that offers it must not be refused by the intake that reads it.
+TIMELINES = ("asap", "30_days", "60_days", "90_days", "6_months", "no_rush")
 CONTACT_METHODS = ("phone", "sms", "email")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 _ZIP_RE = re.compile(r"^\d{5}(-\d{4})?$")
@@ -180,24 +197,70 @@ def svc_json(raw) -> Dict[str, Any]:
         return {}
 
 
-def _existing_property(db: Session, org_id: str, street: str, zip_code: str):
+def _same_place(a_street: Optional[str], a_unit: Optional[str],
+                b_street: Optional[str], b_unit: Optional[str], zip5: str) -> bool:
+    from app.services.evosense.identity import normalize_street, same_address
+    na, ua = normalize_street(a_street)
+    nb, ub = normalize_street(b_street)
+    ua = (a_unit or ua or "").strip().upper() or None
+    ub = (b_unit or ub or "").strip().upper() or None
+    if ua != ub:
+        return False
+    if na and na == nb:
+        return True
+    if _street_key(a_street) and _street_key(a_street) == _street_key(b_street):
+        return True
+    return same_address(a_street, b_street, zip5, zip5) is True
+
+
+def _existing_property(db: Session, org_id: str, street: str, zip_code: str,
+                       unit: Optional[str] = None):
     zip5 = (zip_code or "")[:5]
-    key = _street_key(street)
     for prop in (db.query(WholesaleProperty)
                  .filter(WholesaleProperty.organization_id == org_id,
                          WholesaleProperty.zip_code.like(zip5 + "%"),
-                         WholesaleProperty.is_test.is_(False)).all()):
-        if _street_key(prop.street_address) == key:
+                         WholesaleProperty.is_test.is_(False))
+                 .order_by(WholesaleProperty.created_at.asc()).all()):
+        if _same_place(street, unit, prop.street_address, prop.unit, zip5):
             return prop
     return None
 
 
-def _existing_lead(db: Session, org_id: str, e164: str):
+def _existing_lead(db: Session, org_id: str, e164: str, email: Optional[str] = None):
+    """(lead, matched_by). Phone first - it is what consent and suppression key
+    on - then email. Only this organization's non-test leads."""
     forms = [e164, e164[1:], e164[2:]]
-    return (db.query(Lead)
+    lead = (db.query(Lead)
             .filter(Lead.organization_id == org_id, Lead.phone.in_(forms),
                     Lead.is_test.is_(False))
             .order_by(Lead.updated_at.desc()).first())
+    if lead is not None:
+        return lead, "phone"
+    if email:
+        from sqlalchemy import func
+        lead = (db.query(Lead)
+                .filter(Lead.organization_id == org_id, func.lower(Lead.email) == email.lower(),
+                        Lead.is_test.is_(False))
+                .order_by(Lead.updated_at.desc()).first())
+        if lead is not None:
+            return lead, "email"
+    return None, None
+
+
+def _assignee(db: Session, org_id: str, settings: WholesaleSettings) -> Optional[str]:
+    uid = getattr(settings, "inquiry_assignee_id", None)
+    if not uid:
+        return None
+    from app.models.models import User
+    u = (db.query(User).filter(User.id == uid, User.organization_id == org_id,
+                               User.is_active.isnot(False)).first())
+    return u.id if u is not None else None
+
+
+def _append_note(existing: Optional[str], line: str, limit: int = 8000) -> str:
+    base = (existing or "").rstrip()
+    out = (base + "\n" + line) if base else line
+    return out[-limit:]
 
 
 def _reference(deal_id: Optional[str]) -> str:
@@ -206,7 +269,12 @@ def _reference(deal_id: Optional[str]) -> str:
 
 def submit(db: Session, org: Organization, settings: WholesaleSettings,
            d: Dict[str, Any]) -> Dict[str, Any]:
-    """Create or update the Wholesale records for one inquiry. Commits."""
+    """Create, reuse or re-engage the Wholesale records for one inquiry. Commits."""
+    from datetime import datetime
+    from app.models.models import NotificationType
+    from app.services import wholesale_notify as WN
+    from app.services import wholesale_pipeline as pipeline
+
     org_id = str(org.id)
     prior = _prior_submission(db, org_id, d.get("submission_id"))
     if prior:
@@ -215,9 +283,15 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
 
     first, _, last = (d["full_name"] or "").partition(" ")
     host = urlparse(d.get("source_url") or "").hostname or None
+    assignee_id = _assignee(db, org_id, settings)
     prop = _existing_property(db, org_id, d["street_address"], d["zip_code"])
-    lead = _existing_lead(db, org_id, d["phone"])
+    lead, matched_by = _existing_lead(db, org_id, d["phone"], d.get("email"))
     repeat = prop is not None and lead is not None
+    reengaged = additional = False
+    stamp = datetime.utcnow().strftime("%Y-%m-%d")
+    inquiry_line = "%s - Seller inquiry via %s.%s" % (
+        stamp, host or "public seller form",
+        (" Seller's notes: " + d["notes"]) if d.get("notes") else "")
 
     try:
         if prop is None:
@@ -226,21 +300,38 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
                 "state": d["state"], "zip_code": d["zip_code"],
                 "owner_name": d["full_name"], "acquisition_source": "seller_inquiry",
                 "source_detail": ("%s/sell" % host) if host else "public seller form",
+                "assigned_to_id": assignee_id,
             }, actor_type=ACTOR_API, actor_label=ACTOR_LABEL)
+        deal = svc.deal_for_property(db, org_id, prop.id)
+        if deal is not None and pipeline.is_terminal(settings, deal.stage):
+            deal = svc.reopen_deal(db, org_id, prop, deal, actor_type=ACTOR_API,
+                                   actor_label=ACTOR_LABEL, reason="the owner inquired again")
+            reengaged = True
+        if deal is not None and assignee_id and not deal.assigned_to_id:
+            deal.assigned_to_id = assignee_id
+        if assignee_id and not prop.assigned_to_id:
+            prop.assigned_to_id = assignee_id
+        # A different person asking about a property that already has a seller
+        # is an ADDITIONAL contact until a person verifies them.
+        primary = deal is None or deal.seller_lead_id is None or (
+            lead is not None and deal.seller_lead_id == lead.id)
+        additional = not primary
         seller_data = {
             "first_name": first, "last_name": last.strip() or None,
             "phone": d["phone"], "email": d["email"],
             "source_category": ws.SOURCE_CATEGORY,
+            "relationship_type": "warm_lead",
             "preferred_contact_method": d["preferred_contact_method"],
             "property_condition": d["property_condition"], "timeline": d["timeline"],
             "reason_for_selling": d["reason_for_selling"], "considering_selling": True,
-            "notes": ("Seller inquiry via %s.%s" % (
-                host or "public seller form",
-                (" Seller's notes: " + d["notes"]) if d.get("notes") else ""))[:2400],
+            "notes": inquiry_line[:2400],
         }
+        if additional:
+            seller_data["relationship_note"] = "Additional contact from the seller form - verify ownership"
         if lead is not None:
             seller_data["lead_id"] = lead.id
-        profile = svc.attach_seller(db, org_id, None, prop, seller_data, actor_type=ACTOR_API)
+        profile = svc.attach_seller(db, org_id, None, prop, seller_data, actor_type=ACTOR_API,
+                                    set_primary=primary)
     except HTTPException as exc:
         # Plan capacity or another refusal from the canonical path. The public
         # caller gets the neutral refusal; the operator gets the reason.
@@ -250,8 +341,21 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
 
     lead = db.query(Lead).filter(Lead.id == profile.lead_id,
                                  Lead.organization_id == org_id).first()
-    if not lead.email and d["email"]:
-        lead.email = d["email"]
+    if matched_by:
+        # A RETURNING person: fill what was blank, keep what they wrote, and
+        # stop calling somebody who just reached out a cold lead.
+        if not lead.email and d["email"]:
+            lead.email = d["email"]
+        if not lead.first_name and first:
+            lead.first_name = first
+        if not lead.last_name and last.strip():
+            lead.last_name = last.strip()
+        lead.notes = _append_note(lead.notes, inquiry_line)
+        if (lead.relationship_type or "cold_lead") == "cold_lead":
+            lead.relationship_type = "warm_lead"
+        lead.updated_at = datetime.utcnow()
+    if assignee_id and not lead.assigned_to_id:
+        lead.assigned_to_id = assignee_id
     deal = svc.deal_for_property(db, org_id, prop.id)
     reference = _reference(getattr(deal, "id", None) or prop.id)
 
@@ -278,11 +382,13 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
             log.exception("wholesale intake: confirmation SMS failed for consent %s", consent.id)
             consent.confirmation_status = "ERROR"
 
+    kind = ("re-engaged" if reengaged else "additional contact" if additional
+            else "repeat" if repeat else "new")
     svc.log_event(
         db, org_id, EVENT_RECEIVED, actor_type=ACTOR_API, actor_label=ACTOR_LABEL,
         property_id=prop.id, deal_id=getattr(deal, "id", None),
         summary="Seller inquiry received%s - SMS consent: %s" % (
-            " (repeat)" if repeat else "", "YES" if consent else "NO"),
+            "" if kind == "new" else " (%s)" % kind, "YES" if consent else "NO"),
         details={"submission_id": d.get("submission_id"), "reference": reference,
                  "lead_id": lead.id, "seller_profile_id": profile.id,
                  "sms_consent": bool(consent), "consent_id": getattr(consent, "id", None),
@@ -290,7 +396,22 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
                  "consent_source": d.get("source_url") if consent else None,
                  "preferred_contact_method": d["preferred_contact_method"],
                  "source_url": d.get("source_url"), "repeat": repeat,
+                 "reengaged": reengaged, "additional_contact": additional,
+                 "matched_by": matched_by, "assigned_to_id": assignee_id,
                  "notes": d.get("notes")})
+
+    name = d["full_name"] or "A seller"
+    detail = ", ".join(x for x in (
+        d.get("property_condition") and "condition %s" % d["property_condition"],
+        d.get("timeline") and "timeline %s" % d["timeline"].replace("_", " "),
+        "SMS consent yes" if consent else "no SMS consent") if x)
+    lead_in = {"new": "New seller inquiry", "repeat": "Returning seller inquiry",
+               "re-engaged": "Seller re-engaged (previous deal was closed/dead)",
+               "additional contact": "New contact for a property that already has a seller - verify"}[kind]
+    WN.notify(db, org_id, kind=NotificationType.WHOLESALE_INQUIRY,
+              message="%s: %s - %s (%s). Ref %s" % (lead_in, name, svc.address_line(prop), detail, reference),
+              lead_id=lead.id, link=WN.deal_link(getattr(deal, "id", None)), assignee_id=assignee_id)
     db.commit()
-    return {"reference": reference, "action": "updated" if repeat else "created",
+    return {"reference": reference,
+            "action": "updated" if repeat and not reengaged else "created",
             "sms_consent_recorded": consent is not None}

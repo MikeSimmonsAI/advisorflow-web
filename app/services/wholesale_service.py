@@ -281,7 +281,8 @@ def deal_for_property(db: Session, org_id: str, property_id: str) -> Optional[Wh
 def attach_seller(db: Session, org_id: str, user: Optional[User],
                   prop: WholesaleProperty, data: Dict[str, Any], *,
                   actor_type: str = ACTOR_USER,
-                  capacity: Optional[Any] = None) -> WholesaleSellerProfile:
+                  capacity: Optional[Any] = None,
+                  set_primary: bool = True) -> WholesaleSellerProfile:
     """Attach an owner to a property — as a Lead, plus a wholesale profile.
 
     THE PERSON BECOMES A LEAD. That is the decision recorded in the models
@@ -339,7 +340,9 @@ def attach_seller(db: Session, org_id: str, user: Optional[User],
             city=prop.city,
             state=prop.state,
             zip_code=prop.zip_code,
-            relationship_type="cold_lead",
+            # An owner found in records has never heard of us (cold); one who
+            # submitted the seller form reached out first - the caller says so.
+            relationship_type=data.get("relationship_type") or "cold_lead",
             source_category=data.get("source_category") or "wholesale",
             source_file=prop.acquisition_source or "wholesale",
             notes=data.get("notes"),
@@ -377,7 +380,10 @@ def attach_seller(db: Session, org_id: str, user: Optional[User],
     db.flush()
 
     deal = deal_for_property(db, org_id, prop.id)
-    if deal is not None:
+    # `set_primary=False` attaches a SECOND person to a property without
+    # displacing the deal's seller of record (a co-owner, a relative, or
+    # somebody whose claim to the house is not yet verified).
+    if deal is not None and (set_primary or deal.seller_lead_id is None):
         deal.seller_lead_id = lead.id
         deal.seller_profile_id = profile.id
         if deal.stage == pipeline.INITIAL_STAGE:
@@ -397,16 +403,52 @@ SELLER_FIELDS = (
     "is_available", "considering_selling", "asking_price", "timeline",
     "motivation", "reason_for_selling", "property_condition", "major_repairs",
     "occupancy", "mortgage_note", "decision_makers", "best_callback_time",
-    "appointment_status",
+    "appointment_status", "appointment_at",
 )
 
+# What "booked" means for a SELLER (see WholesaleSellerProfile.appointment_*):
+# a person scheduled a call or walkthrough. Never the Lead's funeral-planning
+# "booked" status, never a self-service booking link.
+APPOINTMENT_STATUSES = ("none", "requested", "scheduled", "completed", "no_show", "cancelled")
 
-def apply_seller_fields(profile: WholesaleSellerProfile, data: Dict[str, Any]) -> None:
+
+def apply_seller_fields(profile: WholesaleSellerProfile, data: Dict[str, Any],
+                        allow_clear: bool = False) -> None:
+    # `allow_clear`: an operator EDIT may empty a field (an explicit null); an
+    # intake or an AI reading only ever adds what it learned.
     for field in SELLER_FIELDS:
-        if field in data and data[field] is not None:
-            setattr(profile, field, data[field])
+        if field not in data:
+            continue
+        if data[field] is None and not allow_clear:
+            continue
+        setattr(profile, field, data[field])
     if data.get("asking_price") is not None and not profile.asking_price_source:
         profile.asking_price_source = VALUE_MANUAL
+    if "asking_price" in data and data["asking_price"] is None and allow_clear:
+        profile.asking_price_source = None
+
+
+def reopen_deal(db: Session, org_id: str, prop: WholesaleProperty, previous: WholesaleDeal, *,
+                actor_type: str = ACTOR_SYSTEM, actor_label: Optional[str] = None,
+                reason: str = "") -> WholesaleDeal:
+    """A NEW deal for a property whose last deal is closed or dead.
+
+    The old deal is history - its outcome, offers and documents stay exactly as
+    they were. A seller coming back is a new cycle, so it gets a new deal
+    rather than silently reviving a lost one (whose lost reason would then be
+    wrong) or attaching to it (where nobody would ever look)."""
+    deal = WholesaleDeal(organization_id=org_id, property_id=prop.id,
+                         assigned_to_id=prop.assigned_to_id or previous.assigned_to_id,
+                         stage=pipeline.INITIAL_STAGE, stage_changed_at=datetime.utcnow(),
+                         is_test=prop.is_test)
+    db.add(deal)
+    db.flush()
+    log_event(db, org_id, "deal.reopened", actor_type=actor_type, actor_label=actor_label,
+              property_id=prop.id, deal_id=deal.id,
+              summary="New deal for %s (previous deal was %s)%s" % (
+                  address_line(prop) or "property", previous.stage, (": " + reason) if reason else ""),
+              after={"previous_deal_id": previous.id, "previous_stage": previous.stage})
+    return deal
 
 
 # ── Seller replies: AI reading, then qualification ──────────────────────────

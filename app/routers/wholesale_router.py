@@ -138,6 +138,11 @@ def seller_json(profile: Optional[WholesaleSellerProfile],
         "decision_makers": profile.decision_makers,
         "best_callback_time": profile.best_callback_time,
         "appointment_status": profile.appointment_status,
+        "appointment_at": (profile.appointment_at.isoformat() + "Z"
+                           if getattr(profile, "appointment_at", None) else None),
+        "relationship_note": profile.relationship_note,
+        "notes": getattr(lead, "notes", None),
+        "relationship_type": getattr(lead, "relationship_type", None),
         "qualification_band": profile.qualification_band,
         "qualification_score": profile.qualification_score,
         "qualification_reasons": _jsonl(profile.qualification_reasons),
@@ -469,6 +474,9 @@ class SettingsPatch(BaseModel):
     sms_messaging_service_sid: Optional[str] = None
     sms_campaign_sid: Optional[str] = None
     sms_brand_sid: Optional[str] = None
+    # Who a public seller inquiry is assigned to (a user of this workspace).
+    # Empty string clears it (unassigned: the workspace admins are notified).
+    inquiry_assignee_id: Optional[str] = None
 
 
 _SMS_PROGRAM_FIELDS = ("public_intake_key", "sms_program_enabled", "sms_sender_number",
@@ -560,6 +568,7 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
         "sms_messaging_service_sid": getattr(s, "sms_messaging_service_sid", None),
         "sms_campaign_sid": getattr(s, "sms_campaign_sid", None),
         "sms_brand_sid": getattr(s, "sms_brand_sid", None),
+        "inquiry_assignee_id": getattr(s, "inquiry_assignee_id", None),
     }
     for field in _JSON_SETTINGS:
         out[field] = _jsonl(getattr(s, field))
@@ -592,6 +601,18 @@ def get_settings(db: Session = Depends(get_db),
     return settings_json(svc.resolve_settings(db, org_id))
 
 
+@router.get("/settings/assignees")
+def settings_assignees(db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    """Who a seller inquiry can be assigned to: active users of THIS workspace."""
+    org_id = svc.read_org_id(db, user)
+    if not org_id:
+        raise HTTPException(status_code=409, detail="No customer organization selected.")
+    rows = (db.query(User).filter(User.organization_id == org_id, User.is_active.isnot(False))
+            .order_by(User.full_name.asc()).all())
+    return {"items": [{"id": u.id, "name": u.full_name or u.email, "role": u.role} for u in rows]}
+
+
 @router.patch("/settings")
 def patch_settings(payload: SettingsPatch, request: Request,
                    db: Session = Depends(get_db),
@@ -621,6 +642,13 @@ def patch_settings(payload: SettingsPatch, request: Request,
             raise HTTPException(status_code=403,
                                 detail="Only an administrator can change the seller SMS program.")
         _clean_sms_program(db, org_id, data)
+    if "inquiry_assignee_id" in data:
+        v = (data["inquiry_assignee_id"] or "").strip()
+        if v and (db.query(User.id).filter(User.id == v, User.organization_id == org_id,
+                                           User.is_active.isnot(False)).first() is None):
+            # 404-shaped: an id from another workspace is not confirmed to exist.
+            raise HTTPException(status_code=400, detail="That user is not in this workspace.")
+        data["inquiry_assignee_id"] = v or None
     if data.get("high_threshold") is not None and data.get("medium_threshold") is not None \
             and data["high_threshold"] <= data["medium_threshold"]:
         raise HTTPException(status_code=400,
@@ -1138,6 +1166,7 @@ class SellerIn(BaseModel):
     decision_makers: Optional[str] = None
     best_callback_time: Optional[str] = None
     appointment_status: Optional[str] = None
+    appointment_at: Optional[datetime] = None
     notes: Optional[str] = None
 
 
@@ -1167,32 +1196,80 @@ def update_seller(profile_id: str, payload: SellerIn, request: Request,
                   db: Session = Depends(get_db),
                   user: User = Depends(require_tenant_user),
                   _guard: User = Depends(require_not_observation)):
+    """An operator correcting what we know about a seller.
+
+    A field sent as null is CLEARED (an edit must be able to empty a box). The
+    phone is validated as a US number and may not belong to another lead in
+    this organization. SMS consent is evidence about a NUMBER: when the number
+    changes, the lead's consent flag does not travel with it (the consent
+    record for the old number stays as it was). A note is appended, dated and
+    signed, never overwritten.
+    """
+    from app.services import wholesale_sms as ws
     org_id = svc.write_org_id(db, user)
     profile = (db.query(WholesaleSellerProfile)
                .filter(WholesaleSellerProfile.id == profile_id,
                        WholesaleSellerProfile.organization_id == org_id).first())
     if profile is None:
         raise HTTPException(status_code=404, detail="Seller not found")
-    lead = db.query(Lead).filter(Lead.id == profile.lead_id).first()
+    lead = (db.query(Lead).filter(Lead.id == profile.lead_id,
+                                  Lead.organization_id == org_id).first())
     before = seller_json(profile, lead)
     data = payload.model_dump(exclude_unset=True)
-    svc.apply_seller_fields(profile, data)
+    data.pop("lead_id", None)
+
+    errors: Dict[str, str] = {}
+    new_e164 = None
+    if data.get("phone"):
+        new_e164 = ws.normalize_e164(data["phone"])
+        if not new_e164:
+            errors["phone"] = "Enter a valid 10-digit US phone number."
+    if data.get("email") and not re.match(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$", data["email"].strip()):
+        errors["email"] = "Enter a valid email address."
+    if data.get("appointment_status") and data["appointment_status"] not in svc.APPOINTMENT_STATUSES:
+        errors["appointment_status"] = "One of: %s." % ", ".join(svc.APPOINTMENT_STATUSES)
+    if "first_name" in data and not (data["first_name"] or "").strip() and not (lead and lead.last_name):
+        errors["first_name"] = "A seller needs a name."
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+
+    consent_note = None
+    if lead is not None and new_e164:
+        old_e164 = ws.normalize_e164(lead.phone)
+        if new_e164 != old_e164:
+            forms = [new_e164, new_e164[1:], new_e164[2:]]
+            other = (db.query(Lead).filter(Lead.organization_id == org_id, Lead.id != lead.id,
+                                           Lead.phone.in_(forms)).first())
+            if other is not None:
+                raise HTTPException(status_code=409, detail={
+                    "message": "That number already belongs to another lead in this workspace.",
+                    "lead_id": other.id})
+            lead.phone_raw = data["phone"]
+            lead.phone = new_e164
+            if getattr(lead, "sms_consent", False):
+                lead.sms_consent = False
+                consent_note = ("Phone changed: SMS consent was given for %s and does not carry "
+                                "to the new number." % (old_e164 or "the previous number"))
+
+    svc.apply_seller_fields(profile, data, allow_clear=True)
 
     # Contact details belong to the LEAD, not to this profile. Writing them here
     # would create a second copy of a phone number that every compliance check
     # reads from the lead — which is exactly the split this module exists to
     # avoid. See the models docstring.
     if lead is not None:
-        if data.get("phone"):
-            from app.services.dedup_service import normalize_phone
-            lead.phone_raw = data["phone"]
-            lead.phone = normalize_phone(data["phone"]) or data["phone"]
-        if data.get("email"):
-            lead.email = data["email"]
-        if data.get("first_name"):
-            lead.first_name = data["first_name"]
-        if data.get("last_name"):
-            lead.last_name = data["last_name"]
+        if "email" in data:
+            lead.email = (data["email"] or "").strip().lower() or None
+        if "first_name" in data:
+            lead.first_name = (data["first_name"] or "").strip() or None
+        if "last_name" in data:
+            lead.last_name = (data["last_name"] or "").strip() or None
+        if (data.get("notes") or "").strip():
+            stamp = datetime.utcnow().strftime("%Y-%m-%d")
+            who = getattr(user, "full_name", None) or getattr(user, "email", None) or "operator"
+            line = "%s - %s: %s" % (stamp, who, data["notes"].strip()[:2000])
+            lead.notes = ((lead.notes or "").rstrip() + "\n" + line).strip()[-8000:]
+        lead.updated_at = datetime.utcnow()
 
     deal = (db.query(WholesaleDeal)
             .filter(WholesaleDeal.seller_profile_id == profile.id,
@@ -1207,11 +1284,14 @@ def update_seller(profile_id: str, payload: SellerIn, request: Request,
     db.flush()
     svc.log_event(db, org_id, "seller.updated", actor_type=ACTOR_USER,
                   actor_user_id=user.id, deal_id=getattr(deal, "id", None),
-                  summary="Seller details updated", before=before,
-                  after=seller_json(profile, lead))
+                  property_id=profile.property_id,
+                  summary="Seller details updated" + ((". " + consent_note) if consent_note else ""),
+                  before=before, after=seller_json(profile, lead))
     db.commit()
     db.refresh(profile)
-    return seller_json(profile, lead)
+    out = seller_json(profile, lead)
+    out["consent_note"] = consent_note
+    return out
 
 
 class OutreachIn(BaseModel):

@@ -754,6 +754,7 @@ export default function LeadDetail() {
   )
 
   const { lead, events, ai_quality, booking } = data
+  const wholesaleLinks = composeCtx?.wholesale || []
 
   // ── CHANNEL CAPABILITY ────────────────────────────────────────────────────
   //
@@ -1726,6 +1727,39 @@ export default function LeadDetail() {
             </section>
           )}
 
+          {/* Lead -> Wholesale. A property seller is worked from the deal; the
+              platform's self-service booking link is never offered to them. */}
+          {wholesaleLinks.length > 0 && (
+            <section className="panel lead-detail-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">🏠 Wholesale seller</h2>
+              </div>
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
+                {wholesaleLinks.map((w) => (
+                  <li key={w.seller_profile_id} style={{ fontSize: 13 }}>
+                    {w.deal_id
+                      ? <a href={`/wholesale/deals/${w.deal_id}`}
+                           onClick={(e) => { e.preventDefault(); navigate(`/wholesale/deals/${w.deal_id}`) }}>
+                          {w.address || 'Property'}
+                        </a>
+                      : <span>{w.address || 'Property'}</span>}
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                      {[w.stage && w.stage.replace(/_/g, ' '),
+                        w.primary_seller ? 'seller of record' : 'additional contact — verify',
+                        w.source === 'seller_inquiry' ? 'came in via the seller form' : null,
+                        w.appointment_status && w.appointment_status !== 'none'
+                          ? `appointment ${w.appointment_status.replace(/_/g, ' ')}` : null]
+                        .filter(Boolean).join(' · ')}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8 }}>
+                Sellers are scheduled by a person, not sent a booking link.
+              </p>
+            </section>
+          )}
+
           {booking && (
             <section className="panel lead-detail-panel">
               <div className="panel-header">
@@ -1826,7 +1860,7 @@ export default function LeadDetail() {
           </section>
 
           {/* ── Case File (always accessible, not just booked) ── */}
-          {!booking && lead.email && (
+          {!booking && lead.email && wholesaleLinks.length === 0 && (
             <section className="panel lead-detail-panel">
               <div className="panel-header">
                 <h2 className="panel-title">🔗 Booking Link</h2>

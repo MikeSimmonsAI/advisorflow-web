@@ -250,6 +250,18 @@ textarea.i{min-height:110px;resize:vertical}
 .consent .tag{display:inline-block;font:700 11px/1 var(--sans);letter-spacing:.12em;background:#fff;border:1px solid var(--line-2);color:var(--ink-3);border-radius:999px;padding:5px 9px;margin-left:4px}
 .check{display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;align-items:start;font-size:15px;color:var(--ink-2);line-height:1.55}
 .check input{width:22px;height:22px;margin:2px 0 0;accent-color:var(--navy)}
+/* SMS opt-in: the plain-language summary sits ABOVE the box, the verbatim
+   registered disclosure is the box's own label, and the box is never checked
+   for anyone. The panel only changes look once a person ticks it. */
+.consent{transition:border-color .15s,box-shadow .15s,background .15s}
+.consent:has(input:checked){background:#fff;border-color:var(--navy-3);box-shadow:0 0 0 3px rgba(29,95,209,.14)}
+.consent-lead{font-size:16px;color:var(--ink);margin:0 0 12px;font-weight:600}
+.consent-facts{list-style:none;margin:0 0 16px;padding:0;display:grid;gap:8px;font-size:15px;color:var(--ink-2)}
+.consent-facts li{display:grid;grid-template-columns:14px minmax(0,1fr);gap:10px}
+.consent-facts li::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--navy-3);margin-top:10px}
+.consent .check{background:#fff;border:1.5px solid var(--line-2);border-radius:10px;padding:14px 14px 14px 12px;color:var(--ink)}
+.consent .check label{cursor:pointer}
+.consent .check input{cursor:pointer}
 .actions{margin-top:28px;display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center}
 .actions .btn{min-width:260px}
 .fine{font-size:14px;color:var(--ink-3);margin:0;max-width:420px}
@@ -540,6 +552,13 @@ textarea.i{min-height:110px;resize:vertical}
 
         <fieldset class="consent">
           <legend><i aria-hidden="true">4</i>Text messages <span class="tag">OPTIONAL</span></legend>
+          <p class="consent-lead">Would you like text updates about this property? It is completely optional.</p>
+          <ul class="consent-facts" id="sms-facts">
+            <li><span>Only about this property inquiry: follow-up questions, scheduling and transaction updates. No unrelated marketing.</span></li>
+            <li><span>Message frequency varies. Message and data rates may apply.</span></li>
+            <li><span>Reply <strong>STOP</strong> at any time to opt out, or <strong>HELP</strong> for help.</span></li>
+            <li><span>Leave the box unchecked and we will reach you by phone or email only. Your inquiry is sent either way.</span></li>
+          </ul>
           <div class="check">
             <input type="checkbox" id="f-sms_consent" name="sms_consent" value="yes"<?=(($_POST['sms_consent'] ?? '') === 'yes') ? ' checked' : ''?><?=sell_aria($errors,'sms_consent','sms-disclosure')?>>
             <label for="f-sms_consent" id="sms-disclosure">By checking this box, I agree to receive SMS text messages from EVO Integrated Solutions LLC (operating as EvoSys Wholesale / EvoSysPro) regarding my property inquiry, including follow-up questions, appointment scheduling, and transaction updates. Message frequency varies. Message and data rates may apply. Reply STOP to unsubscribe, HELP for help. Consent is not a condition of any service. View our <a href="/privacy.html#sms">Privacy Policy</a> and <a href="/terms.html#sms-wholesale">Terms</a>.</label>

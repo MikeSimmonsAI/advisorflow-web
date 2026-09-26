@@ -97,7 +97,10 @@ export default function NotificationBell() {
     setNotifications((prev) => prev.filter((x) => x.id !== n.id))
     setUnreadCount((c) => (c > 0 ? c - 1 : 0))
     setOpen(false)
-    if (n.lead_id) navigate(`/leads/${n.lead_id}`)
+    // A link from the server wins (a Wholesale inquiry opens its deal); only an
+    // in-app path is followed, never an absolute URL.
+    if (n.link && n.link.startsWith('/') && !n.link.startsWith('//')) navigate(n.link)
+    else if (n.lead_id) navigate(`/leads/${n.lead_id}`)
   }
 
   // The badge reads the server's count, not the length of the capped page.
@@ -125,7 +128,7 @@ export default function NotificationBell() {
             <ul className="notif-list">
               {notifications.map((n) => (
                 <li key={n.id} className="notif-item" onClick={() => handleNotificationClick(n)}>
-                  {n.type === 'hot_reply' && <SignalPulse color="red" size={6} />}
+                  {(n.type === 'hot_reply' || n.type === 'wholesale_inquiry') && <SignalPulse color={n.type === 'hot_reply' ? 'red' : 'green'} size={6} />}
                   <div className="notif-item-body">
                     <p className="notif-item-text">{n.message}</p>
                     <span className="notif-item-time">{new Date(n.created_at).toLocaleString()}</span>

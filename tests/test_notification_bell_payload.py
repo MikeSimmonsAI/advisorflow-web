@@ -117,7 +117,7 @@ def test_rows_are_plain_dicts_not_orm_objects(db_session, sample_advisor, sample
     _make(db_session, sample_advisor.id, sample_lead.id, 2)
     for item in get_unread_notifications(db_session, sample_advisor.id):
         assert isinstance(item, dict)
-        assert set(item) == {"id", "lead_id", "type", "message", "created_at", "is_read"}
+        assert set(item) == {"id", "lead_id", "type", "message", "created_at", "is_read", "link"}
 
 
 def test_the_type_is_serialised_as_its_value(db_session, sample_advisor, sample_lead):

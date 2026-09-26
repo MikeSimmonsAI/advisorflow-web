@@ -220,6 +220,9 @@ class WholesaleSettings(Base):
     # here. No organization id, no display name, nothing a browser chooses.
     # NULL = this organization accepts no public seller inquiries.
     public_intake_key = Column(String, nullable=True, unique=True)
+    # Who a public seller inquiry is assigned to (a user of THIS organization).
+    # NULL = unassigned; the workspace admins are notified instead.
+    inquiry_assignee_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     # The seller SMS program. OFF by default and fail-closed: nothing is texted
     # under this program until an admin turns it on AND a Messaging Service is
     # configured AND the recipient holds program consent. The sender number is
@@ -388,7 +391,14 @@ class WholesaleSellerProfile(Base):
     mortgage_note = Column(Text, nullable=True)         # only what they volunteered
     decision_makers = Column(String, nullable=True)
     best_callback_time = Column(String, nullable=True)
+    # BOOKING SEMANTICS FOR A SELLER. A seller is never sent the platform's
+    # self-service booking link; a person schedules the call or walkthrough.
+    # appointment_status is one of wholesale_service.APPOINTMENT_STATUSES and
+    # appointment_at is when it is (or was). "Booked" for a seller means
+    # appointment_status == "scheduled" - it never flips the Lead to the
+    # funeral-planning "booked" status and its post-booking concierge.
     appointment_status = Column(String, nullable=True)
+    appointment_at = Column(DateTime, nullable=True)
 
     # ── Qualification, and the reason for it ────────────────────────────────
     qualification_band = Column(String, nullable=True)  # high / medium / low / review / excluded

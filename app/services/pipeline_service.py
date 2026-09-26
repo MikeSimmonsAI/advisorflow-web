@@ -269,10 +269,16 @@ def analyze_and_respond(
     existing_booking = db.query(BookingLink).filter(
         BookingLink.lead_id == lead.id, BookingLink.status == "pending"
     ).order_by(BookingLink.created_at.desc()).first()
-    booking = existing_booking or create_booking_link(db, lead, advisor)
-    from app.services.public_identity import booking_url as public_booking_url
-    booking_url = public_booking_url(db, lead.organization_id,
-                                     booking.token)
+    from app.services import wholesale_seller_context as WSC
+    seller_ctx = WSC.context_for_lead(db, lead)
+    if seller_ctx:
+        # A seller is scheduled by a person; no booking link is ever minted.
+        booking_url = ""
+    else:
+        booking = existing_booking or create_booking_link(db, lead, advisor)
+        from app.services.public_identity import booking_url as public_booking_url
+        booking_url = public_booking_url(db, lead.organization_id,
+                                         booking.token)
 
     history, latest_inbound = _get_conversation(db, lead.id)
 
@@ -290,6 +296,8 @@ def analyze_and_respond(
         rel_type,
         RELATIONSHIP_TYPE_CONTEXT["cold_lead"]
     )
+    if seller_ctx:
+        relationship_context = seller_ctx["relationship"]
 
     # User direction — if provided use it verbatim; never let the AI override it
     ai_direction = pipeline.ai_direction or ""
@@ -317,10 +325,12 @@ def analyze_and_respond(
         first_name=lead.first_name or "",
         last_name=lead.last_name or "",
         lead_notes=lead_notes,
-        booking_url=booking_url,
+        booking_url=booking_url or "(none - never include a booking or scheduling link)",
         history=history,
         latest_inbound=latest_inbound or "No reply yet — send initial outreach",
     )
+    if seller_ctx:
+        prompt += "\n" + WSC.prompt_block(seller_ctx) + "\n"
 
     try:
         response = ai_gateway.chat_completion(
@@ -341,14 +351,15 @@ def analyze_and_respond(
             "stop_reason": data.get("stop_reason"),
             "intent": data.get("intent", "unknown"),
             "reasoning": data.get("reasoning", ""),
-            "include_booking_link": bool(data.get("include_booking_link", False)),
+            "include_booking_link": bool(data.get("include_booking_link", False)) and bool(booking_url),
             "stage": data.get("stage", "ai_responding"),
             "booking_url": booking_url,
             "source": "ai",
         }
     except Exception as e:
         logger.error("Pipeline AI analysis failed: %s", e)
-        fallback = f"Hi {lead.first_name or 'there'}, just checking in. Ready to connect when you are — {booking_url}"
+        fallback = (WSC.fallback_reply(lead, advisor.full_name, org_name, seller_ctx) if seller_ctx else
+                    f"Hi {lead.first_name or 'there'}, just checking in. Ready to connect when you are — {booking_url}")
         return {
             "reply": fallback,
             "confidence": 50,
@@ -356,7 +367,7 @@ def analyze_and_respond(
             "stop_reason": None,
             "intent": "unknown",
             "reasoning": "AI unavailable, using fallback",
-            "include_booking_link": True,
+            "include_booking_link": bool(booking_url),
             "stage": "ai_responding",
             "booking_url": booking_url,
             "source": "fallback",
@@ -380,6 +391,11 @@ def process_inbound_reply(
     """
     if not ai_gateway.check_background("pipeline_inbound_reply"):
         return {"action": "ai_disabled"}
+    # Defense in depth: the webhook routes a Wholesale seller elsewhere; if a
+    # seller's reply ever reaches here, nothing is auto-sent to them.
+    from app.services import wholesale_seller_context as _WSC
+    if _WSC.is_seller(db, lead):
+        return {"action": "wholesale_seller"}
     # Find active pipeline for this lead
     pipeline = db.query(PipelineConversation).filter(
         PipelineConversation.lead_id == lead.id,
@@ -575,6 +591,12 @@ def launch_pipeline(
             # PLAN CAPACITY HOLD alongside the DNC and duplicate checks: a
             # pipeline conversation is an outbound commitment like any other.
             if lead.status == "dnc" or lead.is_duplicate or is_held(lead):
+                skipped += 1
+                continue
+            # A Wholesale seller is never put on the generic AI auto-conversation
+            # (booking links, auto-send). Sellers are worked from Wholesale.
+            from app.services import wholesale_seller_context as _WSC
+            if _WSC.is_seller(db, lead):
                 skipped += 1
                 continue
 

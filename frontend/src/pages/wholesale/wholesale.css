@@ -1939,3 +1939,13 @@
 .ws-page .ws-sent__note {
   flex-basis: 100%; color: var(--text-secondary); font-size: 12px;
 }
+
+/* Intake reconciliation: seller editor + notes */
+.ws-page .ws-field__err { font-size: 12px; color: var(--signal-red); }
+.ws-page .ws-notes {
+  white-space: pre-wrap; font-family: inherit; font-size: 13px; margin: 0;
+  color: var(--text-primary); background: var(--bg-field); border-radius: var(--radius-sm);
+  padding: 10px 12px; max-height: 220px; overflow: auto;
+}
+.ws-page .ws-link { font-size: 12px; font-weight: 600; color: var(--signal-blue); text-decoration: none; }
+.ws-page .ws-link:hover { text-decoration: underline; }

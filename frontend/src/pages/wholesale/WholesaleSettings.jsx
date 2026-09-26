@@ -378,7 +378,10 @@ export default function WholesaleSettings() {
       <div id="set-contracts" hidden={tab !== 'contracts'}><TemplateLibrary /></div>
 
       <div id="set-assistant" hidden={tab !== 'assistant'}><AiAssistantPanel value={value} set={set} /></div>
-      <div id="set-contact" hidden={tab !== 'contact'}><PublicContactPanel value={value} set={set} /></div>
+      <div id="set-contact" hidden={tab !== 'contact'}>
+        <PublicContactPanel value={value} set={set} />
+        <InquiryRoutingPanel value={value} set={set} />
+      </div>
       <div id="set-sms" hidden={tab !== 'sms'}>
         <SellerSmsPanel value={value} set={set} draft={draft} savedAt={settings} />
       </div>
@@ -498,6 +501,45 @@ function PublicContactPanel({ value, set }) {
           <label htmlFor="ws-public-email">Public email</label>
           <input id="ws-public-email" className="ws-input" type="email" autoComplete="off"
                  value={email} onChange={(e) => set('public_contact_email', e.target.value)} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+/* WHERE A SELLER INQUIRY GOES. A new inquiry from the public seller form is
+ * assigned to this person and they get a notification that opens the deal.
+ * Unassigned, every workspace admin is notified instead. */
+function InquiryRoutingPanel({ value, set }) {
+  const [users, setUsers] = useState([])
+  useEffect(() => {
+    let live = true
+    api.get('/wholesale/settings/assignees').then((r) => { if (live) setUsers(r.items || []) }).catch(() => {})
+    return () => { live = false }
+  }, [])
+  const current = value('inquiry_assignee_id') || ''
+  return (
+    <div className="panel ws-panel">
+      <div className="panel-title ws-panel-title">
+        <span>Seller inquiries</span>
+        <span className={`ws-pill ${current ? 'is-ok' : 'is-muted'}`}>
+          {current ? 'Assigned' : 'Admins notified'}
+        </span>
+      </div>
+      <Note>
+        A new inquiry from the seller form is assigned to this person, who gets a
+        notification that opens the deal. Leave it unassigned and every workspace
+        admin is notified.
+      </Note>
+      <div className="ws-grid">
+        <div className="ws-field">
+          <label htmlFor="ws-inquiry-assignee">Assign new inquiries to</label>
+          <select id="ws-inquiry-assignee" value={current}
+                  onChange={(e) => set('inquiry_assignee_id', e.target.value)}>
+            <option value="">— unassigned (notify admins) —</option>
+            {users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.role ? ` (${u.role.replace(/_/g, ' ')})` : ''}</option>)}
+          </select>
         </div>
       </div>
     </div>
