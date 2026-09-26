@@ -58,7 +58,7 @@ class FortWorthCodeReader:
                          "value": "Fort Worth case %s: %s (%s%s)" % (
                              cid, c.get("Complaint_Type_Description") or "violation", status.lower() or "status unknown",
                              ", opened %s" % created.strftime("%m/%d/%Y") if created else ""),
-                         "raw": "CASE=%s;STATUS=%s" % (cid, status),
+                         "raw": "CASE=%s;STATUS=%s" % (cid, status), "ref": "FWCODE:%s" % cid,
                          "effective_at": created.strftime("%Y-%m-%d") if created else None,
                          "observed_days_ago": 0})
             if len(sigs) >= 5:

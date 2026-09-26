@@ -213,7 +213,8 @@ class Dallas311Reader:
             sigs.append({"type": "CODE_COMPLAINT", "confidence": 55,
                          "value": "311 %s (%s) — %s" % (c.get("service_request_type") or "request",
                                                          created, (c.get("status") or "").lower()),
-                         "raw": "SR=%s" % c.get("service_request_number"), "observed_days_ago": age})
+                         "raw": "SR=%s" % c.get("service_request_number"), "observed_days_ago": age,
+                         "ref": "DAL311:%s" % c.get("service_request_number")})
         return {"source_reference": "DAL311:%s" % newest.get("service_request_number"),
                 "street_address": target.get("street_address"), "city": target.get("city"),
                 "state": "TX", "zip_code": target.get("zip_code"), "county": target.get("county"),
