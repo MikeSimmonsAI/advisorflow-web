@@ -266,6 +266,10 @@ import app.models.evosense_models  # noqa: F401  (imported for side effects)
 # gate reads it; without the table every program send fails closed as
 # NO_SMS_CONSENT. Added to BOTH blocks in this file.
 import app.models.sms_consent_models  # noqa: F401  (imported for side effects)
+# Universal intake (org_contacts / import_batch_files / import_record_versions /
+# intake_classifications). Contacts that are NOT leads live here. Added to BOTH
+# blocks in this file, per the merge-artefact note above.
+import app.models.intake_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -520,3 +524,7 @@ import app.models.wholesale_share_models  # noqa: F401  (imported for side effec
 import app.models.evosense_models  # noqa: F401  (imported for side effects)
 # Program-scoped SMS consent of record. See the first block.
 import app.models.sms_consent_models  # noqa: F401  (imported for side effects)
+# Universal intake (org_contacts / import_batch_files / import_record_versions /
+# intake_classifications). Contacts that are NOT leads live here. Added to BOTH
+# blocks in this file, per the merge-artefact note above.
+import app.models.intake_models  # noqa: F401  (imported for side effects)

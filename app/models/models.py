@@ -1036,6 +1036,13 @@ class Lead(Base):
     imported_by_name = Column(String, nullable=True)  # full name of the user who ran the import
     source_category = Column(String, nullable=True)   # purchased, organic, referral, database, etc.
 
+    # UNIVERSAL INTAKE PROVENANCE. Nullable, no default, no backfill: a lead
+    # created by any other path leaves both NULL and means exactly what it
+    # always meant. Written only when the universal importer activates an
+    # org contact as a real opportunity (app/services/intake/commit.py).
+    org_contact_id = Column(String, nullable=True, index=True)
+    import_batch_id = Column(String, nullable=True, index=True)
+
     # Manual flag — set by any advisor when auto-detection misses a bad contact
     # Values: null (clean), "bad_email" (hide from email/campaign but allow SMS),
     #         "remove_all" (hide from all outreach lists everywhere)

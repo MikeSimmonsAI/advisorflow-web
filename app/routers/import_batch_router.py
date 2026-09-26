@@ -240,6 +240,9 @@ def commit_batch_route(batch_id: str, db: Session = Depends(get_db), user=Depend
         raise HTTPException(409, f"Batch is already {b.status}")
     if b.status == ImportBatchStatus.ARCHIVED:
         raise HTTPException(409, "Cannot commit an archived batch")
+    if getattr(b, "pipeline", None) == "universal":
+        raise HTTPException(409, "This batch belongs to the guided importer "
+                                 "(/intake); commit it there.")
     result = _commit_batch(batch_id, user.organization_id, db, user.id)
     return _batch_dict(result)
 

@@ -268,6 +268,71 @@ COLUMNS_TO_ADD = [
     ("import_batches", "relationship_type", "VARCHAR"),
     ("import_batches", "import_list_name", "VARCHAR"),
 
+    # ── UNIVERSAL INTAKE (2026-09-24) ──────────────────────────────────────
+    # Additive and nullable, every one. A batch or staged row written by the
+    # legacy upload paths leaves all of these NULL and behaves as before; the
+    # universal importer (app/services/intake) is the only writer. `leads`
+    # gains two provenance columns with no default and no backfill, so the
+    # ALTER is metadata-only on Postgres even on a very large table.
+    ("import_batches", "pipeline", "VARCHAR"),
+    ("import_batches", "batch_code", "VARCHAR"),
+    ("import_batches", "stage", "VARCHAR"),
+    ("import_batches", "progress_pct", "INTEGER"),
+    ("import_batches", "heartbeat_at", "TIMESTAMP"),
+    ("import_batches", "acting_user_id", "VARCHAR"),
+    ("import_batches", "acting_user_name", "VARCHAR"),
+    ("import_batches", "acting_role", "VARCHAR"),
+    ("import_batches", "acted_as_platform_owner", "BOOLEAN"),
+    ("import_batches", "source_label", "VARCHAR"),
+    ("import_batches", "source_detail", "VARCHAR"),
+    ("import_batches", "source_system", "VARCHAR"),
+    ("import_batches", "campaign_purpose", "VARCHAR"),
+    ("import_batches", "offer_hook", "VARCHAR"),
+    ("import_batches", "tags_json", "TEXT"),
+    ("import_batches", "original_row_count", "INTEGER"),
+    ("import_batches", "headers_json", "TEXT"),
+    ("import_batches", "mapping_json", "TEXT"),
+    ("import_batches", "classification_json", "TEXT"),
+    ("import_batches", "update_policy_json", "TEXT"),
+    ("import_batches", "analysis_json", "TEXT"),
+    ("import_batches", "commit_mode", "VARCHAR"),
+    ("import_batches", "commit_report_json", "TEXT"),
+    ("import_batches", "rolled_back_at", "TIMESTAMP"),
+    ("import_batches", "rolled_back_by_id", "VARCHAR"),
+    ("import_batches", "rollback_report_json", "TEXT"),
+    ("import_batches", "completed_at", "TIMESTAMP"),
+    ("import_staged_rows", "intake_status", "VARCHAR"),
+    ("import_staged_rows", "status_reasons", "TEXT"),
+    ("import_staged_rows", "record_class", "VARCHAR"),
+    ("import_staged_rows", "classification", "VARCHAR"),
+    ("import_staged_rows", "classification_source", "VARCHAR"),
+    ("import_staged_rows", "classification_raw", "VARCHAR"),
+    ("import_staged_rows", "creates_lead", "BOOLEAN"),
+    ("import_staged_rows", "historical_customer", "BOOLEAN"),
+    ("import_staged_rows", "needs_enrichment", "BOOLEAN"),
+    ("import_staged_rows", "sms_status", "VARCHAR"),
+    ("import_staged_rows", "email_status", "VARCHAR"),
+    ("import_staged_rows", "email_status_raw", "VARCHAR"),
+    ("import_staged_rows", "phone_line_type", "VARCHAR"),
+    ("import_staged_rows", "full_name", "VARCHAR"),
+    ("import_staged_rows", "company", "VARCHAR"),
+    ("import_staged_rows", "company_norm", "VARCHAR"),
+    ("import_staged_rows", "source_system", "VARCHAR"),
+    ("import_staged_rows", "source_record_id", "VARCHAR"),
+    ("import_staged_rows", "match_type", "VARCHAR"),
+    ("import_staged_rows", "match_target_type", "VARCHAR"),
+    ("import_staged_rows", "matched_contact_id", "VARCHAR"),
+    ("import_staged_rows", "match_keys", "TEXT"),
+    ("import_staged_rows", "duplicate_resolution", "VARCHAR"),
+    ("import_staged_rows", "normalized_json", "TEXT"),
+    ("import_staged_rows", "custom_fields_json", "TEXT"),
+    ("import_staged_rows", "vertical_fields_json", "TEXT"),
+    ("import_staged_rows", "tags_json", "TEXT"),
+    ("import_staged_rows", "committed_contact_id", "VARCHAR"),
+    ("import_staged_rows", "commit_action", "VARCHAR"),
+    ("leads", "org_contact_id", "VARCHAR"),
+    ("leads", "import_batch_id", "VARCHAR"),
+
     # ── Capability grant scope (brand-scoped compensation authority) ───────
     # NOT NULL DEFAULT 'customer_org' is doing real work: every row already in
     # this table IS a customer-org grant, so the ALTER backfills them correctly
@@ -1358,6 +1423,10 @@ ENUM_COLUMNS_TO_CONVERT_TO_STRING = [
 # table scans on messages and email_messages (potentially millions of rows)
 # because neither table had any indexes on lead_id, sent_at, or sender_id.
 INDEXES_TO_CREATE = [
+    # Universal intake: category drill-down and the lead provenance links.
+    "CREATE INDEX IF NOT EXISTS ix_isr_batch_intake ON import_staged_rows(batch_id, intake_status)",
+    "CREATE INDEX IF NOT EXISTS ix_leads_org_contact_id ON leads(org_contact_id)",
+    "CREATE INDEX IF NOT EXISTS ix_leads_import_batch_id ON leads(import_batch_id)",
     # The webhook lookup key. Every Retell event resolves through this column,
     # several times per call, so it is indexed rather than scanned.
     "CREATE INDEX IF NOT EXISTS ix_voice_calls_provider_call_id ON voice_calls(provider_call_id)",

@@ -87,12 +87,12 @@ export default function Leads() {
   const [reviewLeadIds, setReviewLeadIds] = useState(null)
   const [reviewBatchId, setReviewBatchId] = useState(null)
   const [reviewBatchCount, setReviewBatchCount] = useState(0)
-  // "/leads?import=1" opens the import panel directly — that is what the
-  // Overview's Import leads button means. Read from location rather than the
-  // useSearchParams hook below, which is declared further down this list.
-  const [showImport, setShowImport] = useState(
-    () => new URLSearchParams(window.location.search).get('import') === '1'
-  )
+  // IMPORTING MOVED TO THE IMPORT CENTER (/imports/new). The inline panel
+  // below committed a whole file as active leads in one click, with a
+  // "Tag whole file as New Inquiry" switch beside it; the guided importer
+  // stages, analyzes and classifies first, and separates contacts from
+  // leads. "/leads?import=1" (the Overview's Import button) now goes there.
+  const [showImport, setShowImport] = useState(false)
   const fileInputRef = useRef(null)
   const pendingFile = useRef(null)
   const [googleImporting, setGoogleImporting] = useState(false)
@@ -357,6 +357,11 @@ export default function Leads() {
   }
 
   useEffect(() => { loadImportBatches(); loadFlaggedLeads() }, [])
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('import') === '1') {
+      navigate('/imports/new', { replace: true })
+    }
+  }, [navigate])
   // Re-fetch when the status filter changes — including on mount, which is how
   // a "/leads?status=new" link arrives already narrowed.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -806,8 +811,8 @@ export default function Leads() {
           <button className="btn btn--secondary" onClick={() => { setShowAddLead(!showAddLead); setShowImport(false) }}>
             {showAddLead ? '✕ Cancel' : '+ Add lead'}
           </button>
-          <button className="btn btn--primary leads-import-btn" onClick={() => { setShowImport(!showImport); setShowAddLead(false) }}>
-            {showImport ? '✕ Close import' : '⬆ Import leads'}
+          <button className="btn btn--primary leads-import-btn" onClick={() => navigate('/imports/new')}>
+            ⬆ Import data
           </button>
         </div>
       </header>

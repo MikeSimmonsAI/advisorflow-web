@@ -173,7 +173,7 @@ const NAV_GROUPS = [
       { to: '/lead-cleanup', label: 'Lead Cleanup', icon: 'users', adminOnly: true, featureKey: 'lead_cleanup' },
       { to: '/admin', label: 'Team Performance', icon: 'shield', adminOnly: true, featureKey: 'master_dashboard' },
       { to: '/reports', label: 'Reports', icon: 'activity', adminOnly: true, featureKey: 'reports' },
-      { to: '/import-batches', label: 'Lead Imports', icon: 'upload', adminOnly: true, featureKey: 'imports' },
+      { to: '/imports', label: 'Import Center', icon: 'upload', adminOnly: true, featureKey: 'imports' },
     ],
   },
   {
