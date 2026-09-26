@@ -1685,6 +1685,14 @@ NULLABILITY_TO_RELAX = [
     # existing caller still passes a tenant id; this only permits the rows that
     # previously could not exist.
     ("audit_log_entries", "organization_id"),
+    # LEGACY import_batches SHAPE. Production's import_batches was first created
+    # by the historical-source-records model (f7a6b50), whose `kind` column was
+    # NOT NULL with only a Python-side default. That model was replaced by the
+    # Lead Import Intelligence / Universal Intake ImportBatch, which has no
+    # `kind`, so every new batch INSERT on production failed with a NOT NULL
+    # violation (found via the /sell fail-safe event after fcc335a). Nothing
+    # reads import_batches.kind any more; existing rows keep their value.
+    ("import_batches", "kind"),
 ]
 
 
