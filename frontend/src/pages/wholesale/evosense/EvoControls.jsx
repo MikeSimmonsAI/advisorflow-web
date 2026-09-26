@@ -1,7 +1,9 @@
 /* EVOSENSE — PROVIDERS & CONTROLS: the control room (Phase 7.3 light rebuild; board screen 4).
  *
- *   EVOSENSE CONTROLS   the kill switches, each RUNNING / PAUSED (and NOT
- *                       CONFIGURED where EvoSense has no such channel yet).
+ *   EVOSENSE CONTROLS   the kill switches. Each shows its SWITCH (running /
+ *                       paused) AND what the channel can actually do, from
+ *                       the server's channel truth: SMS with the seller-SMS
+ *                       program off reads PROGRAM OFF, never "Running".
  *                       Anyone may pull one; only a workspace admin may release
  *                       it. Every switch is enforced by the server in the
  *                       service that would act - a hidden button is not a control.
@@ -10,8 +12,9 @@
  *   DATA CAPABILITIES   what serves each capability, said honestly:
  *                       REAL CONNECTOR / SANDBOX / MANUAL / IMPORT / INTERFACE ONLY.
  *                       Sandbox is never made to look live.
- *   PROVIDERS           health, capability, cost, last result. Healthy providers
- *                       are quiet; failures are prominent.
+ *   PROVIDERS           the ONE canonical state per provider (the same value the
+ *                       Source Registry shows), cost, last result. A source
+ *                       refusing the platform reads BLOCKED everywhere.
  * No credential is stored, sent or shown here.
  */
 import { useCallback, useEffect, useState } from 'react'
@@ -44,6 +47,26 @@ const CAP_ICON = {
   EMAIL_VALIDATION: 'mail', ENTITY_RESOLUTION: 'users',
 }
 const KIND_TONE = { real: 'good', sandbox: 'attention', manual: null, import: 'violet', interface_only: 'quiet', not_built: 'quiet' }
+const STATE_CLASS = { good: 'good', attention: 'attention', danger: 'attention', quiet: 'quiet' }
+
+function StateBadge({ state, tone, why }) {
+  return (
+    <span className={`evo-status is-${STATE_CLASS[tone] || 'quiet'}`} title={why || state}
+          style={tone === 'danger' ? { color: 'var(--evo-danger-ink)' } : null}>{state}</span>
+  )
+}
+
+/** configured · enabled · reachable · healthy · operational, said separately. */
+function Dims({ x }) {
+  if (x.connector_kind !== 'real') return null
+  const yn = (v) => (v === null || v === undefined ? 'unknown' : v ? 'yes' : 'no')
+  return (
+    <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>
+      configured {yn(x.configured)} · enabled {yn(x.enabled)} · reachable {yn(x.reachable)} · healthy {yn(x.healthy)} ·{' '}
+      <strong style={{ color: x.operational ? 'var(--evo-success-ink)' : undefined }}>operational {yn(x.operational)}</strong>
+    </span>
+  )
+}
 
 function Kind({ kind }) {
   const [k, l] = KIND[kind] || [null, humanize(kind)]
@@ -112,7 +135,7 @@ export default function EvoControls() {
   if (!ctl || !prov) return <EvoApp world="acquisition">{error ? <Alert>{error}</Alert> : <PageSkeleton />}</EvoApp>
 
   const pausedCount = SWITCHES.filter(([k]) => ctl[k]).length
-  const failing = prov.providers.filter((p) => p.last_failure_reason)
+  const failing = prov.providers.filter((p) => ['FAILED', 'BLOCKED', 'DEGRADED', 'RATE LIMITED'].includes(p.state))
   const sandboxOn = prov.providers.some((p) => p.connector_kind === 'sandbox' && p.enabled)
 
   return (
@@ -125,7 +148,8 @@ export default function EvoControls() {
         quote="The right data at the right time creates opportunity."
         meta={[
           { label: ctl.paused_all ? 'Engine paused' : 'Engine running', tone: ctl.paused_all ? 'paused' : 'live' },
-          { label: prov.real_connectors.length ? <><b>{prov.real_connectors.length}</b> real connector{prov.real_connectors.length === 1 ? '' : 's'}</> : 'No real vendor connected' },
+          { label: prov.real_connectors.length ? <><b>{prov.real_connectors.length}</b> operational source{prov.real_connectors.length === 1 ? '' : 's'}</> : 'No operational real source' },
+          (prov.real_connectors_unavailable || []).length ? { label: <><b>{prov.real_connectors_unavailable.length}</b> enabled but unavailable</>, tone: 'paused' } : null,
           pausedCount ? { label: <><b>{pausedCount}</b> switch{pausedCount === 1 ? '' : 'es'} paused</>, tone: 'paused' } : null,
         ]}
       />
@@ -134,7 +158,7 @@ export default function EvoControls() {
 
       <TabBar label="Providers and controls" value={tab} onChange={setTab}
               items={[
-                { key: 'sources', label: 'Source Registry', count: reg ? reg.sources.filter((x) => x.state === 'HEALTHY').length + ' healthy' : null },
+                { key: 'sources', label: 'Source Registry', count: reg ? reg.sources.filter((x) => x.operational).length + ' operational' : null },
                 { key: 'providers', label: 'Service Providers', count: prov.providers.length },
                 { key: 'controls', label: 'Controls & Compliance', count: pausedCount ? `${pausedCount} paused` : null },
                 { key: 'usage', label: 'Usage & Costs' },
@@ -142,7 +166,7 @@ export default function EvoControls() {
 
       <div className="evo-stack" role="tabpanel" id="panel-sources" aria-labelledby="tab-sources" hidden={tab !== 'sources'}>
         <Panel title="Source Registry" flush
-               hint="HEALTHY only after a real probe or run succeeded · free public records first · paid vendors are not purchased">
+               hint="HEALTHY only after a real probe or run succeeded — and it means retrieval worked, not that every derived field is true · paid vendors are not purchased">
           {!reg ? <p className="evo-muted" style={{ padding: '0 20px' }}>Loading sources…</p> : (
             <div className="evo-table-wrap">
               <table className="evo-table evo-table--cards">
@@ -150,7 +174,7 @@ export default function EvoControls() {
                   <th scope="col">State</th><th scope="col">Last verified</th><th scope="col"><span className="evo-sr">Use</span></th></tr></thead>
                 <tbody>
                   {reg.sources.map((x) => (
-                    <tr key={x.key} className={x.state === 'FAILED' ? 'evo-provider is-failing' : 'evo-provider'}>
+                    <tr key={x.key} className={['FAILED', 'BLOCKED'].includes(x.state) ? 'evo-provider is-failing' : 'evo-provider'}>
                       <td className="is-lead" data-label="">
                         <span className="evo-strong">{x.label}</span>
                         <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>
@@ -158,12 +182,12 @@ export default function EvoControls() {
                           {x.public_url ? <> · <a href={x.public_url} target="_blank" rel="noreferrer">publisher</a></> : null}
                         </span>
                         {x.terms_note ? <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>{x.terms_note}</span> : null}
+                        <Dims x={x} />
                       </td>
                       <td data-label="Jurisdiction" className="evo-small">{x.jurisdiction || '—'}</td>
                       <td data-label="Access" className="evo-small">{x.access_method || '—'}{x.refresh ? <><br /><span className="evo-muted">{x.refresh}</span></> : null}</td>
                       <td data-label="State">
-                        <span className={`evo-status is-${x.state === 'HEALTHY' ? 'good' : ['NOT CONFIGURED', 'MANUAL ONLY'].includes(x.state) ? 'quiet' : 'attention'}`}
-                              style={x.state === 'FAILED' ? { color: 'var(--evo-danger-ink)' } : null}>{x.state}</span>
+                        <StateBadge state={x.state} tone={x.tone} why={x.why} />
                         <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>{x.why}</span>
                       </td>
                       <td data-label="Last verified" className="evo-small">
@@ -175,10 +199,13 @@ export default function EvoControls() {
                           <span className="evo-chips">
                             <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
                                     onClick={() => provider(x.key, { enabled: !x.enabled })}>{x.enabled ? 'Disable' : 'Enable'}</button>
-                            {x.enabled ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
+                            {x.enabled && x.state !== 'BLOCKED' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
                                                  onClick={() => verify(x.key)}>Verify</button> : null}
+                            {x.enabled && x.state === 'BLOCKED' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
+                                                 title="Blocked platform-wide. Only a platform admin's re-test (one request) is sent; anyone else is refused without calling the source."
+                                                 onClick={() => verify(x.key)}>Platform re-test</button> : null}
                           </span>
-                        ) : <span className="evo-muted evo-small">{x.state === 'MANUAL ONLY' ? 'manual entry / CSV' : 'not purchased'}</span>}
+                        ) : <span className="evo-muted evo-small">{x.state === 'MANUAL ONLY' ? 'manual entry / CSV' : x.state === 'NOT PURCHASED' ? 'not purchased' : x.state.toLowerCase()}</span>}
                       </td>
                     </tr>
                   ))}
@@ -196,22 +223,36 @@ export default function EvoControls() {
         <div>
           <h2 className="evo-section-title">
             Data capabilities
-            <span className="evo-panel__hint">{prov.real_connectors.length ? `${prov.real_connectors.length} real connector(s)`
-              : 'No real data vendor is connected — nothing here is live data'}</span>
+            <span className="evo-panel__hint">{prov.real_connectors.length ? `${prov.real_connectors.length} operational real source(s)`
+              : 'No real source is operational — nothing here is live data'}{prov.markets && prov.markets.length ? ` · rated for ${prov.markets.join(', ')}` : ''}</span>
           </h2>
           <div className="evo-tiles">
             {prov.capabilities.map((c) => (
               <Tile key={c.capability} icon={CAP_ICON[c.capability] || 'layers'} tone={KIND_TONE[c.kind]}
                     name={humanize(c.capability.toLowerCase())}
-                    desc={c.note || (c.providers.length ? `Served by ${c.providers.join(', ')}` : 'No provider serves this yet')}
-                    foot={<><Kind kind={c.kind} />{c.providers.length ? <span className="evo-muted evo-small">{c.providers.length} provider{c.providers.length === 1 ? '' : 's'}</span> : null}</>} />
+                    desc={<>
+                      {c.note || (c.providers.length ? `Served by ${c.providers.join(', ')}` : 'Nothing serves this')}
+                      {(c.unavailable || []).filter((u) => !['NOT PURCHASED'].includes(u.state)).length ? (
+                        <span className="evo-muted" style={{ display: 'block', marginTop: 4 }}>
+                          Unavailable: {(c.unavailable || []).filter((u) => u.state !== 'NOT PURCHASED').map((u) => `${u.label} (${u.state.toLowerCase()})`).join(', ')}</span>
+                      ) : null}
+                      {(c.by_market || []).length ? (
+                        <span style={{ display: 'block', marginTop: 6 }}>
+                          {c.by_market.map((m) => (
+                            <span key={m.market} className="evo-small" style={{ display: 'block' }}>
+                              <strong>{m.market}:</strong> <span style={{ color: m.kind === 'real' ? 'var(--evo-success-ink)' : m.kind === 'unavailable' ? 'var(--evo-danger-ink)' : undefined }}>{m.label}</span>
+                            </span>))}
+                        </span>
+                      ) : null}
+                    </>}
+                    foot={<><Kind kind={c.kind} />{c.providers.length ? <span className="evo-muted evo-small">{c.providers.length} serving</span> : null}</>} />
             ))}
           </div>
         </div>
         <Panel title="Providers" flush hint={sandboxOn ? 'Sandbox providers serve only sandbox properties' : null}>
           {failing.length ? (
             <div style={{ padding: '0 20px' }}>
-              <Alert>{failing.length} provider{failing.length === 1 ? ' has' : 's have'} failed recently — see below. A failed paid lookup is refunded.</Alert>
+              <Alert>{failing.length} provider{failing.length === 1 ? ' is' : 's are'} not working — {failing.map((p) => `${p.label}: ${p.state.toLowerCase()}`).join('; ')}. A failed paid lookup is refunded.</Alert>
             </div>
           ) : null}
           <div className="evo-table-wrap">
@@ -219,15 +260,17 @@ export default function EvoControls() {
               <thead><tr><th scope="col">Provider</th><th scope="col">Kind</th><th scope="col">Status</th><th scope="col">Cost</th><th scope="col">Last result</th><th scope="col"><span className="evo-sr">Use</span></th></tr></thead>
               <tbody>
                 {prov.providers.map((p) => (
-                  <tr key={p.key} className={p.last_failure_reason ? 'evo-provider is-failing' : 'evo-provider'}>
+                  <tr key={p.key} className={['FAILED', 'BLOCKED'].includes(p.state) ? 'evo-provider is-failing' : 'evo-provider'}>
                     <td className="is-lead" data-label="">
                       <span className="evo-strong">{p.label}</span>
                       <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>{p.coverage}</span>
                     </td>
                     <td data-label="Kind">{p.connector_kind === 'sandbox' ? <SandboxTag /> : <Kind kind={p.connector_kind} />}</td>
-                    <td data-label="Status"><span className={`evo-status is-${p.status === 'CONNECTED' ? 'good' : p.status === 'DISABLED' ? 'quiet' : 'attention'}`}>
-                      {humanize(p.status.toLowerCase())}</span></td>
-                    <td data-label="Cost" className="evo-small">{Object.entries(p.costs).map(([k, v]) => `${humanize(k.toLowerCase())} ${cents(v)}`).join(' · ') || 'free'}</td>
+                    <td data-label="Status"><StateBadge state={p.state} tone={p.tone} why={p.why} />
+                      <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>{p.why}</span></td>
+                    <td data-label="Cost" className="evo-small">{p.connector_kind === 'sandbox' && Object.keys(p.costs).length
+                      ? `simulated: ${Object.entries(p.costs).map(([k, v]) => `${humanize(k.toLowerCase())} ${cents(v)}`).join(' · ')}`
+                      : p.cost}</td>
                     <td data-label="Last result" className="evo-small">
                       {p.last_failure_reason ? (
                         <span style={{ color: 'var(--evo-danger-ink)' }}>Failed · {p.last_failure_reason}{p.last_failure_at ? ` · ${ago(p.last_failure_at)}` : ''}</span>
@@ -237,7 +280,7 @@ export default function EvoControls() {
                       {['sandbox', 'real'].includes(p.connector_kind) ? (
                         <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
                                 onClick={() => provider(p.key, { enabled: !p.enabled })}>{p.enabled ? 'Disable' : 'Enable'}</button>
-                      ) : <span className="evo-muted evo-small">always available</span>}
+                      ) : <span className="evo-muted evo-small">{p.connector_kind === 'interface_only' ? 'not purchased' : 'manual — nothing is called'}</span>}
                     </td>
                   </tr>
                 ))}
@@ -252,8 +295,9 @@ export default function EvoControls() {
       <div className="evo-stack" role="tabpanel" id="panel-controls" aria-labelledby="tab-controls" hidden={tab !== 'controls'}>
         <Panel title="EvoSense controls" hint="Anyone can pause. Only an admin can resume.">
           <div className="evo-switches">
-            {SWITCHES.map(([k, label, help, notConfigured]) => {
+            {SWITCHES.map(([k, label, help]) => {
               const paused = !!ctl[k]
+              const ch = (ctl.channels || {})[k]
               return (
                 <div key={k} className={`evo-switch${paused ? ' is-paused' : ''}`}>
                   <div className="evo-switch__top">
@@ -263,11 +307,14 @@ export default function EvoControls() {
                             onClick={() => patch({ [k]: !paused })} />
                   </div>
                   <span className="evo-chips">
-                    {notConfigured && !paused
-                      ? <span className="evo-status is-quiet" title={notConfigured}>Not configured</span>
-                      : <span className={`evo-status is-${paused ? 'attention' : 'good'}`}>{paused ? 'Paused' : 'Running'}</span>}
+                    {ch ? (
+                      <span className={`evo-status is-${ch.state === 'OPERATIONAL' ? 'good' : ch.state === 'PAUSED' ? 'attention' : 'quiet'}`}
+                            style={['PROGRAM OFF', 'UNAVAILABLE', 'NOTHING CONNECTED', 'NOT CONFIGURED'].includes(ch.state) ? { color: 'var(--evo-warning-ink)' } : null}
+                            title={ch.why}>{humanize(ch.state.toLowerCase())}</span>
+                    ) : <span className={`evo-status is-${paused ? 'attention' : 'good'}`}>{paused ? 'Paused' : 'Switch on'}</span>}
+                    <span className="evo-muted evo-small">switch {paused ? 'paused' : 'not paused'}</span>
                   </span>
-                  <p className="evo-switch__desc">{help}</p>
+                  <p className="evo-switch__desc">{ch && ch.why ? ch.why : help}</p>
                 </div>
               )
             })}

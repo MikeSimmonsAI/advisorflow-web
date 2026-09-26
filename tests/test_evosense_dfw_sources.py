@@ -341,10 +341,11 @@ def test_registry_states_are_honest(client, db_session, sample_org, dfw_files, f
     _, h = _admin(db_session, sample_org)
     reg = {r["key"]: r for r in ok(client.get("/wholesale/evosense/sources", headers=h))["sources"]}
     for k in ("tarrant_tax_roll", "tad", "dcad", "census_geocoder", "fw_code_violations", "dallas_311_code"):
-        assert reg[k]["state"] == "NOT CONFIGURED", k           # off until an admin enables it
+        assert reg[k]["state"] == "DISABLED", k                 # off until an admin enables it
+        assert reg[k]["configured"] is True and reg[k]["operational"] is False
         assert reg[k]["cost"] == "free" and reg[k]["jurisdiction"] and reg[k]["access_method"]
     for k in ("rentcast", "regrid", "attom"):
-        assert reg[k]["state"] == "NOT CONFIGURED" and "paid" in reg[k]["cost"]
+        assert reg[k]["state"] == "NOT PURCHASED" and "paid" in reg[k]["cost"]
     for k in ("dallas_foreclosure_manual", "dallas_tax_manual", "manual", "csv_import"):
         assert reg[k]["state"] == "MANUAL ONLY"
     assert not any(k.startswith("sandbox") for k in reg)
@@ -367,7 +368,7 @@ def test_a_failed_probe_reads_failed_with_its_code(client, db_session, sample_or
     v = ok(client.post("/wholesale/evosense/sources/verify", headers=h, json={"key": "fw_code_violations"}))
     assert v["ok"] is False and v["code"] == "RATE_LIMITED"
     reg = {r["key"]: r for r in v["registry"]["sources"]}
-    assert reg["fw_code_violations"]["state"] == "DEGRADED"      # rate limited, not "down forever"
+    assert reg["fw_code_violations"]["state"] == "RATE LIMITED"  # rate limited, not "down forever"
 
 
 def test_only_an_admin_verifies_a_source(client, auth_headers, dfw_files):
@@ -542,7 +543,7 @@ def test_a_failing_lookup_source_is_recorded_and_concludes_nothing(client, db_se
         EvoSenseEnrichmentDecision.provider_key == "tad").one()
     assert dec.outcome == "provider_failed" and "UNKNOWN is not NO" in json.loads(dec.reasons)[0]
     reg = {r["key"]: r for r in ok(client.get("/wholesale/evosense/sources", headers=h))["sources"]}
-    assert reg["tad"]["state"] in ("DEGRADED", "FAILED") and "RATE_LIMITED" in reg["tad"]["why"] + (
+    assert reg["tad"]["state"] in ("DEGRADED", "FAILED", "RATE LIMITED") and "RATE" in reg["tad"]["why"].upper() + (
         reg["tad"]["last_failure_reason"] or "")
 
 
@@ -613,7 +614,7 @@ def test_sources_and_evidence_are_per_tenant(client, db_session, sample_org, dfw
     db.commit()
     _, hb = _admin(db, org_b, email="b@atlantis.test")
     reg_b = {r["key"]: r for r in ok(client.get("/wholesale/evosense/sources", headers=hb))["sources"]}
-    assert reg_b["tarrant_tax_roll"]["state"] == "NOT CONFIGURED"   # A's switch is not B's
+    assert reg_b["tarrant_tax_roll"]["state"] == "DISABLED"         # A's switch is not B's
     assert client.get("/wholesale/evosense/properties/%s/observations/%s/raw" % (p.id, o.id),
                       headers=hb).status_code == 404
     assert ok(client.get("/wholesale/evosense/inbox", headers=hb))["total"] == 0

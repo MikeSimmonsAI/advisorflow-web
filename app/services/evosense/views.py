@@ -44,16 +44,107 @@ def _ratio(a, b):
     return None if not b else round(a / b)
 
 
-def controls_payload(ctl) -> Dict[str, Any]:
-    return {k: getattr(ctl, k) for k in ("paused_all", "paused_discovery", "paused_paid_data",
-                                         "paused_sms", "paused_email", "paused_voice",
-                                         "paused_ai_replies", "org_daily_budget_cents",
-                                         "org_monthly_budget_cents", "owner_touch_cap_days",
-                                         "last_hunt_status")} | {
+def channel_truth(db, org_id: str, ctl) -> Dict[str, Dict[str, Any]]:
+    """What each control can ACTUALLY do, separate from its pause switch.
+
+    A switch that is "not paused" is not the same as a channel that works:
+    SMS with the Wholesale seller-SMS program off, or "paid data" with nothing
+    purchased, would otherwise read RUNNING. Each entry says:
+        switch       running | paused  (the brake, nothing more)
+        available    whether the underlying provider / program can act now
+        operational  switch running AND available
+        state        the one word a screen shows
+        why          the reason, in plain words
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+
+    def put(key, paused, available, why, state_if_unavailable="UNAVAILABLE", built=True):
+        switch = "paused" if paused else "running"
+        if not built:
+            state = "NOT BUILT"
+        elif paused:
+            state = "PAUSED"
+        elif available:
+            state = "OPERATIONAL"
+        else:
+            state = state_if_unavailable
+        out[key] = {"switch": switch, "available": bool(available and built), "built": built,
+                    "operational": bool(built and available and not paused and not ctl.paused_all),
+                    "state": "PAUSED" if (ctl.paused_all and key != "paused_all" and built) else state,
+                    "why": why}
+
+    rows = [PV._provider_row(db, org_id, k) for k in PV.PROVIDERS]
+    real = [r for r in rows if r["connector_kind"] == C.REAL]
+    put("paused_all", ctl.paused_all, True, "Hunting, lookups and outreach.")
+
+    disc = [r for r in rows if r["connector_kind"] in (C.REAL, C.SANDBOX) and r["enabled"]
+            and getattr(PV.PROVIDERS[r["key"]], "discovery", True)
+            and set(r["capabilities"]) & set(C.DISCOVERY_CAPABILITIES)
+            and r["state"] in (PV.S_HEALTHY, PV.S_UNVERIFIED, PV.S_DEGRADED, PV.S_SANDBOX)]
+    put("paused_discovery", ctl.paused_discovery, bool(disc),
+        ("Discovery sources available: %s." % ", ".join(r["label"] for r in disc)) if disc
+        else "No discovery source is enabled and usable — a hunt would find nothing.")
+
+    paid_real = [r for r in real if r["costs"] and r["operational"]]
+    paid_sandbox = [r for r in rows if r["connector_kind"] == C.SANDBOX and r["costs"] and r["enabled"]]
+    if paid_real:
+        put("paused_paid_data", ctl.paused_paid_data, True,
+            "Paid providers connected: %s." % ", ".join(r["label"] for r in paid_real))
+    elif paid_sandbox:
+        put("paused_paid_data", ctl.paused_paid_data, True,
+            "SANDBOX only — simulated prices, no money moves: %s." % ", ".join(r["label"] for r in paid_sandbox),
+            state_if_unavailable="UNAVAILABLE")
+        out["paused_paid_data"]["sandbox_only"] = True
+        if out["paused_paid_data"]["state"] == "OPERATIONAL":
+            out["paused_paid_data"]["state"] = "SANDBOX ONLY"
+    else:
+        put("paused_paid_data", ctl.paused_paid_data, False,
+            "No paid data provider is purchased or connected — nothing can be bought.",
+            state_if_unavailable="NOTHING CONNECTED")
+
+    try:
+        from app.services import wholesale_sms as WSMS
+        prog = WSMS.program_status(db, org_id)
+    except Exception:  # noqa: BLE001 - unknown is not available
+        prog = {"enabled": False, "can_send": False, "messaging_service_configured": False,
+                "kill_switch": False}
+    if prog.get("kill_switch"):
+        why = "The platform SMS kill switch is on — no seller SMS can be sent."
+    elif not prog.get("enabled"):
+        why = "The Wholesale seller-SMS program is OFF — no seller can be texted."
+    elif not prog.get("messaging_service_configured"):
+        why = "The Wholesale seller-SMS program has no Messaging Service configured — nothing can be sent."
+    else:
+        why = ("The Wholesale seller-SMS program is on; every text still needs the owner's consent of record "
+               "and passes the program's send gate.")
+    put("paused_sms", ctl.paused_sms, bool(prog.get("can_send")), why, state_if_unavailable="PROGRAM OFF"
+        if not prog.get("enabled") else "NOT CONFIGURED")
+    out["paused_sms"]["program"] = {k: prog.get(k) for k in ("enabled", "can_send",
+                                                             "messaging_service_configured", "kill_switch")}
+
+    put("paused_email", ctl.paused_email, False, "EvoSense has no email outreach channel. No owner is emailed.",
+        built=False)
+    put("paused_voice", ctl.paused_voice, False, "EvoSense has no voice outreach channel. No owner is called.",
+        built=False)
+    put("paused_ai_replies", ctl.paused_ai_replies, True,
+        "Replies the rules cannot place are read through the platform AI gateway; if it is unavailable the "
+        "reply is saved and held for a person, never guessed.")
+    return out
+
+
+def controls_payload(ctl, db=None, org_id: Optional[str] = None) -> Dict[str, Any]:
+    out = {k: getattr(ctl, k) for k in ("paused_all", "paused_discovery", "paused_paid_data",
+                                        "paused_sms", "paused_email", "paused_voice",
+                                        "paused_ai_replies", "org_daily_budget_cents",
+                                        "org_monthly_budget_cents", "owner_touch_cap_days",
+                                        "last_hunt_status")} | {
         "last_hunt_at": _iso(ctl.last_hunt_at),
         "score_weights": C.jload(getattr(ctl, "score_weights", None), None),
         "default_weights": {k: v["points"] for k, v in SIG.CATALOG.items()},
         "score_version": SC.PO_VERSION}
+    if db is not None and org_id:
+        out["channels"] = channel_truth(db, org_id, ctl)
+    return out
 
 
 def sandbox_state(db, org_id) -> Dict[str, Any]:
@@ -229,7 +320,7 @@ def command_center(db, org_id: str, *, hours: int = 24) -> Dict[str, Any]:
                         "routing_review": len(routing)},
         },
         "routing_reviews": routing,
-        "controls": controls_payload(ctl), "sandbox": sandbox_state(db, org_id),
+        "controls": controls_payload(ctl, db, org_id), "sandbox": sandbox_state(db, org_id),
         "happened": happened,
         "found": [row(p, _signal_labels(db, org_id, p.id)) for p in top],
         "spent": spend(db, org_id),

@@ -55,6 +55,13 @@ class AcquisitionProvider:
     required_env: tuple = ()
     coverage = ""
     freshness_days = 90
+    # WHERE it can serve, so a capability is rated per market, not globally:
+    #   scope   national | county | city | any (manual) | sandbox
+    #   counties  the (Texas) counties it covers when scope is county/city
+    #   scope_name  e.g. "City of Fort Worth" for a city-only source
+    scope = "national"
+    counties: tuple = ()
+    scope_name = ""
 
     def is_configured(self) -> bool:
         return all(os.environ.get(n) for n in self.required_env)
@@ -100,6 +107,7 @@ def _in_query(rec: Dict, q: Dict) -> bool:
 
 
 class SandboxPropertyRecords(AcquisitionProvider):
+    scope = "sandbox"
     key = "sandbox_property_records"
     label = "Sandbox property records"
     connector_kind = C.SANDBOX
@@ -131,6 +139,7 @@ class SandboxPropertyRecords(AcquisitionProvider):
 
 
 class SandboxVacancy(AcquisitionProvider):
+    scope = "sandbox"
     key = "sandbox_vacancy"
     label = "Sandbox vacancy feed"
     connector_kind = C.SANDBOX
@@ -157,6 +166,7 @@ class SandboxVacancy(AcquisitionProvider):
 
 
 class SandboxTaxRoll(AcquisitionProvider):
+    scope = "sandbox"
     key = "sandbox_tax_roll"
     label = "Sandbox tax roll"
     connector_kind = C.SANDBOX
@@ -186,6 +196,7 @@ class SandboxTaxRoll(AcquisitionProvider):
 
 
 class SandboxPublicRecords(AcquisitionProvider):
+    scope = "sandbox"
     key = "sandbox_public_records"
     label = "Sandbox probate / code / foreclosure"
     connector_kind = C.SANDBOX
@@ -215,6 +226,7 @@ class SandboxPublicRecords(AcquisitionProvider):
 
 
 class SandboxSkipTrace(AcquisitionProvider):
+    scope = "sandbox"
     key = "sandbox_skiptrace"
     label = "Sandbox skip trace"
     connector_kind = C.SANDBOX
@@ -263,6 +275,7 @@ class SandboxSkipTraceBackup(SandboxSkipTrace):
 
 
 class SandboxPhoneValidation(AcquisitionProvider):
+    scope = "sandbox"
     key = "sandbox_phone_validation"
     label = "Sandbox phone validation"
     connector_kind = C.SANDBOX
@@ -276,6 +289,7 @@ class SandboxPhoneValidation(AcquisitionProvider):
 
 
 class ManualSource(AcquisitionProvider):
+    scope = "any"
     key = "manual"
     label = "Manual entry"
     connector_kind = C.MANUAL
@@ -286,6 +300,7 @@ class ManualSource(AcquisitionProvider):
 
 
 class CsvImportSource(AcquisitionProvider):
+    scope = "any"
     key = "csv_import"
     label = "CSV property import"
     connector_kind = C.IMPORT
@@ -354,6 +369,7 @@ def _wants(q: Dict[str, Any], county: str) -> bool:
 
 
 class TarrantTaxRollSource(PublicRecordSource):
+    scope, counties = "county", ("Tarrant",)
     key = "tarrant_tax_roll"
     label = "Tarrant County tax roll (delinquency)"
     capabilities = (C.TAX,)
@@ -398,6 +414,7 @@ class TarrantTaxRollSource(PublicRecordSource):
 
 
 class TadSource(PublicRecordSource):
+    scope, counties = "county", ("Tarrant",)
     key = "tad"
     label = "Tarrant Appraisal District (TAD) property data"
     capabilities = (C.ASSESSOR, C.OWNERSHIP)
@@ -437,6 +454,7 @@ class TadSource(PublicRecordSource):
 
 
 class DcadSource(PublicRecordSource):
+    scope, counties = "county", ("Dallas",)
     key = "dcad"
     label = "Dallas Central Appraisal District (DCAD) certified export"
     capabilities = (C.PROPERTY_SEARCH, C.ASSESSOR, C.OWNERSHIP)
@@ -505,6 +523,7 @@ class CensusGeocoderSource(PublicRecordSource):
 
 
 class FortWorthCodeSource(PublicRecordSource):
+    scope, counties, scope_name = "city", ("Tarrant",), "City of Fort Worth"
     key = "fw_code_violations"
     label = "City of Fort Worth code violations"
     capabilities = (C.CODE_VIOLATION,)
@@ -537,6 +556,7 @@ class FortWorthCodeSource(PublicRecordSource):
 
 
 class Dallas311Source(PublicRecordSource):
+    scope, counties, scope_name = "city", ("Dallas",), "City of Dallas"
     key = "dallas_311_code"
     label = "City of Dallas 311 — Code Compliance requests"
     capabilities = (C.CODE_VIOLATION,)
@@ -580,6 +600,7 @@ class ManualOnlySource(AcquisitionProvider):
 
 
 class DallasForeclosureManual(ManualOnlySource):
+    scope, counties = "county", ("Dallas",)
     key = "dallas_foreclosure_manual"
     label = "Dallas County foreclosure notices (manual)"
     capabilities = (C.FORECLOSURE,)
@@ -592,6 +613,7 @@ class DallasForeclosureManual(ManualOnlySource):
 
 
 class DallasTaxManual(ManualOnlySource):
+    scope, counties = "county", ("Dallas",)
     key = "dallas_tax_manual"
     label = "Dallas County tax delinquency (manual)"
     capabilities = (C.TAX,)
@@ -685,18 +707,20 @@ def config(db, org_id: str, key: str):
 
 def health_state(p: AcquisitionProvider, cfg, when: Optional[datetime] = None, *,
                  blocked: bool = False) -> str:
-    when = when or C.now()
-    if p.connector_kind == C.INTERFACE_ONLY:
+    """The ENGINE's routing view (CONNECTED = may be called now). Derived from
+    the canonical state below; screens never show these values."""
+    st = canonical(p, cfg, when, blocked=blocked)
+    if st["state"] == S_NOT_PURCHASED:
         return C.H_NOT_CONNECTED
-    if p.required_env and not p.is_configured():
+    if st["state"] == S_NOT_CONFIGURED:
         return C.H_MISSING_CREDENTIALS
-    if not cfg.enabled:
+    if st["state"] == S_DISABLED:
         return C.H_DISABLED
-    if blocked:
+    if st["state"] == S_BLOCKED:
         return C.H_BLOCKED
-    if cfg.rate_limited_until and cfg.rate_limited_until > when:
+    if st["state"] == S_RATE_LIMITED:
         return C.H_RATE_LIMITED
-    if cfg.degraded_until and cfg.degraded_until > when:
+    if not st["routable"]:
         return C.H_DEGRADED
     return C.H_CONNECTED
 
@@ -840,7 +864,7 @@ def route(db, org_id: str, capability: str, *, exclude: tuple = (),
         if p.connector_kind == C.SANDBOX and not sandbox_allowed:
             continue
         cfg = config(db, org_id, key)
-        if health_state(p, cfg, blocked=platform_blocked(db, key, cfg)) != C.H_CONNECTED:
+        if not canonical(p, cfg, blocked=platform_blocked(db, key, cfg))["routable"]:
             continue
         overrides = C.jload(cfg.cost_overrides, {}) or {}
         rate = (cfg.successes_total or 0) / cfg.calls_total if cfg.calls_total else 1.0
@@ -850,145 +874,296 @@ def route(db, org_id: str, capability: str, *, exclude: tuple = (),
     return [(t[5], t[6], t[2]) for t in out]
 
 
-def status_report(db, org_id: str) -> Dict[str, Any]:
-    """What the provider settings screen shows. No credential ever appears."""
-    rows = []
-    for key, p in PROVIDERS.items():
-        cfg = config(db, org_id, key)
-        overrides = C.jload(cfg.cost_overrides, {}) or {}
-        rows.append({
-            "key": key, "label": p.label, "connector_kind": p.connector_kind,
-            "connector_label": C.CONNECTOR_LABELS[p.connector_kind],
-            "capabilities": list(p.capabilities), "coverage": p.coverage,
-            "costs": {c: p.cost(c, overrides) for c in p.capabilities if p.cost(c, overrides)},
-            "status": health_state(p, cfg, blocked=platform_blocked(db, key, cfg)), "enabled": bool(cfg.enabled),
-            "priority": cfg.priority,
-            "missing_env_count": len(p.missing_config()),
-            "last_success_at": cfg.last_success_at.isoformat() + "Z" if cfg.last_success_at else None,
-            "last_failure_at": cfg.last_failure_at.isoformat() + "Z" if cfg.last_failure_at else None,
-            "last_failure_reason": cfg.last_failure_reason,
-            "consecutive_failures": cfg.consecutive_failures,
-            "degraded_until": cfg.degraded_until.isoformat() + "Z" if cfg.degraded_until else None,
-            "calls_total": cfg.calls_total, "successes_total": cfg.successes_total,
-            "freshness_days": p.freshness_days,
-        })
-    caps = []
+# ── THE CANONICAL OPERATIONAL STATE ─────────────────────────────────────────
+#
+# ONE function decides what every provider IS, and every screen and endpoint
+# derives from it: the Source Registry, the Service Providers table, the
+# capability tiles, the header's connector count and the engine's routing.
+# Two screens can therefore never disagree about the same source again (TAD
+# read FAILED on one tab and "Connected" on the next).
+#
+# The dimensions are kept apart on purpose, so nothing can imply more than it
+# knows:
+#   configured   the adapter exists and any credential it needs is present
+#   enabled      this tenant switched it on
+#   reachable    the last attempt got an answer from the source (True), got
+#                no answer (False), or nothing has been attempted (None)
+#   healthy      the latest outcome is a verified SUCCESS
+#   operational  healthy AND nothing stops it being used right now
+#   failed       the latest outcome is a failure
+#   blocked      the source refused the platform (401/403) - platform-wide
+#   routable     the engine may call it now (an UNVERIFIED source is routable
+#                so a hunt can verify it; it is still NOT "operational")
+#
+# HEALTHY only means retrieval succeeded. It says nothing about whether any
+# field derived from that retrieval is true; derived values keep their own
+# truth labels.
+
+S_HEALTHY = "HEALTHY"
+S_UNVERIFIED = "UNVERIFIED"
+S_DEGRADED = "DEGRADED"
+S_RATE_LIMITED = "RATE LIMITED"
+S_FAILED = "FAILED"
+S_BLOCKED = "BLOCKED"
+S_DISABLED = "DISABLED"
+S_NOT_CONFIGURED = "NOT CONFIGURED"
+S_NOT_PURCHASED = "NOT PURCHASED"
+S_MANUAL_ONLY = "MANUAL ONLY"
+S_SANDBOX = "SANDBOX"
+STATES = (S_HEALTHY, S_UNVERIFIED, S_DEGRADED, S_RATE_LIMITED, S_FAILED, S_BLOCKED, S_DISABLED,
+          S_NOT_CONFIGURED, S_NOT_PURCHASED, S_MANUAL_ONLY, S_SANDBOX)
+TONE = {S_HEALTHY: "good", S_SANDBOX: "attention", S_UNVERIFIED: "attention", S_DEGRADED: "attention",
+        S_RATE_LIMITED: "attention", S_FAILED: "danger", S_BLOCKED: "danger", S_DISABLED: "quiet",
+        S_NOT_CONFIGURED: "quiet", S_NOT_PURCHASED: "quiet", S_MANUAL_ONLY: "quiet"}
+
+# Registry vocabulary kept for callers and history; every value is a canonical state.
+REG_HEALTHY, REG_DEGRADED, REG_FAILED, REG_BLOCKED = S_HEALTHY, S_DEGRADED, S_FAILED, S_BLOCKED
+REG_NOT_CONFIGURED, REG_MANUAL_ONLY, REG_UNVERIFIED = S_NOT_CONFIGURED, S_MANUAL_ONLY, S_UNVERIFIED
+REGISTRY_STATES = STATES
+
+_NO_ANSWER = ("TIMEOUT", "DOWNLOAD_FAILED", "ProviderTimeout")
+
+
+def _fmt(dt: Optional[datetime]) -> Optional[str]:
+    return dt.isoformat() + "Z" if dt else None
+
+
+def canonical(p: AcquisitionProvider, cfg, when: Optional[datetime] = None, *,
+              blocked: bool = False, block_reason: Optional[str] = None) -> Dict[str, Any]:
+    """The state of provider `p` for the tenant whose config row is `cfg`."""
+    when = when or C.now()
+    kind = p.connector_kind
+    configured = kind != C.INTERFACE_ONLY and (not p.required_env or p.is_configured())
+    enabled = bool(cfg.enabled) or kind in (C.MANUAL, C.IMPORT)
+    ok, bad = cfg.last_success_at, cfg.last_failure_at
+    failed_last = bad is not None and (ok is None or bad > ok)
+    healthy = ok is not None and not failed_last
+    reason = cfg.last_failure_reason or ""
+    if ok is None and bad is None:
+        reachable = None
+    elif failed_last:
+        reachable = not reason.startswith(_NO_ANSWER)
+    else:
+        reachable = True
+    rate_limited = bool(cfg.rate_limited_until and cfg.rate_limited_until > when)
+    in_backoff = bool(cfg.degraded_until and cfg.degraded_until > when)
+
+    if kind == C.MANUAL:
+        state, why = S_MANUAL_ONLY, "Fed by manual entry or CSV import; nothing is called automatically"
+    elif kind == C.IMPORT:
+        state, why = S_MANUAL_ONLY, "A file a person uploads"
+    elif kind == C.INTERFACE_ONLY:
+        state, why = S_NOT_PURCHASED, ("Paid vendor — not purchased; no adapter and no credentials (%s). "
+                                       "Nothing is called." % ", ".join(p.required_env)) if p.required_env \
+            else "No adapter"
+    elif not configured:
+        state, why = S_NOT_CONFIGURED, "Missing credentials: %s" % ", ".join(p.missing_config())
+    elif not cfg.enabled:
+        state, why = S_DISABLED, ("Sandbox adapter — off" if kind == C.SANDBOX
+                                  else "Configured, but switched off for this organization")
+    elif kind == C.SANDBOX and not failed_last and not in_backoff:
+        state, why = S_SANDBOX, "Synthetic sandbox data — serves sandbox properties only, never a real one"
+    elif blocked:
+        state, why = S_BLOCKED, ("Blocked platform-wide: %s. Automatic calls stopped; a platform admin "
+                                 "may re-test." % (block_reason or "the source refused the platform's requests"))
+    elif rate_limited:
+        state, why = S_RATE_LIMITED, "Rate limited by the source until %s UTC" % \
+            cfg.rate_limited_until.strftime("%Y-%m-%d %H:%M")
+    elif failed_last:
+        if (cfg.consecutive_failures or 0) >= DEGRADE_AFTER:
+            state, why = S_FAILED, reason or "Repeated failures"
+        else:
+            state, why = S_DEGRADED, "Last attempt failed: %s" % (reason or "error")
+    elif ok is None:
+        state, why = S_UNVERIFIED, "Enabled; no successful probe or run yet"
+    elif in_backoff:
+        state, why = S_DEGRADED, "Recovering from repeated failures"
+    else:
+        state, why = S_HEALTHY, "Last verified %s UTC" % ok.strftime("%Y-%m-%d %H:%M")
+
+    routable = (configured and enabled and kind in (C.REAL, C.SANDBOX) and not blocked and not rate_limited
+                and not in_backoff and state != S_DISABLED)
+    operational = state in (S_HEALTHY, S_SANDBOX) and routable
+    return {"state": state, "why": why, "tone": TONE[state],
+            "configured": bool(configured), "enabled": bool(enabled), "reachable": reachable,
+            "healthy": bool(healthy) if kind in (C.REAL, C.SANDBOX) else None,
+            "operational": bool(operational), "failed": bool(failed_last), "blocked": bool(blocked),
+            "routable": bool(routable), "manual": kind in (C.MANUAL, C.IMPORT)}
+
+
+def state_for(db, org_id: str, key: str, when: Optional[datetime] = None) -> Dict[str, Any]:
+    p = PROVIDERS[key]
+    cfg = config(db, org_id, key)
+    blocked = platform_blocked(db, key, cfg)
+    acc = platform_access(db, key) if blocked else None
+    st = canonical(p, cfg, when, blocked=blocked, block_reason=(acc or {}).get("reason"))
+    st["platform"] = acc
+    return st
+
+
+def _cost_text(p: AcquisitionProvider, overrides=None) -> str:
+    if p.connector_kind == C.INTERFACE_ONLY:
+        return "paid (not purchased)"
+    if p.connector_kind == C.SANDBOX and p.costs:
+        return "simulated (sandbox)"
+    if p.costs:
+        return "paid"
+    return "free" if p.connector_kind == C.REAL else "—"
+
+
+def _coverage_json(p: AcquisitionProvider) -> Dict[str, Any]:
+    return {"scope": p.scope, "counties": list(p.counties), "scope_name": p.scope_name or None}
+
+
+def _provider_row(db, org_id: str, key: str) -> Dict[str, Any]:
+    p = PROVIDERS[key]
+    cfg = config(db, org_id, key)
+    st = state_for(db, org_id, key)
+    overrides = C.jload(cfg.cost_overrides, {}) or {}
+    return {
+        "key": key, "label": p.label, "connector_kind": p.connector_kind,
+        "connector_label": C.CONNECTOR_LABELS[p.connector_kind],
+        "capabilities": list(p.capabilities), "coverage": p.coverage, "coverage_area": _coverage_json(p),
+        "costs": {c: p.cost(c, overrides) for c in p.capabilities if p.cost(c, overrides)},
+        "cost": _cost_text(p, overrides),
+        # THE canonical state. `status` and `state` are the same value.
+        "status": st["state"], "state": st["state"], "why": st["why"], "tone": st["tone"],
+        "configured": st["configured"], "enabled": st["enabled"], "reachable": st["reachable"],
+        "healthy": st["healthy"], "operational": st["operational"], "failed": st["failed"],
+        "blocked": st["blocked"], "platform": st["platform"],
+        "priority": cfg.priority,
+        "missing_env_count": len(p.missing_config()),
+        "last_success_at": _fmt(cfg.last_success_at),
+        "last_failure_at": _fmt(cfg.last_failure_at),
+        "last_failure_reason": cfg.last_failure_reason,
+        "consecutive_failures": cfg.consecutive_failures,
+        "degraded_until": _fmt(cfg.degraded_until),
+        "last_attempt_at": _fmt(cfg.last_attempt_at),
+        "last_verified_at": _fmt(cfg.last_verified_at),
+        "last_record_count": cfg.last_record_count,
+        "calls_total": cfg.calls_total, "successes_total": cfg.successes_total,
+        "freshness_days": p.freshness_days,
+    }
+
+
+def _markets(db, org_id: str) -> List[str]:
+    """The counties this tenant's active strategies hunt in (its markets)."""
+    from app.models.evosense_models import EvoSenseStrategy
+    out = []
+    for s in (db.query(EvoSenseStrategy)
+              .filter(EvoSenseStrategy.organization_id == org_id, EvoSenseStrategy.status == "active").all()):
+        for c in C.jload(getattr(s, "counties", None), []) or []:
+            name = re.sub(r"\s+county$", "", str(c).strip(), flags=re.I).title()
+            if name and name not in out:
+                out.append(name)
+    return out
+
+
+def capability_report(db, org_id: str, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Each capability, rated honestly overall AND per market (county).
+
+    A provider "serves" only when it can actually be used: an operational or
+    routable real source, an ENABLED sandbox adapter, or manual entry. A
+    blocked, failed-over, disabled or unpurchased provider is listed as
+    unavailable with its state, never as serving."""
+    markets = _markets(db, org_id)
+    by_key = {r["key"]: r for r in rows}
+    out = []
     for cap in C.CAPABILITIES:
-        serving = [r for r in rows if cap in r["capabilities"]]
-        live = [r for r in serving if r["connector_kind"] == C.REAL and r["status"] == C.H_CONNECTED]
-        sandbox = [r for r in serving if r["connector_kind"] == C.SANDBOX and r["enabled"]]
-        manual = [r for r in serving if r["connector_kind"] in (C.MANUAL, C.IMPORT)]
+        cands = [PROVIDERS[k] for k in by_key if cap in PROVIDERS[k].capabilities]
+        live = [p for p in cands if p.connector_kind == C.REAL and by_key[p.key]["state"] in
+                (S_HEALTHY, S_UNVERIFIED, S_DEGRADED)]
+        sandbox = [p for p in cands if p.connector_kind == C.SANDBOX and by_key[p.key]["state"] == S_SANDBOX]
+        manual = [p for p in cands if p.connector_kind in (C.MANUAL, C.IMPORT)]
+        unavailable = [p for p in cands if p not in live and p not in sandbox and p not in manual]
         if live:
             kind = C.REAL
         elif sandbox:
             kind = C.SANDBOX
         elif manual:
-            kind = manual[0]["connector_kind"]
+            kind = manual[0].connector_kind
         elif cap in INTERFACE_ONLY_CAPABILITIES:
             kind = C.INTERFACE_ONLY
         else:
             kind = C.NOT_BUILT
-        caps.append({"capability": cap, "kind": kind, "label": C.CONNECTOR_LABELS[kind],
-                     "providers": [r["label"] for r in serving],
-                     "note": INTERFACE_ONLY_CAPABILITIES.get(cap)})
-    return {"providers": rows, "capabilities": caps,
+        per_market = []
+        for m in markets:
+            here = [p for p in live if p.scope == "national" or m in p.counties]
+            man = [p for p in manual if p.scope == "any" or m in p.counties]
+            down = [p for p in unavailable if p.connector_kind == C.REAL and (p.scope == "national" or m in p.counties)]
+            if here:
+                city_only = all(p.scope == "city" for p in here)
+                per_market.append({"market": "%s County" % m, "kind": C.REAL,
+                                   "label": "Real connector" + (" (%s only)" % ", ".join(
+                                       sorted({p.scope_name for p in here})) if city_only else ""),
+                                   "providers": [p.label for p in here]})
+            elif down:
+                per_market.append({"market": "%s County" % m, "kind": "unavailable",
+                                   "label": "Unavailable — " + "; ".join(
+                                       "%s %s" % (p.label, by_key[p.key]["state"].lower()) for p in down),
+                                   "providers": []})
+            elif [p for p in man if p.scope != "any"]:
+                per_market.append({"market": "%s County" % m, "kind": C.MANUAL, "label": "Manual entry only",
+                                   "providers": [p.label for p in man]})
+            else:
+                per_market.append({"market": "%s County" % m, "kind": "none",
+                                   "label": "No source" + (" (manual entry possible)" if man else ""),
+                                   "providers": [p.label for p in man]})
+        out.append({"capability": cap, "kind": kind, "label": C.CONNECTOR_LABELS[kind],
+                    "providers": [p.label for p in live + sandbox + manual],
+                    "unavailable": [{"label": p.label, "state": by_key[p.key]["state"]} for p in unavailable],
+                    "by_market": per_market,
+                    "note": INTERFACE_ONLY_CAPABILITIES.get(cap)})
+    return out
+
+
+def status_report(db, org_id: str) -> Dict[str, Any]:
+    """The Service Providers screen. Every status comes from `canonical()`.
+    No credential ever appears."""
+    rows = [_provider_row(db, org_id, key) for key in PROVIDERS]
+    return {"providers": rows, "capabilities": capability_report(db, org_id, rows),
+            "markets": ["%s County" % m for m in _markets(db, org_id)],
+            "states": list(STATES),
+            # counted from the canonical state: operational = verified AND usable now
             "real_connectors": [r["key"] for r in rows
-                                if r["connector_kind"] == C.REAL and r["status"] == C.H_CONNECTED]}
-
-
-# ── Source Registry (spec vocabulary) ──────────────────────────────────────
-
-REG_HEALTHY = "HEALTHY"
-REG_DEGRADED = "DEGRADED"
-REG_FAILED = "FAILED"
-REG_NOT_CONFIGURED = "NOT CONFIGURED"
-REG_MANUAL_ONLY = "MANUAL ONLY"
-REG_UNVERIFIED = "UNVERIFIED"          # enabled, but no probe or run has succeeded yet
-REG_BLOCKED = "BLOCKED"                # refused the platform (401/403); no automatic call
-REGISTRY_STATES = (REG_HEALTHY, REG_DEGRADED, REG_FAILED, REG_BLOCKED, REG_NOT_CONFIGURED,
-                   REG_MANUAL_ONLY, REG_UNVERIFIED)
+                                if r["connector_kind"] == C.REAL and r["operational"]],
+            "real_connectors_unavailable": [r["key"] for r in rows if r["connector_kind"] == C.REAL
+                                            and r["enabled"] and not r["operational"]]}
 
 
 def registry_state(p: AcquisitionProvider, cfg, when: Optional[datetime] = None, *,
                    blocked: bool = False, block_reason: Optional[str] = None) -> Dict[str, str]:
-    """HEALTHY only after a verified success that is newer than any failure.
-    A source is never shown as operational on the strength of being enabled."""
-    when = when or C.now()
-    if p.connector_kind == C.MANUAL:
-        return {"state": REG_MANUAL_ONLY, "why": "Fed by manual entry or CSV import"}
-    if p.connector_kind == C.IMPORT:
-        return {"state": REG_MANUAL_ONLY, "why": "A file a person uploads"}
-    if p.connector_kind == C.SANDBOX:
-        return {"state": REG_NOT_CONFIGURED if not cfg.enabled else REG_HEALTHY,
-                "why": "Synthetic sandbox data (never shown for real properties)"}
-    if p.connector_kind == C.INTERFACE_ONLY:
-        return {"state": REG_NOT_CONFIGURED,
-                "why": "No adapter and no credentials (%s)" % ", ".join(p.required_env) if p.required_env
-                else "No adapter"}
-    if p.required_env and not p.is_configured():
-        return {"state": REG_NOT_CONFIGURED, "why": "Missing credentials"}
-    if not cfg.enabled:
-        return {"state": REG_NOT_CONFIGURED, "why": "Disabled for this organization"}
-    if blocked:
-        return {"state": REG_BLOCKED,
-                "why": "Blocked platform-wide: %s. Automatic calls stopped; a platform admin may re-test."
-                       % (block_reason or "the source refused the platform's requests")}
-    if cfg.rate_limited_until and cfg.rate_limited_until > when:
-        return {"state": REG_DEGRADED, "why": "Rate limited by the source until %s UTC"
-                % cfg.rate_limited_until.strftime("%Y-%m-%d %H:%M")}
-    ok = cfg.last_success_at
-    bad = cfg.last_failure_at
-    if ok is None:
-        if bad is not None:
-            return {"state": REG_FAILED, "why": cfg.last_failure_reason or "Every attempt failed"}
-        return {"state": REG_UNVERIFIED, "why": "Enabled; no successful probe or run yet"}
-    if bad is not None and bad > ok:
-        if (cfg.consecutive_failures or 0) >= DEGRADE_AFTER:
-            return {"state": REG_FAILED, "why": cfg.last_failure_reason or "Repeated failures"}
-        return {"state": REG_DEGRADED, "why": "Last attempt failed: %s" % (cfg.last_failure_reason or "error")}
-    if cfg.degraded_until and cfg.degraded_until > when:
-        return {"state": REG_DEGRADED, "why": "Recovering from repeated failures"}
-    return {"state": REG_HEALTHY, "why": "Last verified %s UTC" % ok.strftime("%Y-%m-%d %H:%M")}
+    """Kept for callers; the answer is the canonical state."""
+    st = canonical(p, cfg, when, blocked=blocked, block_reason=block_reason)
+    return {"state": st["state"], "why": st["why"]}
 
 
 def source_registry(db, org_id: str) -> Dict[str, Any]:
+    """The Source Registry: every real, manual and paid source (sandbox
+    adapters are not sources) with jurisdiction, access and the SAME
+    canonical state the Service Providers table shows."""
     rows = []
     for key, p in PROVIDERS.items():
         if p.connector_kind == C.SANDBOX:
             continue
-        cfg = config(db, org_id, key)
-        blocked = platform_blocked(db, key, cfg)
-        st = registry_state(p, cfg, blocked=blocked,
-                            block_reason=(platform_access(db, key) or {}).get("reason") if blocked else None)
-        rows.append({
-            "key": key, "label": p.label, "state": st["state"], "why": st["why"],
-            "connector_kind": p.connector_kind, "enabled": bool(cfg.enabled),
+        r = _provider_row(db, org_id, key)
+        r.update({
             "jurisdiction": getattr(p, "jurisdiction", "") or "",
             "source_type": getattr(p, "source_type", "") or "",
             "access_method": getattr(p, "access_method", "") or "",
             "public_url": getattr(p, "public_url", "") or "",
             "refresh": getattr(p, "refresh", "") or "",
             "terms_note": getattr(p, "terms_note", "") or "",
-            "capabilities": list(p.capabilities),
             "role": "discovery" if getattr(p, "discovery", False) else
                     ("lookup" if getattr(p, "lookup_capability", None) else
                      ("manual" if p.connector_kind in (C.MANUAL, C.IMPORT) else "interface")),
-            "cost": "free" if not p.costs and p.connector_kind == C.REAL else
-                    ("paid (not purchased)" if p.connector_kind == C.INTERFACE_ONLY else "—"),
             "adapter_version": getattr(p, "adapter_version", "") or None,
-            "freshness_days": p.freshness_days,
-            "last_success_at": cfg.last_success_at.isoformat() + "Z" if cfg.last_success_at else None,
-            "last_failure_at": cfg.last_failure_at.isoformat() + "Z" if cfg.last_failure_at else None,
-            "last_failure_reason": cfg.last_failure_reason,
-            "last_attempt_at": cfg.last_attempt_at.isoformat() + "Z" if cfg.last_attempt_at else None,
-            "last_verified_at": cfg.last_verified_at.isoformat() + "Z" if cfg.last_verified_at else None,
-            "last_record_count": cfg.last_record_count,
-            "calls_total": cfg.calls_total, "successes_total": cfg.successes_total,
         })
-    order = {REG_HEALTHY: 0, REG_DEGRADED: 1, REG_UNVERIFIED: 2, REG_FAILED: 3, REG_BLOCKED: 3,
-             REG_MANUAL_ONLY: 4, REG_NOT_CONFIGURED: 5}
+        rows.append(r)
+    order = {S_HEALTHY: 0, S_DEGRADED: 1, S_RATE_LIMITED: 1, S_UNVERIFIED: 2, S_FAILED: 3, S_BLOCKED: 3,
+             S_DISABLED: 4, S_MANUAL_ONLY: 5, S_NOT_CONFIGURED: 6, S_NOT_PURCHASED: 6}
     rows.sort(key=lambda r: (order.get(r["state"], 9), r["jurisdiction"], r["label"]))
-    return {"sources": rows, "states": list(REGISTRY_STATES)}
+    return {"sources": rows, "states": list(STATES)}
 
 
 def verify_source(db, org_id: str, key: str, *, platform_admin: bool = False) -> Dict[str, Any]:

@@ -830,7 +830,7 @@ def patch_provider(payload: ProviderPatch, db: Session = Depends(get_db),
 @router.get("/controls")
 def get_controls(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     org_id = _read_org(db, user)
-    out = V.controls_payload(C.controls(db, org_id))
+    out = V.controls_payload(C.controls(db, org_id), db, org_id)
     db.commit()
     return out
 
@@ -876,7 +876,7 @@ def patch_controls(payload: ControlsPatch, db: Session = Depends(get_db),
                 summary="Controls changed: %s" % ", ".join("%s=%s" % kv for kv in data.items()),
                 details=data)
     db.commit()
-    return V.controls_payload(ctl)
+    return V.controls_payload(ctl, db, org_id)
 
 
 @router.get("/events")
