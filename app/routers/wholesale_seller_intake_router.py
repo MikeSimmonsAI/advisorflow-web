@@ -132,19 +132,29 @@ def list_consents(lead_id: Optional[str] = None, deal_id: Optional[str] = None,
         lead_id = lead_id or deal.seller_lead_id
         if not lead_id:
             return {"consents": [], "sms_consent": False, "status": None}
+    current = None
     if lead_id:
         lead = _lead_in_org(db, org_id, lead_id)
         e164 = ws.normalize_e164(lead.phone)
+        current = e164
         q = q.filter((SmsConsentRecord.lead_id == lead.id)
                      | (SmsConsentRecord.phone_normalized == (e164 or "-")))
     if phone:
-        q = q.filter(SmsConsentRecord.phone_normalized == (ws.normalize_e164(phone) or "-"))
+        current = ws.normalize_e164(phone)
+        q = q.filter(SmsConsentRecord.phone_normalized == (current or "-"))
     rows = (q.order_by(SmsConsentRecord.consented_at.desc())
             .limit(max(1, min(limit, 200))).all())
-    latest = rows[0] if rows else None
+    # CONSENT IS ABOUT A NUMBER. The headline answer is for the lead's CURRENT
+    # number; a record for a number they used to have is history, listed but
+    # never reported as "consent on file" (a seller whose phone was corrected
+    # has no consent for the new one until they give it).
+    for_current = [r for r in rows if current and r.phone_normalized == current] if current else rows
+    latest = for_current[0] if for_current else None
     return {"consents": [ws.consent_json(r) for r in rows],
             "sms_consent": bool(latest and latest.status == "opted_in"),
-            "status": latest.status if latest else None}
+            "status": latest.status if latest else None,
+            "current_phone": current,
+            "has_consent_for_other_numbers": any(current and r.phone_normalized != current for r in rows)}
 
 
 @ops_router.get("/eligibility")

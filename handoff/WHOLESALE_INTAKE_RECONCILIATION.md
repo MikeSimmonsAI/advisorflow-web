@@ -69,3 +69,33 @@ Tests: `tests/test_wholesale_intake_reconciliation.py` (17).
   program is OFF; nothing is sent).
 * **Email / push to staff** for inquiries: in-app only for now.
 * **`/sell` upload** to the web host (cPanel) is Mike's step.
+
+## Production verification (2026-09-26, commit 5012ee5)
+
+Via the live `/sell` form (SMS program OFF, no Messaging Service — the gate
+refused the confirmation: `PROGRAM_DISABLED,MESSAGING_SERVICE_NOT_CONFIGURED`)
+with clearly marked records ("Zztest Smoke", "Zztest Cousin",
+100 Smoketest Street, Dallas 75201, 214-555-016x, @example.com):
+
+* 1st inquiry (consent ticked): created, lead `warm_lead`, consent of record
+  kept, no booking link offered (`compose` context), Lead page shows the
+  Wholesale seller panel.
+* 2nd, "100 SMOKETEST ST.", new phone, same email: same property, same lead
+  (`matched_by: email`), notes appended, same reference.
+* 3rd, different person: "additional contact", deal's seller unchanged.
+* Deal marked lost, 4th inquiry: `deal.reopened`, new deal, old deal still
+  `dead / price_too_high`.
+* Seller PATCH: bad phone / bad appointment status → 422; phone change →
+  consent note, new number NOT eligible (`NO_SMS_CONSENT`), old evidence kept;
+  cleared field, appointment scheduled (shown on the Seller tab), signed note;
+  Lead status stays `new`.
+* Draft (`/sms/draft-reply`): seller-aware, references the inquiry and
+  property, no link, no price.
+* Found and fixed: `/wholesale/sms/consents` headline reported consent given
+  for a PREVIOUS number as "consent on file" → now reports the current number
+  only and flags earlier-number history.
+* Not observable from Mike's session: the bell item itself (it goes to the
+  workspace's org admin user; god admins are deliberately not recipients).
+  Covered by tests.
+
+The smoke-test deals were closed out as lost; the records remain, named ZZTEST.

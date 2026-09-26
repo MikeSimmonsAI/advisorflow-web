@@ -193,6 +193,12 @@ def test_a_new_number_does_not_inherit_sms_consent(client, seller):
     assert lead.phone == "+16825550110" and lead.sms_consent is False
     # the evidence for the old number is untouched
     assert db.query(SmsConsentRecord).one().phone_normalized == "+12145550123"
+    # ...and the headline no longer reports it as consent for the current number
+    c = client.get("/wholesale/sms/consents", params={"lead_id": lead.id}, headers=h).json()
+    assert c["sms_consent"] is False and c["status"] is None
+    assert c["has_consent_for_other_numbers"] is True and len(c["consents"]) == 1
+    e = client.get("/wholesale/sms/eligibility", params={"lead_id": lead.id}, headers=h).json()
+    assert e["eligible"] is False and "NO_SMS_CONSENT" in e["reasons"]
 
 
 def test_another_tenant_cannot_edit_the_seller(client, world, seller):

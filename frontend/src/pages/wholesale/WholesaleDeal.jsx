@@ -214,12 +214,18 @@ function SmsConsentKVs({ dealId }) {
     return () => { live = false }
   }, [dealId])
   if (!c || c.error) return <KV label="SMS consent">{c?.error ? 'Unavailable' : null}</KV>
-  const latest = (c.consents || [])[0]
+  // The headline is for the seller's CURRENT number; consent given for a
+  // number they used to have is shown as history, never as consent on file.
+  const forCurrent = (c.consents || []).filter((x) => !c.current_phone || x.phone === c.current_phone)
+  const latest = forCurrent[0]
   const label = c.status === 'opted_in' ? 'YES' : c.status === 'opted_out' ? 'Opted out' : 'NO'
   return (
     <>
       <KV label="SMS consent">
         <span className={`ws-pill ${c.status === 'opted_in' ? 'is-ok' : 'is-muted'}`}>{label}</span>
+        {c.has_consent_for_other_numbers
+          ? <span className="ws-pill is-muted" style={{ marginLeft: 6 }}>earlier consent was for a previous number</span>
+          : null}
       </KV>
       <KV label="Consent given">{latest ? shortDate(latest.consented_at) : null}</KV>
       <KV label="Consent source">{latest ? (latest.source_url || latest.form_id) : null}</KV>
