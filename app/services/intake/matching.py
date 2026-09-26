@@ -231,7 +231,11 @@ def lead_identity(l) -> dict:
         "kind": "lead", "id": l.id, "lead_id": l.id,
         "org_contact_id": getattr(l, "org_contact_id", None),
         "src_system": "", "src_id": None,
-        "email": (l.email or "").strip().lower() or None, "phone": l.phone, "mobile": None,
+        # Leads store the PLATFORM phone format (dedup_service.normalize_phone,
+        # "12145550123"); intake compares E.164. Normalized here so an existing
+        # lead is actually matched by phone.
+        "email": (l.email or "").strip().lower() or None,
+        "phone": (N.phone(l.phone)[0] if l.phone else None), "mobile": None,
         "first_key": N.name_key(l.first_name), "last_key": N.name_key(l.last_name),
         "company_key": None, "addr_key": N.address_key(l.street_address),
         "zip5": N.zip5(l.zip_code), "record_class": "lead", "classification": None,
@@ -291,7 +295,13 @@ def load_existing(db: Session, organization_id: str, rows: List[dict]) -> _Index
     for ch in _chunks(emails):
         for l in lbase.filter(Lead.email.in_(ch)).all():
             leads[l.id] = l
-    for ch in _chunks(phones):
+    # Every stored spelling of each number: E.164, the platform's own
+    # "1XXXXXXXXXX", and bare ten digits.
+    lead_phone_forms = set()
+    for p in phones:
+        if p:
+            lead_phone_forms.update({p, p.lstrip("+"), p[-10:]})
+    for ch in _chunks(lead_phone_forms):
         for l in lbase.filter(Lead.phone.in_(ch)).all():
             leads[l.id] = l
 

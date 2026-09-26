@@ -22,9 +22,11 @@ NO UNCONTROLLED DUPLICATES - AND A RETURNING SELLER IS RE-ENGAGED
   * the same property in this org is reused, not re-created. The address is
     compared NORMALIZED ("St" = "Street", "N" = "North", a suffix one side
     omits, the unit) within the same ZIP;
-  * the same person in this org - matched by phone, then by email - reuses
-    that Lead. Their name is filled in if it was blank and the inquiry is
-    appended to their notes with its date, so nothing they wrote is lost;
+  * the same person in this org is decided by UNIVERSAL INTAKE
+    (app/services/intake/capture.py): one matcher for the whole platform, an
+    org contact record, fill-blanks updates, a rollback-able batch. An exact
+    match reuses that Lead; a possible match is kept separate for review. The
+    inquiry is appended to the Lead's notes with its date;
   * a DIFFERENT person inquiring about a property that already has a seller is
     attached as an additional contact. The deal's seller of record is never
     displaced by a web form; the operator is told to verify;
@@ -230,27 +232,6 @@ def _existing_property(db: Session, org_id: str, street: str, zip_code: str,
     return None
 
 
-def _existing_lead(db: Session, org_id: str, e164: str, email: Optional[str] = None):
-    """(lead, matched_by). Phone first - it is what consent and suppression key
-    on - then email. Only this organization's non-test leads."""
-    forms = [e164, e164[1:], e164[2:]]
-    lead = (db.query(Lead)
-            .filter(Lead.organization_id == org_id, Lead.phone.in_(forms),
-                    Lead.is_test.is_(False))
-            .order_by(Lead.updated_at.desc()).first())
-    if lead is not None:
-        return lead, "phone"
-    if email:
-        from sqlalchemy import func
-        lead = (db.query(Lead)
-                .filter(Lead.organization_id == org_id, func.lower(Lead.email) == email.lower(),
-                        Lead.is_test.is_(False))
-                .order_by(Lead.updated_at.desc()).first())
-        if lead is not None:
-            return lead, "email"
-    return None, None
-
-
 def _assignee(db: Session, org_id: str, settings: WholesaleSettings) -> Optional[str]:
     uid = getattr(settings, "inquiry_assignee_id", None)
     if not uid:
@@ -289,8 +270,28 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
     host = urlparse(d.get("source_url") or "").hostname or None
     assignee_id = _assignee(db, org_id, settings)
     prop = _existing_property(db, org_id, d["street_address"], d["zip_code"])
-    lead, matched_by = _existing_lead(db, org_id, d["phone"], d.get("email"))
-    repeat = prop is not None and lead is not None
+    # WHO THIS PERSON IS is Universal Intake's answer, not Wholesale's: the one
+    # matcher, the org contact record, fill-blanks updates, a rollback-able
+    # batch, and the capacity HOLD for an external arrival. Wholesale keeps
+    # only what intake cannot know: which property, and this person's role on it.
+    from app.services.intake.capture import capture_one
+    cap = capture_one(db, org, {
+        "first_name": first, "last_name": last.strip() or None, "email": d.get("email"),
+        "phone": d["phone"], "street_address": d["street_address"], "city": d["city"],
+        "state": d["state"], "zip_code": d["zip_code"], "notes": d.get("notes")},
+        source="website", source_detail=("%s/sell" % host) if host else "public seller form",
+        list_name="Seller inquiries", classification="new_inquiry",
+        actor_label=ACTOR_LABEL, external=True)
+    lead = cap.lead
+    matched_by = {"existing": "intake exact match", "blocked_existing": "intake exact match (do-not-contact record)"}.get(cap.match)
+    if lead is None:
+        raise IntakeRefused("universal intake produced no lead (batch %s, match %s)" % (cap.batch_id, cap.match))
+    if cap.lead_created:
+        # A person first seen through this form is in the Wholesale seller SMS
+        # PROGRAM (wholesale_sms.PROGRAM_SOURCE_CATEGORIES) - the category the
+        # program's consent scoping reads.
+        lead.source_category = ws.SOURCE_CATEGORY
+    repeat = prop is not None and matched_by is not None
     reengaged = additional = False
     stamp = datetime.utcnow().strftime("%Y-%m-%d")
     inquiry_line = "%s - Seller inquiry via %s.%s" % (
@@ -332,8 +333,7 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
         }
         if additional:
             seller_data["relationship_note"] = "Additional contact from the seller form - verify ownership"
-        if lead is not None:
-            seller_data["lead_id"] = lead.id
+        seller_data["lead_id"] = lead.id
         profile = svc.attach_seller(db, org_id, None, prop, seller_data, actor_type=ACTOR_API,
                                     set_primary=primary, external_arrival=True)
     except HTTPException as exc:
@@ -348,19 +348,13 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
                                  Lead.organization_id == org_id).first()
     from app.services import lead_capacity
     held = lead_capacity.is_held(lead)
-    if matched_by:
-        # A RETURNING person: fill what was blank, keep what they wrote, and
-        # stop calling somebody who just reached out a cold lead.
-        if not lead.email and d["email"]:
-            lead.email = d["email"]
-        if not lead.first_name and first:
-            lead.first_name = first
-        if not lead.last_name and last.strip():
-            lead.last_name = last.strip()
-        lead.notes = _append_note(lead.notes, inquiry_line)
-        if (lead.relationship_type or "cold_lead") == "cold_lead":
-            lead.relationship_type = "warm_lead"
-        lead.updated_at = datetime.utcnow()
+    # Every inquiry is kept on the person, dated - the first and every repeat.
+    # (Blank-filling a returning person's name/email is intake's job.)
+    lead.notes = _append_note(lead.notes, inquiry_line)
+    if (lead.relationship_type or "cold_lead") == "cold_lead":
+        # somebody who just reached out is not a cold lead
+        lead.relationship_type = "warm_lead"
+    lead.updated_at = datetime.utcnow()
     if assignee_id and not lead.assigned_to_id:
         lead.assigned_to_id = assignee_id
     deal = svc.deal_for_property(db, org_id, prop.id)
@@ -412,6 +406,8 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
                  "source_url": d.get("source_url"), "repeat": repeat,
                  "reengaged": reengaged, "additional_contact": additional,
                  "matched_by": matched_by, "assigned_to_id": assignee_id,
+                 "intake_batch_id": cap.batch_id, "org_contact_id": cap.contact_id,
+                 "intake_match": cap.match, "intake_notes": cap.notes,
                  "capacity_held": held,
                  "notes": d.get("notes")})
 
