@@ -1284,13 +1284,38 @@ def update_seller(profile_id: str, payload: SellerIn, request: Request,
                     "message": "That number already belongs to another lead in this workspace.",
                     "lead_id": other.id})
             lead.phone_raw = data["phone"]
-            lead.phone = new_e164
+            # The PLATFORM format ("12145550123"), not E.164: the inbound SMS
+            # sender lookup, suppression and dedupe all compare that format, so
+            # a Lead stored as "+1..." would never be found when this seller
+            # replies. The org contact (below) keeps E.164.
+            from app.services.dedup_service import normalize_phone
+            lead.phone = normalize_phone(new_e164) or new_e164
             if getattr(lead, "sms_consent", False):
                 lead.sms_consent = False
                 consent_note = ("Phone changed: SMS consent was given for %s and does not carry "
                                 "to the new number." % (old_e164 or "the previous number"))
 
     svc.apply_seller_fields(profile, data, allow_clear=True)
+
+    # WHO THE PERSON IS belongs to Universal Intake. The correction is written
+    # to the org contact first and marked as an operator edit, so a later
+    # import of the old spelling or old number can never overwrite it; the
+    # Lead mirrors it below in its own format. Only fields the operator sent.
+    if lead is not None:
+        from app.services.intake.contacts import apply_manual_edit
+        person: Dict[str, Any] = {}
+        for f in ("first_name", "last_name"):
+            if f in data:
+                person[f] = (data[f] or "").strip() or None
+        if "email" in data:
+            person["email"] = (data["email"] or "").strip().lower() or None
+        if new_e164:
+            # A Lead's phone is never blanked by this editor (every compliance
+            # check keys on it), so the contact's is not either.
+            person["phone"] = new_e164
+        apply_manual_edit(db, org_id, lead, person, actor_id=getattr(user, "id", None),
+                          actor_name=getattr(user, "full_name", None),
+                          source="wholesale_seller_edit")
 
     # Contact details belong to the LEAD, not to this profile. Writing them here
     # would create a second copy of a phone number that every compliance check

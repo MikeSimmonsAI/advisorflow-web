@@ -190,7 +190,8 @@ def test_a_new_number_does_not_inherit_sms_consent(client, seller):
     assert "does not carry" in r.json()["consent_note"]
     db.expire_all()
     lead = db.query(Lead).one()
-    assert lead.phone == "+16825550110" and lead.sms_consent is False
+    # the platform format: the inbound SMS lookup compares normalize_phone(From)
+    assert lead.phone == "16825550110" and lead.sms_consent is False
     # the evidence for the old number is untouched
     assert db.query(SmsConsentRecord).one().phone_normalized == "+12145550123"
     # ...and the headline no longer reports it as consent for the current number
@@ -199,6 +200,41 @@ def test_a_new_number_does_not_inherit_sms_consent(client, seller):
     assert c["has_consent_for_other_numbers"] is True and len(c["consents"]) == 1
     e = client.get("/wholesale/sms/eligibility", params={"lead_id": lead.id}, headers=h).json()
     assert e["eligible"] is False and "NO_SMS_CONSENT" in e["reasons"]
+
+
+def test_a_seller_edit_is_written_to_the_org_contact_and_survives_a_later_import(client, seller):
+    import json as _json
+    from app.models.intake_models import OrgContact
+    db, h, p = seller["db"], seller["h"], seller["profile"]
+    # The operator removes a first name they know is wrong and corrects the
+    # contact channels.
+    r = client.patch("/wholesale/sellers/%s" % p.id, headers=h, json={
+        "first_name": None, "phone": "(682) 555-0110", "email": "Pat.New@Example.com"})
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    c, lead = db.query(OrgContact).one(), db.query(Lead).one()
+    assert (c.first_name, c.last_name, c.full_name) == (None, "Seller", "Seller")
+    assert c.phone == "+16825550110" and c.email == "pat.new@example.com"
+    assert (lead.first_name, lead.email, lead.phone) == (None, "pat.new@example.com", "16825550110")
+    assert set(_json.loads(c.manually_edited_fields)) >= {"first_name", "full_name", "phone", "email"}
+    # A later capture of the same person (EXACT on email, same surname) would
+    # blank-fill the first name back in; the operator's correction wins.
+    post(client, form(submission_id="again", email="pat.new@example.com", phone="(682) 555-0110"))
+    db.expire_all()
+    assert db.query(OrgContact).count() == 1 and db.query(Lead).count() == 1
+    c, lead = db.query(OrgContact).one(), db.query(Lead).one()
+    assert c.first_name is None and lead.first_name is None
+
+
+def test_an_edit_of_a_seller_with_no_org_contact_still_works(client, seller):
+    from app.models.intake_models import OrgContact
+    db, h, p = seller["db"], seller["h"], seller["profile"]
+    seller["lead"].org_contact_id = None
+    db.query(OrgContact).delete()
+    db.commit()
+    r = client.patch("/wholesale/sellers/%s" % p.id, headers=h, json={"last_name": "Legacy"})
+    assert r.status_code == 200 and r.json()["last_name"] == "Legacy"
+    assert db.query(OrgContact).count() == 0
 
 
 def test_another_tenant_cannot_edit_the_seller(client, world, seller):
@@ -442,3 +478,4 @@ def test_an_intake_failure_never_loses_the_seller(client, world, monkeypatch):
     err = db.query(WholesaleEvent).filter_by(action="seller_inquiry.intake_error").one()
     assert "simulated engine failure" in err.details
     assert "555" not in err.details and "pat@example.com" not in err.details
+

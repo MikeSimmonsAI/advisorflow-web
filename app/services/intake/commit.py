@@ -362,14 +362,20 @@ def _lead_phone(e164: Optional[str]) -> Optional[str]:
     return normalize_phone(e164) or e164
 
 
-def _update_matched_lead(db, batch, row, lead) -> List[str]:
-    """Blank-fill a matched lead and apply more-restrictive consent. Versioned."""
+def _update_matched_lead(db, batch, row, lead, protected=()) -> List[str]:
+    """Blank-fill a matched lead and apply more-restrictive consent. Versioned.
+
+    `protected` is the org contact's `manually_edited_fields`: a field an
+    operator corrected (including one they deliberately cleared) is never
+    refilled from an import."""
+    from app.services.intake.contacts import mark_protected
     before, changed = {}, []
     fill = {"first_name": row.first_name, "last_name": row.last_name,
             "phone": _lead_phone(row.phone_normalized), "phone_raw": row.phone_raw,
             "email": row.email_normalized if row.email_status not in _BAD_EMAIL else None,
             "street_address": row.street_address, "city": row.city, "state": row.state,
             "zip_code": row.zip_code}
+    fill = mark_protected(fill, protected)
     for f, v in fill.items():
         if v and not getattr(lead, f, None):
             before[f] = getattr(lead, f, None)
@@ -612,7 +618,9 @@ def run_commit(db: Session, batch_id: str, org_id: str, ctx, mode: str,
                         if contact.lead_id:
                             ml = db.query(Lead).filter(Lead.id == contact.lead_id,
                                                        Lead.organization_id == org_id).first()
-                            if ml is not None and _update_matched_lead(db, batch, row, ml):
+                            if ml is not None and _update_matched_lead(
+                                    db, batch, row, ml,
+                                    protected=_j(contact.manually_edited_fields, [])):
                                 report["leads_updated"] += 1
                     if contact is None:
                         raise ENG.IntakeError("matched record no longer exists")
