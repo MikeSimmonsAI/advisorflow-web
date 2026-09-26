@@ -85,9 +85,12 @@ def command_center(hours: int = Query(24, ge=1, le=24 * 30), db: Session = Depen
 def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Optional[str] = None,
           signal: Optional[str] = None, sort: str = "opportunity",
           limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+          county: Optional[str] = None, min_score: Optional[int] = Query(None, ge=0, le=100),
+          source: Optional[str] = None, archived: bool = False,
           db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     return V.inbox(db, _read_org(db, user), bucket=bucket, strategy_id=strategy_id, q=q,
-                   signal=signal, sort=sort, limit=limit, offset=offset)
+                   signal=signal, sort=sort, limit=limit, offset=offset, county=county,
+                   min_score=min_score, source=source, archived=archived)
 
 
 @router.get("/properties/{property_id}")
@@ -95,6 +98,26 @@ def property_detail(property_id: str, db: Session = Depends(get_db),
                     user: User = Depends(require_tenant_or_observer)):
     org_id = _read_org(db, user)
     return V.property_detail(db, org_id, _prop(db, org_id, property_id))
+
+
+@router.get("/properties/{property_id}/observations/{observation_id}/raw")
+def observation_raw(property_id: str, observation_id: str, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_or_observer)):
+    """The raw evidence behind one observation, exactly as the source gave it
+    (never credentials — adapters never receive any)."""
+    org_id = _read_org(db, user)
+    prop = _prop(db, org_id, property_id)
+    o = (db.query(EvoSenseObservation)
+         .filter(EvoSenseObservation.id == observation_id, EvoSenseObservation.organization_id == org_id,
+                 EvoSenseObservation.property_id == prop.id).first())
+    if o is None:
+        raise HTTPException(status_code=404, detail="Observation not found")
+    return {"id": o.id, "provider": o.provider_key, "reference": o.source_reference,
+            "retrieved_at": V._iso(o.observed_at), "source_updated_at": V._iso(o.source_updated_at),
+            "source_url": o.source_url, "adapter_version": o.adapter_version,
+            "content_hash": o.content_hash, "raw": o.raw_payload,
+            "normalized": C.jload(o.payload, {}), "processing": o.processing_status,
+            "error": o.processing_error}
 
 
 class ManualProperty(BaseModel):
@@ -649,14 +672,41 @@ def clone_strategy(strategy_id: str, db: Session = Depends(get_db),
 
 
 @router.post("/strategies/{strategy_id}/hunt")
-def hunt_now(strategy_id: str, db: Session = Depends(get_db),
+def hunt_now(strategy_id: str, background: bool = False, db: Session = Depends(get_db),
              user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
     org_id = svc.write_org_id(db, user)
     s = ST.get(db, org_id, strategy_id)
     if s.status != "active":
         raise HTTPException(status_code=409, detail="Activate the strategy before it can hunt.")
+    if background:
+        C.log_event(db, org_id, "hunt.queued", strategy_id=s.id, user=user, actor_type=C.ACTOR_USER,
+                    is_test=s.is_test, summary="Hunt started in the background")
+        db.commit()
+        HU.start_background(org_id, s.id, user_id=user.id)
+        return {"run_id": None, "status": "started", "background": True,
+                "note": "Follow progress in the strategy's runs and the event log."}
     run = HU.run_strategy(db, org_id, s, trigger="manual", user=user)
     return {"run_id": run.id, "status": run.status, "error": run.error, "counts": C.jload(run.counts, {})}
+
+
+@router.post("/strategies/{strategy_id}/pilot-archive")
+def pilot_archive(strategy_id: str, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    org_id = svc.write_org_id(db, user)
+    s = ST.get(db, org_id, strategy_id)
+    out = HU.archive_pilot(db, org_id, s, user=user)
+    db.commit()
+    return out
+
+
+@router.post("/strategies/{strategy_id}/pilot-restore")
+def pilot_restore(strategy_id: str, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    org_id = svc.write_org_id(db, user)
+    s = ST.get(db, org_id, strategy_id)
+    out = HU.unarchive_pilot(db, org_id, s, user=user)
+    db.commit()
+    return out
 
 
 def _strategy_action(action: str):
@@ -717,6 +767,38 @@ def providers(db: Session = Depends(get_db), user: User = Depends(require_tenant
     return out
 
 
+@router.get("/sources")
+def sources(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """The Source Registry: every real, manual and not-configured source with
+    its jurisdiction, access method, freshness and verified health."""
+    org_id = _read_org(db, user)
+    out = PV.source_registry(db, org_id)
+    db.commit()
+    return out
+
+
+class VerifyIn(BaseModel):
+    key: str
+
+
+@router.post("/sources/verify")
+def verify_source(payload: VerifyIn, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A cheap real probe of one of THIS organization's sources (the key names
+    an adapter, not a record). Only a success makes a source HEALTHY."""
+    source_key = payload.key
+    org_id = svc.write_org_id(db, user)
+    _admin(user)
+    if source_key not in PV.PROVIDERS:
+        raise HTTPException(status_code=404, detail="Unknown source")
+    res = PV.verify_source(db, org_id, source_key)
+    C.log_event(db, org_id, "source.verified" if res.get("ok") else "source.verify_failed", user=user,
+                actor_type=C.ACTOR_USER, summary="%s verify: %s" % (
+                    source_key, "ok" if res.get("ok") else "%s %s" % (res.get("code"), res.get("error"))))
+    db.commit()
+    return {**res, "registry": PV.source_registry(db, org_id)}
+
+
 class ProviderPatch(BaseModel):
     key: str
     enabled: Optional[bool] = None
@@ -763,6 +845,7 @@ class ControlsPatch(BaseModel):
     org_daily_budget_cents: Optional[int] = None
     org_monthly_budget_cents: Optional[int] = None
     owner_touch_cap_days: Optional[int] = None
+    score_weights: Optional[Dict[str, int]] = None
 
 
 @router.patch("/controls")
@@ -772,6 +855,11 @@ def patch_controls(payload: ControlsPatch, db: Session = Depends(get_db),
     ctl = C.controls(db, org_id)
     data = payload.model_dump(exclude_unset=True)
     for k, v in data.items():
+        if k == "score_weights":
+            _admin(user)
+            from app.services.evosense import scoring as SC
+            ctl.score_weights = C.jdump(SC.clean_weights(v)) if v else None
+            continue
         if k.startswith("paused_"):
             if v is None:
                 continue

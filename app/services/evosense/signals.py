@@ -10,6 +10,7 @@ History is never erased when a signal goes stale.
 """
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -41,6 +42,39 @@ CATALOG: Dict[str, Dict[str, Any]] = {
     "PRICE_REDUCTION":      {"label": "Price reduction", "points": 4, "current_days": 60, "stale_days": 120},
     "TIRED_LANDLORD":       {"label": "Tired landlord", "points": 8, "current_days": 365, "stale_days": 730},
     "MANUAL_OPERATOR_SIGNAL": {"label": "Operator flag", "points": 5, "current_days": 180, "stale_days": 365},
+    # DFW public-record additions (property_opportunity/v2)
+    "TAX_SUIT":             {"label": "Tax suit / litigation", "points": 8, "current_days": 365, "stale_days": 730},
+    "CODE_COMPLAINT":       {"label": "Code complaint (311)", "points": 3, "current_days": 180, "stale_days": 365},
+    "ACTIVE_LISTING":       {"label": "Active listing", "points": -12, "current_days": 60, "stale_days": 120},
+    "RECENT_SALE":          {"label": "Recent sale", "points": -10, "current_days": 365, "stale_days": 730},
+    "OTHER":                {"label": "Other evidence", "points": 0, "current_days": 180, "stale_days": 365},
+}
+
+# The acquisition spec's signal families. EvoSense's stored keys predate the
+# spec and are kept (renaming stored evidence is an unnecessary rewrite);
+# every key reports the family it belongs to.
+FAMILY = {
+    "TAX_DELINQUENT": "TAX_DELINQUENT", "TAX_SUIT": "TAX_DELINQUENT", "LIEN": "OTHER",
+    "PRE_FORECLOSURE": "PRE_FORECLOSURE", "ABSENTEE_OWNER": "ABSENTEE_OWNER",
+    "OUT_OF_STATE_OWNER": "OUT_OF_STATE_OWNER", "VACANT": "VACANT",
+    "CODE_VIOLATION": "CODE_VIOLATION", "CODE_COMPLAINT": "CODE_VIOLATION",
+    "PROBATE": "PROBATE_OR_ESTATE", "ESTATE": "PROBATE_OR_ESTATE",
+    "LONG_OWNERSHIP": "LONG_TERM_OWNERSHIP", "HIGH_EQUITY": "HIGH_EQUITY",
+    "FREE_AND_CLEAR": "FREE_AND_CLEAR", "TIRED_LANDLORD": "TIRED_LANDLORD",
+    "DISTRESSED_CONDITION": "DISTRESSED_PROPERTY", "EXPIRED_LISTING": "RECENT_FAILED_LISTING",
+    "FAILED_LISTING": "RECENT_FAILED_LISTING", "PRICE_REDUCTION": "ACTIVE_LISTING",
+    "ACTIVE_LISTING": "ACTIVE_LISTING", "RECENT_SALE": "RECENT_SALE",
+    "MANUAL_OPERATOR_SIGNAL": "OTHER", "OTHER": "OTHER",
+}
+DERIVED_RULE_VERSION = "derive/v2"
+DERIVED_LIMITATIONS = {
+    "ABSENTEE_OWNER": "Mailing address differs from the property. It does not prove the house is vacant "
+                      "or rented; a PO box never counts.",
+    "OUT_OF_STATE_OWNER": "Mailing state differs from the property state.",
+    "HIGH_EQUITY": "ESTIMATED from a reported value and a reported mortgage. Never computed when the "
+                   "mortgage is unknown.",
+    "FREE_AND_CLEAR": "Only when a source reports a zero mortgage. Never inferred from a missing mortgage.",
+    "LONG_OWNERSHIP": "From the last recorded deed / sale date.",
 }
 DERIVED_SOURCE = "evosense_derived"
 
@@ -83,6 +117,7 @@ def stack(signals, when: Optional[datetime] = None) -> List[Dict[str, Any]]:
             "independent_sources": len({s.source for s in items if s.source != DERIVED_SOURCE}),
             "observed_at": best.observed_at.isoformat() + "Z" if best.observed_at else None,
             "derived": best.source == DERIVED_SOURCE,
+            "family": FAMILY.get(stype, "OTHER"),
             "evidence": [{
                 "id": s.id, "source": s.source, "connector": s.connector_kind,
                 "source_reference": s.source_reference,
@@ -160,13 +195,22 @@ def derive(db, prop, owner=None) -> List[str]:
             s.active = False
 
     if owner is not None and owner.mailing_street:
-        same_zip = (owner.mailing_zip or "")[:5] == (prop.zip_code or "")[:5]
         from app.services.evosense.identity import normalize_street
-        same_street = normalize_street(owner.mailing_street)[0] == normalize_street(prop.street_address)[0]
+        mail_street = normalize_street(owner.mailing_street)[0]
+        prop_street = normalize_street(prop.street_address)[0]
+        same_street = bool(mail_street) and mail_street == prop_street
+        mz, pz = (owner.mailing_zip or "")[:5], (prop.zip_code or "")[:5]
+        # UNKNOWN is not NO: with no property ZIP the street alone decides; a
+        # PO box (or no property street) decides nothing.
+        po_box = bool(re.match(r"^(P\s*O\s*BOX|POST OFFICE BOX|BOX)\b", mail_street or ""))
         prov = {"owner_mailing": ", ".join(x for x in (owner.mailing_street, owner.mailing_city,
                                                         owner.mailing_state, owner.mailing_zip) if x),
-                "property": prop.street_address, "rule": "mailing address differs from property"}
-        if not (same_zip and same_street):
+                "property": ", ".join(x for x in (prop.street_address, prop.city, prop.zip_code) if x),
+                "rule": "mailing address differs from property", "rule_version": DERIVED_RULE_VERSION,
+                "limitations": DERIVED_LIMITATIONS["ABSENTEE_OWNER"]}
+        if po_box or not prop_street:
+            retract("ABSENTEE_OWNER")
+        elif not same_street or (mz and pz and mz != pz):
             upsert(db, prop, "ABSENTEE_OWNER", source=DERIVED_SOURCE, confidence=80,
                    normalized_value="mailing address differs", provenance=prov)
             made.append("ABSENTEE_OWNER")
@@ -175,7 +219,8 @@ def derive(db, prop, owner=None) -> List[str]:
         if owner.mailing_state and prop.state and owner.mailing_state.upper() != prop.state.upper():
             upsert(db, prop, "OUT_OF_STATE_OWNER", source=DERIVED_SOURCE, confidence=85,
                    normalized_value="mailing state %s" % owner.mailing_state.upper(),
-                   provenance={**prov, "rule": "mailing state differs from property state"})
+                   provenance={**prov, "rule": "mailing state differs from property state",
+                               "limitations": DERIVED_LIMITATIONS["OUT_OF_STATE_OWNER"]})
             made.append("OUT_OF_STATE_OWNER")
         else:
             retract("OUT_OF_STATE_OWNER")
@@ -183,24 +228,30 @@ def derive(db, prop, owner=None) -> List[str]:
         if prop.equity_pct >= 50:
             upsert(db, prop, "HIGH_EQUITY", source=DERIVED_SOURCE,
                    confidence=70 if prop.equity_basis == "computed" else 75,
-                   normalized_value="%s%%" % prop.equity_pct,
+                   normalized_value="%s%% (ESTIMATED)" % prop.equity_pct,
                    provenance={"equity_basis": prop.equity_basis,
                                "value_source": prop.estimated_value_source,
-                               "mortgage_source": prop.mortgage_source})
+                               "mortgage_source": prop.mortgage_source,
+                               "truth": "ESTIMATED", "rule_version": DERIVED_RULE_VERSION,
+                               "limitations": DERIVED_LIMITATIONS["HIGH_EQUITY"]})
             made.append("HIGH_EQUITY")
         else:
             retract("HIGH_EQUITY")
         if prop.mortgage_balance == 0 and prop.mortgage_source:
             upsert(db, prop, "FREE_AND_CLEAR", source=DERIVED_SOURCE, confidence=70,
-                   normalized_value="no mortgage reported",
-                   provenance={"mortgage_source": prop.mortgage_source})
+                   normalized_value="source reports a $0 mortgage",
+                   provenance={"mortgage_source": prop.mortgage_source,
+                               "rule_version": DERIVED_RULE_VERSION,
+                               "limitations": DERIVED_LIMITATIONS["FREE_AND_CLEAR"]})
             made.append("FREE_AND_CLEAR")
     if prop.ownership_years is not None:
         if prop.ownership_years >= 10:
             upsert(db, prop, "LONG_OWNERSHIP", source=DERIVED_SOURCE, confidence=85,
                    normalized_value="%s years" % prop.ownership_years,
                    provenance={"last_sale_date": prop.last_sale_date.isoformat()
-                               if prop.last_sale_date else None})
+                               if prop.last_sale_date else None,
+                               "rule_version": DERIVED_RULE_VERSION,
+                               "limitations": DERIVED_LIMITATIONS["LONG_OWNERSHIP"]})
             made.append("LONG_OWNERSHIP")
         else:
             retract("LONG_OWNERSHIP")

@@ -1165,6 +1165,26 @@ COLUMNS_TO_ADD = [
     ("wholesale_settings", "sms_messaging_service_sid", "VARCHAR"),
     ("wholesale_settings", "sms_campaign_sid", "VARCHAR"),
     ("wholesale_settings", "sms_brand_sid", "VARCHAR"),
+    # EvoSense DFW acquisition (sources, raw evidence, pilot mode). All
+    # additive and nullable / defaulted OFF: an existing strategy is not a
+    # pilot, an existing observation simply has no raw evidence recorded.
+    ("evosense_strategies", "pilot_mode", "BOOLEAN DEFAULT FALSE"),
+    ("evosense_strategies", "pilot_max_properties", "INTEGER"),
+    ("evosense_strategies", "pilot_max_spend_cents", "INTEGER"),
+    ("evosense_strategies", "pilot_allow_paid", "BOOLEAN DEFAULT FALSE"),
+    ("evosense_observations", "raw_payload", "TEXT"),
+    ("evosense_observations", "content_hash", "VARCHAR"),
+    ("evosense_observations", "adapter_version", "VARCHAR"),
+    ("evosense_observations", "source_updated_at", "TIMESTAMP"),
+    ("evosense_observations", "source_url", "VARCHAR"),
+    ("evosense_observations", "processing_status", "VARCHAR"),
+    ("evosense_observations", "processing_error", "VARCHAR"),
+    ("evosense_properties", "archived_at", "TIMESTAMP"),
+    ("evosense_properties", "archive_reason", "VARCHAR"),
+    ("evosense_controls", "score_weights", "TEXT"),
+    ("evosense_provider_configs", "last_attempt_at", "TIMESTAMP"),
+    ("evosense_provider_configs", "last_record_count", "INTEGER"),
+    ("evosense_provider_configs", "last_verified_at", "TIMESTAMP"),
 
     ("wholesale_documents", "buyer_visible", "BOOLEAN DEFAULT FALSE"),
     ("wholesale_documents", "seller_visible", "BOOLEAN DEFAULT FALSE"),
@@ -1316,6 +1336,7 @@ INDEXES_TO_CREATE = [
     "CREATE INDEX IF NOT EXISTS ix_voice_calls_booking_link_id  ON voice_calls(booking_link_id)",
     # One organization per public seller-intake key. NULLs do not collide.
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_wholesale_settings_intake_key ON wholesale_settings(public_intake_key)",
+    "CREATE INDEX IF NOT EXISTS ix_evosense_properties_archived ON evosense_properties(organization_id, archived_at)",
     "CREATE INDEX IF NOT EXISTS ix_messages_lead_id      ON messages(lead_id)",
     "CREATE INDEX IF NOT EXISTS ix_messages_sent_at      ON messages(sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_messages_sender_id    ON messages(sender_id)",

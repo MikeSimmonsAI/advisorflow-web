@@ -38,9 +38,13 @@ LIST_FIELDS = ("markets", "states", "counties", "cities", "zips", "property_type
 INT_FIELDS = ("min_value", "max_value", "min_equity_pct", "min_ownership_years",
               "min_opportunity_score", "min_contact_confidence", "handoff_intent_threshold",
               "target_fee", "daily_budget_cents", "monthly_budget_cents",
-              "max_cost_per_property_cents", "approval_over_cents")
+              "max_cost_per_property_cents", "approval_over_cents",
+              "pilot_max_properties", "pilot_max_spend_cents")
+BOOL_FIELDS = ("pilot_mode", "pilot_allow_paid")
+PILOT_HARD_CAP = 100               # properties per pilot run, whatever the strategy says
+PILOT_DEFAULT_CAP = 50
 TEXT_FIELDS = ("name", "description", "owner_geography")
-EDITABLE = LIST_FIELDS + INT_FIELDS + TEXT_FIELDS + (
+EDITABLE = LIST_FIELDS + INT_FIELDS + TEXT_FIELDS + BOOL_FIELDS + (
     "provider_preferences", "outreach_policy", "nurture_policy")
 
 
@@ -77,6 +81,9 @@ def validate(data: Dict[str, Any], partial: bool = False) -> Tuple[Dict[str, Any
                 continue
             if clean[f] < 0:
                 problems.append("%s cannot be negative." % f.replace("_", " "))
+    for f in BOOL_FIELDS:
+        if f in data and data[f] is not None:
+            clean[f] = data[f] is True or str(data[f]).strip().lower() in ("1", "true", "yes", "on")
     for f in TEXT_FIELDS:
         if f in data:
             clean[f] = (str(data[f]).strip() or None) if data[f] is not None else None
@@ -111,6 +118,8 @@ def validate(data: Dict[str, Any], partial: bool = False) -> Tuple[Dict[str, Any
     mn, mx = clean.get("min_value"), clean.get("max_value")
     if mn is not None and mx is not None and mn > mx:
         problems.append("Minimum value is above maximum value.")
+    if clean.get("pilot_max_properties") is not None and clean["pilot_max_properties"] > PILOT_HARD_CAP:
+        problems.append("A pilot is capped at %s properties per run." % PILOT_HARD_CAP)
     for f in ("min_opportunity_score", "min_contact_confidence", "handoff_intent_threshold",
               "min_equity_pct"):
         if clean.get(f) is not None and clean[f] > 100:
@@ -119,6 +128,11 @@ def validate(data: Dict[str, Any], partial: bool = False) -> Tuple[Dict[str, Any
 
 
 def apply(strategy: EvoSenseStrategy, clean: Dict[str, Any]) -> None:
+    if clean.get("pilot_mode"):
+        # A pilot never works owners by itself, whatever else was sent.
+        pol = dict(clean.get("outreach_policy") or C.jload(getattr(strategy, "outreach_policy", None), {}) or {})
+        pol["auto_outreach"] = False
+        clean = {**clean, "outreach_policy": pol}
     for k, v in clean.items():
         if k in LIST_FIELDS or k in ("provider_preferences", "outreach_policy",
                                      "nurture_policy"):
@@ -234,7 +248,29 @@ def summary(strategy) -> str:
     s5 = (" Eligible owners are worked automatically through the cadence engine."
           if pol.get("auto_outreach") else
           " Outreach starts only when you start it.")
+    if is_pilot(strategy):
+        s5 += (" PILOT / CONTROLLED: at most %s properties per run, %s, no outreach of any kind, "
+               "and it only runs when a person starts it." % (
+                   pilot_cap(strategy),
+                   "paid data up to %s" % C.money(pilot_spend_cap(strategy)) if pilot_spend_cap(strategy)
+                   else "no paid data"))
     return s1 + s2 + s3 + s4 + s5
+
+
+def is_pilot(strategy) -> bool:
+    return bool(getattr(strategy, "pilot_mode", False))
+
+
+def pilot_cap(strategy) -> int:
+    v = getattr(strategy, "pilot_max_properties", None) or PILOT_DEFAULT_CAP
+    return max(1, min(int(v), PILOT_HARD_CAP))
+
+
+def pilot_spend_cap(strategy) -> int:
+    """Cents a pilot may spend in total. Paid data off = $0, whatever is set."""
+    if not getattr(strategy, "pilot_allow_paid", False):
+        return 0
+    return max(0, int(getattr(strategy, "pilot_max_spend_cents", None) or 0))
 
 
 def payload(strategy) -> Dict[str, Any]:
@@ -253,6 +289,11 @@ def payload(strategy) -> Dict[str, Any]:
         out[f] = lst(strategy, f)
     for f in INT_FIELDS:
         out[f] = getattr(strategy, f)
+    for f in BOOL_FIELDS:
+        out[f] = bool(getattr(strategy, f, False))
+    out["pilot"] = {"on": is_pilot(strategy), "record_cap": pilot_cap(strategy) if is_pilot(strategy) else None,
+                    "spend_cap_cents": pilot_spend_cap(strategy) if is_pilot(strategy) else None,
+                    "hard_cap": PILOT_HARD_CAP}
     return out
 
 

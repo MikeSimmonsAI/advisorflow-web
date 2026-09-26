@@ -102,6 +102,12 @@ class EvoSenseStrategy(Base):
     provider_preferences = Column(Text, nullable=True)          # JSON {capability: [provider_key]}
     outreach_policy = Column(Text, nullable=True)               # JSON, see strategy.DEFAULT_OUTREACH
     nurture_policy = Column(Text, nullable=True)                # JSON, see strategy.DEFAULT_NURTURE
+    # PILOT / CONTROLLED mode: hard record cap, hard spend cap, no outreach,
+    # paid data off unless explicitly allowed, never scheduled automatically.
+    pilot_mode = Column(Boolean, nullable=False, default=False)
+    pilot_max_properties = Column(Integer, nullable=True)
+    pilot_max_spend_cents = Column(Integer, nullable=True)
+    pilot_allow_paid = Column(Boolean, nullable=False, default=False)
 
     is_test = Column(Boolean, nullable=False, default=False)
     created_by_id = Column(String, ForeignKey("users.id"), nullable=True)
@@ -137,6 +143,7 @@ class EvoSenseControl(Base):
     org_daily_budget_cents = Column(Integer, nullable=True)     # NULL = strategy budgets only
     org_monthly_budget_cents = Column(Integer, nullable=True)
     owner_touch_cap_days = Column(Integer, nullable=False, default=7)   # one touch per owner per N days
+    score_weights = Column(Text, nullable=True)                 # JSON {signal_type: points}; NULL = catalog
     last_hunt_at = Column(DateTime, nullable=True)
     last_hunt_status = Column(String, nullable=True)
     last_command_view_at = Column(DateTime, nullable=True)
@@ -168,6 +175,9 @@ class EvoSenseProviderConfig(Base):
     last_failure_reason = Column(String, nullable=True)
     calls_total = Column(Integer, nullable=False, default=0)
     successes_total = Column(Integer, nullable=False, default=0)
+    last_attempt_at = Column(DateTime, nullable=True)
+    last_record_count = Column(Integer, nullable=True)
+    last_verified_at = Column(DateTime, nullable=True)           # a probe or a run actually succeeded
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
     __table_args__ = (
@@ -243,6 +253,8 @@ class EvoSenseProperty(Base):
     next_action = Column(String, nullable=True)
     next_action_detail = Column(String, nullable=True)
     blocked_reason = Column(String, nullable=True)
+    archived_at = Column(DateTime, nullable=True)      # pilot rollback: hidden, never deleted
+    archive_reason = Column(String, nullable=True)
 
     fact_ranks = Column(Text, nullable=True)          # JSON {field: source rank}
     # conflicts the operator should see
@@ -292,6 +304,14 @@ class EvoSenseObservation(Base):
     match_keys = Column(Text, nullable=True)
     ledger_id = Column(String, nullable=True)
     is_test = Column(Boolean, nullable=False, default=False)
+    # Raw evidence, exactly as the source delivered it (never credentials).
+    raw_payload = Column(Text, nullable=True)
+    content_hash = Column(String, nullable=True)         # sha256 of raw_payload
+    adapter_version = Column(String, nullable=True)
+    source_updated_at = Column(DateTime, nullable=True)  # the source's own "as of"
+    source_url = Column(String, nullable=True)           # canonical public link
+    processing_status = Column(String, nullable=True)    # ingested|review|rejected
+    processing_error = Column(String, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("organization_id", "provider_key", "source_reference",

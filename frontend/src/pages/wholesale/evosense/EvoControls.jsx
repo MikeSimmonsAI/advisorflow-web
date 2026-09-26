@@ -53,18 +53,23 @@ function Kind({ kind }) {
 export default function EvoControls() {
   const [ctl, setCtl] = useState(null)
   const [prov, setProv] = useState(null)
+  const [reg, setReg] = useState(null)
+  const [weights, setWeights] = useState({})
   const [spent, setSpent] = useState(null)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
   const [busy, setBusy] = useState(false)
   const [budget, setBudget] = useState({ day: '', month: '', cap: '' })
-  const [tab, setTab] = useState(() => (typeof window !== 'undefined' && window.location.hash === '#budget' ? 'usage' : 'providers'))
+  const [tab, setTab] = useState(() => (typeof window !== 'undefined' && window.location.hash === '#budget' ? 'usage' : window.location.hash === '#sources' ? 'sources' : 'providers'))
 
   const load = useCallback(async () => {
     try {
-      const [c, p, cc] = await Promise.all([api.get('/wholesale/evosense/controls'), api.get('/wholesale/evosense/providers'),
-        api.get('/wholesale/evosense/command-center').catch(() => null)])
-      setCtl(c); setProv(p); setSpent(cc ? cc.spent : null)
+      const [c, p, cc, r] = await Promise.all([api.get('/wholesale/evosense/controls'), api.get('/wholesale/evosense/providers'),
+        api.get('/wholesale/evosense/command-center').catch(() => null),
+        api.get('/wholesale/evosense/sources').catch(() => null)])
+      setCtl(c); setProv(p); setSpent(cc ? cc.spent : null); setReg(r)
+      setWeights(Object.fromEntries(Object.entries({ ...(c.default_weights || {}), ...(c.score_weights || {}) })
+        .map(([k, v]) => [k, String(v)])))
       setBudget({ day: c.org_daily_budget_cents == null ? '' : String(c.org_daily_budget_cents / 100),
                   month: c.org_monthly_budget_cents == null ? '' : String(c.org_monthly_budget_cents / 100),
                   cap: String(c.owner_touch_cap_days) })
@@ -80,8 +85,28 @@ export default function EvoControls() {
   }
   async function provider(key, body) {
     setBusy(true); setError(null)
-    try { setProv(await api.patch('/wholesale/evosense/providers', { key, ...body })) }
-    catch (e) { setError(errText(e)) } finally { setBusy(false) }
+    try {
+      setProv(await api.patch('/wholesale/evosense/providers', { key, ...body }))
+      setReg(await api.get('/wholesale/evosense/sources'))
+    } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+  }
+  async function verify(key) {
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      const r = await api.post('/wholesale/evosense/sources/verify', { key })
+      setReg(r.registry)
+      if (r.ok) setNotice(`${key}: verified against the live source.`)
+      else setError(`${key}: ${r.code || 'failed'} — ${r.error || ''}`)
+    } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+  }
+  function saveWeights() {
+    const defaults = ctl.default_weights || {}
+    const changed = {}
+    Object.entries(weights).forEach(([k, v]) => {
+      const n = Number(v)
+      if (v !== '' && Number.isFinite(n) && n !== defaults[k]) changed[k] = Math.round(n)
+    })
+    patch({ score_weights: Object.keys(changed).length ? changed : null }, 'Scoring weights saved. Properties re-score on their next evaluation.')
   }
 
   if (!ctl || !prov) return <EvoApp world="acquisition">{error ? <Alert>{error}</Alert> : <PageSkeleton />}</EvoApp>
@@ -109,10 +134,63 @@ export default function EvoControls() {
 
       <TabBar label="Providers and controls" value={tab} onChange={setTab}
               items={[
+                { key: 'sources', label: 'Source Registry', count: reg ? reg.sources.filter((x) => x.state === 'HEALTHY').length + ' healthy' : null },
                 { key: 'providers', label: 'Service Providers', count: prov.providers.length },
                 { key: 'controls', label: 'Controls & Compliance', count: pausedCount ? `${pausedCount} paused` : null },
                 { key: 'usage', label: 'Usage & Costs' },
               ]} />
+
+      <div className="evo-stack" role="tabpanel" id="panel-sources" aria-labelledby="tab-sources" hidden={tab !== 'sources'}>
+        <Panel title="Source Registry" flush
+               hint="HEALTHY only after a real probe or run succeeded · free public records first · paid vendors are not purchased">
+          {!reg ? <p className="evo-muted" style={{ padding: '0 20px' }}>Loading sources…</p> : (
+            <div className="evo-table-wrap">
+              <table className="evo-table evo-table--cards">
+                <thead><tr><th scope="col">Source</th><th scope="col">Jurisdiction</th><th scope="col">Access</th>
+                  <th scope="col">State</th><th scope="col">Last verified</th><th scope="col"><span className="evo-sr">Use</span></th></tr></thead>
+                <tbody>
+                  {reg.sources.map((x) => (
+                    <tr key={x.key} className={x.state === 'FAILED' ? 'evo-provider is-failing' : 'evo-provider'}>
+                      <td className="is-lead" data-label="">
+                        <span className="evo-strong">{x.label}</span>
+                        <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>
+                          {x.source_type}{x.role ? ` · ${x.role}` : ''}{x.cost ? ` · ${x.cost}` : ''}
+                          {x.public_url ? <> · <a href={x.public_url} target="_blank" rel="noreferrer">publisher</a></> : null}
+                        </span>
+                        {x.terms_note ? <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>{x.terms_note}</span> : null}
+                      </td>
+                      <td data-label="Jurisdiction" className="evo-small">{x.jurisdiction || '—'}</td>
+                      <td data-label="Access" className="evo-small">{x.access_method || '—'}{x.refresh ? <><br /><span className="evo-muted">{x.refresh}</span></> : null}</td>
+                      <td data-label="State">
+                        <span className={`evo-status is-${x.state === 'HEALTHY' ? 'good' : ['NOT CONFIGURED', 'MANUAL ONLY'].includes(x.state) ? 'quiet' : 'attention'}`}
+                              style={x.state === 'FAILED' ? { color: 'var(--evo-danger-ink)' } : null}>{x.state}</span>
+                        <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>{x.why}</span>
+                      </td>
+                      <td data-label="Last verified" className="evo-small">
+                        {x.last_verified_at ? ago(x.last_verified_at) : <span className="evo-muted">never</span>}
+                        {x.last_record_count != null ? <><br /><span className="evo-muted">{x.last_record_count} record{x.last_record_count === 1 ? '' : 's'} last run</span></> : null}
+                      </td>
+                      <td data-label="" className="is-right">
+                        {x.connector_kind === 'real' ? (
+                          <span className="evo-chips">
+                            <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
+                                    onClick={() => provider(x.key, { enabled: !x.enabled })}>{x.enabled ? 'Disable' : 'Enable'}</button>
+                            {x.enabled ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
+                                                 onClick={() => verify(x.key)}>Verify</button> : null}
+                          </span>
+                        ) : <span className="evo-muted evo-small">{x.state === 'MANUAL ONLY' ? 'manual entry / CSV' : 'not purchased'}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="evo-muted evo-small" style={{ margin: 0, padding: '12px 20px 16px' }}>Public-record sources are read politely:
+            no logins, no CAPTCHAs, byte-range reads of published files, one request at a time. Every record keeps its raw
+            evidence, the adapter version and the source&apos;s own date.</p>
+        </Panel>
+      </div>
 
       <div className="evo-stack" role="tabpanel" id="panel-providers" aria-labelledby="tab-providers" hidden={tab !== 'providers'}>
         <div>
@@ -196,12 +274,32 @@ export default function EvoControls() {
           </div>
         </Panel>
 
+        <Panel title="Opportunity scoring weights" hint={`deterministic · ${ctl.score_version || ''}${ctl.score_weights ? ' · customised' : ' · defaults'} · admin only`}>
+          <div className="evo-form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+            {Object.keys(ctl.default_weights || {}).map((k) => (
+              <label key={k} className="evo-field" htmlFor={`w-${k}`}>
+                <span className="evo-field__label">{humanize(k.toLowerCase())}</span>
+                <input id={`w-${k}`} className="evo-input" inputMode="numeric" value={weights[k] ?? ''}
+                       onChange={(e) => setWeights({ ...weights, [k]: e.target.value })} />
+              </label>
+            ))}
+          </div>
+          <div style={{ marginTop: 12 }} className="evo-chips">
+            <button type="button" className="evo-btn evo-btn--primary" disabled={busy} onClick={saveWeights}>Save weights</button>
+            <button type="button" className="evo-btn evo-btn--ghost" disabled={busy}
+                    onClick={() => patch({ score_weights: null }, 'Weights reset to the defaults.')}>Reset to defaults</button>
+          </div>
+          <p className="evo-muted evo-small" style={{ margin: '10px 0 0' }}>Points each current signal adds (−30 to 30). Aging evidence counts half;
+            stale evidence counts nothing. A changed weight changes the score version, so older scores stay explainable. AI never sets a score.</p>
+        </Panel>
+
         <Panel title="Compliance guarantees" hint="enforced by the server, not by this screen">
           <ul className="evo-checklist">
             <li>An opted-out or suppressed owner is never contacted again — by any strategy, ever.</li>
             <li>Owners are contacted at most once every {ctl.owner_touch_cap_days} days, across every strategy.</li>
             <li>EvoSense never makes an offer, signs anything or moves money. It hands the conversation to you.</li>
             <li>Scores, budgets and do-not-contact decisions are deterministic rules; AI only reads replies.</li>
+            <li>A phone found in public records or by skip trace is never permission to text. Only a consent record under the Wholesale seller SMS program is.</li>
             <li>Provider credentials stay on the server and are never sent to a browser.</li>
           </ul>
         </Panel>

@@ -26,6 +26,8 @@ import {
 } from '../ds/ds'
 import '../ds/evo-pages.css'
 
+const FRESHNESS = { current: 'FRESH', aging: 'AGING', stale: 'STALE' }
+
 const FEEDBACK = [['GOOD_FIND', 'Good find'], ['HIGH_PRIORITY', 'High priority'], ['BAD_FIT', 'Bad fit'],
   ['WRONG_OWNER', 'Wrong owner'], ['BAD_CONTACT', 'Bad contact'],
   ['NOT_ACTUALLY_DISTRESSED', 'Not distressed'], ['IGNORE', 'Ignore']]
@@ -59,6 +61,12 @@ export default function EvoProperty() {
   const [nurtureDate, setNurtureDate] = useState('')
   const [explain, setExplain] = useState(null)
   const [promoteOpen, setPromoteOpen] = useState(false)
+  const [raw, setRaw] = useState(null)
+
+  async function showRaw(obsId) {
+    try { setRaw(await api.get(`/wholesale/evosense/properties/${propertyId}/observations/${obsId}/raw`)) }
+    catch (e) { setError(errText(e)) }
+  }
 
   const load = useCallback(async () => {
     try { setD(await api.get(`/wholesale/evosense/properties/${propertyId}`)); setError(null) }
@@ -327,8 +335,9 @@ export default function EvoProperty() {
                   <li key={s.signal_type} className={`evo-signal-item${s.freshness === 'stale' ? ' is-stale' : ''}`}>
                     <span className="evo-signal-item__name">{s.label}{s.value ? <span className="evo-muted" style={{ fontWeight: 400 }}> · {s.value}</span> : null}</span>
                     <span className="evo-chips">
-                      <Tag kind={s.freshness === 'fresh' ? 'live' : s.freshness === 'stale' ? 'danger' : undefined}>{s.freshness}</Tag>
-                      {s.derived ? <Tag>derived</Tag> : null}
+                      <Tag kind={s.freshness === 'current' ? 'live' : s.freshness === 'stale' ? 'danger' : undefined}>{FRESHNESS[s.freshness] || 'UNKNOWN'}</Tag>
+                      {s.family && s.family !== s.signal_type ? <Tag kind="info">{humanize(s.family.toLowerCase())}</Tag> : null}
+                      {s.derived ? <Tag kind="estimate">derived</Tag> : <Tag>record</Tag>}
                     </span>
                     <span className="evo-signal-item__meta">
                       {s.evidence.map((e) => [
@@ -337,8 +346,13 @@ export default function EvoProperty() {
                         e.observed_at ? shortDate(e.observed_at) : null,
                         e.confidence ? `${e.confidence}% confidence` : null,
                         e.provenance && e.provenance.rule ? e.provenance.rule : null,
+                        e.provenance && e.provenance.rule_version ? e.provenance.rule_version : null,
                       ].filter(Boolean).join(' · ')).join('  |  ')}
                     </span>
+                    {(s.evidence.find((e) => e.provenance && e.provenance.limitations) || {}).provenance ? (
+                      <span className="evo-signal-item__meta" style={{ fontStyle: 'italic' }}>
+                        Limitation: {s.evidence.find((e) => e.provenance && e.provenance.limitations).provenance.limitations}</span>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -389,6 +403,17 @@ export default function EvoProperty() {
                 {c.status !== 'active' ? <span className="evo-contact__meta" style={{ color: 'var(--evo-danger-ink)' }}>{humanize(c.status)} — {c.status_reason}</span> : null}
               </div>
             ))}
+            {d.sms_eligibility ? (
+              <div style={{ marginTop: 12 }} className="evo-small">
+                <span>SMS: </span>
+                <strong style={{ color: d.sms_eligibility.verdict.startsWith('ELIGIBLE') ? undefined : 'var(--evo-warning-ink)' }}>
+                  {d.sms_eligibility.verdict}</strong>
+                {d.sms_eligibility.phones.map((x) => (
+                  <div key={x.contact_id} className="evo-muted">{x.phone}: {x.eligible ? 'consent of record' : x.reasons.map((r) => humanize(r.toLowerCase())).join(', ')}</div>
+                ))}
+                <div className="evo-muted" style={{ marginTop: 4 }}>{d.sms_eligibility.rule}</div>
+              </div>
+            ) : null}
             {d.eligibility ? (
               <details style={{ marginTop: 12 }} open={!d.eligibility.eligible}>
                 <summary className="evo-small" style={{ cursor: 'pointer' }}>Outreach eligibility: <strong>{d.eligibility.eligible ? 'eligible' : 'not eligible'}</strong></summary>
@@ -407,11 +432,24 @@ export default function EvoProperty() {
               <dt>Conflicts</dt><dd style={{ color: d.conflicts.length ? 'var(--evo-warning-ink)' : undefined }}>{d.conflicts.length || 'none'}</dd>
             </dl>
             <div className="evo-divider" />
-            <Feed items={d.attribution.observations.map((o, i) => ({
-              key: i, tone: o.connector_kind === 'sandbox' ? 'attention' : 'good',
-              text: <>{o.provider} · {humanize(o.capability)}</>,
-              meta: `${o.connector_kind === 'sandbox' ? 'sandbox' : humanize(o.connector_kind)} · ${o.match} match · ${shortDate(o.at)}`,
+            <p className="evo-hero__label">Provenance — raw evidence kept</p>
+            <Feed items={(d.provenance || []).map((o) => ({
+              key: o.id, tone: o.connector_kind === 'sandbox' ? 'attention' : 'good',
+              text: <>{o.provider_label} · {humanize(o.capability.toLowerCase())}{' '}
+                {o.has_raw ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => showRaw(o.id)}>Raw record</button> : null}</>,
+              meta: [o.connector_label, o.match ? `${o.match} match` : null,
+                     `retrieved ${shortDate(o.retrieved_at)}`, o.source_updated_at ? `source as of ${shortDate(o.source_updated_at)}` : null,
+                     o.adapter_version, o.content_hash ? `sha256 ${o.content_hash.slice(0, 10)}…` : null,
+                     o.evidence && o.evidence.city_basis ? `city: ${o.evidence.city_basis}` : null].filter(Boolean).join(' · '),
             }))} empty="No provider observations." />
+            {d.lookups && d.lookups.length ? (
+              <details style={{ marginTop: 12 }}>
+                <summary className="evo-small" style={{ cursor: 'pointer' }}>Free public-record lookups ({d.lookups.length})</summary>
+                <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--evo-text-secondary)' }}>
+                  {d.lookups.map((x) => <li key={x.id}><strong>{x.governor}</strong> · {x.provider_label}{x.outcome && x.outcome !== 'skipped' ? ` → ${humanize(x.outcome)}` : ''} — {(x.reasons || [])[0]}</li>)}
+                </ul>
+              </details>
+            ) : null}
             {d.ledger.length ? (
               <>
                 <div className="evo-divider" />
@@ -428,7 +466,7 @@ export default function EvoProperty() {
               <details style={{ marginTop: 12 }}>
                 <summary className="evo-small" style={{ cursor: 'pointer' }}>Enrichment decisions ({d.enrichment.length})</summary>
                 <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--evo-text-secondary)' }}>
-                  {d.enrichment.map((x) => <li key={x.id}><strong>{humanize(x.decision)}</strong>{x.outcome && x.outcome !== 'skipped' ? ` → ${humanize(x.outcome)}` : ''} — {(x.reasons || [])[0]}</li>)}
+                  {d.enrichment.map((x) => <li key={x.id}><strong>{x.governor || humanize(x.decision)}</strong>{x.outcome && x.outcome !== 'skipped' ? ` → ${humanize(x.outcome)}` : ''} — {(x.reasons || [])[0]}</li>)}
                 </ul>
               </details>
             ) : null}
@@ -502,6 +540,24 @@ export default function EvoProperty() {
           <li>No offer is made — offers still go through Deal Operations' approval gates.</li>
           <li>EvoSense stops working this owner; the deal team takes over.</li>
         </ul>
+      </Drawer>
+
+      <Drawer open={!!raw} onClose={() => setRaw(null)} title="Raw source record"
+              sub={raw ? `${raw.provider} · ${raw.reference}` : ''}
+              footer={<button type="button" className="evo-btn evo-btn--ghost" onClick={() => setRaw(null)}>Close</button>}>
+        {raw ? (
+          <>
+            <dl className="evo-kv" style={{ fontSize: 12.5 }}>
+              <dt>Retrieved</dt><dd>{raw.retrieved_at ? new Date(raw.retrieved_at).toLocaleString() : '—'}</dd>
+              <dt>Source as of</dt><dd>{raw.source_updated_at ? shortDate(raw.source_updated_at) : 'not stated by the source'}</dd>
+              <dt>Adapter</dt><dd>{raw.adapter_version || '—'}</dd>
+              <dt>SHA-256</dt><dd style={{ wordBreak: 'break-all' }}>{raw.content_hash || '—'}</dd>
+              {raw.source_url ? <><dt>Publisher</dt><dd><a href={raw.source_url} target="_blank" rel="noreferrer">open</a></dd></> : null}
+            </dl>
+            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 11.5, maxHeight: 360, overflow: 'auto',
+                          background: 'var(--evo-surface-2, #f6f7f9)', padding: 10, borderRadius: 8 }}>{raw.raw || '(no raw payload recorded)'}</pre>
+          </>
+        ) : null}
       </Drawer>
     </EvoApp>
   )

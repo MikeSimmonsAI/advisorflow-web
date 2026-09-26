@@ -49,6 +49,7 @@ export function EvoStrategies() {
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [confirmArchive, setConfirmArchive] = useState(null)
+  const [notice, setNotice] = useState(null)
 
   const load = useCallback(async () => {
     // Archived strategies are fetched too, so every tab count is real; the
@@ -68,6 +69,15 @@ export function EvoStrategies() {
       await api.post(`/wholesale/evosense/strategies/${s.id}/${action}`, {})
       setConfirmArchive(null)
       await load()
+    } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+  }
+
+  async function hunt(s) {
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      const r = await api.post(`/wholesale/evosense/strategies/${s.id}/hunt?background=true`, {})
+      setNotice(`${s.name}: hunt started on the server. Results appear in the Discovery Inbox as they are ingested.`)
+      if (r) await load()
     } catch (e) { setError(errText(e)) } finally { setBusy(false) }
   }
 
@@ -95,6 +105,7 @@ export function EvoStrategies() {
               actions={<button type="button" className="evo-btn evo-btn--primary" onClick={() => navigate('/wholesale/evosense/strategies/new')}>
                 + New Strategy</button>} />
       <Alert>{error}</Alert>
+      <Alert kind="ok">{notice}</Alert>
       {!data ? <PageSkeleton /> : !shown.length && all.length ? (
         <Panel><Empty title="No strategies here">Nothing in this view. The other tabs hold the rest.</Empty></Panel>
       ) : !shown.length ? (
@@ -130,6 +141,7 @@ export function EvoStrategies() {
                   <span className="evo-chips" style={{ justifyContent: 'flex-end', flexShrink: 0 }}>
                     <Status status={s.status} />
                     {s.is_test ? <Tag kind="sandbox">Test</Tag> : null}
+                    {s.pilot_mode ? <Tag kind="info">Pilot · {s.pilot?.record_cap} max</Tag> : null}
                   </span>
                 </div>
 
@@ -158,7 +170,10 @@ export function EvoStrategies() {
                     <Link className="evo-btn evo-btn--primary evo-btn--sm" to={`/wholesale/evosense/strategies/${s.id}`}>Open strategy</Link>
                   ) : null}
                   {s.status === 'draft' ? <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy} onClick={() => act(s, 'activate')}>Activate</button> : null}
+                  {s.status === 'active' ? <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy} onClick={() => hunt(s)}>Run hunt</button> : null}
                   {s.status === 'active' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'pause')}>Pause</button> : null}
+                  {s.pilot_mode ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'pilot-archive')}>Roll back pilot</button> : null}
+                  {s.pilot_mode ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'pilot-restore')}>Restore pilot</button> : null}
                   {s.status === 'paused' ? <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy} onClick={() => act(s, 'resume')}>Resume</button> : null}
                   <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'clone')}>Clone</button>
                   {s.status !== 'archived' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => setConfirmArchive(s)}>Archive</button> : null}
@@ -190,6 +205,7 @@ const EMPTY = {
   outreach_policy: { auto_outreach: false, channels: ['sms'], cold_outreach_compliance_confirmed: false },
   nurture_policy: { allow_nurture: true, default_days: 60 },
   hunt_cadence: 'daily', hunt_interval_hours: 12,
+  pilot_mode: false, pilot_max_properties: 50, pilot_allow_paid: false, pilot_max_spend: '',
 }
 
 const toList = (s) => String(s || '').split(/[,\n;]/).map((x) => x.trim()).filter(Boolean)
@@ -205,6 +221,8 @@ function fromServer(s) {
     max_cost_per_property: dollars(s.max_cost_per_property_cents), approval_over: dollars(s.approval_over_cents),
     min_value: s.min_value ?? '', max_value: s.max_value ?? '', min_equity_pct: s.min_equity_pct ?? '',
     min_ownership_years: s.min_ownership_years ?? '', target_fee: s.target_fee ?? '',
+    pilot_mode: !!s.pilot_mode, pilot_max_properties: s.pilot_max_properties ?? 50,
+    pilot_allow_paid: !!s.pilot_allow_paid, pilot_max_spend: dollars(s.pilot_max_spend_cents),
   }
 }
 
@@ -222,7 +240,10 @@ function toServer(f) {
     approval_over_cents: toCents(f.approval_over), outreach_policy: f.outreach_policy, nurture_policy: f.nurture_policy,
     hunt_cadence: f.hunt_cadence || 'daily',
     hunt_interval_hours: f.hunt_cadence === 'interval' ? Number(f.hunt_interval_hours) || 12 : null,
+    pilot_mode: !!f.pilot_mode, pilot_max_properties: f.pilot_mode ? Number(f.pilot_max_properties) || 50 : f.pilot_max_properties,
+    pilot_allow_paid: !!f.pilot_allow_paid, pilot_max_spend_cents: toCents(f.pilot_max_spend),
   }
+  if (out.pilot_mode) out.hunt_cadence = 'manual'
   Object.keys(out).forEach((k) => { if (out[k] === '') out[k] = null })
   return out
 }
@@ -416,11 +437,25 @@ export function EvoStrategyBuilder() {
                 <NumIn id="sb-cadh" label="Every" suffix="hours" value={form.hunt_interval_hours} onChange={(v) => set('hunt_interval_hours', v)} />) : null}
             </div>
           </Step>
-          <Step n={8} q="How should eligible owners be worked?"
+          <Step n={8} q="Run it as a controlled pilot?"
+                hint="A pilot hunts only when you press Run hunt, stops at its record cap, never contacts anyone and buys no paid data unless you allow it.">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <Check checked={form.pilot_mode} onChange={(v) => set('pilot_mode', v)}>
+                PILOT / CONTROLLED mode</Check>
+            </div>
+            {form.pilot_mode ? (
+              <div className="evo-form-grid" style={{ marginTop: 12 }}>
+                <NumIn id="sb-pcap" label="Most properties per run (max 100)" value={form.pilot_max_properties} onChange={(v) => set('pilot_max_properties', v)} />
+                <Check checked={form.pilot_allow_paid} onChange={(v) => set('pilot_allow_paid', v)}>Allow paid lookups in this pilot</Check>
+                {form.pilot_allow_paid ? <NumIn id="sb-pspend" label="Pilot spend cap" prefix="$" value={form.pilot_max_spend} onChange={(v) => set('pilot_max_spend', v)} /> : null}
+              </div>
+            ) : null}
+          </Step>
+          <Step n={9} q="How should eligible owners be worked?"
                 hint="DNC, suppression and frequency caps always apply and cannot be switched off here.">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <Check checked={form.outreach_policy.auto_outreach} onChange={(v) => setPol('outreach_policy', 'auto_outreach', v)}>
-                Start outreach automatically when an owner passes every check</Check>
+              <Check checked={form.outreach_policy.auto_outreach && !form.pilot_mode} onChange={(v) => setPol('outreach_policy', 'auto_outreach', v)}>
+                Start outreach automatically when an owner passes every check{form.pilot_mode ? ' (off in a pilot)' : ''}</Check>
               <Check checked={form.outreach_policy.cold_outreach_compliance_confirmed} onChange={(v) => setPol('outreach_policy', 'cold_outreach_compliance_confirmed', v)}>
                 My organization has confirmed its cold-SMS compliance for this strategy
                 <span className="evo-muted evo-small" style={{ display: 'block' }}>Without it, real (non-sandbox) owners are never texted.</span></Check>

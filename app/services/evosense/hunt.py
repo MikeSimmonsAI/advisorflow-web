@@ -138,34 +138,96 @@ def _finish_failed(db, org_id, strategy, run, ctl, counts, error, user):
     return run
 
 
-def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_properties, enrich):
-    q = _query(strategy)
-    touched: Dict[str, EvoSenseProperty] = {}
+def _discovery_routes(db, org_id):
+    """(capability, provider, cfg) for every connected DISCOVERY source. A
+    public-record LOOKUP source (TAD, geocoder, code cases) is never asked to
+    discover; it is called per property in the lookup stage."""
+    out, seen = [], set()
     for cap in DISCOVERY:
         for provider, cfg, _cost in PV.route(db, org_id, cap):
-            try:
-                records = provider.search(cap, q)
-                PV.record_success(cfg)
-            except Exception as exc:  # noqa: BLE001 - one failing source never ends the hunt
-                PV.record_failure(cfg, "%s: %s" % (type(exc).__name__, str(exc)[:160]))
-                counts["provider_errors"] += 1
+            if not getattr(provider, "discovery", True):
                 continue
-            for rec in records:
-                if len(touched) >= max_properties:
-                    break
-                counts["observed"] += 1
+            if (provider.key, cap) in seen:
+                continue
+            seen.add((provider.key, cap))
+            out.append((cap, provider, cfg))
+    return out
+
+
+def _source_failed(db, org_id, strategy, provider, cfg, exc, counts, user):
+    from app.services.evosense.sources import base as SRC
+    if isinstance(exc, SRC.SourceError):
+        code, msg = exc.code, exc.message
+        PV.record_failure(cfg, "%s: %s" % (code, msg[:200]),
+                          rate_limited_for=exc.retry_after if code == SRC.RATE_LIMITED else None)
+    else:
+        code, msg = type(exc).__name__, str(exc)[:200]
+        PV.record_failure(cfg, "%s: %s" % (code, msg))
+    counts["provider_errors"] += 1
+    counts.setdefault("source_errors", []).append({"provider": provider.key, "code": code,
+                                                   "message": msg[:200]})
+    C.log_event(db, org_id, "provider.failed", strategy_id=strategy.id, is_test=strategy.is_test,
+                actor_type=C.ACTOR_USER if user else C.ACTOR_AUTOMATION,
+                summary="%s failed — %s: %s" % (provider.label, code, msg[:160]))
+
+
+def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_properties, enrich):
+    q = _query(strategy)
+    pilot = ST.is_pilot(strategy)
+    if pilot:
+        max_properties = min(max_properties, ST.pilot_cap(strategy))
+        counts["pilot"] = {"record_cap": max_properties, "spend_cap_cents": ST.pilot_spend_cap(strategy),
+                           "outreach": "off", "paid_data": "on" if ST.pilot_spend_cap(strategy) else "off"}
+    touched: Dict[str, EvoSenseProperty] = {}
+    routes = _discovery_routes(db, org_id)
+    real = [r for r in routes if r[1].connector_kind == C.REAL]
+    share = max(1, -(-max_properties // max(1, len(real))))      # ceil: a fair share per real source
+    counts["sources"] = {}
+    for cap, provider, cfg in routes:
+        if len(touched) >= max_properties:
+            break
+        cfg.last_attempt_at = C.now()
+        pq = dict(q, limit=min(share, max_properties - len(touched)))
+        try:
+            records = provider.search(cap, pq)
+        except Exception as exc:  # noqa: BLE001 - one failing source never ends the hunt
+            _source_failed(db, org_id, strategy, provider, cfg, exc, counts, user)
+            db.commit()
+            continue
+        PV.record_success(cfg)
+        cfg.last_record_count = len(records)
+        if provider.connector_kind == C.REAL:
+            cfg.last_verified_at = C.now()
+        stats = getattr(records, "stats", None)
+        if stats is not None:
+            counts["sources"][provider.key] = {"records": len(records), **{k: v for k, v in stats.items()
+                                                                          if isinstance(v, (int, float, str))}}
+        for rec in records:
+            if len(touched) >= max_properties:
+                break
+            counts["observed"] += 1
+            try:
                 outcome, prop = IN.ingest(db, org_id, provider, cap, rec, strategy_id=strategy.id,
                                           run_id=run.id, is_test=strategy.is_test)
-                counts[outcome] = counts.get(outcome, 0) + 1
-                if prop is not None:
-                    touched[prop.id] = prop
+            except Exception as exc:  # noqa: BLE001 - one malformed record is recorded, not fatal
+                counts["rejected"] = counts.get("rejected", 0) + 1
+                C.log.warning("evosense record rejected (%s): %s", provider.key, exc)
+                continue
+            counts[outcome] = counts.get(outcome, 0) + 1
+            if prop is not None:
+                touched[prop.id] = prop
         db.flush()
+        db.commit()
+
+    if touched:
+        free_lookups(db, org_id, strategy, run, list(touched.values()), counts)
 
     for prop in touched.values():
         if prop.best_strategy_id and prop.best_strategy_id != strategy.id:
             other = db.query(EvoSenseStrategy).filter(EvoSenseStrategy.id == prop.best_strategy_id).first()
             if other is not None and other.status == "active":
-                mine = SC.property_opportunity(prop, EV.stacked_signals(db, prop), strategy)["value"] or 0
+                mine = SC.property_opportunity(prop, EV.stacked_signals(db, prop), strategy,
+                                              weights=EV.score_weights(db, org_id))["value"] or 0
                 if mine <= (prop.opportunity_score or 0):
                     continue
         prop.best_strategy_id = strategy.id
@@ -185,7 +247,8 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
                 # a real no-match / failure waits out its own retry window.
                 last = (db.query(EvoSenseEnrichmentDecision)
                         .filter(EvoSenseEnrichmentDecision.organization_id == org_id,
-                                EvoSenseEnrichmentDecision.property_id == prop.id)
+                                EvoSenseEnrichmentDecision.property_id == prop.id,
+                                EvoSenseEnrichmentDecision.capability == C.CONTACT_ENRICHMENT)
                         .order_by(EvoSenseEnrichmentDecision.created_at.desc()).first())
                 if last is None or last.outcome != "skipped":
                     continue
@@ -201,7 +264,7 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
 
     counts["nurture_due"] = CV.resume_due(db, org_id)
     pol = ST.outreach_policy(strategy)
-    if pol.get("auto_outreach"):
+    if pol.get("auto_outreach") and not pilot:
         for prop in sorted(mine, key=lambda p: -(p.opportunity_score or 0)):
             if prop.status != C.S_READY:
                 continue
@@ -209,6 +272,137 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             counts["outreach_started" if res.get("started") else "outreach_blocked"] += 1
             db.commit()
     return finish("partial" if counts["provider_errors"] else "succeeded")
+
+
+# ── free public-record lookups (the cost governor's QUEUE_FREE_LOOKUP lane) ──
+
+LOOKUP_ORDER = (C.ASSESSOR, C.GEOCODING, C.CODE_VIOLATION)
+
+
+def _target(prop) -> Dict[str, Any]:
+    return {"id": prop.id, "street_address": prop.street_address, "unit": prop.unit,
+            "city": prop.city, "state": prop.state, "zip_code": prop.zip_code,
+            "county": prop.county, "parcel_apn": prop.parcel_apn}
+
+
+def _lookup_decision(db, prop, strategy, provider, cap, decision, reason, outcome=None):
+    from app.models.evosense_models import EvoSenseEnrichmentDecision
+    row = EvoSenseEnrichmentDecision(
+        organization_id=prop.organization_id, property_id=prop.id, strategy_id=strategy.id,
+        capability=cap, decision=decision, reasons=C.jdump([reason]), provider_key=provider.key,
+        estimated_cost_cents=0, outcome=outcome, decided_by="engine")
+    db.add(row)
+    return row
+
+
+def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], counts) -> None:
+    """Ask each enabled FREE public-record lookup source about each property it
+    covers, recording one governor decision per (property, source):
+
+        SKIP_FRESH_DATA       this source answered for this property recently
+        SKIP_PROVIDER_DOWN    the source is enabled but degraded / rate limited / failing
+        QUEUE_FREE_LOOKUP     looked up now ($0) -> outcome found | no_match | provider_failed
+
+    Paid sources never run here. Results go through the same ingest as any
+    record, so every fact keeps its own observation and raw evidence."""
+    from app.models.evosense_models import EvoSenseObservation
+    from app.services.evosense.sources import base as SRC
+    counts.setdefault("lookups", {})
+    for cap in LOOKUP_ORDER:
+        for key, provider in PV.PROVIDERS.items():
+            if not isinstance(provider, PV.PublicRecordSource) or provider.lookup_capability != cap:
+                continue
+            if provider.costs:
+                continue                                  # never a paid call in this lane
+            cfg = PV.config(db, org_id, key)
+            if not cfg.enabled:
+                continue                                  # NOT CONFIGURED: nothing to decide
+            tally = counts["lookups"].setdefault(key, {"queued": 0, "found": 0, "no_match": 0,
+                                                       "skipped_fresh": 0, "skipped_down": 0,
+                                                       "failed": 0})
+            applicable = [p for p in props if provider.applies(_target(p))]
+            if not applicable:
+                continue
+            health = PV.health_state(provider, cfg)
+            if health != C.H_CONNECTED:
+                for p in applicable:
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_SKIP_PROVIDER_DOWN,
+                                     "%s is %s; not called." % (provider.label, health.replace("_", " ").lower()),
+                                     outcome="skipped")
+                    tally["skipped_down"] += 1
+                db.commit()
+                continue
+            fresh_after = C.now() - timedelta(days=provider.freshness_days)
+            queued = []
+            for p in applicable:
+                recent = (db.query(EvoSenseObservation.id)
+                          .filter(EvoSenseObservation.organization_id == org_id,
+                                  EvoSenseObservation.property_id == p.id,
+                                  EvoSenseObservation.provider_key == key,
+                                  EvoSenseObservation.observed_at >= fresh_after).first())
+                if recent is not None:
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_SKIP_FRESH_DATA,
+                                     "%s already answered within %s days." % (provider.label, provider.freshness_days),
+                                     outcome="skipped")
+                    tally["skipped_fresh"] += 1
+                else:
+                    queued.append(p)
+            if not queued:
+                db.commit()
+                continue
+            cfg.last_attempt_at = C.now()
+            by_id = {p.id: p for p in queued}
+            try:
+                res = provider.lookup_many([_target(p) for p in queued])
+            except Exception as exc:  # noqa: BLE001 - systemic source failure: recorded per property
+                _source_failed(db, org_id, strategy, provider, cfg, exc, counts, None)
+                code = exc.code if isinstance(exc, SRC.SourceError) else type(exc).__name__
+                for p in queued:
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
+                                     "Free lookup failed: %s. UNKNOWN is not NO — nothing was concluded." % code,
+                                     outcome="provider_failed")
+                    tally["failed"] += 1
+                db.commit()
+                continue
+            PV.record_success(cfg)
+            cfg.last_verified_at = C.now()
+            found = 0
+            for pid, p in by_id.items():
+                tally["queued"] += 1
+                err = res.get("errors", {}).get(pid)
+                if err is not None:
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
+                                     "Free lookup failed for this property: %s" % getattr(err, "code", err),
+                                     outcome="provider_failed")
+                    tally["failed"] += 1
+                    continue
+                rec = res.get("results", {}).get(pid)
+                if not rec:
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
+                                     "%s has no record for this property (not the same as 'none exists')."
+                                     % provider.label, outcome="no_match")
+                    tally["no_match"] += 1
+                    continue
+                try:
+                    outcome, merged = IN.ingest(db, org_id, provider, cap, rec, strategy_id=strategy.id,
+                                                run_id=run.id, is_test=strategy.is_test)
+                except Exception as exc:  # noqa: BLE001
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
+                                     "Record could not be ingested: %s" % str(exc)[:160],
+                                     outcome="provider_failed")
+                    tally["failed"] += 1
+                    continue
+                if outcome == "review":
+                    _lookup_decision(db, p, strategy, provider, cap, C.L_MANUAL_REVIEW,
+                                     "%s answered, but its record might describe a different property; "
+                                     "it waits in identity review." % provider.label, outcome="review")
+                    continue
+                _lookup_decision(db, p, strategy, provider, cap, C.L_QUEUE_FREE,
+                                 "%s answered at no cost (%s)." % (provider.label, outcome), outcome="found")
+                tally["found"] += 1
+                found += 1
+            cfg.last_record_count = found
+            db.commit()
 
 
 def run_all(db, *, trigger: str = "schedule", org_id: Optional[str] = None) -> List[EvoSenseRun]:
@@ -319,3 +513,81 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
                 % (counts["rows"], filename, counts["created"], counts["merged"], counts["review"],
                    counts["rejected"]), details=counts)
     return {"counts": counts, "rejected": rejected[:50]}
+
+
+# ── background runs and pilot rollback ─────────────────────────────────────
+
+def start_background(org_id: str, strategy_id: str, *, user_id: Optional[str] = None,
+                     trigger: str = "manual", session_factory=None) -> bool:
+    """Run one hunt on a worker thread with its own session, so a public-record
+    pilot (tens of seconds to minutes of downloads) never holds a web request.
+    Progress and the result are the run row + events; the strategy's hunt lock
+    still guarantees one hunt at a time."""
+    import threading
+
+    def work():
+        if session_factory is None:
+            from app.deps import SessionLocal as factory
+        else:
+            factory = session_factory
+        db = factory()
+        try:
+            s = db.query(EvoSenseStrategy).filter(EvoSenseStrategy.id == strategy_id,
+                                                  EvoSenseStrategy.organization_id == org_id).first()
+            if s is None:
+                return
+            user = None
+            if user_id:
+                from app.models.models import User
+                user = db.query(User).filter(User.id == user_id).first()
+            run_strategy(db, org_id, s, trigger=trigger, user=user)
+        except Exception:  # noqa: BLE001 - the run row already records failures
+            db.rollback()
+            C.log.exception("evosense background hunt crashed (strategy %s)", strategy_id)
+        finally:
+            db.close()
+
+    t = threading.Thread(target=work, name="evosense-hunt-%s" % strategy_id[:8], daemon=True)
+    t.start()
+    return True
+
+
+def archive_pilot(db, org_id: str, strategy: EvoSenseStrategy, *, user, reason: str = None) -> Dict[str, Any]:
+    """EASY ROLLBACK. Hide every property this strategy discovered that nobody
+    has promoted or is talking to. Nothing is deleted: observations, raw
+    evidence, signals, scores and decisions stay, and the archive is reversible."""
+    from app.models.evosense_models import EvoSenseEngagement
+    live = {pid for (pid,) in db.query(EvoSenseEngagement.property_id)
+            .filter(EvoSenseEngagement.organization_id == org_id).all()}
+    rows = (db.query(EvoSenseProperty)
+            .filter(EvoSenseProperty.organization_id == org_id,
+                    EvoSenseProperty.first_strategy_id == strategy.id,
+                    EvoSenseProperty.archived_at.is_(None)).all())
+    archived, kept = 0, 0
+    why = (reason or "Pilot rolled back")[:200]
+    for p in rows:
+        if p.promoted_deal_id or p.id in live:
+            kept += 1
+            continue
+        p.archived_at = C.now()
+        p.archive_reason = why
+        archived += 1
+    C.log_event(db, org_id, "pilot.archived", strategy_id=strategy.id, user=user,
+                actor_type=C.ACTOR_USER, is_test=strategy.is_test,
+                summary="Pilot rollback: %s properties archived, %s kept (promoted or in conversation)"
+                % (archived, kept), details={"archived": archived, "kept": kept, "reason": why})
+    return {"archived": archived, "kept": kept}
+
+
+def unarchive_pilot(db, org_id: str, strategy: EvoSenseStrategy, *, user) -> Dict[str, Any]:
+    rows = (db.query(EvoSenseProperty)
+            .filter(EvoSenseProperty.organization_id == org_id,
+                    EvoSenseProperty.first_strategy_id == strategy.id,
+                    EvoSenseProperty.archived_at.isnot(None)).all())
+    for p in rows:
+        p.archived_at = None
+        p.archive_reason = None
+    C.log_event(db, org_id, "pilot.restored", strategy_id=strategy.id, user=user,
+                actor_type=C.ACTOR_USER, is_test=strategy.is_test,
+                summary="Pilot restored: %s properties back in the inbox" % len(rows))
+    return {"restored": len(rows)}

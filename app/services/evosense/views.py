@@ -49,7 +49,10 @@ def controls_payload(ctl) -> Dict[str, Any]:
                                          "paused_ai_replies", "org_daily_budget_cents",
                                          "org_monthly_budget_cents", "owner_touch_cap_days",
                                          "last_hunt_status")} | {
-        "last_hunt_at": _iso(ctl.last_hunt_at)}
+        "last_hunt_at": _iso(ctl.last_hunt_at),
+        "score_weights": C.jload(getattr(ctl, "score_weights", None), None),
+        "default_weights": {k: v["points"] for k, v in SIG.CATALOG.items()},
+        "score_version": SC.PO_VERSION}
 
 
 def sandbox_state(db, org_id) -> Dict[str, Any]:
@@ -57,8 +60,10 @@ def sandbox_state(db, org_id) -> Dict[str, Any]:
     test_props = (db.query(func.count(EvoSenseProperty.id))
                   .filter(EvoSenseProperty.organization_id == org_id,
                           EvoSenseProperty.is_test.is_(True)).scalar() or 0)
+    real = [r["key"] for r in PV.source_registry(db, org_id)["sources"]
+            if r["connector_kind"] == C.REAL and r["state"] == PV.REG_HEALTHY]
     return {"sandbox_providers_enabled": sandbox_on, "sandbox_properties": int(test_props),
-            "real_connectors": [], "banner": (
+            "real_connectors": real, "banner": (
                 "SANDBOX — every discovered property, owner and contact on this screen is synthetic "
                 "test data from sandbox adapters. No real vendor is connected; nothing is sent."
                 if (sandbox_on or test_props) else None)}
@@ -81,6 +86,7 @@ def spend(db, org_id) -> Dict[str, Any]:
     this_month = B.spent(db, org_id, month)
     found = (db.query(func.count(EvoSenseEnrichmentDecision.id))
              .filter(EvoSenseEnrichmentDecision.organization_id == org_id,
+                     EvoSenseEnrichmentDecision.capability == C.CONTACT_ENRICHMENT,
                      EvoSenseEnrichmentDecision.outcome == "found").scalar() or 0)
     handoffs = (db.query(func.count(EvoSenseHandoff.id))
                 .filter(EvoSenseHandoff.organization_id == org_id).scalar() or 0)
@@ -123,6 +129,7 @@ def command_center(db, org_id: str, *, hours: int = 24) -> Dict[str, Any]:
     dec = (db.query(EvoSenseEnrichmentDecision.decision, EvoSenseEnrichmentDecision.outcome,
                     func.count(EvoSenseEnrichmentDecision.id))
            .filter(EvoSenseEnrichmentDecision.organization_id == org_id,
+                   EvoSenseEnrichmentDecision.capability == C.CONTACT_ENRICHMENT,
                    EvoSenseEnrichmentDecision.created_at >= since)
            .group_by(EvoSenseEnrichmentDecision.decision, EvoSenseEnrichmentDecision.outcome).all())
     dec_budget = sum(n for d, o, n in dec if d == C.D_BUDGET)
@@ -144,6 +151,7 @@ def command_center(db, org_id: str, *, hours: int = 24) -> Dict[str, Any]:
     }
     top = (db.query(EvoSenseProperty)
            .filter(EvoSenseProperty.organization_id == org_id,
+                   EvoSenseProperty.archived_at.is_(None),
                    EvoSenseProperty.status.in_((C.S_NEEDS_YOU, C.S_READY, C.S_HIGH, C.S_CONTACT_FOUND,
                                                 C.S_OUTREACH, C.S_RESPONDED, C.S_WAITING_DATA,
                                                 C.S_BUDGET_BLOCKED)))
@@ -242,6 +250,7 @@ def command_center(db, org_id: str, *, hours: int = 24) -> Dict[str, Any]:
         "next": nxt,
         "buckets": [{"key": k, "label": lbl, "count": buckets.get(k, 0)} for k, lbl in C.BUCKETS],
         "strategies": [{"id": s.id, "name": s.name, "is_test": s.is_test,
+                        "pilot": bool(getattr(s, "pilot_mode", False)),
                         "last_hunt_at": _iso(s.last_hunt_at)} for s in active],
     }
 
@@ -336,7 +345,7 @@ def _recent_activity(db, org_id: str, limit: int = 8) -> List[Dict[str, Any]]:
 
 def bucket_counts(db, org_id: str, strategy_id: Optional[str] = None) -> Dict[str, int]:
     q = db.query(EvoSenseProperty.status, func.count(EvoSenseProperty.id)).filter(
-        EvoSenseProperty.organization_id == org_id)
+        EvoSenseProperty.organization_id == org_id, EvoSenseProperty.archived_at.is_(None))
     if strategy_id:
         q = q.filter(EvoSenseProperty.best_strategy_id == strategy_id)
     return {s: int(n) for s, n in q.group_by(EvoSenseProperty.status).all()}
@@ -354,7 +363,10 @@ def row(p, signals: Optional[List[str]] = None, strategy_name: Optional[str] = N
             "has_conflicts": bool(p.has_conflicts), "identity_status": p.identity_status,
             "is_test": bool(p.is_test), "strategy_id": p.best_strategy_id,
             "strategy_name": strategy_name, "discovered_at": _iso(p.discovered_at),
-            "promoted_deal_id": p.promoted_deal_id}
+            "promoted_deal_id": p.promoted_deal_id, "parcel_apn": p.parcel_apn,
+            "last_observed_at": _iso(p.last_observed_at),
+            "archived_at": _iso(getattr(p, "archived_at", None)),
+            "archive_reason": getattr(p, "archive_reason", None)}
 
 
 SORTS = {"opportunity": (EvoSenseProperty.opportunity_score.desc().nullslast(),),
@@ -366,9 +378,23 @@ SORTS = {"opportunity": (EvoSenseProperty.opportunity_score.desc().nullslast(),)
 
 def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optional[str] = None,
           q: Optional[str] = None, signal: Optional[str] = None, sort: str = "opportunity",
-          limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+          limit: int = 50, offset: int = 0, county: Optional[str] = None,
+          min_score: Optional[int] = None, source: Optional[str] = None,
+          archived: bool = False) -> Dict[str, Any]:
     limit = max(1, min(int(limit or 50), 200))
     base = db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id)
+    # A rolled-back pilot is hidden, never deleted; "archived" shows only it.
+    base = base.filter(EvoSenseProperty.archived_at.isnot(None) if archived
+                       else EvoSenseProperty.archived_at.is_(None))
+    if county:
+        base = base.filter(func.lower(EvoSenseProperty.county) == county.strip().lower().replace(" county", ""))
+    if min_score is not None:
+        base = base.filter(EvoSenseProperty.opportunity_score >= int(min_score))
+    if source:
+        osub = (db.query(EvoSenseObservation.property_id)
+                .filter(EvoSenseObservation.organization_id == org_id,
+                        EvoSenseObservation.provider_key == source))
+        base = base.filter(EvoSenseProperty.id.in_(osub))
     if strategy_id:
         base = base.filter(EvoSenseProperty.best_strategy_id == strategy_id)
     if q:
@@ -404,6 +430,11 @@ def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optiona
                           names.get(p.best_strategy_id)) for p in items],
             "strategies": [{"id": k, "name": v} for k, v in names.items()],
             "signal_types": [{"key": k, "label": v["label"]} for k, v in SIG.CATALOG.items()],
+            "counties": sorted({c for (c,) in db.query(EvoSenseProperty.county.distinct())
+                                .filter(EvoSenseProperty.organization_id == org_id).all() if c}),
+            "sources": sorted({k for (k,) in db.query(EvoSenseObservation.provider_key.distinct())
+                               .filter(EvoSenseObservation.organization_id == org_id).all() if k}),
+            "archived": bool(archived),
             "sandbox": sandbox_state(db, org_id)}
 
 
@@ -481,7 +512,7 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
     decisions = (db.query(EvoSenseEnrichmentDecision)
                  .filter(EvoSenseEnrichmentDecision.organization_id == org_id,
                          EvoSenseEnrichmentDecision.property_id == prop.id)
-                 .order_by(EvoSenseEnrichmentDecision.created_at.desc()).limit(20).all())
+                 .order_by(EvoSenseEnrichmentDecision.created_at.desc()).limit(40).all())
     ledger = (db.query(EvoSenseCostEntry)
               .filter(EvoSenseCostEntry.organization_id == org_id, EvoSenseCostEntry.property_id == prop.id)
               .order_by(EvoSenseCostEntry.created_at.asc()).all())
@@ -551,8 +582,33 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
         "contacts": contacts,
         "eligibility": elig,
         "enrichment": [{"id": d.id, "decision": d.decision, "reasons": C.jload(d.reasons, []),
+                        "governor": C.GOVERNOR_LABEL.get(d.decision, d.decision),
+                        "capability": d.capability,
                         "provider": d.provider_key, "estimated_cost_cents": d.estimated_cost_cents,
-                        "outcome": d.outcome, "by": d.decided_by, "at": _iso(d.created_at)} for d in decisions],
+                        "outcome": d.outcome, "by": d.decided_by, "at": _iso(d.created_at)}
+                       for d in decisions if (d.capability or C.CONTACT_ENRICHMENT) == C.CONTACT_ENRICHMENT],
+        "lookups": [{"id": d.id, "decision": d.decision, "governor": C.GOVERNOR_LABEL.get(d.decision, d.decision),
+                     "capability": d.capability, "reasons": C.jload(d.reasons, []),
+                     "provider": d.provider_key,
+                     "provider_label": PV.PROVIDERS[d.provider_key].label if d.provider_key in PV.PROVIDERS else d.provider_key,
+                     "cost_cents": d.estimated_cost_cents or 0, "outcome": d.outcome, "at": _iso(d.created_at)}
+                    for d in decisions if (d.capability or C.CONTACT_ENRICHMENT) != C.CONTACT_ENRICHMENT],
+        "sms_eligibility": sms_eligibility(db, org_id, prop, contacts),
+        "provenance": [{"id": o.id, "provider": o.provider_key,
+                        "provider_label": PV.PROVIDERS[o.provider_key].label if o.provider_key in PV.PROVIDERS else o.provider_key,
+                        "connector_kind": o.connector_kind,
+                        "connector_label": C.CONNECTOR_LABELS.get(o.connector_kind, o.connector_kind),
+                        "capability": o.capability, "reference": o.source_reference,
+                        "retrieved_at": _iso(o.observed_at), "last_seen_at": _iso(o.last_seen_at),
+                        "source_updated_at": _iso(getattr(o, "source_updated_at", None)),
+                        "source_url": getattr(o, "source_url", None),
+                        "adapter_version": getattr(o, "adapter_version", None),
+                        "content_hash": getattr(o, "content_hash", None),
+                        "has_raw": bool(getattr(o, "raw_payload", None)),
+                        "processing": getattr(o, "processing_status", None),
+                        "error": getattr(o, "processing_error", None),
+                        "run_id": o.run_id, "match": o.match_type,
+                        "evidence": (C.jload(o.payload, {}) or {}).get("evidence")} for o in obs],
         "ledger": [{"id": e.id, "provider": e.provider_key, "connector_kind": e.connector_kind,
                     "capability": e.capability, "operation": e.operation, "cents": e.total_cents,
                     "status": e.status, "at": _iso(e.created_at)} for e in ledger],
@@ -582,6 +638,32 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
                       "at": _iso(e.created_at)} for e in events],
         "feedback_kinds": list(C.FEEDBACK_KINDS),
     }
+
+
+def sms_eligibility(db, org_id: str, prop, contacts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """FOUND PHONE != SMS CONSENT. The Wholesale seller-SMS gate is the only
+    authority; this shows its verdict for every phone on the property. A
+    property with no phone reads UNKNOWN, never eligible."""
+    from app.services import wholesale_sms as WS
+    phones = [c for c in contacts if c.get("kind") == "phone"]
+    rows = []
+    for c in phones:
+        try:
+            res = WS.check_eligibility(db, org_id, c["value"])
+            rows.append({"contact_id": c["id"], "phone": c["value"], "eligible": bool(res["eligible"]),
+                         "reasons": res["reasons"], "consent_id": res.get("consent_id")})
+        except Exception as exc:  # noqa: BLE001 - unknown means not eligible
+            rows.append({"contact_id": c["id"], "phone": c["value"], "eligible": False,
+                         "reasons": ["CHECK_FAILED: %s" % type(exc).__name__]})
+    if not rows:
+        verdict = "UNKNOWN — no phone on file"
+    elif any(r["eligible"] for r in rows):
+        verdict = "ELIGIBLE (consent of record)"
+    else:
+        verdict = "NOT ELIGIBLE"
+    return {"verdict": verdict, "phones": rows, "program": WS.PROGRAM,
+            "rule": "A phone found in public records or by skip trace is never permission to text. "
+                    "Only a consent record under the Wholesale seller SMS program is."}
 
 
 def strategy_metrics(db, org_id: str, strategy: EvoSenseStrategy) -> Dict[str, Any]:

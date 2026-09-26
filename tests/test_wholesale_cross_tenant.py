@@ -175,6 +175,11 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
         "es_contact_id": db_session.query(EvoSenseContactPoint).filter(
             EvoSenseContactPoint.organization_id == sample_org.id).first().id,
     }
+    # DFW acquisition: raw source evidence behind one of A's observations.
+    from app.models.evosense_models import EvoSenseObservation
+    es_ids["es_observation_id"] = db_session.query(EvoSenseObservation).filter(
+        EvoSenseObservation.organization_id == sample_org.id,
+        EvoSenseObservation.property_id == es_prop.id).first().id
     # Phase 7.1: a real open routing review of A's (an inbound SMS that could
     # belong to two of A's conversations), so its resolve route is attacked
     # against a row that exists.
@@ -370,6 +375,10 @@ def evosense_attacks(ids):
         ("post", "%s/strategies/%s/pause" % (base, es), None),
         ("post", "%s/strategies/%s/resume" % (base, es), None),
         ("post", "%s/strategies/%s/archive" % (base, es), None),
+        # DFW acquisition: raw evidence, and the pilot rollback / restore.
+        ("get", "%s/properties/%s/observations/%s/raw" % (base, ep, ids["es_observation_id"]), None),
+        ("post", "%s/strategies/%s/pilot-archive" % (base, es), None),
+        ("post", "%s/strategies/%s/pilot-restore" % (base, es), None),
     ]
 
 

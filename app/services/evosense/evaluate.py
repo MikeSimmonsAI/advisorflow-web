@@ -26,6 +26,13 @@ def strategy_for(db, prop) -> Optional[EvoSenseStrategy]:
                     EvoSenseStrategy.organization_id == prop.organization_id).first())
 
 
+def score_weights(db, org_id: str):
+    """The organization's configured signal weights (None = the catalog's)."""
+    from app.models.evosense_models import EvoSenseControl
+    row = db.query(EvoSenseControl).filter(EvoSenseControl.organization_id == org_id).first()
+    return C.jload(getattr(row, "score_weights", None), None) if row is not None else None
+
+
 def stacked_signals(db, prop):
     rows = (db.query(EvoSenseSignal)
             .filter(EvoSenseSignal.organization_id == prop.organization_id,
@@ -42,7 +49,7 @@ def rescore(db, prop: EvoSenseProperty, strategy=None) -> Dict[str, Any]:
     SIG.derive(db, prop, owner)
     db.flush()
     stacked = stacked_signals(db, prop)
-    po = SC.property_opportunity(prop, stacked, strategy)
+    po = SC.property_opportunity(prop, stacked, strategy, weights=score_weights(db, prop.organization_id))
     SC.record(db, prop, "property_opportunity", po, strategy_id=getattr(strategy, "id", None))
     dc = SC.data_confidence(prop, stacked, owner_known=owner is not None)
     SC.record(db, prop, "data_confidence", dc)
@@ -121,7 +128,11 @@ def status_for(db, prop, strategy) -> Tuple[str, str, Optional[str], Optional[st
             return C.S_SUPPRESSED, "Nothing — do not contact", \
                 worst.status_reason or "Contact is on the suppression list.", "SUPPRESSED"
 
-    dec = _latest(db, EvoSenseEnrichmentDecision, prop, EvoSenseEnrichmentDecision.created_at.desc())
+    dec = (db.query(EvoSenseEnrichmentDecision)
+           .filter(EvoSenseEnrichmentDecision.organization_id == prop.organization_id,
+                   EvoSenseEnrichmentDecision.property_id == prop.id,
+                   EvoSenseEnrichmentDecision.capability == C.CONTACT_ENRICHMENT)
+           .order_by(EvoSenseEnrichmentDecision.created_at.desc()).first())
     if active:
         min_cc = getattr(strategy, "min_contact_confidence", 60) if strategy else 60
         best = prop.contact_confidence or 0

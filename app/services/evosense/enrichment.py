@@ -61,6 +61,13 @@ def spent_on_property(db, prop) -> int:
                        EvoSenseCostEntry.status == "charged").scalar() or 0)
 
 
+def pilot_spent(db, strategy) -> int:
+    return int(db.query(func.coalesce(func.sum(EvoSenseCostEntry.total_cents), 0))
+               .filter(EvoSenseCostEntry.organization_id == strategy.organization_id,
+                       EvoSenseCostEntry.strategy_id == strategy.id,
+                       EvoSenseCostEntry.status.in_(("charged", "reserved"))).scalar() or 0)
+
+
 def decide(db, prop: EvoSenseProperty, strategy, *, user=None,
            approved: bool = False) -> EvoSenseEnrichmentDecision:
     db.flush()
@@ -101,6 +108,7 @@ def decide(db, prop: EvoSenseProperty, strategy, *, user=None,
 
     recent_miss = (db.query(EvoSenseEnrichmentDecision)
                    .filter(EvoSenseEnrichmentDecision.organization_id == org_id,
+                           EvoSenseEnrichmentDecision.capability == C.CONTACT_ENRICHMENT,
                            EvoSenseEnrichmentDecision.owner_id == owner.id,
                            EvoSenseEnrichmentDecision.outcome.in_(("no_match", "provider_failed")),
                            EvoSenseEnrichmentDecision.created_at >
@@ -131,6 +139,15 @@ def decide(db, prop: EvoSenseProperty, strategy, *, user=None,
     if cost == 0:
         return _decision(db, prop, strategy, owner, C.D_FREE,
                          ["%s answers at no cost." % provider.label], provider=provider, cost=0, user=user)
+    if ST.is_pilot(strategy):
+        pcap = ST.pilot_spend_cap(strategy)
+        pspent = pilot_spent(db, strategy)
+        if pcap <= 0 or pspent + cost > pcap:
+            return _decision(db, prop, strategy, owner, C.D_BUDGET,
+                             ["PILOT MODE: paid lookups are off for this pilot." if pcap <= 0 else
+                              "PILOT MODE: the pilot spend cap %s is reached (%s spent)."
+                              % (C.money(pcap), C.money(pspent))],
+                             provider=provider, cost=cost, user=user)
     cap = getattr(strategy, "max_cost_per_property_cents", None)
     already = spent_on_property(db, prop)
     if cap is not None and already + cost > cap:
@@ -181,6 +198,11 @@ def execute(db, prop, strategy, decision: EvoSenseEnrichmentDecision, *, user=No
     touched = []
     outcome = "provider_failed"
     for provider, cfg, cost in routes:
+        if cost > 0 and ST.is_pilot(strategy) and \
+                pilot_spent(db, strategy) + cost > ST.pilot_spend_cap(strategy):
+            attempts.append({"provider": provider.key, "result": "not attempted",
+                             "reason": "PILOT MODE spend cap"})
+            break
         ok, why, entry = B.reserve(db, org_id, strategy, cost, provider_key=provider.key,
                                    connector_kind=provider.connector_kind,
                                    capability=C.CONTACT_ENRICHMENT, operation="owner_contact_lookup",

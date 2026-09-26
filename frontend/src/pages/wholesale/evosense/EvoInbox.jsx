@@ -33,6 +33,10 @@ export default function EvoInbox() {
   const signal = params.get('signal') || ''
   const sort = params.get('sort') || 'opportunity'
   const offset = Number(params.get('offset') || 0)
+  const county = params.get('county') || ''
+  const source = params.get('source') || ''
+  const minScore = params.get('min_score') || ''
+  const archived = params.get('archived') === '1'
   const [q, setQ] = useState(params.get('q') || '')
   // The top-bar search can change ?q while this page is open.
   const urlQ = params.get('q') || ''
@@ -48,10 +52,14 @@ export default function EvoInbox() {
       if (bucket) p.set('bucket', bucket)
       if (strategy) p.set('strategy_id', strategy)
       if (signal) p.set('signal', signal)
+      if (county) p.set('county', county)
+      if (source) p.set('source', source)
+      if (minScore) p.set('min_score', minScore)
+      if (archived) p.set('archived', 'true')
       if (params.get('q')) p.set('q', params.get('q'))
       setData(await api.get('/wholesale/evosense/inbox?' + p.toString()))
     } catch (e) { setError(errText(e)) } finally { setLoading(false) }
-  }, [bucket, strategy, signal, sort, offset, params])
+  }, [bucket, strategy, signal, sort, offset, params, county, source, minScore, archived])
   useEffect(() => { load() }, [load])
 
   function set(k, v) {
@@ -119,6 +127,28 @@ export default function EvoInbox() {
               <option value="">Any signal</option>
               {(data?.signal_types || []).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
+          </label>
+          <label><span className="evo-sr">County</span>
+            <select className="evo-select" value={county} onChange={(e) => set('county', e.target.value)}>
+              <option value="">Any county</option>
+              {(data?.counties || []).map((c) => <option key={c} value={c}>{c} County</option>)}
+            </select>
+          </label>
+          <label><span className="evo-sr">Source</span>
+            <select className="evo-select" value={source} onChange={(e) => set('source', e.target.value)}>
+              <option value="">Any source</option>
+              {(data?.sources || []).map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+            </select>
+          </label>
+          <label><span className="evo-sr">Minimum opportunity</span>
+            <select className="evo-select" value={minScore} onChange={(e) => set('min_score', e.target.value)}>
+              <option value="">Any score</option>
+              {['30', '45', '60', '75'].map((v) => <option key={v} value={v}>{v}+ opportunity</option>)}
+            </select>
+          </label>
+          <label className="evo-small" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={archived} onChange={(e) => set('archived', e.target.checked ? '1' : '')} />
+            Rolled-back pilot
           </label>
           <label><span className="evo-sr">Sort</span>
             <select className="evo-select" value={sort} onChange={(e) => set('sort', e.target.value)}>

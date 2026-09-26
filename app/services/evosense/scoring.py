@@ -24,7 +24,11 @@ from app.services.evosense import common as C
 from app.services.evosense import signals as SIG
 from app.services.evosense import strategy as ST
 
-PO_VERSION = "property_opportunity/v1"
+PO_VERSION = "property_opportunity/v2"
+# v2 = v1 + organization-configurable signal weights (fingerprinted into the
+# version string when present) + the DFW public-record signals; signals with
+# negative weight (active listing, recent sale) subtract and never count
+# toward the multiple-signal bonus.
 DC_VERSION = "data_confidence/v1"
 CC_VERSION = "contact_confidence/v1"
 SI_VERSION = "seller_intent/v1"
@@ -66,13 +70,38 @@ def _equity_points(eq: Optional[int]) -> int:
     return 0
 
 
-def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy) -> Dict[str, Any]:
+def weights_fingerprint(weights: Optional[Dict[str, int]]) -> Optional[str]:
+    if not weights:
+        return None
+    import hashlib
+    import json
+    return hashlib.sha1(json.dumps(weights, sort_keys=True).encode()).hexdigest()[:8]
+
+
+def clean_weights(raw: Any) -> Dict[str, int]:
+    """Only known signals, integers in [-30, 30]."""
+    out: Dict[str, int] = {}
+    for k, v in (raw or {}).items():
+        if k in SIG.CATALOG:
+            try:
+                out[k] = max(-30, min(30, int(v)))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
+                         weights: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+    weights = clean_weights(weights)
+    fp = weights_fingerprint(weights)
+    PO_VERSION = globals()["PO_VERSION"] + ("+w" + fp if fp else "")
     factors: List[Dict[str, Any]] = []
     inputs = {"signals": {s["signal_type"]: s["freshness"] for s in stacked},
               "equity_pct": prop.equity_pct, "estimated_value": prop.estimated_value,
               "ownership_years": prop.ownership_years, "property_type": prop.property_type,
               "strategy_id": getattr(strategy, "id", None),
-              "strategy_version": getattr(strategy, "version", None)}
+              "strategy_version": getattr(strategy, "version", None),
+              "weights": weights or None}
     live = {s["signal_type"]: s for s in stacked if s["freshness"] != SIG.STALE}
 
     if strategy is not None:
@@ -94,7 +123,7 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy) -> Dict[
     for s in stacked:
         stype = s["signal_type"]
         spec = SIG.CATALOG.get(stype, {})
-        pts = spec.get("points", 0)
+        pts = weights.get(stype, spec.get("points", 0))
         if stype == "LONG_OWNERSHIP":
             pts = 10 if (prop.ownership_years or 0) >= 15 else 6
             label = "Owned %s years" % prop.ownership_years if prop.ownership_years else spec["label"]
@@ -103,7 +132,7 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy) -> Dict[
         else:
             label = spec.get("label", stype)
         if s["freshness"] == SIG.AGING:
-            pts = pts // 2
+            pts = int(pts / 2)
             label += " (aging evidence, half weight)"
         elif s["freshness"] == SIG.STALE:
             factors.append(_f(0, label + " — stale evidence, not counted",
@@ -158,8 +187,10 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy) -> Dict[
             total -= 10
             factors.append(_f(-10, "Owned fewer than %s years" % strategy.min_ownership_years))
 
+    def _positive(t):
+        return weights.get(t, SIG.CATALOG.get(t, {}).get("points", 0)) > 0 or t == "LONG_OWNERSHIP"
     independent = {s["signal_type"] for s in stacked if s["freshness"] == SIG.CURRENT
-                   and not s["derived"]}
+                   and not s["derived"] and _positive(s["signal_type"])}
     derived_live = {s["signal_type"] for s in stacked if s["freshness"] == SIG.CURRENT and s["derived"]
                     and s["signal_type"] != "HIGH_EQUITY"}
     distinct = len(independent) + len(derived_live)

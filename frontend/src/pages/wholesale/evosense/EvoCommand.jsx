@@ -49,9 +49,11 @@ export default function EvoCommand() {
       for (const s of cc.strategies || []) {
         // The SAME service the scheduler runs, one strategy at a time; the
         // strategy lock means a hunt already running is skipped, not doubled.
-        const r = await api.post(`/wholesale/evosense/strategies/${s.id}/hunt`, {})
+        // A PILOT reads public-record files; it runs on the server in the
+        // background and reports through its run history.
+        const r = await api.post(`/wholesale/evosense/strategies/${s.id}/hunt${s.pilot ? '?background=true' : ''}`, {})
         const c = r.counts || {}
-        lines.push(r.status === 'skipped' ? `${s.name}: skipped — ${r.error}` :
+        lines.push(r.background ? `${s.name}: pilot hunt started in the background` : r.status === 'skipped' ? `${s.name}: skipped — ${r.error}` :
           `${s.name}: ${c.observed || 0} seen, ${c.created || 0} new, ${c.contacts_found || 0} contacts, ${cents(c.spent_cents || 0)} spent`)
       }
       setNotice(lines.join(' · ') || 'No active strategy to hunt.')

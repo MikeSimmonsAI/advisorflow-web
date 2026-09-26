@@ -163,7 +163,8 @@ def run_due(db, *, org_id: Optional[str] = None, now=None) -> Dict[str, Any]:
         try:
             sched = schedule_for(db, strategy)
             db.commit()
-            if interval_for(sched) is None:
+            if getattr(strategy, "pilot_mode", False) or interval_for(sched) is None:
+                # A PILOT is never hunted automatically, whatever its cadence says.
                 report["manual_only"] += 1
                 continue
             if sched.next_due_at and sched.next_due_at > max(now, C.now()):
@@ -210,15 +211,17 @@ def status(db, org_id: str) -> List[Dict[str, Any]]:
               .order_by(EvoSenseStrategy.created_at).all()):
         sched = schedule_for(db, s, create=False)
         cadence = sched.cadence if sched else DEFAULT_CADENCE
+        if getattr(s, "pilot_mode", False):
+            cadence = "manual"                 # pilots only run when a person starts them
         running = bool(sched and sched.locked_until and sched.locked_until > C.now())
         if s.status != "active":
             state = "strategy_paused"
         elif ctl.paused_all or ctl.paused_discovery:
             state = "paused"
-        elif cadence == "manual":
-            state = "manual"
         elif running:
             state = "running"
+        elif cadence == "manual":
+            state = "manual"
         else:
             state = "scheduled"
         out.append({"strategy_id": s.id, "name": s.name, "is_test": bool(s.is_test),

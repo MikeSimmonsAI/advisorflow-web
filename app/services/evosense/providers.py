@@ -22,6 +22,7 @@ shape — one normalized result type in the platform, not two.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -292,10 +293,362 @@ class CsvImportSource(AcquisitionProvider):
     coverage = "A file you upload (fixed columns; see the report)"
 
 
+# ── Real public-record sources (DFW) ────────────────────────────────────────
+# Free, public, no account. OFF for every organization until an admin turns
+# one on; HEALTHY only after a verified probe or run (see source_registry()).
+
+class Records(list):
+    """A list of ingest-shaped records that also carries the read's stats."""
+    stats: Dict[str, Any] = {}
+    source_url: Optional[str] = None
+
+
+class PublicRecordSource(AcquisitionProvider):
+    connector_kind = C.REAL
+    discovery = False
+    jurisdiction = ""
+    source_type = ""
+    access_method = ""
+    public_url = ""
+    refresh = ""
+    terms_note = "Public record, published free by the government body for download or query."
+    adapter_version = ""
+    lookup_capability: Optional[str] = None
+
+    def applies(self, target: Dict[str, Any]) -> bool:
+        return True
+
+    def lookup_one(self, target: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def lookup_many(self, targets: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """{"results": {target id: record | None}, "errors": {id: str}, "stats": {}}.
+        One target's failure is recorded against that target; a systemic
+        failure (rate limit, auth, format change) stops the batch."""
+        from app.services.evosense.sources import base as SB_
+        out: Dict[str, Any] = {"results": {}, "errors": {}, "stats": {"calls": 0}}
+        for t in targets:
+            out["stats"]["calls"] += 1
+            try:
+                out["results"][t["id"]] = self.lookup_one(t)
+            except SB_.SourceError as exc:
+                out["errors"][t["id"]] = exc
+                if exc.code in (SB_.RATE_LIMITED, SB_.AUTH_FAILED, SB_.SOURCE_FORMAT_CHANGED):
+                    raise
+        return out
+
+    def verify(self) -> Dict[str, Any]:
+        raise NotImplementedError
+
+
+def _county(q: Dict[str, Any]) -> List[str]:
+    return [re.sub(r"\s+county$", "", (c or "").strip().lower()) for c in q.get("counties") or []]
+
+
+def _wants(q: Dict[str, Any], county: str) -> bool:
+    counties = _county(q)
+    states = [s.upper() for s in q.get("states") or []]
+    if states and "TX" not in states:
+        return False
+    return not counties or county in counties
+
+
+class TarrantTaxRollSource(PublicRecordSource):
+    key = "tarrant_tax_roll"
+    label = "Tarrant County tax roll (delinquency)"
+    capabilities = (C.TAX,)
+    discovery = True
+    coverage = "Tarrant County, TX — every account on the county tax roll"
+    jurisdiction = "Tarrant County, TX"
+    source_type = "County tax assessor-collector roll"
+    access_method = "Bulk fixed-width file (daily zip), read with HTTP byte ranges"
+    public_url = "https://www.tarrantcountytx.gov/en/tax/property-tax/tarrant-county-tax-roll.html"
+    refresh = "Published daily"
+    freshness_days = 30
+    adapter_version = "tarrant_tax_roll/1"
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.tarrant import TarrantTaxRollReader
+        out = Records()
+        if not _wants(query, "tarrant"):
+            out.stats = {"skipped": "strategy does not include Tarrant County"}
+            return out
+        res = TarrantTaxRollReader().discover(limit=int(query.get("limit") or 25),
+                                              scan_limit=int(query.get("scan_limit") or 600_000),
+                                              min_due=float(query.get("min_tax_due") or 250))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.tarrant import TarrantTaxRollReader
+        url = TarrantTaxRollReader().locate()
+        oz = SB_.open_zip(self.key, url)
+        try:
+            names = oz.zip.namelist()
+            if "Master.dat" not in names:
+                raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "Master.dat missing from the tax roll")
+            first = next(SB_.text_lines(oz.zip, "Master.dat"))
+            from app.services.evosense.sources.tarrant import parse_master
+            parse_master(first)
+        finally:
+            oz.close()
+        return {"url": url, "members": names, "mode": oz.meta.get("mode"), "size": oz.meta.get("size")}
+
+
+class TadSource(PublicRecordSource):
+    key = "tad"
+    label = "Tarrant Appraisal District (TAD) property data"
+    capabilities = (C.ASSESSOR, C.OWNERSHIP)
+    lookup_capability = C.ASSESSOR
+    coverage = "Tarrant County, TX — owner of record, situs, appraised value, building facts"
+    jurisdiction = "Tarrant County, TX"
+    source_type = "Appraisal district export"
+    access_method = "Bulk pipe-delimited file (zip), read with HTTP byte ranges"
+    public_url = "https://www.tad.org/resources/data-downloads"
+    refresh = "Published weekly (appraisal year)"
+    freshness_days = 120
+    adapter_version = "tad_property_data/1"
+
+    def applies(self, target):
+        return (target.get("county") or "").lower() == "tarrant" and bool(target.get("parcel_apn"))
+
+    def lookup_many(self, targets):
+        from app.services.evosense.sources.tarrant import TadReader, apn
+        by_apn = {apn(t["parcel_apn"]): t["id"] for t in targets if t.get("parcel_apn")}
+        res = TadReader().lookup_many(list(by_apn))
+        results = {tid: res["records"].get(a) for a, tid in by_apn.items()}
+        return {"results": results, "errors": {}, "stats": res["stats"]}
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.tarrant import TAD_REQUIRED, TAD_URL
+        oz = SB_.open_zip(self.key, TAD_URL)
+        try:
+            member = next(n for n in oz.zip.namelist() if n.lower().endswith(".txt"))
+            header = next(SB_.text_lines(oz.zip, member)).split("|")
+        finally:
+            oz.close()
+        missing = [c for c in TAD_REQUIRED if c not in header]
+        if missing:
+            raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "TAD file lacks %s" % ", ".join(missing))
+        return {"url": TAD_URL, "columns": len(header), "mode": oz.meta.get("mode")}
+
+
+class DcadSource(PublicRecordSource):
+    key = "dcad"
+    label = "Dallas Central Appraisal District (DCAD) certified export"
+    capabilities = (C.PROPERTY_SEARCH, C.ASSESSOR, C.OWNERSHIP)
+    discovery = True
+    coverage = "Dallas County, TX — owner of record, situs, value, appraiser condition rating"
+    jurisdiction = "Dallas County, TX"
+    source_type = "Appraisal district export"
+    access_method = "Bulk CSV archive (~200 MB zip), downloaded to a size-capped cache"
+    public_url = "https://www.dallascad.org/DataProducts.aspx"
+    refresh = "Certified roll, refreshed by DCAD through the year"
+    freshness_days = 180
+    adapter_version = "dcad_certified/1"
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.dallas import DcadReader
+        out = Records()
+        if capability != C.PROPERTY_SEARCH or not _wants(query, "dallas"):
+            out.stats = {"skipped": "strategy does not include Dallas County"}
+            return out
+        res = DcadReader().discover(limit=int(query.get("limit") or 25))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.dallas import DcadReader
+        url = DcadReader().locate()
+        if SB_.local_override(self.key):
+            return {"url": url, "mode": "local_file"}
+        info = SB_._probe(url)
+        if not info.get("size"):
+            raise SB_.SourceError(SB_.DOWNLOAD_FAILED, "DCAD export did not report a size")
+        return {"url": url, "size": info["size"], "ranged": info["ranged"]}
+
+
+class CensusGeocoderSource(PublicRecordSource):
+    key = "census_geocoder"
+    label = "U.S. Census geocoder"
+    capabilities = (C.GEOCODING,)
+    lookup_capability = C.GEOCODING
+    coverage = "United States — ZIP, coordinates, county check"
+    jurisdiction = "United States"
+    source_type = "Federal geocoding API"
+    access_method = "Public REST API, one address per call"
+    public_url = "https://geocoding.geo.census.gov/geocoder/"
+    refresh = "Census address ranges (current benchmark)"
+    freshness_days = 365
+    adapter_version = "census_geocoder/1"
+
+    def applies(self, target):
+        # The geocoder needs a city (or ZIP); without one it answers 400.
+        return bool(target.get("street_address")) and bool(target.get("city")) and not target.get("zip_code")
+
+    def lookup_one(self, target):
+        from app.services.evosense.sources.census import CensusGeocoder
+        g = CensusGeocoder()
+        res = g.geocode(target["street_address"], target.get("city"), target.get("state") or "TX",
+                        target.get("zip_code"), target.get("county"))
+        return g.to_record(target, res)
+
+    def verify(self):
+        from app.services.evosense.sources.census import CensusGeocoder
+        res = CensusGeocoder().geocode("100 E Weatherford St", "Fort Worth", "TX", None, "Tarrant")
+        return {"matches": res["matches"]}
+
+
+class FortWorthCodeSource(PublicRecordSource):
+    key = "fw_code_violations"
+    label = "City of Fort Worth code violations"
+    capabilities = (C.CODE_VIOLATION,)
+    lookup_capability = C.CODE_VIOLATION
+    coverage = "City of Fort Worth — code cases opened by the city"
+    jurisdiction = "City of Fort Worth, TX"
+    source_type = "City open data (ArcGIS feature service)"
+    access_method = "Public ArcGIS REST query, one address per call"
+    public_url = "https://data.fortworthtexas.gov/"
+    refresh = "Updated by the city (near daily)"
+    freshness_days = 30
+    adapter_version = "fw_code_violations/1"
+
+    def applies(self, target):
+        return (target.get("city") or "").strip().lower() == "fort worth" and bool(target.get("street_address"))
+
+    def lookup_one(self, target):
+        from app.services.evosense.sources.fortworth import FortWorthCodeReader
+        r = FortWorthCodeReader()
+        return r.to_record(target, r.lookup(target["street_address"])["cases"])
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.fortworth import LAYER
+        meta = SB_.get_json(LAYER, {"f": "json"})
+        names = [f.get("name") for f in (meta or {}).get("fields", [])]
+        if "Violation_Address" not in names:
+            raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "Violation_Address field missing")
+        return {"fields": len(names)}
+
+
+class Dallas311Source(PublicRecordSource):
+    key = "dallas_311_code"
+    label = "City of Dallas 311 — Code Compliance requests"
+    capabilities = (C.CODE_VIOLATION,)
+    lookup_capability = C.CODE_VIOLATION
+    coverage = "City of Dallas — resident service requests routed to Code Compliance"
+    jurisdiction = "City of Dallas, TX"
+    source_type = "City open data (Socrata)"
+    access_method = "Public Socrata SODA query, one address per call"
+    public_url = "https://www.dallasopendata.com/d/d7e7-envw"
+    refresh = "Updated by the city (daily)"
+    freshness_days = 30
+    adapter_version = "dallas_311/1"
+
+    def applies(self, target):
+        return (target.get("city") or "").strip().lower() == "dallas" and bool(target.get("street_address"))
+
+    def lookup_one(self, target):
+        from app.services.evosense.sources.dallas import Dallas311Reader
+        r = Dallas311Reader()
+        return r.to_record(target, r.lookup(target["street_address"])["cases"])
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.dallas import DALLAS_311
+        rows = SB_.get_json(DALLAS_311, {"$limit": 1, "department": "Code Compliance"})
+        if not isinstance(rows, list):
+            raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "Dallas 311 did not return a list")
+        return {"rows": len(rows)}
+
+
+class ManualOnlySource(AcquisitionProvider):
+    """A real source EvoSense will not automate (no free bulk export, or a
+    portal behind search forms / CAPTCHA). Fed through manual entry or CSV."""
+    connector_kind = C.MANUAL
+    jurisdiction = ""
+    source_type = ""
+    access_method = "Manual entry or CSV import"
+    public_url = ""
+    refresh = ""
+    terms_note = ""
+
+
+class DallasForeclosureManual(ManualOnlySource):
+    key = "dallas_foreclosure_manual"
+    label = "Dallas County foreclosure notices (manual)"
+    capabilities = (C.FORECLOSURE,)
+    coverage = "Dallas County, TX — notices of trustee sale posted with the County Clerk"
+    jurisdiction = "Dallas County, TX"
+    source_type = "County Clerk foreclosure postings"
+    public_url = "https://www.dallascounty.org/"
+    terms_note = ("No free structured export. Postings are read by a person and entered "
+                  "manually (signal PRE_FORECLOSURE) or imported by CSV.")
+
+
+class DallasTaxManual(ManualOnlySource):
+    key = "dallas_tax_manual"
+    label = "Dallas County tax delinquency (manual)"
+    capabilities = (C.TAX,)
+    coverage = "Dallas County, TX — delinquent tax accounts"
+    jurisdiction = "Dallas County, TX"
+    source_type = "County tax office"
+    public_url = "https://www.dallasact.com/"
+    terms_note = ("No free bulk delinquency file; account lookups are one-at-a-time web "
+                  "searches. Entered manually (signal TAX_DELINQUENT) or imported by CSV.")
+
+
+class CommercialInterface(AcquisitionProvider):
+    """A commercial data vendor with a slot and NO adapter. NOT CONFIGURED
+    until someone buys it, adds the key, and a real adapter is written."""
+    connector_kind = C.INTERFACE_ONLY
+    jurisdiction = "United States"
+    source_type = "Commercial property data (paid)"
+    access_method = "Vendor API (key required)"
+    refresh = ""
+    terms_note = "Paid vendor. Not purchased. Nothing is called."
+
+
+class RentCastInterface(CommercialInterface):
+    key = "rentcast"
+    label = "RentCast (not configured)"
+    capabilities = (C.VALUATION, C.LISTING, C.COMPS)
+    required_env = ("RENTCAST_API_KEY",)
+    public_url = "https://www.rentcast.io/api"
+    coverage = "AVM, rent estimates, active listings"
+
+
+class RegridInterface(CommercialInterface):
+    key = "regrid"
+    label = "Regrid parcels (not configured)"
+    capabilities = (C.PARCEL, C.OWNERSHIP)
+    required_env = ("REGRID_API_TOKEN",)
+    public_url = "https://regrid.com/api"
+    coverage = "National parcel boundaries and owners"
+
+
+class AttomInterface(CommercialInterface):
+    key = "attom"
+    label = "ATTOM property data (not configured)"
+    capabilities = (C.ASSESSOR, C.FORECLOSURE, C.VALUATION, C.LISTING)
+    required_env = ("ATTOM_API_KEY",)
+    public_url = "https://api.developer.attomdata.com/"
+    coverage = "Assessor, recorder, foreclosure, AVM"
+
+
 PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
+    TarrantTaxRollSource(), TadSource(), DcadSource(), CensusGeocoderSource(),
+    FortWorthCodeSource(), Dallas311Source(),
+    DallasForeclosureManual(), DallasTaxManual(),
+    RentCastInterface(), RegridInterface(), AttomInterface(),
 )}
 SANDBOX_KEYS = tuple(k for k, p in PROVIDERS.items() if p.connector_kind == C.SANDBOX)
 
@@ -435,4 +788,115 @@ def status_report(db, org_id: str) -> Dict[str, Any]:
                      "providers": [r["label"] for r in serving],
                      "note": INTERFACE_ONLY_CAPABILITIES.get(cap)})
     return {"providers": rows, "capabilities": caps,
-            "real_connectors": [r["key"] for r in rows if r["connector_kind"] == C.REAL]}
+            "real_connectors": [r["key"] for r in rows
+                                if r["connector_kind"] == C.REAL and r["status"] == C.H_CONNECTED]}
+
+
+# ── Source Registry (spec vocabulary) ──────────────────────────────────────
+
+REG_HEALTHY = "HEALTHY"
+REG_DEGRADED = "DEGRADED"
+REG_FAILED = "FAILED"
+REG_NOT_CONFIGURED = "NOT CONFIGURED"
+REG_MANUAL_ONLY = "MANUAL ONLY"
+REG_UNVERIFIED = "UNVERIFIED"          # enabled, but no probe or run has succeeded yet
+REGISTRY_STATES = (REG_HEALTHY, REG_DEGRADED, REG_FAILED, REG_NOT_CONFIGURED, REG_MANUAL_ONLY,
+                   REG_UNVERIFIED)
+
+
+def registry_state(p: AcquisitionProvider, cfg, when: Optional[datetime] = None) -> Dict[str, str]:
+    """HEALTHY only after a verified success that is newer than any failure.
+    A source is never shown as operational on the strength of being enabled."""
+    when = when or C.now()
+    if p.connector_kind == C.MANUAL:
+        return {"state": REG_MANUAL_ONLY, "why": "Fed by manual entry or CSV import"}
+    if p.connector_kind == C.IMPORT:
+        return {"state": REG_MANUAL_ONLY, "why": "A file a person uploads"}
+    if p.connector_kind == C.SANDBOX:
+        return {"state": REG_NOT_CONFIGURED if not cfg.enabled else REG_HEALTHY,
+                "why": "Synthetic sandbox data (never shown for real properties)"}
+    if p.connector_kind == C.INTERFACE_ONLY:
+        return {"state": REG_NOT_CONFIGURED,
+                "why": "No adapter and no credentials (%s)" % ", ".join(p.required_env) if p.required_env
+                else "No adapter"}
+    if p.required_env and not p.is_configured():
+        return {"state": REG_NOT_CONFIGURED, "why": "Missing credentials"}
+    if not cfg.enabled:
+        return {"state": REG_NOT_CONFIGURED, "why": "Disabled for this organization"}
+    if cfg.rate_limited_until and cfg.rate_limited_until > when:
+        return {"state": REG_DEGRADED, "why": "Rate limited by the source until %s UTC"
+                % cfg.rate_limited_until.strftime("%Y-%m-%d %H:%M")}
+    ok = cfg.last_success_at
+    bad = cfg.last_failure_at
+    if ok is None:
+        if bad is not None:
+            return {"state": REG_FAILED, "why": cfg.last_failure_reason or "Every attempt failed"}
+        return {"state": REG_UNVERIFIED, "why": "Enabled; no successful probe or run yet"}
+    if bad is not None and bad > ok:
+        if (cfg.consecutive_failures or 0) >= DEGRADE_AFTER:
+            return {"state": REG_FAILED, "why": cfg.last_failure_reason or "Repeated failures"}
+        return {"state": REG_DEGRADED, "why": "Last attempt failed: %s" % (cfg.last_failure_reason or "error")}
+    if cfg.degraded_until and cfg.degraded_until > when:
+        return {"state": REG_DEGRADED, "why": "Recovering from repeated failures"}
+    return {"state": REG_HEALTHY, "why": "Last verified %s UTC" % ok.strftime("%Y-%m-%d %H:%M")}
+
+
+def source_registry(db, org_id: str) -> Dict[str, Any]:
+    rows = []
+    for key, p in PROVIDERS.items():
+        if p.connector_kind == C.SANDBOX:
+            continue
+        cfg = config(db, org_id, key)
+        st = registry_state(p, cfg)
+        rows.append({
+            "key": key, "label": p.label, "state": st["state"], "why": st["why"],
+            "connector_kind": p.connector_kind, "enabled": bool(cfg.enabled),
+            "jurisdiction": getattr(p, "jurisdiction", "") or "",
+            "source_type": getattr(p, "source_type", "") or "",
+            "access_method": getattr(p, "access_method", "") or "",
+            "public_url": getattr(p, "public_url", "") or "",
+            "refresh": getattr(p, "refresh", "") or "",
+            "terms_note": getattr(p, "terms_note", "") or "",
+            "capabilities": list(p.capabilities),
+            "role": "discovery" if getattr(p, "discovery", False) else
+                    ("lookup" if getattr(p, "lookup_capability", None) else
+                     ("manual" if p.connector_kind in (C.MANUAL, C.IMPORT) else "interface")),
+            "cost": "free" if not p.costs and p.connector_kind == C.REAL else
+                    ("paid (not purchased)" if p.connector_kind == C.INTERFACE_ONLY else "—"),
+            "adapter_version": getattr(p, "adapter_version", "") or None,
+            "freshness_days": p.freshness_days,
+            "last_success_at": cfg.last_success_at.isoformat() + "Z" if cfg.last_success_at else None,
+            "last_failure_at": cfg.last_failure_at.isoformat() + "Z" if cfg.last_failure_at else None,
+            "last_failure_reason": cfg.last_failure_reason,
+            "last_attempt_at": cfg.last_attempt_at.isoformat() + "Z" if cfg.last_attempt_at else None,
+            "last_verified_at": cfg.last_verified_at.isoformat() + "Z" if cfg.last_verified_at else None,
+            "last_record_count": cfg.last_record_count,
+            "calls_total": cfg.calls_total, "successes_total": cfg.successes_total,
+        })
+    order = {REG_HEALTHY: 0, REG_DEGRADED: 1, REG_UNVERIFIED: 2, REG_FAILED: 3, REG_MANUAL_ONLY: 4,
+             REG_NOT_CONFIGURED: 5}
+    rows.sort(key=lambda r: (order.get(r["state"], 9), r["jurisdiction"], r["label"]))
+    return {"sources": rows, "states": list(REGISTRY_STATES)}
+
+
+def verify_source(db, org_id: str, key: str) -> Dict[str, Any]:
+    """A cheap, real probe (a zip's directory, a one-row query, one geocode).
+    Success is what makes a source HEALTHY; failure is recorded with its code."""
+    from app.services.evosense.sources import base as SB_
+    p = PROVIDERS[key]
+    cfg = config(db, org_id, key)
+    if not isinstance(p, PublicRecordSource):
+        return {"key": key, "ok": False, "error": "Only automated public sources can be verified"}
+    cfg.last_attempt_at = C.now()
+    try:
+        detail = p.verify()
+    except SB_.SourceError as exc:
+        record_failure(cfg, "%s: %s" % (exc.code, exc.message),
+                       rate_limited_for=exc.retry_after if exc.code == SB_.RATE_LIMITED else None)
+        return {"key": key, "ok": False, "code": exc.code, "error": exc.message}
+    except Exception as exc:  # noqa: BLE001 - recorded, never raised to the operator raw
+        record_failure(cfg, "%s: %s" % (type(exc).__name__, str(exc)[:160]))
+        return {"key": key, "ok": False, "code": "ERROR", "error": str(exc)[:200]}
+    record_success(cfg)
+    cfg.last_verified_at = C.now()
+    return {"key": key, "ok": True, "detail": detail}

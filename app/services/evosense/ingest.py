@@ -92,6 +92,8 @@ def upsert_owner(db, org_id: str, prop: EvoSenseProperty, data: Dict[str, Any], 
     q = db.query(EvoSenseOwner).filter(EvoSenseOwner.organization_id == org_id,
                                        EvoSenseOwner.name_key == nk)
     owner = q.filter(EvoSenseOwner.mailing_key == mk).first() if mk else q.first()
+    if owner is None and mk:
+        owner = same_owner_other_spelling(db, org_id, prop, name, mk)
     if owner is None:
         otype = data.get("owner_type") or owner_type_of(name)
         owner = EvoSenseOwner(
@@ -148,6 +150,35 @@ def upsert_owner(db, org_id: str, prop: EvoSenseProperty, data: Dict[str, Any], 
             link.in_conflict = True
             add_conflict(prop, "owner", {"value": name, "source": source}, names)
     return owner
+
+
+_NAME_NOISE = {"AND", "THE", "OF", "ETAL", "ET", "AL", "LLC", "INC", "TRUST", "TRUSTEE", "TR",
+               "EST", "ESTATE", "LIVING", "REVOCABLE", "FAMILY", "JR", "SR", "II", "III"}
+
+
+def _name_tokens(name: Optional[str]) -> set:
+    toks = re.sub(r"[^A-Z0-9 ]", " ", (name or "").upper()).split()
+    return {t for t in toks if len(t) >= 3 and t not in _NAME_NOISE}
+
+
+def same_owner_other_spelling(db, org_id: str, prop, name: str, mk: str) -> Optional[EvoSenseOwner]:
+    """County files spell the same owner differently ("DAILEY TODD W AND
+    DAILEY MELIS" on the tax roll, "TODD & MELISSA DAILEY" at TAD). An owner
+    already on THIS property with the SAME mailing address and at least one
+    shared name word is the same owner — not a conflict. Anything less stays
+    a conflict for a person."""
+    toks = _name_tokens(name)
+    if not toks:
+        return None
+    links = (db.query(EvoSenseOwnership)
+             .filter(EvoSenseOwnership.organization_id == org_id,
+                     EvoSenseOwnership.property_id == prop.id,
+                     EvoSenseOwnership.is_current.is_(True)).all())
+    for link in links:
+        ow = db.query(EvoSenseOwner).filter(EvoSenseOwner.id == link.owner_id).first()
+        if ow is not None and ow.mailing_key == mk and toks & _name_tokens(ow.display_name):
+            return ow
+    return None
 
 
 def _persons_for(name: str, otype: str):
@@ -241,12 +272,17 @@ def ingest(db, org_id: str, provider, capability: str, rec: Dict[str, Any], *,
         return "seen", prop
 
     match, prop, candidates, keys = ID.resolve(db, org_id, rec)
+    raw = raw_evidence(rec)
     obs = EvoSenseObservation(
         organization_id=org_id, property_id=prop.id if prop else None,
         strategy_id=strategy_id, run_id=run_id, provider_key=provider.key,
         connector_kind=provider.connector_kind, capability=capability,
         source_reference=ref, payload=C.jdump(_sanitize(rec)), match_type=match,
-        match_keys=C.jdump(keys), ledger_id=ledger_id, is_test=is_test)
+        match_keys=C.jdump(keys), ledger_id=ledger_id, is_test=is_test,
+        raw_payload=raw["raw_payload"], content_hash=raw["content_hash"],
+        adapter_version=raw["adapter_version"], source_updated_at=raw["source_updated_at"],
+        source_url=raw["source_url"],
+        processing_status="review" if match == ID.AMBIGUOUS else "ingested")
     db.add(obs)
     db.flush()
 
@@ -338,16 +374,21 @@ def attach_to(db, prop, provider, capability, rec, obs, rank, *, user=None, cost
 
 def _apply_signals(db, prop, provider, rec, observation_id, cost_cents, user=None):
     for s in rec.get("signals") or []:
-        observed = C.now() - timedelta(days=int(s.get("observed_days_ago") or 0))
+        observed = _parse_date(s.get("observed_at")) or \
+            C.now() - timedelta(days=int(s.get("observed_days_ago") or 0))
         SIG.upsert(db, prop, s["type"], source=provider.key,
                    connector_kind=provider.connector_kind,
-                   source_reference=rec.get("source_reference"),
+                   source_reference=s.get("ref") or rec.get("source_reference"),
                    observation_id=observation_id, observed_at=observed,
                    effective_at=_parse_date(s.get("effective_at")),
                    confidence=s.get("confidence"), strength=s.get("strength"),
                    raw_value=s.get("raw"), normalized_value=s.get("value"),
                    provenance={"provider": provider.key, "connector": provider.connector_kind,
-                               "record": rec.get("source_reference")},
+                               "record": rec.get("source_reference"),
+                               "observation": observation_id,
+                               "source_url": rec.get("_source_url"),
+                               "adapter_version": rec.get("_adapter_version"),
+                               "limitations": s.get("limitations")},
                    cost_cents=cost_cents if len(rec.get("signals") or []) == 1 else 0,
                    user=user)
     db.flush()
@@ -358,10 +399,50 @@ def _apply_signals(db, prop, provider, rec, observation_id, cost_cents, user=Non
                                  EvoSenseSignal.active.is_(True)).count())
 
 
+_CREDENTIAL = re.compile(r"(key|token|secret|password|auth)", re.I)
+RAW_MAX = 60_000
+
+
 def _sanitize(rec: Dict[str, Any]) -> Dict[str, Any]:
-    """What we keep of a source record. Nothing credential-shaped survives."""
-    bad = re.compile(r"(key|token|secret|password|auth)", re.I)
-    return {k: v for k, v in rec.items() if not bad.search(str(k))}
+    """What we keep of a source record. Nothing credential-shaped survives.
+    Adapter plumbing (keys starting "_") is kept apart as raw evidence;
+    `_evidence` (the adapter's plain-language notes) stays as `evidence`."""
+    out = {k: v for k, v in rec.items() if not str(k).startswith("_") and not _CREDENTIAL.search(str(k))}
+    if isinstance(rec.get("_evidence"), dict):
+        out["evidence"] = {k: v for k, v in rec["_evidence"].items() if not _CREDENTIAL.search(str(k))}
+    return out
+
+
+def _scrub(value):
+    if isinstance(value, dict):
+        return {k: _scrub(v) for k, v in value.items() if not _CREDENTIAL.search(str(k))}
+    if isinstance(value, list):
+        return [_scrub(v) for v in value]
+    return value
+
+
+def raw_evidence(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """The source's own bytes (a fixed-width line, a CSV row, an API answer),
+    hashed, with the adapter version and the source's "as of" date."""
+    import hashlib
+    import json
+    raw = rec.get("_raw")
+    if raw is None:
+        text = None
+    elif isinstance(raw, str):
+        text = raw
+    else:
+        text = json.dumps(_scrub(raw), default=str, sort_keys=True)
+    if text is not None and len(text) > RAW_MAX:
+        text = text[:RAW_MAX]
+    su = rec.get("_source_updated_at")
+    if isinstance(su, str):
+        su = _parse_date(su)
+    return {"raw_payload": text,
+            "content_hash": hashlib.sha256(text.encode("utf-8", "replace")).hexdigest() if text else None,
+            "adapter_version": (rec.get("_adapter_version") or None),
+            "source_updated_at": su if isinstance(su, datetime) else None,
+            "source_url": (rec.get("_source_url") or None)}
 
 
 def resolve_review(db, org_id: str, review: EvoSenseIdentityReview, action: str,
