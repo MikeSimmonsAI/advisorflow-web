@@ -407,6 +407,82 @@ def attach_seller(db: Session, org_id: str, user: Optional[User],
     return profile
 
 
+def add_owner(db: Session, org_id: str, user: Optional[User], prop: WholesaleProperty,
+              data: Dict[str, Any]) -> WholesaleSellerProfile:
+    """An operator adds an owner by hand (no `lead_id`): WHO THE PERSON IS goes
+    through Universal Intake, like every other way a person enters the platform.
+
+    The one matcher decides whether this owner is already in the workspace
+    (EXACT: their existing contact and Lead are reused, never duplicated;
+    POSSIBLE: kept separate and marked for review), the org contact is written,
+    and the capture is a batch that can be rolled back. Wholesale then attaches
+    that Lead to the property, exactly as the "already in the system" path does.
+
+    A person at the customer adding an owner is REFUSED at the plan's lead
+    limit, and the check runs first, so a refusal writes nothing at all.
+
+    FAIL SAFE: if intake errors, or produces no Lead (it keeps a contact with no
+    way to reach them as a contact only), the owner is attached through the
+    direct path, and an intake error is recorded as an event without the
+    person's details. An operator's work is never lost because intake failed.
+    """
+    from app.models.models import Organization
+    from app.services import plan_limits
+    plan_limits.require_capacity_for_org_id(db, org_id, plan_limits.LIMIT_LEADS, adding=1)
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    prop_id = prop.id
+    lead = None
+    contact_id = None
+    try:
+        from app.services.intake.capture import capture_one
+        cap = capture_one(db, org, {
+            "first_name": (data.get("first_name") or "").strip() or None,
+            "last_name": (data.get("last_name") or "").strip() or None,
+            "email": (data.get("email") or "").strip() or None,
+            "phone": (data.get("phone") or "").strip() or None,
+            "street_address": prop.street_address, "city": prop.city, "state": prop.state,
+            "zip_code": prop.zip_code},
+            source="wholesale", source_detail="Wholesale property owner",
+            list_name="Wholesale owners", classification="cold_prospect",
+            actor_label="Wholesale owner", external=False, explicit=True, user=user)
+        lead, contact_id = cap.lead, cap.contact_id
+        if lead is not None and cap.lead_created:
+            # What only Wholesale knows about a person it just brought in.
+            lead.source_category = data.get("source_category") or "wholesale"
+            lead.relationship_type = data.get("relationship_type") or lead.relationship_type \
+                or "cold_lead"
+            if not lead.assigned_to_id:
+                lead.assigned_to_id = prop.assigned_to_id or getattr(user, "id", None)
+            if prop.is_test:
+                lead.is_test = True
+                lead.test_note = "Wholesale sandbox record"
+            if data.get("notes") and not lead.notes:
+                lead.notes = data["notes"]
+    except Exception as exc:  # noqa: BLE001 - intake must never lose an operator's owner
+        db.rollback()
+        from app.services.wholesale_seller_intake import _safe_error
+        log.exception("wholesale: universal intake failed adding an owner; direct path used")
+        prop = get_property(db, org_id, prop_id)
+        log_event(db, org_id, "seller.intake_error", actor_type=ACTOR_USER,
+                  actor_user_id=getattr(user, "id", None), property_id=prop.id,
+                  summary="Universal Intake failed; the owner was added directly",
+                  details={"error": _safe_error(exc)}, mirror_to_platform_audit=False)
+        lead = None
+    prop = get_property(db, org_id, prop_id)
+    if lead is None:
+        profile = attach_seller(db, org_id, user, prop, data)
+        if contact_id:
+            from app.models.intake_models import OrgContact
+            c = (db.query(OrgContact).filter(OrgContact.id == contact_id,
+                                             OrgContact.organization_id == org_id).first())
+            new_lead = db.query(Lead).filter(Lead.id == profile.lead_id).first()
+            if c is not None and new_lead is not None and not c.lead_id:
+                c.lead_id = new_lead.id
+                new_lead.org_contact_id = c.id
+        return profile
+    return attach_seller(db, org_id, user, prop, dict(data, lead_id=lead.id))
+
+
 SELLER_FIELDS = (
     "owner_status", "relationship_note", "preferred_contact_method",
     "is_available", "considering_selling", "asking_price", "timeline",

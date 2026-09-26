@@ -1223,7 +1223,10 @@ def attach_seller(property_id: str, payload: SellerIn, request: Request,
             status_code=400,
             detail="An owner needs a name or a way to reach them. If you have "
                    "neither yet, run enrichment or import the contact details.")
-    profile = svc.attach_seller(db, org_id, user, prop, data)
+    # No lead_id: a new person as far as the operator knows. Universal Intake
+    # decides who they are (and reuses them if they are already here).
+    profile = (svc.attach_seller(db, org_id, user, prop, data) if data.get("lead_id")
+               else svc.add_owner(db, org_id, user, prop, data))
     db.commit()
     db.refresh(profile)
     lead = db.query(Lead).filter(Lead.id == profile.lead_id).first()

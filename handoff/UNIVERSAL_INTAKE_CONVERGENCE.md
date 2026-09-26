@@ -116,9 +116,9 @@ not about who the person is.
 | 1. Merge `feature/universal-intake` into main | **DONE** (merge commit on `feat/universal-intake-converge`; only conflict was `app/models/registry.py`, both sides kept) |
 | 2. Single-record intake entry point | **DONE** — `app/services/intake/capture.py` `capture_one()`: a one-row batch through the unchanged engine (create_batch → run_analysis → run_commit). |
 | 3. `/sell` onto it | **DONE** — `wholesale_seller_intake.submit` calls `capture_one`; `_existing_lead` deleted. Wholesale keeps property identity, role on the property, deal lifecycle, notifications. |
-| 4. Operator attach + Wholesale CSV | open |
+| 4. Operator attach + Wholesale CSV | **operator attach DONE** (`wholesale_service.add_owner`, see below); Wholesale CSV still open |
 | 5. EvoSense `converged_contact_ref` | open |
-| 6. Seller edits write through to `org_contacts` | open |
+| 6. Seller edits write through to `org_contacts` | **DONE** (`intake/contacts.apply_manual_edit`, see below) |
 | 7. Capacity semantics | **DECIDED (Mike, 2026-09-26) and DONE** — see below |
 | 8. Retire parallel code | partly (`_existing_lead` gone; `attach_seller`'s Lead creation remains for step 4) |
 
@@ -183,3 +183,42 @@ for EXTERNAL arrivals via `run_commit(..., hold_when_full=True)` /
   with source `wholesale_seller_inquiry`, and the one-row batch was `committed`.
   `/intake/batches` returns 200 for EVO. Every ZZTEST property (300, 400, 500
   and 600 Smoketest Street) is test-flagged.
+
+### Steps 6 and 4a — 2026-09-26 (night)
+* **Seller edits write through (step 6, ab9374d).** `PATCH /wholesale/sellers/{id}`
+  sends name, email and phone to `intake.contacts.apply_manual_edit`. That
+  function writes the org contact, adds each field the operator sent to
+  `manually_edited_fields`, and audits the change as `intake.contact_edited`
+  (target `org_contact`). The Lead then mirrors the change in its own format.
+  Import blank-fill of a matched Lead (`commit._update_matched_lead`) now skips
+  protected fields too, so a later import or `/sell` capture cannot refill a
+  field the operator deliberately cleared. A Lead with no org contact (created
+  before intake) is still edited directly, and no contact is invented for it.
+* **Bug fixed in the same change:** an edited seller phone was being stored on
+  the Lead as E.164, which the inbound SMS lookup can't match. It now stores the
+  platform format. A production sweep of EVO's leads found one E.164 phone: a
+  test-flagged ZZTEST seller I created earlier. No real seller was affected.
+* **Operator "add owner" (step 4a).** `POST /wholesale/properties/{id}/seller`
+  without `lead_id` now calls `wholesale_service.add_owner`, which works like
+  this:
+  - The plan-limit check runs first. At the limit the request is refused (402)
+    and nothing is written.
+  - `capture_one(external=False, explicit=True, user=...)` runs as the signed-in
+    operator. The batch and audit record who did it, the list is "Wholesale
+    owners", and the classification is `cold_prospect`.
+  - An EXACT match reuses that contact and Lead. The same owner on a second
+    property gives one Lead with two seller profiles.
+  - A POSSIBLE match gets its own contact and Lead, marked for review.
+  - A newly created Lead gets Wholesale's source category, `cold_lead`, the
+    property's assignee and the property's test flag.
+  - If intake errors, the owner is attached through the direct path and a
+    `seller.intake_error` event is logged without personal data. If intake
+    keeps a contact but makes no Lead, the direct path creates the Lead and
+    links it to that contact.
+* `capture_one` has two new parameters: `explicit` (a deliberate request gets a
+  Lead even on a POSSIBLE match) and `user` (a real actor context).
+* **Still open:** the Wholesale property CSV (step 4b). Each row's person half
+  should go through intake, with batch rollback retracting EvoSense
+  observations. Also open: step 5 (EvoSense `converged_contact_ref`) and
+  step 8 (retiring the direct Lead construction in `attach_seller` once CSV is
+  converged; it remains the fail-safe path until then).

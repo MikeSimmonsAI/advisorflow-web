@@ -75,6 +75,21 @@ def system_context(org, actor_label: str) -> IntakeContext:
                          actor_email=None, role="system", acting_as_platform_owner=False)
 
 
+def user_context(org, user) -> IntakeContext:
+    """A capture made by a signed-in person (an operator adding one owner).
+
+    The ORGANIZATION is the one the caller already resolved and authorized for
+    this request; only the actor comes from the user, so the batch, its audit
+    rows and its record versions say who did it and as whom."""
+    from app.services.platform_owner import is_platform_owner
+    name = getattr(user, "full_name", None) or getattr(user, "email", None) or user.id
+    return IntakeContext(org_id=org.id, org_name=org.name or getattr(org, "brand_name", "") or "",
+                         org_slug=getattr(org, "slug", None), actor_id=user.id, actor_name=name,
+                         actor_email=getattr(user, "email", None),
+                         role=getattr(user, "role", None) or "user",
+                         acting_as_platform_owner=is_platform_owner(user))
+
+
 def _csv(record: Dict[str, Any]) -> bytes:
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -86,10 +101,23 @@ def _csv(record: Dict[str, Any]) -> bytes:
 def capture_one(db: Session, org, record: Dict[str, Any], *, source: str = "website",
                 source_detail: Optional[str] = None, list_name: Optional[str] = None,
                 classification: str = "new_inquiry", actor_label: str = "Public web form",
-                external: bool = True) -> CaptureResult:
-    """Capture one person. COMMITS (the engine commits as it goes)."""
+                external: bool = True, explicit: Optional[bool] = None,
+                user=None) -> CaptureResult:
+    """Capture one person. COMMITS (the engine commits as it goes).
+
+    `external`  - the person reached out on their own (a web form, a webhook):
+                  at the plan's lead limit the Lead is created HELD.
+    `explicit`  - somebody deliberately asked for THIS person to be worked (the
+                  person themselves, or an operator adding one owner by hand):
+                  a POSSIBLE match still gets its own Lead, kept separate and
+                  marked for review. Defaults to `external`. A present operator
+                  is subject to the plan limit (no hold); the caller checks
+                  capacity before capturing so a refusal writes nothing.
+    `user`      - the signed-in actor, when there is one."""
     from app.models.models import Lead
-    ctx = system_context(org, actor_label)
+    if explicit is None:
+        explicit = external
+    ctx = user_context(org, user) if user is not None else system_context(org, actor_label)
     stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     batch = ENG.create_batch(db, ctx, content=_csv(record), filename="capture-%s.csv" % stamp,
                              source=source, source_detail=source_detail, list_name=list_name,
@@ -132,7 +160,7 @@ def capture_one(db: Session, org, record: Dict[str, Any], *, source: str = "webs
         lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org.id).first()
     created = bool(lead is not None and lead.import_batch_id == batch.id)
 
-    if lead is None and contact is not None and external and row.creates_lead:
+    if lead is None and contact is not None and explicit and row.creates_lead:
         # The review row a person explicitly submitted: activate its Lead
         # (held at the limit), still marked for review on the contact.
         try:
@@ -141,10 +169,11 @@ def capture_one(db: Session, org, record: Dict[str, Any], *, source: str = "webs
         except Exception:  # noqa: BLE001
             capacity = None
         lead = COMMIT.activate_lead(db, _batch(db, batch.id, org.id), row, contact,
-                                    ENG.org_catalog(db, org.id), actor_label, capacity,
-                                    hold_when_full=True)
-        row.committed_lead_id = lead.id
-        created = True
+                                    ENG.org_catalog(db, org.id), ctx.actor_name, capacity,
+                                    hold_when_full=external)
+        if lead is not None:
+            row.committed_lead_id = lead.id
+            created = True
         db.commit()
     from app.services import lead_capacity
     held = bool(lead is not None and lead_capacity.is_held(lead))

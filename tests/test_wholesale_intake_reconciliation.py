@@ -479,3 +479,79 @@ def test_an_intake_failure_never_loses_the_seller(client, world, monkeypatch):
     assert "simulated engine failure" in err.details
     assert "555" not in err.details and "pat@example.com" not in err.details
 
+
+
+# ── operator-added owners go through Universal Intake too ───────────────────
+
+def _prop(client, h, street):
+    p = client.post("/wholesale/properties", headers=h,
+                    json={"street_address": street, "city": "Dallas", "state": "TX",
+                          "zip_code": "75201"}).json()
+    return p.get("id") or p.get("property", {}).get("id")
+
+
+def test_an_operator_added_owner_goes_through_universal_intake(client, world):
+    from app.models.import_models import ImportBatch
+    from app.models.intake_models import OrgContact
+    db, o = world["db"], world["orgs"]
+    h = _headers(db, _user(db, o["evo"]))
+    r = client.post("/wholesale/properties/%s/seller" % _prop(client, h, "7 Ash St"), headers=h,
+                    json={"first_name": "Ola", "last_name": "Owner", "phone": "214-555-0181",
+                          "email": "ola@example.com"})
+    assert r.status_code == 200, r.text
+    lead, contact = db.query(Lead).one(), db.query(OrgContact).one()
+    assert lead.org_contact_id == contact.id and contact.lead_id == lead.id
+    assert lead.phone == "12145550181" and contact.phone == "+12145550181"
+    assert lead.source_category == "wholesale" and lead.relationship_type == "cold_lead"
+    batch = db.query(ImportBatch).filter_by(id=lead.import_batch_id).one()
+    assert batch.import_list_name == "Wholesale owners" and batch.created_by_id is not None
+    assert db.query(WholesaleEvent).filter_by(action="seller.intake_error").count() == 0
+    # the same owner on a second property is the same person, not a second lead
+    r = client.post("/wholesale/properties/%s/seller" % _prop(client, h, "9 Ash St"), headers=h,
+                    json={"first_name": "Ola", "last_name": "Owner", "email": "ola@example.com"})
+    assert r.status_code == 200
+    assert db.query(Lead).count() == 1 and db.query(OrgContact).count() == 1
+    assert db.query(WholesaleSellerProfile).count() == 2
+
+
+def test_an_owner_known_only_by_name_is_still_attached_and_linked(client, world):
+    from app.models.intake_models import OrgContact
+    db, o = world["db"], world["orgs"]
+    h = _headers(db, _user(db, o["evo"]))
+    r = client.post("/wholesale/properties/%s/seller" % _prop(client, h, "11 Ash St"), headers=h,
+                    json={"first_name": "Nameonly", "last_name": "Owner"})
+    assert r.status_code == 200, r.text
+    lead = db.query(Lead).one()
+    assert lead.last_name == "Owner"
+    c = db.query(OrgContact).one()
+    assert c.lead_id == lead.id and lead.org_contact_id == c.id
+    assert db.query(WholesaleEvent).filter_by(action="seller.intake_error").count() == 0
+
+
+def test_an_operator_refused_at_the_limit_writes_nothing(client, world, full_plan):
+    from app.models.import_models import ImportBatch
+    from app.models.intake_models import OrgContact
+    db, o = world["db"], world["orgs"]
+    h = _headers(db, _user(db, o["evo"]))
+    r = client.post("/wholesale/properties/%s/seller" % _prop(client, h, "13 Ash St"), headers=h,
+                    json={"first_name": "Cap", "last_name": "Owner", "phone": "214-555-0182"})
+    assert r.status_code == 402
+    assert db.query(OrgContact).count() == 0 and db.query(ImportBatch).count() == 0
+    assert db.query(Lead).count() == 0
+
+
+def test_an_intake_failure_never_loses_an_operator_added_owner(client, world, monkeypatch):
+    from app.services.intake import capture as CAP
+    db, o = world["db"], world["orgs"]
+    h = _headers(db, _user(db, o["evo"]))
+    pid = _prop(client, h, "15 Ash St")
+
+    def boom(*a, **k):
+        raise RuntimeError("simulated failure [parameters: ('+12145550183',)]")
+    monkeypatch.setattr(CAP, "capture_one", boom)
+    r = client.post("/wholesale/properties/%s/seller" % pid, headers=h,
+                    json={"first_name": "Fay", "last_name": "Owner", "phone": "214-555-0183"})
+    assert r.status_code == 200, r.text
+    assert db.query(Lead).one().last_name == "Owner"
+    err = db.query(WholesaleEvent).filter_by(action="seller.intake_error").one()
+    assert "simulated failure" in err.details and "555" not in err.details
