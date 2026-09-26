@@ -45,6 +45,62 @@ def _split_name(full: Optional[str]):
     return toks[0], (toks[-1] if len(toks) > 1 else None)
 
 
+def _converge(db, prop, person: EvoSensePerson, cp, lead) -> None:
+    """Point EvoSense's person and contact point at the org contact that is
+    this person in Universal Intake (convergence step 5). EvoSense keeps the
+    owner-of-record relationship; it never becomes a second contact database."""
+    try:
+        from app.services.intake.contacts import contact_for_lead
+        c = contact_for_lead(db, prop.organization_id, lead)
+    except Exception:  # noqa: BLE001 - a missing link is a gap, not a failure
+        return
+    if c is None:
+        return
+    person.converged_contact_ref = c.id
+    if cp is not None:
+        cp.converged_contact_ref = c.id
+
+
+def _capture(db, prop, person: EvoSensePerson, cp, first, last, *, user=None):
+    """WHO THIS OWNER IS, through Universal Intake: the one matcher (an owner
+    already in the workspace is reused, never duplicated), the org contact, a
+    batch that can be rolled back. Returns (lead, created) or (None, False).
+
+    Sandbox owners are synthetic and never enter the contact database. Any
+    intake error falls back to the direct path; it is logged, never raised."""
+    if prop.is_test:
+        return None, False
+    from app.models.models import Organization
+    org = db.query(Organization).filter(Organization.id == prop.organization_id).first()
+    # capture_one commits as it goes; persist the engagement state written so
+    # far (eligibility, channel) first so a fallback rollback cannot lose it.
+    db.commit()
+    try:
+        from app.services.intake.capture import capture_one
+        cap = capture_one(db, org, {
+            "first_name": first, "last_name": last,
+            "phone": cp.value if cp.kind == "phone" else None,
+            "email": cp.value if cp.kind == "email" else None,
+            "street_address": prop.street_address, "city": prop.city, "state": prop.state,
+            "zip_code": prop.zip_code},
+            source="evosense", source_detail="EvoSense property owner",
+            list_name="EvoSense owners", classification="cold_prospect",
+            actor_label="EvoSense", external=False, explicit=True, user=user)
+        return cap.lead, cap.lead_created
+    except Exception as exc:  # noqa: BLE001 - intake must never stop outreach bookkeeping
+        db.rollback()
+        C.log.exception("evosense: universal intake failed; direct path used")
+        try:
+            from app.services.wholesale_seller_intake import _safe_error
+            C.log_event(db, prop.organization_id, "owner.intake_error", property_id=prop.id,
+                        user=user, is_test=prop.is_test,
+                        summary="Universal Intake failed; the owner's Lead was created directly",
+                        details={"error": _safe_error(exc)})
+        except Exception:  # noqa: BLE001
+            pass
+        return None, False
+
+
 def ensure_lead(db, prop, person: EvoSensePerson, cp, *, user=None) -> Lead:
     """The seller becomes a Lead (Phase 6 decision) — only now, when worked.
     Costs a lead seat exactly like `wholesale_service.attach_seller`."""
@@ -52,11 +108,26 @@ def ensure_lead(db, prop, person: EvoSensePerson, cp, *, user=None) -> Lead:
         lead = db.query(Lead).filter(Lead.id == person.lead_id,
                                      Lead.organization_id == prop.organization_id).first()
         if lead is not None:
+            if not person.converged_contact_ref:
+                _converge(db, prop, person, cp, lead)
             return lead
     from app.services import plan_limits
     plan_limits.require_capacity_for_org_id(db, prop.organization_id, plan_limits.LIMIT_LEADS, adding=1)
     from app.services.dedup_service import normalize_phone
     first, last = _split_name(person.full_name)
+    lead, created = _capture(db, prop, person, cp, first, last, user=user)
+    if lead is not None:
+        if created:
+            lead.source_category = "evosense"
+            lead.relationship_type = "cold_lead"
+            if not lead.assigned_to_id and user is not None:
+                lead.assigned_to_id = user.id
+            if not lead.notes:
+                lead.notes = "Property owner found by EvoSense (%s)." % (
+                    prop.street_address or "property")
+        person.lead_id = lead.id
+        _converge(db, prop, person, cp, lead)
+        return lead
     phone = cp.value if cp.kind == "phone" else None
     lead = Lead(
         organization_id=prop.organization_id,

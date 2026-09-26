@@ -117,7 +117,7 @@ not about who the person is.
 | 2. Single-record intake entry point | **DONE** — `app/services/intake/capture.py` `capture_one()`: a one-row batch through the unchanged engine (create_batch → run_analysis → run_commit). |
 | 3. `/sell` onto it | **DONE** — `wholesale_seller_intake.submit` calls `capture_one`; `_existing_lead` deleted. Wholesale keeps property identity, role on the property, deal lifecycle, notifications. |
 | 4. Operator attach + Wholesale CSV | **DONE** — operator attach (`wholesale_service.add_owner`) and the property CSV (`attach_imported_owners` via `intake.capture.capture_many`), see below |
-| 5. EvoSense `converged_contact_ref` | open |
+| 5. EvoSense `converged_contact_ref` | **DONE** — `evosense.outreach.ensure_lead` captures through intake and sets the refs, see below |
 | 6. Seller edits write through to `org_contacts` | **DONE** (`intake/contacts.apply_manual_edit`, see below) |
 | 7. Capacity semantics | **DECIDED (Mike, 2026-09-26) and DONE** — see below |
 | 8. Retire parallel code | partly (`_existing_lead` gone; `attach_seller`'s Lead creation remains for step 4) |
@@ -242,7 +242,27 @@ for EXTERNAL arrivals via `run_commit(..., hold_when_full=True)` /
 * **Fail-safe:** if intake errors, every owner in the file goes through the
   direct path exactly as before. An `import.intake_error` event is logged
   without personal data.
-* **Still open:** step 5 (EvoSense `converged_contact_ref`). Also step 8:
+* **Still open:** step 8:
   `attach_seller` still builds a Lead directly, but only as the fail-safe path
   for all three entry points. Remove it once production has shown clean
   captures for a while.
+
+### Step 5 — EvoSense owners (2026-09-26, night)
+* When EvoSense starts working a REAL owner, `evosense.outreach.ensure_lead` now
+  captures them through `capture_one(explicit=True, user=...)` (source
+  "evosense", list "EvoSense owners", `cold_prospect`) instead of building a
+  Lead itself. An owner who is already in the workspace is reused, not
+  duplicated. `EvoSensePerson.converged_contact_ref` and
+  `EvoSenseContactPoint.converged_contact_ref` are set to the `org_contacts.id`.
+  A person who already had a Lead gets the refs filled in on their next
+  engagement.
+* **Sandbox owners are synthetic and never enter the contact database.** They
+  keep the direct path and stay test leads.
+* The plan-limit check still runs first, exactly as before.
+* Because `capture_one` commits, `ensure_lead` commits the engagement state
+  written so far before capturing. That way a fallback rollback cannot lose it.
+* If intake errors, the direct path creates the Lead as before, and an
+  `owner.intake_error` EvoSense event is logged without personal data.
+* **Not done:** mapping contact-point `(provider, source_reference)` to
+  `org_contact_source_ids`. EvoSense contact points carry no provider-side
+  record id today, so there is nothing to map yet.
