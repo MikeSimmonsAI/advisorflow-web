@@ -53,6 +53,12 @@ function Report({ ev }) {
     <div style={{ marginBottom: 12 }}>
       {r.lines.map((l) => <p key={l.provider} style={{ margin: '4px 0' }}><strong>{l.label}:</strong> {l.summary}</p>)}
       {r.notes.map((n, i) => <p key={i} className="evo-muted evo-small" style={{ margin: '2px 0' }}>{n}</p>)}
+      {(r.examples || []).length ? (
+        <details style={{ marginTop: 6 }}><summary className="evo-small">Examples ({r.examples.length}) - masked, with provenance</summary>
+          <ul className="evo-small">{r.examples.map((e, i) => (
+            <li key={i}><strong>{e.kind}</strong> · {e.why} · name match: {e.name_match || 'none'} · {e.phones.map((p) => `${p.masked} ${p.type || '?'}${p.referee_type ? `/${p.referee_type}` : ''}${p.last_seen ? ` seen ${p.last_seen}` : ''}`).join(', ')}{e.provider_reference ? ` · ref ${e.provider_reference}` : ''}</li>
+          ))}</ul></details>
+      ) : null}
     </div>
   )
 }
@@ -73,6 +79,12 @@ function Plan({ ev, busy, onExecute }) {
         </table>
       </div>
       <p className="evo-muted evo-small">{plan.note}</p>
+      {(() => {
+        const rd = ev.readiness || { ready: (plan.lines || []).every((l) => !l.readiness || l.readiness.ready),
+                                     lines: (plan.lines || []).map((l) => ({ provider: l.provider, ...(l.readiness || {}) })) }
+        return rd.ready ? <p className="evo-small">Ready to run once authorized.</p> : (
+          <p className="evo-small"><strong>Not ready yet:</strong> {rd.lines.filter((l) => !l.ready).map((l) => `${l.provider}: ${l.why}`).join(' · ')}</p>)
+      })()}
       <label className="evo-small" style={{ display: 'block' }}>To authorize exactly this plan, type: <code>{ev.confirmation}</code>
         <input className="evo-input" value={phrase} onChange={(e) => setPhrase(e.target.value)} />
       </label>

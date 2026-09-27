@@ -1071,7 +1071,12 @@ def get_provider_evaluation(evaluation_id: str, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="Evaluation not found")
     # The returned values (people's phones and emails) are shown to a
     # workspace admin only; everyone else sees the metrics.
-    return PE.payload(ev, with_records=getattr(user, "role", None) in ADMIN_ROLES)
+    out = PE.payload(ev, with_records=getattr(user, "role", None) in ADMIN_ROLES)
+    if ev.status == "planned":
+        out["readiness"] = PE.plan_readiness(db, ev)
+    if not getattr(user, "role", None) in ADMIN_ROLES and out.get("report"):
+        out["report"] = dict(out["report"], examples=[])
+    return out
 
 
 @router.get("/capabilities")

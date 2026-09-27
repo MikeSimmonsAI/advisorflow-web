@@ -640,3 +640,50 @@ def test_an_evaluation_changes_no_production_count_anywhere(world, http):
     for k in ("needs_you", "new_qualified", "seller_replies", "appointments", "awaiting_contact_data",
               "nurture", "pipeline_movement", "data_depth"):
         assert a[k] == b[k], k
+
+
+# ── first real evaluation prep (Tracerfy) ───────────────────────────────
+
+def test_a_paid_plan_can_be_made_before_the_credential_exists_and_cannot_run_without_it(world, http,
+                                                                                    monkeypatch):
+    db, org, real = world["db"], world["org"], world["real"]
+    monkeypatch.delenv("TRACERFY_API_TOKEN", raising=False)
+    PV.config(db, org, "tracerfy").enabled = False                    # the tenant toggle is off
+    db.flush()
+    ev = PE.plan(db, org, name="Tracerfy first", provider_keys=["tracerfy"], property_ids=[p.id for p in real])
+    assert ev.status == "planned" and ev.max_spend_cents == 3 * 10
+    r = PE.plan_readiness(db, ev)
+    assert r["ready"] is False and "TRACERFY_API_TOKEN" in r["lines"][0]["why"]
+    with pytest.raises(PE.EvaluationRefused) as exc:
+        PE.execute(db, ev, confirm=PE.confirmation_for(ev))
+    assert "TRACERFY_API_TOKEN" in str(exc.value) and ev.status == "planned"
+    assert http[0] == []
+    # the credential alone: still nothing routes, nothing runs by itself
+    monkeypatch.setenv("TRACERFY_API_TOKEN", "tok")
+    assert [p.key for p, _, _ in PV.route(db, org, C.CONTACT_ENRICHMENT, sandbox_allowed=False)] == []
+    assert PE.plan_readiness(db, ev)["ready"] is True and http[0] == []
+    # only the exact phrase runs it - with the tenant toggle still off
+    answers = http[1]
+    answers["tracerfy.com"] = TRACERFY_HIT_ONE
+    PE.execute(db, ev, confirm=PE.confirmation_for(ev))
+    assert ev.status == "completed" and len(http[0]) == 3
+
+
+def test_the_report_gives_masked_examples_with_provenance(world, http):
+    db, org, real = world["db"], world["org"], world["real"]
+    _, answers = http
+    seq = iter([TRACERFY_HIT_ONE, TRACERFY_MISS, TRACERFY_HIT_ONE])
+    answers["tracerfy.com"] = lambda: json.loads(json.dumps(next(seq)))
+    ev = _paid(db, org, name="x", provider_keys=["tracerfy"], property_ids=[p.id for p in real])
+    out = PE.payload(ev)
+    m = out["results"]["providers"]["tracerfy"]
+    assert m["cost_per_match_cents"] == 10.0
+    ex = out["report"]["examples"]
+    assert ex
+    blob = json.dumps(ex)
+    assert "2145550101" not in blob and "***-***-0101" in blob                # masked
+    assert "Pat" not in blob and "@" not in blob                              # no names, no emails
+    assert all("why" in e and "kind" in e for e in ex)
+    assert PE.payload(ev, with_records=False)["report"]["examples"] == []
+    PE.purge(db, ev)
+    assert PE.payload(ev)["report"]["examples"] == []

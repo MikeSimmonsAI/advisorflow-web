@@ -108,16 +108,34 @@ def _ratio(a, b):
     return round(a / b, 3) if b else None
 
 
-def _check_provider(db, org_id, key, capability):
+def _readiness(db, org_id, p, cfg) -> Dict[str, Any]:
+    """May the harness call this provider right now, and if not, why not.
+
+    An EVALUATION ONLY vendor needs its credential in the platform
+    environment and no platform block - the owner's typed authorization of a
+    specific capped plan is the switch, so the per-tenant toggle is not also
+    required (and production routing never reaches it either way)."""
+    canon = PV.canonical(p, cfg, blocked=PV.platform_blocked(db, p.key, cfg))
+    if canon.get("eval_routable"):
+        return {"ready": True, "why": "ready"}
+    if getattr(p, "evaluation_only", False) and canon.get("configured") and not canon.get("blocked"):
+        return {"ready": True, "why": "ready (evaluation only - runs solely under an authorized plan)"}
+    missing = list(p.missing_config()) if hasattr(p, "missing_config") else []
+    return {"ready": False, "why": ("credential not set on the platform: %s" % ", ".join(missing)) if missing
+            else canon.get("why")}
+
+
+def _check_provider(db, org_id, key, capability, *, require_ready: bool = True):
     p = PV.PROVIDERS.get(key)
     if p is None or capability not in (p.capabilities or ()):
         raise EvaluationRefused("%s cannot supply %s." % (key, capability.replace("_", " ").lower()))
     if p.connector_kind not in (C.SANDBOX, C.REAL):
         raise EvaluationRefused("%s cannot be called (%s)." % (p.label, p.connector_kind))
     cfg = PV.config(db, org_id, key)
-    canon = PV.canonical(p, cfg, blocked=PV.platform_blocked(db, key, cfg))
-    if not canon.get("eval_routable"):
-        raise EvaluationRefused("%s is not usable for this workspace: %s" % (p.label, canon.get("why")))
+    if require_ready:
+        r = _readiness(db, org_id, p, cfg)
+        if not r["ready"]:
+            raise EvaluationRefused("%s is not usable yet: %s" % (p.label, r["why"]))
     return p, cfg
 
 
@@ -140,12 +158,19 @@ def plan(db, org_id: str, *, name: str, provider_keys: List[str], property_ids: 
         raise EvaluationRefused("An evaluation sample is capped at %s properties." % MAX_SAMPLE)
     cap = C.CONTACT_ENRICHMENT if mode == MODE_CONTACT else C.COMPS
     keys = list(dict.fromkeys(provider_keys))
-    providers = [_check_provider(db, org_id, k, cap) for k in keys]
+    # A PAID vendor may be planned before its credential exists: planning
+    # calls nothing, and the plan shows exactly what is still missing. A
+    # sandbox adapter must be switched on to be planned.
+    providers = [_check_provider(db, org_id, k, cap,
+                                 require_ready=PV.PROVIDERS.get(k) is not None
+                                 and PV.PROVIDERS[k].connector_kind == C.SANDBOX) for k in keys]
     referee = None
     if referee_key:
         if mode != MODE_CONTACT:
             raise EvaluationRefused("A line-type referee applies to contact evaluations only.")
-        referee = _check_provider(db, org_id, referee_key, C.PHONE_VALIDATION)
+        rk = PV.PROVIDERS.get(referee_key)
+        referee = _check_provider(db, org_id, referee_key, C.PHONE_VALIDATION,
+                                  require_ready=rk is not None and rk.connector_kind == C.SANDBOX)
     props = (db.query(EvoSenseProperty)
              .filter(EvoSenseProperty.organization_id == org_id,
                      EvoSenseProperty.id.in_(property_ids)).all())
@@ -161,6 +186,7 @@ def plan(db, org_id: str, *, name: str, provider_keys: List[str], property_ids: 
         unit = _unit(p, cfg, cap)
         lines.append({"provider": p.key, "label": p.label, "role": "provider", "max_calls": n,
                       "unit_cents": unit, "max_cents": unit * n, "paid": _paid(p),
+                      "readiness": _readiness(db, org_id, p, cfg),
                       "price_confirmed": getattr(p, "price_confirmed", None),
                       "price_note": getattr(p, "price_note", None),
                       "misses_free": getattr(p, "charge_on_miss", True) is False})
@@ -170,6 +196,7 @@ def plan(db, org_id: str, *, name: str, provider_keys: List[str], property_ids: 
         calls = n * len(providers) * REFEREE_MAX_PER_LOOKUP
         lines.append({"provider": rp.key, "label": rp.label, "role": "line-type referee",
                       "max_calls": calls, "unit_cents": unit, "max_cents": unit * calls, "paid": _paid(rp),
+                      "readiness": _readiness(db, org_id, rp, rcfg),
                       "price_confirmed": getattr(rp, "price_confirmed", None),
                       "price_note": getattr(rp, "price_note", None), "misses_free": False})
     paid = any(l["paid"] for l in lines)
@@ -581,6 +608,7 @@ def _contact_metrics(p, rows, lat, ages) -> Dict[str, Any]:
         "median_latency_ms": median(lat) if lat else None,
         "cost_cents": cost,
         "cost_per_lookup_cents": _ratio(cost, len(attempted)),
+        "cost_per_match_cents": _ratio(cost, len(matched)),
         "cost_per_matched_owner_cents": _ratio(cost, len(owner_ok) if named else len(matched)),
         "cost_per_usable_contact_cents": _ratio(cost, usable),
         "cost_per_verified_contact_cents": _ratio(cost, verified),
@@ -820,6 +848,7 @@ def report(ev: EvoSenseProviderEvaluation) -> Dict[str, Any]:
                               "%s per subject" % _usd(m.get("cost_per_subject_cents"))])
         lines.append({"provider": m.get("provider"), "label": m.get("label"), "summary": text,
                       "synthetic": m.get("synthetic"), "price_confirmed": m.get("price_confirmed")})
+    examples = _examples(res) if mode == MODE_CONTACT else []
     notes = ["Same records for every provider (%s properties)." % res.get("sample_size"),
              "No winner is declared: this is evidence for Mike's decision."]
     if ev.synthetic:
@@ -828,7 +857,45 @@ def report(ev: EvoSenseProviderEvaluation) -> Dict[str, Any]:
         notes.append("Some costs use UNCONFIRMED prices; the ledger shows what was actually charged.")
     if (res.get("isolation") or {}).get("violations"):
         notes.append("ISOLATION VIOLATION recorded - results must not be relied on.")
-    return {"mode": mode, "lines": lines, "notes": notes}
+    return {"mode": mode, "lines": lines, "notes": notes, "examples": examples}
+
+
+def _mask(number: Optional[str]) -> Optional[str]:
+    d = _digits(number)
+    return ("***-***-%s" % d[-4:]) if len(d) >= 4 else None
+
+
+def _examples(res: Dict[str, Any], per_kind: int = 3) -> List[Dict[str, Any]]:
+    """A few STRONG and QUESTIONABLE matches, with provenance and nothing
+    more personal than needed: the (public) property address, how the
+    vendor's name compared with the owner of record, line types, last-seen
+    dates, the vendor's reference, and phones masked to the last 4 digits.
+    No names, no full numbers, no emails. Empty once the data is purged."""
+    out: List[Dict[str, Any]] = []
+    strong, doubtful = [], []
+    for r in res.get("records") or []:
+        phones = r.get("phones") or []
+        if not phones and not r.get("emails"):
+            continue
+        item = {"provider": r.get("provider"), "property_id": r.get("property_id"),
+                "name_match": r.get("name_match"),
+                "phones": [{"masked": _mask(ph.get("number")), "type": ph.get("type"),
+                            "referee_type": ph.get("referee_type"), "dnc": ph.get("dnc"),
+                            "last_seen": ph.get("last_seen"), "usable": ph.get("usable")} for ph in phones[:4]],
+                "emails": len(r.get("emails") or []),
+                "provider_reference": r.get("provider_reference"), "looked_up_at": r.get("looked_up_at")}
+        good = r.get("name_match") == "full" and any(ph.get("usable_mobile") for ph in phones)
+        bad = r.get("name_match") in ("none", None) or not any(ph.get("usable") for ph in phones)
+        if good and len(strong) < per_kind:
+            strong.append(dict(item, kind="strong",
+                               why="Vendor's person name fully agrees with the owner of record, "
+                                   "and a usable mobile was returned"))
+        elif bad and len(doubtful) < per_kind:
+            doubtful.append(dict(item, kind="questionable",
+                                 why="Name does not agree with the owner of record" if r.get("name_match") ==
+                                 "none" else "No name to compare" if r.get("name_match") is None
+                                 else "No usable phone returned"))
+    return strong + doubtful
 
 
 def purge(db, ev: EvoSenseProviderEvaluation, user=None) -> None:
@@ -850,6 +917,19 @@ def purge(db, ev: EvoSenseProviderEvaluation, user=None) -> None:
     db.flush()
 
 
+def plan_readiness(db, ev: EvoSenseProviderEvaluation) -> Dict[str, Any]:
+    """LIVE readiness of a planned evaluation (a credential added after the
+    plan was made shows up here). Calls nothing."""
+    plan_ = C.jload(ev.plan, {}) or {}
+    lines = []
+    for l in plan_.get("lines") or []:
+        p = PV.PROVIDERS.get(l["provider"])
+        r = _readiness(db, ev.organization_id, p, PV.config(db, ev.organization_id, p.key)) if p else \
+            {"ready": False, "why": "provider no longer exists"}
+        lines.append({"provider": l["provider"], "role": l["role"], **r})
+    return {"ready": bool(lines) and all(l["ready"] for l in lines), "lines": lines}
+
+
 def payload(ev: EvoSenseProviderEvaluation, *, with_records: bool = True) -> Dict[str, Any]:
     res = C.jload(ev.results, None)
     if res is not None and not with_records:
@@ -862,7 +942,7 @@ def payload(ev: EvoSenseProviderEvaluation, *, with_records: bool = True) -> Dic
             "plan": C.jload(ev.plan, None), "max_spend_cents": ev.max_spend_cents,
             "confirmation": confirmation_for(ev) if ev.status == "planned" else None,
             "authorized_at": ev.authorized_at.isoformat() + "Z" if ev.authorized_at else None,
-            "report": report(ev) if res else None,
+            "report": (report(ev) if with_records else dict(report(ev), examples=[])) if res else None,
             "sample_size": len(sample.get("property_ids") or []),
             "purged": bool((res or {}).get("purged_at")),
             "total_cost_cents": ev.total_cost_cents,
