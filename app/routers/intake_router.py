@@ -6,6 +6,7 @@
     POST   /intake/classifications                  add an org classification
     GET    /intake/batches                          the Import Batch Ledger
     POST   /intake/batches                          upload -> batch (status: mapping)
+    POST   /intake/batches/google-contacts          Google Contacts -> batch (status: mapping)
     GET    /intake/batches/{id}                     batch detail + analysis + progress
     GET    /intake/batches/{id}/preview             headers, samples, suggested mapping
     PUT    /intake/batches/{id}/mapping             mapping / classification / update policy
@@ -232,6 +233,32 @@ async def upload(file: UploadFile = File(...),
             campaign_purpose=campaign_purpose, offer_hook=offer_hook,
             tags=[t.strip() for t in (tags or "").split(",") if t.strip()])
     except ENG.IntakeError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc))
+    audit.record(db, ctx, "intake.file_uploaded", b.id,
+                 {"filename": b.source_filename, "rows": b.original_row_count,
+                  "columns": len(_j(b.headers_json, [])), "source": b.source_label,
+                  "source_detail": b.source_detail, "batch_code": b.batch_code})
+    db.commit()
+    return _batch_payload(db, b, detail=True)
+
+
+class GoogleImportIn(BaseModel):
+    list_name: Optional[str] = None
+
+
+@router.post("/batches/google-contacts")
+def upload_google_contacts(payload: Optional[GoogleImportIn] = None, db: Session = Depends(get_db),
+                           user=Depends(require_import_stage)):
+    """Google Contacts as a SOURCE of the canonical importer: the contacts are
+    staged as a batch and go through the same mapping, analysis, review and
+    commit as any file. Nothing is written as a contact or lead here."""
+    from app.services import google_contacts_service as GC
+    ctx = CTX.resolve(db, user)
+    try:
+        b = GC.create_intake_batch_from_google(db, user, ctx,
+                                               list_name=(payload.list_name if payload else None))
+    except (ValueError, ENG.IntakeError) as exc:
         db.rollback()
         raise HTTPException(400, str(exc))
     audit.record(db, ctx, "intake.file_uploaded", b.id,

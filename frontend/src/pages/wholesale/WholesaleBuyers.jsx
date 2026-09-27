@@ -11,7 +11,7 @@ import '../../styles/shared.css'
 import './wholesale.css'
 import {
   Empty, ErrorBox, errText, fmtDate, fmtLabel, fmtLabels, fmtMoney, fmtNum,
-  fmtWhen, Note, Why,
+  fmtWhen, Note, Standing, Why,
 } from './wsShared'
 import { ConfirmDelete } from './wsFiles'
 import { Alert, Drawer, Empty as EvoEmpty, EvoApp, Hero, Metric, Metrics, Panel, Skeleton, Tag } from './ds/ds'
@@ -549,6 +549,7 @@ function TrackRecord({ buyer }) {
   if (!a || !a.sheets_sent) {
     return (
       <>
+        {buyer.standing ? <div><Standing standing={buyer.standing} /></div> : null}
         <span className="ws-muted">Nothing sent yet</span>
         {buyer.past_deals_count ? (
           <div className="ws-comp__sub">
@@ -560,6 +561,9 @@ function TrackRecord({ buyer }) {
   }
   return (
     <>
+      {buyer.standing ? (
+        <div title={buyer.standing.why}><Standing standing={buyer.standing} /></div>
+      ) : null}
       <div>
         {a.sheets_sent} sent · {a.responded} replied
         {a.offers_made ? ` · ${a.offers_made} offered` : ''}
@@ -568,6 +572,7 @@ function TrackRecord({ buyer }) {
         {a.selected_count
           ? `chosen on ${a.selected_count} deal${a.selected_count === 1 ? '' : 's'}`
           : 'never chosen'}
+        {a.deals_closed ? ` · closed ${a.deals_closed}` : ''}
         {a.best_offer !== null && a.best_offer !== undefined
           ? ` · best ${fmtMoney(a.best_offer)}` : ''}
       </div>

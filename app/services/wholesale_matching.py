@@ -344,3 +344,69 @@ def match_deal_to_buyers(deal: Any, prop: Any, buyers: Sequence[Any],
 
     results.sort(key=lambda r: (not r["disqualified"], r["score"]), reverse=True)
     return results
+
+
+
+# ── Standing: who SAYS they buy vs who ACTUALLY buys ────────────────────────
+#
+# A verdict read off what a buyer has done on THIS organization's deals - the
+# measured activity from the buyer list - and never off what they told us. It
+# sits BESIDE the match score, never inside it: the score answers "does this
+# deal fit what they said they want", the standing answers "do they actually
+# act". Mixing the two would let a loud buyer with a wide buy box outrank a
+# quiet one who closes.
+#
+# Order matters: the strongest evidence wins. A buyer with nothing sent is NEW,
+# not bad - a new buyer and an unresponsive one are different things.
+
+UNRESPONSIVE_AFTER = 3        # deal sheets sent with no reply of any kind
+
+STANDINGS = ("proven", "active", "responsive", "unresponsive", "unproven", "new")
+STANDING_LABELS = {
+    "proven": "Proven closer",
+    "active": "Active bidder",
+    "responsive": "Responsive",
+    "unresponsive": "Unresponsive",
+    "unproven": "Says they buy - unproven",
+    "new": "New - nothing sent yet",
+}
+
+
+def buyer_standing(activity: Optional[Dict[str, Any]], buyer: Any = None) -> Dict[str, Any]:
+    """{standing, label, why, response_rate, claimed_past_deals, closed_here}.
+    Pure: `activity` is the measured dict (sheets_sent, responded, offers_made,
+    selected_count, deals_closed, ...); `buyer` supplies only what the buyer
+    CLAIMED (past_deals_count), which is reported and never counted."""
+    a = activity or {}
+    sent = int(a.get("sheets_sent") or 0)
+    responded = int(a.get("responded") or 0)
+    offers = int(a.get("offers_made") or 0)
+    chosen = int(a.get("selected_count") or 0)
+    closed = int(a.get("deals_closed") or 0)
+    claimed = int(getattr(buyer, "past_deals_count", 0) or 0) if buyer is not None else 0
+    rate = round(responded / sent, 2) if sent else None
+
+    def out(key, why):
+        return {"standing": key, "label": STANDING_LABELS[key], "why": why,
+                "response_rate": rate, "claimed_past_deals": claimed, "closed_here": closed}
+
+    if closed:
+        return out("proven", "Closed %d deal%s with you." % (closed, "" if closed == 1 else "s"))
+    if offers or chosen:
+        bits = []
+        if offers:
+            bits.append("made %d offer%s" % (offers, "" if offers == 1 else "s"))
+        if chosen:
+            bits.append("chosen on %d deal%s" % (chosen, "" if chosen == 1 else "s"))
+        return out("active", "Has %s, but no closing with you yet." % " and ".join(bits))
+    if responded:
+        return out("responsive", "Replied to %d of %d deal sheet%s; no offer yet."
+                   % (responded, sent, "" if sent == 1 else "s"))
+    if sent >= UNRESPONSIVE_AFTER:
+        return out("unresponsive", "%d deal sheets sent, no reply of any kind." % sent)
+    claim = (" Says %d past deal%s - not measured here." % (claimed, "" if claimed == 1 else "s")
+             if claimed else "")
+    if sent:
+        return out("unproven", "%d deal sheet%s sent, no reply yet.%s"
+                   % (sent, "" if sent == 1 else "s", claim))
+    return out("new", ("Nothing sent yet." + claim).strip())

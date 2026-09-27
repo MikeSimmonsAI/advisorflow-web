@@ -3,7 +3,7 @@ Google Contacts Router
 
 Two endpoints:
 1. POST /google-contacts/push/{lead_id} — push one lead to Google Contacts
-2. POST /google-contacts/import — pull all Google Contacts and import as leads
+2. POST /google-contacts/import — stage Google Contacts as a Universal Intake batch
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead
+from app.services.import_permissions import require_import_stage
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter(prefix="/google-contacts", tags=["google-contacts"])
@@ -41,30 +42,29 @@ def push_lead_to_google(
 @router.post("/import")
 def import_from_google_contacts(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_import_stage),
 ):
     """
-    Pulls all contacts from the advisor's Google Contacts and imports
-    them as leads. Uses the same dedup + tier-routing logic as the
-    Excel import — duplicates are flagged, not doubled.
+    Kept for old clients. Google Contacts no longer writes leads directly: it
+    stages ONE Universal Intake batch (the canonical importer) and returns it,
+    so matching, dedupe, review and rollback are the same as for any file.
     """
-    from app.services.google_contacts_service import pull_google_contacts
-    from app.services.import_service import import_leads_from_rows
-
+    from app.services import google_contacts_service as GC
+    from app.services.intake import audit
+    from app.services.intake import context as CTX
+    from app.services.intake import engine as ENG
+    ctx = CTX.resolve(db, current_user)
     try:
-        rows = pull_google_contacts(current_user)
-    except ValueError as e:
+        b = GC.create_intake_batch_from_google(db, current_user, ctx)
+    except (ValueError, ENG.IntakeError) as e:
+        db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
-
-    if not rows:
-        return {"message": "No contacts found in Google Contacts.", "imported": 0}
-
-    result = import_leads_from_rows(
-        db,
-        rows=rows,
-        organization_id=current_user.organization_id,
-        uploading_user_id=current_user.id,
-        source_filename="Google Contacts",
-    )
-
-    return result
+    audit.record(db, ctx, "intake.file_uploaded", b.id,
+                 {"filename": b.source_filename, "rows": b.original_row_count,
+                  "source": b.source_label, "source_detail": b.source_detail,
+                  "batch_code": b.batch_code})
+    db.commit()
+    return {"staged": True, "imported": 0, "batch_id": b.id, "batch_code": b.batch_code,
+            "rows": b.original_row_count, "next": "/imports/%s" % b.id,
+            "message": "Google Contacts staged for review in the Import Center. Nothing has been "
+                       "imported yet."}

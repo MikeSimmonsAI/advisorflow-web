@@ -36,6 +36,7 @@ from app.models.wholesale_models import (
 )
 from app.services import wholesale_analysis as analysis
 from app.services import wholesale_service as svc
+from app.services.wholesale_matching import buyer_standing
 from app.services.entitlements import require_feature
 
 log = logging.getLogger(__name__)
@@ -199,6 +200,9 @@ def buyer_json(b: WholesaleBuyer, boxes: Optional[List[WholesaleBuyBox]] = None,
         # the `past_deals_count` a person typed when they added the buyer —
         # both are shown, and the screen says which is which.
         "activity": activity,
+        # The verdict on that record (who ACTUALLY buys), only when the record
+        # was asked for. Never folded into a match score.
+        "standing": (buyer_standing(activity, b) if activity is not None else None),
     }
 
 

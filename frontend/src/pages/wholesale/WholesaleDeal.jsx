@@ -17,7 +17,7 @@ import '../../styles/shared.css'
 import './wholesale.css'
 import {
   Band, Empty, ErrorBox, Factors, Score, Sourced, Steps, Warnings,
-  errText, fmtBool, fmtDate, fmtLabel, fmtMoney, fmtNum, fmtWhen, Note, Reads, Why,
+  errText, fmtBool, fmtDate, fmtLabel, fmtMoney, fmtNum, fmtWhen, Note, Reads, Standing, Why,
 } from './wsShared'
 import { AuthImage } from './wsFiles'
 import { PropertyWorkspace } from './wsProperty'
@@ -1229,9 +1229,11 @@ function MatchRow({ m, chosen, onToggle }) {
             ? <div className="ws-comp__sub">rated {m.reliability_rating}</div> : null}
         </td>
         <td>
+          {m.standing ? <div><Standing standing={m.standing} /></div> : null}
           {a && a.sheets_sent ? (
             <>
-              <div>{a.sheets_sent} sent · {a.responded} replied</div>
+              <div>{a.sheets_sent} sent · {a.responded} replied
+                {a.deals_closed ? ` · closed ${a.deals_closed}` : ''}</div>
               <div className="ws-comp__sub">
                 {a.selected_count
                   ? `chosen on ${a.selected_count} deal${a.selected_count === 1 ? '' : 's'}`

@@ -372,6 +372,7 @@ export default function Leads() {
     setGoogleImportResult(null)
     try {
       const result = await api.post('/google-contacts/import', {})
+      if (result && result.next) { navigate(result.next); return }
       setGoogleImportResult(result)
       loadLeads()
     } catch (err) {

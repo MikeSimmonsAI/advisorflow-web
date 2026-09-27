@@ -43,6 +43,7 @@ from app.models.wholesale_models import (
     WholesaleEnrichmentRequest, WholesaleEvent, WholesaleFile, WholesaleOffer,
     WholesaleProperty, WholesaleSellerProfile, WholesaleSettings,
 )
+from app.services.wholesale_matching import buyer_standing
 from app.services import wholesale_analysis as analysis
 from app.services import wholesale_enrichment as enrichment
 from app.services import wholesale_esign as esign
@@ -2255,6 +2256,7 @@ def deal_room(deal_id: str, db: Session = Depends(get_db),
             "do_not_contact": bool(getattr(buyers.get(m.buyer_id),
                                            "do_not_contact", False)),
             "activity": match_activity.get(m.buyer_id),
+            "standing": buyer_standing(match_activity.get(m.buyer_id), buyers.get(m.buyer_id)),
             "computed_at": m.computed_at.isoformat() if m.computed_at else None,
         } for m in matches],
         "buyer_outreach": [{

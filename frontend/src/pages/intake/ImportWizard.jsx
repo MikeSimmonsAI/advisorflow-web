@@ -157,6 +157,13 @@ function UploadStep({ ctx, onCreated }) {
   const [err, setErr] = useState('')
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
+  async function fromGoogle() {
+    setBusy(true); setErr('')
+    try { onCreated(await api.post('/intake/batches/google-contacts', { list_name: form.list_name.trim() || null })) }
+    catch (e) { setErr(errorText(e)) }
+    finally { setBusy(false) }
+  }
+
   async function submit() {
     if (!file) { setErr('Choose a .csv or .xlsx file.'); return }
     setBusy(true); setErr('')
@@ -222,6 +229,10 @@ function UploadStep({ ctx, onCreated }) {
       <div className="ic-actions">
         <button className="btn btn--primary btn--lg" disabled={busy || !file} onClick={submit}>
           {busy ? 'Reading file…' : 'Upload & read columns →'}
+        </button>
+        <button className="btn btn--secondary btn--lg" disabled={busy} onClick={fromGoogle}
+                title="Reads your connected Google Contacts into this same review. Nothing is imported until you commit.">
+          📇 From Google Contacts
         </button>
       </div>
     </section>

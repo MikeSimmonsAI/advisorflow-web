@@ -3,12 +3,16 @@ Google Contacts Service
 
 Handles two-way sync between the app and Google Contacts:
 1. Export a lead TO Google Contacts (so advisors have them on their phone)
-2. Import contacts FROM Google Contacts (bulk pull into the app as leads)
+2. Read contacts FROM Google Contacts. They are NOT written as leads here:
+   `google_contacts_csv` turns them into a file that goes through Universal
+   Intake (stage -> map -> analyze -> decide), the one canonical importer.
 
 Uses the same Google OAuth refresh token already stored from the Calendar
 connection. Requires the contacts scope to have been granted during OAuth.
 """
 
+import csv
+import io
 import os
 import requests
 from app.utils.crypto import decrypt_value
@@ -147,3 +151,101 @@ def pull_google_contacts(user, max_results: int = 500) -> list[dict]:
         })
 
     return rows
+
+
+# ── Universal Intake source ─────────────────────────────────────────────────
+# Google Contacts is a SOURCE CONNECTOR of the canonical importer, never an
+# importer of its own. Everything below only READS Google and produces a file;
+# matching, dedupe, classification, consent-neutral eligibility, commit and
+# rollback all happen in `app.services.intake`.
+
+GOOGLE_CSV_HEADERS = ["Source Record ID", "First Name", "Last Name", "Company", "Job Title",
+                      "Email", "Phone", "Mobile Phone", "Google Phone Label", "Notes"]
+GOOGLE_MAX_CONTACTS = 25000
+
+
+def _digits(v: str) -> str:
+    return "".join(ch for ch in (v or "") if ch.isdigit() or ch == "+")
+
+
+def fetch_google_people(user, *, page_size: int = 1000, limit: int = GOOGLE_MAX_CONTACTS,
+                        session=None) -> list:
+    """Every connection of the signed-in user (paged). Read-only."""
+    http = session or requests
+    access_token = _get_access_token(user)
+    headers = {"Authorization": f"Bearer {access_token}"}
+    people, token = [], None
+    while True:
+        params = {"personFields": "names,phoneNumbers,emailAddresses,organizations,biographies",
+                  "pageSize": min(page_size, 1000)}
+        if token:
+            params["pageToken"] = token
+        resp = http.get(f"{PEOPLE_API_BASE}/people/me/connections", params=params,
+                        headers=headers, timeout=30)
+        if not resp.ok:
+            if resp.status_code == 403:
+                raise ValueError("Google Contacts permission not granted. Please reconnect Google in "
+                                 "Settings and allow contact access when prompted.")
+            raise ValueError("Google Contacts could not be read (HTTP %s)." % resp.status_code)
+        data = resp.json() or {}
+        people.extend(data.get("connections") or [])
+        token = data.get("nextPageToken")
+        if not token or len(people) >= limit:
+            return people[:limit]
+
+
+def google_people_rows(people: list) -> list:
+    """One row per person, in the Universal Intake column vocabulary. The
+    Google phone label ("mobile", "home") is what the owner typed into Google:
+    it is kept as SOURCE DATA and never treated as a carrier line type."""
+    rows = []
+    for p in people or []:
+        name = (p.get("names") or [{}])[0]
+        phones = p.get("phoneNumbers") or []
+        emails = p.get("emailAddresses") or []
+        org = (p.get("organizations") or [{}])[0]
+        first, last = (name.get("givenName") or "").strip(), (name.get("familyName") or "").strip()
+        full = (name.get("displayName") or "").strip()
+        if not (first or last) and full:
+            first = full
+        phone = _digits((phones[0] if phones else {}).get("value", ""))
+        mobile = next((_digits(x.get("value", "")) for x in phones
+                       if (x.get("type") or "").lower() == "mobile"), "")
+        email = ((emails[0] if emails else {}).get("value") or "").strip()
+        if not (phone or email or first or last):
+            continue
+        rows.append({
+            "Source Record ID": p.get("resourceName") or "",
+            "First Name": first, "Last Name": last,
+            "Company": (org.get("name") or "").strip(), "Job Title": (org.get("title") or "").strip(),
+            "Email": email, "Phone": phone, "Mobile Phone": mobile,
+            "Google Phone Label": ((phones[0] if phones else {}).get("type") or ""),
+            "Notes": ((p.get("biographies") or [{}])[0].get("value") or "").strip()[:1000],
+        })
+    return rows
+
+
+def rows_to_csv(rows: list) -> bytes:
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=GOOGLE_CSV_HEADERS, extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        w.writerow(r)
+    return buf.getvalue().encode("utf-8")
+
+
+def create_intake_batch_from_google(db, user, ctx, *, list_name=None, people=None):
+    """Read the user's Google Contacts and stage them as ONE Universal Intake
+    batch (status: mapping). Nothing becomes a contact or a lead until the
+    operator runs analysis and commits, exactly like an uploaded file."""
+    from datetime import datetime as _dt
+    from app.services.intake import engine as ENG
+    rows = google_people_rows(people if people is not None else fetch_google_people(user))
+    if not rows:
+        raise ENG.IntakeError("No contacts with a name, phone or email were found in Google Contacts.")
+    stamp = _dt.utcnow().strftime("%Y-%m-%d")
+    who = getattr(user, "email", None) or "connected Google account"
+    return ENG.create_batch(
+        db, ctx, content=rows_to_csv(rows), filename="google-contacts-%s.csv" % stamp,
+        source="google_contacts", source_detail="Google Contacts of %s" % who,
+        list_name=list_name, display_name=list_name or "Google Contacts %s" % stamp)

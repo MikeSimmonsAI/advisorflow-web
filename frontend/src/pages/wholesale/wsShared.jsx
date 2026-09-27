@@ -217,3 +217,17 @@ export function Reads({ value, as = 'money' }) {
       })
   return <span className="ws-reads">{text}</span>
 }
+
+
+/* Who ACTUALLY buys, read off what the buyer has done here — never what they
+ * said. Shown beside the match score, never folded into it. */
+const STANDING_TONE = { proven: 'is-ok', active: 'is-in', responsive: 'is-in',
+                        unresponsive: 'is-warn', unproven: 'is-muted', new: 'is-muted' }
+export function Standing({ standing }) {
+  if (!standing) return null
+  return (
+    <span className={`ws-pill ${STANDING_TONE[standing.standing] || 'is-muted'}`} title={standing.why}>
+      {standing.label}
+    </span>
+  )
+}
