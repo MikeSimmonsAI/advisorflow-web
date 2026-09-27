@@ -229,7 +229,8 @@ def test_provider_payload_never_contains_credentials(client, auth_headers, seede
         for k in p:
             assert not re.search(r"(secret|token|password|api_?key|credential)", k, re.I), k
     kinds = {c["capability"]: c["label"] for c in data["capabilities"]}
-    assert kinds["CONTACT_ENRICHMENT"] == "SANDBOX" and kinds["COMPS"] == "INTERFACE ONLY"
+    # a sandbox workspace: the synthetic comps adapter serves COMPS (test records only)
+    assert kinds["CONTACT_ENRICHMENT"] == "SANDBOX" and kinds["COMPS"] == "SANDBOX"
     assert kinds["EMAIL_VALIDATION"] == "INTERFACE ONLY" and kinds["ENTITY_RESOLUTION"] == "INTERFACE ONLY"
     assert kinds["LISTING"] == "MANUAL"
     assert data["real_connectors"] == []

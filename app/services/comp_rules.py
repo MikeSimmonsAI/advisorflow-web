@@ -28,6 +28,29 @@ from typing import Any, Dict, List, Optional
 
 VERSION = "comp_eligibility/v1"
 
+# WHERE A PRICE CAME FROM. Only a closed sale is ARV evidence:
+#   MLS_CLOSED          the MLS closed/sold price, with its close date
+#   PUBLIC_RECORD       a recorded deed price (not available in non-disclosure
+#                       states such as Texas)
+#   UNVERIFIED_RECORD   a "last sale price" from records in a non-disclosure
+#                       state - its origin is unknown, so it is NOT evidence
+#   ESTIMATED           a modelled / estimated sale price
+#   LIST                a list (asking) price
+#   AVM                 an automated valuation
+# A comp typed by a person carries no price_source: it is MANUAL, needs a
+# source reference, and is labelled as such everywhere.
+PRICE_MLS_CLOSED = "MLS_CLOSED"
+PRICE_PUBLIC_RECORD = "PUBLIC_RECORD"
+PRICE_UNVERIFIED_RECORD = "UNVERIFIED_RECORD"
+PRICE_ESTIMATED = "ESTIMATED"
+PRICE_LIST = "LIST"
+PRICE_AVM = "AVM"
+CLOSED_PRICE_SOURCES = (PRICE_MLS_CLOSED, PRICE_PUBLIC_RECORD)
+PRICE_SOURCE_LABELS = {PRICE_MLS_CLOSED: "MLS closed price", PRICE_PUBLIC_RECORD: "Public-record sale price",
+                       PRICE_UNVERIFIED_RECORD: "Record price of unknown origin (non-disclosure state)",
+                       PRICE_ESTIMATED: "Estimated sale price", PRICE_LIST: "List price",
+                       PRICE_AVM: "AVM"}
+
 DEFAULT_RULES: Dict[str, Any] = {
     "max_distance_miles": 1.0,
     "max_age_months": 12,
@@ -166,7 +189,13 @@ def evaluate(comp, subject, rules: Dict[str, Any], *, today: Optional[date] = No
         excluded.append(_c("EXCLUDED_BY_PERSON", "Excluded by a person",
                            getattr(comp, "exclusion_reason", None) or "no reason given"))
 
-    # 1. Closed-sale evidence.
+    # 1. Closed-sale evidence. A price that is not a closed sale - an
+    #    estimate, a list price, an AVM, or a record price of unknown origin
+    #    in a non-disclosure state - never counts, however plausible.
+    ps = getattr(comp, "price_source", None)
+    if ps and ps not in CLOSED_PRICE_SOURCES:
+        excluded.append(_c("PRICE_NOT_CLOSED_SALE", "Not a closed sale price",
+                           PRICE_SOURCE_LABELS.get(ps, ps)))
     if price is None or price <= 0:
         excluded.append(_c("NO_SALE_PRICE", "No closed sale price"))
     if sdate is None:

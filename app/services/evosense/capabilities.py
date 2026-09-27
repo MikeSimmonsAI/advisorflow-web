@@ -56,6 +56,7 @@ LABELS.update({"SOLD_COMPS": "Sold comparable sales", "VALUATION": "Valuation (A
 S_OPERATIONAL, S_UNVERIFIED, S_DEGRADED = "OPERATIONAL", "UNVERIFIED", "DEGRADED"
 S_NOT_ENABLED, S_BLOCKED, S_NOT_CONFIGURED = "NOT ENABLED", "BLOCKED", "NOT CONFIGURED"
 S_MANUAL, S_SANDBOX = "MANUAL ONLY", "SANDBOX"
+S_EVALUATION = "EVALUATION ONLY"
 
 
 def _existing_cfg(db, org_id, key):
@@ -116,7 +117,11 @@ def provider_capability(db, org_id: str, p, engine_caps: List[str], cfg=None) ->
         state = S_OPERATIONAL
     else:
         state = S_UNVERIFIED
-    operational = state in (S_OPERATIONAL, S_UNVERIFIED, S_SANDBOX) and bool(canon and canon.get("routable"))
+    evaluation_only = bool(getattr(p, "evaluation_only", False))
+    if evaluation_only and state in (S_OPERATIONAL, S_UNVERIFIED):
+        state = S_EVALUATION
+    operational = (not evaluation_only and state in (S_OPERATIONAL, S_UNVERIFIED, S_SANDBOX)
+                   and bool(canon and canon.get("routable")))
     why = {S_MANUAL: "Entered by a person or imported from a file",
            S_BLOCKED: "Blocked: %s" % ((canon or {}).get("why") or "the source refused the platform"),
            S_NOT_CONFIGURED: ("Not purchased - interface only" if kind == C.INTERFACE_ONLY
@@ -127,7 +132,11 @@ def provider_capability(db, org_id: str, p, engine_caps: List[str], cfg=None) ->
            S_SANDBOX: "Synthetic sandbox adapter - software testing only, never real data",
            S_OPERATIONAL: ("Last call for this capability succeeded" if health_basis == "capability"
                            else "Last call to this provider succeeded (not yet recorded per capability)"),
-           S_UNVERIFIED: "Configured and enabled, never proven to work - not 'connected'"}[state]
+           S_UNVERIFIED: "Configured and enabled, never proven to work - not 'connected'",
+           S_EVALUATION: "Provider evaluation only - not approved for production; nothing in "
+                         "discovery, enrichment or outreach can call it"}[state]
+    if evaluation_only and state in (S_NOT_CONFIGURED, S_NOT_ENABLED):
+        why = "Adapter built for evaluation; %s" % why[0].lower() + why[1:]
     return {"provider": p.key, "label": p.label, "connector_kind": kind, "state": state, "why": why,
             "platform": {"configured": configured, "blocked": bool(platform_block)},
             "tenant": {"enabled": enabled, "reachable": reachable, "healthy": healthy,
@@ -135,7 +144,7 @@ def provider_capability(db, org_id: str, p, engine_caps: List[str], cfg=None) ->
                        "last_failure_at": last_bad or None, "health_basis": health_basis},
             "configured": configured, "enabled": enabled, "reachable": reachable,
             "healthy": healthy, "operational": operational, "blocked": state == S_BLOCKED,
-            "synthetic": kind == C.SANDBOX,
+            "synthetic": kind == C.SANDBOX, "evaluation_only": evaluation_only,
             "cost_cents": {c: p.costs.get(c) for c in engine_caps if p.costs.get(c) is not None}}
 
 
@@ -149,10 +158,11 @@ def matrix(db, org_id: str) -> List[Dict[str, Any]]:
             if set(engine_caps) & set(p.capabilities or ()):
                 rows.append(provider_capability(db, org_id, p, engine_caps))
         real_ok = [r for r in rows if r["operational"] and not r["synthetic"]
-                   and r["connector_kind"] == C.REAL]
+                   and not r.get("evaluation_only") and r["connector_kind"] == C.REAL]
         if real_ok:
             overall = S_OPERATIONAL if any(r["state"] == S_OPERATIONAL for r in real_ok) else S_UNVERIFIED
-        elif any(r["state"] == S_DEGRADED for r in rows if r["connector_kind"] == C.REAL):
+        elif any(r["state"] == S_DEGRADED for r in rows
+                 if r["connector_kind"] == C.REAL and not r.get("evaluation_only")):
             overall = S_DEGRADED
         elif any(r["state"] == S_BLOCKED for r in rows):
             overall = S_BLOCKED

@@ -417,6 +417,7 @@ def evosense_attacks(ids):
         # their records.
         ("get", "%s/reprocess/%s" % (base, ids["es_reprocess_run_id"]), None),
         ("get", "%s/provider-evaluations/%s" % (base, ids["es_evaluation_id"]), None),
+        ("post", "%s/provider-evaluations/%s/purge" % (base, ids["es_evaluation_id"]), None),
         ("post", "%s/reprocess/%s/apply" % (base, ids["es_reprocess_run_id"]),
          {"confirm": "APPLY %s" % ids["es_reprocess_run_id"]}),
         ("post", "%s/reprocess/%s/rollback" % (base, ids["es_reprocess_run_id"]),

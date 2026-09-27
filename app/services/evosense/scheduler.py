@@ -93,16 +93,23 @@ def set_cadence(db, strategy, cadence: str, interval_hours: Optional[int] = None
 
 # ── the lock ────────────────────────────────────────────────────────────────
 
-def claim(db, strategy) -> Optional[str]:
+def claim(db, strategy, *, due_only: bool = False) -> Optional[str]:
     """Atomically take this strategy's hunt lock. Returns a token, or None if
-    another hunt holds it. Committed immediately so other workers see it."""
+    another hunt holds it. Committed immediately so other workers see it.
+
+    `due_only` (scheduled hunts): the claim ALSO requires the schedule to
+    still be due, in the same atomic UPDATE. Without it, a worker that saw
+    the strategy due a moment ago could take the lock just after another
+    worker's hunt finished and hunt - and pay - a second time. (Two web
+    instances overlap during every deploy, each with its own scheduler.)"""
     sched = schedule_for(db, strategy)
     db.commit()
     token = uuid.uuid4().hex
     now = C.now()
+    due = " AND (next_due_at IS NULL OR next_due_at <= :now)" if due_only else ""
     res = db.execute(text(
         "UPDATE evosense_hunt_schedules SET lock_token = :tok, locked_until = :until "
-        "WHERE id = :id AND (locked_until IS NULL OR locked_until < :now)"),
+        "WHERE id = :id AND (locked_until IS NULL OR locked_until < :now)" + due),
         {"tok": token, "until": now + LOCK_FOR, "id": sched.id, "now": now})
     db.commit()
     return token if res.rowcount == 1 else None

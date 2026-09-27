@@ -142,6 +142,26 @@ def charge(db, entry: EvoSenseCostEntry, success: bool = True) -> None:
     entry.success = success
 
 
+def settle(db, entry: EvoSenseCostEntry, actual_cents: int, success: bool = True) -> None:
+    """Charge what the vendor ACTUALLY billed, when it is known and not more
+    than the reservation: the unused part of the reservation goes back to
+    every budget counter it was taken from. (A vendor that bills more than
+    was reserved is charged the reservation and the difference is noted by
+    the caller - the ledger never silently exceeds a budget.)"""
+    actual = max(0, int(actual_cents))
+    diff = (entry.total_cents or 0) - actual
+    if diff > 0:
+        scopes = ["org"] + (["strategy:%s" % entry.strategy_id] if entry.strategy_id else [])
+        for scope, period in [(s, p) for s in scopes for p in (entry.period_day, entry.period_month)]:
+            db.execute(text("UPDATE evosense_budget_counters SET spent_cents = spent_cents - :c "
+                            "WHERE organization_id = :o AND scope = :s AND period = :p"),
+                       {"c": diff, "o": entry.organization_id, "s": scope, "p": period})
+        entry.total_cents = actual
+        entry.unit_cost_cents = actual
+    entry.status = "charged"
+    entry.success = success
+
+
 def refund(db, entry: EvoSenseCostEntry, strategy=None) -> None:
     """Release a reservation for a call that did not complete."""
     if entry.total_cents:

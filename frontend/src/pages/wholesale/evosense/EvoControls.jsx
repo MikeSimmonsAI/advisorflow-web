@@ -24,6 +24,7 @@ import {
   Alert, EvoApp, Hero, Metric, Metrics, PageSkeleton, Panel, SandboxTag, TabBar, Tag, Tile, ago, cents, humanize,
 } from '../ds/ds'
 import '../ds/evo-pages.css'
+import EvoEvaluation from './EvoEvaluation'
 
 const SWITCHES = [
   ['paused_all', 'Engine', 'Everything: hunting, lookups and outreach. Seller replies are still saved and opt-outs still honoured.'],
@@ -57,7 +58,8 @@ function StateBadge({ state, tone, why }) {
 }
 
 const CAP_TONE = { OPERATIONAL: 'good', UNVERIFIED: 'attention', DEGRADED: 'danger', BLOCKED: 'danger',
-                   SANDBOX: 'attention', 'MANUAL ONLY': 'quiet', 'NOT ENABLED': 'quiet', 'NOT CONFIGURED': 'quiet' }
+                   SANDBOX: 'attention', 'MANUAL ONLY': 'quiet', 'NOT ENABLED': 'quiet', 'NOT CONFIGURED': 'quiet',
+                   'EVALUATION ONLY': 'attention' }
 
 /** The provider capability registry: per product capability, per provider,
  *  platform state and tenant state kept apart. "Configured" is never shown as
@@ -131,7 +133,7 @@ export default function EvoControls() {
   const [tab, setTab] = useState(() => {
     const h = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : ''
     if (h === 'budget') return 'usage'
-    return ['sources', 'providers', 'capabilities', 'controls', 'usage'].includes(h) ? h : 'providers'
+    return ['sources', 'providers', 'capabilities', 'evaluation', 'controls', 'usage'].includes(h) ? h : 'providers'
   })
 
   const load = useCallback(async () => {
@@ -210,6 +212,7 @@ export default function EvoControls() {
               items={[
                 { key: 'sources', label: 'Source Registry', count: reg ? reg.sources.filter((x) => x.operational).length + ' operational' : null },
                 { key: 'providers', label: 'Service Providers', count: prov.providers.length },
+                { key: 'evaluation', label: 'Provider Evaluation' },
                 { key: 'capabilities', label: 'Capability Registry', count: capReg ? capReg.capabilities.filter((x) => x.state === 'OPERATIONAL').length + ' operational' : null },
                 { key: 'controls', label: 'Controls & Compliance', count: pausedCount ? `${pausedCount} paused` : null },
                 { key: 'usage', label: 'Usage & Costs' },
@@ -341,6 +344,10 @@ export default function EvoControls() {
           <p className="evo-muted evo-small" style={{ margin: 0, padding: '12px 20px 16px' }}>Sandbox providers are off for every organization
             until an admin turns them on, and they never serve a real (non-sandbox) property. No credential is ever shown here.</p>
         </Panel>
+      </div>
+
+      <div className="evo-stack" role="tabpanel" id="panel-evaluation" aria-labelledby="tab-evaluation" hidden={tab !== 'evaluation'}>
+        {tab === 'evaluation' ? <EvoEvaluation /> : null}
       </div>
 
       <div className="evo-stack" role="tabpanel" id="panel-capabilities" aria-labelledby="tab-capabilities" hidden={tab !== 'capabilities'}>

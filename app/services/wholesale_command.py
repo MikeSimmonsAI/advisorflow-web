@@ -456,7 +456,8 @@ def command_center(db, org_id: str, *, include_test: bool = False, days: int = 7
             prov = PV.PROVIDERS.get(cfg.provider_key)
             # Manual entry and file import are never "called", so they can
             # never be failing; the sandbox is not a real problem either.
-            if prov is None or prov.connector_kind in (C.MANUAL, C.IMPORT, C.SANDBOX):
+            if prov is None or prov.connector_kind in (C.MANUAL, C.IMPORT, C.SANDBOX) \
+                    or getattr(prov, "evaluation_only", False):
                 continue
             key = cfg.provider_key
             # The same canonical state the Providers screen shows, including

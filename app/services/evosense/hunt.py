@@ -54,11 +54,14 @@ def run_strategy(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str = 
     error, and the lock released; everything it had committed before the
     failure is idempotent, so the retry re-sees rather than re-creates."""
     from app.services.evosense import scheduler as SCH
-    token = SCH.claim(db, strategy)
+    token = SCH.claim(db, strategy, due_only=(trigger == "schedule"))
     if token is None:
         run = EvoSenseRun(organization_id=org_id, strategy_id=strategy.id, trigger=trigger,
                           status="skipped", error="Another hunt of this strategy is already running",
                           counts=C.jdump({}), finished_at=C.now())
+        if trigger == "schedule":
+            run.error = ("Another hunt of this strategy is already running, or it already ran "
+                         "and is not due again yet")
         db.add(run)
         C.log_event(db, org_id, "hunt.skipped_lock", strategy_id=strategy.id, user=user,
                     actor_type=C.ACTOR_USER if user else C.ACTOR_AUTOMATION, is_test=strategy.is_test,
@@ -68,10 +71,12 @@ def run_strategy(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str = 
     try:
         run = _run_locked(db, org_id, strategy, trigger=trigger, user=user,
                           max_properties=max_properties, enrich=enrich)
+        # The next due time is written BEFORE the lock is released, so no
+        # other worker can see "unlocked and still due" in between.
+        if run.status != "skipped":
+            SCH.record_result(db, strategy, run)
     finally:
         SCH.release(db, strategy, token)
-    if run.status != "skipped":
-        SCH.record_result(db, strategy, run)
     return run
 
 

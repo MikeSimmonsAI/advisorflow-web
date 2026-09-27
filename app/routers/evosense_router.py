@@ -863,6 +863,8 @@ class EvaluationIn(BaseModel):
     name: str
     provider_keys: List[str]
     property_ids: List[str]
+    mode: str = "contact"                      # contact | comps
+    referee_key: Optional[str] = None          # a PHONE_VALIDATION provider (contact mode)
     ground_truth: Optional[Dict[str, Dict[str, Any]]] = None
     confirm: Optional[str] = None
 
@@ -879,11 +881,48 @@ def run_provider_evaluation(payload: EvaluationIn, db: Session = Depends(get_db)
     org_id = svc.write_org_id(db, user)
     try:
         ev = PE.run(db, org_id, name=payload.name, provider_keys=payload.provider_keys,
-                    property_ids=payload.property_ids, ground_truth=payload.ground_truth,
+                    property_ids=payload.property_ids, mode=payload.mode,
+                    ground_truth=payload.ground_truth, referee_key=payload.referee_key,
                     user=user, confirm=payload.confirm)
     except PE.EvaluationRefused as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc))
+    db.commit()
+    return PE.payload(ev)
+
+
+@router.get("/provider-evaluations/setup")
+def provider_evaluation_setup(mode: str = "contact", db: Session = Depends(get_db),
+                              user: User = Depends(require_tenant_or_observer)):
+    """What an evaluation would use: the proposed authorized sample (real
+    properties this workspace already researches), every candidate provider
+    with its readiness, and the confirmation a paid run would need. Reads
+    only - calls no provider."""
+    from app.services.evosense import provider_eval as PE
+    if mode not in (PE.MODE_CONTACT, PE.MODE_COMPS):
+        raise HTTPException(status_code=422, detail="Mode must be contact or comps.")
+    org_id = _read_org(db, user)
+    return {"sample": PE.proposed_sample(db, org_id, mode), "providers": PE.candidates(db, org_id),
+            "confirmation_format": PE.PAID_CONFIRMATION + " <n>",
+            "referee_max_per_lookup": PE.REFEREE_MAX_PER_LOOKUP}
+
+
+@router.post("/provider-evaluations/{evaluation_id}/purge")
+def purge_provider_evaluation(evaluation_id: str, db: Session = Depends(get_db),
+                              user: User = Depends(require_tenant_user),
+                              _g: User = Depends(require_not_observation)):
+    """Delete an evaluation's returned values (contacts, comps, ground truth)
+    and keep only its aggregate metrics. Admin only; irreversible."""
+    from app.models.evosense_models import EvoSenseProviderEvaluation
+    from app.services.evosense import provider_eval as PE
+    _admin(user)
+    org_id = svc.write_org_id(db, user)
+    ev = (db.query(EvoSenseProviderEvaluation)
+          .filter(EvoSenseProviderEvaluation.id == evaluation_id,
+                  EvoSenseProviderEvaluation.organization_id == org_id).first())
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    PE.purge(db, ev, user=user)
     db.commit()
     return PE.payload(ev)
 
@@ -897,7 +936,7 @@ def list_provider_evaluations(db: Session = Depends(get_db),
     rows = (db.query(EvoSenseProviderEvaluation)
             .filter(EvoSenseProviderEvaluation.organization_id == org_id)
             .order_by(EvoSenseProviderEvaluation.created_at.desc()).limit(50).all())
-    return {"items": [dict(PE.payload(r), results=None) for r in rows]}
+    return {"items": [PE.payload(r, with_records=False) for r in rows]}
 
 
 @router.get("/provider-evaluations/{evaluation_id}")
@@ -911,7 +950,9 @@ def get_provider_evaluation(evaluation_id: str, db: Session = Depends(get_db),
                   EvoSenseProviderEvaluation.organization_id == org_id).first())
     if ev is None:
         raise HTTPException(status_code=404, detail="Evaluation not found")
-    return PE.payload(ev)
+    # The returned values (people's phones and emails) are shown to a
+    # workspace admin only; everyone else sees the metrics.
+    return PE.payload(ev, with_records=getattr(user, "role", None) in ADMIN_ROLES)
 
 
 @router.get("/capabilities")
@@ -922,7 +963,8 @@ def capability_registry(db: Session = Depends(get_db), user: User = Depends(requ
     org_id = _read_org(db, user)
     return {"capabilities": CAPS.matrix(db, org_id),
             "states": [CAPS.S_OPERATIONAL, CAPS.S_UNVERIFIED, CAPS.S_DEGRADED, CAPS.S_NOT_ENABLED,
-                       CAPS.S_BLOCKED, CAPS.S_NOT_CONFIGURED, CAPS.S_MANUAL, CAPS.S_SANDBOX]}
+                       CAPS.S_BLOCKED, CAPS.S_NOT_CONFIGURED, CAPS.S_MANUAL, CAPS.S_SANDBOX,
+                       CAPS.S_EVALUATION]}
 
 
 @router.get("/sources")

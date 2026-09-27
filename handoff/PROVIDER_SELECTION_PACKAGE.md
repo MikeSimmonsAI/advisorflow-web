@@ -1,6 +1,6 @@
 # Provider selection package: contact/skip trace and sold comps/property data
 
-**Version 2**, 2026-09-27. Replaces the 2026-09-26 version.
+**Version 3**, 2026-09-27. Replaces version 2; pricing updated (section 4) and the harness/adapters are now built (section 11).
 
 **This is a decision package, not a purchase.** Nothing has been bought, signed up for, configured or activated. No vendor was contacted. No real owner was contacted.
 
@@ -84,10 +84,10 @@ Research was done through a web fetcher. Some vendor pages were blocked or retur
 | **API / trial** | REST; sandbox **UNKNOWN** | REST, Bearer; **no sandbox** | REST, `x-api-key`; sandbox **UNKNOWN** | REST, Bearer | REST (header keys); **100 free matches/month**. **CONFIRMED** | REST; **free trial, no card**. **CONFIRMED** | REST |
 | **Batch / async** | Async variant. **CONFIRMED** ([doc](https://developer.batchdata.com/docs/batchdata/batchdata-v1/operations/create-a-property-skip-trace-async)); webhook **UNKNOWN** | Async batch + webhook. **CONFIRMED** | Bulk 10–1,000 with per-item and completion webhooks. **CONFIRMED** ([doc](https://developer.realestateapi.com/reference/bulk-skiptrace-api)) | 100 addresses/request. **CONFIRMED** | "Batch & API" plans; mechanics **SALES** | — | — |
 | **Rate limits** | **UNKNOWN** | 500/min single; batch 10 POSTs/5 min. **CONFIRMED** | 10 rps; 1M matches/day. **CONFIRMED** ([doc](https://developer.realestateapi.com/reference/rate-limiting-1)) | 500/min single, 250/min bulk. **CONFIRMED** | **UNKNOWN** | 10 QPS self-serve, 32 enterprise. **CONFIRMED** | **UNKNOWN** |
-| **Pricing** | Plans $2,000/mo (100k) to $20,000/mo (3M). **CONFIRMED** ([pricing](https://batchdata.io/pricing)). PAYG per match and miss-free: **SALES** | $0.02 credits; sync lookup = 5 credits (**$0.10**) per hit, 0 on a miss. **CONFIRMED** ([pricing](https://www.tracerfy.com/pricing)). **But** the FAQ says per uploaded row: **SALES** | Credits (example response shows 10); dollar price **SALES** (pricing page would not render) | **$0.04 per match, misses free**, no subscription. **CONFIRMED** | From $0.25/match (Pro as low as $0.01, custom); pay only for matches. **CONFIRMED** ([pricing](https://go.enformion.com/pricing/)) | Phone Validation $0.015; Reverse Address $0.07; Real Contact $0.03. **CONFIRMED** ([pricing](https://trestleiq.com/pricing/)) | $0.008/request. **CONFIRMED** ([pricing](https://www.twilio.com/en-us/user-authentication-identity/pricing/lookup)) |
+| **Pricing** | Plans $2,000/mo (100k) to $20,000/mo (3M). **CONFIRMED** ([pricing](https://batchdata.io/pricing)). PAYG per match and miss-free: **SALES** | **Normal Trace $0.02/hit, Advanced $0.04/hit, misses free; API included at the same per-hit pricing. CONFIRMED** ([pricing](https://www.tracerfy.com/pricing)). The **instant (single) API lookup is 5 credits = $0.10 per hit**, 0 on a miss; the batch trace is 1 (normal) or 2 (advanced) credits per lead. **CONFIRMED** ([API docs](https://www.tracerfy.com/skip-tracing-api-documentation/)) | Reported on REAPI's official pricing page: **$0.10/property PAYG; skip trace $0.05/match with a property-data subscription; Starter $599/mo, Growth $1,200/mo, Pro $2,500/mo; Pro positioned for consumer-facing SaaS** (reviewed by Mike's research 9/27; our fetcher could not render the page, so treat as **reported, re-confirm**) | **$0.04 per match, misses free**, no subscription. **CONFIRMED** | From $0.25/match (Pro as low as $0.01, custom); pay only for matches. **CONFIRMED** ([pricing](https://go.enformion.com/pricing/)) | Phone Validation $0.015; Reverse Address $0.07; Real Contact $0.03. **CONFIRMED** ([pricing](https://trestleiq.com/pricing/)) | $0.008/request. **CONFIRMED** ([pricing](https://www.twilio.com/en-us/user-authentication-identity/pricing/lookup)) |
 | **Minimums** | Fees non-refundable (§3.7a). **CONFIRMED**; plan minimum = plan | None; start at $20; plans from $700/mo. **CONFIRMED** | **SALES** | None. **CONFIRMED** | None (Starter). **CONFIRMED** | None (self-serve) | None |
-| **Storage / retention** | Refresh caches at least every **30 days**; delete/suppress on notice; ≤3% of database. **CONFIRMED** ([ToS](https://batchdata.io/terms-of-service) §6.20, §6.2) | **UNKNOWN** (terms page 404) | **UNKNOWN** (terms 404); responses carry a `cached` flag | **UNKNOWN** (terms not reviewed) | **May not store/cache to avoid new inquiries.** **CONFIRMED** | **May not store/cache to avoid new queries**; merged data must be tagged as Trestle. **CONFIRMED** (§3.3.2) | **UNKNOWN** |
-| **Multi-tenant / resale** | Internal use, non-sublicensable; resale needs a **Reseller Addendum** (VP-signed). **CONFIRMED** (§6.25); addendum terms **SALES** | "White-label partnership… with a contract" exists. **CONFIRMED** ([FAQ](https://www.tracerfy.com/faqs)); terms **SALES** | **UNKNOWN / SALES** | **UNKNOWN / SALES** | No disclosing, sublicensing or reselling without written consent. **CONFIRMED** | Written consent needed; restrictions flow down. **CONFIRMED** (§3.3.1). **No marketing use except responding to inbound requests** (§3.3.2), which conflicts with outbound wholesaling | **UNKNOWN** |
+| **Storage / retention** | Refresh caches at least every **30 days**; delete/suppress on notice; ≤3% of database. **CONFIRMED** ([ToS](https://batchdata.io/terms-of-service) §6.20, §6.2) | **UNKNOWN** (terms page 404) | **UNKNOWN** (terms 404); responses carry a `cached` flag | Terms have **no** storage, resale or permissible-use clauses at all ([terms](https://dataskip.io/terms)) → **SALES** | **May not store/cache to avoid new inquiries.** **CONFIRMED** | **May not store/cache to avoid new queries**; merged data must be tagged as Trestle. **CONFIRMED** (§3.3.2) | **UNKNOWN** |
+| **Multi-tenant / resale** | Internal use, non-sublicensable; resale needs a **Reseller Addendum** (VP-signed). **CONFIRMED** (§6.25); addendum terms **SALES** | White-label / API partnerships **explicitly offered by contract. CONFIRMED** ([FAQ](https://www.tracerfy.com/faqs)); the actual storage, redistribution and tenant rights **must be confirmed in writing before commercial rollout (SALES)** | **UNKNOWN / SALES** | **UNKNOWN / SALES** | No disclosing, sublicensing or reselling without written consent. **CONFIRMED** | Written consent needed; restrictions flow down. **CONFIRMED** (§3.3.1). **No marketing use except responding to inbound requests** (§3.3.2), which conflicts with outbound wholesaling | **UNKNOWN** |
 | **FCRA / GLBA / DPPA** | No FCRA use (§6.13b); DPPA §2721(b) only; GLBA clause; customer owns TCPA/DNC. **CONFIRMED** | **UNKNOWN** | Docs mention "FCRA/TCPA" tools; terms **UNKNOWN** | **UNKNOWN** | Not a CRA; GLBA/DPPA not mentioned. **CONFIRMED** | Not a CRA; no people-search. **CONFIRMED** | n/a |
 
 **Ruled out:**
@@ -144,11 +144,11 @@ Research was done through a web fetcher. Some vendor pages were blocked or retur
 
 | Vendor | Confirmed pricing | Needs sales |
 |---|---|---|
-| Tracerfy | $0.02/credit; sync = 5 credits ($0.10)/hit, 0 on a miss; start at $20; plans from $700/mo | FAQ conflict on charging per uploaded row |
+| Tracerfy | Normal Trace $0.02/hit, Advanced $0.04/hit, misses free, API included; instant API lookup 5 credits ($0.10)/hit, 0 on a miss; batch 1–2 credits per lead; plans $700 / $1,500 / $3,000 per month | Whether batch credits are per uploaded lead or per hit (the docs say "per lead", the pricing page says misses are free) |
 | DataSkip | $0.04/match, misses free, no subscription | — |
 | EnformionGO | 100 free matches/mo; from $0.25/match; Pro to $0.01 | Batch pricing |
 | BatchData | Plans $2,000–$20,000/mo (skip); $1k–$10k/mo (property) | PAYG per match; miss charging; reseller addendum cost |
-| REAPI | — | Everything (the pricing page would not render) |
+| REAPI | Reported: $0.10/property PAYG; skip $0.05/match with a subscription; Starter $599 / Growth $1,200 / Pro $2,500 per month (not machine-verified here) | Written quote; which tier includes Comps and the MLS add-on; white-label/redistribution; DFW `mlsSoldPrice` fill rate |
 | Trestle IQ | $0.015 validation; $0.03 Real Contact; $0.07 reverse address | Whether misses are charged |
 | Twilio Lookup | $0.008 line type; $0.007 line status; reassigned from $0.02 down | — |
 | ATTOM | 30-day free key | Everything production |
@@ -274,7 +274,7 @@ Research was done through a web fetcher. Some vendor pages were blocked or retur
 * ≥ 70% of subjects reach ≥ 3 eligible comps (1 mi / 12 mo).
 * Price matches ground truth exactly.
 
-**The harness gap (honest).** The evaluation harness today evaluates **contact** providers only. A comps evaluation needs a small extension: a "comps mode" that runs `search(COMPS)` per subject and scores each result with the existing `comp_rules` + `arv_engine`, writing nothing to deals. About half a day of work, SYNTHETIC-tested first. Until then the comps test would be scored by exporting results and running them through the rules offline.
+**Comps mode is built** (section 11): `search(COMPS)` per subject, every comp scored in memory by `comp_eligibility` + the ARV engine, nothing written to deals, SYNTHETIC-tested with the sandbox comps adapter and against REAPI's documented response shape.
 
 ---
 
@@ -325,7 +325,36 @@ All adapters are subclasses of `AcquisitionProvider` in `evosense/providers.py`,
 * **Fifth Circuit, *Bradford v. Sovereign Pest Control* (Feb 2026).** The TCPA requires prior express consent, not "written" consent. Consent is still required ([Holland & Knight](https://www.hklaw.com/en/insights/publications/2026/03/tcpa-reset-fifth-circuit-rejects-prior-express-written-consent-rule)).
 * **Texas SB 140 (from Sept 1, 2025).** Telephone-solicitation law covers texts. Solicitors register with the Texas Secretary of State ([Morgan Lewis](https://www.morganlewis.com/pubs/2025/09/texas-telephone-solicitation-law-now-covers-text-messages)). **This is a decision for Mike / counsel before any cold texting.**
 
-## 11. Pages that could not be read
+## 11. Evaluation harness and adapters (built 2026-09-27; nothing called)
+
+| Component | Status |
+|---|---|
+| **Adapters** (`evosense/vendors.py`), built from each vendor's published API reference | `tracerfy` (instant address trace), `reapi_skiptrace` (/v1/SkipTrace), `dataskip` (/api/v1/skip-trace), `twilio_lookup` (Lookup v2 line type - a lookup, never a message), `reapi_comps` (/v3/PropertyComps), `sandbox_comps` (synthetic, test records only) |
+| **EVALUATION ONLY** | Every commercial adapter is excluded from production routing (`route()`), shows **EVALUATION ONLY** in the registry and Providers screen, and can be called by the evaluation harness alone. Making one a production provider is a one-line change that is Mike's decision. |
+| **Contact mode** | Same sample through each vendor; optional independent line-type referee; metrics: match rate, correct owner (ground truth), owner-name agreement with the DCAD owner (proxy, labelled), phone/mobile/email coverage, line-type completeness and agreement, freshness, false positives, latency, failures, cost per lookup / matched owner / usable / verified contact |
+| **Comps mode** | Calls `search(COMPS)` and runs every comp through `comp_eligibility` → ARV engine → confidence **in memory**; classifies each price as MLS CLOSED / PUBLIC RECORD / UNVERIFIED RECORD (non-disclosure state) / ESTIMATED / LIST / AVM. Only a closed sale can count (new rule `PRICE_NOT_CLOSED_SALE`). A Texas record price of unknown origin never counts. Every comps provider reports `production_ready: false` until its Texas closed-price origin is confirmed in writing. |
+| **Isolation** | Nothing returned becomes a contact point, comp, lead or deal value; nothing is sent; contactability untouched. Returned values are shown to admins only and can be **deleted** ("Delete returned data"), keeping the metrics. |
+| **Money** | Every call is reserved against the workspace budget and settled to what the vendor actually billed (misses free where the vendor says so), in the cost ledger per property. A paid run needs the exact phrase `RUN PAID EVALUATION <n>` (n = the most paid calls the run can make, including referee lookups). |
+| **Screen** | EvoSense → Providers & Controls → **Provider Evaluation** tab: proposed sample (the real properties awaiting contact data), provider readiness, referee, confirmation, results side by side, delete. |
+
+**What Mike does to run the first paid contact test (only after he decides to):**
+
+1. Open a Tracerfy account ($20 minimum credit purchase) and put the API token on the Render backend as `TRACERFY_API_TOKEN`. Optionally add `DATASKIP_API_TOKEN` (DataSkip, $0.04/match). `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` already exist and enable the line-type referee.
+2. In EvoSense → Providers & Controls → Service Providers, enable those providers for the workspace. They will read **EVALUATION ONLY**.
+3. If an EvoSense org budget is set (Controls), make sure it has room for the run; a lookup that would exceed it is recorded as "not attempted" rather than spending.
+4. Provider Evaluation tab: choose providers and referee, keep the proposed sample, press Run. The server replies with the exact phrase, e.g. `RUN PAID EVALUATION 140` for 35 properties × 1 vendor + 35 × 3 referee lookups. Type it and run.
+
+**Maximum cost at published prices, 35 properties:**
+
+| Setup | Maximum |
+|---|---|
+| Tracerfy instant API, every property a hit | 35 × $0.10 = **$3.50** |
+| DataSkip, every property a hit | 35 × $0.04 = **$1.40** |
+| Twilio referee, at most 105 numbers | 105 × $0.008 = **$0.84** |
+
+Misses cost nothing at Tracerfy and DataSkip.
+
+## 12. Pages that could not be read
 
 **Skip-trace vendors:**
 

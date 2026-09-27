@@ -672,6 +672,9 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(),
 )}
+# Commercial vendor adapters: EVALUATION ONLY until Mike approves a vendor.
+from app.services.evosense.vendors import VENDOR_PROVIDERS  # noqa: E402
+PROVIDERS.update({p.key: p for p in VENDOR_PROVIDERS})
 SANDBOX_KEYS = tuple(k for k, p in PROVIDERS.items() if p.connector_kind == C.SANDBOX)
 
 # Capabilities with a slot and no adapter of any kind beyond manual entry.
@@ -680,7 +683,9 @@ INTERFACE_ONLY_CAPABILITIES = {
     C.LISTING: "No listing (MLS) connector. Expired / failed listing signals can be entered manually.",
     C.EMAIL_VALIDATION: "No email validation connector. Emails are shown as unverified.",
     C.ENTITY_RESOLUTION: "No LLC / entity resolution connector. LLC owners stay UNRESOLVED ENTITY.",
-    C.COMPS: "Comps are entered in the existing Wholesale deal room after promotion.",
+    C.COMPS: ("No approved comps provider. Sold comps are entered by a person, with a source "
+              "reference, on the EvoSense property or the Wholesale deal; vendor adapters exist for "
+              "provider evaluation only."),
 }
 
 
@@ -881,6 +886,8 @@ def route(db, org_id: str, capability: str, *, exclude: tuple = (),
             continue                      # a person, not something to call
         if p.connector_kind == C.SANDBOX and not sandbox_allowed:
             continue
+        if getattr(p, "evaluation_only", False):
+            continue                      # the evaluation harness only - never production
         cfg = config(db, org_id, key)
         if not canonical(p, cfg, blocked=platform_blocked(db, key, cfg))["routable"]:
             continue
@@ -928,11 +935,13 @@ S_NOT_CONFIGURED = "NOT CONFIGURED"
 S_NOT_PURCHASED = "NOT PURCHASED"
 S_MANUAL_ONLY = "MANUAL ONLY"
 S_SANDBOX = "SANDBOX"
+S_EVALUATION_ONLY = "EVALUATION ONLY"
 STATES = (S_HEALTHY, S_UNVERIFIED, S_DEGRADED, S_RATE_LIMITED, S_FAILED, S_BLOCKED, S_DISABLED,
-          S_NOT_CONFIGURED, S_NOT_PURCHASED, S_MANUAL_ONLY, S_SANDBOX)
+          S_NOT_CONFIGURED, S_NOT_PURCHASED, S_MANUAL_ONLY, S_SANDBOX, S_EVALUATION_ONLY)
 TONE = {S_HEALTHY: "good", S_SANDBOX: "attention", S_UNVERIFIED: "attention", S_DEGRADED: "attention",
         S_RATE_LIMITED: "attention", S_FAILED: "danger", S_BLOCKED: "danger", S_DISABLED: "quiet",
-        S_NOT_CONFIGURED: "quiet", S_NOT_PURCHASED: "quiet", S_MANUAL_ONLY: "quiet"}
+        S_NOT_CONFIGURED: "quiet", S_NOT_PURCHASED: "quiet", S_MANUAL_ONLY: "quiet",
+        S_EVALUATION_ONLY: "attention"}
 
 # Registry vocabulary kept for callers and history; every value is a canonical state.
 REG_HEALTHY, REG_DEGRADED, REG_FAILED, REG_BLOCKED = S_HEALTHY, S_DEGRADED, S_FAILED, S_BLOCKED
@@ -1002,7 +1011,18 @@ def canonical(p: AcquisitionProvider, cfg, when: Optional[datetime] = None, *,
     routable = (configured and enabled and kind in (C.REAL, C.SANDBOX) and not blocked and not rate_limited
                 and not in_backoff and state != S_DISABLED)
     operational = state in (S_HEALTHY, S_SANDBOX) and routable
-    return {"state": state, "why": why, "tone": TONE[state],
+    # EVALUATION ONLY vendors (evosense/vendors.py): callable by the provider
+    # evaluation harness alone. The engine never routes to them and no screen
+    # may count them operational until Mike approves the vendor.
+    evaluation_only = bool(getattr(p, "evaluation_only", False))
+    eval_routable = bool(routable)
+    if evaluation_only:
+        routable = operational = False
+        if state in (S_HEALTHY, S_UNVERIFIED):
+            state = S_EVALUATION_ONLY
+        why = "EVALUATION ONLY - not approved for production use. " + why
+    return {"state": state, "why": why, "tone": TONE[state], "evaluation_only": evaluation_only,
+            "eval_routable": eval_routable,
             "configured": bool(configured), "enabled": bool(enabled), "reachable": reachable,
             "healthy": bool(healthy) if kind in (C.REAL, C.SANDBOX) else None,
             "operational": bool(operational), "failed": bool(failed_last), "blocked": bool(blocked),
@@ -1090,7 +1110,7 @@ def capability_report(db, org_id: str, rows: List[Dict[str, Any]]) -> List[Dict[
     for cap in C.CAPABILITIES:
         cands = [PROVIDERS[k] for k in by_key if cap in PROVIDERS[k].capabilities]
         live = [p for p in cands if p.connector_kind == C.REAL and by_key[p.key]["state"] in
-                (S_HEALTHY, S_UNVERIFIED, S_DEGRADED)]
+                (S_HEALTHY, S_UNVERIFIED, S_DEGRADED) and not getattr(p, "evaluation_only", False)]
         sandbox = [p for p in cands if p.connector_kind == C.SANDBOX and by_key[p.key]["state"] == S_SANDBOX]
         manual = [p for p in cands if p.connector_kind in (C.MANUAL, C.IMPORT)]
         unavailable = [p for p in cands if p not in live and p not in sandbox and p not in manual]
