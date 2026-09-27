@@ -486,12 +486,22 @@ def proposed_sample(db, org_id: str, mode: str = MODE_CONTACT, limit: int = 50) 
     q = (db.query(EvoSenseProperty)
          .filter(EvoSenseProperty.organization_id == org_id, EvoSenseProperty.is_test.isnot(True),
                  EvoSenseProperty.archived_at.is_(None)))
-    items = []
+    items, left_out = [], []
     if mode == MODE_CONTACT:
         q = q.filter(EvoSenseProperty.contactability == "ENRICHMENT_NEEDED")
-        for prop in q.order_by(EvoSenseProperty.opportunity_score.desc()).limit(limit * 2).all():
+        for prop in q.order_by(EvoSenseProperty.opportunity_score.desc()).limit(limit * 3).all():
             owner = CT.primary_owner(db, prop)
-            if owner is None or (owner.owner_type or "individual") not in ("individual", "unknown"):
+            why = None
+            if owner is None:
+                why = "no owner of record"
+            elif (owner.owner_type or "individual") not in ("individual", "unknown"):
+                why = "entity owner (%s) - not skip-traced" % owner.owner_type
+            elif not (prop.street_address and prop.city and prop.state):
+                # Skip-trace vendors match on street + city + state; a lookup
+                # without a city would be a guaranteed miss that skews the rates.
+                why = "address incomplete (no city)" if not prop.city else "address incomplete"
+            if why:
+                left_out.append({"property_id": prop.id, "address": prop.street_address, "why": why})
                 continue
             items.append({"property_id": prop.id, "address": prop.street_address, "city": prop.city,
                           "owner_of_record": owner.display_name, "score": prop.opportunity_score})
@@ -502,7 +512,7 @@ def proposed_sample(db, org_id: str, mode: str = MODE_CONTACT, limit: int = 50) 
         for prop in q.order_by(EvoSenseProperty.opportunity_score.desc()).limit(limit).all():
             items.append({"property_id": prop.id, "address": prop.street_address, "city": prop.city,
                           "county": prop.county, "square_feet": prop.square_feet})
-    return {"mode": mode, "items": items, "count": len(items),
+    return {"mode": mode, "items": items, "count": len(items), "left_out": left_out,
             "note": "Real properties this workspace already researches. Every lookup is research on a "
                     "property owner; nobody is contacted and nothing is written to the contact graph."}
 

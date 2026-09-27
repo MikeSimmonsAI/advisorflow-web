@@ -411,3 +411,13 @@ def test_an_enabled_evaluation_vendor_never_reads_as_a_real_connector(client, au
     assert "Tracerfy skip trace" not in caps["CONTACT_ENRICHMENT"]["providers"]
     assert caps["CONTACT_ENRICHMENT"]["kind"] != C.REAL
     assert "tracerfy" not in body["real_connectors"]
+
+
+def test_the_proposed_sample_leaves_out_what_would_skew_the_rates_and_says_why(world):
+    db, org, real = world["db"], world["org"], world["real"]
+    real[0].city = None
+    db.flush()
+    s = PE.proposed_sample(db, org, "contact")
+    assert real[0].id not in {i["property_id"] for i in s["items"]}
+    out = {x["property_id"]: x["why"] for x in s["left_out"]}
+    assert "no city" in out[real[0].id]

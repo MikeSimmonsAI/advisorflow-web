@@ -162,6 +162,12 @@ export default function EvoEvaluation() {
               ))}
               {!sample.length ? <p className="evo-muted">No properties fit this mode's sample yet.</p> : null}
             </div>
+            {(setup.sample.left_out || []).length ? (
+              <details className="evo-small" style={{ marginTop: 6 }}>
+                <summary>{setup.sample.left_out.length} awaiting propert{setup.sample.left_out.length === 1 ? 'y' : 'ies'} left out, with the reason</summary>
+                {setup.sample.left_out.map((x) => <div key={x.property_id} className="evo-muted">{x.address}: {x.why}</div>)}
+              </details>
+            ) : null}
             <label className="evo-small" style={{ display: 'block', marginTop: 10 }}>
               Owner confirmation for paid calls ({setup.confirmation_format}; the server tells you the exact number):
               <input className="evo-input" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="RUN PAID EVALUATION n" />

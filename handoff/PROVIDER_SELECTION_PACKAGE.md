@@ -14,7 +14,7 @@ Research was done through a web fetcher. Some vendor pages were blocked or retur
 
 ---
 
-## 0. Where EvoSys stands today (production, commit `ff35e74`)
+## 0. Where EvoSys stands today (production)
 
 | Capability (registry) | State today | What stays true until Mike approves a provider |
 |---|---|---|
@@ -342,7 +342,9 @@ All adapters are subclasses of `AcquisitionProvider` in `evosense/providers.py`,
 1. Open a Tracerfy account ($20 minimum credit purchase) and put the API token on the Render backend as `TRACERFY_API_TOKEN`. Optionally add `DATASKIP_API_TOKEN` (DataSkip, $0.04/match). `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` already exist and enable the line-type referee.
 2. In EvoSense → Providers & Controls → Service Providers, enable those providers for the workspace. They will read **EVALUATION ONLY**.
 3. If an EvoSense org budget is set (Controls), make sure it has room for the run; a lookup that would exceed it is recorded as "not attempted" rather than spending.
-4. Provider Evaluation tab: choose providers and referee, keep the proposed sample, press Run. The server replies with the exact phrase, e.g. `RUN PAID EVALUATION 140` for 35 properties × 1 vendor + 35 × 3 referee lookups. Type it and run.
+4. Provider Evaluation tab: choose providers and referee, keep the proposed sample, press Run. The server replies with the exact phrase, e.g. `RUN PAID EVALUATION 100` for 25 properties × 1 vendor + 25 × 3 referee lookups. Type it and run.
+
+**The sample in production (verified 2026-09-27):** 25 of the 35 awaiting properties qualify. The other 10 are left out with the reason shown: entity owners, which are not skip-traced, or properties with no city on file, which would be a guaranteed miss and skew the rates.
 
 **Maximum cost at published prices, 35 properties:**
 
