@@ -379,3 +379,38 @@ Misses cost nothing at Tracerfy and DataSkip.
 * **Trestle:** FAQ looped on redirects.
 * **NTREIS:** old data-access page would not load.
 * **Zillow:** data terms would not load.
+
+## 13. First real evaluation: Tracerfy (PLANNED, NOT RUN) — 2026-09-27
+
+**The plan (created in production, commit `8ba1654`):**
+
+| Field | Value |
+|---|---|
+| Plan id | `078a8709-68b0-4cde-ada4-94ae98d5583d` (status **planned**) |
+| Provider | Tracerfy, **instant address trace** (`POST /v1/api/trace/lookup/`, `find_owner: true`) |
+| Mode | contact / skip trace |
+| Sample | 31 DFW properties awaiting contact data |
+| Maximum calls | 31 (one per property; no line-type referee in this run) |
+| Pricing the planner used | 5 credits × $0.02 = **$0.10 per hit**, 0 on a miss (Tracerfy docs + pricing page) |
+| Maximum spend | **$3.10** |
+| Credential | `TRACERFY_API_TOKEN` not set |
+| Isolation | verified in production: all 31 properties and every Command Center count identical before and after creating the plan; $0 ledger spend |
+
+**Authorization phrase:** `RUN PAID EVALUATION 078a8709-68b0-4cde-ada4-94ae98d5583d`
+
+**Which properties are in and out:**
+
+* **In:** 21 individual owners, 7 joint owners, 1 "ET AL", 1 estate, 1 life estate. The difficult ownership records are kept on purpose.
+* **Out:** 4 Tarrant properties with no city and no ZIP on file. Tracerfy requires a city, so these would be guaranteed misses caused by our data gap, not the vendor's.
+
+**Ground truth:**
+
+* No lawfully known contact ground truth exists for any of the 31.
+* Correct-owner accuracy therefore = **NOT MEASURED**. It must not be inferred from name similarity or vendor confidence.
+* Owner-name agreement with the DCAD/TAD owner of record is reported as a *proxy*, labelled so.
+
+**Why the instant trace, not Normal or Advanced:**
+
+* Normal ($0.02/hit) and Advanced ($0.04/hit) are Tracerfy's **batch-upload** trace types. They are asynchronous (queue, webhook, then a CSV download).
+* The instant API returns per-property results synchronously. That is what the harness measures, including latency.
+* A batch adapter could cut the test to about $0.62 but is not built.

@@ -347,10 +347,18 @@ def ensure_meeting_types(db: Session, brand_sales_org_id: str) -> List:
     # instant is what keeps `_edited_by_a_person` false until somebody really
     # does edit it.
     if system_touched:
+        from sqlalchemy.orm.attributes import flag_modified
         stamp = datetime.utcnow()
         for row in system_touched:
             row.updated_at = stamp
             row.system_defaults_at = stamp
+            # FORCE updated_at into this UPDATE. On a coarse clock (Windows
+            # ticks ~1-15 ms) `stamp` can EQUAL the value the flush above just
+            # wrote; the ORM then sees no change, leaves updated_at out of the
+            # statement, and `onupdate` stamps it a moment AFTER the stamp -
+            # the exact "looks hand-edited" state this function exists to
+            # prevent. Found as an intermittent test failure.
+            flag_modified(row, "updated_at")
         db.flush()
 
     return (db.query(MeetingType)

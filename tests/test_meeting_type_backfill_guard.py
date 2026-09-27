@@ -258,3 +258,37 @@ def test_a_platform_with_only_a_demo_org_refuses(db_session):
                                  is_demo=True))
     db_session.commit()
     assert pb.brand_sales_org_for_platform(db_session, p) is None
+
+
+def test_the_stamp_holds_even_when_the_clock_does_not_move(db_session, monkeypatch):
+    """A coarse clock (Windows ticks ~1-15 ms) can hand the stamp the SAME
+    value the flush just wrote to updated_at. updated_at must still equal the
+    stamp afterwards - never an `onupdate` a moment later that reads as a
+    person's edit. (Found as an intermittent Windows failure of the test above.)"""
+    import time
+    import app.services.meeting_roles as MR
+    bso = _brand(db_session, seed=False)
+    ensure_meeting_types(db_session, bso.id)
+    db_session.commit()
+    mt = _mt(db_session, bso)
+    mt.requires_video = False
+    mt.leadership_policy = None
+    mt.system_defaults_at = None
+    db_session.commit()
+
+    real = datetime
+
+    class _Clock(datetime):
+        @classmethod
+        def utcnow(cls):
+            # the clock has not ticked since the flush wrote updated_at
+            v = mt.__dict__.get("updated_at")
+            time.sleep(0.003)
+            return v if v is not None else real.utcnow()
+    monkeypatch.setattr(MR, "datetime", _Clock)
+    ensure_meeting_types(db_session, bso.id)
+    db_session.commit()
+    db_session.refresh(mt)
+    assert mt.system_defaults_at is not None
+    assert mt.updated_at == mt.system_defaults_at
+    assert _edited_by_a_person(mt) is False
