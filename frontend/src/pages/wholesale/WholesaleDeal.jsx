@@ -27,6 +27,7 @@ import { BuyerBoard } from './wsBuyerBoard'
 import { ClosingWorkspace } from './wsClosing'
 import { SellerTimeline } from './wsTimeline'
 import { SellerIntelPanel } from './wsIntel'
+import { ValuationPanel } from './wsValuation'
 import { DocumentDrawer } from './wsDocuments'
 import { SharingWorkspace } from './wsSharing'
 import { EvoApp, Hero, PageSkeleton, PropertyThumb, Ring, Status, Tag, humanize, money, shortDate } from './ds/ds'
@@ -948,6 +949,8 @@ function AnalysisTab({ room, act, busy }) {
           "exclude from the ARV" kept visibly distinct from "delete the
           record", and the subject set beside the comp set so the numbers can
           be argued with rather than taken on faith. */}
+      <ValuationPanel dealId={deal.id} valuation={room.valuation} act={act} busy={busy} />
+
       <CompsWorkspace dealId={deal.id} deal={deal} comps={comps}
                       stats={room.comp_statistics} arvCalc={arvCalc}
                       capability={room.file_storage} act={act} busy={busy} />

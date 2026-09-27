@@ -334,6 +334,18 @@ def comp_json(c: WholesaleComp, photo: Any = None) -> Dict[str, Any]:
         "price_per_sqft": psf,
         "property_type": c.property_type, "source": c.source,
         "notes": c.notes, "included": bool(c.included),
+        # Evidence and provenance. MANUAL is shown as MANUAL, always.
+        "origin": "MANUAL" if not getattr(c, "provider_key", None) else "PROVIDER",
+        "verification_state": getattr(c, "verification_state", None) or "manual",
+        "verified_at": c.verified_at.isoformat() + "Z" if getattr(c, "verified_at", None) else None,
+        "provider_key": getattr(c, "provider_key", None),
+        "source_reference": getattr(c, "source_reference", None),
+        "sale_type": getattr(c, "sale_type", None),
+        "half_baths": getattr(c, "half_baths", None),
+        "lot_size_sqft": getattr(c, "lot_size_sqft", None),
+        "retrieved_at": c.retrieved_at.isoformat() + "Z" if getattr(c, "retrieved_at", None) else None,
+        "exclusion_reason": getattr(c, "exclusion_reason", None),
+        "attestation": getattr(c, "attestation", None),
         # The photo is a reference, never a public URL: /wholesale/files/{id}
         # re-checks the organization on every read.
         "photo": _photo_json(photo) if photo is not None else None,
@@ -486,9 +498,13 @@ class SettingsPatch(BaseModel):
     # The workspace's own compliance decision: may it email owners it FOUND
     # (not ones who wrote in)? Admin-only; off by default.
     cold_seller_email_confirmed: Optional[bool] = None
+    # Data depth: comp eligibility rules and the MAO gate policy (admin).
+    comp_rules: Optional[Dict[str, Any]] = None
+    mao_policy: Optional[Dict[str, Any]] = None
 
 
-_POLICY_FIELDS = ("qualification_criteria", "nurture_default_days", "cold_seller_email_confirmed")
+_POLICY_FIELDS = ("qualification_criteria", "nurture_default_days", "cold_seller_email_confirmed",
+                  "comp_rules", "mao_policy")
 _SMS_PROGRAM_FIELDS = ("public_intake_key", "sms_program_enabled", "sms_sender_number",
                        "sms_messaging_service_sid", "sms_campaign_sid", "sms_brand_sid")
 _ADMIN_ROLES = ("org_admin", "super_admin", "god_admin")
@@ -596,6 +612,8 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
         "qualification_criteria_options": _intel_options(),
         "nurture_default_days": getattr(s, "nurture_default_days", None) or 60,
         "cold_seller_email_confirmed": bool(getattr(s, "cold_seller_email_confirmed", False)),
+        "comp_rules_effective": _comp_rules_view(s),
+        "mao_policy_effective": _mao_policy_view(s),
     }
     for field in _JSON_SETTINGS:
         out[field] = _jsonl(getattr(s, field))
@@ -617,6 +635,17 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
     }
     out["signature_capability"] = esign.capability()
     return out
+
+
+def _comp_rules_view(s):
+    from app.services import comp_rules as CRULES
+    return {"version": CRULES.VERSION, "rules": CRULES.rules_for(s), "labels": CRULES.RULE_LABELS,
+            "customized": bool(getattr(s, "comp_rules", None))}
+
+
+def _mao_policy_view(s):
+    from app.services import mao_gate as MGATE
+    return {"policy": MGATE.policy_for(s), "customized": bool(getattr(s, "mao_policy", None))}
 
 
 @router.get("/settings")
@@ -702,6 +731,15 @@ def patch_settings(payload: SettingsPatch, request: Request,
                 raise HTTPException(status_code=400, detail="Nurture days must be 1-730.")
         if "cold_seller_email_confirmed" in data:
             data["cold_seller_email_confirmed"] = bool(data["cold_seller_email_confirmed"])
+        from app.services import comp_rules as CRULES
+        from app.services import mao_gate as MGATE
+        for key, check in (("comp_rules", CRULES.validate_rules), ("mao_policy", MGATE.validate_policy)):
+            if key in data:
+                try:
+                    clean = check(data[key])
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc))
+                data[key] = json.dumps(clean) if clean else None
     if data.get("high_threshold") is not None and data.get("medium_threshold") is not None \
             and data["high_threshold"] <= data["medium_threshold"]:
         raise HTTPException(status_code=400,
@@ -2149,7 +2187,7 @@ def deal_room(deal_id: str, db: Session = Depends(get_db),
         replies = (db.query(Reply).filter(Reply.lead_id == lead.id)
                    .order_by(Reply.received_at.desc()).limit(100).all())
 
-    summary = analysis.deal_summary(deal, settings)
+    summary = svc.gated_summary(deal, settings)
     arv_calc = analysis.arv_from_comps(comps, getattr(prop, "square_feet", None))
     comp_photos = _comp_photos(db, org_id, [c.id for c in comps])
     # The stored file behind each document, in one query for the whole drawer.
@@ -2178,6 +2216,10 @@ def deal_room(deal_id: str, db: Session = Depends(get_db),
         "seller": seller_json(profile, lead),
         "analysis": summary,
         "arv_calculation": arv_calc,
+        # VALUATION, each part labelled with what it is: the ARV engine's
+        # evidence (comps used / excluded and why, confidence, limitations),
+        # repair status with its history, and the MAO gate's decision.
+        "valuation": deal_valuation(db, org_id, deal),
         "comps": [comp_json(c, comp_photos.get(c.id)) for c in comps],
         # The comp set described as numbers — median AND average $/sqft, the
         # spread, and where the subject sits in it. Computed in the analysis
@@ -2401,6 +2443,23 @@ class CompIn(BaseModel):
     property_type: Optional[str] = None
     notes: Optional[str] = None
     included: bool = True
+    # Evidence (comp_rules): where a second person could check this sale.
+    source_reference: Optional[str] = None
+    sale_type: Optional[str] = None
+    half_baths: Optional[int] = None
+    lot_size_sqft: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    attestation: Optional[str] = None
+    exclusion_reason: Optional[str] = None
+
+
+# Fields a person may set on a comp. Provenance fields (provider_key,
+# verification_state, retrieved_at, provenance, entered_by) are the system's.
+_COMP_FIELDS = ("street_address", "city", "state", "zip_code", "sale_price", "square_feet",
+                "bedrooms", "bathrooms", "distance_miles", "year_built", "property_type", "notes",
+                "included", "source_reference", "sale_type", "half_baths", "lot_size_sqft",
+                "latitude", "longitude", "attestation", "exclusion_reason")
 
 
 @router.post("/deals/{deal_id}/comps")
@@ -2411,10 +2470,16 @@ def add_comp(deal_id: str, payload: CompIn, request: Request,
     org_id = svc.write_org_id(db, user)
     deal = svc.get_deal(db, org_id, deal_id)
     data = payload.model_dump(exclude_unset=True)
+    # A comp a person types is MANUAL - visibly, permanently. It can be
+    # verified by a person later; it never becomes provider-verified.
     comp = WholesaleComp(
         organization_id=org_id, deal_id=deal.id, source=VALUE_MANUAL,
+        verification_state="manual", entered_by_id=user.id,
+        is_test=bool(getattr(deal, "is_test", False)),
         sale_date=_parse_date(data.pop("sale_date", None)),
-        **{k: v for k, v in data.items() if k != "sale_date"})
+        **{k: v for k, v in data.items() if k in _COMP_FIELDS})
+    if comp.sale_type:
+        comp.sale_type = comp.sale_type.strip().lower().replace(" ", "_")
     db.add(comp)
     db.flush()
     svc.log_event(db, org_id, "comp.added", actor_type=ACTOR_USER,
@@ -2441,7 +2506,17 @@ def update_comp(comp_id: str, payload: CompIn, request: Request,
     if "sale_date" in data:
         comp.sale_date = _parse_date(data.pop("sale_date"))
     for key, value in data.items():
-        setattr(comp, key, value)
+        if key in _COMP_FIELDS:
+            setattr(comp, key, value)
+    if "included" in data and not data["included"]:
+        comp.excluded_by_id = user.id
+    elif "included" in data and data["included"]:
+        comp.exclusion_reason = None
+        comp.excluded_by_id = None
+    comp.updated_at = datetime.utcnow()
+    if comp.deal_id is None:
+        raise HTTPException(status_code=409, detail="This comp supports an EvoSense property; "
+                            "edit it there.")
     deal = svc.get_deal(db, org_id, comp.deal_id)
     label = comp.street_address or "unnamed"
     if "included" in data and bool(data["included"]) != was_included:
@@ -2458,6 +2533,102 @@ def update_comp(comp_id: str, payload: CompIn, request: Request,
     summary = svc.recalculate_analysis(db, org_id, deal, user)
     db.commit()
     return {"comp": comp_json(comp), "analysis": summary}
+
+
+def deal_valuation(db, org_id: str, deal) -> Dict[str, Any]:
+    from app.services import wholesale_repairs as REP
+    settings = svc.resolve_settings(db, org_id, commit=False)
+    from app.services import mao_gate
+    cost = None
+    try:
+        from app.models.evosense_models import EvoSenseProperty
+        from app.services.evosense import economics as EC
+        evo = (db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id,
+                                                 EvoSenseProperty.promoted_deal_id == deal.id).first())
+        cost = EC.acquisition_cost(db, evo) if evo is not None else None
+    except Exception:                                      # noqa: BLE001
+        cost = None
+    return {"arv": _jsonl(deal.arv_detail) if getattr(deal, "arv_detail", None) else None,
+            "arv_value": _num(deal.arv), "arv_source": deal.arv_source,
+            "arv_confidence": getattr(deal, "arv_confidence", None),
+            "repairs": REP.view(db, org_id, deal),
+            "mao": {"value": _num(deal.max_allowable_offer),
+                    **mao_gate.evaluate(deal, settings)},
+            "acquisition_cost": cost}
+
+
+class CompVerifyIn(BaseModel):
+    attestation: str
+
+
+@router.post("/comps/{comp_id}/verify")
+def verify_comp(comp_id: str, payload: CompVerifyIn, db: Session = Depends(get_db),
+                user: User = Depends(require_tenant_user),
+                _guard: User = Depends(require_not_observation)):
+    """A PERSON confirms a comp against a primary source and says how. A manual
+    comp becomes human_verified - still MANUAL in origin, never provider
+    verified."""
+    org_id = svc.write_org_id(db, user)
+    comp = (db.query(WholesaleComp).filter(WholesaleComp.id == comp_id,
+                                           WholesaleComp.organization_id == org_id).first())
+    if comp is None:
+        raise HTTPException(status_code=404, detail="Comp not found")
+    note = (payload.attestation or "").strip()
+    if len(note) < 8:
+        raise HTTPException(status_code=422, detail="Say how you verified it (e.g. \"MLS #123 closed "
+                            "record checked 9/26\").")
+    comp.verification_state = "human_verified" if not comp.provider_key else "provider_verified"
+    comp.verified_by_id, comp.verified_at = user.id, datetime.utcnow()
+    comp.attestation = note[:500]
+    deal = svc.get_deal(db, org_id, comp.deal_id) if comp.deal_id else None
+    svc.log_event(db, org_id, "comp.verified", actor_type=ACTOR_USER, actor_user_id=user.id,
+                  deal_id=getattr(deal, "id", None), summary="Comp verified: %s" % (comp.street_address or ""),
+                  details={"comp_id": comp.id, "attestation": comp.attestation})
+    summary = svc.recalculate_analysis(db, org_id, deal, user) if deal else None
+    db.commit()
+    return {"comp": comp_json(comp), "analysis": summary}
+
+
+class RepairIn(BaseModel):
+    status: str
+    amount: Optional[float] = None
+    low: Optional[float] = None
+    high: Optional[float] = None
+    source: Optional[str] = None
+    confidence: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.post("/deals/{deal_id}/repairs")
+def add_repair_estimate(deal_id: str, payload: RepairIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user),
+                        _guard: User = Depends(require_not_observation)):
+    """Record a repair estimate with its status and provenance. Append-only;
+    the newest becomes the deal's current estimate."""
+    from app.services import wholesale_repairs as REP
+    org_id = svc.write_org_id(db, user)
+    deal = svc.get_deal(db, org_id, deal_id)
+    try:
+        REP.record(db, org_id, deal, status=payload.status, amount=payload.amount, low=payload.low,
+                   high=payload.high, source=payload.source, user=user,
+                   confidence=payload.confidence, notes=payload.notes)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    svc.log_event(db, org_id, "repairs.estimated", actor_type=ACTOR_USER, actor_user_id=user.id,
+                  deal_id=deal.id, summary="Repairs: %s %s" % (
+                      REP.LABELS.get(payload.status, payload.status),
+                      ("$%s" % format(int(deal.repair_estimate), ",")) if deal.repair_estimate else ""))
+    summary = svc.recalculate_analysis(db, org_id, deal, user)
+    db.commit()
+    return {"valuation": deal_valuation(db, org_id, deal), "analysis": summary}
+
+
+@router.get("/deals/{deal_id}/valuation")
+def get_deal_valuation(deal_id: str, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    org_id = svc.read_org_id(db, user)
+    deal = svc.get_deal(db, org_id, deal_id)
+    return deal_valuation(db, org_id, deal)
 
 
 @router.delete("/comps/{comp_id}")
@@ -2522,8 +2693,27 @@ def update_analysis(deal_id: str, payload: AnalysisIn, request: Request,
 
     before = {k: _num(getattr(deal, k, None))
               for k in ("arv", "repair_estimate", "proposed_offer")}
+    repair = data.pop("repair_estimate", "__unset__")
+    repair_src = data.pop("repair_estimate_source", None)
     for key, value in data.items():
         setattr(deal, key, value)
+    if repair != "__unset__":
+        # A typed repair number is a MANUAL ESTIMATE (or VERIFIED when the
+        # person says so) and goes into the repair history with who typed it.
+        from app.services import wholesale_repairs as REP
+        if repair is None:
+            deal.repair_estimate = None
+            deal.repair_status = REP.UNKNOWN
+            deal.repair_low = deal.repair_high = None
+            deal.repair_estimate_source = None
+        else:
+            REP.record(db, org_id, deal,
+                       status=REP.VERIFIED if repair_src == "verified" else REP.MANUAL_ESTIMATE,
+                       amount=repair, user=user, source="analysis edit")
+            if repair_src:
+                deal.repair_estimate_source = repair_src
+    elif repair_src:
+        deal.repair_estimate_source = repair_src
 
     summary = svc.recalculate_analysis(db, org_id, deal, user,
                                        recompute_arv_from_comps="arv" not in data)

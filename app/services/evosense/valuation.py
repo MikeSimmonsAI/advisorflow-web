@@ -86,12 +86,33 @@ def appraisal_value(prop) -> Optional[int]:
 
 
 def arv(db, prop) -> Dict[str, Any]:
-    """The only answer EvoSense gives about ARV until a closed-sale source exists.
-
-    Neither the appraisal district's tax value nor a modelled estimate is an
-    ARV. When a verified comparable-sales ARV exists (Priority 4), it is read
-    here; until then the answer is INSUFFICIENT COMPARABLE SALES."""
-    return {"value": None, "status": "insufficient", "label": ARV_INSUFFICIENT,
-            "method": None, "comp_count": 0,
-            "why": "No verified comparable closed sales are on file for this property. "
-                   "An appraisal district tax value or a modelled estimate is never used as ARV."}
+    """EvoSense's ARV: the ARV ENGINE over the ELIGIBLE closed sales on file
+    for this property (wholesale_comps with evosense_property_id), under the
+    workspace's comp rules. Neither the appraisal district's tax value nor a
+    modelled estimate is ever an ARV; with too few eligible closed sales the
+    answer is INSUFFICIENT COMPARABLE SALES."""
+    insufficient = {"value": None, "status": "insufficient", "label": ARV_INSUFFICIENT,
+                    "method": None, "comp_count": 0,
+                    "why": "No verified comparable closed sales are on file for this property. "
+                           "An appraisal district tax value or a modelled estimate is never used as ARV."}
+    try:
+        from app.models.wholesale_models import WholesaleComp
+        from app.services import arv_engine, comp_rules
+        from app.services import wholesale_sms as WS
+        comps = (db.query(WholesaleComp)
+                 .filter(WholesaleComp.organization_id == prop.organization_id,
+                         WholesaleComp.evosense_property_id == prop.id).all())
+        if not comps:
+            return insufficient
+        rules = comp_rules.rules_for(WS.settings_row(db, prop.organization_id))
+        res = arv_engine.compute(prop, comps, rules)
+    except Exception:  # noqa: BLE001 - an ARV question never breaks a page
+        return insufficient
+    if res["status"] != arv_engine.ESTIMATED:
+        return dict(insufficient, comp_count=len(res["comps_used"]), engine=res,
+                    why="%s eligible closed sale(s) on file; %s needed. %s" % (
+                        len(res["comps_used"]), res["rules"].get("min_comps"), insufficient["why"]))
+    return {"value": res["value"], "status": "estimated", "label": res["label"],
+            "method": "%s:%s" % (res["version"], res["method"]),
+            "comp_count": len(res["comps_used"]), "confidence": res["confidence"]["label"],
+            "why": "; ".join(res["limitations"]), "engine": res}

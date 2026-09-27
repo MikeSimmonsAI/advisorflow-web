@@ -43,6 +43,10 @@ const FIELDS = [
   ['year_built', 'Year built', 'number'],
   ['distance_miles', 'Distance (mi)', 'number'],
   ['property_type', 'Property type', 'text'],
+  // Evidence: without a source reference a typed comp does not count
+  // (comp rules), because nobody else could check it.
+  ['source_reference', 'Source (MLS #, deed, URL)', 'text'],
+  ['sale_type', 'Sale type (arms_length, foreclosure…)', 'text'],
 ]
 
 const NUMERIC = new Set(['sale_price', 'square_feet', 'bedrooms', 'bathrooms',
@@ -85,6 +89,11 @@ function addPayload(draft) {
 function arvProvenance(deal) {
   if (deal.arv === null || deal.arv === undefined) return 'not set'
   const method = String(deal.arv_method || '')
+  if (method.startsWith('arv/')) {
+    return method.endsWith('median_psf')
+      ? 'ESTIMATED · ARV engine, median $/sqft of eligible closed sales'
+      : 'ESTIMATED · ARV engine, median eligible closed sale price'
+  }
   if (method.startsWith('comps:')) {
     return method.endsWith('median_psf')
       ? 'ESTIMATED · median $/sqft from comps'

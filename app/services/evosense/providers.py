@@ -830,15 +830,33 @@ def note_source_failure(db, provider: AcquisitionProvider, cfg, code: str, messa
         block_platform(db, provider.key, code, "%s: %s" % (code, (message or "")[:200]))
 
 
-def record_success(cfg):
+def _cap_health(cfg, capability, *, ok: bool, reason: Optional[str] = None):
+    if not capability:
+        return
+    data = C.jload(getattr(cfg, "capability_health", None), {}) or {}
+    row = data.get(capability) or {}
+    now = C.now().isoformat()
+    if ok:
+        row.update(last_success_at=now, failures=0, reason=None)
+    else:
+        row.update(last_failure_at=now, failures=int(row.get("failures") or 0) + 1,
+                   reason=(reason or "")[:200])
+    data[capability] = row
+    cfg.capability_health = C.jdump(data)
+
+
+def record_success(cfg, capability: Optional[str] = None):
     cfg.calls_total = (cfg.calls_total or 0) + 1
     cfg.successes_total = (cfg.successes_total or 0) + 1
     cfg.consecutive_failures = 0
     cfg.last_success_at = C.now()
     cfg.degraded_until = None
+    _cap_health(cfg, capability, ok=True)
 
 
-def record_failure(cfg, reason: str, rate_limited_for: Optional[int] = None):
+def record_failure(cfg, reason: str, rate_limited_for: Optional[int] = None,
+                   capability: Optional[str] = None):
+    _cap_health(cfg, capability, ok=False, reason=reason)
     cfg.calls_total = (cfg.calls_total or 0) + 1
     cfg.consecutive_failures = (cfg.consecutive_failures or 0) + 1
     cfg.last_failure_at = C.now()

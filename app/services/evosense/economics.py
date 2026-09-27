@@ -61,6 +61,13 @@ def preliminary(db, prop) -> Dict[str, Any]:
     elif repairs is None:
         blocked = "no_repair_assumption"
         warnings.append("No repair assumption. No MAO is calculated until repairs are estimated.")
+    elif "SYSTEM_ESTIMATE" not in _accepted_repairs(settings):
+        # The only repair number EvoSense has here is the platform's rough
+        # band from the seller's stated condition. The workspace's MAO policy
+        # decides whether that is enough; by default it is not.
+        blocked = "no_accepted_repair_estimate"
+        warnings.append("Repairs are only a SYSTEM ESTIMATE, which this workspace's MAO policy "
+                        "does not accept. No MAO until a person or an inspection estimates them.")
     else:
         calc = wholesale_analysis.calculate_offer(
             arv["value"], repairs, settings.investor_percentage, settings.default_wholesale_fee,
@@ -83,7 +90,7 @@ def preliminary(db, prop) -> Dict[str, Any]:
         {"label": "ARV", "key": "arv", "value": arv["value"],
          "truth": C.T_INSUFFICIENT if arv["value"] is None else C.T_ESTIMATE,
          "truth_label": ("INSUFFICIENT COMPARABLE SALES" if arv["value"] is None
-                         else "VERIFIED COMPARABLE SALES"),
+                         else "ELIGIBLE CLOSED SALES - %s confidence" % (arv.get("confidence") or "unknown")),
          "display": VAL.ARV_INSUFFICIENT if arv["value"] is None else None,
          "source": arv["why"]},
         {"label": "Repairs", "value": repairs, "truth": C.T_ESTIMATE if repairs is not None else C.T_MISSING,
@@ -140,7 +147,27 @@ def acquisition_cost(db, prop) -> Dict[str, Any]:
                  .order_by(EvoSenseEnrichmentDecision.created_at.asc()).all())
     paid = [d for d in decisions if d.decision == C.D_PAID]
     total = sum(r.total_cents or 0 for r in charged)
+    buckets = {k: 0 for k in COST_BUCKETS}
+    for r in charged:
+        buckets[bucket_of(r.capability)] += r.total_cents or 0
+
+    def before(ts):
+        if ts is None:
+            return None
+        return sum(r.total_cents or 0 for r in charged if r.created_at and r.created_at <= ts)
+    qualified_at = _qualified_at(db, prop)
+    free_lookups = len([d for d in decisions if d.decision in (C.L_QUEUE_FREE, C.D_FREE)])
     return {
+        "buckets": buckets,
+        "free_public_lookups": free_lookups,
+        "cost_to_find_cents": buckets["public_data"],
+        "cost_to_contactability_cents": before(getattr(prop, "first_contactable_at", None)),
+        "cost_to_qualification_cents": before(qualified_at),
+        "contactable_at": prop.first_contactable_at.isoformat() + "Z"
+        if getattr(prop, "first_contactable_at", None) else None,
+        "qualified_at": qualified_at.isoformat() + "Z" if qualified_at else None,
+        "note": "Charged ledger entries only - hypothetical or refunded costs are never counted. "
+                "A milestone not yet reached shows no figure.",
         "total_cents": total,
         "total": C.money(total),
         "charged_lookups": len(charged),
@@ -157,3 +184,38 @@ def acquisition_cost(db, prop) -> Dict[str, Any]:
                             "confidence_after": d.confidence_after} for d in paid],
         "is_test": bool(prop.is_test),
     }
+
+
+def _accepted_repairs(settings):
+    from app.services import mao_gate
+    return mao_gate.policy_for(settings)["accepted_repair_statuses"]
+
+
+COST_BUCKETS = ("public_data", "contact_enrichment", "valuation_comps", "other")
+_BUCKET = {C.CONTACT_ENRICHMENT: "contact_enrichment", C.PHONE_VALIDATION: "contact_enrichment",
+           C.EMAIL_VALIDATION: "contact_enrichment", C.COMPS: "valuation_comps",
+           C.VALUATION: "valuation_comps", C.LISTING: "valuation_comps"}
+_PUBLIC = (C.PROPERTY_SEARCH, C.PARCEL, C.ASSESSOR, C.OWNERSHIP, C.TAX, C.FORECLOSURE, C.PROBATE,
+           C.CODE_VIOLATION, C.VACANCY, C.GEOCODING, C.ENTITY_RESOLUTION)
+
+
+def bucket_of(capability) -> str:
+    if capability in _BUCKET:
+        return _BUCKET[capability]
+    return "public_data" if capability in _PUBLIC else "other"
+
+
+def _qualified_at(db, prop):
+    """When the seller of this property was first QUALIFIED (after promotion)."""
+    if not getattr(prop, "promoted_deal_id", None):
+        return None
+    try:
+        from app.models.wholesale_models import WholesaleDeal, WholesaleSellerProfile
+        d = db.query(WholesaleDeal).filter(WholesaleDeal.id == prop.promoted_deal_id,
+                                           WholesaleDeal.organization_id == prop.organization_id).first()
+        if d is None or not d.seller_profile_id:
+            return None
+        p = db.query(WholesaleSellerProfile).filter(WholesaleSellerProfile.id == d.seller_profile_id).first()
+        return getattr(p, "qualified_at", None)
+    except Exception:  # noqa: BLE001
+        return None

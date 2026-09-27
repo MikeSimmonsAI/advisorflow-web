@@ -195,6 +195,10 @@ class WholesaleSettings(Base):
     enrichment_auto = Column(Boolean, nullable=False, default=False)
     property_data_provider = Column(String, nullable=False, default="manual")
     comps_provider = Column(String, nullable=False, default="manual")
+    # Comp eligibility rules (comp_rules.DEFAULT_RULES), ARV minimum comps,
+    # and what the MAO gate accepts. JSON; NULL = the platform defaults.
+    comp_rules = Column(Text, nullable=True)
+    mao_policy = Column(Text, nullable=True)
     esign_provider = Column(String, nullable=False, default="manual")
     # Phase 6. How the assistant should PHRASE WHAT IT REPORTS BACK — the
     # one-sentence summary it writes for the operator after reading an owner's
@@ -439,6 +443,7 @@ class WholesaleSellerProfile(Base):
     # stays as the score's summary; this is the decision a person acts on.
     qualification_status = Column(String, nullable=True)
     qualification_detail = Column(Text, nullable=True)
+    qualified_at = Column(DateTime, nullable=True)           # first QUALIFIED (economics milestone)
     # NURTURE: "not now" is not "dead". History is kept; nothing restarts
     # against an opt-out.
     nurture_until = Column(DateTime, nullable=True)
@@ -533,6 +538,12 @@ class WholesaleDeal(Base):
     repair_estimate = Column(Numeric(14, 2), nullable=True)
     repair_estimate_source = Column(String, nullable=True)
     repair_notes = Column(Text, nullable=True)
+    # REPAIR STATUS (wholesale_repairs.STATUSES): UNKNOWN | SELLER_REPORTED |
+    # MANUAL_ESTIMATE | INSPECTION_ESTIMATE | SYSTEM_ESTIMATE | VERIFIED. The
+    # current accepted estimate; its history is wholesale_repair_estimates.
+    repair_status = Column(String, nullable=True)
+    repair_low = Column(Numeric(14, 2), nullable=True)
+    repair_high = Column(Numeric(14, 2), nullable=True)
     # Snapshot of the formula inputs AT THE TIME the offer was calculated, so a
     # later settings change never silently rewrites the history of an offer.
     investor_percentage_used = Column(Numeric(6, 3), nullable=True)
@@ -542,6 +553,16 @@ class WholesaleDeal(Base):
     proposed_offer = Column(Numeric(14, 2), nullable=True)
     analysis_notes = Column(Text, nullable=True)
     analysis_updated_at = Column(DateTime, nullable=True)
+    # The ARV ENGINE's last answer (arv_engine): version, confidence and the
+    # full explanation - comps used/excluded and why, limitations. An
+    # INSUFFICIENT answer is a real answer and is stored as one.
+    arv_version = Column(String, nullable=True)
+    arv_confidence = Column(String, nullable=True)       # high|medium|low|insufficient
+    arv_detail = Column(Text, nullable=True)
+    arv_calculated_at = Column(DateTime, nullable=True)
+    # MAO GATE (mao_gate): CALCULATED | NOT_CALCULATED, with the reasons.
+    mao_status = Column(String, nullable=True)
+    mao_detail = Column(Text, nullable=True)
 
     # ── Contract / acquisition ──────────────────────────────────────────────
     contract_price = Column(Numeric(14, 2), nullable=True)
@@ -671,7 +692,11 @@ class WholesaleComp(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
-    deal_id = Column(String, ForeignKey("wholesale_deals.id", ondelete="CASCADE"), nullable=False)
+    # A comp supports a DEAL, or (before promotion) an EvoSense property. The
+    # subject is one or the other; promotion re-points EvoSense comps at the
+    # new deal. NULL deal_id is only ever an EvoSense-subject comp.
+    deal_id = Column(String, ForeignKey("wholesale_deals.id", ondelete="CASCADE"), nullable=True)
+    evosense_property_id = Column(String, nullable=True)
 
     street_address = Column(String, nullable=True)
     city = Column(String, nullable=True)
@@ -692,11 +717,67 @@ class WholesaleComp(Base):
     included = Column(Boolean, nullable=False, default=True)
     year_built = Column(Integer, nullable=True)
 
+    # ── EVIDENCE (comp_rules / arv_engine). A comp is its own evidence object:
+    # where it came from, who put it here, how far it is trusted, and - when a
+    # person or a rule excluded it - exactly why. Source facts are never
+    # overwritten with calculated values; adjustments live beside them.
+    half_baths = Column(Integer, nullable=True)
+    lot_size_sqft = Column(Integer, nullable=True)
+    sale_type = Column(String, nullable=True)            # arms_length|foreclosure|reo|auction|family|...
+    latitude = Column(Numeric(10, 7), nullable=True)
+    longitude = Column(Numeric(10, 7), nullable=True)
+    provider_key = Column(String, nullable=True)         # NULL for a manual comp
+    source_reference = Column(String, nullable=True)     # MLS #, deed/doc #, URL, provider record id
+    retrieved_at = Column(DateTime, nullable=True)
+    confidence = Column(Integer, nullable=True)
+    # manual | provider | provider_verified | human_verified. A MANUAL comp
+    # never becomes provider_verified; a person verifying it against a primary
+    # source makes it human_verified (still labelled manual in origin).
+    verification_state = Column(String, nullable=True, default="manual")
+    verified_by_id = Column(String, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+    exclusion_reason = Column(Text, nullable=True)       # a person's reason for excluding it
+    excluded_by_id = Column(String, nullable=True)
+    adjustments = Column(Text, nullable=True)            # JSON; never replaces the source facts
+    provenance = Column(Text, nullable=True)             # JSON: raw evidence where permitted
+    entered_by_id = Column(String, nullable=True)
+    attestation = Column(Text, nullable=True)            # "I confirmed this sale on ..."
+    is_test = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
         Index("ix_wscomp_org_deal", "organization_id", "deal_id"),
+        Index("ix_wscomp_org_esprop", "organization_id", "evosense_property_id"),
     )
+
+
+class WholesaleRepairEstimate(Base):
+    """One repair estimate, with where it came from. Append-only: a newer
+    estimate supersedes, never deletes. A seller's own account of the repairs
+    is SELLER_REPORTED and stays distinguishable from an inspection."""
+
+    __tablename__ = "wholesale_repair_estimates"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    deal_id = Column(String, ForeignKey("wholesale_deals.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String, nullable=False)
+    amount = Column(Numeric(14, 2), nullable=True)
+    low = Column(Numeric(14, 2), nullable=True)
+    high = Column(Numeric(14, 2), nullable=True)
+    source = Column(String, nullable=True)               # e.g. "seller", "walkthrough", "contractor bid"
+    supplied_by_id = Column(String, nullable=True)
+    supplied_by_label = Column(String, nullable=True)
+    confidence = Column(String, nullable=True)           # high|medium|low
+    notes = Column(Text, nullable=True)
+    provenance = Column(Text, nullable=True)             # JSON (e.g. the seller fact it came from)
+    superseded = Column(Boolean, nullable=False, default=False)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (Index("ix_wsrepair_org_deal", "organization_id", "deal_id"),)
 
 
 class WholesaleApproval(Base):

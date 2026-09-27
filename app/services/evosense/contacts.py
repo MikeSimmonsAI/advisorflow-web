@@ -90,11 +90,15 @@ def apply_result(db, owner: EvoSenseOwner, result, provider, *, manual_user=None
 
     touched = []
     items = [("phone", normalize_phone(ph.number), ph.number, ph.phone_type, ph.confidence,
-              ph.source) for ph in result.phones]
-    items += [("email", (e or "").strip().lower(), e, None, result.confidence, provider.key)
-              for e in result.emails]
+              ph.source, ph) for ph in result.phones]
+    for e in result.emails:
+        addr = e if isinstance(e, str) else getattr(e, "address", "")
+        items.append(("email", (addr or "").strip().lower(), addr, None,
+                      result.confidence if isinstance(e, str) else (e.confidence or result.confidence),
+                      provider.key, None if isinstance(e, str) else e))
     db.flush()
-    for kind, value, raw, line, conf, sub in items:
+    import json as _json
+    for kind, value, raw, line, conf, sub, item in items:
         if not value:
             continue
         cp = (db.query(EvoSenseContactPoint)
@@ -122,6 +126,20 @@ def apply_result(db, owner: EvoSenseOwner, result, provider, *, manual_user=None
                 cp.provider_confidence = max(cp.provider_confidence or 0, conf)
             if mailing_match:
                 cp.mailing_match = True
+        # PROVENANCE of this lookup: the vendor's record id, when it was made,
+        # when the vendor last saw the value, the identity evidence, and the raw
+        # response only where the vendor's terms permit keeping it.
+        cp.provider_reference = (getattr(item, "provider_reference", None)
+                                 or getattr(result, "provider_reference", None) or cp.provider_reference)
+        cp.looked_up_at = C.now()
+        cp.source_last_seen = getattr(item, "last_seen", None) or cp.source_last_seen
+        ev = getattr(item, "match_evidence", None) or getattr(result, "match_evidence", None)
+        if ev:
+            cp.match_evidence = _json.dumps(ev, default=str)
+        if getattr(result, "raw_permitted", False) and getattr(result, "raw_payload", None):
+            cp.raw_evidence = _json.dumps(result.raw_payload, default=str)[:20000]
+        if cp.trust_state is None:
+            cp.trust_state = "candidate"
         # A number already known as wrong-party / suppressed anywhere in this
         # organization inherits that status: a new strategy cannot resurrect it.
         prior = (db.query(EvoSenseContactPoint)
@@ -152,6 +170,14 @@ def score_contact_point(db, prop, cp) -> Dict[str, Any]:
                         EvoSenseOwnership.in_conflict.is_(True)).first() is not None)
     res = SC.contact_confidence(cp, person, owner, mailing_agrees=cp.mailing_match,
                                 identity_conflict=conflict)
+    # CANDIDATE -> TRUSTED only through the identity/confidence rules or a
+    # person; a bad status rejects it. Trust is about identity, never consent.
+    if cp.status in BAD_STATUSES:
+        cp.trust_state = "rejected"
+    elif getattr(cp, "verified_at", None) or (res.get("value") or 0) >= _trust_threshold(db, prop):
+        cp.trust_state = "trusted"
+    else:
+        cp.trust_state = "candidate"
     SC.record(db, prop, "contact_confidence", res, subject_type="contact_point", subject_id=cp.id)
     return res
 
@@ -177,3 +203,17 @@ def best_contact(db, prop):
         if cp.status == "active":
             return cp, sc
     return None, None
+
+
+def _trust_threshold(db, prop) -> int:
+    """The Contact Confidence a candidate must reach to be trusted: the
+    property's strategy minimum, else 60."""
+    sid = getattr(prop, "best_strategy_id", None)
+    if sid:
+        from app.models.evosense_models import EvoSenseStrategy
+        s = (db.query(EvoSenseStrategy.min_contact_confidence)
+             .filter(EvoSenseStrategy.id == sid,
+                     EvoSenseStrategy.organization_id == prop.organization_id).first())
+        if s and s[0] is not None:
+            return int(s[0])
+    return 60

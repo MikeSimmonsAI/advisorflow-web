@@ -56,6 +56,47 @@ function StateBadge({ state, tone, why }) {
   )
 }
 
+const CAP_TONE = { OPERATIONAL: 'good', UNVERIFIED: 'attention', DEGRADED: 'danger', BLOCKED: 'danger',
+                   SANDBOX: 'attention', 'MANUAL ONLY': 'quiet', 'NOT ENABLED': 'quiet', 'NOT CONFIGURED': 'quiet' }
+
+/** The provider capability registry: per product capability, per provider,
+ *  platform state and tenant state kept apart. "Configured" is never shown as
+ *  connected - UNVERIFIED until a real call for THAT capability succeeds. */
+function CapabilityRegistry({ data }) {
+  if (!data) return <p className="evo-muted">Loading the capability registry…</p>
+  const yn = (v) => (v === null || v === undefined ? 'unknown' : v ? 'yes' : 'no')
+  return (
+    <Panel title="Capability registry" flush
+           hint="Per capability, per provider · UNVERIFIED = configured and enabled but never proven · SANDBOX is synthetic, never real data">
+      <div className="evo-table-wrap">
+        <table className="evo-table evo-table--cards">
+          <thead><tr><th scope="col">Capability</th><th scope="col">State</th><th scope="col">Providers</th></tr></thead>
+          <tbody>
+            {data.capabilities.map((c) => (
+              <tr key={c.capability} className="evo-provider">
+                <td className="is-lead" data-label=""><span className="evo-strong">{c.label}</span>
+                  <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>{c.note}</span></td>
+                <td data-label="State"><StateBadge state={c.state} tone={CAP_TONE[c.state]} why={c.note} /></td>
+                <td data-label="Providers" className="evo-small">
+                  {c.providers.length ? c.providers.map((p) => (
+                    <div key={p.provider} style={{ marginBottom: 6 }}>
+                      <StateBadge state={p.state} tone={CAP_TONE[p.state]} why={p.why} /> <strong>{p.label}</strong>
+                      <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>
+                        {p.why} · platform: configured {yn(p.platform.configured)}{p.platform.blocked ? ', blocked' : ''} ·
+                        workspace: enabled {yn(p.tenant.enabled)}, reachable {yn(p.tenant.reachable)}, healthy {yn(p.tenant.healthy)}
+                      </span>
+                    </div>
+                  )) : <span className="evo-muted">No provider can supply this yet</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  )
+}
+
 /** configured · enabled · reachable · healthy · operational, said separately. */
 function Dims({ x }) {
   if (x.connector_kind !== 'real') return null
@@ -82,15 +123,17 @@ export default function EvoControls() {
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [capReg, setCapReg] = useState(null)
   const [budget, setBudget] = useState({ day: '', month: '', cap: '' })
   const [tab, setTab] = useState(() => (typeof window !== 'undefined' && window.location.hash === '#budget' ? 'usage' : window.location.hash === '#sources' ? 'sources' : 'providers'))
 
   const load = useCallback(async () => {
     try {
-      const [c, p, cc, r] = await Promise.all([api.get('/wholesale/evosense/controls'), api.get('/wholesale/evosense/providers'),
+      const [c, p, cc, r, caps] = await Promise.all([api.get('/wholesale/evosense/controls'), api.get('/wholesale/evosense/providers'),
         api.get('/wholesale/evosense/command-center').catch(() => null),
-        api.get('/wholesale/evosense/sources').catch(() => null)])
-      setCtl(c); setProv(p); setSpent(cc ? cc.spent : null); setReg(r)
+        api.get('/wholesale/evosense/sources').catch(() => null),
+        api.get('/wholesale/evosense/capabilities').catch(() => null)])
+      setCtl(c); setProv(p); setSpent(cc ? cc.spent : null); setReg(r); setCapReg(caps)
       setWeights(Object.fromEntries(Object.entries({ ...(c.default_weights || {}), ...(c.score_weights || {}) })
         .map(([k, v]) => [k, String(v)])))
       setBudget({ day: c.org_daily_budget_cents == null ? '' : String(c.org_daily_budget_cents / 100),
@@ -160,6 +203,7 @@ export default function EvoControls() {
               items={[
                 { key: 'sources', label: 'Source Registry', count: reg ? reg.sources.filter((x) => x.operational).length + ' operational' : null },
                 { key: 'providers', label: 'Service Providers', count: prov.providers.length },
+                { key: 'capabilities', label: 'Capability Registry', count: capReg ? capReg.capabilities.filter((x) => x.state === 'OPERATIONAL').length + ' operational' : null },
                 { key: 'controls', label: 'Controls & Compliance', count: pausedCount ? `${pausedCount} paused` : null },
                 { key: 'usage', label: 'Usage & Costs' },
               ]} />
@@ -290,6 +334,10 @@ export default function EvoControls() {
           <p className="evo-muted evo-small" style={{ margin: 0, padding: '12px 20px 16px' }}>Sandbox providers are off for every organization
             until an admin turns them on, and they never serve a real (non-sandbox) property. No credential is ever shown here.</p>
         </Panel>
+      </div>
+
+      <div className="evo-stack" role="tabpanel" id="panel-capabilities" aria-labelledby="tab-capabilities" hidden={tab !== 'capabilities'}>
+        <CapabilityRegistry data={capReg} />
       </div>
 
       <div className="evo-stack" role="tabpanel" id="panel-controls" aria-labelledby="tab-controls" hidden={tab !== 'controls'}>

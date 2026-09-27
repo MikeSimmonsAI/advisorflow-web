@@ -177,7 +177,11 @@ export default function EvoProperty() {
             ) : (
               <div><dt>Market estimate</dt><dd>{money(f.estimated_value.value)}<small>{f.estimated_value.value ? 'modelled estimate' : 'none on file'}</small></dd></div>
             )}
-            <div><dt>ARV</dt><dd className="is-quiet">—<small>{(f.arv && f.arv.label) || 'Insufficient comparable sales'}</small></dd></div>
+            {eco.arv && eco.arv.value != null ? (
+              <div><dt>ARV</dt><dd>{money(eco.arv.value)}<small>{eco.arv.comp_count} eligible closed sales · {eco.arv.confidence} confidence</small></dd></div>
+            ) : (
+              <div><dt>ARV</dt><dd className="is-quiet">—<small>{(f.arv && f.arv.label) || 'Insufficient comparable sales'}</small></dd></div>
+            )}
             <div><dt>Equity</dt><dd>{f.equity_pct.value != null ? `${f.equity_pct.value}%` : '—'}<small>{f.equity_pct.value != null ? (f.equity_pct.truth || '').toLowerCase().split(' (')[0] : 'missing'}</small></dd></div>
             <div><dt>Occupancy</dt><dd>{f.occupancy.value ? humanize(f.occupancy.value) : '—'}<small>{f.occupancy.source || 'not reported'}</small></dd></div>
             <div><dt>Size</dt><dd>{f.physical.bedrooms || '—'}bd · {f.physical.bathrooms || '—'}{f.physical.half_bathrooms ? `/${f.physical.half_bathrooms}` : ''}ba<small>{f.physical.half_bathrooms ? 'full / half baths · ' : 'full baths · '}{f.physical.square_feet ? `${Number(f.physical.square_feet).toLocaleString()} sq ft` : 'sq ft unknown'}{f.physical.year_built ? ` · ${f.physical.year_built}` : ''}</small></dd></div>
@@ -340,6 +344,7 @@ export default function EvoProperty() {
             {eco.verdict ? <p style={{ margin: '14px 0 0', color: 'var(--evo-text-primary)' }}>{eco.verdict}</p> : null}
             {(eco.warnings || []).map((w, i) => <p key={i} className="evo-muted evo-small" style={{ margin: '6px 0 0' }}>{w}</p>)}
             <p className="evo-muted evo-small" style={{ margin: '10px 0 0' }}>{eco.notice}</p>
+            <ManualComp propertyId={p.id} arv={eco.arv} busy={busy} act={act} />
           </Panel>
 
           {/* 3 ── WHY FOUND ────────────────────────────────────────────── */}
@@ -606,6 +611,53 @@ export default function EvoProperty() {
 
 /** One piece of evidence, with the SOURCE's date (a plain calendar date, never
  * shifted by the viewer's time zone) and what that date is. */
+/** A MANUAL sold comp: address, closed price, sale date and a source
+ *  reference a second person could check. Labelled MANUAL for good. */
+const COMP_FIELDS = [['street_address', 'Address'], ['sale_price', 'Closed price'], ['sale_date', 'Sale date (YYYY-MM-DD)'],
+  ['source_reference', 'Source (MLS #, deed, URL)'], ['square_feet', 'Sq ft'], ['bedrooms', 'Beds'], ['bathrooms', 'Baths'],
+  ['distance_miles', 'Distance (mi)'], ['sale_type', 'Sale type']]
+const COMP_NUM = new Set(['sale_price', 'square_feet', 'bedrooms', 'bathrooms', 'distance_miles'])
+
+function ManualComp({ propertyId, arv, busy, act }) {
+  const [open, setOpen] = useState(false)
+  const [c, setC] = useState({})
+  const eng = (arv && arv.engine) || null
+  const counted = eng ? eng.comps_used.length : 0
+  const excluded = eng ? eng.comps_excluded : []
+  return (
+    <div style={{ marginTop: 14 }}>
+      <p className="evo-muted evo-small" style={{ margin: 0 }}>
+        Sold comps on file: {counted} eligible{excluded.length ? `, ${excluded.length} excluded` : ''}.
+        {excluded.map((x, i) => <span key={i} style={{ display: 'block' }}>{x.address}: {x.excluded.map((e) => e.label).join('; ')}</span>)}
+      </p>
+      {!open ? (
+        <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" style={{ marginTop: 8 }}
+                onClick={() => setOpen(true)}>Add a sold comp (manual)</button>
+      ) : (
+        <div className="evo-form-grid" style={{ marginTop: 8, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 8 }}>
+          {COMP_FIELDS.map(([k, label]) => (
+            <label key={k} className="evo-small">{label}
+              <input className="evo-input" value={c[k] || ''} onChange={(e) => setC({ ...c, [k]: e.target.value })} />
+            </label>
+          ))}
+          <div style={{ gridColumn: '1 / -1' }} className="evo-chips">
+            <button type="button" className="evo-btn evo-btn--primary evo-btn--sm"
+                    disabled={busy || !c.street_address || !c.sale_price || !c.sale_date || !(c.source_reference || '').trim()}
+                    onClick={async () => {
+                      const body = {}
+                      Object.entries(c).forEach(([k, v]) => { if (v !== '' && v != null) body[k] = COMP_NUM.has(k) ? Number(v) : v })
+                      const r = await act(() => api.post(`/wholesale/evosense/properties/${propertyId}/comps`, body),
+                        () => 'Manual comp saved - labelled MANUAL.')
+                      if (r) { setC({}); setOpen(false) }
+                    }}>Save comp</button>
+            <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function evidenceLine(e) {
   const date = e.evidence_date ? shortDate(e.evidence_date) : (e.observed_at ? `read ${shortDate(e.observed_at)}` : null)
   return [

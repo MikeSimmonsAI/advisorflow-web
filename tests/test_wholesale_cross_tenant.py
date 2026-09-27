@@ -195,6 +195,12 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
 
     # Priority 3: a re-derivation dry run of A's.
     from app.services.evosense import reprocess as evosense_reprocess
+    from app.models.evosense_models import EvoSenseProviderEvaluation
+    _ev = EvoSenseProviderEvaluation(organization_id=sample_org.id, name="A eval",
+                                     provider_keys="[]", sample="{}")
+    db_session.add(_ev)
+    db_session.flush()
+    es_ids["es_evaluation_id"] = _ev.id
     es_ids["es_reprocess_run_id"] = evosense_reprocess.dry_run(
         db_session, sample_org.id, user=sample_advisor).id
     db_session.commit()
@@ -273,6 +279,9 @@ def attacks(ids):
          {"street_address": "planted", "sale_price": 1}),
         ("patch", "/wholesale/comps/%s" % ids["comp_id"], {"sale_price": 1}),
         ("delete", "/wholesale/comps/%s" % ids["comp_id"], None),
+        ("post", "/wholesale/comps/%s/verify" % ids["comp_id"], {"attestation": "stolen verification"}),
+        ("post", "/wholesale/deals/%s/repairs" % d, {"status": "MANUAL_ESTIMATE", "amount": 1}),
+        ("get", "/wholesale/deals/%s/valuation" % d, None),
         ("post", "/wholesale/deals/%s/documents" % d,
          {"doc_type": "purchase_contract", "title": "planted"}),
         ("patch", "/wholesale/documents/%s" % ids["document_id"],
@@ -384,6 +393,7 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/contacts/%s/wrong-party" % (base, ep, ids["es_contact_id"]), None),
         ("post", "%s/properties/%s/contacts/%s/verify" % (base, ep, ids["es_contact_id"]), {"note": "x"}),
         ("post", "%s/properties/%s/signals" % (base, ep), {"signal_type": "VACANT"}),
+        ("post", "%s/properties/%s/comps" % (base, ep), {"street_address": "1 X", "sale_price": 1, "sale_date": "2026-01-01", "source_reference": "x"}),
         ("post", "%s/properties/%s/rescore" % (base, ep), None),
         ("post", "%s/properties/%s/retry-reading" % (base, ep), None),
         ("post", "%s/routing-reviews/%s" % (base, ids["es_routing_review_id"]),
@@ -406,6 +416,7 @@ def evosense_attacks(ids):
         # derived state; applying or rolling back someone else's would rewrite
         # their records.
         ("get", "%s/reprocess/%s" % (base, ids["es_reprocess_run_id"]), None),
+        ("get", "%s/provider-evaluations/%s" % (base, ids["es_evaluation_id"]), None),
         ("post", "%s/reprocess/%s/apply" % (base, ids["es_reprocess_run_id"]),
          {"confirm": "APPLY %s" % ids["es_reprocess_run_id"]}),
         ("post", "%s/reprocess/%s/rollback" % (base, ids["es_reprocess_run_id"]),

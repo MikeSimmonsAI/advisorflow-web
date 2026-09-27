@@ -193,7 +193,7 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
             _source_failed(db, org_id, strategy, provider, cfg, exc, counts, user)
             db.commit()
             continue
-        PV.record_success(cfg)
+        PV.record_success(cfg, capability=cap)
         cfg.last_record_count = len(records)
         if provider.connector_kind == C.REAL:
             cfg.last_verified_at = C.now()
@@ -367,7 +367,7 @@ def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], count
                     tally["failed"] += 1
                 db.commit()
                 continue
-            PV.record_success(cfg)
+            PV.record_success(cfg, capability=cap)
             cfg.last_verified_at = C.now()
             found = 0
             for pid, p in by_id.items():

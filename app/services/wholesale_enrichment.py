@@ -53,6 +53,24 @@ class EnrichmentPhone:
     phone_type: Optional[str] = None      # mobile, landline, voip, unknown
     confidence: Optional[int] = None      # 0-100, provider-reported
     source: Optional[str] = None
+    # CONTACT-ENRICHMENT READINESS (all optional; an adapter fills what its
+    # vendor actually returns): the vendor's own record id, when the vendor
+    # last saw this number, and the identity evidence behind the match.
+    provider_reference: Optional[str] = None
+    last_seen: Optional[str] = None       # ISO date the vendor last observed it
+    match_evidence: Optional[dict] = None # e.g. {"name_match": "full", "address_match": "mailing"}
+    dnc_flag: Optional[bool] = None       # the VENDOR's DNC flag - evidence, never permission
+
+
+@dataclass
+class EnrichmentEmail:
+    """An email a provider returned, with its own confidence and evidence.
+    `EnrichmentResult.emails` accepts these or plain strings."""
+    address: str
+    confidence: Optional[int] = None
+    provider_reference: Optional[str] = None
+    last_seen: Optional[str] = None
+    match_evidence: Optional[dict] = None
 
 
 @dataclass
@@ -78,6 +96,15 @@ class EnrichmentResult:
     billable: bool = False
     cost_cents: Optional[int] = None
     raw_summary: Optional[str] = None
+    # Provenance: the vendor's record id for this lookup, when it was made,
+    # the identity-match evidence, and - ONLY where the vendor's terms permit
+    # storing it - the raw response (`raw_permitted` must be set by the
+    # adapter, from the contract, never assumed).
+    provider_reference: Optional[str] = None
+    looked_up_at: Optional[str] = None
+    match_evidence: Optional[dict] = None
+    raw_payload: Optional[dict] = None
+    raw_permitted: bool = False
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), default=str)

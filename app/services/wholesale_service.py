@@ -1176,6 +1176,19 @@ def set_stage(db: Session, org_id: str, deal: WholesaleDeal, to_stage: str,
 
 # ── Analysis ────────────────────────────────────────────────────────────────
 
+def gated_summary(deal: WholesaleDeal, settings) -> Dict[str, Any]:
+    """The deal summary with the MAO GATE applied: an MAO the evidence does
+    not support is shown as NOT CALCULATED (None), with the reasons."""
+    from app.services import mao_gate
+    summary = analysis.deal_summary(deal, settings)
+    gate = mao_gate.evaluate(deal, settings)
+    if gate["status"] != mao_gate.CALCULATED:
+        summary["max_allowable_offer"] = None
+        summary["mao_blocked"] = gate["reasons"]
+    summary["mao_gate"] = gate
+    return summary
+
+
 def recalculate_analysis(db: Session, org_id: str, deal: WholesaleDeal,
                          user: Optional[User] = None,
                          recompute_arv_from_comps: bool = True) -> Dict[str, Any]:
@@ -1190,30 +1203,66 @@ def recalculate_analysis(db: Session, org_id: str, deal: WholesaleDeal,
         WholesaleProperty.id == deal.property_id).first()
 
     arv_result = None
+    engine = None
     if recompute_arv_from_comps:
+        from app.services import arv_engine, comp_rules
         comps = (db.query(WholesaleComp)
                  .filter(WholesaleComp.deal_id == deal.id,
                          WholesaleComp.organization_id == org_id).all())
+        # THE ARV ENGINE: only ELIGIBLE closed sales count (comp_rules), and
+        # "insufficient comparable sales" is a real, stored answer. The legacy
+        # arithmetic is kept alongside for the steps a person reads.
+        other = {}
+        if prop is not None and prop.estimated_value is not None:
+            other["estimated_value"] = {
+                "value": float(prop.estimated_value),
+                "type": "AVM / estimate (%s)" % (prop.estimated_value_source or "unknown source"),
+                "is_arv": False}
+        engine = arv_engine.compute(prop, comps, comp_rules.rules_for(settings),
+                                    other_valuations=other)
+        eligible_ids = {c["comp_id"] for c in engine["comps_used"]}
         arv_result = analysis.arv_from_comps(
-            comps, getattr(prop, "square_feet", None))
+            [c for c in comps if c.id in eligible_ids], getattr(prop, "square_feet", None))
+        deal.arv_detail = json.dumps(engine, default=str)
+        deal.arv_version = engine["version"]
+        deal.arv_calculated_at = datetime.utcnow()
         # A manually entered or verified ARV is NOT overwritten by a comp set.
         # A person who typed a number, or confirmed one against a primary
         # source, has more information than the median of four comps, and
         # silently replacing it is how a deal analyzer loses somebody's work.
-        if arv_result["arv"] is not None and deal.arv_source in (None, VALUE_ESTIMATED):
-            deal.arv = arv_result["arv"]
-            deal.arv_source = VALUE_ESTIMATED
-            deal.arv_method = arv_result["method"]
+        if deal.arv_source in (None, VALUE_ESTIMATED):
+            deal.arv_confidence = engine["confidence"]["label"]
+            if engine["status"] == arv_engine.ESTIMATED:
+                deal.arv = engine["value"]
+                deal.arv_source = VALUE_ESTIMATED
+                deal.arv_method = "%s:%s" % (engine["version"], engine["method"])
+            else:
+                # INSUFFICIENT is the answer: an earlier comp-derived ARV that
+                # the evidence no longer supports is cleared, not kept stale.
+                deal.arv = None
+                deal.arv_source = None
+                deal.arv_method = None
 
     if deal.investor_percentage_used is None:
         deal.investor_percentage_used = settings.investor_percentage
     if deal.desired_wholesale_fee is None:
         deal.desired_wholesale_fee = settings.default_wholesale_fee
 
+    from app.services import mao_gate
+    gate = mao_gate.evaluate(deal, settings)
     summary = analysis.deal_summary(deal, settings)
+    if gate["status"] != mao_gate.CALCULATED:
+        # NOT CALCULATED is shown as not calculated - never a number that
+        # quietly assumed $0 repairs or leaned on an unsupported ARV.
+        summary["max_allowable_offer"] = None
+        summary["mao_blocked"] = gate["reasons"]
     deal.max_allowable_offer = analysis.money(summary["max_allowable_offer"])
     deal.transaction_costs = analysis.money(summary["transaction_costs"])
+    deal.mao_status = gate["status"]
+    deal.mao_detail = json.dumps(gate, default=str)
     deal.analysis_updated_at = datetime.utcnow()
+    summary["mao_gate"] = gate
+    summary["arv_engine"] = engine
 
     log_event(db, org_id, "analysis.updated",
               actor_type=ACTOR_USER if user else ACTOR_AUTOMATION,
@@ -1302,7 +1351,7 @@ def request_approval(db: Session, org_id: str, deal: WholesaleDeal, kind: str,
     make impossible.
     """
     settings = resolve_settings(db, org_id, commit=False)
-    snapshot = inputs if inputs is not None else analysis.deal_summary(deal, settings)
+    snapshot = inputs if inputs is not None else gated_summary(deal, settings)
     approval = WholesaleApproval(
         organization_id=org_id, deal_id=deal.id, kind=kind, status="pending",
         amount=analysis.money(amount),

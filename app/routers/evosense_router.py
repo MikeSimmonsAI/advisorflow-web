@@ -447,6 +447,63 @@ def verify_contact(property_id: str, contact_id: str, payload: ContactVerifyIn,
     return {"ok": True, "contactability": C.jload(prop.contactability_detail, None)}
 
 
+class EvoCompIn(BaseModel):
+    street_address: str
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    sale_price: float
+    sale_date: str
+    source_reference: str
+    square_feet: Optional[int] = None
+    bedrooms: Optional[float] = None
+    bathrooms: Optional[float] = None
+    half_baths: Optional[int] = None
+    year_built: Optional[int] = None
+    lot_size_sqft: Optional[int] = None
+    property_type: Optional[str] = None
+    sale_type: Optional[str] = None
+    distance_miles: Optional[float] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    attestation: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.post("/properties/{property_id}/comps")
+def add_evosense_comp(property_id: str, payload: EvoCompIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user),
+                      _g: User = Depends(require_not_observation)):
+    """A MANUAL sold comp for an EvoSense property, with the evidence a second
+    person could check (address, closed price, sale date, source reference).
+    Labelled MANUAL for good; it moves to the deal on promotion."""
+    from datetime import datetime as _dt
+    from app.models.wholesale_models import WholesaleComp
+    from app.services.evosense import valuation as VAL
+    org_id = svc.write_org_id(db, user)
+    prop = _prop(db, org_id, property_id)
+    try:
+        sdate = _dt.fromisoformat(payload.sale_date[:10]).date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Sale date must be YYYY-MM-DD.")
+    if payload.sale_price <= 0 or not payload.source_reference.strip():
+        raise HTTPException(status_code=422, detail="A closed sale needs a price and a source reference.")
+    data = payload.model_dump(exclude={"sale_date"})
+    if data.get("sale_type"):
+        data["sale_type"] = data["sale_type"].strip().lower().replace(" ", "_")
+    comp = WholesaleComp(organization_id=org_id, deal_id=prop.promoted_deal_id,
+                         evosense_property_id=prop.id, source="manual",
+                         verification_state="manual", entered_by_id=user.id,
+                         is_test=bool(prop.is_test), sale_date=sdate, **data)
+    db.add(comp)
+    C.log_event(db, org_id, "comp.added", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
+                is_test=prop.is_test, summary="Manual sold comp added: %s" % payload.street_address)
+    db.flush()
+    res = VAL.arv(db, prop)
+    db.commit()
+    return {"comp_id": comp.id, "arv": res}
+
+
 class SignalIn(BaseModel):
     signal_type: str
     note: Optional[str] = None
@@ -800,6 +857,72 @@ def providers(db: Session = Depends(get_db), user: User = Depends(require_tenant
     out = PV.status_report(db, org_id)
     db.commit()
     return out
+
+
+class EvaluationIn(BaseModel):
+    name: str
+    provider_keys: List[str]
+    property_ids: List[str]
+    ground_truth: Optional[Dict[str, Dict[str, Any]]] = None
+    confirm: Optional[str] = None
+
+
+@router.post("/provider-evaluations")
+def run_provider_evaluation(payload: EvaluationIn, db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_user),
+                            _g: User = Depends(require_not_observation)):
+    """Run the same authorized sample through each chosen contact provider.
+    Admin only. Sandbox runs are SYNTHETIC; a real provider needs the owner's
+    explicit confirmation because every lookup costs money."""
+    from app.services.evosense import provider_eval as PE
+    _admin(user)
+    org_id = svc.write_org_id(db, user)
+    try:
+        ev = PE.run(db, org_id, name=payload.name, provider_keys=payload.provider_keys,
+                    property_ids=payload.property_ids, ground_truth=payload.ground_truth,
+                    user=user, confirm=payload.confirm)
+    except PE.EvaluationRefused as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc))
+    db.commit()
+    return PE.payload(ev)
+
+
+@router.get("/provider-evaluations")
+def list_provider_evaluations(db: Session = Depends(get_db),
+                              user: User = Depends(require_tenant_or_observer)):
+    from app.models.evosense_models import EvoSenseProviderEvaluation
+    from app.services.evosense import provider_eval as PE
+    org_id = _read_org(db, user)
+    rows = (db.query(EvoSenseProviderEvaluation)
+            .filter(EvoSenseProviderEvaluation.organization_id == org_id)
+            .order_by(EvoSenseProviderEvaluation.created_at.desc()).limit(50).all())
+    return {"items": [dict(PE.payload(r), results=None) for r in rows]}
+
+
+@router.get("/provider-evaluations/{evaluation_id}")
+def get_provider_evaluation(evaluation_id: str, db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_or_observer)):
+    from app.models.evosense_models import EvoSenseProviderEvaluation
+    from app.services.evosense import provider_eval as PE
+    org_id = _read_org(db, user)
+    ev = (db.query(EvoSenseProviderEvaluation)
+          .filter(EvoSenseProviderEvaluation.id == evaluation_id,
+                  EvoSenseProviderEvaluation.organization_id == org_id).first())
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    return PE.payload(ev)
+
+
+@router.get("/capabilities")
+def capability_registry(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """What each provider can actually supply for this workspace, per
+    capability, with platform state and tenant state kept apart."""
+    from app.services.evosense import capabilities as CAPS
+    org_id = _read_org(db, user)
+    return {"capabilities": CAPS.matrix(db, org_id),
+            "states": [CAPS.S_OPERATIONAL, CAPS.S_UNVERIFIED, CAPS.S_DEGRADED, CAPS.S_NOT_ENABLED,
+                       CAPS.S_BLOCKED, CAPS.S_NOT_CONFIGURED, CAPS.S_MANUAL, CAPS.S_SANDBOX]}
 
 
 @router.get("/sources")

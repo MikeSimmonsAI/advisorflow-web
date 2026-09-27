@@ -77,6 +77,21 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
     }
     wprop = WS.create_property(db, org_id, user, data)
     deal = WS.deal_for_property(db, org_id, wprop.id)
+    # The comparable sales gathered for this property become the deal's -
+    # same rows, same evidence, re-pointed rather than copied.
+    try:
+        from app.models.wholesale_models import WholesaleComp
+        moved = (db.query(WholesaleComp)
+                 .filter(WholesaleComp.organization_id == org_id,
+                         WholesaleComp.evosense_property_id == prop.id,
+                         WholesaleComp.deal_id.is_(None))
+                 .update({"deal_id": deal.id}, synchronize_session=False))
+        if moved:
+            db.flush()
+            WS.recalculate_analysis(db, org_id, deal, user)
+    except Exception:                                   # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception("promotion: comps not carried")
 
     eng = (db.query(EvoSenseEngagement)
            .filter(EvoSenseEngagement.organization_id == org_id,

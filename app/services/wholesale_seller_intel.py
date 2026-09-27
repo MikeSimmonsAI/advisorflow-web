@@ -205,7 +205,29 @@ def record_message_facts(db, profile, deal, lead, text: str, reading: Dict[str, 
                                           reading["timeline"], text, message_ref=message_ref,
                                           channel=channel, extracted_by=src, confidence=conf)
     db.flush()
+    for ft in ("repairs", "condition"):
+        if ft in added:
+            seller_reported_repairs(db, deal, added[ft])
     return {"outcome": outcome, "facts": sorted(added)}
+
+
+def seller_reported_repairs(db, deal, fact) -> None:
+    """What the SELLER said about repairs/condition goes into the deal's repair
+    history as SELLER_REPORTED - with the quote and the fact it came from. It
+    becomes the current status only if nothing better (an estimate) exists,
+    and it never carries an invented dollar amount."""
+    if deal is None:
+        return
+    from app.services import wholesale_repairs as REP
+    try:
+        REP.record(db, fact.organization_id, deal, status=REP.SELLER_REPORTED,
+                   source="seller", supplied_by_label="Seller (own words)",
+                   notes="%s: %s" % (fact.fact_type.replace("_", " "), fact.quote or fact.value),
+                   provenance={"fact_id": fact.id, "message_ref": fact.message_ref,
+                               "extracted_by": fact.extracted_by},
+                   make_current=REP.status_of(deal) in (REP.UNKNOWN, REP.SELLER_REPORTED))
+    except ValueError:
+        pass
 
 
 FORM_FIELDS = {"timeline": "timeline", "property_condition": "condition",
@@ -232,6 +254,10 @@ def record_form_facts(db, profile, deal, lead, form: Dict[str, Any], *, submissi
              form["notes"][:500], form["notes"], message_ref=ref, channel="form",
              extracted_by="form")
     db.flush()
+    if form.get("property_condition"):
+        cond = [f for f in current_facts(db, profile) if f.fact_type == "condition"]
+        if cond:
+            seller_reported_repairs(db, deal, cond[-1])
 
 
 # ── seller intent ───────────────────────────────────────────────────────────
@@ -319,6 +345,8 @@ def qualification(db, profile, deal, settings, lead, *, outcome: Optional[str] =
 def store(profile, qual: Dict[str, Any], intent: Optional[Dict[str, Any]]) -> None:
     profile.qualification_status = qual["status"]
     profile.qualification_detail = json.dumps(qual, default=str)
+    if qual["status"] == QUALIFIED and getattr(profile, "qualified_at", None) is None:
+        profile.qualified_at = datetime.utcnow()
     if intent is not None:
         profile.seller_intent = intent.get("value")
         profile.seller_intent_detail = json.dumps(intent, default=str)

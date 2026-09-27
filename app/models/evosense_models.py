@@ -183,6 +183,10 @@ class EvoSenseProviderConfig(Base):
     last_attempt_at = Column(DateTime, nullable=True)
     last_record_count = Column(Integer, nullable=True)
     last_verified_at = Column(DateTime, nullable=True)           # a probe or a run actually succeeded
+    # Per-CAPABILITY outcomes (JSON {capability: {last_success_at, last_failure_at,
+    # failures, reason}}). A provider that serves several capabilities can be
+    # healthy for one and failing for another; one row of health cannot say so.
+    capability_health = Column(Text, nullable=True)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
     __table_args__ = (
@@ -275,6 +279,7 @@ class EvoSenseProperty(Base):
     contactability = Column(String, nullable=True)
     contactability_detail = Column(Text, nullable=True)       # JSON: channels, reasons
     contactability_at = Column(DateTime, nullable=True)
+    first_contactable_at = Column(DateTime, nullable=True)   # economics milestone
     signal_count = Column(Integer, nullable=False, default=0)
     next_action = Column(String, nullable=True)
     next_action_detail = Column(String, nullable=True)
@@ -530,6 +535,15 @@ class EvoSenseContactPoint(Base):
     verified_at = Column(DateTime, nullable=True)
     verified_by_id = Column(String, nullable=True)
     verification_note = Column(String, nullable=True)
+    # CANDIDATE vs TRUSTED. A provider's returned number is a CANDIDATE until
+    # identity/confidence rules (or a person) say otherwise; "rejected" once it
+    # is known wrong, opted out or suppressed. Derived on every scoring.
+    trust_state = Column(String, nullable=True, default="candidate")
+    provider_reference = Column(String, nullable=True)
+    looked_up_at = Column(DateTime, nullable=True)
+    source_last_seen = Column(String, nullable=True)
+    match_evidence = Column(Text, nullable=True)         # JSON
+    raw_evidence = Column(Text, nullable=True)           # JSON, only where the vendor permits
     first_seen_at = Column(DateTime, default=_now)
     last_seen_at = Column(DateTime, default=_now)
     is_test = Column(Boolean, nullable=False, default=False)
@@ -945,3 +959,29 @@ class EvoSenseReprocessRun(Base):
     rolled_back_by_id = Column(String, nullable=True)
 
     __table_args__ = (Index("ix_es_reproc_org_created", "organization_id", "created_at"),)
+
+
+class EvoSenseProviderEvaluation(Base):
+    """One provider-evaluation run: the SAME authorized sample through one or
+    more contact providers, compared on the same metrics. Results that came
+    from a sandbox adapter are labelled SYNTHETIC and measure software
+    behaviour only - never a business conclusion about a vendor. Lookup
+    results live here, not in the contact graph: an evaluation never turns a
+    candidate into a contact anyone works."""
+
+    __tablename__ = "evosense_provider_evaluations"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    name = Column(String, nullable=False)
+    provider_keys = Column(Text, nullable=False)          # JSON list
+    sample = Column(Text, nullable=False)                 # JSON: property ids + optional ground truth
+    status = Column(String, nullable=False, default="running")   # running|completed|failed
+    synthetic = Column(Boolean, nullable=False, default=True)
+    results = Column(Text, nullable=True)                 # JSON: per-provider metrics + per-lookup rows
+    total_cost_cents = Column(Integer, nullable=False, default=0)
+    created_by_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=_now)
+    finished_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (Index("ix_es_eval_org", "organization_id", "created_at"),)

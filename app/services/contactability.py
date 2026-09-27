@@ -216,6 +216,8 @@ def refresh_evosense(db, prop, strategy=None) -> Dict[str, Any]:
     prop.contactability = res["state"]
     prop.contactability_detail = json.dumps(res, default=str)
     prop.contactability_at = datetime.utcnow()
+    if res["state"] in CONTACTABLE and getattr(prop, "first_contactable_at", None) is None:
+        prop.first_contactable_at = prop.contactability_at
     return res
 
 

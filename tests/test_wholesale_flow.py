@@ -107,15 +107,20 @@ def test_a_real_property_runs_the_whole_way_through(wholesale):
     assert reply["qualification"]["band"] in ("high", "medium", "review")
     assert reply["qualification"]["reasons"]
 
-    # 7. Comps, entered by hand because no comps provider is connected.
+    # 7. Comps, entered by hand because no comps provider is connected. A
+    # manual comp counts toward the ARV only with a source reference a second
+    # person could check (comp_rules); it stays labelled MANUAL.
     for price, sqft in ((300000, 1500), (290000, 1450), (310000, 1520)):
         result = ok(wholesale.post("/deals/%s/comps" % deal_id, {
             "street_address": "%d Comp St" % price, "sale_price": price,
-            "square_feet": sqft, "sale_date": "2026-06-01"}))
+            "square_feet": sqft, "sale_date": "2026-06-01", "distance_miles": 0.4,
+            "source_reference": "MLS #%d" % price}))
+    assert result["comp"]["origin"] == "MANUAL"
     analysis = result["analysis"]
     assert analysis["arv"] is not None
     assert analysis["arv_source"] == "estimated"
-    assert analysis["arv_method"].startswith("comps:")
+    assert analysis["arv_method"].startswith("arv/v1:")
+    assert analysis["arv_engine"]["status"] == "ESTIMATED"
 
     # 8. Repairs, and the offer the formula allows.
     analysis = ok(wholesale.patch("/deals/%s/analysis" % deal_id, {
@@ -416,15 +421,16 @@ def test_the_phase_three_journey_lead_to_fee_collected(wholesale, storage):
     # ── ANALYSIS ────────────────────────────────────────────────────────────
     comps = []
     for address, price, sqft in (("A", 300000, 1500), ("B", 290000, 1450),
-                                 ("C", 480000, 1480)):
+                                 ("C", 480000, 1480), ("D", 305000, 1510)):
         comps.append(ok(wholesale.post("/deals/%s/comps" % deal_id, {
             "street_address": address, "sale_price": price, "square_feet": sqft,
-            "sale_date": "2026-06-01", "year_built": 1970}))["comp"])
+            "sale_date": "2026-06-01", "year_built": 1970, "distance_miles": 0.5,
+            "source_reference": "MLS %s" % address}))["comp"])
     ok(wholesale.upload("/comps/%s/photo" % comps[0]["id"], png))
 
     room = ok(wholesale.get("/deals/%s" % deal_id))
     stats = room["comp_statistics"]
-    assert stats["included_count"] == 3
+    assert stats["included_count"] == 4
     # Median and average disagree because C is an outlier — which is the whole
     # reason both are shown.
     assert stats["median_price_per_sqft"] != stats["average_price_per_sqft"]
@@ -433,8 +439,8 @@ def test_the_phase_three_journey_lead_to_fee_collected(wholesale, storage):
     # EXCLUDE FROM ARV is not DELETE COMP: the row survives, the maths changes.
     ok(wholesale.patch("/comps/%s" % comps[2]["id"], {"included": False}))
     room = ok(wholesale.get("/deals/%s" % deal_id))
-    assert len(room["comps"]) == 3
-    assert room["comp_statistics"]["included_count"] == 2
+    assert len(room["comps"]) == 4
+    assert room["comp_statistics"]["included_count"] == 3
     assert room["comp_statistics"]["excluded_count"] == 1
 
     ok(wholesale.patch("/deals/%s/analysis" % deal_id,

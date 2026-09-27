@@ -162,6 +162,27 @@ def decide(db, prop: EvoSenseProperty, strategy, *, user=None,
                           % (recent_miss.created_at.strftime("%b %d"), recent_miss.outcome.replace("_", " "),
                              NO_MATCH_RETRY_DAYS)], user=user)
 
+    # VALUE OF INFORMATION: would another lookup change anything? Checked
+    # before any provider or price is considered. No ROI is invented; these
+    # are the cases the system already KNOWS a purchase is wasted.
+    if getattr(prop, "contactability", None) == "DO_NOT_CONTACT":
+        return _decision(db, prop, strategy, owner, C.D_SUPPRESSED,
+                         ["Do not contact: every channel is blocked for this owner. A lookup could "
+                          "not make them reachable."], user=user)
+    if getattr(prop, "promoted_deal_id", None):
+        return _decision(db, prop, strategy, owner, C.D_USE_EXISTING,
+                         ["Already a Wholesale deal with a seller attached; contact comes from the "
+                          "deal, not a new lookup."], user=user)
+    if getattr(prop, "seller_intent", None) == 0:
+        return _decision(db, prop, strategy, owner, C.D_INSUFFICIENT,
+                         ["The owner already said no (Seller Intent 0). Paying to find them again "
+                          "would not change the answer."], user=user)
+    if not approved and getattr(prop, "data_confidence", None) == "insufficient" \
+            and policy_of(strategy) != P_AGGRESSIVE:
+        return _decision(db, prop, strategy, owner, C.D_INSUFFICIENT,
+                         ["The property's own evidence is too thin (data confidence INSUFFICIENT) to "
+                          "justify paying for a contact yet."], user=user)
+
     policy = policy_of(strategy)
     threshold = getattr(strategy, "min_opportunity_score", 60) if strategy else 60
     if policy == P_AGGRESSIVE:
@@ -293,12 +314,14 @@ def execute(db, prop, strategy, decision: EvoSenseEnrichmentDecision, *, user=No
             result = provider.enrich(_input_for(prop, owner))
         except PV.ProviderRateLimited as exc:
             B.refund(db, entry)
-            PV.record_failure(cfg, "rate limited", rate_limited_for=exc.retry_after_seconds)
+            PV.record_failure(cfg, "rate limited", rate_limited_for=exc.retry_after_seconds,
+                              capability=C.CONTACT_ENRICHMENT)
             attempts.append({"provider": provider.key, "result": "rate_limited", "refunded": cost})
             continue
         except (PV.ProviderTimeout, PV.ProviderFailure, Exception) as exc:  # noqa: BLE001
             B.refund(db, entry)
-            PV.record_failure(cfg, "%s: %s" % (type(exc).__name__, str(exc)[:160]))
+            PV.record_failure(cfg, "%s: %s" % (type(exc).__name__, str(exc)[:160]),
+                              capability=C.CONTACT_ENRICHMENT)
             attempts.append({"provider": provider.key, "result": "failed",
                              "error": "%s: %s" % (type(exc).__name__, str(exc)[:160]),
                              "refunded": cost})
@@ -306,7 +329,7 @@ def execute(db, prop, strategy, decision: EvoSenseEnrichmentDecision, *, user=No
                         summary="%s failed (%s); reservation of %s refunded"
                         % (provider.label, type(exc).__name__, C.money(cost)))
             continue
-        PV.record_success(cfg)
+        PV.record_success(cfg, capability=C.CONTACT_ENRICHMENT)
         if result.status == WE.STATUS_SUCCEEDED and (result.phones or result.emails):
             B.charge(db, entry, success=True)
             touched = CT.apply_result(db, owner, result, provider)
@@ -381,9 +404,9 @@ def validate_contacts(db, prop, strategy, cps) -> None:
             res = provider.validate_phone(cp.value)
         except Exception as exc:  # noqa: BLE001
             B.refund(db, entry)
-            PV.record_failure(cfg, str(exc)[:160])
+            PV.record_failure(cfg, str(exc)[:160], capability=C.PHONE_VALIDATION)
             continue
-        PV.record_success(cfg)
+        PV.record_success(cfg, capability=C.PHONE_VALIDATION)
         B.charge(db, entry, success=True)
         entry.contact_point_id = cp.id
         cp.validation = res.get("validation") or "unverified"

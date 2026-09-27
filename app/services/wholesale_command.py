@@ -286,8 +286,83 @@ def needs_you(db, org_id: str, *, include_test: bool = False, limit: int = 50) -
     except Exception:  # noqa: BLE001 - EvoSense not in use for this workspace
         pass
 
+    # 5. Comp review: a deal heading to an offer on a LOW-confidence ARV.
+    cr = (db.query(WholesaleDeal, WholesaleProperty)
+          .join(WholesaleProperty, WholesaleProperty.id == WholesaleDeal.property_id)
+          .filter(WholesaleDeal.organization_id == org_id,
+                  WholesaleDeal.stage.in_(("analysis", "offer_review")),
+                  WholesaleDeal.arv_confidence == "low"))
+    if not include_test:
+        cr = cr.filter(WholesaleDeal.is_test.isnot(True))
+    for d, wp in cr.all():
+        items.append(_item("comp_review", 55, "Review the comps — %s" % (wp.street_address or "deal"),
+                           "The ARV rests on low-confidence comparable sales; a person should check "
+                           "them before any offer.", [], _deal_link(d.id), deal_id=d.id))
+
     items.sort(key=lambda i: -i["priority"])
     return items[:limit]
+
+
+def _data_depth(db, org_id, deals_q, profiles_q, active) -> Dict[str, Any]:
+    """Where the evidence is thin, and what it is costing - each count with
+    the list behind it."""
+    from app.models.wholesale_models import WholesaleDeal
+    analysis_stages = ("analysis", "offer_review", "offer_sent", "negotiating")
+    in_analysis = deals_q().filter(WholesaleDeal.stage.in_(analysis_stages)).all()
+    enough = [d for d in in_analysis if d.arv is not None and d.arv_confidence in ("high", "medium")]
+    insufficient = [d for d in in_analysis if d.arv is None or d.arv_confidence in ("insufficient", None)]
+    mao_blocked = [d for d in in_analysis if d.mao_status == "NOT_CALCULATED"]
+    awaiting_analysis = [p for p in profiles_q().filter(
+        WholesaleSellerProfile_status_qualified()).all()
+        if p.id in active and active[p.id].stage in ("qualified", "qualifying", "seller_engaged")]
+    out = {
+        "comps_enough_evidence": {"count": len(enough), "link": "/wholesale?view=analysis"},
+        "comps_insufficient": {"count": len(insufficient),
+                               "items": [{"deal_id": d.id, "link": _deal_link(d.id)} for d in insufficient[:20]]},
+        "mao_not_calculated": {"count": len(mao_blocked),
+                               "items": [{"deal_id": d.id, "link": _deal_link(d.id),
+                                          "why": (json.loads(d.mao_detail or "{}").get("reasons") or [])[:2]}
+                                         for d in mao_blocked[:20]]},
+        "qualified_awaiting_analysis": {"count": len(awaiting_analysis),
+                                        "items": [{"profile_id": p.id, "link": _deal_link(active[p.id].id)}
+                                                  for p in awaiting_analysis[:20]]},
+        "blocked_by_provider_config": [], "cost": None,
+    }
+    try:
+        from app.models.evosense_models import EvoSenseProperty
+        from app.services.evosense import capabilities as CAPS
+        from app.services.evosense import economics as EC
+        waiting = db.query(EvoSenseProperty).filter(
+            EvoSenseProperty.organization_id == org_id, EvoSenseProperty.is_test.isnot(True),
+            EvoSenseProperty.contactability.in_(("ENRICHMENT_NEEDED",))).count()
+        for cap in ("PHONE", "SOLD_COMPS"):
+            if not CAPS.is_operational(db, org_id, cap):
+                out["blocked_by_provider_config"].append({
+                    "capability": cap, "label": CAPS.LABELS[cap],
+                    "waiting": waiting if cap == "PHONE" else len(insufficient),
+                    "why": "No real provider is operational for %s" % CAPS.LABELS[cap].lower(),
+                    "link": "/wholesale/evosense?tab=providers"})
+        promoted = (db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id,
+                                                      EvoSenseProperty.promoted_deal_id.isnot(None),
+                                                      EvoSenseProperty.is_test.isnot(True))
+                    .limit(50).all())
+        costs = [EC.acquisition_cost(db, p) for p in promoted]
+        if costs:
+            def avg(key):
+                vals = [c[key] for c in costs if c.get(key) is not None]
+                return round(sum(vals) / len(vals)) if vals else None
+            out["cost"] = {"deals": len(costs), "avg_cost_to_find_cents": avg("cost_to_find_cents"),
+                           "avg_cost_to_contactability_cents": avg("cost_to_contactability_cents"),
+                           "avg_cost_to_qualification_cents": avg("cost_to_qualification_cents"),
+                           "avg_total_cents": avg("total_cents")}
+    except Exception:  # noqa: BLE001 - EvoSense not in use
+        pass
+    return out
+
+
+def WholesaleSellerProfile_status_qualified():
+    from app.models.wholesale_models import WholesaleSellerProfile
+    return WholesaleSellerProfile.qualification_status == "QUALIFIED"
 
 
 # ── Morning Command Center ──────────────────────────────────────────────────
@@ -399,8 +474,11 @@ def command_center(db, org_id: str, *, include_test: bool = False, days: int = 7
         if st:
             movement[st] = movement.get(st, 0) + 1
 
+    data_depth = _data_depth(db, org_id, deals_q, profiles_q, active)
+
     return {
         "generated_at": now.isoformat() + "Z",
+        "data_depth": data_depth,
         "include_test": include_test,
         "needs_you": {"count": len(ny), "items": ny},
         "new_qualified": {"count": len(qualified), "days": days,
