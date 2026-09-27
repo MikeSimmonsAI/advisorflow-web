@@ -711,3 +711,17 @@ def test_the_scheduler_backfills_contactability_without_calling_anyone(hunted, m
     assert n == min(len(props), SCH.BACKFILL_BATCH)
     assert all(p.contactability for p in db.query(EvoSenseProperty).filter_by(organization_id=org).all()[:n])
     assert SCH.backfill_contactability(db, org_id=org) == max(0, len(props) - n)
+
+
+def test_property_page_acquisition_cost_is_the_charged_ledger(client, auth_headers, hunted):
+    """The EvoSense property page shows acquisition cost from the ledger only."""
+    from app.models.evosense_models import EvoSenseCostEntry
+    db, org, _ = hunted
+    for prop in db.query(EvoSenseProperty).filter_by(organization_id=org).limit(5).all():
+        d = ok(client.get("/wholesale/evosense/properties/%s" % prop.id, headers=auth_headers))
+        cost = d["acquisition_cost"]
+        charged = sum(r.total_cents or 0 for r in db.query(EvoSenseCostEntry).filter(
+            EvoSenseCostEntry.organization_id == org, EvoSenseCostEntry.property_id == prop.id,
+            EvoSenseCostEntry.status.in_(("charged", "failed_charged"))))
+        assert cost["total_cents"] == charged == sum(cost["buckets"].values())
+        assert cost["cost_to_qualification_cents"] is None

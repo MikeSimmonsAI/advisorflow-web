@@ -345,6 +345,7 @@ export default function EvoProperty() {
             {(eco.warnings || []).map((w, i) => <p key={i} className="evo-muted evo-small" style={{ margin: '6px 0 0' }}>{w}</p>)}
             <p className="evo-muted evo-small" style={{ margin: '10px 0 0' }}>{eco.notice}</p>
             <ManualComp propertyId={p.id} arv={eco.arv} busy={busy} act={act} />
+            <AcquisitionCost c={d.acquisition_cost} />
           </Panel>
 
           {/* 3 ── WHY FOUND ────────────────────────────────────────────── */}
@@ -611,6 +612,36 @@ export default function EvoProperty() {
 
 /** One piece of evidence, with the SOURCE's date (a plain calendar date, never
  * shifted by the viewer's time zone) and what that date is. */
+/** What finding and qualifying this opportunity has ACTUALLY cost - charged
+ *  cost-ledger entries only. Refunds, reservations and projections are never
+ *  counted; a milestone not reached shows no figure. */
+function AcquisitionCost({ c }) {
+  if (!c) return null
+  const m = (v, none) => (v === null || v === undefined ? none : cents(v))
+  const b = c.buckets || {}
+  return (
+    <div style={{ marginTop: 14 }}>
+      <h3 className="evo-panel__title" style={{ fontSize: 13, margin: '0 0 6px' }}>Acquisition cost (ledger)</h3>
+      <div className="evo-econ">
+        {[['Total spent', m(c.total_cents, cents(0))],
+          ['Cost to find', m(c.cost_to_find_cents, cents(0))],
+          ['Cost to contactable', m(c.cost_to_contactability_cents, 'not reached')],
+          ['Cost to qualified', m(c.cost_to_qualification_cents, 'not reached')]].map(([k, v]) => (
+          <div key={k} className="evo-econ__cell">
+            <div className="evo-econ__k">{k}</div>
+            <div className="evo-econ__v">{v}</div>
+          </div>
+        ))}
+      </div>
+      <p className="evo-muted evo-small" style={{ margin: '8px 0 0' }}>
+        Public data {cents(b.public_data || 0)} · contact enrichment {cents(b.contact_enrichment || 0)} · valuation / comps {cents(b.valuation_comps || 0)}
+        {b.other ? ` · other ${cents(b.other)}` : ''} · {c.charged_lookups || 0} charged, {c.refunded_lookups || 0} refunded, {c.free_public_lookups || 0} free public lookups
+      </p>
+      <p className="evo-muted evo-small" style={{ margin: '4px 0 0' }}>{c.note}</p>
+    </div>
+  )
+}
+
 /** A MANUAL sold comp: address, closed price, sale date and a source
  *  reference a second person could check. Labelled MANUAL for good. */
 const COMP_FIELDS = [['street_address', 'Address'], ['sale_price', 'Closed price'], ['sale_date', 'Sale date (YYYY-MM-DD)'],
