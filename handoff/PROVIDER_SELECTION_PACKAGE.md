@@ -344,7 +344,7 @@ All adapters are subclasses of `AcquisitionProvider` in `evosense/providers.py`,
 3. If an EvoSense org budget is set (Controls), make sure it has room for the run; a lookup that would exceed it is recorded as "not attempted" rather than spending.
 4. Provider Evaluation tab: choose providers and referee, keep the proposed sample, press Run. The server replies with the exact phrase, e.g. `RUN PAID EVALUATION 100` for 25 properties × 1 vendor + 25 × 3 referee lookups. Type it and run.
 
-**The sample in production (verified 2026-09-27):** 25 of the 35 awaiting properties qualify. The other 10 are left out with the reason shown: entity owners, which are not skip-traced, or properties with no city on file, which would be a guaranteed miss and skew the rates.
+**The sample in production (verified 2026-09-27):** the qualifying share of the awaiting properties is shown on the Provider Evaluation tab. The rest are left out with the reason shown: true entities (LLC, company, trust, institutional) or no city on file (a guaranteed miss that would skew the rates). Joint owners, "ET AL", life estates and estates are people and stay in.
 
 **Maximum cost at published prices, 35 properties:**
 

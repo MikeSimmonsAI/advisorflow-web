@@ -63,6 +63,9 @@ MAX_SAMPLE = 200
 PAID_CONFIRMATION = "RUN PAID EVALUATION"
 REFEREE_MAX_PER_LOOKUP = 3            # numbers per provider per property sent to the referee
 MODE_CONTACT, MODE_COMPS = "contact", "comps"
+# Owners a PERSON skip trace cannot meaningfully match. Joint owners, "ET AL",
+# life estates and estates are people (or their heirs) and ARE in the sample.
+ENTITY_OWNER_TYPES = ("llc", "corporation", "trust", "government", "religious_org", "nonprofit")
 REAL_LABEL = "REAL PROVIDER EVALUATION DATA - isolated; never a contact, comp or deal value"
 SYNTHETIC_LABEL = "SYNTHETIC TEST RESULTS - software behaviour only"
 
@@ -494,8 +497,8 @@ def proposed_sample(db, org_id: str, mode: str = MODE_CONTACT, limit: int = 50) 
             why = None
             if owner is None:
                 why = "no owner of record"
-            elif (owner.owner_type or "individual") not in ("individual", "unknown"):
-                why = "entity owner (%s) - not skip-traced" % owner.owner_type
+            elif (owner.owner_type or "individual") in ENTITY_OWNER_TYPES:
+                why = "entity owner (%s) - a person skip trace does not apply" % owner.owner_type
             elif not (prop.street_address and prop.city and prop.state):
                 # Skip-trace vendors match on street + city + state; a lookup
                 # without a city would be a guaranteed miss that skews the rates.

@@ -421,3 +421,14 @@ def test_the_proposed_sample_leaves_out_what_would_skew_the_rates_and_says_why(w
     assert real[0].id not in {i["property_id"] for i in s["items"]}
     out = {x["property_id"]: x["why"] for x in s["left_out"]}
     assert "no city" in out[real[0].id]
+
+
+def test_joint_owners_and_estates_are_people_and_stay_in_the_sample(world):
+    db, org, real = world["db"], world["org"], world["real"]
+    for p, kind in zip(real, ("joint", "estate_indicated", "llc")):
+        CT.primary_owner(db, p).owner_type = kind
+    db.flush()
+    s = PE.proposed_sample(db, org, "contact")
+    ids = {i["property_id"] for i in s["items"]}
+    assert real[0].id in ids and real[1].id in ids and real[2].id not in ids
+    assert "entity owner (llc)" in {x["property_id"]: x["why"] for x in s["left_out"]}[real[2].id]
