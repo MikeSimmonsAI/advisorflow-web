@@ -873,22 +873,141 @@ class EvaluationIn(BaseModel):
 def run_provider_evaluation(payload: EvaluationIn, db: Session = Depends(get_db),
                             user: User = Depends(require_tenant_user),
                             _g: User = Depends(require_not_observation)):
-    """Run the same authorized sample through each chosen contact provider.
-    Admin only. Sandbox runs are SYNTHETIC; a real provider needs the owner's
-    explicit confirmation because every lookup costs money."""
+    """PLAN an evaluation: validate it and compute its maximum spend. Calls
+    nothing paid. A sandbox-only plan (SYNTHETIC) runs at once; a plan with a
+    real provider is saved as PLANNED and runs only through /execute with
+    "RUN PAID EVALUATION <id>". Admin only."""
     from app.services.evosense import provider_eval as PE
     _admin(user)
     org_id = svc.write_org_id(db, user)
     try:
-        ev = PE.run(db, org_id, name=payload.name, provider_keys=payload.provider_keys,
-                    property_ids=payload.property_ids, mode=payload.mode,
-                    ground_truth=payload.ground_truth, referee_key=payload.referee_key,
-                    user=user, confirm=payload.confirm)
+        ev = PE.plan(db, org_id, name=payload.name, provider_keys=payload.provider_keys,
+                     property_ids=payload.property_ids, mode=payload.mode,
+                     ground_truth=payload.ground_truth, referee_key=payload.referee_key, user=user)
+        if ev.synthetic:
+            PE.execute(db, ev, user=user)
     except PE.EvaluationRefused as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc))
     db.commit()
     return PE.payload(ev)
+
+
+class ExecuteIn(BaseModel):
+    confirm: Optional[str] = None
+
+
+@router.post("/provider-evaluations/{evaluation_id}/execute")
+def execute_provider_evaluation(evaluation_id: str, payload: ExecuteIn, db: Session = Depends(get_db),
+                                user: User = Depends(require_tenant_user),
+                                _g: User = Depends(require_not_observation)):
+    """Run a PLANNED evaluation. A paid plan needs the owner's exact phrase
+    "RUN PAID EVALUATION <id>" and never spends beyond its planned maximum."""
+    from app.models.evosense_models import EvoSenseProviderEvaluation
+    from app.services.evosense import provider_eval as PE
+    _admin(user)
+    org_id = svc.write_org_id(db, user)
+    ev = (db.query(EvoSenseProviderEvaluation)
+          .filter(EvoSenseProviderEvaluation.id == evaluation_id,
+                  EvoSenseProviderEvaluation.organization_id == org_id).first())
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    try:
+        PE.execute(db, ev, confirm=payload.confirm, user=user)
+    except PE.EvaluationRefused as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc))
+    db.commit()
+    return PE.payload(ev)
+
+
+class GroundTruthIn(BaseModel):
+    kind: str                                   # contact | closed_sale
+    property_id: Optional[str] = None
+    data: Dict[str, Any]
+    source_note: str
+
+
+@router.get("/ground-truth")
+def list_ground_truth(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Facts the workspace already lawfully knows, used only to score provider
+    evaluations. Admin only (they can hold people's phone numbers)."""
+    from app.models.evosense_models import EvoSenseEvalGroundTruth
+    from app.services.evosense import provider_eval as PE
+    _admin(user)
+    org_id = _read_org(db, user)
+    rows = (db.query(EvoSenseEvalGroundTruth).filter(EvoSenseEvalGroundTruth.organization_id == org_id)
+            .order_by(EvoSenseEvalGroundTruth.created_at.desc()).limit(500).all())
+    return {"items": [PE.ground_truth_payload(r) for r in rows]}
+
+
+@router.post("/ground-truth")
+def add_ground_truth(payload: GroundTruthIn, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.services.evosense import provider_eval as PE
+    _admin(user)
+    org_id = svc.write_org_id(db, user)
+    try:
+        row = PE.add_ground_truth(db, org_id, kind=payload.kind, data=payload.data,
+                                  source_note=payload.source_note, property_id=payload.property_id, user=user)
+    except PE.EvaluationRefused as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    C.log_event(db, org_id, "ground_truth.added", user=user, actor_type=C.ACTOR_USER,
+                summary="Evaluation ground truth added (%s)" % payload.kind)
+    db.commit()
+    return PE.ground_truth_payload(row)
+
+
+@router.delete("/ground-truth/{truth_id}")
+def delete_ground_truth(truth_id: str, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.models.evosense_models import EvoSenseEvalGroundTruth
+    _admin(user)
+    org_id = svc.write_org_id(db, user)
+    row = (db.query(EvoSenseEvalGroundTruth)
+           .filter(EvoSenseEvalGroundTruth.id == truth_id,
+                   EvoSenseEvalGroundTruth.organization_id == org_id).first())
+    if row is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.delete(row)
+    C.log_event(db, org_id, "ground_truth.deleted", user=user, actor_type=C.ACTOR_USER,
+                summary="Evaluation ground truth deleted (%s)" % row.kind)
+    db.commit()
+    return {"ok": True}
+
+
+class GateIn(BaseModel):
+    criterion: str
+    met: bool
+    evidence: str = ""
+    value: Optional[str] = None
+
+
+@router.get("/truth-gate")
+def truth_gates(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """The DFW sold-comps truth gate for every comps provider."""
+    from app.services.evosense import truth_gate as TG
+    org_id = _read_org(db, user)
+    return {"items": [TG.evaluate(db, org_id, k) for k, p in PV.PROVIDERS.items()
+                      if C.COMPS in (p.capabilities or ()) and p.connector_kind == C.REAL]}
+
+
+@router.post("/truth-gate/{provider_key}")
+def attest_truth_gate(provider_key: str, payload: GateIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """Record one attested criterion WITH its evidence. Admin only."""
+    from app.services.evosense import truth_gate as TG
+    _admin(user)
+    org_id = svc.write_org_id(db, user)
+    try:
+        out = TG.attest(db, org_id, provider_key, payload.criterion, met=payload.met,
+                        evidence=payload.evidence, value=payload.value, user=user)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return out
 
 
 @router.get("/provider-evaluations/setup")
@@ -964,7 +1083,7 @@ def capability_registry(db: Session = Depends(get_db), user: User = Depends(requ
     return {"capabilities": CAPS.matrix(db, org_id),
             "states": [CAPS.S_OPERATIONAL, CAPS.S_UNVERIFIED, CAPS.S_DEGRADED, CAPS.S_NOT_ENABLED,
                        CAPS.S_BLOCKED, CAPS.S_NOT_CONFIGURED, CAPS.S_MANUAL, CAPS.S_SANDBOX,
-                       CAPS.S_EVALUATION]}
+                       CAPS.S_EVALUATION, CAPS.S_GATED]}
 
 
 @router.get("/sources")

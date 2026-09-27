@@ -57,6 +57,7 @@ S_OPERATIONAL, S_UNVERIFIED, S_DEGRADED = "OPERATIONAL", "UNVERIFIED", "DEGRADED
 S_NOT_ENABLED, S_BLOCKED, S_NOT_CONFIGURED = "NOT ENABLED", "BLOCKED", "NOT CONFIGURED"
 S_MANUAL, S_SANDBOX = "MANUAL ONLY", "SANDBOX"
 S_EVALUATION = "EVALUATION ONLY"
+S_GATED = "TRUTH GATE NOT MET"
 
 
 def _existing_cfg(db, org_id, key):
@@ -118,9 +119,15 @@ def provider_capability(db, org_id: str, p, engine_caps: List[str], cfg=None) ->
     else:
         state = S_UNVERIFIED
     evaluation_only = bool(getattr(p, "evaluation_only", False))
+    gated = False
+    if C.COMPS in engine_caps and kind == C.REAL and state in (S_OPERATIONAL, S_UNVERIFIED):
+        from app.services.evosense import truth_gate as TG
+        gated = not TG.passes(db, org_id, p.key)
     if evaluation_only and state in (S_OPERATIONAL, S_UNVERIFIED):
         state = S_EVALUATION
-    operational = (not evaluation_only and state in (S_OPERATIONAL, S_UNVERIFIED, S_SANDBOX)
+    elif gated:
+        state = S_GATED
+    operational = (not evaluation_only and not gated and state in (S_OPERATIONAL, S_UNVERIFIED, S_SANDBOX)
                    and bool(canon and canon.get("routable")))
     why = {S_MANUAL: "Entered by a person or imported from a file",
            S_BLOCKED: "Blocked: %s" % ((canon or {}).get("why") or "the source refused the platform"),
@@ -133,6 +140,8 @@ def provider_capability(db, org_id: str, p, engine_caps: List[str], cfg=None) ->
            S_OPERATIONAL: ("Last call for this capability succeeded" if health_basis == "capability"
                            else "Last call to this provider succeeded (not yet recorded per capability)"),
            S_UNVERIFIED: "Configured and enabled, never proven to work - not 'connected'",
+           S_GATED: "DFW sold-comps truth gate not met - what the price is, its origin, coverage, "
+                    "freshness and our storage / display rights must all be established first",
            S_EVALUATION: "Provider evaluation only - not approved for production; nothing in "
                          "discovery, enrichment or outreach can call it"}[state]
     if evaluation_only and state in (S_NOT_CONFIGURED, S_NOT_ENABLED):

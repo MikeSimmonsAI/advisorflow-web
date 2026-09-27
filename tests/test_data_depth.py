@@ -510,11 +510,12 @@ def test_22b_a_real_provider_needs_the_owners_exact_confirmation(hunted, stub_re
     with pytest.raises(PE.EvaluationRefused) as exc:
         PE.run(db, org, name="x", provider_keys=[p.key], property_ids=[prop.id])
     assert PE.PAID_CONFIRMATION in str(exc.value)
+    ev = db.query(EvoSenseProviderEvaluation).get(exc.value.evaluation_id)
+    assert ev.status == "planned" and ev.max_spend_cents == 25          # 1 property x 25c
     with pytest.raises(PE.EvaluationRefused):
-        PE.run(db, org, name="x", provider_keys=[p.key], property_ids=[prop.id],
-               confirm="%s 99" % PE.PAID_CONFIRMATION)
+        PE.execute(db, ev, confirm="%s 99" % PE.PAID_CONFIRMATION)   # the old count-style phrase
     assert _StubRealContact.calls == []                             # nothing was ever called
-    assert db.query(EvoSenseProviderEvaluation).filter_by(organization_id=org).count() == 0
+    assert ev.status == "planned" and ev.results is None
 
 
 def test_22c_evaluation_routes_are_admin_only_and_tenant_scoped(client, auth_headers, org_b, hunted):

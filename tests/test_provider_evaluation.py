@@ -217,17 +217,42 @@ def test_without_credentials_a_vendor_is_not_configured(db_session, sample_org, 
 
 # ── contact mode ─────────────────────────────────────────────────────────
 
-def test_a_paid_contact_evaluation_needs_the_exact_confirmation(world, http):
+def _paid(db, org, **kw):
+    """Plan, then authorize exactly that plan - the owner's step, in a test."""
+    ev = PE.plan(db, org, **kw)
+    return PE.execute(db, ev, confirm=PE.confirmation_for(ev))
+
+
+def test_a_paid_evaluation_is_planned_priced_and_needs_its_own_phrase(world, http):
     db, org, real = world["db"], world["org"], world["real"]
     ids = [p.id for p in real]
     with pytest.raises(PE.EvaluationRefused) as exc:
         PE.run(db, org, name="x", provider_keys=["tracerfy", "dataskip"], property_ids=ids)
-    assert "RUN PAID EVALUATION 6" in str(exc.value)
-    with pytest.raises(PE.EvaluationRefused) as exc:
-        PE.run(db, org, name="x", provider_keys=["tracerfy"], property_ids=ids,
-               referee_key="twilio_lookup")
-    assert "RUN PAID EVALUATION %s" % (3 + 3 * 1 * PE.REFEREE_MAX_PER_LOOKUP) in str(exc.value)
+    ev = db.query(EvoSenseProviderEvaluation).get(exc.value.evaluation_id)
+    plan = json.loads(ev.plan)
+    assert ev.status == "planned" and ev.max_spend_cents == 3 * 10 + 3 * 4     # before anything runs
+    assert {l["provider"]: l["max_cents"] for l in plan["lines"]} == {"tracerfy": 30, "dataskip": 12}
+    assert "RUN PAID EVALUATION %s" % ev.id in str(exc.value) and "$0.42" in str(exc.value)
+    for wrong in (None, "RUN PAID EVALUATION 6", "run paid evaluation %s" % ev.id):
+        with pytest.raises(PE.EvaluationRefused):
+            PE.execute(db, ev, confirm=wrong)
+    ref = PE.plan(db, org, name="x", provider_keys=["tracerfy"], property_ids=ids, referee_key="twilio_lookup")
+    assert ref.max_spend_cents == 3 * 10 + 3 * PE.REFEREE_MAX_PER_LOOKUP * 1
     assert http[0] == []                                              # nothing was called
+
+
+def test_execution_never_spends_beyond_the_authorized_maximum(world, http):
+    db, org, real = world["db"], world["org"], world["real"]
+    _, answers = http
+    answers["tracerfy.com"] = TRACERFY_HIT_ONE
+    ev = PE.plan(db, org, name="x", provider_keys=["tracerfy"], property_ids=[p.id for p in real])
+    ev.max_spend_cents = 20                                            # room for two hits only
+    PE.execute(db, ev, confirm=PE.confirmation_for(ev))
+    m = PE.payload(ev)["results"]["providers"]["tracerfy"]
+    assert ev.total_cost_cents == 20 and m["not_attempted"] == 1
+    assert any(r.get("reason") == PE.CAP_REACHED for r in m["rows"])
+    with pytest.raises(PE.EvaluationRefused):                          # a plan runs once
+        PE.execute(db, ev, confirm=PE.confirmation_for(ev))
 
 
 def test_contact_evaluation_is_isolated_metered_and_measured(world, http):
@@ -239,9 +264,8 @@ def test_contact_evaluation_is_isolated_metered_and_measured(world, http):
     before = _counts(db, org)
     ids = [p.id for p in real]
     truth = {ids[0]: {"phones": ["2145550101"]}}
-    ev = PE.run(db, org, name="Pilot contact eval", provider_keys=["tracerfy"], property_ids=ids,
-                referee_key="twilio_lookup", ground_truth=truth,
-                confirm="RUN PAID EVALUATION %s" % (3 + 3 * PE.REFEREE_MAX_PER_LOOKUP))
+    ev = _paid(db, org, name="Pilot contact eval", provider_keys=["tracerfy"], property_ids=ids,
+               referee_key="twilio_lookup", ground_truth=truth)
     out = PE.payload(ev)
     assert out["label"] == "REAL" and out["results"]["label"].startswith("REAL PROVIDER EVALUATION DATA")
     m = out["results"]["providers"]["tracerfy"]
@@ -280,8 +304,7 @@ def test_a_failing_vendor_is_refunded_and_recorded_per_capability(world, http, m
     def boom():
         raise V.ProviderFailure("tracerfy.com answered 500")
     answers["tracerfy.com"] = boom
-    ev = PE.run(db, org, name="x", provider_keys=["tracerfy"], property_ids=[real[0].id],
-                confirm="RUN PAID EVALUATION 1")
+    ev = _paid(db, org, name="x", provider_keys=["tracerfy"], property_ids=[real[0].id])
     m = PE.payload(ev)["results"]["providers"]["tracerfy"]
     assert m["failures"] == 1 and ev.total_cost_cents == 0
     assert db.query(EvoSenseCostEntry).filter_by(organization_id=org, status="failed_refunded").count() >= 1
@@ -317,13 +340,14 @@ def test_a_texas_record_price_of_unknown_origin_never_makes_an_arv(world, http):
     prop.square_feet = prop.square_feet or 1500
     prop.state = "TX"
     db.flush()
-    ev = PE.run(db, org, name="REAPI comps", mode="comps", provider_keys=["reapi_comps"],
-                property_ids=[prop.id], confirm="RUN PAID EVALUATION 1")
+    ev = _paid(db, org, name="REAPI comps", mode="comps", provider_keys=["reapi_comps"],
+               property_ids=[prop.id])
     m = PE.payload(ev)["results"]["providers"]["reapi_comps"]
     assert m["comps_by_price_source"] == {CR.PRICE_UNVERIFIED_RECORD: 5}
     assert m["closed_price_share"] == 0 and m["subjects_with_3_eligible"] == 0
     assert m["would_be_arv_confidence"] == {"insufficient": 1}
-    assert m["closed_price_origin_confirmed"] is False and "NOT established" in m["readiness_note"]
+    assert m["production_ready"] is False and "truth gate" in m["readiness_note"]
+    assert m["exclusion_reasons"]["PRICE_NOT_CLOSED_SALE"] == 5 and m["excluded_comps"] == 5
 
 
 def test_mls_labelled_comps_can_form_an_arv_but_are_never_production_ready(world, http):
@@ -334,8 +358,8 @@ def test_mls_labelled_comps_can_form_an_arv_but_are_never_production_ready(world
     prop.square_feet, prop.bedrooms, prop.bathrooms, prop.year_built = 1500, 3, 2, 1985
     prop.property_type = "single_family"
     db.flush()
-    ev = PE.run(db, org, name="REAPI comps", mode="comps", provider_keys=["reapi_comps"],
-                property_ids=[prop.id], confirm="RUN PAID EVALUATION 1")
+    ev = _paid(db, org, name="REAPI comps", mode="comps", provider_keys=["reapi_comps"],
+               property_ids=[prop.id])
     m = PE.payload(ev)["results"]["providers"]["reapi_comps"]
     assert m["mls_closed_share"] == 1.0 and m["subjects_with_3_eligible"] == 1.0
     assert m["production_ready"] is False
@@ -370,8 +394,7 @@ def test_records_are_admin_only_purge_is_admin_only_and_tenant_scoped(client, au
     db, org = world["db"], world["org"]
     _, answers = http
     answers["tracerfy.com"] = TRACERFY_HIT
-    ev = PE.run(db, org, name="x", provider_keys=["tracerfy"], property_ids=[world["real"][0].id],
-                confirm="RUN PAID EVALUATION 1")
+    ev = _paid(db, org, name="x", provider_keys=["tracerfy"], property_ids=[world["real"][0].id])
     db.commit()
     path = "/wholesale/evosense/provider-evaluations/%s" % ev.id
     assert client.get(path, headers=auth_headers).json()["results"]["records"] is None
@@ -432,3 +455,188 @@ def test_joint_owners_and_estates_are_people_and_stay_in_the_sample(world):
     ids = {i["property_id"] for i in s["items"]}
     assert real[0].id in ids and real[1].id in ids and real[2].id not in ids
     assert "entity owner (llc)" in {x["property_id"]: x["why"] for x in s["left_out"]}[real[2].id]
+
+
+
+# ── DFW truth gate ───────────────────────────────────────────────────────
+
+class _GatedComps(V.VendorAdapter):
+    """A comps vendor as it would look APPROVED for production (not evaluation
+    only) - to prove the truth gate alone still keeps it out."""
+    key = "gated_comps_stub"
+    label = "Approved comps vendor (stub)"
+    capabilities = (C.COMPS,)
+    required_env = ()
+    costs = {C.COMPS: 10}
+    evaluation_only = False
+
+    def search(self, capability, subject):
+        return [V.reapi_comp(_reapi_comp(i), "TX") for i in range(4)]
+
+
+@pytest.fixture()
+def gated(world, monkeypatch):
+    p = _GatedComps()
+    monkeypatch.setitem(PV.PROVIDERS, p.key, p)
+    PV.config(world["db"], world["org"], p.key).enabled = True
+    world["db"].flush()
+    return p
+
+
+def test_a_field_named_sold_price_never_opens_the_truth_gate(world, gated):
+    from app.services.evosense import truth_gate as TG
+    db, org = world["db"], world["org"]
+    g = TG.evaluate(db, org, gated.key)
+    assert g["passed"] is False and set(g["missing"]) == {"PRICE_MEANING", "CLOSED_SALE", "ORIGIN", "COVERAGE",
+                                                          "FRESHNESS", "STORAGE_RIGHT", "DISPLAY_RIGHT"}
+    assert [p.key for p, _, _ in PV.route(db, org, C.COMPS, sandbox_allowed=False)] == []
+    caps = {c["capability"]: c for c in CAPS.matrix(db, org)}
+    row = next(r for r in caps["SOLD_COMPS"]["providers"] if r["provider"] == gated.key)
+    assert row["state"] == CAPS.S_GATED and not row["operational"]
+    assert caps["SOLD_COMPS"]["real_operational"] == []
+    with pytest.raises(ValueError):
+        TG.attest(db, org, gated.key, "CLOSED_SALE", met=True, evidence="yes")        # no evidence
+    with pytest.raises(ValueError):
+        TG.attest(db, org, gated.key, "ORIGIN", met=True, value="MODELED",
+                  evidence="Vendor email 9/27: prices are modelled from mortgage data")
+    with pytest.raises(ValueError):
+        TG.attest(db, org, gated.key, "COVERAGE", met=True, evidence="x" * 30)       # measured, not attested
+
+
+def test_every_attested_criterion_still_is_not_enough_without_a_real_dfw_evaluation(world, gated):
+    from app.services.evosense import truth_gate as TG
+    db, org = world["db"], world["org"]
+    for crit in TG.ATTESTED:
+        TG.attest(db, org, gated.key, crit, met=True, value="MLS" if crit == "ORIGIN" else None,
+                  evidence="Signed data licence section 4.2 (test fixture)")
+    g = TG.evaluate(db, org, gated.key)
+    assert g["passed"] is False and set(g["missing"]) == {"COVERAGE", "FRESHNESS"}
+    assert [p.key for p, _, _ in PV.route(db, org, C.COMPS, sandbox_allowed=False)] == []
+
+
+# ── ground truth ─────────────────────────────────────────────────────────
+
+def test_ground_truth_must_say_how_it_is_lawfully_known_and_scores_the_run(world, http):
+    db, org, real = world["db"], world["org"], world["real"]
+    _, answers = http
+    answers["tracerfy.com"] = TRACERFY_HIT_ONE
+    with pytest.raises(PE.EvaluationRefused):
+        PE.add_ground_truth(db, org, kind="contact", property_id=real[0].id,
+                            data={"phones": ["2145550101"]}, source_note="trust me")
+    with pytest.raises(PE.EvaluationRefused):
+        PE.add_ground_truth(db, org, kind="contact", property_id="not-mine",
+                            data={"phones": ["2145550101"]}, source_note="Seller's phone from our signed contract")
+    PE.add_ground_truth(db, org, kind="contact", property_id=real[0].id, data={"phones": ["(214) 555-0101"]},
+                        source_note="Seller's own phone from our signed purchase contract")
+    ev = _paid(db, org, name="x", provider_keys=["tracerfy"], property_ids=[real[0].id])
+    m = PE.payload(ev)["results"]["providers"]["tracerfy"]
+    assert m["ground_truth_records"] == 1 and m["correct_owner_rate_truth"] == 1.0
+
+
+def test_closed_sale_ground_truth_scores_comp_price_accuracy(world, http):
+    db, org, real = world["db"], world["org"], world["real"]
+    _, answers = http
+    comps = [_reapi_comp(i) for i in range(4)]
+    answers["PropertyComps"] = {"comps": comps}
+    c0 = V.reapi_comp(comps[0], "TX")
+    PE.add_ground_truth(db, org, kind="closed_sale",
+                        data={"street_address": c0["street_address"], "sale_price": c0["sale_price"],
+                              "sale_date": c0["sale_date"]},
+                        source_note="MLS closed record printed by our broker, #TEST1")
+    with pytest.raises(PE.EvaluationRefused):
+        PE.add_ground_truth(db, org, kind="closed_sale", data={"street_address": "x", "sale_price": "abc"},
+                            source_note="MLS closed record printed by our broker")
+    prop = real[1]
+    prop.square_feet, prop.bedrooms, prop.bathrooms, prop.year_built = 1500, 3, 2, 1985
+    prop.property_type = "single_family"
+    db.flush()
+    ev = _paid(db, org, name="c", mode="comps", provider_keys=["reapi_comps"], property_ids=[prop.id])
+    m = PE.payload(ev)["results"]["providers"]["reapi_comps"]
+    assert m["ground_truth_sales_matched"] == 1 and m["ground_truth_price_accuracy"] == 1.0
+    assert m["median_distance_miles"] is not None and m["eligible_comps"] == 4
+
+
+# ── isolation guard ──────────────────────────────────────────────────────
+
+def test_an_adapter_that_touches_production_state_is_caught_and_undone(world, http, monkeypatch):
+    db, org, real = world["db"], world["org"], world["real"]
+    _, answers = http
+    answers["tracerfy.com"] = TRACERFY_HIT_ONE
+    original = V.TracerfySkipTrace.enrich
+
+    def leaky(self, data):
+        real[0].contactability = "CONTACTABLE_SMS"          # a bug that would make someone contactable
+        real[0].opportunity_score = 99
+        return original(self, data)
+    monkeypatch.setattr(V.TracerfySkipTrace, "enrich", leaky)
+    ev = _paid(db, org, name="x", provider_keys=["tracerfy"], property_ids=[real[0].id])
+    assert ev.status == "isolation_violation"
+    assert real[0].contactability == "ENRICHMENT_NEEDED" and real[0].opportunity_score != 99
+    out = PE.payload(ev)
+    assert out["results"]["isolation"]["violations"]
+    assert any("ISOLATION VIOLATION" in n for n in out["report"]["notes"])
+
+
+def test_the_report_compares_providers_on_the_same_records_without_a_winner(world, http):
+    db, org, real = world["db"], world["org"], world["real"]
+    _, answers = http
+    answers["tracerfy.com"] = TRACERFY_HIT_ONE
+    answers["dataskip"] = DATASKIP
+    ev = _paid(db, org, name="h2h", provider_keys=["tracerfy", "dataskip"], property_ids=[p.id for p in real])
+    rep = PE.payload(ev)["report"]
+    assert {l["provider"] for l in rep["lines"]} == {"tracerfy", "dataskip"}
+    for l in rep["lines"]:
+        assert "usable mobile" in l["summary"] and "per usable contact" in l["summary"]
+    assert any("No winner" in n for n in rep["notes"])
+    m = PE.payload(ev)["results"]["providers"]["tracerfy"]
+    for k in ("hits_charged", "hits_free", "misses", "misses_charged", "refunded", "usable_phone_coverage",
+              "usable_mobile_coverage", "usable_email_coverage"):
+        assert k in m
+
+
+def test_execute_and_ground_truth_routes_are_admin_only(client, auth_headers, admin_h, world, http):
+    db, org = world["db"], world["org"]
+    ev = PE.plan(db, org, name="x", provider_keys=["tracerfy"], property_ids=[world["real"][0].id])
+    db.commit()
+    path = "/wholesale/evosense/provider-evaluations/%s/execute" % ev.id
+    assert client.post(path, headers=auth_headers, json={}).status_code == 403
+    r = client.post(path, headers=admin_h, json={"confirm": "RUN PAID EVALUATION 1"})
+    assert r.status_code == 409 and ev.id in r.json()["detail"]
+    assert client.get("/wholesale/evosense/ground-truth", headers=auth_headers).status_code == 403
+    r = client.post("/wholesale/evosense/provider-evaluations", headers=admin_h,
+                    json={"name": "p", "provider_keys": ["tracerfy"], "property_ids": [world["real"][0].id]})
+    assert r.status_code == 200 and r.json()["status"] == "planned" and r.json()["confirmation"]
+    assert r.json()["max_spend_cents"] == 10 and http[0] == []
+
+
+def test_an_evaluation_changes_no_production_count_anywhere(world, http):
+    """NEEDS YOU, the Morning Command Center, contactability, scores, seller
+    intent, leads, deals, comps, outreach: identical before and after."""
+    from app.services import wholesale_command as WC
+    from app.models.evosense_models import EvoSenseEngagement, EvoSenseScore
+    from app.models.wholesale_models import WholesaleDeal
+    db, org, real = world["db"], world["org"], world["real"]
+    _, answers = http
+    answers["tracerfy.com"] = TRACERFY_HIT_ONE
+    answers["lookups.twilio.com"] = TWILIO
+
+    def snap():
+        cc = WC.command_center(db, org)
+        cc.pop("generated_at", None)
+        props = [(p.id, p.opportunity_score, p.contact_confidence, p.seller_intent, p.contactability,
+                  p.status) for p in db.query(EvoSenseProperty).filter_by(organization_id=org).all()]
+        return (json.dumps(cc, sort_keys=True, default=str), props, _counts(db, org),
+                db.query(EvoSenseEngagement).filter_by(organization_id=org).count(),
+                db.query(EvoSenseScore).filter_by(organization_id=org).count(),
+                db.query(WholesaleDeal).filter_by(organization_id=org).count())
+    before = snap()
+    ev = _paid(db, org, name="x", provider_keys=["tracerfy"], property_ids=[p.id for p in real],
+               referee_key="twilio_lookup")
+    assert ev.status == "completed"
+    after = snap()
+    assert after[1:] == before[1:]
+    # The Command Center differs at most in provider health, never in seller/deal/outreach counts.
+    b, a = json.loads(before[0]), json.loads(after[0])
+    for k in ("needs_you", "new_qualified", "seller_replies", "appointments", "awaiting_contact_data",
+              "nurture", "pipeline_movement", "data_depth"):
+        assert a[k] == b[k], k

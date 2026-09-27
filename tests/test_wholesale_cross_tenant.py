@@ -201,6 +201,15 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     db_session.add(_ev)
     db_session.flush()
     es_ids["es_evaluation_id"] = _ev.id
+    from app.models.evosense_models import EvoSenseEvalGroundTruth
+    _gt = EvoSenseEvalGroundTruth(organization_id=sample_org.id, kind="contact", property_id=None,
+                                  data='{"phones": ["2145550101"]}', source_note="fixture: lawfully known")
+    db_session.add(_gt)
+    db_session.flush()
+    es_ids["es_ground_truth_id"] = _gt.id
+    # Not a record: the provider key is the same word in every workspace, and
+    # a gate write always lands on the CALLER's own workspace.
+    es_ids["es_gate_provider"] = "reapi_comps"
     es_ids["es_reprocess_run_id"] = evosense_reprocess.dry_run(
         db_session, sample_org.id, user=sample_advisor).id
     db_session.commit()
@@ -418,6 +427,10 @@ def evosense_attacks(ids):
         ("get", "%s/reprocess/%s" % (base, ids["es_reprocess_run_id"]), None),
         ("get", "%s/provider-evaluations/%s" % (base, ids["es_evaluation_id"]), None),
         ("post", "%s/provider-evaluations/%s/purge" % (base, ids["es_evaluation_id"]), None),
+        ("post", "%s/provider-evaluations/%s/execute" % (base, ids["es_evaluation_id"]),
+         {"confirm": "RUN PAID EVALUATION %s" % ids["es_evaluation_id"]}),
+        ("delete", "%s/ground-truth/%s" % (base, ids["es_ground_truth_id"]), None),
+        ("post", "%s/truth-gate/%s" % (base, ids["es_gate_provider"]), None),
         ("post", "%s/reprocess/%s/apply" % (base, ids["es_reprocess_run_id"]),
          {"confirm": "APPLY %s" % ids["es_reprocess_run_id"]}),
         ("post", "%s/reprocess/%s/rollback" % (base, ids["es_reprocess_run_id"]),

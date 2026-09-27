@@ -888,6 +888,10 @@ def route(db, org_id: str, capability: str, *, exclude: tuple = (),
             continue
         if getattr(p, "evaluation_only", False):
             continue                      # the evaluation harness only - never production
+        if capability == C.COMPS and p.connector_kind == C.REAL:
+            from app.services.evosense import truth_gate as TG
+            if not TG.passes(db, org_id, key):
+                continue                  # DFW truth gate not met: no comps call, ever
         cfg = config(db, org_id, key)
         if not canonical(p, cfg, blocked=platform_blocked(db, key, cfg))["routable"]:
             continue

@@ -187,6 +187,10 @@ class EvoSenseProviderConfig(Base):
     # failures, reason}}). A provider that serves several capabilities can be
     # healthy for one and failing for another; one row of health cannot say so.
     capability_health = Column(Text, nullable=True)
+    # SOLD COMPS TRUTH GATE (DFW): per-criterion attestations with evidence.
+    # A comps provider cannot turn SOLD_COMPS operational until every
+    # criterion is met - see evosense/truth_gate.py.
+    truth_gate = Column(Text, nullable=True)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
     __table_args__ = (
@@ -983,5 +987,35 @@ class EvoSenseProviderEvaluation(Base):
     created_by_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)
     finished_at = Column(DateTime, nullable=True)
+    # THE APPROVAL GATE: a paid evaluation is PLANNED first (sample, providers,
+    # maximum spend), then executed only with "RUN PAID EVALUATION <id>".
+    mode = Column(String, nullable=True)                  # contact | comps
+    plan = Column(Text, nullable=True)                    # JSON: calls and max spend per provider
+    max_spend_cents = Column(Integer, nullable=True)      # the authorized ceiling
+    authorized_at = Column(DateTime, nullable=True)
+    authorized_by_id = Column(String, nullable=True)
 
     __table_args__ = (Index("ix_es_eval_org", "organization_id", "created_at"),)
+
+
+class EvoSenseEvalGroundTruth(Base):
+    """A fact the workspace ALREADY LAWFULLY KNOWS, entered by a person with
+    how it is known - used only to score provider evaluations. Never
+    manufactured, never inferred, never shown as data about anyone.
+
+        kind = contact      {"phones": [...], "emails": [...], "owner_name": ...}
+                            for an EvoSense property (e.g. a closed deal's seller)
+        kind = closed_sale  {"street_address", "city", "sale_price", "sale_date"}
+                            a sale whose closed price is known from a lawful
+                            source (the MLS record a broker supplied, a HUD)"""
+
+    __tablename__ = "evosense_eval_ground_truth"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)                 # contact | closed_sale
+    property_id = Column(String, nullable=True)
+    data = Column(Text, nullable=False)                   # JSON
+    source_note = Column(String, nullable=False)          # how it is lawfully known
+    entered_by_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=_now)
