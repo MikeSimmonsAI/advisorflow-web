@@ -529,6 +529,19 @@ SORTS = {"opportunity": (EvoSenseProperty.opportunity_score.desc().nullslast(),)
          "contact": (EvoSenseProperty.contact_confidence.desc().nullslast(),)}
 
 
+def _contactability(db, prop):
+    """The cached answer; for a property not rescored since contactability
+    existed, the same answer computed now (read-only - nothing is stored and
+    no provider is called)."""
+    if getattr(prop, "contactability_detail", None):
+        return C.jload(prop.contactability_detail, None)
+    try:
+        from app.services import contactability as CB
+        return dict(CB.for_evosense_property(db, prop), computed_on_read=True)
+    except Exception:  # noqa: BLE001 - an explanation never breaks the page
+        return None
+
+
 def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optional[str] = None,
           q: Optional[str] = None, signal: Optional[str] = None, sort: str = "opportunity",
           limit: int = 50, offset: int = 0, county: Optional[str] = None,
@@ -759,8 +772,7 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
         "acquisition_cost": _acq(db, prop),
         # Contactability: may we lawfully reach the owner, and how - kept apart
         # from "we have a number" and from the opportunity score.
-        "contactability": (C.jload(prop.contactability_detail, None)
-                           if getattr(prop, "contactability_detail", None) else None),
+        "contactability": _contactability(db, prop),
         "enrichment": [{"id": d.id, "decision": d.decision, "reasons": C.jload(d.reasons, []),
                         "governor": C.GOVERNOR_LABEL.get(d.decision, d.decision),
                         "capability": d.capability,

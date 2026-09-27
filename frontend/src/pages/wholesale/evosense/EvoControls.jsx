@@ -82,8 +82,9 @@ function CapabilityRegistry({ data }) {
                     <div key={p.provider} style={{ marginBottom: 6 }}>
                       <StateBadge state={p.state} tone={CAP_TONE[p.state]} why={p.why} /> <strong>{p.label}</strong>
                       <span className="evo-prop__sub" style={{ whiteSpace: 'normal' }}>
-                        {p.why} · platform: configured {yn(p.platform.configured)}{p.platform.blocked ? ', blocked' : ''} ·
-                        workspace: enabled {yn(p.tenant.enabled)}, reachable {yn(p.tenant.reachable)}, healthy {yn(p.tenant.healthy)}
+                        {p.why}
+                        {p.state === 'MANUAL ONLY' ? null : <> · platform: configured {yn(p.platform.configured)}{p.platform.blocked ? ', blocked' : ''} ·
+                        workspace: enabled {yn(p.tenant.enabled)}, reachable {yn(p.tenant.reachable)}, healthy {yn(p.tenant.healthy)}</>}
                       </span>
                     </div>
                   )) : <span className="evo-muted">No provider can supply this yet</span>}
@@ -125,7 +126,13 @@ export default function EvoControls() {
   const [busy, setBusy] = useState(false)
   const [capReg, setCapReg] = useState(null)
   const [budget, setBudget] = useState({ day: '', month: '', cap: '' })
-  const [tab, setTab] = useState(() => (typeof window !== 'undefined' && window.location.hash === '#budget' ? 'usage' : window.location.hash === '#sources' ? 'sources' : 'providers'))
+  // Deep links from the Command Center land on the right tab: #sources,
+  // #providers, #capabilities, #controls, #budget (= Usage & Costs).
+  const [tab, setTab] = useState(() => {
+    const h = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : ''
+    if (h === 'budget') return 'usage'
+    return ['sources', 'providers', 'capabilities', 'controls', 'usage'].includes(h) ? h : 'providers'
+  })
 
   const load = useCallback(async () => {
     try {

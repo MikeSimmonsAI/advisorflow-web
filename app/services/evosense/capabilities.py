@@ -81,11 +81,26 @@ def provider_capability(db, org_id: str, p, engine_caps: List[str], cfg=None) ->
     failures = max((int(r.get("failures") or 0) for r in cap_rows), default=0)
     if cap_rows:
         healthy = bool(last_ok) and last_ok > last_bad
+        health_basis = "capability"
+    elif health:
+        # This provider tracks health per capability and has never succeeded
+        # at THIS one: another capability's success proves nothing here.
+        healthy, health_basis = False, "capability"
     else:
+        # No call has been recorded per capability yet (tracking began with
+        # this registry): fall back to the provider's own last success /
+        # failure, and SAY that is the basis rather than showing "never".
         healthy = bool(canon and canon.get("healthy"))
+        health_basis = "provider" if (getattr(cfg, "last_success_at", None)
+                                      or getattr(cfg, "last_failure_at", None)) else None
+        ok_at, bad_at = getattr(cfg, "last_success_at", None), getattr(cfg, "last_failure_at", None)
+        last_ok = ok_at.isoformat() + "Z" if ok_at else ""
+        last_bad = bad_at.isoformat() + "Z" if bad_at else ""
     reachable = (bool(last_ok) or bool(canon and canon.get("reachable"))) if (cap_rows or canon) else None
 
     if kind in (C.MANUAL, C.IMPORT):
+        # Nothing is called: reachability and health do not apply.
+        reachable = healthy = None
         state = S_MANUAL
     elif platform_block or (canon and canon.get("blocked")):
         state = S_BLOCKED
@@ -110,13 +125,14 @@ def provider_capability(db, org_id: str, p, engine_caps: List[str], cfg=None) ->
            S_DEGRADED: "Failing for this capability (%s consecutive failures)%s" % (
                failures, ": %s" % cap_rows[-1].get("reason") if cap_rows and cap_rows[-1].get("reason") else ""),
            S_SANDBOX: "Synthetic sandbox adapter - software testing only, never real data",
-           S_OPERATIONAL: "Last call for this capability succeeded",
+           S_OPERATIONAL: ("Last call for this capability succeeded" if health_basis == "capability"
+                           else "Last call to this provider succeeded (not yet recorded per capability)"),
            S_UNVERIFIED: "Configured and enabled, never proven to work - not 'connected'"}[state]
     return {"provider": p.key, "label": p.label, "connector_kind": kind, "state": state, "why": why,
             "platform": {"configured": configured, "blocked": bool(platform_block)},
             "tenant": {"enabled": enabled, "reachable": reachable, "healthy": healthy,
                        "failures": failures, "last_success_at": last_ok or None,
-                       "last_failure_at": last_bad or None},
+                       "last_failure_at": last_bad or None, "health_basis": health_basis},
             "configured": configured, "enabled": enabled, "reachable": reachable,
             "healthy": healthy, "operational": operational, "blocked": state == S_BLOCKED,
             "synthetic": kind == C.SANDBOX,

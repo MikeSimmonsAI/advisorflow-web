@@ -1182,10 +1182,26 @@ def gated_summary(deal: WholesaleDeal, settings) -> Dict[str, Any]:
     from app.services import mao_gate
     summary = analysis.deal_summary(deal, settings)
     gate = mao_gate.evaluate(deal, settings)
-    if gate["status"] != mao_gate.CALCULATED:
-        summary["max_allowable_offer"] = None
-        summary["mao_blocked"] = gate["reasons"]
+    return apply_mao_gate(summary, gate)
+
+
+def apply_mao_gate(summary: Dict[str, Any], gate: Dict[str, Any]) -> Dict[str, Any]:
+    """NOT CALCULATED means no MAO anywhere in the summary: not the headline
+    figure, not the last line of the worked steps (which would otherwise still
+    show the arithmetic done with repairs assumed at zero)."""
+    from app.services import mao_gate
     summary["mao_gate"] = gate
+    if gate["status"] == mao_gate.CALCULATED:
+        return summary
+    summary["max_allowable_offer"] = None
+    summary["mao_blocked"] = gate["reasons"]
+    summary["blocked"] = summary.get("blocked") or "mao_not_calculated"
+    summary["steps"] = [dict(st, value=None, note="not calculated")
+                        if str(st.get("label", "")).startswith("= maximum allowable offer") else st
+                        for st in (summary.get("steps") or [])]
+    head = "MAO NOT CALCULATED - " + "; ".join(gate["reasons"]) + "."
+    summary["warnings"] = [head] + [w for w in (summary.get("warnings") or [])
+                                    if "calculated as if repairs were zero" not in w]
     return summary
 
 
@@ -1250,18 +1266,14 @@ def recalculate_analysis(db: Session, org_id: str, deal: WholesaleDeal,
 
     from app.services import mao_gate
     gate = mao_gate.evaluate(deal, settings)
-    summary = analysis.deal_summary(deal, settings)
-    if gate["status"] != mao_gate.CALCULATED:
-        # NOT CALCULATED is shown as not calculated - never a number that
-        # quietly assumed $0 repairs or leaned on an unsupported ARV.
-        summary["max_allowable_offer"] = None
-        summary["mao_blocked"] = gate["reasons"]
+    # NOT CALCULATED is shown as not calculated - never a number that
+    # quietly assumed $0 repairs or leaned on an unsupported ARV.
+    summary = apply_mao_gate(analysis.deal_summary(deal, settings), gate)
     deal.max_allowable_offer = analysis.money(summary["max_allowable_offer"])
     deal.transaction_costs = analysis.money(summary["transaction_costs"])
     deal.mao_status = gate["status"]
     deal.mao_detail = json.dumps(gate, default=str)
     deal.analysis_updated_at = datetime.utcnow()
-    summary["mao_gate"] = gate
     summary["arv_engine"] = engine
 
     log_event(db, org_id, "analysis.updated",

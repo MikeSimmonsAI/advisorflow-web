@@ -18,6 +18,39 @@ function Count({ label, value, to, sub, tone, attention }) {
   return to && value ? <Link to={to} style={{ textDecoration: 'none', color: 'inherit' }}>{metric}</Link> : metric
 }
 
+/* EVIDENCE DEPTH: where valuation evidence is thin, and which capabilities
+ * are blocked because no REAL provider is operational (manual entry and the
+ * sandbox never count as operational here). */
+function EvidenceDepth({ dd, cents }) {
+  const first = (x) => (x && x.items && x.items[0] ? x.items[0].link : null)
+  return (
+    <>
+      <Metrics label="Evidence depth">
+        <Count label="ARV on enough comps" value={dd.comps_enough_evidence.count} sub="deals in analysis / offer"
+               tone="success" to={dd.comps_enough_evidence.link} />
+        <Count label="Insufficient comps" value={dd.comps_insufficient.count} sub="no ARV, or low evidence"
+               tone="warning" attention={dd.comps_insufficient.count > 0} to={first(dd.comps_insufficient)} />
+        <Count label="MAO not calculated" value={dd.mao_not_calculated.count} sub="missing ARV evidence or repairs"
+               tone="warning" to={first(dd.mao_not_calculated)} />
+        <Count label="Qualified, awaiting analysis" value={dd.qualified_awaiting_analysis.count}
+               to={first(dd.qualified_awaiting_analysis)} />
+        {dd.cost && dd.cost.avg_total_cents != null ? (
+          <Count label="Avg cost per promoted deal" value={cents(dd.cost.avg_total_cents)}
+                 sub={`find ${cents(dd.cost.avg_cost_to_find_cents) || '—'} · qualify ${cents(dd.cost.avg_cost_to_qualification_cents) || 'not reached'}`} />
+        ) : null}
+      </Metrics>
+      {(dd.blocked_by_provider_config || []).length ? (
+        <p className="evo-prop__sub" style={{ marginTop: 8 }}>
+          Provider-blocked (no real provider operational - manual entry only):{' '}
+          {dd.blocked_by_provider_config.map((b, k) => (
+            <span key={b.capability}>{k ? ' · ' : ''}<Link to={b.link}>{b.label}</Link>{b.waiting ? ` (${b.waiting} waiting)` : ''}</span>
+          ))}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
 export default function MorningCommand({ includeTest }) {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
@@ -109,6 +142,8 @@ export default function MorningCommand({ includeTest }) {
           Moved to: {Object.entries(moved.by_stage).map(([s, n]) => `${humanize(s)} ${n}`).join(' · ')}
         </p>
       ) : null}
+
+      {data.data_depth ? <EvidenceDepth dd={data.data_depth} cents={cents} /> : null}
     </Panel>
   )
 }

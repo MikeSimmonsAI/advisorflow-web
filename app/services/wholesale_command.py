@@ -75,7 +75,17 @@ def seller_lifecycle(*, lead=None, profile=None, deal=None, evosense_prop=None,
     src = dict(lead_status=lead_status, qualification=q, deal_stage=stage, evosense_status=es,
                engagement=engagement_status, contactability=contactability)
     if lead_status == "dnc" or contactability == "DO_NOT_CONTACT" or es == "suppressed":
-        return _life(DO_NOT_CONTACT, "Asked not to be contacted / suppressed", **src)
+        # Say WHICH block: "asked not to be contacted" is a claim about the
+        # seller, and is only true when they did.
+        if lead_status == "dnc":
+            why = "Asked not to be contacted"
+        elif getattr(lead, "is_test", False):
+            why = "Internal test record - excluded from real outreach"
+        elif es == "suppressed":
+            why = "Suppressed in EvoSense"
+        else:
+            why = "Every channel is blocked (see contactability for the reasons)"
+        return _life(DO_NOT_CONTACT, why, **src)
     if stage == "dead":
         return _life(NOT_INTERESTED, "Deal closed out: %s" % (getattr(deal, "lost_reason", None)
                                                             or "dead"), **src)
@@ -253,7 +263,7 @@ def needs_you(db, org_id: str, *, include_test: bool = False, limit: int = 50) -
                                             prop.street_address or "property"),
                                "; ".join(r.get("label", "") for r in reasons) or "EvoSense handed this off",
                                [h.next_action],
-                               "/wholesale/evosense/properties/%s" % prop.id,
+                               "/wholesale/evosense/property/%s" % prop.id,
                                evosense_property_id=prop.id, handoff_id=h.id))
         iq = db.query(EvoSenseIdentityReview).filter(EvoSenseIdentityReview.organization_id == org_id,
                                                      EvoSenseIdentityReview.status == "open")
@@ -262,7 +272,7 @@ def needs_you(db, org_id: str, *, include_test: bool = False, limit: int = 50) -
             items.append(_item("identity_review", 50, "%s property identit%s to confirm"
                                % (n, "y" if n == 1 else "ies"),
                                "Two sources may describe the same house; nothing is merged until you decide.",
-                               [], "/wholesale/evosense?tab=identity"))
+                               [], "/wholesale/evosense/inbox?bucket=needs_review"))
         # latest decision per property: still waiting for approval?
         latest = {}
         for d in (db.query(EvoSenseEnrichmentDecision)
@@ -282,7 +292,7 @@ def needs_you(db, org_id: str, *, include_test: bool = False, limit: int = 50) -
                                                                          "" if len(waiting) == 1 else "s"),
                                "These lookups are outside the strategy's automatic policy.",
                                ["Estimated total %s" % C.money(cost)],
-                               "/wholesale/evosense?bucket=needs_enrichment"))
+                               "/wholesale/evosense/inbox?bucket=needs_enrichment"))
     except Exception:  # noqa: BLE001 - EvoSense not in use for this workspace
         pass
 
@@ -316,7 +326,9 @@ def _data_depth(db, org_id, deals_q, profiles_q, active) -> Dict[str, Any]:
         WholesaleSellerProfile_status_qualified()).all()
         if p.id in active and active[p.id].stage in ("qualified", "qualifying", "seller_engaged")]
     out = {
-        "comps_enough_evidence": {"count": len(enough), "link": "/wholesale?view=analysis"},
+        "comps_enough_evidence": {"count": len(enough),
+                                  "link": _deal_link(enough[0].id) if enough else None,
+                                  "items": [{"deal_id": d.id, "link": _deal_link(d.id)} for d in enough[:20]]},
         "comps_insufficient": {"count": len(insufficient),
                                "items": [{"deal_id": d.id, "link": _deal_link(d.id)} for d in insufficient[:20]]},
         "mao_not_calculated": {"count": len(mao_blocked),
@@ -341,7 +353,7 @@ def _data_depth(db, org_id, deals_q, profiles_q, active) -> Dict[str, Any]:
                     "capability": cap, "label": CAPS.LABELS[cap],
                     "waiting": waiting if cap == "PHONE" else len(insufficient),
                     "why": "No real provider is operational for %s" % CAPS.LABELS[cap].lower(),
-                    "link": "/wholesale/evosense?tab=providers"})
+                    "link": "/wholesale/evosense/controls#providers"})
         promoted = (db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id,
                                                       EvoSenseProperty.promoted_deal_id.isnot(None),
                                                       EvoSenseProperty.is_test.isnot(True))
@@ -422,7 +434,7 @@ def command_center(db, org_id: str, *, include_test: bool = False, days: int = 7
 
     awaiting_deals = deals_q().filter(WholesaleDeal.stage == "enrichment_needed").count()
     awaiting = {"wholesale_deals": awaiting_deals, "evosense_properties": 0,
-                "link": "/wholesale?stage=enrichment_needed"}
+                "link": "/wholesale/properties?stage=enrichment_needed"}
     provider_problems: List[Dict[str, Any]] = []
     spend = None
     try:
@@ -436,27 +448,31 @@ def command_center(db, org_id: str, *, include_test: bool = False, days: int = 7
         if not include_test:
             eq = eq.filter(EvoSenseProperty.is_test.isnot(True))
         awaiting["evosense_properties"] = eq.count()
-        awaiting["evosense_link"] = "/wholesale/evosense?bucket=needs_enrichment"
+        awaiting["evosense_link"] = "/wholesale/evosense/inbox?bucket=needs_enrichment"
         from app.models.evosense_models import EvoSenseProviderConfig
         for cfg in (db.query(EvoSenseProviderConfig)
                     .filter(EvoSenseProviderConfig.organization_id == org_id,
                             EvoSenseProviderConfig.enabled.is_(True)).all()):
             prov = PV.PROVIDERS.get(cfg.provider_key)
-            if prov is None:
+            # Manual entry and file import are never "called", so they can
+            # never be failing; the sandbox is not a real problem either.
+            if prov is None or prov.connector_kind in (C.MANUAL, C.IMPORT, C.SANDBOX):
                 continue
             key = cfg.provider_key
-            state = PV.health_state(prov, cfg)
-            if state in (C.H_DEGRADED, C.H_RATE_LIMITED, C.H_BLOCKED):
-                provider_problems.append({"provider": key, "label": prov.label, "state": state,
-                                          "reason": getattr(cfg, "last_failure_reason", None),
-                                          "link": "/wholesale/evosense?tab=providers"})
+            # The same canonical state the Providers screen shows, including
+            # a platform-wide block (a public source refusing our servers).
+            st = PV.canonical(prov, cfg, blocked=PV.platform_blocked(db, key, cfg))
+            if st["state"] in ("FAILED", "DEGRADED", "RATE LIMITED", "BLOCKED"):
+                provider_problems.append({"provider": key, "label": prov.label, "state": st["state"],
+                                          "reason": st.get("why") or getattr(cfg, "last_failure_reason", None),
+                                          "link": "/wholesale/evosense/controls#sources"})
         budget_blocked = db.query(EvoSenseProperty).filter(
             EvoSenseProperty.organization_id == org_id,
             EvoSenseProperty.status == "budget_blocked").count()
         if budget_blocked:
             provider_problems.append({"provider": None, "label": "Budget", "state": "BUDGET BLOCKED",
                                       "reason": "%s properties are waiting for budget" % budget_blocked,
-                                      "link": "/wholesale/evosense?bucket=budget_blocked"})
+                                      "link": "/wholesale/evosense/inbox?bucket=budget_blocked"})
         spend = EVV.spend(db, org_id)
     except Exception:  # noqa: BLE001 - EvoSense not in use
         pass

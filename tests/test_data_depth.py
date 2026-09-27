@@ -614,3 +614,100 @@ def test_value_of_information_skips_a_do_not_contact_owner(hunted):
     res = EN.run(db, prop, s)
     assert res["decision"] == C.D_SUPPRESSED
     assert "Do not contact" in res["reasons"][0]
+
+
+def test_a_gated_mao_leaves_no_number_in_the_worked_steps(W):
+    """Found in production verification: the deal room's worked offer still
+    ended in '= maximum allowable offer $162,860' (repairs assumed zero) while
+    the headline said not calculated. Not calculated means no number anywhere."""
+    _, deal_id = W.deal()
+    _three(W, deal_id)
+    room = ok(W.get("/deals/%s" % deal_id))
+    a = room["analysis"]
+    assert a["max_allowable_offer"] is None and a["blocked"]
+    last = [s for s in a["steps"] if s["label"].startswith("= maximum allowable offer")]
+    assert all(s["value"] is None for s in last)
+    assert a["warnings"][0].startswith("MAO NOT CALCULATED")
+    assert not any("as if repairs were zero" in w for w in a["warnings"])
+    # once the evidence is there, the number comes back
+    ok(W.post("/deals/%s/repairs" % deal_id, {"status": "MANUAL_ESTIMATE", "amount": 30000}))
+    a = ok(W.get("/deals/%s" % deal_id))["analysis"]
+    assert a["max_allowable_offer"] is not None and not a.get("mao_blocked")
+
+
+# ── Found in production verification ───────────────────────────────────────
+
+FRONTEND_ROUTES = ("/wholesale/deals/", "/wholesale/evosense/property/", "/wholesale/evosense/inbox",
+                   "/wholesale/evosense/controls", "/wholesale/evosense/strategies", "/wholesale/properties")
+
+
+def test_every_command_center_link_is_a_real_screen():
+    """Links pointed at /wholesale/evosense?tab=... (the EvoSense home, which has
+    no tabs) and /wholesale/evosense/properties/<id> (an API path, not a page)."""
+    import inspect
+    import re
+    from app.services import wholesale_command as WC
+    src = inspect.getsource(WC)
+    links = set(re.findall(r'"(/wholesale[^"%]*)', src))
+    assert links
+    for link in links:
+        assert "?tab=" not in link and "/evosense/properties/" not in link, link
+        assert link.startswith(FRONTEND_ROUTES) or link in ("/wholesale", "/wholesale/"), link
+
+
+def test_a_test_records_lifecycle_does_not_claim_the_seller_asked_not_to_be_contacted():
+    from types import SimpleNamespace
+    from app.services import wholesale_command as WC
+    life = WC.seller_lifecycle(lead=SimpleNamespace(status="new", is_test=True),
+                               contactability="DO_NOT_CONTACT")
+    assert life["stage"] == WC.DO_NOT_CONTACT and "test record" in life["why"]
+    life = WC.seller_lifecycle(lead=SimpleNamespace(status="dnc", is_test=False))
+    assert life["why"] == "Asked not to be contacted"
+
+
+def test_manual_sources_do_not_claim_reachability_or_health(db_session, sample_org):
+    manual = PV.PROVIDERS["manual"]
+    row = CAPS.provider_capability(db_session, sample_org.id, manual, [C.CONTACT_ENRICHMENT])
+    assert row["state"] == CAPS.S_MANUAL
+    assert row["tenant"]["reachable"] is None and row["tenant"]["healthy"] is None
+    assert row["operational"] is False or row["synthetic"] is False
+
+
+def test_contactability_is_computed_on_read_for_a_property_never_rescored(client, auth_headers, hunted):
+    db, org, _ = hunted
+    prop = db.query(EvoSenseProperty).filter_by(organization_id=org).first()
+    prop.contactability = None
+    prop.contactability_detail = None
+    db.commit()
+    d = ok(client.get("/wholesale/evosense/properties/%s" % prop.id, headers=auth_headers))
+    assert d["contactability"] and d["contactability"]["state"] and d["contactability"]["computed_on_read"]
+    db.refresh(prop)
+    assert prop.contactability_detail is None                      # read-only: nothing stored
+
+
+def test_manual_sources_are_never_provider_problems(db_session, sample_org):
+    """Production showed Manual entry, CSV import and two manual Dallas sources
+    as DEGRADED 'provider problems' - they are never called, so never failing."""
+    from app.services import wholesale_command as WC
+    for key in ("manual", "csv_import"):
+        if key in PV.PROVIDERS:
+            PV.config(db_session, sample_org.id, key).enabled = True
+    db_session.commit()
+    body = WC.command_center(db_session, sample_org.id)
+    assert not [p for p in body["provider_problems"]["items"]
+                if p["provider"] in ("manual", "csv_import")]
+
+
+def test_the_scheduler_backfills_contactability_without_calling_anyone(hunted, monkeypatch):
+    from app.services.evosense import scheduler as SCH
+    db, org, _ = hunted
+    props = db.query(EvoSenseProperty).filter_by(organization_id=org).all()
+    for p in props:
+        p.contactability = p.contactability_detail = None
+    db.commit()
+    monkeypatch.setattr(PV.AcquisitionProvider, "enrich",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no provider call")))
+    n = SCH.backfill_contactability(db, org_id=org)
+    assert n == min(len(props), SCH.BACKFILL_BATCH)
+    assert all(p.contactability for p in db.query(EvoSenseProperty).filter_by(organization_id=org).all()[:n])
+    assert SCH.backfill_contactability(db, org_id=org) == max(0, len(props) - n)

@@ -147,6 +147,30 @@ def _note_skip(db, strategy, sched, status: str, summary: str) -> bool:
     return True
 
 
+BACKFILL_BATCH = 200
+
+
+def backfill_contactability(db, *, org_id: Optional[str] = None, limit: int = BACKFILL_BATCH) -> int:
+    """Properties discovered before contactability existed (or never rescored
+    since) carry no answer, so the Command Center's "awaiting contact data"
+    count misses them. Compute it for a bounded batch per pass: pure
+    derivation from what is already stored - no provider is called, nothing
+    is sent, no score or status changes."""
+    from app.models.evosense_models import EvoSenseProperty
+    from app.services import contactability as CB
+    q = db.query(EvoSenseProperty).filter(EvoSenseProperty.contactability_detail.is_(None),
+                                          EvoSenseProperty.archived_at.is_(None))
+    if org_id:
+        q = q.filter(EvoSenseProperty.organization_id == org_id)
+    n = 0
+    for prop in q.limit(limit).all():
+        CB.refresh_evosense(db, prop)
+        n += 1
+    if n:
+        db.commit()
+    return n
+
+
 def run_due(db, *, org_id: Optional[str] = None, now=None) -> Dict[str, Any]:
     """One scheduler pass across every organization (or one). Returns counts
     for the job ledger."""
@@ -193,6 +217,11 @@ def run_due(db, *, org_id: Optional[str] = None, now=None) -> Dict[str, Any]:
             db.rollback()
             report["failed"] += 1
             C.log.exception("evosense scheduled hunt crashed for strategy %s", strategy.id)
+    try:
+        report["contactability_backfilled"] = backfill_contactability(db, org_id=org_id)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        C.log.exception("evosense contactability backfill failed")
     try:
         report["replies_retried"] = CV.retry_pending(db, org_id=org_id)
     except Exception:  # noqa: BLE001
