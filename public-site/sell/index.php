@@ -166,9 +166,20 @@ h2{font-size:clamp(30px,3.2vw,44px);line-height:1.12}
 .brand svg{width:34px;height:34px;flex:none}
 .brand b{display:block;font:700 19px/1 var(--serif);letter-spacing:.02em}
 .brand small{display:block;font:700 11px/1 var(--sans);letter-spacing:.32em;color:var(--gold-2);margin-top:5px}
-.top nav ul{display:flex;gap:28px;list-style:none;margin:0;padding:0}
-.top nav a{color:#dfe6f1;text-decoration:none;font-size:15px;font-weight:600}
-.top nav a:hover{color:#fff;text-decoration:underline;text-underline-offset:6px;text-decoration-color:var(--gold)}
+.top .dnav ul{display:flex;align-items:center;gap:26px;list-style:none;margin:0;padding:0}
+.top .dnav .home{display:inline-flex;align-items:center;gap:7px;padding-right:24px;border-right:1px solid rgba(255,255,255,.22)}
+.top .dnav .home svg,.mnav .home svg{width:17px;height:17px;flex:none;color:var(--gold-2)}
+.mnav{display:none;position:relative}
+.mnav summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:9px 16px;border:1.5px solid rgba(255,255,255,.5);border-radius:10px;font:700 14px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:#fff}
+.mnav summary::-webkit-details-marker{display:none}
+.mnav summary svg{width:18px;height:18px}
+.mnav[open] summary{border-color:var(--gold-2)}
+.mnav ul{position:absolute;right:0;top:calc(100% + 10px);width:min(280px,calc(100vw - 32px));list-style:none;margin:0;padding:8px;background:var(--navy);border:1px solid rgba(212,174,90,.5);border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.35)}
+.mnav li+li{border-top:1px solid rgba(255,255,255,.1)}
+.mnav a{display:flex;align-items:center;gap:8px;min-height:44px;padding:10px 14px;color:#fff;text-decoration:none;font-weight:600;font-size:16px;border-radius:8px}
+.mnav a:hover{background:rgba(255,255,255,.08)}
+.top .dnav a{color:#dfe6f1;text-decoration:none;font-size:15px;font-weight:600}
+.top .dnav a:hover{color:#fff;text-decoration:underline;text-underline-offset:6px;text-decoration-color:var(--gold)}
 .top .btn{min-height:44px;padding:10px 20px;font-size:14px;letter-spacing:.08em;text-transform:uppercase}
 
 /* hero */
@@ -244,12 +255,14 @@ textarea.i{min-height:110px;resize:vertical}
 .i[aria-invalid="true"]{border-color:var(--danger);background:var(--danger-soft)}
 .hint{font-size:14px;color:var(--ink-3);margin:7px 0 0}
 .s-err{font-size:14.5px;color:var(--danger);margin:7px 0 0;font-weight:650}
-.consent{margin-top:30px;background:var(--mist);border:1px solid var(--line);border-radius:12px;padding:20px 20px 18px}
-.consent legend{margin-bottom:14px}
+.consent{margin-top:30px;background:var(--mist);border:1px solid var(--line);border-top:4px solid var(--gold);border-radius:12px;padding:22px 20px 18px}
+.consent legend{margin-bottom:10px;font-size:15px;letter-spacing:.14em;color:var(--navy)}
+.consent legend i{background:var(--navy);color:var(--gold-2)}
+.consent-sub{clear:both;font:700 clamp(21px,2.2vw,25px)/1.25 var(--serif);color:var(--navy);margin:0 0 14px}
 .consent .check{clear:both}
 .consent .tag{display:inline-block;font:700 11px/1 var(--sans);letter-spacing:.12em;background:#fff;border:1px solid var(--line-2);color:var(--ink-3);border-radius:999px;padding:5px 9px;margin-left:4px}
 .check{display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;align-items:start;font-size:15px;color:var(--ink-2);line-height:1.55}
-.check input{width:22px;height:22px;margin:2px 0 0;accent-color:var(--navy)}
+.check input{width:24px;height:24px;margin:1px 0 0;accent-color:var(--navy)}
 /* SMS opt-in: the plain-language summary sits ABOVE the box, the verbatim
    registered disclosure is the box's own label, and the box is never checked
    for anyone. The panel only changes look once a person ticks it. */
@@ -295,7 +308,8 @@ textarea.i{min-height:110px;resize:vertical}
 }
 @media (max-width:1024px){
   .wrap{padding:0 28px}
-  .top nav{display:none}
+  .top .dnav{display:none}
+  .mnav{display:block}
   .trust ul{grid-template-columns:repeat(2,minmax(0,1fr))}
   .trust li{border-left:0;padding-left:0}
   .steps{grid-template-columns:minmax(0,1fr);gap:18px}
@@ -326,6 +340,7 @@ textarea.i{min-height:110px;resize:vertical}
   .brand b{font-size:17px}
   .brand small{letter-spacing:.26em}
   .top .btn{padding:9px 14px;min-height:42px;font-size:13px}
+  .top .wrap>.btn{display:none}
   .hero p{font-size:17.5px}
   .hero-ctas .btn{width:100%}
   .trust li{padding:16px 0;font-size:13px;gap:10px;letter-spacing:.04em}
@@ -357,14 +372,25 @@ textarea.i{min-height:110px;resize:vertical}
       <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><rect width="40" height="40" rx="9" fill="#122b4f"/><path d="M8 21.5L20 11l12 10.5" fill="none" stroke="#d4ae5a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.5 19.5V29h15v-9.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/><path d="M18 29v-5.5h4V29" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/></svg>
       <span><b>EvoSys</b><small>WHOLESALE</small></span>
     </a>
-    <nav aria-label="Page sections">
+    <nav class="dnav" aria-label="EvoSys Wholesale">
       <ul>
+        <li><a class="home" href="/"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 11l8-7 8 7M6.5 9.5V20h11V9.5"/></svg>EvoSysPro Home</a></li>
         <li><a href="#how">How It Works</a></li>
         <li><a href="#situations">Situations We Help</a></li>
-        <li><a href="#seller-form" data-focus-form>Get Started</a></li>
       </ul>
     </nav>
-    <a class="btn btn-gold" href="#seller-form" data-focus-form>Get started</a>
+    <details class="mnav">
+      <summary><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></svg>Menu</summary>
+      <nav aria-label="EvoSys Wholesale menu">
+        <ul>
+          <li><a class="home" href="/"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 11l8-7 8 7M6.5 9.5V20h11V9.5"/></svg>EvoSysPro Home</a></li>
+          <li><a href="#how">How It Works</a></li>
+          <li><a href="#situations">Situations We Help</a></li>
+          <li><a href="#seller-form" data-focus-form>Get Started</a></li>
+        </ul>
+      </nav>
+    </details>
+    <a class="btn btn-gold" href="#seller-form" data-focus-form>Get Started</a>
   </div>
 </header>
 
@@ -551,13 +577,12 @@ textarea.i{min-height:110px;resize:vertical}
         </fieldset>
 
         <fieldset class="consent">
-          <legend><i aria-hidden="true">4</i>Text messages <span class="tag">OPTIONAL</span></legend>
-          <p class="consent-lead">Would you like text updates about this property? It is completely optional.</p>
+          <legend><i aria-hidden="true">4</i>Optional SMS Opt-In</legend>
+          <p class="consent-sub">Want text updates about your property inquiry?</p>
           <ul class="consent-facts" id="sms-facts">
-            <li><span>Only about this property inquiry: follow-up questions, scheduling and transaction updates. No unrelated marketing.</span></li>
-            <li><span>Message frequency varies. Message and data rates may apply.</span></li>
-            <li><span>Reply <strong>STOP</strong> at any time to opt out, or <strong>HELP</strong> for help.</span></li>
-            <li><span>Leave the box unchecked and we will reach you by phone or email only. Your inquiry is sent either way.</span></li>
+            <li><span>From EVO Integrated Solutions LLC (EvoSys Wholesale), only about this property inquiry. No unrelated marketing.</span></li>
+            <li><span>Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out, <strong>HELP</strong> for help.</span></li>
+            <li><span>Not required. Leave the box unchecked and we will use phone or email only &mdash; your inquiry is sent either way.</span></li>
           </ul>
           <div class="check">
             <input type="checkbox" id="f-sms_consent" name="sms_consent" value="yes"<?=(($_POST['sms_consent'] ?? '') === 'yes') ? ' checked' : ''?><?=sell_aria($errors,'sms_consent','sms-disclosure')?>>
@@ -610,7 +635,8 @@ textarea.i{min-height:110px;resize:vertical}
       <ul>
         <li><a href="/privacy.html#sms">Privacy Policy</a></li>
         <li><a href="/terms.html#sms-wholesale">Terms</a></li>
-        <li><a href="/">EvoSysPro</a></li>
+        <li><a href="/sms-terms.html#wholesale">SMS Terms</a></li>
+        <li><a href="/">EvoSysPro Home</a></li>
       </ul>
     </nav>
     <div class="legal">EvoSys Wholesale is a product of EVO Integrated Solutions LLC, operated under the EvoSysPro platform.<br>&copy; <?=date('Y')?> EVO Integrated Solutions LLC. All rights reserved.</div>
@@ -627,6 +653,15 @@ document.addEventListener('click',function(e){
   if(!f)return;
   setTimeout(function(){try{f.focus({preventScroll:true})}catch(_){f.focus()}},
     window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:450);
+});
+document.addEventListener('click',function(e){
+  var a=e.target.closest&&e.target.closest('.mnav a');
+  if(a)a.closest('details').removeAttribute('open');
+});
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Escape')return;
+  var d=document.querySelector('.mnav[open]');
+  if(d){d.removeAttribute('open');d.querySelector('summary').focus();}
 });
 </script>
 </body>
