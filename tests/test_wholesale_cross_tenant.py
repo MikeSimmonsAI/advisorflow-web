@@ -199,8 +199,17 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
         db_session, sample_org.id, user=sample_advisor).id
     db_session.commit()
 
+    # A seller fact of A's (seller intelligence verify route).
+    from app.models.wholesale_models import WholesaleSellerFact
+    fact = WholesaleSellerFact(organization_id=sample_org.id,
+                               profile_id=an_id(seller, "seller", "seller_profile", "profile"),
+                               fact_type="timeline", value="asap", quote="asap")
+    db_session.add(fact)
+    db_session.commit()
+
     return {
         **es_ids,
+        "fact_id": fact.id,
         "file_id": photo["id"],
         "template_id": an_id(template, "template"),
         "property_id": an_id(prop, "property"),
@@ -235,6 +244,9 @@ def attacks(ids):
          {"owner_name": "Attacker", "phone": "2145559999"}),
         ("patch", "/wholesale/sellers/%s" % ids["profile_id"],
          {"motivation": "rewritten by a stranger"}),
+        ("get", "/wholesale/sellers/%s/intelligence" % ids["profile_id"], None),
+        ("post", "/wholesale/sellers/%s/nurture" % ids["profile_id"], {"days": 30}),
+        ("post", "/wholesale/sellers/%s/facts/%s/verify" % (ids["profile_id"], ids["fact_id"]), None),
 
         # ── Writes that move the deal ───────────────────────────────────────
         ("post", "/wholesale/deals/%s/stage" % d, {"stage": "dead"}),

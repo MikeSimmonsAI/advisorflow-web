@@ -200,7 +200,8 @@ def handle_inbound_reply(db, lead, reply) -> Dict[str, Any]:
     if deal is not None and deal.seller_profile_id:
         try:
             with db.begin_nested():
-                read = svc.apply_seller_reply(db, org_id, deal, reply.body or "", mode="background")
+                read = svc.apply_seller_reply(db, org_id, deal, reply.body or "", mode="background",
+                                              reply_id=getattr(reply, "id", None), channel="sms")
         except Exception:  # noqa: BLE001 - the message is already stored
             import logging
             logging.getLogger(__name__).exception("wholesale: seller reply read failed (lead %s)", lead.id)

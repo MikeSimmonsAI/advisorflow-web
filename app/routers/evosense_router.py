@@ -412,13 +412,13 @@ def mark_wrong_party(property_id: str, contact_id: str, db: Session = Depends(ge
     return {"ok": True}
 
 
-class VerifyIn(BaseModel):
+class ContactVerifyIn(BaseModel):
     note: Optional[str] = None
     verified: bool = True
 
 
 @router.post("/properties/{property_id}/contacts/{contact_id}/verify")
-def verify_contact(property_id: str, contact_id: str, payload: VerifyIn,
+def verify_contact(property_id: str, contact_id: str, payload: ContactVerifyIn,
                    db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
                    _g: User = Depends(require_not_observation)):
     """A PERSON confirms this is the right person at this number/address (a

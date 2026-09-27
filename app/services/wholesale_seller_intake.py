@@ -413,6 +413,20 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
     deal = svc.deal_for_property(db, org_id, prop.id)
     reference = _reference(getattr(deal, "id", None) or prop.id)
 
+    # WHAT THE SELLER TOLD US, WITH PROVENANCE (wholesale_seller_intel): each
+    # form answer becomes a seller-stated fact quoting the field. A seller in
+    # nurture who writes in again has re-engaged: the nurture date is cleared.
+    # Never allowed to cost the inquiry.
+    try:
+        from app.services import wholesale_seller_intel as SI
+        with db.begin_nested():
+            SI.record_form_facts(db, profile, deal, lead, d, submission_id=d.get("submission_id"))
+            if profile.nurture_until is not None:
+                SI.clear_nurture(profile)
+            SI.refresh(db, profile, deal, settings, lead)
+    except Exception:                                           # noqa: BLE001
+        log.exception("wholesale intake: seller facts not recorded")
+
     consent = None
     # The consent is EVIDENCE and is always recorded. The confirmation text is
     # an outbound message, so a capacity-held seller is not sent one (the send

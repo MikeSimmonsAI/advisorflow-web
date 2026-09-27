@@ -26,6 +26,7 @@ import { NegotiationLedger } from './wsOffers'
 import { BuyerBoard } from './wsBuyerBoard'
 import { ClosingWorkspace } from './wsClosing'
 import { SellerTimeline } from './wsTimeline'
+import { SellerIntelPanel } from './wsIntel'
 import { DocumentDrawer } from './wsDocuments'
 import { SharingWorkspace } from './wsSharing'
 import { EvoApp, Hero, PageSkeleton, PropertyThumb, Ring, Status, Tag, humanize, money, shortDate } from './ds/ds'
@@ -575,6 +576,7 @@ function SellerTab({ room, act, busy }) {
             editable - an inquiry's typo or a wrong number is fixed here, not
             by re-entering the person. */}
         <SellerEditor seller={seller} act={act} busy={busy} />
+        <SellerIntelPanel profileId={seller.id} />
         {/* 4. THE CADENCE and 5. THE PERMISSIONS. Both are settings for the
             conversation rather than part of it, so they sit beside it. */}
         <CadencePanel dealId={deal.id} cadence={room.cadence} act={act} busy={busy} />

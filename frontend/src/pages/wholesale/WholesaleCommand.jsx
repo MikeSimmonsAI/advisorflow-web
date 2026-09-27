@@ -25,6 +25,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { errText } from './wsShared'
 import { AuthImage } from './wsFiles'
+import MorningCommand from './wsMorning'
 import {
   Alert, Empty, EvoApp, Feed, Hero, Metric, Metrics, PageSkeleton, Panel, PropertyThumb, Status, TabBar,
   ago, humanize, money, moneyK, shortDate, useEnvironment,
@@ -152,6 +153,7 @@ export default function WholesaleCommand({ focus }) {
     <EvoApp world={world}>
       {head}
       <Alert>{error}</Alert>
+      <MorningCommand includeTest={!!includeTest} />
       <Metrics label="Deal operations">
         <Metric label="Active deals" value={h.active_deals} tone="primary" />
         <Metric label="Under contract" value={h.under_contract} tone="success" />

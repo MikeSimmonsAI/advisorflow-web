@@ -118,6 +118,24 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
         if eng is not None and eng.status in ("responded", "handed_off"):
             WS._set_stage_unchecked(db, deal, "seller_engaged", actor_type="user",
                                     actor_user_id=user.id)
+        # WHAT THE SELLER SAID TRAVELS WITH ITS PROVENANCE. Each EvoSense fact
+        # becomes a Wholesale seller fact with the same words, truth state and
+        # a reference back to the EvoSense message - one seller, one record of
+        # what they told us, whichever module heard it.
+        try:
+            from app.models.models import Lead
+            from app.services import wholesale_seller_intel as SI
+            for f in facts.values():
+                SI._add(db, profile, getattr(deal, "id", None), person.lead_id, f.fact_type,
+                        f.value, f.quote, message_ref="evosense:%s" % (f.message_id or f.id),
+                        channel="evosense", extracted_by=f.extracted_by or "rules",
+                        confidence=f.confidence, truth_state=f.truth_state)
+            SI.refresh(db, profile, deal, WS.resolve_settings(db, org_id, commit=False),
+                       db.query(Lead).filter(Lead.id == person.lead_id).first(),
+                       outcome=getattr(eng, "last_outcome", None))
+        except Exception:                                   # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).exception("promotion: seller facts not carried")
 
     spend = int(db.query(func.coalesce(func.sum(EvoSenseCostEntry.total_cents), 0))
                 .filter(EvoSenseCostEntry.organization_id == org_id,
@@ -137,6 +155,10 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
                           "contact_confidence": prop.contact_confidence,
                           "seller_intent": prop.seller_intent,
                           "acquisition_cost_cents": spend,
+                          "acquisition_cost": _acq(db, prop),
+                          "contactability": C.jload(getattr(prop, "contactability_detail", None), None),
+                          "contact_provenance": _contact_provenance(db, prop),
+                          "known_unknowns": _known_unknowns(prop, facts),
                           "signals": [s["signal_type"] for s in stacked],
                           "seller_facts": {k: {"value": f.value, "quote": f.quote}
                                            for k, f in facts.items()},
@@ -158,3 +180,44 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
     EV.refresh_status(db, prop)
     return {"already": False, "deal_id": deal.id, "property_id": wprop.id,
             "acquisition_cost_cents": spend}
+
+
+def _acq(db, prop):
+    try:
+        from app.services.evosense import economics as EC
+        return EC.acquisition_cost(db, prop)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _contact_provenance(db, prop):
+    """Where the number/address we will use came from, and how sure we are."""
+    try:
+        cp, sc = CT.best_contact(db, prop)
+    except Exception:  # noqa: BLE001
+        return None
+    if cp is None:
+        return None
+    return {"kind": cp.kind, "source": cp.source, "connector_kind": cp.connector_kind,
+            "line_type": cp.line_type, "validation": cp.validation,
+            "agreeing_sources": cp.agreeing_sources,
+            "verified": bool(getattr(cp, "verified_at", None)),
+            "contact_confidence": (sc or {}).get("value"),
+            "factors": [f["label"] for f in (sc or {}).get("factors", [])][:6]}
+
+
+def _known_unknowns(prop, facts):
+    """What the deal analyzer does NOT have yet - listed, never guessed."""
+    out = []
+    out.append("ARV: no verified comparable sales yet (an appraisal/tax value is not an ARV)")
+    if "condition" not in facts:
+        out.append("Repairs: condition not stated by the seller")
+    if "asking_price" not in facts:
+        out.append("Asking price: not stated")
+    if "wants_quick_close" not in facts and "timeline" not in facts:
+        out.append("Timeline: not stated")
+    if "decision_makers" not in facts:
+        out.append("Decision makers / title: not confirmed")
+    if not prop.mortgage_balance:
+        out.append("Mortgage / liens: unknown")
+    return out

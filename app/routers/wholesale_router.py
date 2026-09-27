@@ -25,6 +25,7 @@ import json
 import logging
 import re
 from datetime import datetime, date
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 from fastapi import (APIRouter, Depends, File, HTTPException, Query, Request,
@@ -479,8 +480,15 @@ class SettingsPatch(BaseModel):
     inquiry_assignee_id: Optional[str] = None
     inquiry_email_enabled: Optional[bool] = None
     inquiry_email_recipients: Optional[str] = None
+    # Seller intelligence (wholesale_seller_intel). Admin-only.
+    qualification_criteria: Optional[Dict[str, Any]] = None
+    nurture_default_days: Optional[int] = None
+    # The workspace's own compliance decision: may it email owners it FOUND
+    # (not ones who wrote in)? Admin-only; off by default.
+    cold_seller_email_confirmed: Optional[bool] = None
 
 
+_POLICY_FIELDS = ("qualification_criteria", "nurture_default_days", "cold_seller_email_confirmed")
 _SMS_PROGRAM_FIELDS = ("public_intake_key", "sms_program_enabled", "sms_sender_number",
                        "sms_messaging_service_sid", "sms_campaign_sid", "sms_brand_sid")
 _ADMIN_ROLES = ("org_admin", "super_admin", "god_admin")
@@ -521,6 +529,17 @@ def _clean_sms_program(db: Session, org_id: str, data: Dict[str, Any]) -> None:
 
 _JSON_SETTINGS = ("markets", "target_states", "target_counties", "target_cities",
                   "target_zips", "pipeline_stages")
+
+
+def _intel_criteria(s):
+    from app.services import wholesale_seller_intel as SI
+    return SI.criteria(s)
+
+
+def _intel_options():
+    from app.services import wholesale_seller_intel as SI
+    return {"criteria": SI.CRITERIA, "timelines": SI.TIMELINE_ORDER,
+            "outcomes": {k: SI.LABELS[k] for k in SI.QUALIFICATION_OUTCOMES}}
 
 
 def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
@@ -573,6 +592,10 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
         "inquiry_assignee_id": getattr(s, "inquiry_assignee_id", None),
         "inquiry_email_enabled": bool(getattr(s, "inquiry_email_enabled", False)),
         "inquiry_email_recipients": getattr(s, "inquiry_email_recipients", None),
+        "qualification_criteria": _intel_criteria(s),
+        "qualification_criteria_options": _intel_options(),
+        "nurture_default_days": getattr(s, "nurture_default_days", None) or 60,
+        "cold_seller_email_confirmed": bool(getattr(s, "cold_seller_email_confirmed", False)),
     }
     for field in _JSON_SETTINGS:
         out[field] = _jsonl(getattr(s, field))
@@ -663,6 +686,22 @@ def patch_settings(payload: SettingsPatch, request: Request,
         data["inquiry_email_recipients"] = ", ".join(addrs) or None
     if "inquiry_email_enabled" in data:
         data["inquiry_email_enabled"] = bool(data["inquiry_email_enabled"])
+    if any(k in data for k in _POLICY_FIELDS):
+        if (getattr(user, "role", None) or "").lower() not in _ADMIN_ROLES:
+            raise HTTPException(status_code=403, detail="Only an administrator can change "
+                                "qualification, nurture or email policy.")
+        from app.services import wholesale_seller_intel as SI
+        if "qualification_criteria" in data:
+            try:
+                crit = SI.validate_criteria(data["qualification_criteria"])
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            data["qualification_criteria"] = json.dumps(crit) if crit else None
+        if "nurture_default_days" in data and data["nurture_default_days"] is not None:
+            if not 1 <= int(data["nurture_default_days"]) <= 730:
+                raise HTTPException(status_code=400, detail="Nurture days must be 1-730.")
+        if "cold_seller_email_confirmed" in data:
+            data["cold_seller_email_confirmed"] = bool(data["cold_seller_email_confirmed"])
     if data.get("high_threshold") is not None and data.get("medium_threshold") is not None \
             and data["high_threshold"] <= data["medium_threshold"]:
         raise HTTPException(status_code=400,
@@ -1362,6 +1401,21 @@ def update_seller(profile_id: str, payload: SellerIn, request: Request,
     profile.completeness = qual["completeness"]
     profile.qualification_reasons = json.dumps(qual["reasons"])
 
+    # An operator's entry is a fact too - HUMAN ENTERED, with who and when.
+    from app.services import wholesale_seller_intel as SI
+    for field, ft in list(SI._READING_FACTS.items()) + [("considering_selling", "willing_to_sell"),
+                                                        ("preferred_contact_method",
+                                                         "preferred_contact")]:
+        if field in data and data[field] is not None:
+            val = data[field]
+            if field == "considering_selling":
+                ft, val = ("willing_to_sell", "yes") if val else ("not_selling", "no")
+            SI._add(db, profile, getattr(deal, "id", None), profile.lead_id, ft, val,
+                    "Entered by %s" % (getattr(user, "full_name", None) or "an operator"),
+                    message_ref="manual", channel="manual", extracted_by="person",
+                    truth_state="human_entered")
+    SI.refresh(db, profile, deal, settings, lead)
+
     db.flush()
     svc.log_event(db, org_id, "seller.updated", actor_type=ACTOR_USER,
                   actor_user_id=user.id, deal_id=getattr(deal, "id", None),
@@ -1373,6 +1427,161 @@ def update_seller(profile_id: str, payload: SellerIn, request: Request,
     out = seller_json(profile, lead)
     out["consent_note"] = consent_note
     return out
+
+
+# ── Seller intelligence: facts, intent, qualification, nurture ─────────────
+
+def _seller_profile(db, org_id: str, profile_id: str) -> WholesaleSellerProfile:
+    profile = (db.query(WholesaleSellerProfile)
+               .filter(WholesaleSellerProfile.id == profile_id,
+                       WholesaleSellerProfile.organization_id == org_id).first())
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    return profile
+
+
+def seller_intelligence(db, org_id: str, profile: WholesaleSellerProfile) -> Dict[str, Any]:
+    """Everything the platform knows about this seller as a SELLER, each part
+    kept apart: what they said (with provenance), how much they want to sell,
+    whether they are qualified, and whether/how we may reach them."""
+    from app.services import contactability as CB
+    from app.services import wholesale_seller_intel as SI
+    lead = db.query(Lead).filter(Lead.id == profile.lead_id, Lead.organization_id == org_id).first()
+    deal = (db.query(WholesaleDeal).filter(WholesaleDeal.seller_profile_id == profile.id,
+                                           WholesaleDeal.organization_id == org_id).first())
+    stored = _jsonl(profile.qualification_detail) if profile.qualification_detail else {}
+    outcome = (stored or {}).get("outcome")
+    # Computed LIVE (the workspace's criteria may have changed since the last
+    # message); the stored copy on the profile is what lists and counts read.
+    intent = SI.seller_intent(db, profile, outcome, lead)
+    qual = SI.qualification(db, profile, deal, svc.resolve_settings(db, org_id, commit=False),
+                            lead, outcome=outcome, intent=intent)
+    contact = CB.for_seller(db, org_id, lead)
+    evo = None
+    if deal is not None:
+        try:
+            from app.models.evosense_models import EvoSenseProperty
+            evo = (db.query(EvoSenseProperty)
+                   .filter(EvoSenseProperty.organization_id == org_id,
+                           EvoSenseProperty.promoted_deal_id == deal.id).first())
+        except Exception:                                  # noqa: BLE001
+            evo = None
+    from app.services import wholesale_command as WC
+    life = WC.seller_lifecycle(lead=lead, profile=SimpleNamespace(
+        qualification_status=qual["status"]), deal=deal, evosense_prop=evo,
+        contactability=contact["state"])
+    cost = None
+    if evo is not None:
+        from app.services.evosense import economics as EC
+        cost = EC.acquisition_cost(db, evo)
+    return {
+        "profile_id": profile.id,
+        "lifecycle": life,
+        "acquisition_cost": cost,
+        "facts": [SI.fact_json(f) for f in SI.current_facts(db, profile)],
+        "seller_intent": intent,
+        "qualification": qual,
+        "qualification_band": profile.qualification_band,
+        "nurture": {"until": profile.nurture_until.isoformat() + "Z" if profile.nurture_until else None,
+                    "reason": profile.nurture_reason,
+                    "due": bool(profile.nurture_until and profile.nurture_until <= datetime.utcnow())},
+        "contactability": contact,
+    }
+
+
+@router.get("/command-center")
+def morning_command_center(include_test: bool = False, days: int = Query(7, ge=1, le=90),
+                           db: Session = Depends(get_db),
+                           user: User = Depends(require_tenant_or_observer)):
+    """The Morning Command Center: NEEDS YOU first, then what got better, what
+    is stuck, what comes back today, what it cost and what moved. Read-only."""
+    from app.services import wholesale_command as WC
+    org_id = svc.read_org_id(db, user)
+    if not org_id:
+        raise HTTPException(status_code=409, detail="No customer organization selected.")
+    return WC.command_center(db, org_id, include_test=include_test, days=days)
+
+
+@router.get("/needs-you")
+def needs_you_feed(include_test: bool = False, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_or_observer)):
+    from app.services import wholesale_command as WC
+    org_id = svc.read_org_id(db, user)
+    if not org_id:
+        raise HTTPException(status_code=409, detail="No customer organization selected.")
+    items = WC.needs_you(db, org_id, include_test=include_test)
+    return {"count": len(items), "items": items}
+
+
+@router.get("/sellers/{profile_id}/intelligence")
+def get_seller_intelligence(profile_id: str, db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_or_observer)):
+    org_id = svc.read_org_id(db, user)
+    return seller_intelligence(db, org_id, _seller_profile(db, org_id, profile_id))
+
+
+@router.post("/sellers/{profile_id}/facts/{fact_id}/verify")
+def verify_seller_fact(profile_id: str, fact_id: str, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user),
+                       _guard: User = Depends(require_not_observation)):
+    """A PERSON confirms what the seller said (e.g. on a call). Only a person
+    can make a seller-stated fact verified."""
+    from app.models.wholesale_models import WholesaleSellerFact
+    org_id = svc.write_org_id(db, user)
+    profile = _seller_profile(db, org_id, profile_id)
+    f = (db.query(WholesaleSellerFact)
+         .filter(WholesaleSellerFact.id == fact_id, WholesaleSellerFact.organization_id == org_id,
+                 WholesaleSellerFact.profile_id == profile.id).first())
+    if f is None:
+        raise HTTPException(status_code=404, detail="Fact not found")
+    f.verified_at = datetime.utcnow()
+    f.verified_by_id = user.id
+    svc.log_event(db, org_id, "seller.fact_verified", actor_type=ACTOR_USER, actor_user_id=user.id,
+                  property_id=profile.property_id, summary="Verified: %s" % f.fact_type.replace("_", " "),
+                  details={"fact_id": f.id, "value": f.value})
+    db.commit()
+    return seller_intelligence(db, org_id, profile)
+
+
+class NurtureIn(BaseModel):
+    days: Optional[int] = None
+    until: Optional[datetime] = None
+    reason: Optional[str] = None
+    clear: bool = False
+
+
+@router.post("/sellers/{profile_id}/nurture")
+def set_seller_nurture(profile_id: str, payload: NurtureIn, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user),
+                       _guard: User = Depends(require_not_observation)):
+    """Put a seller into nurture ("not now" is not "dead"), or take them out.
+    Nothing is sent by this; a DNC seller cannot be put back into play."""
+    from app.services import wholesale_seller_intel as SI
+    org_id = svc.write_org_id(db, user)
+    profile = _seller_profile(db, org_id, profile_id)
+    lead = db.query(Lead).filter(Lead.id == profile.lead_id, Lead.organization_id == org_id).first()
+    if payload.clear:
+        SI.clear_nurture(profile)
+    else:
+        if lead is not None and lead.status == "dnc":
+            raise HTTPException(status_code=409, detail="This seller asked not to be contacted; "
+                                "nurture would schedule contact they refused.")
+        if payload.days is not None and not 1 <= payload.days <= 730:
+            raise HTTPException(status_code=400, detail="Nurture days must be 1-730.")
+        settings = svc.resolve_settings(db, org_id, commit=False)
+        SI.set_nurture(profile, days=payload.days or SI.nurture_days(settings, profile),
+                       until=payload.until, reason=payload.reason)
+    deal = (db.query(WholesaleDeal).filter(WholesaleDeal.seller_profile_id == profile.id,
+                                           WholesaleDeal.organization_id == org_id).first())
+    SI.refresh(db, profile, deal, svc.resolve_settings(db, org_id, commit=False), lead)
+    svc.log_event(db, org_id, "seller.nurture_cleared" if payload.clear else "seller.nurture",
+                  actor_type=ACTOR_USER, actor_user_id=user.id, property_id=profile.property_id,
+                  deal_id=getattr(deal, "id", None),
+                  summary=("Nurture cleared" if payload.clear else "Nurture until %s"
+                           % profile.nurture_until.strftime("%b %d, %Y")),
+                  details={"reason": profile.nurture_reason})
+    db.commit()
+    return seller_intelligence(db, org_id, profile)
 
 
 class OutreachIn(BaseModel):

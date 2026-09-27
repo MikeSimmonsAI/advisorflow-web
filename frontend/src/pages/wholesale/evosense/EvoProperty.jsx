@@ -433,6 +433,15 @@ export default function EvoProperty() {
                 {c.status !== 'active' ? <span className="evo-contact__meta" style={{ color: 'var(--evo-danger-ink)' }}>{humanize(c.status)} — {c.status_reason}</span> : null}
               </div>
             ))}
+            {d.contactability ? (
+              <div style={{ marginTop: 12 }} className="evo-small">
+                <span>Contactability: </span>
+                <strong style={{ color: String(d.contactability.state).startsWith('CONTACTABLE') ? undefined : 'var(--evo-warning-ink)' }}>
+                  {d.contactability.label}</strong>
+                {(d.contactability.reasons || []).map((r, i) => <div key={i} className="evo-muted">{r}</div>)}
+                <div className="evo-muted" style={{ marginTop: 4 }}>Having a number is not permission to use it; this says which channel, if any, is permitted and working.</div>
+              </div>
+            ) : null}
             {d.sms_eligibility ? (
               <div style={{ marginTop: 12 }} className="evo-small">
                 <span>SMS: </span>

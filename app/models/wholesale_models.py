@@ -234,6 +234,10 @@ class WholesaleSettings(Base):
     # here by an admin. OFF by default: until it is confirmed, email is only
     # ever eligible for sellers who reached out or said yes.
     cold_seller_email_confirmed = Column(Boolean, nullable=False, default=False)
+    # QUALIFICATION CRITERIA (wholesale_seller_intel.DEFAULT_CRITERIA): what a
+    # seller must have told us before they are QUALIFIED. JSON; NULL = defaults.
+    qualification_criteria = Column(Text, nullable=True)
+    nurture_default_days = Column(Integer, nullable=True)       # NULL = 60
     # The seller SMS program. OFF by default and fail-closed: nothing is texted
     # under this program until an admin turns it on AND a Messaging Service is
     # configured AND the recipient holds program consent. The sender number is
@@ -424,6 +428,22 @@ class WholesaleSellerProfile(Base):
     needs_human = Column(Boolean, nullable=False, default=False)
     needs_human_reason = Column(String, nullable=True)
 
+    # SELLER INTENT - separate from the property's opportunity and from how
+    # reachable the seller is. From seller-stated facts only (see
+    # wholesale_seller_intel); explained in the detail JSON.
+    seller_intent = Column(Integer, nullable=True)
+    seller_intent_detail = Column(Text, nullable=True)
+    # QUALIFICATION OUTCOME (wholesale_seller_intel.QUALIFICATION_OUTCOMES):
+    # QUALIFIED | NEEDS_MORE_INFORMATION | NURTURE | NOT_INTERESTED |
+    # DISQUALIFIED | HUMAN_REVIEW, with what is still unknown. The band above
+    # stays as the score's summary; this is the decision a person acts on.
+    qualification_status = Column(String, nullable=True)
+    qualification_detail = Column(Text, nullable=True)
+    # NURTURE: "not now" is not "dead". History is kept; nothing restarts
+    # against an opt-out.
+    nurture_until = Column(DateTime, nullable=True)
+    nurture_reason = Column(String, nullable=True)
+
     is_test = Column(Boolean, nullable=False, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -433,6 +453,45 @@ class WholesaleSellerProfile(Base):
         UniqueConstraint("property_id", "lead_id", name="uq_wsseller_property_lead"),
         Index("ix_wsseller_org_lead", "organization_id", "lead_id"),
         Index("ix_wsseller_org_property", "organization_id", "property_id"),
+    )
+
+
+class WholesaleSellerFact(Base):
+    """ONE thing a seller told us, with where it came from.
+
+    Every fact keeps its PROVENANCE: the words it was read from (`quote`), the
+    message it came from (`message_ref`: a platform `replies.id`, "form:<id>"
+    for the inquiry form, or "manual"), how it was read (`extracted_by`:
+    rules | ai | person | form) and how far it is trusted (`truth_state`,
+    EvoSense's vocabulary: seller_stated | human_entered | ...). An AI reading
+    of a seller's words is SELLER STATED, never verified: `verified_at` is set
+    only by a person. A newer fact of the same type supersedes, never deletes.
+    """
+
+    __tablename__ = "wholesale_seller_facts"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    profile_id = Column(String, ForeignKey("wholesale_seller_profiles.id", ondelete="CASCADE"),
+                        nullable=False)
+    deal_id = Column(String, nullable=True)
+    lead_id = Column(String, nullable=True)
+    fact_type = Column(String, nullable=False)
+    value = Column(Text, nullable=True)
+    quote = Column(Text, nullable=True)
+    message_ref = Column(String, nullable=True)
+    source_channel = Column(String, nullable=True)       # sms|email|form|manual|evosense
+    extracted_by = Column(String, nullable=True)         # rules|ai|person|form
+    truth_state = Column(String, nullable=False, default="seller_stated")
+    confidence = Column(Integer, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+    verified_by_id = Column(String, nullable=True)
+    superseded = Column(Boolean, nullable=False, default=False)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_wsfact_org_profile", "organization_id", "profile_id"),
     )
 
 

@@ -682,7 +682,9 @@ def reopen_deal(db: Session, org_id: str, prop: WholesaleProperty, previous: Who
 def apply_seller_reply(db: Session, org_id: str, deal: WholesaleDeal,
                        message_text: str, *, user: Optional[User] = None,
                        mode: str = "background",
-                       record_inbound: bool = False) -> Dict[str, Any]:
+                       record_inbound: bool = False,
+                       reply_id: Optional[str] = None,
+                       channel: str = "sms") -> Dict[str, Any]:
     """Read an inbound seller message and update everything it touches.
 
     This is the seam between the platform's existing conversation plumbing and
@@ -727,8 +729,10 @@ def apply_seller_reply(db: Session, org_id: str, deal: WholesaleDeal,
     # for a message that actually arrived over a wire.
     if record_inbound and lead is not None:
         from app.models.models import Reply
-        db.add(Reply(lead_id=lead.id, body=message_text, source="manual"))
+        rec = Reply(lead_id=lead.id, body=message_text, source="manual")
+        db.add(rec)
         db.flush()
+        reply_id, channel = rec.id, "manual"
 
     if not settings.ai_qualification_enabled:
         reading = wholesale_ai._deterministic_read(message_text)
@@ -759,15 +763,50 @@ def apply_seller_reply(db: Session, org_id: str, deal: WholesaleDeal,
     profile.needs_human = bool(reading.get("needs_human"))
     profile.needs_human_reason = reading.get("needs_human_reason")
 
+    # ── What the seller said, with provenance (wholesale_seller_intel) ──────
+    # Every fact this message established is written with the words it came
+    # from and the message it came from. The outcome is EvoSense's reading of
+    # the same words - one reader of seller language across the platform.
+    from app.services import wholesale_seller_intel as SI
+    heard = SI.record_message_facts(db, profile, deal, lead, message_text, reading,
+                                    message_ref=("reply:%s" % reply_id) if reply_id else "manual",
+                                    channel=channel)
+    outcome = heard["outcome"]
+    if reading.get("source") != "ai" and reading.get("intent") == wholesale_ai.INTENT_NEEDS_HUMAN \
+            and outcome not in (None, "UNKNOWN"):
+        # The pattern reader found nothing, but EvoSense's reader of the same
+        # words did (e.g. "can you make me an offer?"): that is not a message
+        # nobody can understand, so it does not need a person for THAT reason.
+        profile.needs_human = False
+        profile.needs_human_reason = None
+
     # ── A refusal is acted on, not just recorded ────────────────────────────
+    # Either reader recognising a STOP is enough: erring toward honouring an
+    # opt-out is the only acceptable direction to be wrong in.
     suppression_note = None
-    if reading.get("intent") == wholesale_ai.INTENT_DO_NOT_CONTACT and lead is not None:
+    if (reading.get("intent") == wholesale_ai.INTENT_DO_NOT_CONTACT or outcome == "DO_NOT_CONTACT") \
+            and lead is not None:
         lead.status = "dnc"
-        try:
-            from app.services.compliance_service import add_suppression  # noqa: F401
-            suppression_note = "Lead marked DNC."
-        except Exception:                                        # noqa: BLE001
-            suppression_note = "Lead marked DNC."
+        suppression_note = "Lead marked DNC."
+        # The platform's REAL suppression, not only a flag on this lead: the
+        # number is suppressed for the workspace and any seller-program consent
+        # is withdrawn, so no path - and no later lead with this number - can
+        # text it.
+        if lead.phone:
+            try:
+                from app.models.models import SuppressionSource
+                from app.services import compliance_service, wholesale_sms
+                if compliance_service.usable_us_phone(lead.phone):
+                    compliance_service.add_suppression_entry(
+                        db, org_id, lead.phone, "Seller asked not to be contacted",
+                        source=SuppressionSource.REPLY_STOP)
+                wholesale_sms.record_opt_out(db, org_id, lead.phone,
+                                             keyword=(message_text or "").strip()[:40],
+                                             reason="Seller asked not to be contacted",
+                                             source="manual")
+                suppression_note = "Lead marked DNC; number suppressed and consent withdrawn."
+            except Exception as exc:                            # noqa: BLE001
+                log.warning("wholesale: suppression on opt-out failed: %s", exc)
         # AN OPT-OUT STOPS THE SEQUENCE, NOT JUST THE NEXT MESSAGE. The cadence
         # runner refuses a DNC lead on its own, but leaving a row in `active` on
         # somebody who said stop is a schedule that only luck is keeping quiet.
@@ -781,18 +820,32 @@ def apply_seller_reply(db: Session, org_id: str, deal: WholesaleDeal,
                                    wholesale_ai.INTENT_WRONG_PERSON):
         _set_stage_unchecked(db, deal, pipeline.STAGE_DEAD)
         deal.lost_reason = reading.get("intent")
+    elif outcome in SI.NURTURE_OUTCOMES or reading.get("intent") == wholesale_ai.INTENT_MAYBE_LATER:
+        # NOT NOW IS NOT DEAD. The seller is kept, with the reason and a date
+        # to come back; nothing is sent by this, and a later opt-out still wins.
+        SI.set_nurture(profile, days=SI.nurture_days(settings, profile),
+                       reason=SI.NURTURE_OUTCOMES.get(outcome, "Maybe later"))
+        log_event(db, org_id, "seller.nurture", actor_type=ACTOR_SYSTEM,
+                  actor_label="seller reply reader", deal_id=deal.id,
+                  summary="Not now - nurture until %s" % profile.nurture_until.strftime("%b %d, %Y"),
+                  details={"outcome": outcome, "quote": (message_text or "")[:200]})
 
     qual = analysis.qualify_seller(profile, deal, settings, lead)
     profile.qualification_band = qual["band"]
     profile.qualification_score = qual["score"]
     profile.completeness = qual["completeness"]
     profile.qualification_reasons = _json(qual["reasons"])
+    intel = SI.refresh(db, profile, deal, settings, lead, outcome=outcome)
+    status = intel["qualification"]["status"]
 
     # ── Automation, each step behind its own switch ─────────────────────────
+    # A deal moves to QUALIFIED only when the qualification OUTCOME says so -
+    # the score band alone is not enough, because a high score with the
+    # timeline still unknown is a question to ask, not a qualified seller.
     moved = None
     if settings.auto_qualify_on_reply and deal.stage not in (pipeline.STAGE_DEAD,
                                                              pipeline.STAGE_CLOSED):
-        if qual["band"] in ("high", "medium") and deal.stage in (
+        if status == SI.QUALIFIED and qual["band"] in ("high", "medium") and deal.stage in (
                 "ready_for_outreach", "outreach_active", "seller_engaged", "qualifying"):
             moved = _set_stage_unchecked(db, deal, "qualified", actor_type=ACTOR_AUTOMATION)
         elif deal.stage in ("ready_for_outreach", "outreach_active"):
@@ -810,13 +863,18 @@ def apply_seller_reply(db: Session, org_id: str, deal: WholesaleDeal,
               summary=(reading.get("summary") or "")[:200],
               before=before,
               after={"band": qual["band"], "score": qual["score"],
-                     "intent": reading.get("intent"), "stage": deal.stage},
+                     "intent": reading.get("intent"), "stage": deal.stage,
+                     "qualification_status": status,
+                     "seller_intent": intel["intent"].get("value"),
+                     "facts": heard["facts"], "outcome": outcome},
               details={"reader": reading.get("source"),
                        "ai_unavailable_reason": reading.get("ai_unavailable_reason"),
                        "reasons": qual["reasons"]})
 
     return {"reading": reading, "qualification": qual, "stage": deal.stage,
-            "moved_to": moved, "suppression": suppression_note}
+            "moved_to": moved, "suppression": suppression_note,
+            "qualification_outcome": intel["qualification"], "seller_intent": intel["intent"],
+            "facts": heard["facts"], "outcome": outcome}
 
 
 # ── Seller cadence ──────────────────────────────────────────────────────────
