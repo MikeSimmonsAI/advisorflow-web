@@ -38,6 +38,7 @@ export const WORLDS = {
       ['/wholesale', 'Deal Operations', true],
       ['/wholesale/properties', 'Properties'],
       ['/wholesale/buyers', 'Cash Buyers'],
+      ['/wholesale/exceptions', 'Exceptions'],
       ['/wholesale/closing', 'Contracts & Closing'],
       ['/wholesale/dispositions', 'Dispositions'],
     ],

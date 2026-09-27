@@ -22,7 +22,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from app.models.evosense_models import EvoSenseProperty, EvoSenseRun, EvoSenseStrategy
@@ -463,12 +463,52 @@ CSV_COLUMNS = ("street_address", "unit", "city", "state", "zip_code", "county", 
                "property_type", "owner_name", "mailing_street", "mailing_city", "mailing_state",
                "mailing_zip", "estimated_value", "mortgage_balance", "last_sale_date", "signals",
                "record_id")
+# Evidence columns a DISTRESS LIST may carry. They describe the list's claim;
+# they are stored as the signal's evidence, never as verified fact.
+EVIDENCE_COLUMNS = ("signal_date", "case_number", "case_status", "amount")
+
+# ── Distress lists: one hook, not one importer per county ──────────────────
+# A tax-sale list, a code-enforcement export, a clerk's foreclosure postings,
+# a driving-for-dollars sheet: each is the SAME flow - a file of addresses that
+# says "this property has this distress" - differing only in which signal it
+# asserts. So each is a declared LIST KIND of the one EvoSense import (which
+# runs the same ingest -> identity/dedupe -> signals -> scoring as every
+# provider), and a new source is a new entry here, not new code. A row's own
+# `signals` column, when present, still wins over the list's default.
+DISTRESS_LISTS: Dict[str, Dict[str, str]] = {
+    "tax_delinquent":      {"label": "Delinquent tax list", "signal": "TAX_DELINQUENT"},
+    "tax_sale":            {"label": "Tax-sale list", "signal": "TAX_DELINQUENT"},
+    "tax_suit":            {"label": "Tax suit filings", "signal": "TAX_SUIT"},
+    "pre_foreclosure":     {"label": "Pre-foreclosure / notice of default", "signal": "PRE_FORECLOSURE"},
+    "foreclosure_filing":  {"label": "Foreclosure / trustee-sale postings", "signal": "PRE_FORECLOSURE"},
+    "code_enforcement":    {"label": "Code enforcement cases", "signal": "CODE_VIOLATION"},
+    "municipal_violation": {"label": "Municipal violations", "signal": "CODE_VIOLATION"},
+    "lien":                {"label": "Liens (clerk / public record)", "signal": "LIEN"},
+    "probate":             {"label": "Probate filings", "signal": "PROBATE"},
+    "driving_for_dollars": {"label": "Driving for dollars", "signal": "DISTRESSED_CONDITION"},
+}
+
+
+def distress_list_kinds() -> List[Dict[str, str]]:
+    from app.services.evosense.signals import CATALOG
+    return [{"key": k, "label": v["label"], "signal": v["signal"],
+             "signal_label": CATALOG[v["signal"]]["label"]} for k, v in DISTRESS_LISTS.items()]
 
 
 def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: str = "upload.csv",
-               max_rows: int = 5000) -> Dict[str, Any]:
+               max_rows: int = 5000, list_kind: Optional[str] = None,
+               list_source: Optional[str] = None) -> Dict[str, Any]:
     """A property list through the SAME ingest as every provider. Re-importing
-    the same file is idempotent (row identity = record_id, or a hash of the row)."""
+    the same file is idempotent (row identity = record_id, or a hash of the row).
+
+    `list_kind` declares a DISTRESS LIST (see DISTRESS_LISTS): rows with no
+    `signals` column value assert that list's signal, carrying the row's own
+    evidence (signal_date, case_number, case_status, amount). The list kind is
+    part of the row identity, so the same address on a tax list and on a code
+    list is two pieces of evidence, not one overwriting the other."""
+    if list_kind is not None and list_kind not in DISTRESS_LISTS:
+        raise ValueError("Unknown list kind %r. Known: %s" % (list_kind, ", ".join(DISTRESS_LISTS)))
+    kind = DISTRESS_LISTS.get(list_kind) if list_kind else None
     reader = csv.DictReader(io.StringIO(content))
     missing = [c for c in ("street_address",) if c not in (reader.fieldnames or [])]
     if missing:
@@ -490,7 +530,7 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
             row.get(c, "") for c in CSV_COLUMNS[:8]).lower().encode()).hexdigest()[:20]
         rec = {k: row.get(k) or None for k in ("street_address", "unit", "city", "state", "zip_code",
                                                "county", "parcel_apn", "property_type", "last_sale_date")}
-        rec["source_reference"] = "csv:%s" % ref
+        rec["source_reference"] = ("csv:%s:%s" % (list_kind, ref)) if list_kind else "csv:%s" % ref
         try:
             if row.get("estimated_value"):
                 rec["valuation"] = {"value": int(float(row["estimated_value"].replace(",", "").replace("$", ""))),
@@ -507,8 +547,29 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
                             "mailing_state": row.get("mailing_state"), "mailing_zip": row.get("mailing_zip")}
         sigs = [s.strip().upper() for s in (row.get("signals") or "").replace(",", ";").split(";") if s.strip()]
         from app.services.evosense.signals import CATALOG
-        rec["signals"] = [{"type": s, "confidence": 60, "value": "from imported list"}
-                          for s in sigs if s in CATALOG]
+        if not sigs and kind:
+            sigs = [kind["signal"]]
+        if kind:
+            case = (row.get("case_number") or "").strip()
+            when = _parse_list_date(row.get("signal_date"))
+            if row.get("signal_date") and when is None:
+                counts["rejected"] += 1
+                rejected.append({"line": i, "reason": "signal_date is not a date (use YYYY-MM-DD)"})
+                continue
+            what = "%s - %s" % (kind["label"], list_source or filename)
+            rec["signals"] = [{
+                "type": s, "confidence": 60, "value": what,
+                "ref": ("list:%s:%s" % (list_kind, case)) if case else None,
+                "effective_at": when.isoformat() if when else None,
+                "case_status": (row.get("case_status") or "").strip() or None,
+                "raw": (row.get("amount") or "").strip() or None,
+                "evidence_basis": "imported list",
+                "limitations": "As stated by an imported %s (%s); not verified against the "
+                               "primary record." % (kind["label"].lower(), list_source or filename),
+            } for s in sigs if s in CATALOG]
+        else:
+            rec["signals"] = [{"type": s, "confidence": 60, "value": "from imported list"}
+                              for s in sigs if s in CATALOG]
         outcome, prop = IN.ingest(db, org_id, provider, C.PROPERTY_SEARCH, rec,
                                   strategy_id=getattr(strategy, "id", None), user=user)
         counts[outcome] = counts.get(outcome, 0) + 1
@@ -517,10 +578,23 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
                 prop.best_strategy_id = strategy.id
             EV.rescore(db, prop, strategy)
     C.log_event(db, org_id, "import.csv", user=user, actor_type=C.ACTOR_USER,
-                summary="Imported %s rows from %s: %s new, %s merged, %s for review, %s rejected"
-                % (counts["rows"], filename, counts["created"], counts["merged"], counts["review"],
-                   counts["rejected"]), details=counts)
-    return {"counts": counts, "rejected": rejected[:50]}
+                summary="Imported %s rows from %s%s: %s new, %s merged, %s for review, %s rejected"
+                % (counts["rows"], filename, (" as %s" % kind["label"]) if kind else "",
+                   counts["created"], counts["merged"], counts["review"], counts["rejected"]),
+                details=dict(counts, list_kind=list_kind, list_source=list_source))
+    return {"counts": counts, "rejected": rejected[:50], "list_kind": list_kind}
+
+
+def _parse_list_date(value):
+    v = (value or "").strip()
+    if not v:
+        return None
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(v, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 # ── background runs and pilot rollback ─────────────────────────────────────

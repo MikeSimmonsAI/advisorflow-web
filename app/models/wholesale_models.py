@@ -1375,3 +1375,146 @@ class WholesaleContractTemplate(Base):
     __table_args__ = (
         Index("ix_ws_contract_templates_org", "organization_id", "is_active"),
     )
+
+
+# ── Funding / capital partners (P5) ─────────────────────────────────────────
+#
+# A funding partner is a PERSON OR COMPANY IN THE CONTACT DATABASE - an
+# `org_contacts` row made by Universal Intake with the built-in "partner"
+# classification (record class PARTNER, never a Lead) - plus this 1:1 side
+# table of lending-specific facts, the same way `WholesaleSellerProfile`
+# extends a Lead. It is not a second CRM and not a lending platform: EvoSys
+# does not lend, approve, price or guarantee anything. These rows record who a
+# third-party lender or capital source SAYS they fund, and what actually
+# happened when a deal was sent to them.
+
+FUNDING_PRODUCTS = ("dscr", "fix_flip", "hard_money", "bridge", "ground_up",
+                    "land_development", "private_capital", "transactional")
+FUNDING_SUBMISSION_STATUSES = ("submitted", "info_requested", "term_sheet", "approved",
+                               "declined", "funded", "withdrawn", "no_response")
+
+
+class WholesaleFundingPartner(Base):
+    """What a funding partner says they fund. Stated criteria, labelled as such;
+    `verified` is a person's act, with their name and the time on it."""
+
+    __tablename__ = "wholesale_funding_partners"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    org_contact_id = Column(String, ForeignKey("org_contacts.id", ondelete="SET NULL"), nullable=True)
+    name = Column(String, nullable=False)           # company or person, as given
+    contact_person = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    products = Column(Text, nullable=True)          # JSON list of FUNDING_PRODUCTS
+    states = Column(Text, nullable=True)            # JSON list of state codes
+    markets = Column(Text, nullable=True)           # JSON list of free-text markets
+    property_types = Column(Text, nullable=True)    # JSON list
+    min_loan = Column(Numeric(14, 2), nullable=True)
+    max_loan = Column(Numeric(14, 2), nullable=True)
+    max_ltv_pct = Column(Numeric(5, 2), nullable=True)
+    max_ltc_pct = Column(Numeric(5, 2), nullable=True)
+    min_credit_score = Column(Integer, nullable=True)
+    typical_close_days = Column(Integer, nullable=True)
+    referral_relationship = Column(String, nullable=True)   # e.g. referral fee agreement, none
+    verified = Column(Boolean, nullable=False, default=False)
+    verified_at = Column(DateTime, nullable=True)
+    verified_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    last_contact_at = Column(DateTime, nullable=True)
+    notes = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_ws_funding_partners_org", "organization_id", "is_active"),
+    )
+
+
+class WholesaleFundingSubmission(Base):
+    """One deal sent to one funding partner, and what came back. The partner's
+    decision is theirs; this row only records it."""
+
+    __tablename__ = "wholesale_funding_submissions"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    deal_id = Column(String, ForeignKey("wholesale_deals.id", ondelete="CASCADE"), nullable=False)
+    partner_id = Column(String, ForeignKey("wholesale_funding_partners.id", ondelete="CASCADE"),
+                        nullable=False)
+    product = Column(String, nullable=True)
+    amount_requested = Column(Numeric(14, 2), nullable=True)
+    status = Column(String, nullable=False, default="submitted")
+    submitted_at = Column(DateTime, nullable=True)
+    responded_at = Column(DateTime, nullable=True)   # first answer of any kind
+    decided_at = Column(DateTime, nullable=True)
+    approved_amount = Column(Numeric(14, 2), nullable=True)
+    decline_reason = Column(String, nullable=True)
+    funded_at = Column(DateTime, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_ws_funding_subs_org_deal", "organization_id", "deal_id"),
+        Index("ix_ws_funding_subs_partner", "organization_id", "partner_id"),
+    )
+
+
+# ── Exception queue (P6): automation handles volume, a person handles exceptions ─
+#
+# ONE row = one thing automation could not settle and a person must: verify an
+# owner, research a property, check a buyer's proof of funds, call a seller
+# back. A VA sees the exceptions ASSIGNED TO THEM with just enough of the
+# subject to do the job - not the whole CRM. The owner sees escalations. Every
+# state change is a wholesale event (who, when, what outcome).
+#
+# Not a second task system: the platform has no human task table (AI work items
+# belong to AI employees), and this is deliberately narrow - an exception has a
+# kind, a subject, an assignee and one of four outcomes.
+
+EXCEPTION_KINDS = (
+    "verify_owner", "verify_contact", "property_research", "bad_or_missing_data",
+    "missing_photos_docs", "buyer_criteria_verification", "proof_of_funds_verification",
+    "buyer_research", "missing_disposition_data", "seller_callback_requested",
+    "ai_exception", "title_ownership_anomaly", "escalate_to_owner",
+)
+EXCEPTION_OUTCOMES = ("complete", "unable_to_verify", "needs_more_info", "escalate")
+EXCEPTION_OPEN_STATUSES = ("open", "assigned", "needs_more_info", "escalated")
+
+
+class WholesaleWorkException(Base):
+    __tablename__ = "wholesale_work_exceptions"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    kind = Column(String, nullable=False)
+    subject_type = Column(String, nullable=False)     # property, deal, buyer, lead, evosense_property
+    subject_id = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    detail = Column(Text, nullable=True)
+    priority = Column(Integer, nullable=False, default=50)   # lower = sooner
+    status = Column(String, nullable=False, default="open")
+    assigned_to_id = Column(String, ForeignKey("users.id"), nullable=True)
+    assigned_at = Column(DateTime, nullable=True)
+    outcome = Column(String, nullable=True)
+    outcome_note = Column(Text, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    resolved_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    raised_by_actor = Column(String, nullable=False, default=ACTOR_SYSTEM)
+    raised_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    source = Column(String, nullable=True)            # which rule or screen raised it
+    due_at = Column(DateTime, nullable=True)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_ws_exceptions_org_status", "organization_id", "status"),
+        Index("ix_ws_exceptions_assignee", "organization_id", "assigned_to_id", "status"),
+        Index("ix_ws_exceptions_subject", "organization_id", "subject_type", "subject_id"),
+    )

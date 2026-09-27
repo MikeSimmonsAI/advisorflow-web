@@ -182,6 +182,13 @@ CAPABILITIES: Dict[str, Capability] = dict([
          why="Administrative housekeeping Ã¢â‚¬â€ archive batches, purge old staging "
              "data. Separate from commit so batch management does not require "
              "commit authority."),
+    # ── Wholesale exception queue (feature capability — role-resolved) ──────
+    _cap("exception_queue_work",
+         "Work the exceptions assigned to you (verify, research, record an outcome)",
+         requires_feature=None, delegable=True,
+         why="The VA seat: a person who resolves what automation could not, "
+             "seeing only the exceptions assigned to them. Org admins qualify by "
+             "role and see, assign and escalate the whole queue."),
     # ── Demo Suite entitlement (platform-scoped) ────────────────────────────
     #
     # DEMO ACCESS IS NOT GOD ACCESS, AND IT IS NOT CUSTOMER ACCESS. It is the

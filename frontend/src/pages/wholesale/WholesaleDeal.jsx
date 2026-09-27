@@ -23,6 +23,7 @@ import { AuthImage } from './wsFiles'
 import { PropertyWorkspace } from './wsProperty'
 import { CompsWorkspace } from './wsComps'
 import { NegotiationLedger } from './wsOffers'
+import { FundingWorkspace } from './wsFunding'
 import { BuyerBoard } from './wsBuyerBoard'
 import { ClosingWorkspace } from './wsClosing'
 import { SellerTimeline } from './wsTimeline'
@@ -38,6 +39,7 @@ const TABS = [
   ['seller', 'Seller & conversation'],
   ['analysis', 'Analysis & comps'],
   ['offer', 'Offer & approvals'],
+  ['funding', 'Funding'],
   ['documents', 'Contracts & documents'],
   ['buyers', 'Buyer matching'],
   ['closing', 'Assignment & closing'],
@@ -182,6 +184,7 @@ export default function WholesaleDeal() {
       {tab === 'seller' ? <SellerTab room={room} act={act} busy={busy} /> : null}
       {tab === 'analysis' ? <AnalysisTab room={room} act={act} busy={busy} /> : null}
       {tab === 'offer' ? <OfferTab room={room} act={act} busy={busy} /> : null}
+      {tab === 'funding' ? <FundingWorkspace deal={room.deal} /> : null}
       {tab === 'documents' ? <DocumentsTab room={room} act={act} busy={busy} /> : null}
       {tab === 'buyers' ? <BuyersTab room={room} act={act} busy={busy} /> : null}
       {tab === 'closing' ? <ClosingTab room={room} act={act} busy={busy} /> : null}

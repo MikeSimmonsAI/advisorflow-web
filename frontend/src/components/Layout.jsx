@@ -160,6 +160,7 @@ const NAV_GROUPS = [
       { to: '/wholesale', label: 'Deal Operations', icon: 'activity', featureKey: 'wholesale_real_estate', end: true },
       { to: '/wholesale/properties', label: 'Properties', icon: 'home', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/buyers', label: 'Cash Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/exceptions', label: 'Exceptions', icon: 'check-square', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/closing', label: 'Contracts & Closing', icon: 'file-text', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/dispositions', label: 'Dispositions', icon: 'send', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/settings', label: 'Wholesale Settings', icon: 'sliders', adminOnly: true, featureKey: 'wholesale_real_estate' },

@@ -90,6 +90,7 @@ import WholesaleCommand, { DealOperationsClosing, DealOperationsDispositions } f
 import WholesaleProperties from './pages/wholesale/WholesaleProperties'
 import WholesaleDeal from './pages/wholesale/WholesaleDeal'
 import WholesaleBuyers from './pages/wholesale/WholesaleBuyers'
+import WholesaleExceptions from './pages/wholesale/WholesaleExceptions'
 import WholesaleSettings from './pages/wholesale/WholesaleSettings'
 // Wholesale Phase 7 — EvoSense acquisition engine. Same feature key.
 import EvoCommand from './pages/wholesale/evosense/EvoCommand'
@@ -1051,6 +1052,7 @@ export default function App() {
         <Route path="/wholesale/closing" element={<ProtectedRoute feature="wholesale_real_estate"><DealOperationsClosing /></ProtectedRoute>} />
         <Route path="/wholesale/dispositions" element={<ProtectedRoute feature="wholesale_real_estate"><DealOperationsDispositions /></ProtectedRoute>} />
         <Route path="/wholesale/buyers" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleBuyers /></ProtectedRoute>} />
+        <Route path="/wholesale/exceptions" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleExceptions /></ProtectedRoute>} />
         <Route path="/wholesale/settings" element={<ProtectedRoute feature="wholesale_real_estate" requireAdmin><WholesaleSettings /></ProtectedRoute>} />
         <Route path="/wholesale/deals/:dealId" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleDeal /></ProtectedRoute>} />
         {/* Phase 7 EvoSense — discovery before a deal exists. */}

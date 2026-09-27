@@ -53,9 +53,9 @@ from app.services.intake.context import IntakeContext
 log = logging.getLogger(__name__)
 
 HEADERS = ["First Name", "Last Name", "Email", "Phone", "Street Address", "City", "State",
-           "Zip Code", "Notes"]
+           "Zip Code", "Notes", "Company"]
 _KEYS = ["first_name", "last_name", "email", "phone", "street_address", "city", "state",
-         "zip_code", "notes"]
+         "zip_code", "notes", "company"]
 
 
 @dataclass

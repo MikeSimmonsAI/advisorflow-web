@@ -222,8 +222,24 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     db_session.add(fact)
     db_session.commit()
 
+    # P5 / P6: a funding partner, a submission and an exception of A's.
+    partner = ok(client.post("/wholesale/funding/partners", headers=auth_headers,
+                             json={"name": "Victim Funding", "email": "vf@example.com",
+                                   "is_test": True}))
+    submission = ok(client.post("/wholesale/funding/deals/%s/submissions" % deal_id,
+                                headers=auth_headers, json={"partner_id": partner["id"]}))
+    from app.models.wholesale_models import WholesaleWorkException
+    exc = WholesaleWorkException(organization_id=sample_org.id, kind="verify_owner",
+                                 subject_type="property", subject_id=prop["id"],
+                                 title="Victim exception")
+    db_session.add(exc)
+    db_session.commit()
+
     return {
         **es_ids,
+        "funding_partner_id": partner["id"],
+        "funding_submission_id": submission["id"],
+        "exception_id": exc.id,
         "fact_id": fact.id,
         "file_id": photo["id"],
         "template_id": an_id(template, "template"),
@@ -381,7 +397,24 @@ def attacks(ids):
          {"status": "approved"}),
         ("post", "/wholesale/documents/%s/signature-request" % ids["document_id"],
          {"parties": [{"name": "attacker", "email": "a@example.com"}]}),
-    ] + evosense_attacks(ids)
+    ] + evosense_attacks(ids) + funding_and_exception_attacks(ids)
+
+
+def funding_and_exception_attacks(ids):
+    """P5 funding partners / submissions and the P6 exception queue."""
+    d = ids["deal_id"]
+    return [
+        ("patch", "/wholesale/funding/partners/%s" % ids["funding_partner_id"], {"verified": True}),
+        ("get", "/wholesale/funding/deals/%s/options" % d, None),
+        ("get", "/wholesale/funding/deals/%s/submissions" % d, None),
+        ("post", "/wholesale/funding/deals/%s/submissions" % d,
+         {"partner_id": ids["funding_partner_id"]}),
+        ("post", "/wholesale/funding/submissions/%s/response" % ids["funding_submission_id"],
+         {"status": "declined"}),
+        ("post", "/wholesale/exceptions/%s/assign" % ids["exception_id"], {"assigned_to_id": None}),
+        ("post", "/wholesale/exceptions/%s/resolve" % ids["exception_id"],
+         {"outcome": "complete"}),
+    ]
 
 
 def evosense_attacks(ids):

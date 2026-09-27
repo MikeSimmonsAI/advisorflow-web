@@ -160,8 +160,16 @@ def add_property(payload: ManualProperty, db: Session = Depends(get_db),
     return out
 
 
+@router.get("/import/list-kinds")
+def import_list_kinds(user: User = Depends(require_tenant_or_observer)):
+    """The distress-list kinds the one EvoSense import understands."""
+    return {"list_kinds": HU.distress_list_kinds(), "columns": list(HU.CSV_COLUMNS),
+            "evidence_columns": list(HU.EVIDENCE_COLUMNS)}
+
+
 @router.post("/import")
 async def import_properties(file: UploadFile = File(...), strategy_id: Optional[str] = Form(None),
+                            list_kind: Optional[str] = Form(None), list_source: Optional[str] = Form(None),
                             db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
                             _g: User = Depends(require_not_observation)):
     org_id = svc.write_org_id(db, user)
@@ -175,7 +183,8 @@ async def import_properties(file: UploadFile = File(...), strategy_id: Optional[
     strategy = ST.get(db, org_id, strategy_id) if strategy_id else None
     try:
         out = HU.import_csv(db, org_id, text, user=user, strategy=strategy,
-                            filename=file.filename or "upload.csv")
+                            filename=file.filename or "upload.csv",
+                            list_kind=(list_kind or None), list_source=((list_source or "").strip()[:120] or None))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     db.commit()
