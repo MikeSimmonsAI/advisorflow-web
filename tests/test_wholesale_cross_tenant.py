@@ -370,6 +370,7 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/feedback" % (base, ep), {"kind": "BAD_FIT"}),
         ("post", "%s/properties/%s/contacts" % (base, ep), {"kind": "phone", "value": "2145559999"}),
         ("post", "%s/properties/%s/contacts/%s/wrong-party" % (base, ep, ids["es_contact_id"]), None),
+        ("post", "%s/properties/%s/contacts/%s/verify" % (base, ep, ids["es_contact_id"]), {"note": "x"}),
         ("post", "%s/properties/%s/signals" % (base, ep), {"signal_type": "VACANT"}),
         ("post", "%s/properties/%s/rescore" % (base, ep), None),
         ("post", "%s/properties/%s/retry-reading" % (base, ep), None),

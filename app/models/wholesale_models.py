@@ -228,6 +228,12 @@ class WholesaleSettings(Base):
     # the assignee, else the workspace admins.
     inquiry_email_enabled = Column(Boolean, nullable=False, default=False)
     inquiry_email_recipients = Column(Text, nullable=True)
+    # EMAIL TO A SELLER WHO NEVER WROTE TO US. Whether a workspace may email a
+    # property owner it found (rather than one who inquired or gave explicit
+    # permission) is the workspace's own legal/compliance decision, recorded
+    # here by an admin. OFF by default: until it is confirmed, email is only
+    # ever eligible for sellers who reached out or said yes.
+    cold_seller_email_confirmed = Column(Boolean, nullable=False, default=False)
     # The seller SMS program. OFF by default and fail-closed: nothing is texted
     # under this program until an admin turns it on AND a Messaging Service is
     # configured AND the recipient holds program consent. The sender number is

@@ -45,7 +45,7 @@ PILOT_HARD_CAP = 100               # properties per pilot run, whatever the stra
 PILOT_DEFAULT_CAP = 50
 TEXT_FIELDS = ("name", "description", "owner_geography")
 EDITABLE = LIST_FIELDS + INT_FIELDS + TEXT_FIELDS + BOOL_FIELDS + (
-    "provider_preferences", "outreach_policy", "nurture_policy")
+    "provider_preferences", "outreach_policy", "nurture_policy", "enrichment_policy")
 
 
 def _clean_list(value) -> List[str]:
@@ -94,6 +94,13 @@ def validate(data: Dict[str, Any], partial: bool = False) -> Tuple[Dict[str, Any
             else:
                 clean[f] = data[f]
 
+    if "enrichment_policy" in data and data["enrichment_policy"] is not None:
+        from app.services.evosense.enrichment import POLICIES
+        pol = str(data["enrichment_policy"]).strip().lower()
+        if pol not in POLICIES:
+            problems.append("Enrichment policy must be one of: %s." % ", ".join(POLICIES))
+        else:
+            clean["enrichment_policy"] = pol
     if not partial and not clean.get("name"):
         problems.append("Give the strategy a name.")
     if "states" in clean:
@@ -284,6 +291,7 @@ def payload(strategy) -> Dict[str, Any]:
            "outreach_policy": outreach_policy(strategy),
            "nurture_policy": nurture_policy(strategy),
            "provider_preferences": C.jload(strategy.provider_preferences, {}) or {},
+           "enrichment_policy": getattr(strategy, "enrichment_policy", None) or "standard",
            "summary": summary(strategy)}
     for f in LIST_FIELDS:
         out[f] = lst(strategy, f)

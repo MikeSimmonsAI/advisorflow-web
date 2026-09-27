@@ -131,8 +131,9 @@ D_BUDGET = "BUDGET_BLOCKED"
 D_SUPPRESSED = "SUPPRESSED"
 D_INSUFFICIENT = "INSUFFICIENT_OPPORTUNITY"
 D_RETRY = "RETRY_LATER"
+D_POLICY = "POLICY_BLOCKED"          # the strategy's enrichment policy does not pay for this
 DECISIONS = (D_NO_LOOKUP, D_USE_EXISTING, D_FREE, D_PAID, D_APPROVAL, D_BUDGET,
-             D_SUPPRESSED, D_INSUFFICIENT, D_RETRY)
+             D_SUPPRESSED, D_INSUFFICIENT, D_RETRY, D_POLICY)
 
 # ── Cost-governor lookup decisions (public-record lookups, any capability) ──
 # These are the spec's vocabulary; contact-enrichment decisions above map onto
@@ -154,6 +155,7 @@ GOVERNOR_LABEL = {
     D_FREE: L_QUEUE_FREE, D_PAID: L_QUEUE_PAID, D_APPROVAL: L_MANUAL_REVIEW,
     D_BUDGET: L_SKIP_BUDGET, D_SUPPRESSED: L_SKIP_ALREADY_KNOWN,
     D_INSUFFICIENT: L_SKIP_LOW_SCORE, D_RETRY: L_SKIP_PROVIDER_DOWN,
+    D_POLICY: L_SKIP_BUDGET,
 }
 GOVERNOR_LABEL.update({d: d for d in LOOKUP_DECISIONS})
 

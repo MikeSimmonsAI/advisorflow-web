@@ -599,6 +599,14 @@ def _score_payload(s: Optional[EvoSenseScore]):
             "calculated_at": _iso(s.calculated_at)}
 
 
+def _acq(db, prop):
+    from app.services.evosense import economics as EC
+    try:
+        return EC.acquisition_cost(db, prop)
+    except Exception:  # noqa: BLE001 - a missing total never breaks the page
+        return None
+
+
 def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
     from app.services.evosense import evaluate as EV
     strategy = EV.strategy_for(db, prop)
@@ -656,7 +664,9 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
             "connector_label": C.CONNECTOR_LABELS.get(cp.connector_kind or "", cp.connector_kind),
             "line_type": cp.line_type, "validation": cp.validation,
             "agreeing_sources": cp.agreeing_sources, "status": cp.status,
-            "status_reason": cp.status_reason, "confidence": sc, "is_test": bool(cp.is_test)})
+            "status_reason": cp.status_reason, "confidence": sc, "is_test": bool(cp.is_test),
+            "verified_at": _iso(getattr(cp, "verified_at", None)),
+            "verification_note": getattr(cp, "verification_note", None)})
     best_cp, _ = CT.best_contact(db, prop)
     live = (db.query(EvoSenseEngagement.id)
             .filter(EvoSenseEngagement.organization_id == org_id,
@@ -746,6 +756,11 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
         "owners": owners,
         "contacts": contacts,
         "eligibility": elig,
+        "acquisition_cost": _acq(db, prop),
+        # Contactability: may we lawfully reach the owner, and how - kept apart
+        # from "we have a number" and from the opportunity score.
+        "contactability": (C.jload(prop.contactability_detail, None)
+                           if getattr(prop, "contactability_detail", None) else None),
         "enrichment": [{"id": d.id, "decision": d.decision, "reasons": C.jload(d.reasons, []),
                         "governor": C.GOVERNOR_LABEL.get(d.decision, d.decision),
                         "capability": d.capability,

@@ -41,6 +41,29 @@ RECENT_LOOKUP_DAYS = 90
 NO_MATCH_RETRY_DAYS = 7
 
 
+# ── ENRICHMENT POLICY ───────────────────────────────────────────────────────
+# Whether paying for contact data is on the table at all, per strategy. Every
+# paid lookup is still bounded by the budgets, caps and pilot limits below; a
+# policy can only make the engine MORE careful than those, or (aggressive) let
+# it pay for a slightly weaker property - never past a budget.
+#
+#   free_only        never pays; free sources only
+#   standard         pays when Property Opportunity meets the strategy minimum
+#   aggressive       pays down to AGGRESSIVE_MARGIN below that minimum
+#   manual_approval  every paid lookup waits for a person
+P_FREE_ONLY, P_STANDARD, P_AGGRESSIVE, P_MANUAL = ("free_only", "standard", "aggressive",
+                                                   "manual_approval")
+POLICIES = (P_FREE_ONLY, P_STANDARD, P_AGGRESSIVE, P_MANUAL)
+POLICY_LABELS = {P_FREE_ONLY: "FREE ONLY", P_STANDARD: "STANDARD", P_AGGRESSIVE: "AGGRESSIVE",
+                 P_MANUAL: "MANUAL APPROVAL"}
+AGGRESSIVE_MARGIN = 15
+
+
+def policy_of(strategy) -> str:
+    p = (getattr(strategy, "enrichment_policy", None) or P_STANDARD) if strategy else P_STANDARD
+    return p if p in POLICIES else P_STANDARD
+
+
 def _decision(db, prop, strategy, owner, decision, reasons, *, provider=None, cost=None,
               user=None) -> EvoSenseEnrichmentDecision:
     row = EvoSenseEnrichmentDecision(
@@ -48,7 +71,9 @@ def _decision(db, prop, strategy, owner, decision, reasons, *, provider=None, co
         strategy_id=getattr(strategy, "id", None), owner_id=getattr(owner, "id", None),
         capability=C.CONTACT_ENRICHMENT, decision=decision, reasons=C.jdump(reasons),
         provider_key=getattr(provider, "key", None), estimated_cost_cents=cost,
-        decided_by="user" if user else "engine", decided_by_id=getattr(user, "id", None))
+        decided_by="user" if user else "engine", decided_by_id=getattr(user, "id", None),
+        policy=policy_of(strategy), opportunity_score=prop.opportunity_score,
+        confidence_before=prop.contact_confidence)
     db.add(row)
     db.flush()
     return row
@@ -137,12 +162,17 @@ def decide(db, prop: EvoSenseProperty, strategy, *, user=None,
                           % (recent_miss.created_at.strftime("%b %d"), recent_miss.outcome.replace("_", " "),
                              NO_MATCH_RETRY_DAYS)], user=user)
 
+    policy = policy_of(strategy)
     threshold = getattr(strategy, "min_opportunity_score", 60) if strategy else 60
+    if policy == P_AGGRESSIVE:
+        threshold = max(0, threshold - AGGRESSIVE_MARGIN)
     if not approved and (prop.opportunity_score is None or prop.opportunity_score < threshold):
         return _decision(db, prop, strategy, owner, C.D_INSUFFICIENT,
-                         ["Property Opportunity %s is below this strategy's %s; not worth paying "
+                         ["Property Opportunity %s is below this strategy's %s%s; not worth paying "
                           "for a contact." % (prop.opportunity_score if prop.opportunity_score is not None
-                                             else "INSUFFICIENT EVIDENCE", threshold)], user=user)
+                                             else "INSUFFICIENT EVIDENCE", threshold,
+                                             " (AGGRESSIVE policy)" if policy == P_AGGRESSIVE else "")],
+                         user=user)
 
     prefs = (C.jload(getattr(strategy, "provider_preferences", None), {}) or {}).get(C.CONTACT_ENRICHMENT)
     routes = PV.route(db, org_id, C.CONTACT_ENRICHMENT, sandbox_allowed=bool(prop.is_test),
@@ -152,10 +182,23 @@ def decide(db, prop: EvoSenseProperty, strategy, *, user=None,
                          ["No contact-enrichment provider is connected" +
                           ("" if prop.is_test else " (sandbox providers never serve real properties)") +
                           ". WAITING FOR DATA — add a contact manually."], user=user)
+    if policy == P_FREE_ONLY:
+        free = [r for r in routes if r[2] == 0]
+        if not free:
+            return _decision(db, prop, strategy, owner, C.D_POLICY,
+                             ["Policy FREE ONLY: no free source can supply this owner's contact; the "
+                              "cheapest connected provider costs %s and this strategy never pays."
+                              % C.money(min(r[2] for r in routes))], user=user)
+        routes = free
     provider, cfg, cost = routes[0]
     if cost == 0:
         return _decision(db, prop, strategy, owner, C.D_FREE,
                          ["%s answers at no cost." % provider.label], provider=provider, cost=0, user=user)
+    if policy == P_MANUAL and not approved:
+        return _decision(db, prop, strategy, owner, C.D_APPROVAL,
+                         ["Policy MANUAL APPROVAL: every paid lookup waits for a person. %s would "
+                          "cost %s." % (provider.label, C.money(cost))],
+                         provider=provider, cost=cost, user=user)
     if ST.is_pilot(strategy):
         pcap = ST.pilot_spend_cap(strategy)
         pspent = pilot_spent(db, strategy)
@@ -211,6 +254,14 @@ def execute(db, prop, strategy, decision: EvoSenseEnrichmentDecision, *, user=No
     prefs = (C.jload(getattr(strategy, "provider_preferences", None), {}) or {}).get(C.CONTACT_ENRICHMENT)
     routes = PV.route(db, org_id, C.CONTACT_ENRICHMENT, sandbox_allowed=bool(prop.is_test),
                       preferences=prefs)
+    # A fallback may never be something the policy would not have allowed:
+    # a free decision never falls back to a paid provider, and an approved
+    # lookup never falls back to one dearer than what the person approved.
+    policy = policy_of(strategy)
+    if decision.decision == C.D_FREE or policy == P_FREE_ONLY:
+        routes = [r for r in routes if r[2] == 0]
+    elif policy == P_MANUAL and decision.estimated_cost_cents is not None:
+        routes = [r for r in routes if r[2] <= decision.estimated_cost_cents]
     attempts: List[Dict[str, Any]] = []
     touched = []
     outcome = "provider_failed"
@@ -356,4 +407,9 @@ def run(db, prop, strategy, *, user=None, approved: bool = False) -> Dict[str, A
     else:
         dec.outcome = "skipped"
     EV.rescore(db, prop, strategy)
+    # What the lookup did to Contact Confidence - the other half of "was it
+    # worth it". Recorded on the decision, next to what it cost.
+    dec.confidence_after = prop.contact_confidence
+    result["confidence_before"] = dec.confidence_before
+    result["confidence_after"] = dec.confidence_after
     return result

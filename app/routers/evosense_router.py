@@ -412,6 +412,41 @@ def mark_wrong_party(property_id: str, contact_id: str, db: Session = Depends(ge
     return {"ok": True}
 
 
+class VerifyIn(BaseModel):
+    note: Optional[str] = None
+    verified: bool = True
+
+
+@router.post("/properties/{property_id}/contacts/{contact_id}/verify")
+def verify_contact(property_id: str, contact_id: str, payload: VerifyIn,
+                   db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                   _g: User = Depends(require_not_observation)):
+    """A PERSON confirms this is the right person at this number/address (a
+    call, a reply that identified them). Raises Contact Confidence; grants no
+    permission to contact - consent and blocks are unchanged. Reversible."""
+    org_id = svc.write_org_id(db, user)
+    prop = _prop(db, org_id, property_id)
+    cp = (db.query(EvoSenseContactPoint)
+          .filter(EvoSenseContactPoint.id == contact_id, EvoSenseContactPoint.organization_id == org_id,
+                  EvoSenseContactPoint.owner_id.in_([o.id for o in CT.current_owners(db, prop)]))
+          .first())
+    if cp is None:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    if payload.verified:
+        cp.verified_at = C.now()
+        cp.verified_by_id = user.id
+        cp.verification_note = (payload.note or "").strip()[:200] or None
+    else:
+        cp.verified_at = cp.verified_by_id = cp.verification_note = None
+    C.log_event(db, org_id, "contact.verified" if payload.verified else "contact.unverified",
+                property_id=prop.id, user=user, actor_type=C.ACTOR_USER, is_test=prop.is_test,
+                summary=("Contact verified by %s" if payload.verified else "Verification removed by %s")
+                % (user.full_name or "a user"), details={"contact_point": cp.id, "note": cp.verification_note})
+    EV.rescore(db, prop)
+    db.commit()
+    return {"ok": True, "contactability": C.jload(prop.contactability_detail, None)}
+
+
 class SignalIn(BaseModel):
     signal_type: str
     note: Optional[str] = None
@@ -632,7 +667,7 @@ def edit_strategy(strategy_id: str, payload: StrategyIn, db: Session = Depends(g
     if problems:
         raise HTTPException(status_code=422, detail=" ".join(problems))
     money_keys = {"daily_budget_cents", "monthly_budget_cents", "max_cost_per_property_cents",
-                  "approval_over_cents"}
+                  "approval_over_cents", "enrichment_policy"}
     changed_money = [k for k in money_keys & set(clean) if clean[k] != getattr(s, k)]
     if changed_money and getattr(user, "role", None) not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Only a workspace admin can change budgets.")

@@ -98,6 +98,10 @@ class EvoSenseStrategy(Base):
     monthly_budget_cents = Column(Integer, nullable=True)
     max_cost_per_property_cents = Column(Integer, nullable=True)
     approval_over_cents = Column(Integer, nullable=True)        # lookup needs a person above this
+    # ENRICHMENT POLICY (evosense/enrichment.py POLICIES): free_only | standard |
+    # aggressive | manual_approval. The tier decides WHETHER paying is on the
+    # table at all; the budgets and caps above still bound every paid lookup.
+    enrichment_policy = Column(String, nullable=True, default="standard")
 
     provider_preferences = Column(Text, nullable=True)          # JSON {capability: [provider_key]}
     outreach_policy = Column(Text, nullable=True)               # JSON, see strategy.DEFAULT_OUTREACH
@@ -265,6 +269,12 @@ class EvoSenseProperty(Base):
     data_confidence = Column(String, nullable=True)   # high|medium|low|insufficient
     contact_confidence = Column(Integer, nullable=True)
     seller_intent = Column(Integer, nullable=True)
+    # CONTACTABILITY (evosense/contactability.py): may we reach the owner, and
+    # by what channel - separate from whether we merely HAVE contact data, and
+    # separate from how good the opportunity is. Derived, explained, cached.
+    contactability = Column(String, nullable=True)
+    contactability_detail = Column(Text, nullable=True)       # JSON: channels, reasons
+    contactability_at = Column(DateTime, nullable=True)
     signal_count = Column(Integer, nullable=False, default=0)
     next_action = Column(String, nullable=True)
     next_action_detail = Column(String, nullable=True)
@@ -514,6 +524,12 @@ class EvoSenseContactPoint(Base):
     last_response_at = Column(DateTime, nullable=True)
     positive_response = Column(Boolean, nullable=False, default=False)
     converged_contact_ref = Column(String, nullable=True)
+    # A PERSON confirmed this is the right person at this number/address (a
+    # call, a reply that identified them, a document). The strongest single
+    # piece of contact evidence, and the only one no provider can supply.
+    verified_at = Column(DateTime, nullable=True)
+    verified_by_id = Column(String, nullable=True)
+    verification_note = Column(String, nullable=True)
     first_seen_at = Column(DateTime, default=_now)
     last_seen_at = Column(DateTime, default=_now)
     is_test = Column(Boolean, nullable=False, default=False)
@@ -627,6 +643,13 @@ class EvoSenseEnrichmentDecision(Base):
     estimated_cost_cents = Column(Integer, nullable=True)
     ledger_id = Column(String, nullable=True)
     outcome = Column(String, nullable=True)           # found|no_match|provider_failed|skipped
+    # The economics of the decision, recorded at the time it was made: which
+    # policy applied, what the property was worth pursuing, and what the
+    # lookup did to Contact Confidence.
+    policy = Column(String, nullable=True)
+    opportunity_score = Column(Integer, nullable=True)
+    confidence_before = Column(Integer, nullable=True)
+    confidence_after = Column(Integer, nullable=True)
     decided_by = Column(String, nullable=False, default="engine")   # engine|user
     decided_by_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)

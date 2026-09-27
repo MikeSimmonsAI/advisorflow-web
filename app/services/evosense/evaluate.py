@@ -66,6 +66,8 @@ def rescore(db, prop: EvoSenseProperty, strategy=None) -> Dict[str, Any]:
     prop.signal_count = len([s for s in stacked if s["freshness"] != SIG.STALE])
     cp, cc = CT.best_contact(db, prop)
     prop.contact_confidence = cc["value"] if cc else None
+    from app.services import contactability as CB
+    CB.refresh_evosense(db, prop, strategy)
     prop.last_evaluated_at = C.now()
     refresh_status(db, prop, strategy)
     return {"opportunity": po, "data_confidence": dc, "contact": cc, "stacked": stacked}

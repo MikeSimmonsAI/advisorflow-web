@@ -116,3 +116,44 @@ def preliminary(db, prop) -> Dict[str, Any]:
             "steps": steps, "warnings": warnings, "blocked": blocked,
             "notice": "Preliminary and internal. EvoSense never sends an offer; offers are made "
                       "by a person from the Wholesale deal after comps."}
+
+
+def acquisition_cost(db, prop) -> Dict[str, Any]:
+    """"How much did it cost EvoSys to discover and qualify this opportunity?"
+
+    Every cent comes from the cost ledger (evosense_cost_ledger), which is the
+    only place money is recorded: charged lookups count; refunded failures do
+    not. Each paid decision also says what it did to Contact Confidence."""
+    from app.models.evosense_models import EvoSenseCostEntry, EvoSenseEnrichmentDecision
+    rows = (db.query(EvoSenseCostEntry)
+            .filter(EvoSenseCostEntry.organization_id == prop.organization_id,
+                    EvoSenseCostEntry.property_id == prop.id).all())
+    charged = [r for r in rows if r.status in ("charged", "failed_charged")]
+    by_cap: Dict[str, int] = {}
+    by_provider: Dict[str, int] = {}
+    for r in charged:
+        by_cap[r.capability] = by_cap.get(r.capability, 0) + (r.total_cents or 0)
+        by_provider[r.provider_key] = by_provider.get(r.provider_key, 0) + (r.total_cents or 0)
+    decisions = (db.query(EvoSenseEnrichmentDecision)
+                 .filter(EvoSenseEnrichmentDecision.organization_id == prop.organization_id,
+                         EvoSenseEnrichmentDecision.property_id == prop.id)
+                 .order_by(EvoSenseEnrichmentDecision.created_at.asc()).all())
+    paid = [d for d in decisions if d.decision == C.D_PAID]
+    total = sum(r.total_cents or 0 for r in charged)
+    return {
+        "total_cents": total,
+        "total": C.money(total),
+        "charged_lookups": len(charged),
+        "refunded_lookups": len([r for r in rows if r.status == "failed_refunded"]),
+        "reserved_cents": sum(r.total_cents or 0 for r in rows if r.status == "reserved"),
+        "by_capability": by_cap,
+        "by_provider": by_provider,
+        "decisions": len(decisions),
+        "paid_decisions": [{"at": d.created_at.isoformat() if d.created_at else None,
+                            "policy": d.policy, "provider": d.provider_key,
+                            "estimated_cents": d.estimated_cost_cents, "outcome": d.outcome,
+                            "opportunity_score": d.opportunity_score,
+                            "confidence_before": d.confidence_before,
+                            "confidence_after": d.confidence_after} for d in paid],
+        "is_test": bool(prop.is_test),
+    }

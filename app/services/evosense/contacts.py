@@ -144,7 +144,14 @@ def apply_result(db, owner: EvoSenseOwner, result, provider, *, manual_user=None
 def score_contact_point(db, prop, cp) -> Dict[str, Any]:
     person = db.query(EvoSensePerson).filter(EvoSensePerson.id == cp.person_id).first()
     owner = db.query(EvoSenseOwner).filter(EvoSenseOwner.id == cp.owner_id).first()
-    res = SC.contact_confidence(cp, person, owner, mailing_agrees=cp.mailing_match)
+    conflict = (db.query(EvoSenseOwnership.id)
+                .filter(EvoSenseOwnership.organization_id == prop.organization_id,
+                        EvoSenseOwnership.property_id == prop.id,
+                        EvoSenseOwnership.owner_id == cp.owner_id,
+                        EvoSenseOwnership.is_current.is_(True),
+                        EvoSenseOwnership.in_conflict.is_(True)).first() is not None)
+    res = SC.contact_confidence(cp, person, owner, mailing_agrees=cp.mailing_match,
+                                identity_conflict=conflict)
     SC.record(db, prop, "contact_confidence", res, subject_type="contact_point", subject_id=cp.id)
     return res
 

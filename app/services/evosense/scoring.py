@@ -36,7 +36,7 @@ PO_VERSION = "property_opportunity/v3"
 # one county row are one source); unknown facts are "not scored", never a
 # penalty; institutional owners are excluded by default (tenant option).
 DC_VERSION = "data_confidence/v2"
-CC_VERSION = "contact_confidence/v1"
+CC_VERSION = "contact_confidence/v2"
 SI_VERSION = "seller_intent/v1"
 
 
@@ -342,10 +342,25 @@ def data_confidence(prop, stacked: List[Dict[str, Any]], owner_known: bool) -> D
 # ── CONTACT CONFIDENCE ──────────────────────────────────────────────────────
 
 def contact_confidence(cp, person, owner, *, mailing_agrees: Optional[bool],
-                       when=None) -> Dict[str, Any]:
+                       when=None, identity_conflict: Optional[bool] = None) -> Dict[str, Any]:
+    """Is this the right person at this number/address? Evidence-based and
+    separate from Property Opportunity and Seller Intent.
+
+    v2 adds two factors to v1 and changes nothing else:
+      * a PERSON verified it (a call, a reply that identified them)   +30
+      * the ownership evidence for this owner is in conflict            -15
+    Unknown evidence scores 0 and is listed as unknown - "not yet
+    validated" is not the same as "failed validation"."""
     when = when or C.now()
     factors = []
     total = 0
+    if getattr(cp, "verified_at", None):
+        total += 30
+        factors.append(_f(30, "Verified by a person%s" % (
+            " — %s" % cp.verification_note if getattr(cp, "verification_note", None) else "")))
+    if identity_conflict:
+        total -= 15
+        factors.append(_f(-15, "Sources disagree about who owns this property"))
     from app.services.evosense.ingest import name_key
     if person is not None and owner is not None:
         if person.role in ("owner", "co_owner") and person.name_key and \
