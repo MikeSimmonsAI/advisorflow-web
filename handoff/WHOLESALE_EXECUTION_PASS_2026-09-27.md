@@ -281,3 +281,42 @@ seller site and SMS consent work (`78759ad`) is complete and was not reopened.
   Results opens. Nothing entered Atlantis's CRM. A real import is Mike's decision.
 - Follow-up fix: Step 7 "Still staged" tile showed 0 for a stage-only batch (no commit report) → now shows
   the staged row count.
+
+---
+
+## Build-cycle closeout (2026-09-27 night) — commit 69d44c8
+
+### Production test-data correction
+- Marked TEST through the established mechanism (`POST /wholesale/properties/{id}/test-flag`, address-confirmed,
+  audited, nothing deleted): 100 / 101 / 110 / 111 ZZTEST Fixture Ln (website SMS-consent verification,
+  2026-09-27) and 100 / 101 Smoke Test Ln (2026-09-25 /sell verification). Evidence: seller names ZZTEST /
+  SMOKE TEST, fictional 555-01xx phones, example.com emails. Their deals, seller profiles and seller Leads
+  followed (6 each); consent evidence rows untouched (append-only).
+- All 18 ZZTEST / SMOKE seller Leads in EVO are now is_test. Older pre-cycle synthetic website leads
+  (QA Synthetic V8 ..., Synthetic Preview Tester, Codex Backend Notification Test, Synthetic EvoSys Test Lead,
+  2026-09-12..15) remain unflagged: there is no lead-level test-marking tool, they are in no automation
+  (no cadence enrolment in EVO), and they predate this cycle. Recorded, not changed.
+- Manual exception sweep now leaves sandbox records out unless `?include_test=true` (same rule as the hourly pass).
+
+### Cadence job incident (cadence_loop + cadence_cron in ERROR since 2026-09-22 01:39 UTC)
+- Error: `UniqueViolation uq_cadence_touch_attempt (state e155e476…, touch 6, attempt 1)` every pass.
+- Root cause: skip / block / stop log rows were numbered "failures + 1", so the second skip of the same
+  touch reused attempt 1; those inserts were not under a savepoint, so the IntegrityError aborted the WHOLE
+  pass for every tenant. Last success 2026-09-22 00:39 (loop) / 2026-09-21 14:01 (cron).
+- Affected: Restland Cemetery and Funeral Home — 96 active enrollments, all due. Cadence SMS sending is
+  disabled for the deployment (`sending_enabled: false`), so no intended outreach failed to send; what did
+  not happen was the skip/stop bookkeeping. No other tenant has active enrollments.
+- Fix: `attempt_seq` = next free row slot (max + 1); retry budget counts FAILED rows separately
+  (`_failed_attempts`); every log insert goes through the savepoint claim. 3 regression tests reproduce the
+  production error first (sqlite) and a Postgres run confirmed slots 1,2,3 on repeated skips.
+
+### /sell
+- Tablet/phone: a slim "A product of EvoSysPro · EvoSysPro Home" strip above the header (the desktop nav
+  already had EvoSysPro Home). Deployed via cPanel UAPI; backup `private/bak-20260927b__sell__index.php`.
+  Everything else (consent heading, unchecked box, disclosures, Privacy / Terms / SMS Terms) audited live and
+  unchanged.
+
+### Atlantis
+- ATL-20260928-001 had been moved back to ready_for_review at 01:44 UTC by a customer-side classification
+  re-save; re-staged (stage-only, nothing imported) at 02:50 UTC. 25 rows, 4 in-file dups, 1 email review,
+  25 previous_customer, 0 leads, 0 SMS-ready.
