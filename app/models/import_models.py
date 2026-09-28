@@ -407,4 +407,7 @@ class ImportStagedRow(Base):
         Index("ix_isr_merged_lead",         "merged_into_lead_id"),
         Index("ix_isr_matched_lead",        "matched_lead_id"),
         Index("ix_isr_batch_intake",        "batch_id", "intake_status"),
+        # The self-FK (ON DELETE SET NULL) is checked for every deleted row;
+        # without this index re-analysing a 15k-row batch took ~10 minutes.
+        Index("ix_isr_duplicate_of",        "duplicate_of_staged_row_id"),
     )

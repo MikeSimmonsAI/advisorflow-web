@@ -1560,6 +1560,8 @@ ENUM_COLUMNS_TO_CONVERT_TO_STRING = [
 INDEXES_TO_CREATE = [
     # Universal intake: category drill-down and the lead provenance links.
     "CREATE INDEX IF NOT EXISTS ix_isr_batch_intake ON import_staged_rows(batch_id, intake_status)",
+    # Self-FK lookup on every staged-row delete (re-analysis of a large batch).
+    "CREATE INDEX IF NOT EXISTS ix_isr_duplicate_of ON import_staged_rows(duplicate_of_staged_row_id)",
     "CREATE INDEX IF NOT EXISTS ix_leads_org_contact_id ON leads(org_contact_id)",
     "CREATE INDEX IF NOT EXISTS ix_leads_import_batch_id ON leads(import_batch_id)",
     # The webhook lookup key. Every Retell event resolves through this column,
