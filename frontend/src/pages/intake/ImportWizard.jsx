@@ -24,6 +24,9 @@ const PIPELINE = [['parsing', 'Parsing'], ['normalizing', 'Normalizing'],
 
 function stepFor(batch) {
   if (!batch) return 1
+  // The server decides from persisted state (analysis done, classification
+  // confirmed, staged, committed) so refresh / Back / the ledger all agree.
+  if (batch.workflow?.step) return batch.workflow.step
   const s = batch.status
   if (s === 'mapping' || s === 'failed' && !batch.analysis?.status) return 2
   if (s === 'processing') return 3
@@ -42,7 +45,20 @@ export default function ImportWizard() {
   const [fieldsMeta, setFieldsMeta] = useState(null)
   const [batch, setBatch] = useState(null)
   const [err, setErr] = useState('')
-  const step = Number(params.get('step')) || stepFor(batch)
+  const urlStep = Number(params.get('step'))
+  // Never show a step the batch cannot be on: a stale ?step=6 on a batch that
+  // has since been re-mapped falls back to where the server says it is.
+  const serverStep = batch ? stepFor(batch) : 0
+  const reachable = !batch ? 1
+    : (batch.status === 'staged' || serverStep === 7) ? 7      // a staged batch can show its results
+    : (batch.workflow?.analyzed || batch.analysis?.status) ? 6 : 2
+  const step = !batch ? (urlStep || (batchId ? 0 : 1))    // still loading: steps 2-7 render nothing yet
+    : serverStep === 7 ? 7
+    : (urlStep >= 1 && urlStep <= reachable) ? urlStep
+    : (serverStep || 1)
+  // While the server is (re)analyzing, whichever of steps 3-5 asked for it
+  // shows progress, and the same step renders the result when it finishes.
+  const working = batch && ['processing', 'interrupted'].includes(batch.status) && step >= 3 && step <= 5
   const goStep = n => setParams(p => { const q = new URLSearchParams(p); q.set('step', n); return q })
 
   useEffect(() => {
@@ -111,11 +127,13 @@ export default function ImportWizard() {
       {step === 1 && <UploadStep ctx={ctx} onCreated={b => navigate(`/imports/${b.id}?step=2`)} />}
       {step === 2 && batch && <MapStep batch={batch} meta={fieldsMeta} reload={load}
                                        onAnalyzed={() => { load(); goStep(3) }} />}
-      {step === 3 && batch && <AnalyzeStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []}
+      {working && <AnalyzeStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []}
+                               onNext={() => {}} onRemap={() => goStep(2)} />}
+      {!working && step === 3 && batch && <AnalyzeStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []}
                                            onNext={() => goStep(4)} onRemap={() => goStep(2)} />}
-      {step === 4 && batch && <ClassifyStep batch={batch} reload={load}
-                                            onDone={() => { load(); goStep(3) }} onNext={() => goStep(5)} />}
-      {step === 5 && batch && <ReviewStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []}
+      {!working && step === 4 && batch && <ClassifyStep batch={batch} reload={load}
+                                            onDone={() => { load(); goStep(5) }} onNext={() => goStep(5)} />}
+      {!working && step === 5 && batch && <ReviewStep batch={batch} reload={load} catalog={fieldsMeta?.classifications || []}
                                           initialTab={params.get('tab')}
                                           onNext={() => goStep(6)} />}
       {step === 6 && batch && <ApproveStep batch={batch} ctx={ctx} reload={load}

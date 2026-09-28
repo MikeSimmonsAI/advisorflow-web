@@ -410,8 +410,14 @@ def save_mapping(db: Session, batch: ImportBatch, *, mapping: Optional[dict] = N
         order = classification.get("date_order", cfg.get("date_order") or N.DATE_AUTO)
         if order not in (N.DATE_AUTO, N.DATE_MDY, N.DATE_DMY):
             return ["date_order must be auto, mdy or dmy."]
+        # `confirmed_at`: the operator has DONE the Classify step for this
+        # mapping. It is what lets the wizard send them on to Review Problems
+        # (and keep them there across a refresh) instead of back to Analyze.
+        # A mapping change that picks a different classification column
+        # rebuilds this config above, which clears it - as it should.
         cfg.update({"fallback": fb, "value_map": {v: k for v, k in vmap.items() if k},
-                    "date_order": order})
+                    "date_order": order,
+                    "confirmed_at": datetime.utcnow().replace(microsecond=0).isoformat()})
         batch.classification_json = json.dumps(cfg)
     if update_policy is not None:
         mode = update_policy.get("mode", "fill_blanks")
