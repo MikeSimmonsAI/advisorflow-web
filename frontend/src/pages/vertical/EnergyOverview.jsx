@@ -12,21 +12,24 @@
  *                                      decision, follow-ups due today
  *   GET /workspace-views               which configured screens exist here
  *   GET /workspace-views/rate-requests total + New / In Review / Options
- *                                      Sent / Unassigned counters
+ *                                      Sent / Unassigned counters, and the
+ *                                      most recent rate-request rows
  *   GET /workspace-views/renewals      total + Renewal Due / Under Contract
  *   GET /workspace-views/move-concierge total + Active / Unassigned
  *   GET /leads/sparklines?days=7       daily new leads and daily bookings
- *   GET /leads/?page=1&page_size=8     the recent-leads table
- *   GET /launch/me                     real launch readiness
+ *   GET /leads/?page=1&page_size=8     the recent-leads list
+ *   GET /leads/workspace-summary       lead sources over the last 30 days
+ *   GET /intake/contacts/summary       the customer snapshot
+ *   GET /launch/me                     launch progress and the real status of
+ *                                      every integration the launch tracks
  *
  * ── The rule this page is built on ────────────────────────────────────────
  * NO NUMBER WITHOUT A SOURCE, AND NO SHAPE WITHOUT A NUMBER. The approved
- * concept shows sample counts, an upward trend and a progress bar at a fixed
- * percentage. None of those is a fact about this workspace, so none of them
- * is drawn. A metric this schema cannot yet compute renders its card in full
- * with an honest "not yet available" body — the layout is the design's, the
- * content is the truth — and a chart with no history renders its frame and
- * says so rather than inventing bars.
+ * concept shows sample counts and an "all core services online" banner.
+ * None of those is a fact about this workspace until the server says so, so
+ * none of them is drawn from the concept. A metric this schema cannot yet
+ * compute renders its card in full with an honest "not yet available" body —
+ * the layout is the design's, the content is the truth.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -39,8 +42,21 @@ const VIEW_RATE_REQUESTS = 'rate-requests'
 const VIEW_RENEWALS = 'renewals'
 const VIEW_CONCIERGE = 'move-concierge'
 
+// A refused call (the module or permission is absent) is marked, not
+// swallowed, so a card can tell "you may not see this" from "nothing yet".
+const FORBIDDEN = 'forbidden'
+
 function num(n) {
   return n === null || n === undefined ? '—' : Number(n).toLocaleString('en-US')
+}
+
+function isNum(n) {
+  return typeof n === 'number' && Number.isFinite(n)
+}
+
+function pct(part, whole) {
+  if (!isNum(part) || !isNum(whole) || whole <= 0) return null
+  return Math.round((part / whole) * 100)
 }
 
 function statValue(payload, label) {
@@ -49,16 +65,110 @@ function statValue(payload, label) {
   return hit ? hit.value : null
 }
 
-function greeting(date) {
-  const h = date.getHours()
-  if (h < 12) return 'Good morning'
-  return h < 17 ? 'Good afternoon' : 'Good evening'
-}
-
 function initials(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
   if (!parts.length) return '?'
   return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase()
+}
+
+function humanize(value) {
+  const s = String(value || '').replace(/[_-]+/g, ' ').trim()
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : '—'
+}
+
+// The server writes naive UTC ISO strings; read them as UTC.
+function parseIso(iso) {
+  if (!iso) return null
+  const s = String(iso)
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : `${s}Z`)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function ago(iso) {
+  const d = parseIso(iso)
+  if (!d) return ''
+  const mins = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000))
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.round(hrs / 24)
+  return days < 30 ? `${days}d ago` : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+// ── icons ──────────────────────────────────────────────────────────────────
+// Stroke icons in one weight, so the page reads as one set.
+const ICONS = {
+  users: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
+  user: <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
+  file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></>,
+  calendar: <><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></>,
+  refresh: <><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></>,
+  zap: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />,
+  truck: <><rect x="1" y="3" width="15" height="13" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></>,
+  clock: <><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>,
+  more: <><circle cx="5" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="19" cy="12" r="1.2" /></>,
+  globe: <><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></>,
+  phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />,
+  mail: <><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></>,
+  alert: <><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>,
+  check: <polyline points="20 6 9 17 4 12" />,
+  plug: <><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0z" /><path d="M12 18v4" /></>,
+}
+
+function Icon({ name, size = 18 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
+         strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {ICONS[name] || ICONS.more}
+    </svg>
+  )
+}
+
+// The live clock re-renders itself only, not the whole dashboard.
+function Clock() {
+  const [now, setNow] = useState(new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  return (
+    <div className="eo-clock">
+      <span className="eo-clock-time">
+        {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+      </span>
+      <span className="eo-clock-date">
+        {now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+      </span>
+    </div>
+  )
+}
+
+function sourceIcon(source) {
+  const s = String(source || '').toLowerCase()
+  if (s.includes('web') || s.includes('site') || s.includes('form')) return 'globe'
+  if (s.includes('compare') || s.includes('rate')) return 'zap'
+  if (s.includes('move') || s.includes('concierge')) return 'truck'
+  if (s.includes('referr') || s.includes('partner')) return 'users'
+  if (s.includes('import') || s.includes('csv') || s.includes('upload')) return 'file'
+  if (s.includes('phone') || s.includes('call')) return 'phone'
+  return 'user'
+}
+
+// Integration statuses as the launch programme records them
+// (app/models/launch_delivery_models.py). `connected` and `verified` are the
+// only two that mean something answered.
+const INTEGRATION_STATE = {
+  connected: { tone: 'green', label: 'Connected' },
+  verified: { tone: 'green', label: 'Connected' },
+  blocked: { tone: 'red', label: 'Blocked' },
+  not_applicable: { tone: 'muted', label: 'Not needed' },
+  credentials_received: { tone: 'amber', label: 'Credentials received' },
+  configuring: { tone: 'amber', label: 'Configuring' },
+  testing: { tone: 'amber', label: 'Testing' },
+}
+function integrationState(status) {
+  return INTEGRATION_STATE[status] || { tone: 'amber', label: 'Not connected' }
 }
 
 export default function EnergyOverview() {
@@ -66,14 +176,7 @@ export default function EnergyOverview() {
   const navigate = useNavigate()
   const authority = useWorkspaceAuthority()
   const terminology = useTerminology()
-  const branding = authority.branding
   const hasLeads = authority.isFeatureEnabled('leads')
-
-  const [now, setNow] = useState(new Date())
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 30000)
-    return () => clearInterval(t)
-  }, [])
 
   const [views, setViews] = useState([])
   const [briefing, setBriefing] = useState(null)
@@ -82,6 +185,8 @@ export default function EnergyOverview() {
   const [concierge, setConcierge] = useState(null)
   const [spark, setSpark] = useState(null)
   const [recent, setRecent] = useState([])
+  const [leadSummary, setLeadSummary] = useState(null)
+  const [contactSummary, setContactSummary] = useState(null)
   const [launch, setLaunch] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -102,10 +207,11 @@ export default function EnergyOverview() {
     // workspace does not have the module; the panel is simply absent, as it
     // is from the rail. Anything else is a real fault and is said once, in
     // one sentence, with the detail left in the console for whoever looks.
-    const attempt = (label, promise, fallback) =>
+    const attempt = (label, promise, fallback, forbidden = fallback) =>
       promise.catch(e => {
         const status = e?.status ?? e?.response?.status
-        if (!(status === 402 || status === 403 || status === 404)) {
+        if (status === 403) return forbidden
+        if (!(status === 402 || status === 404)) {
           unexpected += 1
           // eslint-disable-next-line no-console
           console.warn('[energy-overview] %s failed:', label, e?.message || e)
@@ -123,8 +229,10 @@ export default function EnergyOverview() {
       view(VIEW_CONCIERGE),
       hasLeads ? attempt('sparklines', api.get('/leads/sparklines?days=7'), null) : skip(null),
       hasLeads ? attempt('recent leads', api.get('/leads/?page=1&page_size=8'), null) : skip(null),
+      hasLeads ? attempt('lead summary', api.get('/leads/workspace-summary'), null) : skip(null),
+      attempt('contact summary', api.get('/intake/contacts/summary', { skipRedirect: true }), null, FORBIDDEN),
       attempt('launch', api.get('/launch/me', { skipRedirect: true }), null),
-    ]).then(([v, b, rr, rn, mc, sp, rl, lc]) => {
+    ]).then(([v, b, rr, rn, mc, sp, rl, ls, cs, lc]) => {
       if (!live) return
       setViews(Array.isArray(v?.views) ? v.views : [])
       setBriefing(b)
@@ -133,6 +241,8 @@ export default function EnergyOverview() {
       setConcierge(mc)
       setSpark(sp)
       setRecent(Array.isArray(rl?.items) ? rl.items : [])
+      setLeadSummary(ls)
+      setContactSummary(cs)
       setLaunch(lc)
       setLoadError(unexpected > 0 ? 'Some workspace data is unavailable.' : '')
       setLoading(false)
@@ -148,13 +258,7 @@ export default function EnergyOverview() {
     navigate(q ? `/leads?q=${encodeURIComponent(q)}` : '/leads')
   }
 
-  const firstName = (user?.full_name || '').trim().split(/\s+/)[0] || 'there'
-  const orgName = terminology.orgName || branding?.brand_name || 'this workspace'
-
   // ── THE FOUR COUNTERS ────────────────────────────────────────────────────
-  //
-  // Each one carries where it came from, because a tile whose provenance is
-  // not obvious is the tile somebody eventually invents a number for.
   //
   // ENROLMENTS THIS MONTH is the one the schema cannot answer yet: nothing
   // records WHEN an account reached a signed contract, only that it is at
@@ -176,6 +280,7 @@ export default function EnergyOverview() {
       key: 'new-leads',
       label: 'New Leads',
       tag: 'Last 24h',
+      icon: 'users',
       value: hasLeads ? num(briefing?.leads_imported_last_24h ?? null) : '—',
       sub: hasLeads ? 'Arrived from the website, a referral or an advisor.'
                     : 'The lead module is not enabled for this workspace.',
@@ -186,16 +291,18 @@ export default function EnergyOverview() {
       key: 'rate-requests',
       label: 'Open Rate Requests',
       tag: hasView(VIEW_RATE_REQUESTS) ? 'Live' : null,
+      icon: 'file',
       value: num(rateRequests?.total ?? null),
       sub: missing(rateRequests, 'This screen is not configured for this workspace.')
         || `${num(statValue(rateRequests, 'Options Sent') ?? 0)} waiting on the customer · ${num(statValue(rateRequests, 'Unassigned') ?? 0)} unassigned`,
       to: hasView(VIEW_RATE_REQUESTS) ? `/view/${VIEW_RATE_REQUESTS}` : null,
-      tone: 'cyan',
+      tone: 'violet',
     },
     {
       key: 'enrollments',
       label: 'Enrollments This Month',
       tag: 'Not yet tracked',
+      icon: 'calendar',
       value: null,
       sub: 'Contracts record the tier an account is at, not the date it got '
          + 'there, so a month-to-date figure cannot be counted yet.',
@@ -206,109 +313,166 @@ export default function EnergyOverview() {
       key: 'renewals',
       label: 'Renewal Watch',
       tag: hasView(VIEW_RENEWALS) ? 'Renewal window' : null,
+      icon: 'refresh',
       value: num(renewalDue ?? null),
       sub: missing(renewals, 'This screen is not configured for this workspace.')
         || `${num(underContract ?? 0)} under contract in total.`,
       to: hasView(VIEW_RENEWALS) ? `/view/${VIEW_RENEWALS}` : null,
-      tone: 'amber',
+      tone: 'green',
     },
   ]
 
   // ── NEEDS ATTENTION ──────────────────────────────────────────────────────
   //
-  // Real conditions only, and a condition at zero is not listed. Four rows
-  // reading "0 of these" is not a priority queue; an empty queue is the
-  // honest answer to "what needs a person right now".
-  const attention = []
-  const repliesWaiting = briefing?.replies_needing_attention ?? 0
-  const followUpsDue = briefing?.cadence_touches_due_today ?? 0
-  const unassignedRates = statValue(rateRequests, 'Unassigned') ?? 0
-  const conciergeActive = statValue(concierge, 'Active') ?? 0
-  if (repliesWaiting > 0) attention.push({
-    key: 'replies', tone: 'blue', icon: 'mail',
-    title: `${repliesWaiting} customer ${repliesWaiting === 1 ? 'reply needs' : 'replies need'} a decision`,
-    sub: 'Answered a plan comparison or a question and is waiting on you.',
-    to: '/replies?needs_attention=true', cta: 'Open',
-  })
-  if (unassignedRates > 0) attention.push({
-    key: 'rates', tone: 'cyan', icon: 'zap',
-    title: `${unassignedRates} rate ${unassignedRates === 1 ? 'request has' : 'requests have'} no owner`,
-    sub: 'Nobody is working these, so nothing will happen to them.',
-    to: `/view/${VIEW_RATE_REQUESTS}`, cta: 'Assign',
-  })
-  if (followUpsDue > 0) attention.push({
-    key: 'followups', tone: 'amber', icon: 'clock',
-    title: `${followUpsDue} follow-${followUpsDue === 1 ? 'up is' : 'ups are'} due today`,
-    sub: 'Scheduled touches that have reached their date.',
-    to: '/workqueue', cta: 'Work queue',
-  })
-  if (conciergeActive > 0) attention.push({
-    key: 'concierge', tone: 'blue', icon: 'truck',
-    title: `${conciergeActive} Move Concierge ${conciergeActive === 1 ? 'handoff' : 'handoffs'} in progress`,
-    sub: 'Energy plus the rest of the move, still open.',
-    to: `/view/${VIEW_CONCIERGE}`, cta: 'Open',
-  })
-  if (renewalDue > 0) attention.push({
-    key: 'renewals', tone: 'amber', icon: 'refresh',
-    title: `${renewalDue} ${renewalDue === 1 ? 'account is' : 'accounts are'} inside the renewal window`,
-    sub: 'Reached before the contract date rather than after it.',
-    to: `/view/${VIEW_RENEWALS}`, cta: 'Review',
-  })
+  // A fixed priority queue, in the design's order, each row counted from a
+  // named source. A row whose source this workspace does not have shows a
+  // dash, never a zero: "none" and "cannot tell" are different answers.
+  const newRates = statValue(rateRequests, 'New')
+  const reviewRates = statValue(rateRequests, 'In Review')
+  const incompleteRates = rateRequests
+    ? (newRates ?? 0) + (reviewRates ?? 0)
+    : null
+  const followUpsDue = briefing ? (briefing.cadence_touches_due_today ?? 0) : null
+  const repliesWaiting = briefing ? (briefing.replies_needing_attention ?? 0) : null
+  const conciergeActive = concierge ? (statValue(concierge, 'Active') ?? 0) : null
+  const renewalsUpcoming = renewals ? (renewalDue ?? 0) : null
+
+  const attention = [
+    {
+      key: 'rates', tone: 'red', icon: 'file',
+      title: 'Incomplete rate requests',
+      sub: rateRequests ? 'New or in review — options not yet sent.' : 'Rate requests are not configured here.',
+      count: incompleteRates, to: `/view/${VIEW_RATE_REQUESTS}`,
+    },
+    {
+      key: 'followups', tone: 'amber', icon: 'user',
+      title: 'Customers needing follow-up',
+      sub: briefing ? 'Scheduled follow-ups due today.' : 'Follow-ups are not available here.',
+      count: followUpsDue, to: '/workqueue',
+    },
+    {
+      key: 'concierge', tone: 'blue', icon: 'truck',
+      title: 'Move Concierge pending',
+      sub: concierge ? 'Handoffs still open.' : 'Move Concierge is not configured here.',
+      count: conciergeActive, to: `/view/${VIEW_CONCIERGE}`,
+    },
+    {
+      key: 'renewals', tone: 'violet', icon: 'refresh',
+      title: 'Renewals coming up',
+      sub: renewals ? 'Accounts inside the renewal window.' : 'Renewals are not configured here.',
+      count: renewalsUpcoming, to: `/view/${VIEW_RENEWALS}`,
+    },
+    {
+      key: 'other', tone: 'muted', icon: 'more',
+      title: 'Other items',
+      sub: briefing ? 'Customer replies waiting on a decision.' : 'Replies are not available here.',
+      count: repliesWaiting, to: '/replies?needs_attention=true',
+    },
+  ]
+  const attentionTotal = attention.reduce((s, r) => s + (r.count || 0), 0)
 
   // ── LEAD → ENROLMENT ACTIVITY ────────────────────────────────────────────
   //
-  // Server-computed daily counts, oldest to newest, zeros included. The
-  // endpoint returns real history or nothing; this draws whichever it got and
-  // never fills a gap. A week with no movement renders the frame and says so,
-  // because a flat row of bars at zero reads as a broken chart.
+  // Server-computed daily counts (UTC days), oldest to newest, zeros
+  // included. The second series is BOOKED APPOINTMENTS — that is what the
+  // endpoint counts — and it is labelled as such. Rate requests and
+  // enrollments have no daily history in this schema, so they are named in
+  // the legend as not yet tracked rather than drawn as flat zeros.
   const series = useMemo(() => {
     const leadsIn = Array.isArray(spark?.leads_imported) ? spark.leads_imported : []
     const booked = Array.isArray(spark?.bookings) ? spark.bookings : []
     const days = Math.max(leadsIn.length, booked.length)
-    if (!days) return { days: [], peak: 0, total: 0 }
-    const today = new Date()
+    if (!days) return { days: [], peak: 0, total: 0, ticks: [] }
+    const now = new Date()
+    const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
     const out = []
     let peak = 0
     let total = 0
     for (let i = 0; i < days; i += 1) {
-      const d = new Date(today)
-      d.setDate(today.getDate() - (days - 1 - i))
+      const d = new Date(todayUtc - (days - 1 - i) * 86400000)
       const leads = Number(leadsIn[i] || 0)
-      const enrolled = Number(booked[i] || 0)
-      peak = Math.max(peak, leads, enrolled)
-      total += leads + enrolled
-      out.push({ label: d.toLocaleDateString(undefined, { weekday: 'short' }), leads, enrolled })
+      const booked_ = Number(booked[i] || 0)
+      peak = Math.max(peak, leads, booked_)
+      total += leads + booked_
+      out.push({
+        label: d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
+        leads, booked: booked_,
+      })
     }
-    return { days: out, peak, total }
+    // A readable axis: four steps, rounded up to a whole step.
+    const step = Math.max(1, Math.ceil(peak / 4))
+    const top = step * 4
+    const ticks = [4, 3, 2, 1, 0].map(k => k * step)
+    return { days: out, peak: top, total, ticks }
   }, [spark])
 
-  // ── LAUNCH READINESS ─────────────────────────────────────────────────────
+  // ── TOP LEAD SOURCES (30 days) ───────────────────────────────────────────
+  const sources = useMemo(() => {
+    const list = Array.isArray(leadSummary?.sources_30d) ? leadSummary.sources_30d : null
+    if (!list) return null
+    const rows = list
+      .map(r => ({ source: r?.source, count: Number(r?.count) || 0 }))
+      .sort((a, b) => b.count - a.count)
+    const total = rows.reduce((s, r) => s + r.count, 0)
+    return { rows: rows.slice(0, 6), total }
+  }, [leadSummary])
+
+  // ── CUSTOMER SNAPSHOT ────────────────────────────────────────────────────
+  const snapshotHidden = contactSummary === FORBIDDEN
+  const snap = contactSummary && contactSummary !== FORBIDDEN ? contactSummary : null
+  const totalContacts = isNum(snap?.contacts) ? snap.contacts : null
+  const snapStats = snap ? [
+    {
+      key: 'email', icon: 'mail', tone: 'blue', value: snap.email_ready,
+      label: 'Email ready',
+      extra: pct(snap.email_ready, totalContacts),
+    },
+    {
+      key: 'phones', icon: 'phone', tone: 'blue', value: snap.valid_phones,
+      label: 'Valid phones',
+      note: isNum(snap.mobile) ? `${num(snap.mobile)} mobile` : null,
+    },
+    {
+      key: 'enrich', icon: 'alert', tone: 'amber', value: snap.needs_enrichment,
+      label: 'Need enrichment',
+      extra: pct(snap.needs_enrichment, totalContacts),
+    },
+    {
+      key: 'previous', icon: 'user', tone: 'amber', value: snap.previous_customers,
+      label: 'Previous customers',
+      extra: pct(snap.previous_customers, totalContacts),
+    },
+  ] : []
+
+  // ── SYSTEM READINESS ─────────────────────────────────────────────────────
   //
-  // THE LAUNCH EXPERIENCE IS THE SOURCE OF TRUTH AND IS NOT REBUILT HERE.
-  // `overview.overall_pct` is computed once on the server and handed to both
-  // the ring on the Launch screen and this bar, which is exactly why it is
-  // read rather than recalculated: two components each averaging their own
-  // copy is how a screen ends up showing 60% beside 62%.
+  // Read from the launch programme's own integration rows. "All core
+  // services online" is a claim, so it is made only when every integration
+  // that applies here is actually connected or verified.
+  const integrations = Array.isArray(launch?.requirements?.integrations)
+    ? launch.requirements.integrations : []
+  const applicable = integrations.filter(i => i.status !== 'not_applicable')
+  const online = applicable.filter(i => i.status === 'connected' || i.status === 'verified')
+  const blocked = applicable.filter(i => i.status === 'blocked')
+  const allOnline = applicable.length > 0 && online.length === applicable.length
   const launchPct = launch?.overview?.overall_pct
   const launchSteps = Array.isArray(launch?.overview?.steps) ? launch.overview.steps : []
-  const launchStatus = launch?.implementation?.status || null
 
   const tierLabel = useMemo(() => {
     const map = new Map((terminology.tiers || []).map(t => [t.value, t.label]))
-    return (value) => (value ? (map.get(value) || String(value).replace(/_/g, ' ')) : '—')
+    return (value) => (value ? (map.get(value) || humanize(value)) : '—')
   }, [terminology.tiers])
 
   const leadName = (l) =>
     [l.first_name, l.last_name].filter(Boolean).join(' ') || l.phone || l.email || 'Unnamed'
 
+  const rateItems = Array.isArray(rateRequests?.items) ? rateRequests.items : []
+
   return (
     <div className="eo">
-      {/* ── HEADER ─────────────────────────────────────────────────────── */}
+      {/* ── TOP BAR ────────────────────────────────────────────────────── */}
       <header className="eo-header">
-        <div className="eo-header-title">
-          <h1>Operations Overview</h1>
-          <p>Today&apos;s leads, customers, enrollments and items needing attention.</p>
-        </div>
+        <Clock />
         <div className="eo-header-actions">
           <form className="eo-search" onSubmit={runSearch}>
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
@@ -338,13 +502,13 @@ export default function EnergyOverview() {
         </div>
       </header>
 
-      {loadError && <div className="eo-notice">{loadError}</div>}
-
-      {/* ── GREETING ───────────────────────────────────────────────────── */}
-      <section className="eo-greeting">
-        <h2>{greeting(now)}, {firstName}.</h2>
-        <p>Here is what needs attention across {orgName} today.</p>
+      {/* ── HERO ───────────────────────────────────────────────────────── */}
+      <section className="eo-hero">
+        <h1>Operations Overview</h1>
+        <p>Today&apos;s leads, customers, enrollments and items needing attention.</p>
       </section>
+
+      {loadError && <div className="eo-notice">{loadError}</div>}
 
       {/* ── KPI ROW ────────────────────────────────────────────────────── */}
       <section className="eo-kpis">
@@ -355,14 +519,17 @@ export default function EnergyOverview() {
                    role={kpi.to ? 'button' : undefined}
                    tabIndex={kpi.to ? 0 : undefined}
                    onKeyDown={kpi.to ? (e => { if (e.key === 'Enter') go(kpi.to) }) : undefined}>
-            <div className="eo-kpi-top">
-              <span className="eo-kpi-label">{kpi.label}</span>
-              {kpi.tag && <span className="eo-kpi-tag">{kpi.tag}</span>}
+            <span className="eo-kpi-icon"><Icon name={kpi.icon} size={22} /></span>
+            <div className="eo-kpi-body">
+              <div className="eo-kpi-top">
+                <span className="eo-kpi-label">{kpi.label}</span>
+                {kpi.tag && <span className="eo-kpi-tag">{kpi.tag}</span>}
+              </div>
+              <div className={`eo-kpi-value${kpi.value === null ? ' eo-kpi-value--none' : ''}`}>
+                {loading ? '·' : (kpi.value === null ? 'Not yet available' : kpi.value)}
+              </div>
+              <div className="eo-kpi-sub">{kpi.sub}</div>
             </div>
-            <div className={`eo-kpi-value${kpi.value === null ? ' eo-kpi-value--none' : ''}`}>
-              {loading ? '·' : (kpi.value === null ? 'Not yet available' : kpi.value)}
-            </div>
-            <div className="eo-kpi-sub">{kpi.sub}</div>
           </article>
         ))}
       </section>
@@ -376,27 +543,34 @@ export default function EnergyOverview() {
           </div>
           {loading ? (
             <div className="eo-empty">Loading…</div>
-          ) : attention.length === 0 ? (
-            <div className="eo-empty">
-              <strong>Nothing is waiting on a person right now.</strong>
-              <span>No unanswered replies, no rate request without an owner,
-                    no follow-up past its date and nothing inside the renewal window.</span>
-            </div>
           ) : (
-            <ul className="eo-attn">
-              {attention.map(item => (
-                <li key={item.key} className={`eo-attn-row eo-attn-row--${item.tone}`}>
-                  <span className="eo-attn-dot" aria-hidden="true" />
-                  <div className="eo-attn-body">
-                    <span className="eo-attn-title">{item.title}</span>
-                    <span className="eo-attn-sub">{item.sub}</span>
-                  </div>
-                  <button type="button" className="eo-attn-cta" onClick={() => go(item.to)}>
-                    {item.cta} →
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="eo-attn">
+                {attention.map(item => {
+                  const actionable = item.count > 0
+                  return (
+                    <li key={item.key}
+                        className={`eo-attn-row eo-attn-row--${item.tone}${actionable ? ' eo-attn-row--link' : ''}`}
+                        onClick={actionable ? () => go(item.to) : undefined}
+                        role={actionable ? 'button' : undefined}
+                        tabIndex={actionable ? 0 : undefined}
+                        onKeyDown={actionable ? (e => { if (e.key === 'Enter') go(item.to) }) : undefined}>
+                      <span className="eo-attn-icon"><Icon name={item.icon} size={16} /></span>
+                      <div className="eo-attn-body">
+                        <span className="eo-attn-title">{item.title}</span>
+                        <span className="eo-attn-sub">{item.sub}</span>
+                      </div>
+                      <span className={`eo-attn-count${actionable ? ' eo-attn-count--hot' : ''}`}>
+                        {item.count === null ? '—' : num(item.count)}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+              {attentionTotal === 0 && (
+                <p className="eo-attn-foot">Nothing is waiting on a person right now.</p>
+              )}
+            </>
           )}
         </section>
 
@@ -405,48 +579,65 @@ export default function EnergyOverview() {
             <h3>Lead → Enrollment Activity</h3>
             <span className="eo-card-note">Last 7 days</span>
           </div>
-          {loading ? (
+          {!hasLeads ? (
+            <div className="eo-empty">
+              <strong>The lead module is not enabled for this workspace.</strong>
+            </div>
+          ) : loading ? (
             <div className="eo-empty">Loading…</div>
           ) : series.days.length === 0 ? (
             <div className="eo-empty">
               <strong>No activity history yet.</strong>
               <span>This chart draws real daily counts. It fills in as leads
-                    arrive and enrollments are booked.</span>
+                    arrive and appointments are booked.</span>
             </div>
           ) : (
             <>
-              <div className="eo-chart" role="img"
-                   aria-label={`Daily new leads and enrollments over the last ${series.days.length} days`}>
-                {series.days.map((d, i) => (
-                  <div className="eo-chart-day" key={i}>
-                    <div className="eo-chart-bars">
-                      <span className="eo-bar eo-bar--leads"
-                            style={{ height: series.peak ? `${(d.leads / series.peak) * 100}%` : '0%' }}
-                            title={`${d.leads} new lead${d.leads === 1 ? '' : 's'}`} />
-                      <span className="eo-bar eo-bar--enrolled"
-                            style={{ height: series.peak ? `${(d.enrolled / series.peak) * 100}%` : '0%' }}
-                            title={`${d.enrolled} enrollment${d.enrolled === 1 ? '' : 's'}`} />
-                    </div>
-                    <span className="eo-chart-label">{d.label}</span>
+              <div className="eo-chartwrap">
+                <div className="eo-chart-axis" aria-hidden="true">
+                  {series.ticks.map(t => <span key={t}>{t}</span>)}
+                </div>
+                <div className="eo-chart-plot">
+                  <div className="eo-chart-grid" aria-hidden="true">
+                    {series.ticks.map(t => <i key={t} />)}
                   </div>
-                ))}
+                  <div className="eo-chart" role="img"
+                       aria-label={`Daily new leads and booked appointments over the last ${series.days.length} days`}>
+                    {series.days.map((d, i) => (
+                      <div className="eo-chart-day" key={i}>
+                        <div className="eo-chart-bars">
+                          <span className="eo-bar eo-bar--leads"
+                                style={{ height: `${(d.leads / series.peak) * 100}%` }}
+                                title={`${d.leads} new lead${d.leads === 1 ? '' : 's'}`}>
+                            <em>{d.leads}</em>
+                          </span>
+                          <span className="eo-bar eo-bar--booked"
+                                style={{ height: `${(d.booked / series.peak) * 100}%` }}
+                                title={`${d.booked} appointment${d.booked === 1 ? '' : 's'} booked`}>
+                            <em>{d.booked}</em>
+                          </span>
+                        </div>
+                        <span className="eo-chart-label">{d.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
               <div className="eo-legend">
                 <span><i className="eo-key eo-key--leads" /> New leads</span>
-                <span><i className="eo-key eo-key--enrolled" /> Enrollments</span>
-                {series.total === 0 && (
-                  <span className="eo-legend-note">
-                    Nothing recorded in this window — every day is a real zero.
-                  </span>
-                )}
+                <span><i className="eo-key eo-key--booked" /> Appointments booked</span>
+                <span className="eo-legend-off"><i className="eo-key eo-key--off" /> Rate requests · Enrollments — not yet tracked by day</span>
               </div>
+              {series.total === 0 && (
+                <p className="eo-legend-note">Nothing recorded in this window — every day is a real zero.</p>
+              )}
             </>
           )}
         </section>
       </div>
 
-      {/* ── RECENT LEADS + LAUNCH READINESS ────────────────────────────── */}
-      <div className="eo-grid eo-grid--split">
+      {/* ── RECENT LEADS / RATE REQUESTS / ENROLLMENTS ─────────────────── */}
+      <div className="eo-grid eo-grid--three">
         <section className="eo-card">
           <div className="eo-card-head">
             <h3>Recent Leads</h3>
@@ -464,82 +655,258 @@ export default function EnergyOverview() {
             <div className="eo-empty">Loading…</div>
           ) : recent.length === 0 ? (
             <div className="eo-empty">
+              <span className="eo-empty-icon"><Icon name="users" size={30} /></span>
               <strong>No leads yet.</strong>
               <span>Enquiries from the website, referrals and imports appear
                     here the moment they arrive.</span>
+              <button type="button" className="eo-btn eo-btn--ghost" onClick={() => go('/leads')}>
+                + Add lead
+              </button>
             </div>
           ) : (
-            <div className="eo-tablewrap">
-              <table className="eo-table">
-                <thead>
-                  <tr><th>Customer</th><th>Need</th><th>Source</th><th>Status</th></tr>
-                </thead>
-                <tbody>
-                  {recent.slice(0, 6).map(l => (
-                    <tr key={l.id} onClick={() => go('/leads/' + l.id)}>
-                      <td><strong>{leadName(l)}</strong></td>
-                      <td className="eo-td-soft">{tierLabel(l.tier)}</td>
-                      <td className="eo-td-soft">
-                        {l.import_list_name || l.source_file || '—'}
-                      </td>
-                      <td>
-                        <span className={`eo-pill eo-pill--${l.status || 'off'}`}>
-                          {String(l.status || '—').replace(/_/g, ' ')}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ul className="eo-list">
+              {recent.slice(0, 5).map(l => (
+                <li key={l.id} className="eo-list-row" role="button" tabIndex={0}
+                    onClick={() => go('/leads/' + l.id)}
+                    onKeyDown={e => { if (e.key === 'Enter') go('/leads/' + l.id) }}>
+                  <div className="eo-list-main">
+                    <strong>{leadName(l)}</strong>
+                    <span>
+                      {tierLabel(l.tier)}
+                      {(l.import_list_name || l.source_file || l.source)
+                        ? ` · ${l.import_list_name || l.source_file || humanize(l.source)}` : ''}
+                    </span>
+                  </div>
+                  <div className="eo-list-side">
+                    <span className={`eo-pill eo-pill--${l.status || 'off'}`}>
+                      {String(l.status || '—').replace(/_/g, ' ')}
+                    </span>
+                    {l.created_at && <span className="eo-list-when">{ago(l.created_at)}</span>}
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
 
-        <section className="eo-card eo-card--launch">
+        <section className="eo-card">
           <div className="eo-card-head">
-            <h3>Launch Readiness</h3>
+            <h3>Recent Rate Requests</h3>
+            {hasView(VIEW_RATE_REQUESTS) && (
+              <button type="button" className="eo-link" onClick={() => go(`/view/${VIEW_RATE_REQUESTS}`)}>
+                View all →
+              </button>
+            )}
+          </div>
+          {loading ? (
+            <div className="eo-empty">Loading…</div>
+          ) : !rateRequests ? (
+            <div className="eo-empty">
+              <strong>Rate requests are not configured for this workspace.</strong>
+            </div>
+          ) : rateItems.length === 0 ? (
+            <div className="eo-empty">
+              <span className="eo-empty-icon"><Icon name="file" size={30} /></span>
+              <strong>No rate requests yet.</strong>
+              <span>Rate comparison requests from your website or team
+                    show up here.</span>
+              {hasView(VIEW_RATE_REQUESTS) && (
+                <button type="button" className="eo-btn eo-btn--ghost"
+                        onClick={() => go(`/view/${VIEW_RATE_REQUESTS}`)}>
+                  + New rate request
+                </button>
+              )}
+            </div>
+          ) : (
+            <ul className="eo-list">
+              {rateItems.slice(0, 5).map(r => {
+                const v = r.values || {}
+                const detail = [v.location, v.source_detail].filter(Boolean).join(' · ')
+                const target = r.lead_id ? `/leads/${r.lead_id}` : `/view/${VIEW_RATE_REQUESTS}`
+                return (
+                  <li key={r.id} className="eo-list-row" role="button" tabIndex={0}
+                      onClick={() => go(target)}
+                      onKeyDown={e => { if (e.key === 'Enter') go(target) }}>
+                    <div className="eo-list-main">
+                      <strong>{v.name || '(no name)'}</strong>
+                      <span>{detail || (v.owner ? `Owner: ${v.owner}` : 'Unassigned')}</span>
+                    </div>
+                    <div className="eo-list-side">
+                      <span className="eo-pill">{tierLabel(v.tier)}</span>
+                      {v.updated_at && <span className="eo-list-when">{ago(v.updated_at)}</span>}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </section>
+
+        <section className="eo-card">
+          <div className="eo-card-head">
+            <h3>Recent Enrollments</h3>
+            <span className="eo-card-note">Not yet tracked</span>
+          </div>
+          <div className="eo-empty">
+            <span className="eo-empty-icon"><Icon name="calendar" size={30} /></span>
+            <strong>Not yet available.</strong>
+            <span>Enrollments are not recorded as their own records yet, so
+                  there is nothing truthful to list here. Accounts under
+                  contract are counted in Renewal Watch.</span>
+          </div>
+        </section>
+      </div>
+
+      {/* ── SOURCES / SNAPSHOT / READINESS ─────────────────────────────── */}
+      <div className={`eo-grid ${snapshotHidden ? 'eo-grid--two' : 'eo-grid--three'}`}>
+        <section className="eo-card">
+          <div className="eo-card-head">
+            <h3>Top Lead Sources</h3>
+            <span className="eo-card-note">Last 30 days</span>
+          </div>
+          {!hasLeads ? (
+            <div className="eo-empty">
+              <strong>The lead module is not enabled for this workspace.</strong>
+            </div>
+          ) : loading ? (
+            <div className="eo-empty">Loading…</div>
+          ) : !sources ? (
+            <div className="eo-empty">
+              <strong>Not yet available.</strong>
+              <span>Lead source totals could not be read for this workspace.</span>
+            </div>
+          ) : sources.rows.length === 0 ? (
+            <div className="eo-empty">
+              <strong>No leads in the last 30 days.</strong>
+            </div>
+          ) : (
+            <ul className="eo-sources">
+              {sources.rows.map(r => {
+                const share = sources.total > 0 ? Math.round((r.count / sources.total) * 100) : 0
+                return (
+                  <li key={r.source || 'unknown'} className="eo-source">
+                    <span className="eo-source-icon"><Icon name={sourceIcon(r.source)} size={15} /></span>
+                    <span className="eo-source-name">{r.source ? humanize(r.source) : 'Unknown'}</span>
+                    <span className="eo-source-bar"><span style={{ width: `${share}%` }} /></span>
+                    <span className="eo-source-count">{num(r.count)}</span>
+                    <span className="eo-source-pct">({share}%)</span>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </section>
+
+        {!snapshotHidden && (
+          <section className="eo-card">
+            <div className="eo-card-head">
+              <h3>Customer Snapshot</h3>
+              {snap && (
+                <button type="button" className="eo-link" onClick={() => go('/contacts')}>
+                  Browse contacts →
+                </button>
+              )}
+            </div>
+            {loading ? (
+              <div className="eo-empty">Loading…</div>
+            ) : !snap ? (
+              <div className="eo-empty">
+                <strong>Not yet available.</strong>
+                <span>The contact summary could not be read for this workspace.</span>
+              </div>
+            ) : (
+              <div className="eo-snap">
+                <div className="eo-snap-total">
+                  <span className="eo-snap-total-label">Total contacts</span>
+                  <span className={`eo-snap-total-value${totalContacts === null ? ' eo-snap-total-value--none' : ''}`}>
+                    {totalContacts === null ? 'Not yet available' : num(totalContacts)}
+                  </span>
+                </div>
+                <ul className="eo-snap-stats">
+                  {snapStats.map(s => (
+                    <li key={s.key} className={`eo-snap-stat eo-snap-stat--${s.tone}`}>
+                      <span className="eo-snap-icon"><Icon name={s.icon} size={17} /></span>
+                      <div>
+                        <strong className={isNum(s.value) ? '' : 'eo-snap-none'}>
+                          {isNum(s.value) ? num(s.value) : 'Not yet available'}
+                        </strong>
+                        <span>
+                          {s.label}
+                          {isNum(s.value) && s.extra !== null && s.extra !== undefined ? ` (${s.extra}%)` : ''}
+                          {isNum(s.value) && s.note ? ` (${s.note})` : ''}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
+        )}
+
+        <section className="eo-card">
+          <div className="eo-card-head">
+            <h3>System Readiness</h3>
             {launch && (
-              <button type="button" className="eo-link eo-link--invert"
-                      onClick={() => go('/launch')}>
+              <button type="button" className="eo-link" onClick={() => go('/launch')}>
                 Launch Center →
               </button>
             )}
           </div>
           {loading ? (
-            <div className="eo-empty eo-empty--invert">Loading…</div>
-          ) : !launch ? (
-            <div className="eo-empty eo-empty--invert">
-              <strong>No launch is open for this workspace.</strong>
-              <span>Readiness appears here while an implementation is running.</span>
+            <div className="eo-empty">Loading…</div>
+          ) : integrations.length === 0 ? (
+            <div className="eo-empty">
+              <strong>Not yet available.</strong>
+              <span>Integration status appears here once the launch programme
+                    lists the services this workspace uses.</span>
             </div>
           ) : (
             <>
-              <p className="eo-launch-lede">
-                Progress is read from the Launch Center, not recalculated here,
-                so this bar and that screen can never disagree.
-              </p>
-              <div className="eo-launch-bar" role="img"
-                   aria-label={`Launch readiness ${launchPct ?? 0} percent`}>
-                <span style={{ width: `${Math.max(0, Math.min(100, launchPct ?? 0))}%` }} />
-              </div>
-              <div className="eo-launch-meta">
-                <span className="eo-launch-pct">{launchPct ?? 0}%</span>
-                <span>
-                  {launch.overview?.complete_steps ?? 0} of{' '}
-                  {launch.overview?.total_steps ?? launchSteps.length} steps complete
-                  {launchStatus ? ` · ${String(launchStatus).replace(/_/g, ' ')}` : ''}
+              <div className={`eo-ready-banner eo-ready-banner--${allOnline ? 'green' : blocked.length ? 'red' : 'amber'}`}>
+                <span className="eo-ready-banner-icon">
+                  <Icon name={allOnline ? 'check' : 'alert'} size={16} />
                 </span>
+                <div>
+                  <strong>
+                    {allOnline
+                      ? 'All core services online'
+                      : `${online.length} of ${applicable.length} services connected`}
+                  </strong>
+                  <span>
+                    {allOnline
+                      ? 'Every listed integration is connected.'
+                      : blocked.length
+                        ? `${blocked.length} ${blocked.length === 1 ? 'is' : 'are'} blocked and need${blocked.length === 1 ? 's' : ''} attention.`
+                        : 'The rest are still being set up.'}
+                  </span>
+                </div>
               </div>
-              {launchSteps.length > 0 && (
-                <div className="eo-launch-steps">
-                  {launchSteps.slice(0, 4).map(s => (
-                    <div key={s.key} className="eo-launch-step">
-                      <span className="eo-launch-step-name">{s.label}</span>
-                      <span className="eo-launch-step-state">
-                        {s.pct >= 100 ? 'Complete' : s.pct > 0 ? `${s.pct}%` : 'Not started'}
+              <ul className="eo-ready">
+                {integrations.map(i => {
+                  const st = integrationState(i.status)
+                  return (
+                    <li key={i.key} className={`eo-ready-row eo-ready-row--${st.tone}`}>
+                      <span className="eo-ready-dot" aria-hidden="true" />
+                      <span className="eo-ready-name">
+                        {i.label || humanize(i.key)}
+                        {!i.required && i.status !== 'not_applicable' && <em> · optional</em>}
                       </span>
-                    </div>
-                  ))}
+                      <span className="eo-ready-state">{st.label}</span>
+                    </li>
+                  )
+                })}
+              </ul>
+              {isNum(launchPct) && (
+                <div className="eo-launch">
+                  <div className="eo-launch-bar" role="img"
+                       aria-label={`Launch readiness ${launchPct} percent`}>
+                    <span style={{ width: `${Math.max(0, Math.min(100, launchPct))}%` }} />
+                  </div>
+                  <span className="eo-launch-meta">
+                    Launch {launchPct}% · {launch.overview?.complete_steps ?? 0} of{' '}
+                    {launch.overview?.total_steps ?? launchSteps.length} steps complete
+                  </span>
                 </div>
               )}
             </>

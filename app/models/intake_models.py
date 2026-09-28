@@ -232,6 +232,10 @@ class OrgContact(Base):
         Index("ix_org_contacts_org_batch", "organization_id", "import_batch_id"),
         Index("ix_org_contacts_org_lifecycle", "organization_id", "lifecycle"),
         Index("ix_org_contacts_lead", "lead_id"),
+        # Workspace contacts list: name sort / name search and the default
+        # newest-first page, both org-first.
+        Index("ix_org_contacts_org_name", "organization_id", "last_name", "first_name"),
+        Index("ix_org_contacts_org_created", "organization_id", "created_at"),
     )
 
 

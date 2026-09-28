@@ -401,7 +401,7 @@ def test_every_vertical_dashboard_is_reachable_from_the_overview_switch(key):
 
 APPROVED_RAIL = {
     "energy": {
-        "Operate": ["Overview", "Leads & Customers", "Rate Requests",
+        "Operate": ["Overview", "Leads & Customers", "Contacts", "Rate Requests",
                     "Sales Pipeline", "Move Concierge"],
         "Work": ["Communications", "Tasks & Follow-Up", "Renewals", "Reports"],
         "System": ["Integrations", "Team & Access", "Launch Center"],

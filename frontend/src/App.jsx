@@ -171,6 +171,10 @@ import ImportBatchReview from './pages/ImportBatchReview'
 // /import-batches screens stay reachable for batches created before it.
 import ImportWizard from './pages/intake/ImportWizard'
 import ImportLedger from './pages/intake/ImportLedger'
+// CONTACTS WORKSPACE: the org's canonical contact database (read + explicit
+// one-at-a-time Promote to Lead). Same guard as /imports - the contacts API
+// requires import-review permission.
+import Contacts from './pages/contacts/Contacts'
 import MyDay from './pages/sales/MyDay'
 import SellCatalogue from './pages/sales/SellCatalogue'
 import MyPipeline from './pages/sales/MyPipeline'
@@ -993,6 +997,7 @@ export default function App() {
         <Route path="/sales/salespeople" element={<SalesRoute><Salespeople /></SalesRoute>} />
         <Route path="/leads" element={<ProtectedRoute feature="leads"><Leads /></ProtectedRoute>} />
         <Route path="/leads/:leadId" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
+        <Route path="/contacts" element={<ProtectedRoute feature="imports" requireAdmin><Contacts /></ProtectedRoute>} />
         <Route path="/import-batches" element={<ProtectedRoute feature="imports" requireAdmin><ImportBatches /></ProtectedRoute>} />
         <Route path="/import-batches/:batchId" element={<ProtectedRoute requireAdmin><ImportBatchReview /></ProtectedRoute>} />
         <Route path="/imports" element={<ProtectedRoute feature="imports" requireAdmin><ImportLedger /></ProtectedRoute>} />

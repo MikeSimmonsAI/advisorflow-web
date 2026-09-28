@@ -7,6 +7,10 @@ import { formatPhone } from '../utils/phone'
 import '../styles/shared.css'
 import './Leads.css'
 import VoiceCampaign from '../components/VoiceCampaign'
+// Vertical switch (see Leads() below).
+import { verticalFor, VERTICAL_ENERGY } from '../verticals/workspaceVertical'
+import { useWorkspaceAuthority } from '../auth/workspaceAuthority'
+import LeadsWorkspace from './vertical/LeadsWorkspace'
 
 // TIERS BELONG TO THE ORGANIZATION, NOT TO THIS FILE.
 //
@@ -63,7 +67,21 @@ const STATUS_FILTER_OPTIONS = [
   { value: 'needs_tier_review', label: 'Needs Review' },
 ]
 
+// WHICH LEADS SCREEN THIS WORKSPACE GETS. The energy vertical renders its
+// pipeline workspace (pages/vertical/LeadsWorkspace.jsx); every other vertical
+// renders the classic page below, unchanged. `?classic=1` keeps the classic
+// page reachable from the workspace for what it does not reproduce.
 export default function Leads() {
+  const { branding } = useWorkspaceAuthority()
+  const [params] = useSearchParams()
+  const vertical = verticalFor(branding)
+  if (vertical && vertical.key === VERTICAL_ENERGY && params.get('classic') !== '1') {
+    return <LeadsWorkspace />
+  }
+  return <ClassicLeads />
+}
+
+function ClassicLeads() {
   const navigate = useNavigate()
   const [leads, setLeads] = useState([])
   const [leadsTotal, setLeadsTotal] = useState(0)

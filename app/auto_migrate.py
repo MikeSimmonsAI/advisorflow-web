@@ -43,7 +43,7 @@ from datetime import datetime as _datetime
 from typing import Any, Dict, List, Tuple
 
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
 # ── How hard a column-add tries before it gives up ──────────────────────────
 # Bounded by construction: at most three attempts, each capped at a five-second
@@ -1564,6 +1564,16 @@ INDEXES_TO_CREATE = [
     "CREATE INDEX IF NOT EXISTS ix_isr_duplicate_of ON import_staged_rows(duplicate_of_staged_row_id)",
     "CREATE INDEX IF NOT EXISTS ix_leads_org_contact_id ON leads(org_contact_id)",
     "CREATE INDEX IF NOT EXISTS ix_leads_import_batch_id ON leads(import_batch_id)",
+    # Workspace contacts list (GET /intake/contacts): name sort and the
+    # default newest-first page. Organization first, like every org_contacts index.
+    "CREATE INDEX IF NOT EXISTS ix_org_contacts_org_name ON org_contacts(organization_id, last_name, first_name)",
+    "CREATE INDEX IF NOT EXISTS ix_org_contacts_org_created ON org_contacts(organization_id, created_at)",
+    # ONE LEAD PER ORG CONTACT. Backstops the conditional-UPDATE claim in
+    # intake.promote against a concurrent import activation. Partial, so the
+    # many leads with no org contact never collide. If production already holds
+    # duplicates, creation fails with IntegrityError, is logged and skipped
+    # (see the loop below) and the application-level guards still apply.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_leads_org_contact ON leads(organization_id, org_contact_id) WHERE org_contact_id IS NOT NULL",
     # The webhook lookup key. Every Retell event resolves through this column,
     # several times per call, so it is indexed rather than scanned.
     "CREATE INDEX IF NOT EXISTS ix_voice_calls_provider_call_id ON voice_calls(provider_call_id)",
@@ -2084,7 +2094,9 @@ def run_auto_migrations(engine) -> None:
             try:
                 conn.execute(text(idx_sql))
                 conn.commit()
-            except (OperationalError, ProgrammingError) as e:
+            # IntegrityError: a UNIQUE index over rows that already collide.
+            # It is reported and skipped - never a reason to refuse to boot.
+            except (OperationalError, ProgrammingError, IntegrityError) as e:
                 conn.rollback()
                 print(f"[auto_migrate] Index skipped: {e}")
 

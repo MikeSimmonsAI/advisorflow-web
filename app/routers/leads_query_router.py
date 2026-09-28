@@ -51,6 +51,10 @@ def list_leads(
     message_track: Optional[str] = Query(None),
     temperature: Optional[str] = Query(None),
     import_list_name: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, max_length=120),
+    assigned_to_id: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    sort: str = Query("recent", pattern="^(recent|activity|name)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(500, ge=1, le=2000),
     db: Session = Depends(get_db),
@@ -112,6 +116,25 @@ def list_leads(
         query = query.filter(Lead.engagement_temperature == temperature)
     if import_list_name:
         query = query.filter(Lead.import_list_name == import_list_name)
+    # SERVER-SIDE search / assignee / source, inside the one authorized scope
+    # above - an advisor searching still only ever sees their own leads.
+    if search and search.strip():
+        term = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{term}%"
+        conds = [Lead.first_name.ilike(like, escape="\\"), Lead.last_name.ilike(like, escape="\\"),
+                 Lead.email.ilike(like, escape="\\"), Lead.phone.ilike(like, escape="\\"),
+                 # full name: "ann archer" matches first + last
+                 (func.coalesce(Lead.first_name, "") + " "
+                  + func.coalesce(Lead.last_name, "")).ilike(like, escape="\\")]
+        digits = "".join(ch for ch in search if ch.isdigit())
+        if len(digits) >= 3:
+            conds.append(Lead.phone.like(f"%{digits}%"))
+        from sqlalchemy import or_ as _or
+        query = query.filter(_or(*conds))
+    if assigned_to_id:
+        query = query.filter(Lead.assigned_to_id == assigned_to_id)
+    if source:
+        query = query.filter((Lead.source == source) | (Lead.import_list_name == source))
     # Default: exclude remove_all flagged leads from main list (they appear in flagged section)
     # bad_email flagged leads remain in the main list (still contactable by SMS)
     query = query.filter(
@@ -119,9 +142,15 @@ def list_leads(
     )
 
     total = query.count()
+    if sort == "activity":
+        order = (Lead.last_messaged_at.desc().nullslast(), Lead.created_at.desc())
+    elif sort == "name":
+        order = (Lead.last_name.asc(), Lead.first_name.asc())
+    else:
+        order = (Lead.created_at.desc(),)
     rows = (
         query
-        .order_by(Lead.created_at.desc())
+        .order_by(*order)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -210,6 +239,44 @@ def leads_needing_tier_review(
             d["created_at"] = d["created_at"].isoformat()
         items.append(d)
     return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.patch("/{lead_id}/stage")
+def move_lead_stage(
+    lead_id: str,
+    tier: str = Query(..., min_length=1, max_length=64),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    """Move a lead to another stage of THIS organization's pipeline.
+
+    The pipeline is the org's configurable tier list (industry_templates.
+    org_lead_tiers) - not the fixed LeadTier enum that PATCH /tier validates
+    against, which rejects most non-funeral verticals' stages. Unlike PATCH
+    /tier (the needs-review unlock), this does not reset status or the message
+    track: moving a card is not a reason to re-queue anyone. Nothing is sent.
+    Same scope as the rest of the lead routes; audited.
+    """
+    from app.models.models import Organization
+    from app.services.industry_templates import org_lead_tiers
+    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    org = db.query(Organization).filter(Organization.id == lead.organization_id).first()
+    allowed = [t.get("value") for t in (org_lead_tiers(org) if org else []) if t.get("value")]
+    if tier not in allowed:
+        raise HTTPException(status_code=400,
+                            detail={"message": f"'{tier}' is not a stage of this pipeline.",
+                                    "valid_stages": allowed})
+    previous = lead.tier
+    if previous == tier:
+        return {"id": lead.id, "tier": lead.tier, "changed": False}
+    lead.tier = tier
+    log_action(db, lead.organization_id, current_user.id,
+               action="lead.stage_moved", target_type="lead", target_id=lead.id,
+               details={"from": previous, "to": tier}, commit=False)
+    db.commit()
+    return {"id": lead.id, "tier": lead.tier, "changed": True}
 
 
 @router.patch("/{lead_id}/tier")
@@ -495,3 +562,123 @@ def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(re
         for stage in stages
     ]
 
+
+
+# ── workspace summary ───────────────────────────────────────────────────────
+
+# Tier keys that mean "a contract is in place" in the verticals that have one
+# (energy / roofing: contract_signed, funeral: contract_sold, real estate:
+# under_contract). A vertical with none of these reports under_contract = null.
+_UNDER_CONTRACT_TIERS = ("contract_signed", "contract_sold", "under_contract")
+_LOST_STATUSES = ("not_interested", "dead", "dnc")
+
+
+@router.get("/workspace-summary")
+def workspace_summary(db: Session = Depends(get_db),
+                      current_user: User = Depends(require_tenant_or_observer)):
+    """One screen's worth of truthful numbers for the ACTING workspace.
+
+    Same scope as every KPI in this file: the workspace this request is in
+    (lead_scope.active_workspace_org_id), the caller's own leads unless they
+    manage that workspace, and internal test records excluded
+    (app/services/test_records.py). A figure the data cannot support is null
+    ("Not yet available"), never an estimate.
+
+    MUST stay registered above GET /{lead_id}.
+    """
+    from app.models.intake_models import OrgContact
+    from app.models.models import Organization
+    from app.services import industry_templates
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start_7d = now - timedelta(days=7)
+    start_30d = now - timedelta(days=30)
+
+    from app.services.platform_owner import is_platform_pseudo_org
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
+    org = (db.query(Organization).filter(Organization.id == org_id).first()
+           if org_id and not is_platform_pseudo_org(org_id) else None)
+    if org is None:
+        # No customer selected (e.g. the platform owner outside any tenant).
+        # Zeros here would be invented numbers; say so instead, as intake does.
+        raise HTTPException(status_code=409, detail=(
+            "No customer organization is selected. Select a workspace first."))
+    is_manager = lead_scope.is_manager_here(current_user, db)
+    f = [Lead.organization_id == org_id, Lead.is_test.isnot(True)]
+    if not is_manager:
+        f.append(Lead.assigned_to_id == current_user.id)
+
+    def _count(*extra):
+        return int(db.query(func.count(Lead.id)).filter(*f, *extra).scalar() or 0)
+
+    total_leads = _count()
+    lost = _count(Lead.status.in_(_LOST_STATUSES))
+    held = _count(Lead.capacity_state == "over_capacity")
+
+    tiers = [{"key": t["value"], "label": t.get("label") or t["value"]}
+             for t in (industry_templates.org_lead_tiers(org) if org else [])
+             if t.get("value")]
+    by_tier = {t["key"]: 0 for t in tiers}
+    for tier, n in (db.query(Lead.tier, func.count(Lead.id)).filter(*f)
+                    .group_by(Lead.tier).all()):
+        by_tier[tier or "unassigned"] = by_tier.get(tier or "unassigned", 0) + int(n or 0)
+
+    contract_keys = [t["key"] for t in tiers if t["key"] in _UNDER_CONTRACT_TIERS]
+    under_contract = _count(Lead.tier.in_(contract_keys)) if contract_keys else None
+
+    appointments_upcoming = int(
+        db.query(func.count(BookingLink.id))
+        .join(Lead, BookingLink.lead_id == Lead.id)
+        .filter(*f, BookingLink.status.in_(["booked", "confirmed"]),
+                BookingLink.booked_time.isnot(None), BookingLink.booked_time >= now)
+        .scalar() or 0)
+
+    # Replies are read through the SAME lead filters (org, owner, not test),
+    # so the subquery never scans another tenant's replies.
+    replied_7d = (db.query(Reply.lead_id).join(Lead, Reply.lead_id == Lead.id)
+                  .filter(*f, Reply.received_at >= start_7d))
+    recently_active_7d = _count(
+        (Lead.last_messaged_at >= start_7d) | (Lead.last_contact_date >= start_7d)
+        | Lead.id.in_(replied_7d))
+
+    sources_30d = [
+        {"source": src or "unknown", "count": int(n or 0)}
+        for src, n in (db.query(Lead.source, func.count(Lead.id))
+                       .filter(*f, Lead.created_at >= start_30d)
+                       .group_by(Lead.source)
+                       .order_by(func.count(Lead.id).desc()).all())]
+
+    contacts = db.query(OrgContact).filter(OrgContact.organization_id == org_id,
+                                           OrgContact.archived_at.is_(None))
+    total_contacts = contacts.count()
+    not_promoted = contacts.filter(OrgContact.lead_id.is_(None)).count()
+
+    return {
+        "organization_id": org_id,
+        "scope": "workspace" if is_manager else "own_leads",
+        "total_leads": total_leads,
+        "active_leads": total_leads - lost,
+        "by_tier": by_tier,
+        "tiers": tiers,
+        "appointments_upcoming": appointments_upcoming,
+        "under_contract": under_contract,
+        # No field records a won deal distinctly from a contract tier or an
+        # appointment outcome for every vertical, so this is not reported.
+        "closed_won": None,
+        "lost": lost,
+        "recently_active_7d": recently_active_7d,
+        "total_contacts": total_contacts,
+        "contacts_not_promoted": not_promoted,
+        "held_over_capacity": held,
+        "sources_30d": sources_30d,
+        "definitions": {
+            "active_leads": "total_leads minus lost",
+            "lost": "status in " + ", ".join(_LOST_STATUSES),
+            "recently_active_7d": ("messaged, contacted or replied in the last 7 days"),
+            "appointments_upcoming": "booked or confirmed, booked_time in the future",
+            "under_contract": ("tier in " + ", ".join(contract_keys)) if contract_keys
+            else None,
+            "closed_won": "not tracked",
+        },
+        "generated_at": now.isoformat() + "Z",
+    }

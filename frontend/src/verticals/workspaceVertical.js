@@ -47,6 +47,7 @@ export const VERTICAL_ENERGY = 'energy'
  * to the right of each one is the existing capability it opens:
  *
  *   Leads & Customers   /leads           the lead + contact list
+ *   Contacts            /contacts        the canonical contact database
  *   Rate Requests       /view/<key>      configured workflow screen (leads)
  *   Sales Pipeline      /pipeline        the existing pipeline board
  *   Move Concierge      /view/<key>      configured workflow screen (leads)
@@ -71,6 +72,7 @@ const ENERGY = {
       items: [
         { to: '/', label: 'Overview', icon: 'grid' },
         { to: '/leads', label: 'Leads & Customers', icon: 'users', featureKey: 'leads' },
+        { to: '/contacts', label: 'Contacts', icon: 'database', adminOnly: true, featureKey: 'imports' },
         { view: 'rate-requests', label: 'Rate Requests', icon: 'zap' },
         { to: '/pipeline', label: 'Sales Pipeline', icon: 'trending-up' },
         { view: 'move-concierge', label: 'Move Concierge', icon: 'truck' },

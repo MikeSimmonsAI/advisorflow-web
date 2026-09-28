@@ -181,9 +181,28 @@ def plan(db: Session, batch: ImportBatch) -> dict:
                     ok, why = lead_removable[contact.lead_id]
                     if not ok:
                         reasons.append("its lead is being kept" + (f" ({why})" if why else ""))
+                promoted = False
+                if contact.lead_id and contact.lead_id not in lead_removable:
+                    # A person promoted this contact to a lead after the import
+                    # (intake.promote). That lead is not this batch's to remove,
+                    # and the contact is the lead's canonical record: it is
+                    # KEPT exactly as it is - not removed, not archived.
+                    from app.services.intake.promote import PROMOTION_SOURCE
+                    src = (db.query(Lead.source)
+                           .filter(Lead.id == contact.lead_id,
+                                   Lead.organization_id == batch.organization_id).scalar())
+                    promoted = src == PROMOTION_SOURCE
                 # A contact this batch created for a lead that PREDATES the
                 # batch is removable: the lead stays, and its link back to the
                 # contact is restored by that lead's own "updated" version.
+                if promoted:
+                    items.append({"version_id": v.id, "target_type": "org_contact",
+                                  "target_id": v.target_id, "action": v.action,
+                                  "outcome": KEEP,
+                                  "reason": "promoted to a lead by a person; kept unchanged"
+                                            + (" (" + "; ".join(reasons) + ")"
+                                               if reasons else "")})
+                    continue
                 items.append({"version_id": v.id, "target_type": "org_contact",
                               "target_id": v.target_id, "action": v.action,
                               "outcome": ARCHIVE if reasons else REMOVE,

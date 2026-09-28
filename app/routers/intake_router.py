@@ -23,6 +23,8 @@
     GET    /intake/batches/{id}/audit               every audit event for the batch
     GET    /intake/contacts/summary                 CONTACTS / LEADS / CUSTOMERS ... counts
     GET    /intake/contacts                         browse the org contact database
+    GET    /intake/contacts/{id}                    one contact: provenance, contactability
+    POST   /intake/contacts/{id}/promote            explicit human action: contact -> lead
 
 TENANT RULE: every route resolves `context.resolve()` first. There is no route
 here that reads or writes without a selected organization, and every query
@@ -41,7 +43,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.deps import get_db
+from app.deps import get_db, require_not_observation
 from app.models.import_models import ImportBatch, ImportBatchStatus, ImportStagedRow
 from app.models.intake_models import (CommitMode, ContactLifecycle, DuplicateResolution,
                                       IntakeClassification, IntakeStatus, OrgContact,
@@ -55,6 +57,7 @@ from app.services.intake import context as CTX
 from app.services.intake import engine as ENG
 from app.services.intake import fields as F
 from app.services.intake import rollback as RB
+from app.services.platform_owner import require_tenant_context
 
 router = APIRouter(prefix="/intake", tags=["intake"])
 log = logging.getLogger(__name__)
@@ -704,6 +707,24 @@ def batch_audit(batch_id: str, db: Session = Depends(get_db),
 
 
 # ── contacts ─────────────────────────────────────────────────────────────────
+#
+# ROUTE ORDER MATTERS: /contacts/summary is registered before
+# /contacts/{contact_id}, or "summary" would be read as a contact id.
+
+def _has_text(col):
+    return col.isnot(None) & (col != "")
+
+
+def _phone_present():
+    return _has_text(OrgContact.phone) | _has_text(OrgContact.mobile_phone)
+
+
+def _is_mobile():
+    # What the model can say truthfully: a number that arrived in a dedicated
+    # mobile column, or a phone whose line type was determined to be mobile.
+    return _has_text(OrgContact.mobile_phone) | (
+        _has_text(OrgContact.phone) & (OrgContact.phone_line_type == "mobile"))
+
 
 @router.get("/contacts/summary")
 def contacts_summary(db: Session = Depends(get_db), user=Depends(require_import_review)):
@@ -726,39 +747,366 @@ def contacts_summary(db: Session = Depends(get_db), user=Depends(require_import_
         "needs_enrichment": base.filter(
             OrgContact.lifecycle == ContactLifecycle.NEEDS_ENRICHMENT).count(),
         "historical_customers": base.filter(OrgContact.historical_customer.is_(True)).count(),
+        # ── added for the workspace contacts screen ──
+        "with_email": base.filter(_has_text(OrgContact.email)).count(),
+        "with_phone": base.filter(_phone_present()).count(),
+        "valid_phones": base.filter(
+            _phone_present(),
+            (OrgContact.sms_status.is_(None)) | (OrgContact.sms_status != "invalid")).count(),
+        "mobile": base.filter(_is_mobile()).count(),
+        "promoted": base.filter(OrgContact.lead_id.isnot(None)).count(),
     }
+
+
+def _contact_row(c: OrgContact, batch_codes: dict) -> dict:
+    return {
+        "id": c.id, "first_name": c.first_name, "last_name": c.last_name,
+        "full_name": c.full_name or (" ".join(p for p in (c.first_name, c.last_name) if p)
+                                     or None),
+        "company": c.company, "email": c.email,
+        "phone": c.phone, "mobile_phone": c.mobile_phone,
+        "street_address": c.street_address, "city": c.city, "state": c.state,
+        "zip_code": c.zip_code,
+        "record_class": c.record_class, "classification": c.classification,
+        "lifecycle": c.lifecycle,
+        "needs_enrichment": c.lifecycle == ContactLifecycle.NEEDS_ENRICHMENT,
+        "sms_status": c.sms_status, "email_status": c.email_status,
+        "historical_customer": c.historical_customer, "lead_id": c.lead_id,
+        "source": c.source, "source_detail": c.source_detail,
+        "source_system": c.source_system, "source_record_id": c.source_record_id,
+        "import_batch_id": c.import_batch_id,
+        "batch_code": batch_codes.get(c.import_batch_id),
+        "created_at": _iso(c.created_at),
+        # added: the phone line type as determined at import, when known
+        "phone_line_type": c.phone_line_type,
+    }
+
+
+def _batch_codes(db: Session, org_id: str, ids) -> dict:
+    ids = sorted({i for i in ids if i})
+    if not ids:
+        return {}
+    return dict(db.query(ImportBatch.id, ImportBatch.batch_code)
+                .filter(ImportBatch.organization_id == org_id, ImportBatch.id.in_(ids)).all())
+
+
+_SORTS = ("recent", "name", "company")
 
 
 @router.get("/contacts")
 def list_contacts(record_class: Optional[str] = Query(None),
+                  classification: Optional[str] = Query(None),
                   lifecycle: Optional[str] = Query(None),
                   batch_id: Optional[str] = Query(None), search: Optional[str] = Query(None),
+                  has_email: Optional[bool] = Query(None),
+                  has_phone: Optional[bool] = Query(None),
+                  email_ready: Optional[bool] = Query(None),
+                  needs_enrichment: Optional[bool] = Query(None),
+                  historical_customer: Optional[bool] = Query(None),
+                  promoted: Optional[bool] = Query(None),
+                  sort: str = Query("recent"),
                   page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
                   db: Session = Depends(get_db), user=Depends(require_import_review)):
+    import re
+    from sqlalchemy import or_
+    if sort not in _SORTS:
+        raise HTTPException(422, f"sort must be one of: {', '.join(_SORTS)}")
     ctx = CTX.resolve(db, user)
     q = db.query(OrgContact).filter(OrgContact.organization_id == ctx.org_id)
     if record_class:
         q = q.filter(OrgContact.record_class == record_class)
+    if classification:
+        q = q.filter(OrgContact.classification == classification)
     if lifecycle:
         q = q.filter(OrgContact.lifecycle == lifecycle)
     else:
         q = q.filter(OrgContact.archived_at.is_(None))
     if batch_id:
         q = q.filter(OrgContact.import_batch_id == batch_id)
-    if search:
-        s = f"%{search.strip()}%"
-        q = q.filter(OrgContact.first_name.ilike(s) | OrgContact.last_name.ilike(s)
-                     | OrgContact.company.ilike(s) | OrgContact.email.ilike(s)
-                     | OrgContact.phone.ilike(s) | OrgContact.mobile_phone.ilike(s))
+    if has_email is not None:
+        q = q.filter(_has_text(OrgContact.email) if has_email
+                     else ~_has_text(OrgContact.email))
+    if has_phone is not None:
+        q = q.filter(_phone_present() if has_phone else ~_phone_present())
+    if email_ready is not None:
+        q = q.filter(OrgContact.email_status == "ready" if email_ready
+                     else (OrgContact.email_status.is_(None))
+                     | (OrgContact.email_status != "ready"))
+    if needs_enrichment is not None:
+        q = q.filter(OrgContact.lifecycle == ContactLifecycle.NEEDS_ENRICHMENT
+                     if needs_enrichment
+                     else OrgContact.lifecycle != ContactLifecycle.NEEDS_ENRICHMENT)
+    if historical_customer is not None:
+        q = q.filter(OrgContact.historical_customer.is_(True) if historical_customer
+                     else OrgContact.historical_customer.isnot(True))
+    if promoted is not None:
+        q = q.filter(OrgContact.lead_id.isnot(None) if promoted
+                     else OrgContact.lead_id.is_(None))
+    term = (search or "").strip()
+    if term:
+        low = term.lower()
+        full = (func.coalesce(OrgContact.first_name, "") + " "
+                + func.coalesce(OrgContact.last_name, ""))
+        conds = [func.lower(col).contains(low, autoescape=True) for col in (
+            OrgContact.first_name, OrgContact.last_name, OrgContact.full_name,
+            OrgContact.company, OrgContact.email, OrgContact.phone,
+            OrgContact.mobile_phone, OrgContact.phone_raw, OrgContact.mobile_phone_raw)]
+        conds.append(func.lower(full).contains(low, autoescape=True))
+        digits = re.sub(r"\D", "", term)
+        if len(digits) >= 3:
+            # Stored numbers are E.164 ("+12145550101"); "(214) 555-0101" or
+            # "214.555" match on their digits.
+            conds.append(OrgContact.phone.contains(digits, autoescape=True))
+            conds.append(OrgContact.mobile_phone.contains(digits, autoescape=True))
+        q = q.filter(or_(*conds))
     total = q.count()
-    rows = q.order_by(OrgContact.created_at.desc()).offset((page - 1) * per_page) \
-        .limit(per_page).all()
-    return {"total": total, "contacts": [{
-        "id": c.id, "first_name": c.first_name, "last_name": c.last_name,
-        "company": c.company, "email": c.email, "phone": c.phone or c.mobile_phone,
-        "record_class": c.record_class, "classification": c.classification,
-        "lifecycle": c.lifecycle, "sms_status": c.sms_status, "email_status": c.email_status,
-        "historical_customer": c.historical_customer, "lead_id": c.lead_id,
+    if sort == "name":
+        # Plain column order (NULLS LAST) so ix_org_contacts_org_name
+        # (organization_id, last_name, first_name) can serve it.
+        order = (OrgContact.last_name.asc().nullslast(),
+                 OrgContact.first_name.asc().nullslast(), OrgContact.id.asc())
+    elif sort == "company":
+        order = (OrgContact.company_norm.is_(None), OrgContact.company_norm.asc(),
+                 OrgContact.last_name.asc(), OrgContact.id.asc())
+    else:
+        order = (OrgContact.created_at.desc(), OrgContact.id.desc())
+    rows = q.order_by(*order).offset((page - 1) * per_page).limit(per_page).all()
+    codes = _batch_codes(db, ctx.org_id, [c.import_batch_id for c in rows])
+    return {"total": total, "page": page, "per_page": per_page, "sort": sort,
+            "contacts": [_contact_row(c, codes) for c in rows]}
+
+
+def _contact_or_404(db: Session, ctx, contact_id: str) -> OrgContact:
+    c = (db.query(OrgContact)
+         .filter(OrgContact.id == contact_id, OrgContact.organization_id == ctx.org_id)
+         .first())
+    if c is None:
+        raise HTTPException(404, "Contact not found.")
+    return c
+
+
+_SMS_CONSENT_NOTE = "Having a phone number is not SMS permission."
+
+
+@router.get("/contacts/{contact_id}")
+def contact_detail(contact_id: str, db: Session = Depends(get_db),
+                   user=Depends(require_import_review)):
+    from app.models.intake_models import ImportRecordVersion, OrgContactSourceId
+    from app.models.models import AuditLogEntry, Lead
+    ctx = CTX.resolve(db, user)
+    c = _contact_or_404(db, ctx, contact_id)
+    batch = None
+    if c.import_batch_id:
+        batch = (db.query(ImportBatch)
+                 .filter(ImportBatch.id == c.import_batch_id,
+                         ImportBatch.organization_id == ctx.org_id).first())
+    codes = {batch.id: batch.batch_code} if batch else {}
+
+    lead = None
+    if c.lead_id:
+        lead = (db.query(Lead).filter(Lead.id == c.lead_id,
+                                      Lead.organization_id == ctx.org_id).first())
+
+    alt = (db.query(OrgContactSourceId)
+           .filter(OrgContactSourceId.organization_id == ctx.org_id,
+                   OrgContactSourceId.org_contact_id == c.id)
+           .order_by(OrgContactSourceId.created_at.asc()).all())
+
+    contact = _contact_row(c, codes)
+    contact.update({
+        # Not modelled on org_contacts: a second address line has no column.
+        "address_line2": None,
+        "country": c.country, "job_title": c.job_title, "owner_name": c.owner_name,
+        "last_activity_date": _iso(c.last_activity_at),
+        "custom_fields": _j(c.custom_fields, {}),
+        "vertical_fields": _j(c.vertical_fields, {}),
+        "source_fields": _j(c.source_fields, {}),
+        "tags": _j(c.tags, []),
+        "alternate_source_ids": [{"source_system": s.source_system,
+                                  "source_record_id": s.source_record_id,
+                                  "import_batch_id": s.import_batch_id,
+                                  "is_primary": bool(s.is_primary)} for s in alt],
+        "archived_at": _iso(c.archived_at), "archived_reason": c.archived_reason,
+        "updated_at": _iso(c.updated_at),
+    })
+
+    imported_at = None
+    if batch is not None:
+        v = (db.query(ImportRecordVersion.applied_at)
+             .filter(ImportRecordVersion.organization_id == ctx.org_id,
+                     ImportRecordVersion.batch_id == batch.id,
+                     ImportRecordVersion.target_type == "org_contact",
+                     ImportRecordVersion.target_id == c.id,
+                     ImportRecordVersion.action == "created").limit(1).scalar())
+        imported_at = _iso(v or c.created_at)
+    provenance = {
         "source": c.source, "source_detail": c.source_detail,
-        "import_batch_id": c.import_batch_id, "source_record_id": c.source_record_id,
-    } for c in rows]}
+        "source_system": c.source_system, "source_record_id": c.source_record_id,
+        "import_batch_id": c.import_batch_id,
+        "batch_code": batch.batch_code if batch else None,
+        "batch_filename": batch.source_filename if batch else None,
+        "imported_at": imported_at,
+        "imported_by_name": ((batch.acting_user_name or batch.created_by_name)
+                             if batch else None),
+        "source_row_number": c.source_row_number,
+    }
+
+    # CONSENT IS EVIDENCE, NEVER INFERENCE. The contact row has no consent
+    # column at all; the only real evidence the platform keeps is a recorded
+    # opt-in (flag AND timestamp) on the linked Lead. Anything else is False.
+    consent = bool(lead is not None and lead.sms_consent is True
+                   and lead.sms_consent_timestamp is not None)
+    contactability = {
+        "sms_status": c.sms_status,
+        "sms_consent": consent,
+        "sms_consent_source": "lead_opt_in_record" if consent else None,
+        "email_status": c.email_status,
+        "phone_present": bool(c.phone or c.mobile_phone),
+        "email_present": bool(c.email),
+        "phone_line_type": c.phone_line_type,
+        "outreach_reasons": _j(c.outreach_reasons, []),
+        "note": _SMS_CONSENT_NOTE,
+    }
+
+    lead_payload = None
+    if lead is not None:
+        lead_payload = {"id": lead.id, "status": lead.status, "tier": lead.tier,
+                        "assigned_to_id": lead.assigned_to_id,
+                        "created_at": _iso(lead.created_at),
+                        "held_over_capacity": lead.capacity_state == "over_capacity"}
+
+    events = (db.query(AuditLogEntry)
+              .filter(AuditLogEntry.organization_id == ctx.org_id,
+                      AuditLogEntry.target_type == "org_contact",
+                      AuditLogEntry.target_id == c.id)
+              .order_by(AuditLogEntry.created_at.desc(), AuditLogEntry.id.desc())
+              .limit(50).all())
+    history = [{"action": e.action, "at": _iso(e.created_at),
+                "actor_user_id": e.actor_user_id,
+                "details": _j(e.details, e.details)} for e in events]
+    # The import writes to a contact are recorded as record versions, not as
+    # per-row audit entries (one audit event per batch). They are this
+    # contact's history too.
+    vers = (db.query(ImportRecordVersion, ImportBatch.batch_code)
+            .outerjoin(ImportBatch, ImportBatch.id == ImportRecordVersion.batch_id)
+            .filter(ImportRecordVersion.organization_id == ctx.org_id,
+                    ImportRecordVersion.target_type == "org_contact",
+                    ImportRecordVersion.target_id == c.id)
+            .order_by(ImportRecordVersion.applied_at.desc()).limit(50).all())
+    for v, code in vers:
+        history.append({"action": f"import.{v.action}", "at": _iso(v.applied_at),
+                        "actor_user_id": None,
+                        "details": {"import_batch_id": v.batch_id, "batch_code": code,
+                                    "rolled_back_at": _iso(v.rolled_back_at),
+                                    "rollback_outcome": v.rollback_outcome}})
+    history.sort(key=lambda h: h["at"] or "", reverse=True)
+
+    return {"contact": contact, "provenance": provenance,
+            "contactability": contactability, "lead": lead_payload,
+            "history": history[:50]}
+
+
+class PromoteBody(BaseModel):
+    tier: Optional[str] = None
+    assigned_to_id: Optional[str] = None
+    note: Optional[str] = None
+
+
+# The roles that may create a lead in a workspace - the lead scope's own
+# allow-list (lead_scope: managers, advisors, god). Anything else, "viewer"
+# included, is refused: deny by default.
+def _may_create_leads(user, db) -> bool:
+    from app.services import lead_scope
+    role = lead_scope.effective_role(user, db)
+    return role in (lead_scope.MANAGER_ROLES + lead_scope.OWNER_SCOPED_ROLES
+                    + (lead_scope.GOD_ROLE,))
+
+
+def _user_in_workspace(db: Session, user_id: str, org_id: str) -> bool:
+    from app.models.models import User
+    from app.services import workspace_access
+    u = db.query(User).filter(User.id == user_id).first()
+    if u is None or getattr(u, "is_active", True) is False:
+        return False
+    if u.organization_id == org_id:
+        return True
+    try:
+        return bool(workspace_access.has_workspace(u, db, org_id))
+    except Exception:  # noqa: BLE001 - unknown membership is not membership
+        return False
+
+
+@router.post("/contacts/{contact_id}/promote", status_code=201,
+             dependencies=[Depends(require_not_observation),
+                           # the same capability list/detail require: promotion
+                           # returns (and acts on) the contact's identity.
+                           Depends(require_import_review)])
+def promote_contact(contact_id: str, body: PromoteBody = PromoteBody(),
+                    db: Session = Depends(get_db), user=Depends(require_tenant_context)):
+    """EXPLICIT HUMAN ACTION: make this contact a lead. Sends nothing, grants
+    no consent, enrolls nothing (app/services/intake/promote.py)."""
+    from app.services import industry_templates, lead_scope
+    from app.services.intake import promote as PR
+    from app.models.models import Organization
+    ctx = CTX.resolve(db, user)
+    if not _may_create_leads(user, db):
+        lead_scope.log_denial(user, "contact promote: role may not create leads here",
+                              contact_id)
+        raise HTTPException(403, "You do not have permission to create leads in this workspace.")
+    c = _contact_or_404(db, ctx, contact_id)
+
+    prior = PR.existing_lead_id(db, ctx.org_id, c)
+    if prior:
+        return _already_a_lead(db, user, prior)
+    if c.archived_at is not None:
+        raise HTTPException(409, "An archived contact cannot be promoted.")
+    if c.sms_status == "dnc":
+        # The import refuses a DNC contact a lead (commit.may_activate_lead);
+        # so does a person's click.
+        raise HTTPException(409, "do_not_contact")
+
+    org = db.query(Organization).filter(Organization.id == ctx.org_id).first()
+    tiers = industry_templates.org_lead_tiers(org)
+    valid = [t["value"] for t in tiers if t.get("value")]
+    tier = (body.tier or "").strip() or (valid[0] if valid else None)
+    if tier is None or tier not in valid:
+        raise HTTPException(400, {"message": f"'{body.tier}' is not a lead tier for this "
+                                             "organization.", "valid_tiers": valid})
+
+    is_manager = lead_scope.is_manager_here(user, db)
+    assigned = (body.assigned_to_id or "").strip() or None
+    if assigned is not None:
+        if not is_manager and assigned != user.id:
+            # An advisor creates leads for themself; ownership is a manager's call.
+            raise HTTPException(403, "Only a workspace manager can assign a lead to someone else.")
+        if not _user_in_workspace(db, assigned, ctx.org_id):
+            raise HTTPException(400, "assigned_to_id is not a user in this workspace.")
+    elif not lead_scope.is_god(user):
+        assigned = user.id
+
+    try:
+        out = PR.promote(db, ctx, c, tier=tier, assigned_to_id=assigned,
+                         note=(body.note or "").strip() or None)
+    except PR.AlreadyPromoted as e:
+        return _already_a_lead(db, user, e.lead_id)
+    except PR.DoNotContact:
+        raise HTTPException(409, "do_not_contact")
+    return out
+
+
+def _already_a_lead(db: Session, user, lead_id: Optional[str]):
+    """409, naming the lead only if the caller may see it (an advisor is not
+    told the id of a colleague's lead)."""
+    from app.models.models import Lead
+    from app.services import lead_scope
+    visible = None
+    if lead_id:
+        try:
+            visible = (lead_scope.authorized_lead_query(db, user, Lead.id)
+                       .filter(Lead.id == lead_id).scalar())
+        except HTTPException:
+            visible = None
+    content = {"detail": "This contact is already a lead."}
+    if visible:
+        content["lead_id"] = visible
+    return JSONResponse(status_code=409, content=content)

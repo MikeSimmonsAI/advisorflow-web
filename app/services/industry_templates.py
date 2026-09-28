@@ -1188,6 +1188,35 @@ def workspace_views(industry: Optional[str]) -> List[Dict[str, Any]]:
     return copy.deepcopy(resolve(industry).get("workspace_views") or [])
 
 
+def org_lead_tiers(org: Any) -> List[Dict[str, Any]]:
+    """THIS organization's lead tiers, in display order, as [{value, label, ...}].
+
+    The same resolution the settings screen uses (org_settings_router): the
+    organization's own saved `tier_config` when it has one, otherwise its
+    business type's tiers - never another vertical's. Entries saved with
+    `key`/`tier_key` instead of `value` are normalised to `value`.
+    """
+    import json as _json
+    raw = getattr(org, "tier_config", None)
+    out: List[Dict[str, Any]] = []
+    if raw:
+        try:
+            saved = _json.loads(raw)
+        except Exception:  # noqa: BLE001
+            saved = []
+        if isinstance(saved, list):
+            for t in saved:
+                if not isinstance(t, dict):
+                    continue
+                v = t.get("value") or t.get("key") or t.get("tier_key")
+                if v:
+                    d = dict(t)
+                    d["value"] = v
+                    d.setdefault("label", t.get("tier_label") or v)
+                    out.append(d)
+    return out or lead_tiers(getattr(org, "industry", None))
+
+
 def tier_definition_key(industry: Optional[str]) -> str:
     """Which `tier_config_service` set seeds this industry's TierDefinition rows.
 
