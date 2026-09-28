@@ -111,6 +111,9 @@ SCHEDULER_OWNER: Dict[str, str] = {
     # per-strategy lock would refuse the second, but the right answer is that
     # there is never a second).
     JobName.EVOSENSE_HUNT:       ROLE_BACKEND,
+    # Wholesale P6 exception sweep. The backend, once: two processes sweeping
+    # would race to open the same exception.
+    JobName.WHOLESALE_EXCEPTIONS: ROLE_BACKEND,
 }
 
 # A guard rather than a comment: a loop added to JobName without an owner here

@@ -1377,6 +1377,40 @@ async def _evosense_hunt_loop():
         await asyncio.sleep(evosense_scheduler.TICK_SECONDS)
 
 
+async def _wholesale_exception_loop():
+    """Wholesale P6: raise the exceptions the data already shows, every hour.
+
+    Same shape as the loops above - job ledger, work off the event loop, one
+    pass at a time. `wholesale_exceptions.sweep_all` is idempotent (an open
+    exception is never duplicated, a recently closed one is not reopened),
+    leaves sandbox records alone, and contacts nobody.
+    """
+    from app.services import wholesale_exceptions as wholesale_ex
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("wholesale_exception_loop")
+    await asyncio.sleep(330)  # startup delay — offset from every other loop
+    while True:
+        try:
+            async with record_job_run(JobName.WHOLESALE_EXCEPTIONS,
+                                      db_factory=SessionLocal) as _m:
+                def _one_pass():
+                    db = SessionLocal()
+                    try:
+                        return wholesale_ex.sweep_all(db)
+                    finally:
+                        db.close()
+                report = await _off_loop(_one_pass)
+                _m.update(report)
+                if report.get("raised") or report.get("failed"):
+                    _logger.info("wholesale exception sweep: %s", report)
+        except Exception as exc:                               # noqa: BLE001
+            _logger.error("wholesale_exception error: %s", exc, exc_info=True)
+        await asyncio.sleep(wholesale_ex.AUTO_INTERVAL_SECONDS)
+
+
 @app.on_event("startup")
 async def on_startup():
     # 0. THE ENVIRONMENT BOUNDARY. Before the database is touched, before a
@@ -1757,6 +1791,7 @@ async def on_startup():
         JobName.SESSION_CLEANUP:      _session_cleanup_loop,
         JobName.SALES_REMINDERS:      _sales_reminder_loop,
         JobName.EVOSENSE_HUNT:        _evosense_hunt_loop,
+        JobName.WHOLESALE_EXCEPTIONS: _wholesale_exception_loop,
     }
     for _job_name in _plan["start"]:
         _factory = _loop_factories.get(_job_name)

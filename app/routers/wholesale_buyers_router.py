@@ -37,6 +37,7 @@ from app.models.wholesale_models import (
 from app.services import wholesale_analysis as analysis
 from app.services import wholesale_service as svc
 from app.services.wholesale_matching import buyer_standing
+from app.services import wholesale_buyer_contacts as BC
 from app.services.entitlements import require_feature
 
 log = logging.getLogger(__name__)
@@ -192,6 +193,8 @@ def buyer_json(b: WholesaleBuyer, boxes: Optional[List[WholesaleBuyBox]] = None,
         "do_not_contact": bool(b.do_not_contact),
         "do_not_contact_reason": b.do_not_contact_reason,
         "is_test": bool(b.is_test),
+        # Identity in the shared contact database (PARTNER, never a Lead).
+        "org_contact_id": getattr(b, "org_contact_id", None),
         "created_at": b.created_at.isoformat() if b.created_at else None,
         "buy_boxes": [buy_box_json(x) for x in (boxes if boxes is not None
                                                 else (b.buy_boxes or []))],
@@ -298,8 +301,23 @@ def create_buyer(payload: BuyerIn, request: Request, db: Session = Depends(get_d
                   summary="Buyer added: %s" % (buyer.company_name or buyer.contact_name),
                   after={"source": buyer.source, "is_test": bool(buyer.is_test)})
     db.commit()
-    db.refresh(buyer)
+    buyer_id = buyer.id
+    BC.link_buyer(db, buyer, user)          # never fails the write; commits
+    buyer = _get_buyer(db, org_id, buyer_id)
     return buyer_json(buyer, [])
+
+
+@router.post("/buyers/link-contacts")
+def link_buyer_contacts(dry_run: bool = Query(True), db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user),
+                        _guard: User = Depends(require_not_observation)):
+    """Link this organization's existing buyers to the shared contact database
+    (PARTNER, never a Lead). Dry run by default; idempotent; admin only."""
+    from app.services.wholesale_exceptions import is_manager
+    org_id = svc.write_org_id(db, user)
+    if not is_manager(db, user):
+        raise HTTPException(status_code=403, detail="Only an administrator can link buyers.")
+    return BC.link_all(db, org_id, user, dry_run=dry_run)
 
 
 @router.delete("/buyers/{buyer_id}")
@@ -374,13 +392,19 @@ def update_buyer(buyer_id: str, payload: BuyerIn, request: Request,
     if "proof_of_funds_expires" in data:
         from app.routers.wholesale_router import _parse_date
         data["proof_of_funds_expires"] = _parse_date(data["proof_of_funds_expires"])
+    identity = {k: data[k] for k in ("contact_name", "company_name", "email", "phone")
+                if k in data and data[k] != getattr(buyer, k)}
     for key, value in data.items():
         setattr(buyer, key, value)
     db.flush()
+    BC.write_through(db, buyer, identity, user)
     svc.log_event(db, org_id, "buyer.updated", actor_type=ACTOR_USER,
                   actor_user_id=user.id, summary="Buyer updated",
                   before=before, after=buyer_json(buyer, []))
     db.commit()
+    if BC.linked_contact(db, buyer) is None and not buyer.is_test:
+        BC.link_buyer(db, buyer, user)
+        buyer = _get_buyer(db, org_id, buyer_id)
     db.refresh(buyer)
     return buyer_json(buyer)
 
@@ -661,8 +685,15 @@ async def import_buyers(request: Request, file: UploadFile = File(...),
                           % (created, boxes_created),
                   after={"source": source, "skipped": len(skipped)})
     db.commit()
+    new_ids = [b.id for b in db.query(WholesaleBuyer).filter(
+        WholesaleBuyer.organization_id == org_id, WholesaleBuyer.source == source,
+        WholesaleBuyer.org_contact_id.is_(None)).all()]
+    linked = BC.link_many(db, org_id, db.query(WholesaleBuyer).filter(
+        WholesaleBuyer.organization_id == org_id, WholesaleBuyer.id.in_(new_ids or [""])).all(),
+        user) if created else {}
     return {"created": created, "buy_boxes_created": boxes_created,
-            "skipped": skipped, "unmapped_columns": unmapped, "source": source}
+            "skipped": skipped, "unmapped_columns": unmapped, "source": source,
+            "contacts": linked}
 
 
 # ── Matching ────────────────────────────────────────────────────────────────

@@ -919,6 +919,9 @@ class WholesaleBuyer(Base):
     do_not_contact = Column(Boolean, nullable=False, default=False)
     do_not_contact_reason = Column(String, nullable=True)
     is_test = Column(Boolean, nullable=False, default=False)
+    # Who this buyer IS, in the shared contact database (Universal Intake).
+    # The buyer ROLE (buy boxes, standing, outreach, claims) stays on this row.
+    org_contact_id = Column(String, ForeignKey("org_contacts.id", ondelete="SET NULL"), nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

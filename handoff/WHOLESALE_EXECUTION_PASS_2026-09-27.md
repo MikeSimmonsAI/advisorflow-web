@@ -219,3 +219,40 @@ seller site and SMS consent work (`78759ad`) is complete and was not reopened.
 * **Cross-tenant attack list** (`test_wholesale_cross_tenant.py`) now covers
   every new ID-bearing route.
 * **Results** are recorded in the final report for this pass.
+
+---
+
+## Continuation (evening, 2026-09-27) — P3 / P5 / P6 finished
+
+### P3 — buyers in the shared contact layer
+- `wholesale_buyers.org_contact_id` (FK org_contacts, SET NULL) + index `ix_wsbuyer_org_contact` (auto_migrate).
+- `app/services/wholesale_buyer_contacts.py`: every real buyer is captured through Universal Intake with the
+  PARTNER classification (record class PARTNER, **no Lead**). Test buyers stay out. A buyer with no email/phone
+  is skipped. Intake's matcher reuses an existing contact instead of duplicating. An intake failure never
+  fails the buyer write (event `buyer.contact_link_error`; picked up by the next link run).
+- Create / edit / import link automatically; identity edits write through to the contact as manual edits
+  (protected from later imports). Buy boxes, standing, matching, outreach, POF, claims, history stay on the
+  buyer row, untouched.
+- Migration for existing buyers: `POST /wholesale/buyers/link-contacts?dry_run=true|false` (org admin only,
+  idempotent, tenant-scoped). Buyers page shows "In contacts" and an admin "Link N to contacts" button.
+
+### P5 — Funding Partners page + deal packet
+- `/wholesale/funding` standalone page (nav: Funding Partners): list/add/edit/verify/deactivate. Criteria are
+  labelled "Stated, unverified" until someone verifies. Track record is measured, not claimed.
+- `GET /wholesale/funding/deals/{id}/packet?format=json|html[&partner_id][&submission_id]`
+  (`wholesale_funding_packet.py`). Only real system data. ARV only if on file (with source/confidence);
+  MAO only if the MAO gate says CALCULATED, else "NOT CALCULATED" + reasons; repairs with status; comps only
+  those included, with origin; title fields; attachments listed if any, otherwise a note (storage not
+  configured never blocks). No seller personal data, no assignment fee. Download only — logged as
+  `funding.packet_generated` "(not sent)". Nothing is emailed or sent anywhere.
+
+### P6 — automatic exceptions + My Work
+- New sweep rules: `ai_exception` (seller reply the AI routed to a person — `needs_human`; EvoSense handoff
+  open > 48h), `missing_disposition_data` (deals in disposition / buyer identified / assignment pending:
+  one item per deal listing exactly what is missing, kept current).
+- Anti-spam: open items never duplicated; a closed item is not reopened for 30 days; automatic pass skips
+  sandbox records, caps 25 new per rule per pass, skips properties whose deal is closed/dead.
+- Hourly loop `wholesale_exception_sweep_loop` (JobName.WHOLESALE_EXCEPTIONS, backend-owned, job ledger,
+  off the event loop, per-org transaction). Writes only exception rows + audit events.
+- `GET /wholesale/exceptions/summary` → My Work card: "assigned to me" (+ unassigned/escalated for admins).
+  `/workqueue/today` shape unchanged (a test pins it).

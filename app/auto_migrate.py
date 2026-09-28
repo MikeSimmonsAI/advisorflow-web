@@ -1350,6 +1350,8 @@ COLUMNS_TO_ADD = [
     ("evosense_strategies", "enrichment_policy", "VARCHAR DEFAULT 'standard'"),
     ("evosense_provider_configs", "capability_health", "TEXT"),
     ("evosense_provider_configs", "truth_gate", "TEXT"),
+    # P3: a cash buyer's identity lives in the shared contact database.
+    ("wholesale_buyers", "org_contact_id", "VARCHAR"),
     ("evosense_provider_evaluations", "mode", "VARCHAR"),
     ("evosense_provider_evaluations", "plan", "TEXT"),
     ("evosense_provider_evaluations", "max_spend_cents", "INTEGER"),
@@ -1568,6 +1570,7 @@ INDEXES_TO_CREATE = [
     "CREATE INDEX IF NOT EXISTS ix_evosense_properties_archived ON evosense_properties(organization_id, archived_at)",
     # DATA DEPTH: EvoSense properties read their sold comps by this pair.
     "CREATE INDEX IF NOT EXISTS ix_wscomp_org_esprop ON wholesale_comps(organization_id, evosense_property_id)",
+    "CREATE INDEX IF NOT EXISTS ix_wsbuyer_org_contact ON wholesale_buyers(organization_id, org_contact_id)",
     "CREATE INDEX IF NOT EXISTS ix_messages_lead_id      ON messages(lead_id)",
     "CREATE INDEX IF NOT EXISTS ix_messages_sent_at      ON messages(sent_at)",
     "CREATE INDEX IF NOT EXISTS ix_messages_sender_id    ON messages(sender_id)",

@@ -2,6 +2,7 @@
 
     GET   /wholesale/exceptions/kinds                 kinds and outcomes
     GET   /wholesale/exceptions?scope=mine|all|escalated|unassigned
+    GET   /wholesale/exceptions/summary               counts for My Work (assigned to me; admin: + unassigned, escalated)
     POST  /wholesale/exceptions                       raise one by hand (admin)
     POST  /wholesale/exceptions/sweep                 raise what the data shows (admin, idempotent)
     POST  /wholesale/exceptions/{id}/assign           (admin)
@@ -59,6 +60,11 @@ class ResolveIn(BaseModel):
 def kinds(user: User = Depends(require_queue)):
     return {"kinds": [{"key": k, "label": EX.KIND_LABELS[k]} for k in EXCEPTION_KINDS],
             "outcomes": list(EXCEPTION_OUTCOMES)}
+
+
+@router.get("/summary")
+def summary(db: Session = Depends(get_db), user: User = Depends(require_queue)):
+    return EX.summary_for(db, svc.write_org_id(db, user), user)
 
 
 @router.get("")

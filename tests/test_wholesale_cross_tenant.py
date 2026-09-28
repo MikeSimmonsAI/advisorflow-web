@@ -407,6 +407,9 @@ def funding_and_exception_attacks(ids):
         ("patch", "/wholesale/funding/partners/%s" % ids["funding_partner_id"], {"verified": True}),
         ("get", "/wholesale/funding/deals/%s/options" % d, None),
         ("get", "/wholesale/funding/deals/%s/submissions" % d, None),
+        ("get", "/wholesale/funding/deals/%s/packet" % d, None),
+        ("get", "/wholesale/funding/deals/%s/packet?format=html&partner_id=%s&submission_id=%s"
+         % (d, ids["funding_partner_id"], ids["funding_submission_id"]), None),
         ("post", "/wholesale/funding/deals/%s/submissions" % d,
          {"partner_id": ids["funding_partner_id"]}),
         ("post", "/wholesale/funding/submissions/%s/response" % ids["funding_submission_id"],

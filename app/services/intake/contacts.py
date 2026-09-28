@@ -80,7 +80,25 @@ def apply_manual_edit(db, org_id: str, lead, changes: Dict[str, Any], *,
     contact = contact_for_lead(db, org_id, lead)
     if contact is None:
         return []
-    edits = {k: v for k, v in changes.items() if k in EDITABLE}
+    return apply_manual_edit_to_contact(db, org_id, contact, changes, actor_id=actor_id,
+                                        actor_name=actor_name, source=source,
+                                        subject={"lead_id": getattr(lead, "id", None)})
+
+
+CONTACT_EDITABLE = EDITABLE + ("company",)
+
+
+def apply_manual_edit_to_contact(db, org_id: str, contact, changes: Dict[str, Any], *,
+                                 actor_id: Optional[str] = None, actor_name: Optional[str] = None,
+                                 source: str = "operator_edit",
+                                 subject: Optional[Dict[str, Any]] = None) -> List[str]:
+    """The same correction, for a module that holds the org contact directly
+    (a Wholesale buyer, a funding partner) rather than through a Lead. Only a
+    contact of THIS organization is ever edited."""
+    if contact is None or getattr(contact, "organization_id", None) != org_id:
+        return []
+    allowed = CONTACT_EDITABLE if subject is None or "lead_id" not in subject else EDITABLE
+    edits = {k: v for k, v in changes.items() if k in allowed}
     if not edits:
         return []
     before: Dict[str, Any] = {}
@@ -101,6 +119,12 @@ def apply_manual_edit(db, org_id: str, lead, changes: Dict[str, Any], *,
             put("phone_raw", v)
     if "first_name" in edits or "last_name" in edits:
         put("full_name", _full_name(contact.first_name, contact.last_name))
+    if "company" in edits:
+        try:
+            from app.services.intake.normalize import company_key
+            put("company_norm", company_key(edits["company"]) if edits["company"] else None)
+        except Exception:  # noqa: BLE001 - the display value still changes
+            pass
 
     marked = protected_fields(contact)
     # Mark the fields the operator SENT, changed or not: confirming a value is
@@ -119,9 +143,8 @@ def apply_manual_edit(db, org_id: str, lead, changes: Dict[str, Any], *,
         try:
             from app.routers.audit_log_router import log_action
             log_action(db, org_id, actor_id, "intake.contact_edited", "org_contact",
-                       contact.id, details={"fields": changed, "source": source,
-                                            "lead_id": getattr(lead, "id", None),
-                                            "actor_name": actor_name},
+                       contact.id, details=dict({"fields": changed, "source": source,
+                                                 "actor_name": actor_name}, **(subject or {})),
                        before=before, after={f: getattr(contact, f) for f in changed},
                        commit=False)
         except Exception:  # noqa: BLE001 - an audit failure is loud, not fatal

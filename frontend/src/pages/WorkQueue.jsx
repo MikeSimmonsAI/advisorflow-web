@@ -91,6 +91,9 @@ export default function WorkQueue() {
   const [queue, setQueue] = useState(emptyQueue)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  // Wholesale exceptions assigned to this person. Only people who can work the
+  // exception queue get an answer; everyone else simply sees no card.
+  const [exceptions, setExceptions] = useState(null)
 
   const total = useMemo(() => sections.reduce((sum, section) => sum + (queue[section.key]?.length || 0), 0), [queue])
 
@@ -100,6 +103,7 @@ export default function WorkQueue() {
     try {
       const data = await api.get('/workqueue/today')
       setQueue({ ...emptyQueue, ...data })
+      api.get('/wholesale/exceptions/summary').then(setExceptions).catch(() => setExceptions(null))
     } catch (err) {
       setError(err.message || "Could not load today's work.")
     } finally {
@@ -132,6 +136,24 @@ export default function WorkQueue() {
       </header>
 
       {error ? <div className="workqueue-alert">{error}</div> : null}
+
+      {exceptions ? (
+        <section className="panel workqueue-section workqueue-section--red" style={{ marginBottom: 16 }}>
+          <div className="panel-header">
+            <div>
+              <h2 className="panel-title">Exceptions</h2>
+              <p className="workqueue-section-subtitle">
+                Wholesale work that needs a person - assigned to you
+                {exceptions.manager ? `; ${exceptions.unassigned || 0} unassigned, ${exceptions.escalated || 0} escalated to you` : ''}.
+              </p>
+            </div>
+            <span className="workqueue-count workqueue-count--red">{exceptions.assigned_to_me}</span>
+          </div>
+          <button className="btn btn--secondary" onClick={() => navigate('/wholesale/exceptions')}>
+            Open exception queue
+          </button>
+        </section>
+      ) : null}
 
       <div className="workqueue-grid">
         {sections.map((section) => {

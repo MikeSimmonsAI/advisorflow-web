@@ -8,6 +8,7 @@
     GET    /wholesale/funding/deals/{deal_id}/submissions
     POST   /wholesale/funding/deals/{deal_id}/submissions   record a deal sent to a partner
     POST   /wholesale/funding/submissions/{id}/response     record the partner's answer
+    GET    /wholesale/funding/deals/{deal_id}/packet     the deal packet (json | html download) - never sent
 
 EvoSys is not the lender - see app.services.wholesale_funding. Every route is
 organization-scoped; another tenant's partner, deal or submission is a 404.
@@ -17,6 +18,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -176,3 +178,22 @@ def submission_response(submission_id: str, payload: ResponseIn, db: Session = D
                        decline_reason=payload.decline_reason, notes=payload.notes)
     db.commit()
     return FD.submission_json(s)
+
+
+@router.get("/deals/{deal_id}/packet")
+def deal_packet(deal_id: str, format: str = "json", partner_id: Optional[str] = None,
+                submission_id: Optional[str] = None, db: Session = Depends(get_db),
+                user: User = Depends(require_tenant_user)):
+    """Build the funding deal packet from this workspace's own data. It is a
+    download for a person to review; nothing is sent to anyone."""
+    from app.services import wholesale_funding_packet as PK
+    org_id = svc.write_org_id(db, user)
+    pk = PK.build(db, org_id, deal_id, partner_id=partner_id, submission_id=submission_id)
+    PK.log_generated(db, org_id, pk, user)
+    db.commit()
+    if format == "html":
+        safe = "".join(ch if ch.isalnum() else "-" for ch in pk["property"]["address"])[:60].strip("-")
+        return HTMLResponse(PK.render_html(pk), headers={
+            "Content-Disposition": 'attachment; filename="funding-packet-%s.html"' % (safe or "deal"),
+            "Cache-Control": "no-store"})
+    return pk

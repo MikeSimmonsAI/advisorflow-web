@@ -61,6 +61,25 @@ export default function WholesaleBuyers() {
   const verified = buyers.filter((b) => b.cash_verified).length
   const pof = buyers.filter((b) => b.proof_of_funds_on_file).length
   const boxes = buyers.reduce((n, b) => n + (b.buy_boxes || []).length, 0)
+  // Buyers not yet in the shared contact database (sandbox buyers never are).
+  const unlinked = buyers.filter((b) => !b.org_contact_id && !b.is_test && (b.email || b.phone)).length
+
+  async function linkContacts() {
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      const r = await api.post('/wholesale/buyers/link-contacts?dry_run=false', {})
+      const c = r.counts || {}
+      const linked = (c.linked_new || 0) + (c.linked_existing || 0) + (c.linked_possible || 0)
+      setNotice(`${linked} buyer(s) linked to your contacts as partners (not leads)` +
+                (c.linked_existing ? ` - ${c.linked_existing} matched an existing contact` : '') +
+                (c.error ? ` - ${c.error} could not be linked and stay as they were` : '') + '.')
+      await load()
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <EvoApp world="operations">
@@ -68,6 +87,11 @@ export default function WholesaleBuyers() {
             sub="Ready capital. Real relationships. Every buyer with a structured buy box is matched to your deals automatically — with a score and its reasons."
             quote="The right buyer turns opportunity into profit."
             actions={<>
+              {unlinked ? (
+                <button type="button" className="evo-btn evo-btn--secondary" disabled={busy} onClick={linkContacts}
+                        title="Add these buyers to your shared contacts as partners. Buy boxes, standing and history stay exactly as they are. Admins only.">
+                  Link {unlinked} to contacts</button>
+              ) : null}
               <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowImport(true)}>Import buyers</button>
               <button type="button" className="evo-btn evo-btn--primary" onClick={() => setShowAdd(true)}>+ Add buyer</button>
             </>} />
@@ -127,10 +151,11 @@ export default function WholesaleBuyers() {
                     <td className="is-lead" data-label="">
                       <span className="evo-strong" style={{ fontSize: 14 }}>{b.display_name}</span>
                       <span className="evo-prop__sub">{b.email || 'no email'} · {b.phone || 'no phone'}</span>
-                      {(b.do_not_contact || !b.is_active) ? (
+                      {(b.do_not_contact || !b.is_active || b.org_contact_id) ? (
                         <span className="evo-chips" style={{ marginTop: 5 }}>
                           {b.do_not_contact ? <Tag kind="danger">Opted out</Tag> : null}
                           {!b.is_active ? <Tag>Inactive</Tag> : null}
+                          {b.org_contact_id ? <Tag title="In your shared contacts as a partner - never a lead">In contacts</Tag> : null}
                         </span>
                       ) : null}
                     </td>

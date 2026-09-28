@@ -56,6 +56,20 @@ export function FundingWorkspace({ deal }) {
     try { await fn(); await load() } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
 
+  async function downloadPacket(submissionId) {
+    setBusy(true); setErr('')
+    try {
+      const q = new URLSearchParams({ format: 'html' })
+      if (submissionId) q.set('submission_id', submissionId)
+      const html = await api.get(`/wholesale/funding/deals/${deal.id}/packet?${q}`)
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+      const a = document.createElement('a')
+      a.href = url; a.download = `funding-packet-${deal.id.slice(0, 8)}.html`
+      document.body.appendChild(a); a.click(); a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 5000)
+    } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
+  }
+
   const submit = (p) => run(() => api.post(`/wholesale/funding/deals/${deal.id}/submissions`,
     { partner_id: p.id, product: product || null, amount_requested: amount ? Number(amount) : null }))
   const respond = (s, status) => run(() => api.post(`/wholesale/funding/submissions/${s.id}/response`, { status }))
@@ -77,8 +91,13 @@ export function FundingWorkspace({ deal }) {
       {meta?.disclaimer ? <Alert kind="info">{meta.disclaimer}</Alert> : null}
       {err ? <Alert kind="warn">{err}</Alert> : null}
       <Panel title="Find funding options" hint="Ranked on each partner's stated criteria — every reason shown"
-             action={<button className="btn btn--secondary" onClick={() => setAdding(a => !a)}>
-               {adding ? 'Cancel' : '+ Add funding partner'}</button>}>
+             action={<span style={{ display: 'flex', gap: 8 }}>
+               <button className="btn btn--primary" disabled={busy} onClick={() => downloadPacket(null)}
+                       title="Built only from this deal's data; missing items say 'Not on file'. Nothing is sent.">
+                 Download deal packet</button>
+               <a className="btn btn--ghost" href="/wholesale/funding">All partners</a>
+               <button className="btn btn--secondary" onClick={() => setAdding(a => !a)}>
+               {adding ? 'Cancel' : '+ Add funding partner'}</button></span>}>
         {adding ? (
           <div className="ws-form-grid" style={{ marginBottom: 16 }}>
             {[['name', 'Company / name'], ['contact_person', 'Contact person'], ['email', 'Email'],
@@ -167,6 +186,7 @@ export function FundingWorkspace({ deal }) {
                     {s.approved_amount ? <div className="ws-comp__sub">approved {fmtMoney(s.approved_amount)}</div> : null}</td>
                   <td>{fmtDate(s.submitted_at)}</td>
                   <td>
+                    <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => downloadPacket(s.id)}>Packet</button>
                     {['approved', 'declined', 'funded', 'no_response'].map(st => (
                       <button key={st} className="btn btn--ghost btn--sm" disabled={busy || s.status === st}
                               onClick={() => respond(s, st)}>{st.replace('_', ' ')}</button>
