@@ -134,50 +134,136 @@ def _send_email(db: Session, advisor: User, lead: Lead, body: str, org_name: str
         return False
 
 
-def _send_followup(db: Session, booking: BookingLink, lead: Lead, advisor: User) -> None:
-    """Create BookingFollowup row and send thank-you + survey link."""
-    import uuid
-    survey_token = str(uuid.uuid4())
+_CLAIM_MARKER = "claimed; send in progress"
+
+
+def _claim_followup(db: Session, booking: BookingLink, lead: Lead,
+                    advisor: User, survey_token: str):
+    """Claim the booking by committing its BookingFollowup row BEFORE any send.
+
+    Returns the committed followup, or None when this booking is already
+    followed up (by another runner, or by review_request_cron).
+
+    No unique index backs this: a booking legitimately carries more than one
+    BookingFollowup row (review_request_cron writes its own survey row for the
+    same booking), so UNIQUE(booking_link_id) would be wrong. Instead the
+    booking_links row is locked (SELECT ... FOR UPDATE; a no-op on SQLite,
+    whose writers are serialised anyway) and the "any followup yet?" check is
+    re-run under that lock. A second runner blocks on the lock until the first
+    commits, then its fresh re-check sees the committed row and backs off.
+    """
+    locked = (
+        db.query(BookingLink)
+        .filter(BookingLink.id == booking.id)
+        .with_for_update()
+        .first()
+    )
+    if locked is None:
+        db.rollback()
+        return None
+    already = (
+        db.query(BookingFollowup.id)
+        .filter(BookingFollowup.booking_link_id == booking.id)
+        .first()
+    )
+    if already is not None:
+        db.rollback()
+        return None
+
     followup = BookingFollowup(
         booking_link_id=booking.id,
         lead_id=lead.id,
         advisor_id=advisor.id,
         survey_token=survey_token,
+        channel="none",
+        thank_you_sent=False,
+        survey_link_sent=False,
+        # Left in place if the process dies mid-send: the row stays as a
+        # permanent exclusion (at-most-once), never a resend.
+        error=_CLAIM_MARKER,
     )
     db.add(followup)
-    db.flush()  # get the id
+    db.commit()
+    return followup
 
-    org_name = _get_org_name(db, advisor)
-    from app.services.public_identity import survey_url as public_survey_url
-    survey_url = public_survey_url(db, advisor.organization_id, survey_token)
-    message = _build_thank_you(lead, advisor, org_name, survey_url)
 
+def _send_followup(db: Session, booking: BookingLink, lead: Lead, advisor: User) -> bool:
+    """Claim, then send thank-you + survey link, then record the outcome.
+
+    Returns False when the booking was already claimed (nothing sent), True
+    when this runner owned the claim (whether or not the send succeeded).
+
+    Order matters. The BookingFollowup row is committed BEFORE the provider is
+    called, so a commit that fails after the send can no longer roll the row
+    away and let the next poll text/email the family a second time. A failed
+    send is recorded on the claimed row; it is never unclaimed into a resend
+    loop. Same shape as app/crons/review_request_cron.py.
+    """
+    import uuid
+    survey_token = str(uuid.uuid4())
+
+    # ── Phase 1: claim (no side effects outside the DB) ──
+    followup = _claim_followup(db, booking, lead, advisor, survey_token)
+    if followup is None:
+        logger.info("Post-appt followup booking=%s already claimed; skipping", booking.id)
+        return False
+    followup_id = followup.id
+    lead_id = lead.id
+
+    # ── Phase 2: build and send ──
     sent = False
     channel = "none"
+    send_error = None
+    try:
+        org_name = _get_org_name(db, advisor)
+        from app.services.public_identity import survey_url as public_survey_url
+        survey_url = public_survey_url(db, advisor.organization_id, survey_token)
+        message = _build_thank_you(lead, advisor, org_name, survey_url)
 
-    # Prefer SMS; fall back to email
-    # A Wholesale seller is texted only by the seller SMS program, never from
-    # an advisor's number here. See app/services/wholesale_sms.py.
-    from app.services import wholesale_sms
-    program_refused = bool(lead.phone) and bool(wholesale_sms.refusal_for_phone(
-        db, lead.organization_id, lead.phone, path="post_appointment"))
-    if (lead.phone and not program_refused and advisor.twilio_phone_number
-            and advisor.twilio_auth_token_encrypted):
-        sent = _send_sms(advisor, lead, message)
-        channel = "sms"
+        # Prefer SMS; fall back to email
+        # A Wholesale seller is texted only by the seller SMS program, never from
+        # an advisor's number here. See app/services/wholesale_sms.py.
+        from app.services import wholesale_sms
+        program_refused = bool(lead.phone) and bool(wholesale_sms.refusal_for_phone(
+            db, lead.organization_id, lead.phone, path="post_appointment"))
+        if (lead.phone and not program_refused and advisor.twilio_phone_number
+                and advisor.twilio_auth_token_encrypted):
+            sent = _send_sms(advisor, lead, message)
+            channel = "sms"
 
-    if not sent and lead.email and advisor.microsoft_365_connected:
-        sent = _send_email(db, advisor, lead, message, org_name)
-        channel = "email"
+        if not sent and lead.email and advisor.microsoft_365_connected:
+            sent = _send_email(db, advisor, lead, message, org_name)
+            channel = "email"
+    except Exception as e:
+        # The claim stays: whatever happened, this booking is not retried.
+        logger.error("Post-appt followup send path failed lead=%s: %s", lead_id, e)
+        send_error = ("Send path failed: %s" % e)[:500]
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
-    followup.channel = channel
-    followup.thank_you_sent = sent
-    followup.survey_link_sent = sent
-    if not sent:
-        followup.error = "No reachable channel or send failed"
+    # ── Phase 3: record the outcome on the claimed row ──
+    try:
+        row = db.query(BookingFollowup).filter(BookingFollowup.id == followup_id).first()
+        if row is not None:
+            row.channel = channel
+            row.thank_you_sent = sent
+            row.survey_link_sent = sent
+            if sent:
+                row.error = None
+            else:
+                row.error = send_error or "No reachable channel or send failed"
+            db.commit()
+    except Exception as e:
+        # The message (if any) is out and the booking is claimed; only the
+        # bookkeeping is lost. Nothing will resend.
+        db.rollback()
+        logger.error("Post-appt followup sent=%s but could not record outcome "
+                     "followup=%s: %s", sent, followup_id, e)
 
-    db.commit()
-    logger.info("Post-appt followup lead=%s channel=%s sent=%s", lead.id, channel, sent)
+    logger.info("Post-appt followup lead=%s channel=%s sent=%s", lead_id, channel, sent)
+    return True
 
 
 def check_and_send_followups(db: Session) -> int:
@@ -229,8 +315,9 @@ def check_and_send_followups(db: Session) -> int:
             if not lead or not advisor:
                 continue
 
-            _send_followup(db, booking, lead, advisor)
-            count += 1
+            # False means another runner already claimed this booking.
+            if _send_followup(db, booking, lead, advisor) is not False:
+                count += 1
         except Exception as e:
             # One bad booking must not poison the session for the rest.
             db.rollback()

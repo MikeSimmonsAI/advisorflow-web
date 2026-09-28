@@ -57,6 +57,13 @@ from app.services import executive_authority as exec_auth
 # Portfolio assignment is a privileged access change, so it leaves a record.
 from app.routers.audit_log_router import log_action
 
+# TEST RECORDS NEVER INFLATE EXECUTIVE KPIs. Internal staff / QA leads
+# (Lead.is_test) are excluded from every aggregate below, using the same
+# `IS NOT TRUE` rule as app/services/test_records.exclude_test_records so
+# pre-migration NULL rows still count as real. Per-record activity feeds
+# (recent SMS/email activity) are not aggregates and are left unfiltered.
+_NOT_TEST = Lead.is_test.isnot(True)
+
 router = APIRouter(prefix="/executive", tags=["executive"])
 
 
@@ -316,6 +323,7 @@ def get_org_observation_overview(
         return q.filter(
             Lead.organization_id == org_id,
             (Lead.manual_flag == None) | (Lead.manual_flag == "bad_email"),
+            _NOT_TEST,
         )
 
     # ── Lead counts ──────────────────────────────────────────────────────────
@@ -324,6 +332,7 @@ def get_org_observation_overview(
     dnc_count = db.query(func.count(Lead.id)).filter(
         Lead.organization_id == org_id,
         Lead.status == "dnc",
+        _NOT_TEST,
     ).scalar() or 0
 
     # ── Status funnel ─────────────────────────────────────────────────────────
@@ -353,6 +362,7 @@ def get_org_observation_overview(
         .join(Lead, Reply.lead_id == Lead.id)
         .filter(
             Lead.organization_id == org_id,
+            _NOT_TEST,
             Reply.classification.in_([
                 ReplyClassification.INTERESTED,
                 ReplyClassification.CALLBACK,
@@ -392,6 +402,7 @@ def get_org_observation_overview(
         .join(Lead, CadenceState.lead_id == Lead.id)
         .filter(
             Lead.organization_id == org_id,
+            _NOT_TEST,
             CadenceState.status == "active",
             CadenceState.next_touch_due_at.isnot(None),
             CadenceState.next_touch_due_at <= end_of_today,
@@ -401,7 +412,7 @@ def get_org_observation_overview(
 
     leads_last_24h = (
         db.query(func.count(Lead.id))
-        .filter(Lead.organization_id == org_id, Lead.created_at >= start_24h)
+        .filter(Lead.organization_id == org_id, _NOT_TEST, Lead.created_at >= start_24h)
         .scalar() or 0
     )
 
@@ -410,6 +421,7 @@ def get_org_observation_overview(
         .join(Lead, BookingLink.lead_id == Lead.id)
         .filter(
             Lead.organization_id == org_id,
+            _NOT_TEST,
             BookingLink.status == "booked",
             BookingLink.booked_time.isnot(None),
             BookingLink.booked_time >= start_7d,
@@ -422,6 +434,7 @@ def get_org_observation_overview(
         .join(Lead, BookingLink.lead_id == Lead.id)
         .filter(
             Lead.organization_id == org_id,
+            _NOT_TEST,
             BookingLink.status.in_(["booked", "confirmed"]),
         )
         .scalar() or 0
@@ -612,6 +625,7 @@ def get_customer_health(
         .filter(
             Lead.organization_id.in_(org_ids),
             (Lead.manual_flag == None) | (Lead.manual_flag == "bad_email"),  # noqa: E711
+            _NOT_TEST,
         )
         .group_by(Lead.organization_id)
         .all()
@@ -623,6 +637,7 @@ def get_customer_health(
         .filter(
             Lead.organization_id.in_(org_ids),
             Lead.status == "hot",
+            _NOT_TEST,
         )
         .group_by(Lead.organization_id)
         .all()
@@ -634,6 +649,7 @@ def get_customer_health(
         .filter(
             Lead.organization_id.in_(org_ids),
             Lead.status == "booked",
+            _NOT_TEST,
         )
         .group_by(Lead.organization_id)
         .all()
@@ -643,7 +659,7 @@ def get_customer_health(
     last_sms = dict(
         db.query(Lead.organization_id, func.max(Message.sent_at))
         .join(Lead, Message.lead_id == Lead.id)
-        .filter(Lead.organization_id.in_(org_ids))
+        .filter(Lead.organization_id.in_(org_ids), _NOT_TEST)
         .group_by(Lead.organization_id)
         .all()
     )
@@ -652,7 +668,7 @@ def get_customer_health(
     last_reply = dict(
         db.query(Lead.organization_id, func.max(Reply.received_at))
         .join(Lead, Reply.lead_id == Lead.id)
-        .filter(Lead.organization_id.in_(org_ids))
+        .filter(Lead.organization_id.in_(org_ids), _NOT_TEST)
         .group_by(Lead.organization_id)
         .all()
     )
@@ -664,6 +680,7 @@ def get_customer_health(
         .filter(
             Lead.organization_id.in_(org_ids),
             BookingLink.booked_time.isnot(None),
+            _NOT_TEST,
         )
         .group_by(Lead.organization_id)
         .all()

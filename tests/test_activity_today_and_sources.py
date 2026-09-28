@@ -159,3 +159,32 @@ def test_timeline_is_404_across_tenants(client, db_session, sample_org, sample_a
     r = client.get(f"/leads/{lead.id}/timeline",
                    headers=_headers(db_session, other_admin))
     assert r.status_code == 404
+
+
+def test_timeline_cursor_never_skips_a_busy_channel(client, db_session, auth_headers, sample_org):
+    """A busy channel and a quiet one reaching further back: walking the cursor
+    must return every row exactly once."""
+    from datetime import datetime, timedelta
+    from app.models.models import Lead, Message, Reply, User
+    owner = db_session.query(User).filter(User.organization_id == sample_org.id).first()
+    lead = Lead(organization_id=sample_org.id, first_name="Cur", last_name="Sor", phone="12145559001",
+                assigned_to_id=owner.id)
+    db_session.add(lead); db_session.commit()
+    now = datetime.utcnow()
+    for i in range(7):                      # busy: sms every hour, newest first
+        db_session.add(Message(lead_id=lead.id, sender_id=owner.id, body="m%d" % i, sent_at=now - timedelta(hours=i)))
+    for i in range(2):                      # quiet: replies long ago
+        db_session.add(Reply(lead_id=lead.id, body="r%d" % i, received_at=now - timedelta(days=10 + i)))
+    db_session.commit()
+    seen, before = [], None
+    for _ in range(10):
+        url = "/leads/%s/timeline?limit=3" % lead.id + ("&before=%s" % before if before else "")
+        r = client.get(url, headers=auth_headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        seen += [(e["type"], e.get("body")) for e in body["events"] if e["type"] in ("outbound", "inbound")]
+        if not body["has_more"]:
+            break
+        before = body["next_before"]
+    bodies = sorted(b for _, b in seen)
+    assert bodies == sorted(["m%d" % i for i in range(7)] + ["r0", "r1"]), bodies

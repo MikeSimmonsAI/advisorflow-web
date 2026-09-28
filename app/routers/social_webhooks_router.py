@@ -64,6 +64,19 @@ def _get_org_by_token(db: Session, org_token: str) -> Organization:
     return org
 
 
+def _phone_forms(raw):
+    """Every stored form of one phone number: the platform format
+    ("1XXXXXXXXXX", dedup_service.normalize_phone), its 10-digit and E.164
+    spellings, and the raw string (legacy rows stored it verbatim)."""
+    from app.services.dedup_service import normalize_phone
+    raw = (raw or "").strip()
+    forms = {raw} if raw else set()
+    n = normalize_phone(raw) if raw else ""
+    if n:
+        forms |= {n, n[1:], "+" + n}
+    return sorted(forms)
+
+
 def _upsert_social_lead(
     db: Session,
     org: Organization,
@@ -79,16 +92,22 @@ def _upsert_social_lead(
     within the org. Returns the lead record (created or existing).
     """
     # Dedup: phone first, then email
+    # Same person, any spelling: phone in its platform format (and the legacy
+    # raw form), email case-insensitively. Org-scoped.
+    from sqlalchemy import func
+    from app.services.dedup_service import normalize_phone
+    phone = (phone or "").strip() or None
+    email = (email or "").strip() or None
     existing = None
     if phone:
         existing = db.query(Lead).filter(
             Lead.organization_id == org.id,
-            Lead.phone == phone,
+            Lead.phone.in_(_phone_forms(phone)),
         ).first()
     if not existing and email:
         existing = db.query(Lead).filter(
             Lead.organization_id == org.id,
-            Lead.email == email,
+            func.lower(Lead.email) == email.lower(),
         ).first()
 
     if existing:
@@ -114,7 +133,8 @@ def _upsert_social_lead(
         assigned_to_id=assigned_user_id,
         first_name=first_name or "Unknown",
         last_name=last_name or "",
-        phone=phone,
+        phone=(normalize_phone(phone) or phone) if phone else None,
+        phone_raw=phone,
         email=email,
         source=source,
         status="new",
@@ -131,6 +151,7 @@ def _upsert_social_lead(
     #
     # So the lead is written with everything it arrived with, flagged
     # over-capacity, and excluded from every paid path until there is room.
+    from app.services import lead_capacity   # was never imported: NameError on every new lead
     held = lead_capacity.hold_if_over_capacity(db, lead, org)
 
     db.add(lead)

@@ -284,10 +284,22 @@ def get_lead_timeline(lead_id: str,
     # THE CURSOR. `has_more` is true when any channel returned a full page, so
     # a caller walking backwards stops only when there is genuinely nothing
     # older left, not when one quiet channel runs out.
-    page_full = (len(messages) == page_size or len(replies) == page_size
-                 or len(email_messages) == page_size)
-    dated = [e["timestamp"] for e in events if e.get("timestamp") is not None]
-    next_before = min(dated) if (page_full and dated) else None
+    #
+    # The cursor is the NEWEST "oldest row" among the channels that filled a
+    # page. Using the oldest event overall skipped rows: a busy channel stops
+    # at time T while a quiet one reaches back further, and the next page then
+    # started below T. Events older than the cursor are held back to the next
+    # page, so every row is returned exactly once.
+    full_oldest = []
+    for rows, col in ((messages, "sent_at"), (replies, "received_at"),
+                      (email_messages, "sent_at")):
+        if len(rows) == page_size and getattr(rows[-1], col, None) is not None:
+            full_oldest.append(getattr(rows[-1], col))
+    page_full = bool(full_oldest)
+    next_before = max(full_oldest) if page_full else None
+    if next_before is not None:
+        events = [e for e in events
+                  if e.get("timestamp") is None or e["timestamp"] >= next_before]
 
     return {
         "lead": lead,

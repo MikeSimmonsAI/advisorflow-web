@@ -75,6 +75,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import (BookingLink, Lead, Message, Organization,
                                Reply, User)
+from app.services.test_records import exclude_test_records
 
 # ── the health vocabulary, unchanged from what has shipped ──────────────────
 # These five words and their day windows are what /executive/customer-health
@@ -168,6 +169,15 @@ def rows(db: Session, platform_id: str, *, org_ids: List[str],
     def grouped(q):
         return dict(q.all())
 
+    # EVERY LEAD-BASED FACT GOES THROUGH HERE. Internal/QA leads
+    # (Lead.is_test) stay in the database but are not the customer's business:
+    # counting them would inflate leads, replies, appointments and "last
+    # activity" on the command center, portfolio and customer-health screens.
+    # Only for queries that already select from or join Lead - applying the
+    # Lead predicate to a query without Lead would cross-join the table.
+    def lead_grouped(q):
+        return grouped(exclude_test_records(q))
+
     # ── people ──────────────────────────────────────────────────────────────
     users = grouped(db.query(User.organization_id, func.count(User.id))
                     .filter(User.organization_id.in_(ids),
@@ -183,7 +193,7 @@ def rows(db: Session, platform_id: str, *, org_ids: List[str],
                      (Lead.manual_flag == "bad_email")))
         for e in extra:
             q = q.filter(e)
-        return grouped(q.group_by(Lead.organization_id))
+        return lead_grouped(q.group_by(Lead.organization_id))
 
     leads_total = lead_count()
     leads_new = lead_count(Lead.status == "new")
@@ -195,13 +205,13 @@ def rows(db: Session, platform_id: str, *, org_ids: List[str],
     # ── are leads being WORKED. A lead that has been messaged is a lead
     #    somebody touched; a lead sitting untouched is the exception an
     #    executive is looking for.
-    worked_recent = grouped(
+    worked_recent = lead_grouped(
         db.query(Lead.organization_id, func.count(func.distinct(Lead.id)))
         .filter(Lead.organization_id.in_(ids),
                 Lead.last_messaged_at.isnot(None),
                 Lead.last_messaged_at >= recent)
         .group_by(Lead.organization_id))
-    unworked = grouped(
+    unworked = lead_grouped(
         db.query(Lead.organization_id, func.count(Lead.id))
         .filter(Lead.organization_id.in_(ids),
                 Lead.status == "new",
@@ -211,11 +221,11 @@ def rows(db: Session, platform_id: str, *, org_ids: List[str],
         .group_by(Lead.organization_id))
 
     # ── conversation ────────────────────────────────────────────────────────
-    replies = grouped(db.query(Lead.organization_id, func.count(Reply.id))
-                      .join(Lead, Reply.lead_id == Lead.id)
-                      .filter(Lead.organization_id.in_(ids))
-                      .group_by(Lead.organization_id))
-    replies_unreviewed = grouped(
+    replies = lead_grouped(db.query(Lead.organization_id, func.count(Reply.id))
+                           .join(Lead, Reply.lead_id == Lead.id)
+                           .filter(Lead.organization_id.in_(ids))
+                           .group_by(Lead.organization_id))
+    replies_unreviewed = lead_grouped(
         db.query(Lead.organization_id, func.count(Reply.id))
         .join(Lead, Reply.lead_id == Lead.id)
         .filter(Lead.organization_id.in_(ids),
@@ -224,20 +234,20 @@ def rows(db: Session, platform_id: str, *, org_ids: List[str],
 
     # ── appointments. BookingLink is the customer-side appointment; a booked
     #    time that exists is an appointment that was created.
-    appts = grouped(
+    appts = lead_grouped(
         db.query(Lead.organization_id, func.count(func.distinct(BookingLink.lead_id)))
         .join(Lead, BookingLink.lead_id == Lead.id)
         .filter(Lead.organization_id.in_(ids),
                 BookingLink.booked_time.isnot(None))
         .group_by(Lead.organization_id))
-    appts_week = grouped(
+    appts_week = lead_grouped(
         db.query(Lead.organization_id, func.count(func.distinct(BookingLink.lead_id)))
         .join(Lead, BookingLink.lead_id == Lead.id)
         .filter(Lead.organization_id.in_(ids),
                 BookingLink.booked_time.isnot(None),
                 BookingLink.booked_time >= week)
         .group_by(Lead.organization_id))
-    appts_upcoming = grouped(
+    appts_upcoming = lead_grouped(
         db.query(Lead.organization_id, func.count(func.distinct(BookingLink.lead_id)))
         .join(Lead, BookingLink.lead_id == Lead.id)
         .filter(Lead.organization_id.in_(ids),
@@ -246,22 +256,22 @@ def rows(db: Session, platform_id: str, *, org_ids: List[str],
         .group_by(Lead.organization_id))
 
     # ── last operational activity, across all three channels ────────────────
-    last_sms = grouped(db.query(Lead.organization_id, func.max(Message.sent_at))
-                       .join(Lead, Message.lead_id == Lead.id)
-                       .filter(Lead.organization_id.in_(ids))
-                       .group_by(Lead.organization_id))
-    last_reply = grouped(db.query(Lead.organization_id, func.max(Reply.received_at))
-                         .join(Lead, Reply.lead_id == Lead.id)
-                         .filter(Lead.organization_id.in_(ids))
-                         .group_by(Lead.organization_id))
-    last_booking = grouped(
+    last_sms = lead_grouped(db.query(Lead.organization_id, func.max(Message.sent_at))
+                            .join(Lead, Message.lead_id == Lead.id)
+                            .filter(Lead.organization_id.in_(ids))
+                            .group_by(Lead.organization_id))
+    last_reply = lead_grouped(db.query(Lead.organization_id, func.max(Reply.received_at))
+                              .join(Lead, Reply.lead_id == Lead.id)
+                              .filter(Lead.organization_id.in_(ids))
+                              .group_by(Lead.organization_id))
+    last_booking = lead_grouped(
         db.query(Lead.organization_id, func.max(BookingLink.booked_time))
         .join(Lead, BookingLink.lead_id == Lead.id)
         .filter(Lead.organization_id.in_(ids),
                 BookingLink.booked_time.isnot(None))
         .group_by(Lead.organization_id))
 
-    messages_recent = grouped(
+    messages_recent = lead_grouped(
         db.query(Lead.organization_id, func.count(Message.id))
         .join(Lead, Message.lead_id == Lead.id)
         .filter(Lead.organization_id.in_(ids), Message.sent_at >= recent)

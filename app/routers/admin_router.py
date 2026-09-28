@@ -216,6 +216,13 @@ _USERS = [Depends(require_feature("users"))]
 
 
 
+# TEST RECORDS NEVER INFLATE DASHBOARD AGGREGATES. Same `IS NOT TRUE` rule as
+# app/services/test_records.exclude_test_records (NULL = real lead). Applied to
+# the /dashboard* aggregates only; /admin/leads and other per-record admin views
+# still show test records with their TEST badge.
+_NOT_TEST = Lead.is_test.isnot(True)
+
+
 @router.get("/dashboard")
 def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
@@ -241,15 +248,18 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
     def _counts(q):
         return {} if not _ids else {str(k): int(n) for k, n in q.all()}
 
+    # Test records never inflate dashboard KPIs (app/services/test_records.py).
+    # Messages are keyed on sender alone here, so they join Lead for the flag.
     sent_by = _counts(db.query(Message.sender_id, func.count(Message.id))
-                        .filter(Message.sender_id.in_(_ids))
+                        .join(Lead, Message.lead_id == Lead.id)
+                        .filter(Message.sender_id.in_(_ids), _NOT_TEST)
                         .group_by(Message.sender_id))
     leads_by = _counts(db.query(Lead.assigned_to_id, func.count(Lead.id))
-                         .filter(Lead.assigned_to_id.in_(_ids))
+                         .filter(Lead.assigned_to_id.in_(_ids), _NOT_TEST)
                          .group_by(Lead.assigned_to_id))
     hot_by = _counts(db.query(Lead.assigned_to_id, func.count(Reply.id))
                        .join(Lead, Reply.lead_id == Lead.id)
-                       .filter(Lead.assigned_to_id.in_(_ids), Reply.is_hot == True)
+                       .filter(Lead.assigned_to_id.in_(_ids), Reply.is_hot == True, _NOT_TEST)
                        .group_by(Lead.assigned_to_id))
     dash_org_names = {}
     if is_god:
@@ -273,10 +283,10 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
             "hot_replies": hot_count,
         })
 
-    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id.in_(org_ids)).scalar()
+    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id.in_(org_ids), _NOT_TEST).scalar()
     total_duplicates = (
         db.query(func.count(Lead.id))
-        .filter(Lead.organization_id.in_(org_ids), Lead.is_duplicate == True)
+        .filter(Lead.organization_id.in_(org_ids), Lead.is_duplicate == True, _NOT_TEST)
         .scalar()
     )
 
@@ -404,7 +414,8 @@ class AdvisorCounts:
         base_lead = lambda: (
             db.query(Lead.organization_id, Lead.assigned_to_id, func.count(Lead.id))
               .filter(Lead.organization_id.in_(orgs),
-                      Lead.assigned_to_id.in_(ids))
+                      Lead.assigned_to_id.in_(ids),
+                      _NOT_TEST)
               .group_by(Lead.organization_id, Lead.assigned_to_id))
 
         self.leads_owned = grouped(base_lead().filter(Lead.is_duplicate == False))
@@ -419,7 +430,8 @@ class AdvisorCounts:
               .join(Lead, Message.lead_id == Lead.id)
               .filter(Lead.organization_id.in_(orgs),
                       Message.sender_id.in_(ids),
-                      Lead.is_duplicate == False)
+                      Lead.is_duplicate == False,
+                      _NOT_TEST)
               .group_by(Lead.organization_id, Message.sender_id))
 
         reply_q = lambda: (
@@ -427,7 +439,8 @@ class AdvisorCounts:
               .join(Lead, Reply.lead_id == Lead.id)
               .filter(Lead.organization_id.in_(orgs),
                       Lead.assigned_to_id.in_(ids),
-                      Lead.is_duplicate == False)
+                      Lead.is_duplicate == False,
+                      _NOT_TEST)
               .group_by(Lead.organization_id, Lead.assigned_to_id))
 
         self.replies = grouped(reply_q())
@@ -468,24 +481,28 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User,
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
         Lead.is_duplicate == False,
+        _NOT_TEST,
     ).scalar() or 0
 
     messages_sent = db.query(func.count(Message.id)).join(Lead, Message.lead_id == Lead.id).filter(
         Lead.organization_id == organization_id,
         Message.sender_id == advisor.id,
         Lead.is_duplicate == False,
+        _NOT_TEST,
     ).scalar() or 0
 
     replies = db.query(func.count(Reply.id)).join(Lead, Reply.lead_id == Lead.id).filter(
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
         Lead.is_duplicate == False,
+        _NOT_TEST,
     ).scalar() or 0
 
     hot_replies = db.query(func.count(Reply.id)).join(Lead, Reply.lead_id == Lead.id).filter(
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
         Lead.is_duplicate == False,
+        _NOT_TEST,
         ((Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True)),
     ).scalar() or 0
 
@@ -494,6 +511,7 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User,
         Lead.assigned_to_id == advisor.id,
         Lead.status == "booked",
         Lead.is_duplicate == False,
+        _NOT_TEST,
     ).scalar() or 0
 
     dnc_leads = db.query(func.count(Lead.id)).filter(
@@ -501,12 +519,14 @@ def _advisor_metrics(db: Session, organization_id: str, advisor: User,
         Lead.assigned_to_id == advisor.id,
         Lead.status == "dnc",
         Lead.is_duplicate == False,
+        _NOT_TEST,
     ).scalar() or 0
 
     duplicate_leads_prevented = db.query(func.count(Lead.id)).filter(
         Lead.organization_id == organization_id,
         Lead.assigned_to_id == advisor.id,
         Lead.is_duplicate == True,
+        _NOT_TEST,
     ).scalar() or 0
 
     return _advisor_row(advisor, leads_owned, messages_sent, replies,
@@ -577,13 +597,13 @@ def team_activity(db: Session = Depends(get_db), current_user: User = Depends(re
         last_message_at = (
             db.query(func.max(Message.sent_at))
             .join(Lead, Message.lead_id == Lead.id)
-            .filter(Lead.organization_id.in_(org_ids), Message.sender_id == advisor.id)
+            .filter(Lead.organization_id.in_(org_ids), Message.sender_id == advisor.id, _NOT_TEST)
             .scalar()
         )
         last_outcome_at = (
             db.query(func.max(LeadOutcome.created_at))
             .join(Lead, LeadOutcome.lead_id == Lead.id)
-            .filter(Lead.organization_id.in_(org_ids), LeadOutcome.recorded_by_id == advisor.id)
+            .filter(Lead.organization_id.in_(org_ids), LeadOutcome.recorded_by_id == advisor.id, _NOT_TEST)
             .scalar()
         )
 
@@ -662,6 +682,7 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
         "duplicate_leads_prevented": db.query(func.count(Lead.id)).filter(
             Lead.organization_id.in_(org_ids),
             Lead.is_duplicate == True,
+            _NOT_TEST,
         ).scalar() or 0,
     }
     totals["reply_rate"] = _safe_rate(totals["replies"], totals["messages_sent"])
@@ -685,29 +706,34 @@ def dashboard_funnel(db: Session = Depends(get_db), current_user: User = Depends
     # See master_dashboard above: the label has to ask the scope's question.
     is_god = lead_scope.god_sees_all_orgs(current_user)
 
-    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id.in_(org_ids)).scalar() or 0
+    total_leads = db.query(func.count(Lead.id)).filter(Lead.organization_id.in_(org_ids), _NOT_TEST).scalar() or 0
 
     sent = db.query(func.count(distinct(Lead.id))).join(Message, Message.lead_id == Lead.id).filter(
         Lead.organization_id.in_(org_ids),
+        _NOT_TEST,
     ).scalar() or 0
 
     replied = db.query(func.count(distinct(Lead.id))).join(Reply, Reply.lead_id == Lead.id).filter(
         Lead.organization_id.in_(org_ids),
+        _NOT_TEST,
     ).scalar() or 0
 
     hot_interested = db.query(func.count(distinct(Lead.id))).join(Reply, Reply.lead_id == Lead.id).filter(
         Lead.organization_id.in_(org_ids),
+        _NOT_TEST,
         ((Reply.classification.in_(HOT_REPLY_CLASSIFICATIONS)) | (Reply.is_hot == True)),
     ).scalar() or 0
 
     booked = db.query(func.count(Lead.id)).filter(
         Lead.organization_id.in_(org_ids),
         Lead.status == "booked",
+        _NOT_TEST,
     ).scalar() or 0
 
     sold = db.query(func.count(distinct(Lead.id))).join(LeadOutcome, LeadOutcome.lead_id == Lead.id).filter(
         Lead.organization_id.in_(org_ids),
         LeadOutcome.resulted_in_sale == True,
+        _NOT_TEST,
     ).scalar() or 0
 
     stages = [
@@ -754,7 +780,7 @@ def dashboard_revenue(db: Session = Depends(get_db), current_user: User = Depend
     sale_outcomes = (
         db.query(LeadOutcome)
         .join(Lead, LeadOutcome.lead_id == Lead.id)
-        .filter(Lead.organization_id == org_id, LeadOutcome.resulted_in_sale == True)
+        .filter(Lead.organization_id == org_id, LeadOutcome.resulted_in_sale == True, _NOT_TEST)
         .all()
     )
 

@@ -78,6 +78,12 @@ def check_call_eligibility(db: Session, lead: Lead, organization_id: str,
     if (lead.status or "").lower() == "dnc":
         return Eligibility(False, "Lead is marked do-not-contact.", "lead_dnc")
 
+    # Internal test records are never called by the voice agent.
+    from app.services import test_records
+    if test_records.is_test_record(lead):
+        return Eligibility(False, test_records.blocked_reason(lead), "test_record")
+
+
     # PLAN CAPACITY HOLD. A voice call is the most expensive thing this
     # platform can do on a lead's behalf, per minute and per attempt.
     from app.services.lead_capacity import is_held

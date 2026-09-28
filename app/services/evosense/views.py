@@ -254,12 +254,36 @@ def spend(db, org_id) -> Dict[str, Any]:
             if any(p["connector_kind"] == C.SANDBOX for p in providers) else None}
 
 
-def command_center(db, org_id: str, *, hours: int = 24) -> Dict[str, Any]:
+def sandbox_only(db, org_id: str) -> bool:
+    """True when this workspace holds NO real (non-test) EvoSense property.
+
+    Test rows are excluded from the command center by default, the same rule
+    the wholesale dashboards apply, so sandbox activity never inflates a real
+    workspace's numbers. But a workspace that has only ever run sandbox
+    adapters has nothing else to show: hiding its test rows would empty the
+    screen while the sandbox banner still says "every property on this screen
+    is synthetic". There, test rows are all there is and nothing is inflated,
+    so the command-center endpoint includes them.
+    """
+    real = (db.query(EvoSenseProperty.id)
+            .filter(EvoSenseProperty.organization_id == org_id,
+                    EvoSenseProperty.is_test.isnot(True)).first())
+    return real is None
+
+
+def command_center(db, org_id: str, *, hours: int = 24,
+                   include_test: bool = False) -> Dict[str, Any]:
+    """`include_test=False` (the default) leaves sandbox/test rows out of the
+    activity counts, the "found" list, the handoffs that need a person and
+    the nurture follow-ups - matching the wholesale dashboards. The sandbox
+    banner, spend and bucket counts are unchanged."""
     ctl = C.controls(db, org_id)
     since = C.now() - timedelta(hours=hours)
-    ev = (db.query(EvoSenseEvent.action, func.count(EvoSenseEvent.id))
-          .filter(EvoSenseEvent.organization_id == org_id, EvoSenseEvent.created_at >= since)
-          .group_by(EvoSenseEvent.action).all())
+    ev_q = (db.query(EvoSenseEvent.action, func.count(EvoSenseEvent.id))
+            .filter(EvoSenseEvent.organization_id == org_id, EvoSenseEvent.created_at >= since))
+    if not include_test:
+        ev_q = ev_q.filter(EvoSenseEvent.is_test.isnot(True))
+    ev = ev_q.group_by(EvoSenseEvent.action).all()
     evc = {a: int(n) for a, n in ev}
     runs = (db.query(EvoSenseRun).filter(EvoSenseRun.organization_id == org_id,
                                          EvoSenseRun.started_at >= since)
@@ -287,18 +311,23 @@ def command_center(db, org_id: str, *, hours: int = 24) -> Dict[str, Any]:
         "provider_failures": evc.get("provider.failed", 0),
         "identity_reviews": evc.get("identity.review", 0),
     }
-    top = (db.query(EvoSenseProperty)
-           .filter(EvoSenseProperty.organization_id == org_id,
-                   EvoSenseProperty.archived_at.is_(None),
-                   EvoSenseProperty.status.in_((C.S_NEEDS_YOU, C.S_READY, C.S_HIGH, C.S_CONTACT_FOUND,
-                                                C.S_OUTREACH, C.S_RESPONDED, C.S_WAITING_DATA,
-                                                C.S_BUDGET_BLOCKED)))
-           .order_by(EvoSenseProperty.seller_intent.desc().nullslast(),
-                     EvoSenseProperty.opportunity_score.desc().nullslast())
+    top_q = (db.query(EvoSenseProperty)
+             .filter(EvoSenseProperty.organization_id == org_id,
+                     EvoSenseProperty.archived_at.is_(None),
+                     EvoSenseProperty.status.in_((C.S_NEEDS_YOU, C.S_READY, C.S_HIGH, C.S_CONTACT_FOUND,
+                                                  C.S_OUTREACH, C.S_RESPONDED, C.S_WAITING_DATA,
+                                                  C.S_BUDGET_BLOCKED))))
+    if not include_test:
+        top_q = top_q.filter(EvoSenseProperty.is_test.isnot(True))
+    top = (top_q.order_by(EvoSenseProperty.seller_intent.desc().nullslast(),
+                          EvoSenseProperty.opportunity_score.desc().nullslast())
            .limit(8).all())
-    needs = (db.query(EvoSenseHandoff).filter(EvoSenseHandoff.organization_id == org_id,
-                                              EvoSenseHandoff.status.in_(("open", "acknowledged")))
-             .order_by(EvoSenseHandoff.priority.desc(), EvoSenseHandoff.created_at.asc()).limit(20).all())
+    needs_q = db.query(EvoSenseHandoff).filter(EvoSenseHandoff.organization_id == org_id,
+                                               EvoSenseHandoff.status.in_(("open", "acknowledged")))
+    if not include_test:
+        needs_q = needs_q.filter(EvoSenseHandoff.is_test.isnot(True))
+    needs = (needs_q.order_by(EvoSenseHandoff.priority.desc(), EvoSenseHandoff.created_at.asc())
+             .limit(20).all())
     hprops = {p.id: p for p in db.query(EvoSenseProperty).filter(
         EvoSenseProperty.organization_id == org_id,
         EvoSenseProperty.id.in_([h.property_id for h in needs] or ["-"])).all()}
@@ -306,10 +335,12 @@ def command_center(db, org_id: str, *, hours: int = 24) -> Dict[str, Any]:
                .filter(EvoSenseIdentityReview.organization_id == org_id,
                        EvoSenseIdentityReview.status == "open").scalar() or 0)
     buckets = bucket_counts(db, org_id)
-    upcoming = (db.query(EvoSenseEngagement)
-                .filter(EvoSenseEngagement.organization_id == org_id,
-                        EvoSenseEngagement.status == "nurture")
-                .order_by(EvoSenseEngagement.nurture_until.asc()).limit(5).all())
+    upcoming_q = (db.query(EvoSenseEngagement)
+                  .filter(EvoSenseEngagement.organization_id == org_id,
+                          EvoSenseEngagement.status == "nurture"))
+    if not include_test:
+        upcoming_q = upcoming_q.filter(EvoSenseEngagement.is_test.isnot(True))
+    upcoming = upcoming_q.order_by(EvoSenseEngagement.nurture_until.asc()).limit(5).all()
     uprops = {p.id: p for p in db.query(EvoSenseProperty).filter(
         EvoSenseProperty.organization_id == org_id,
         EvoSenseProperty.id.in_([e.property_id for e in upcoming] or ["-"])).all()}
@@ -352,7 +383,7 @@ def command_center(db, org_id: str, *, hours: int = 24) -> Dict[str, Any]:
     held = sum(1 for m in pending_rows if (C.jload(m.reading, {}) or {}).get("pending") == "held")
     routing = INB.open_routing_reviews(db, org_id)
     return {
-        "window_hours": hours, "generated_at": _iso(C.now()),
+        "window_hours": hours, "generated_at": _iso(C.now()), "include_test": include_test,
         "automation": {
             "hunting": ("paused" if (ctl.paused_all or ctl.paused_discovery) else
                         "active" if any(a["state"] in ("scheduled", "running") for a in automation) else

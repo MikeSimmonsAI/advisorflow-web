@@ -47,3 +47,13 @@
 
 .ctx-exit:hover:not(:disabled) { background: rgba(255, 255, 255, 0.24); }
 .ctx-exit:disabled { opacity: 0.6; cursor: default; }
+
+/* Phones: the two buttons used to squeeze the trail to nothing, so an owner
+   acting inside a customer's workspace could not see WHICH one. The trail
+   takes its own full-width line. */
+@media (max-width: 640px) {
+  .ctx-banner { flex-wrap: wrap; row-gap: 6px; padding: 6px 12px; }
+  .ctx-text { flex: 1 1 calc(100% - 20px); min-width: 0; }
+  .ctx-spacer { display: none; }
+  .ctx-exit { flex: 1 1 0; padding: 6px 8px; }
+}

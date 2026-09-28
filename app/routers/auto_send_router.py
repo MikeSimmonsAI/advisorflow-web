@@ -657,10 +657,13 @@ def proactive_scan(
     contacted_lead_ids = db.query(_Msg.lead_id).filter(
         _Msg.sent_at > cutoff).subquery()
 
+    # Internal test records never enter the auto-send candidate set.
+    from app.services import test_records as _test_records
     rows = (
-        _alq(db, current_user)
+        _test_records.exclude_test_records(_alq(db, current_user))
         .filter(
             Lead.status.in_(req.statuses),
+
             Lead.status != "dnc",
             # PLAN CAPACITY HOLD, filtered in SQL rather than checked per row:
             # auto-send picks its own candidates, so a held lead must never

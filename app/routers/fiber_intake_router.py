@@ -139,6 +139,19 @@ input:focus, select:focus { border-color: #1565c0; background: #fff; }
 """
 
 
+def _phone_forms(raw):
+    """Every stored form of one phone number: the platform format
+    ("1XXXXXXXXXX", dedup_service.normalize_phone), its 10-digit and E.164
+    spellings, and the raw string (legacy rows stored it verbatim)."""
+    from app.services.dedup_service import normalize_phone
+    raw = (raw or "").strip()
+    forms = {raw} if raw else set()
+    n = normalize_phone(raw) if raw else ""
+    if n:
+        forms |= {n, n[1:], "+" + n}
+    return sorted(forms)
+
+
 def _get_org(db: Session, org_token: str) -> Organization:
     org = db.query(Organization).filter(
         Organization.social_webhook_token == org_token
@@ -342,10 +355,12 @@ def fiber_intake_submit(
         logger.warning("fiber_intake: invalid org_token %s", org_token)
         return HTMLResponse(content=_render_thankyou("Our Team"))
 
-    # Dedup by phone within org
+    # Dedup by phone within org - any spelling of the same number (platform
+    # format, 10-digit, E.164, or the legacy raw string).
+    from app.services.dedup_service import normalize_phone
     existing = db.query(Lead).filter(
         Lead.organization_id == org.id,
-        Lead.phone == phone.strip(),
+        Lead.phone.in_(_phone_forms(phone)),
     ).first()
 
     if not existing:
@@ -380,7 +395,8 @@ def fiber_intake_submit(
             assigned_to_id=assigned_user_id,
             first_name=first_name.strip(),
             last_name=last_name.strip(),
-            phone=phone.strip(),
+            phone=normalize_phone(phone.strip()) or phone.strip(),
+            phone_raw=phone.strip(),
             email=email.strip() if email else None,
             service_address=service_address.strip(),
             extra_data=json.dumps(extra),

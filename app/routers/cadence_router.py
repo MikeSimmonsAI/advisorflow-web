@@ -11,6 +11,7 @@ from app.services.cadence_service import (
 )
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 from app.services import lead_scope
+from app.services import test_records
 
 router = APIRouter(prefix="/cadence", tags=["cadence"])
 
@@ -26,6 +27,8 @@ def start_lead_cadence(lead_id: str, db: Session = Depends(get_db), current_user
     lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    if test_records.is_test_record(lead):
+        return {"started": False, "reason": test_records.blocked_reason(lead)}
     state = start_cadence(db, lead)
     if not state:
         return {"started": False, "reason": "Lead is excluded from cadence (DNC, duplicate, needs review, or email-only)"}
@@ -36,13 +39,20 @@ def start_lead_cadence(lead_id: str, db: Session = Depends(get_db), current_user
 def start_batch_cadence(lead_ids: list[str], db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
     leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(lead_ids)).all()
     started, skipped = 0, 0
+    skipped_test_records = []
     for lead in leads:
+        # Internal test records are never enrolled; reported, not silent.
+        if test_records.is_test_record(lead):
+            skipped += 1
+            skipped_test_records.append(lead.id)
+            continue
         state = start_cadence(db, lead)
         if state:
             started += 1
         else:
             skipped += 1
-    return {"started": started, "skipped": skipped}
+    return {"started": started, "skipped": skipped,
+            "skipped_test_records": skipped_test_records}
 
 
 @router.post("/run-due")
@@ -180,15 +190,17 @@ def cadence_health_summary(db: Session = Depends(get_db), current_user: User = D
 def start_all_eligible(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """Start cadence for every eligible lead in the org that isn't already in one."""
     from app.services.cadence_service import start_cadence
-    leads = (
+    query = (
         db.query(Lead)
         .filter(
             Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
             Lead.status == "new",
             Lead.is_duplicate.is_(False),
         )
-        .all()
     )
+    # Internal test records never enter bulk outreach.
+    leads = test_records.exclude_test_records(query).all()
+
     started, skipped = 0, 0
     for lead in leads:
         state = start_cadence(db, lead)

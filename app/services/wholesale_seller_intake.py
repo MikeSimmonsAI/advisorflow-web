@@ -308,6 +308,7 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
     # only what intake cannot know: which property, and this person's role on it.
     from app.services.intake.capture import CaptureResult, capture_one
     intake_error = None
+    kept_contact_id = None
     try:
         cap = capture_one(db, org, {
             "first_name": first, "last_name": last.strip() or None, "email": d.get("email"),
@@ -316,7 +317,14 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
             source="website", source_detail=("%s/sell" % host) if host else "public seller form",
             list_name="Seller inquiries", classification="new_inquiry",
             actor_label=ACTOR_LABEL, external=True)
-        if cap.lead is None:
+        kept_contact_id = cap.contact_id
+        # Intake may keep the person as a contact and REFUSE a Lead (e.g. the
+        # record is do-not-contact). That is not an intake error: the inquiry
+        # is still saved below (property + seller profile), and the Lead the
+        # seller path makes is linked to that contact and carries its DNC.
+        refused = bool(cap.contact_id and any(
+            n.startswith("lead_not_activated:") for n in cap.notes))
+        if cap.lead is None and not refused:
             raise RuntimeError("universal intake produced no lead (batch %s, match %s)"
                                % (cap.batch_id, cap.match))
     except Exception as exc:  # noqa: BLE001 - an intake error must never lose the seller
@@ -327,7 +335,9 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
         log.exception("wholesale intake: universal capture failed; using fallback")
         prop = _existing_property(db, org_id, d["street_address"], d["zip_code"])
         fl, fmatch = _legacy_lead_match(db, org_id, d["phone"], d.get("email"))
-        cap = CaptureResult(batch_id=None, contact_id=None, lead=fl,
+        # A contact intake already COMMITTED (capture_one commits as it goes)
+        # is kept, so the fallback Lead is linked to it, not orphaned.
+        cap = CaptureResult(batch_id=None, contact_id=kept_contact_id, lead=fl,
                             match="existing" if fl is not None else "new")
         svc.log_event(db, org_id, "seller_inquiry.intake_error", actor_type=ACTOR_API,
                       actor_label=ACTOR_LABEL, summary="Universal Intake capture failed; the "
@@ -395,6 +405,10 @@ def submit(db: Session, org: Organization, settings: WholesaleSettings,
         raise IntakeRefused("canonical wholesale path refused: %s %s"
                             % (exc.status_code, exc.detail))
 
+    if cap.lead is None and cap.contact_id:
+        # The seller path made the Lead: one person, one record - link it to
+        # the intake contact, carrying that contact's do-not-contact state.
+        svc._link_contact(db, org_id, cap.contact_id, profile.lead_id)
     lead = db.query(Lead).filter(Lead.id == profile.lead_id,
                                  Lead.organization_id == org_id).first()
     if cap.batch_id is None and cap.lead is None:

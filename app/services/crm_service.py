@@ -278,6 +278,19 @@ def push_event(db: Session, org_id: str, event_type: str, lead: Any, extra: dict
 
 # ── Inbound (pull-in) ─────────────────────────────────────────────────────────
 
+def _phone_forms(raw):
+    """Every stored form of one phone number: the platform format
+    ("1XXXXXXXXXX", dedup_service.normalize_phone), its 10-digit and E.164
+    spellings, and the raw string (legacy rows stored it verbatim)."""
+    from app.services.dedup_service import normalize_phone
+    raw = (raw or "").strip()
+    forms = {raw} if raw else set()
+    n = normalize_phone(raw) if raw else ""
+    if n:
+        forms |= {n, n[1:], "+" + n}
+    return sorted(forms)
+
+
 def import_inbound_leads(db: Session, org_id: str, records: list[dict]) -> dict:
     """
     Process leads pushed FROM a CRM into BookaBoost's inbound webhook endpoint.
@@ -301,11 +314,17 @@ def import_inbound_leads(db: Session, org_id: str, records: list[dict]) -> dict:
         phone = (rec.get("phone") or rec.get("mobile") or "").strip()
         email = (rec.get("email") or "").strip()
 
+        # Same person, any spelling: phone in its platform format (and the
+        # legacy raw form), email case-insensitively. Org-scoped.
+        from sqlalchemy import func
+        from app.services.dedup_service import normalize_phone
         existing = None
         if phone:
-            existing = db.query(Lead).filter_by(organization_id=org_id, phone=phone).first()
+            existing = (db.query(Lead).filter(Lead.organization_id == org_id,
+                                              Lead.phone.in_(_phone_forms(phone))).first())
         if not existing and email:
-            existing = db.query(Lead).filter_by(organization_id=org_id, email=email).first()
+            existing = (db.query(Lead).filter(Lead.organization_id == org_id,
+                                              func.lower(Lead.email) == email.lower()).first())
 
         if existing:
             skipped += 1
@@ -317,7 +336,8 @@ def import_inbound_leads(db: Session, org_id: str, records: list[dict]) -> dict:
             first_name=rec.get("first_name") or rec.get("firstName") or "",
             last_name=rec.get("last_name") or rec.get("lastName") or "",
             email=email or None,
-            phone=phone or None,
+            phone=(normalize_phone(phone) or phone) if phone else None,
+            phone_raw=phone or None,
             tier=rec.get("tier") or rec.get("tag") or "",
             source_year=str(rec.get("source_year") or datetime.utcnow().year),
             status="new",

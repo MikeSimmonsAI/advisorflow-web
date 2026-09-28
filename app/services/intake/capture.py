@@ -163,6 +163,17 @@ def capture_one(db: Session, org, record: Dict[str, Any], *, source: str = "webs
     if lead is None and contact is not None and explicit and row.creates_lead:
         # The review row a person explicitly submitted: activate its Lead
         # (held at the limit), still marked for review on the contact.
+        # The SAME gate as the engine (COMMIT.may_activate_lead) decides: an
+        # explicit ask resolves only the REVIEW question (the row is IMPORTED
+        # by now, which the gate would read as "unresolved_review"); it never
+        # overrides do-not-contact or the absence of any usable channel.
+        ok, why = COMMIT.may_activate_lead(_as_resolved(row), contact)
+        if not ok:
+            notes.append("lead_not_activated:%s" % why)
+            log.info("capture: explicit lead not activated for contact %s (%s)", contact.id, why)
+    else:
+        ok = False
+    if ok:
         try:
             from app.services import plan_limits
             capacity = plan_limits.counter_for_org_id(db, org.id, plan_limits.LIMIT_LEADS)
@@ -179,6 +190,48 @@ def capture_one(db: Session, org, record: Dict[str, Any], *, source: str = "webs
     held = bool(lead is not None and lead_capacity.is_held(lead))
     return CaptureResult(batch_id=batch.id, contact_id=getattr(contact, "id", None), lead=lead,
                          match=match, held=held, lead_created=created, notes=notes)
+
+
+def _as_resolved(row):
+    """`row` as the activation gate sees a review the caller has resolved:
+    every other field (classification, channel) exactly as analysed."""
+    from types import SimpleNamespace
+    return SimpleNamespace(creates_lead=row.creates_lead, needs_enrichment=row.needs_enrichment,
+                           intake_status=IntakeStatus.APPROVED)
+
+
+def contact_is_dnc(db: Session, org_id: str, contact_id: Optional[str]) -> bool:
+    if not contact_id:
+        return False
+    c = (db.query(OrgContact).filter(OrgContact.id == contact_id,
+                                     OrgContact.organization_id == org_id).first())
+    return bool(c is not None and c.sms_status == "dnc")
+
+
+def link_direct_lead(db: Session, org_id: str, contact_id: Optional[str], lead) -> bool:
+    """A caller's DIRECT path made a Lead for a person intake kept as a contact
+    (no Lead - e.g. do-not-contact, or an intake error after the contact was
+    committed). Link the two so the person stays one record, and carry the
+    contact's do-not-contact state onto the Lead so the direct path can never
+    produce a contactable Lead for a DNC person. Does not commit.
+    Returns True when the contact is DNC (and the Lead was marked so)."""
+    if not contact_id or lead is None:
+        return False
+    c = (db.query(OrgContact).filter(OrgContact.id == contact_id,
+                                     OrgContact.organization_id == org_id).first())
+    if c is None:
+        return False
+    if not c.lead_id:
+        c.lead_id = lead.id
+        lead.org_contact_id = c.id
+    if c.sms_status == "dnc":
+        lead.status = "dnc"
+        lead.sms_consent = False
+        for col in ("allow_sms", "allow_email", "allow_bulk_email", "allow_voice"):
+            if hasattr(lead, col):
+                setattr(lead, col, False)
+        return True
+    return False
 
 
 def _batch(db, batch_id, org_id):
@@ -279,9 +332,12 @@ def capture_many(db: Session, org, records: List[Dict[str, Any]], *, source: str
         lead = (db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org.id).first()
                 if lead_id else None)
         created = bool(lead is not None and lead.import_batch_id == batch.id and src is row)
-        if lead is None and contact is not None and src is row and row.creates_lead:
+        if (lead is None and contact is not None and src is row and row.creates_lead
+                and COMMIT.may_activate_lead(_as_resolved(row), contact)[0]):
             # A review row an operator deliberately added: its own Lead, still
             # marked for review on the contact. Plan limit applies (no hold).
+            # Same gate as capture_one: never for a do-not-contact record or
+            # one with no usable channel.
             if catalog is None:
                 catalog, b = ENG.org_catalog(db, org.id), _batch(db, batch.id, org.id)
             lead = COMMIT.activate_lead(db, b, row, contact, catalog, ctx.actor_name, capacity,

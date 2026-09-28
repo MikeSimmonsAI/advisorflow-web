@@ -587,11 +587,17 @@ def usage_for(db: Session, org: Organization, key: str) -> int:
         # capacity_state NULL and must keep counting.
         from app.models.models import Lead
         from app.services.lead_capacity import OVER_CAPACITY
+        #
+        # INTERNAL TEST RECORDS DO NOT CONSUME THE PLAN EITHER: they are staff
+        # and QA fixtures that can never be contacted (test_records), so a
+        # customer is never billed a seat for one. IS NOT TRUE keeps NULL rows.
         return (db.query(Lead)
                 .filter(Lead.organization_id == org.id)
                 .filter((Lead.capacity_state.is_(None))
                         | (Lead.capacity_state != OVER_CAPACITY))
+                .filter(Lead.is_test.isnot(True))
                 .count())
+
     return 0
 
 

@@ -269,6 +269,14 @@ def _apply_consent(lead: Lead, sub: Submission, stamp: datetime) -> None:
     consent = sub.consent
     if consent is None or not consent.given:
         return
+    # Consent is given FOR A NUMBER: the one submitted with it. A matched lead
+    # (e.g. found by email) whose own number differs must not be marked as
+    # consenting for that other number.
+    consenting = normalize_phone(_clean(sub.phone, 40) or "")
+    if not consenting or normalize_phone(lead.phone or "") != consenting:
+        log.info("public capture: consent not mirrored - lead phone differs from the "
+                 "consenting number (lead %s)", getattr(lead, "id", None))
+        return
     lead.sms_consent = True
     lead.sms_consent_timestamp = consent.at or stamp
     lead.sms_consent_ip = _clean(consent.ip or sub.ip, 64)

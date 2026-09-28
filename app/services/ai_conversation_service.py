@@ -868,6 +868,12 @@ def start_ai_conversation(db: Session, lead: Lead, advisor: User, channel: str =
     the scheduled loop's, and background AI governs those."""
     # "booked" is intentionally NOT blocked here — a booked lead may still need
     # AI follow-up if they want to reschedule or have pre-appointment questions.
+    # Internal test records never get an AI conversation (refused exactly
+    # like DNC/duplicate, with the human-readable reason).
+    from app.services import test_records
+    if test_records.is_test_record(lead):
+        return {"success": False, "error": test_records.blocked_reason(lead)}
+
     if lead.status == "dnc" or lead.is_duplicate:
         return {"success": False, "error": "Lead is DNC or duplicate"}
 
@@ -1045,8 +1051,12 @@ def _process_scheduled_touches(db: Session, org_id: str = None) -> dict:
                 skipped += 1
                 continue
 
-            if lead.status in ("booked", "dnc") or lead.is_duplicate:
+            # Internal test records are stopped exactly like DNC leads.
+            from app.services import test_records
+            if (lead.status in ("booked", "dnc") or lead.is_duplicate
+                    or test_records.is_test_record(lead)):
                 conv.stage = "stopped"
+
                 conv.next_send_at = None
                 db.commit()
                 skipped += 1

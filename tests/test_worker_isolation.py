@@ -520,3 +520,83 @@ def test_wholesale_sweep_all_one_bad_org_lookup_does_not_stop_the_pass(
     report = wx.sweep_all(db_session)
     assert swept == [ids[1]]
     assert report == {"orgs": 1, "raised": 1, "failed": 1}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 9. post_appointment_service: claim before send
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _post_appt_setup(db, org, advisor, monkeypatch, pas):
+    """One in-window booking, an SMS-capable advisor, every provider mocked."""
+    advisor.twilio_phone_number = "+12145550000"
+    advisor.twilio_auth_token_encrypted = "enc"
+    db.commit()
+    lead = _lead(db, org, advisor, 9)
+    booking = BookingLink(lead_id=lead.id, user_id=advisor.id, status="booked",
+                          booked_time=datetime.utcnow() - timedelta(minutes=30))
+    db.add(booking)
+    db.commit()
+    from app.services import wholesale_sms
+    monkeypatch.setattr(wholesale_sms, "refusal_for_phone", lambda *a, **k: None)
+    monkeypatch.setattr(pas, "_build_thank_you", lambda *a, **k: "Thanks! link")
+    sends = []
+    monkeypatch.setattr(pas, "_send_sms",
+                        lambda advisor, lead, body: sends.append(lead.id) or True)
+    return booking, sends
+
+
+def test_post_appointment_failed_commit_after_send_does_not_resend(
+        db_session, sample_org, sample_advisor, ai_background_on, monkeypatch):
+    from app.services import post_appointment_service as pas
+    booking, sends = _post_appt_setup(db_session, sample_org, sample_advisor,
+                                      monkeypatch, pas)
+    commit = _CommitFailsOnce(db_session, monkeypatch)
+    real_send = pas._send_sms
+
+    def send_then_break_commit(advisor, lead, body):
+        ok = real_send(advisor, lead, body)
+        commit.arm()  # the outcome-recording commit after the send fails
+        return ok
+    monkeypatch.setattr(pas, "_send_sms", send_then_break_commit)
+
+    pas.check_and_send_followups(db_session)
+    assert len(sends) == 1
+    db_session.expire_all()
+    rows = db_session.query(BookingFollowup).filter(
+        BookingFollowup.booking_link_id == booking.id).all()
+    assert len(rows) == 1, "the claim must survive the failed commit"
+
+    # Next poll: the claim excludes the booking; nothing is sent again.
+    assert pas.check_and_send_followups(db_session) == 0
+    assert len(sends) == 1
+
+
+def test_post_appointment_second_runner_cannot_claim_the_same_booking(
+        db_session, sample_org, sample_advisor, ai_background_on, monkeypatch):
+    """Runner A snapshots existing followups, then runner B (its own session)
+    runs a full pass before A reaches its claim. A must back off."""
+    from sqlalchemy.orm import sessionmaker
+    from app.services import post_appointment_service as pas
+    booking, sends = _post_appt_setup(db_session, sample_org, sample_advisor,
+                                      monkeypatch, pas)
+    other = sessionmaker(bind=db_session.get_bind())()
+    real_claim = pas._claim_followup
+    state = {"interleaved": False}
+
+    def claim(db, *a, **k):
+        if db is db_session and not state["interleaved"]:
+            state["interleaved"] = True
+            assert pas.check_and_send_followups(other) == 1  # runner B wins
+        return real_claim(db, *a, **k)
+    monkeypatch.setattr(pas, "_claim_followup", claim)
+
+    try:
+        assert pas.check_and_send_followups(db_session) == 0  # runner A
+    finally:
+        other.close()
+    assert len(sends) == 1
+    db_session.expire_all()
+    rows = db_session.query(BookingFollowup).filter(
+        BookingFollowup.booking_link_id == booking.id).all()
+    assert len(rows) == 1
+    assert rows[0].thank_you_sent is True and rows[0].error is None

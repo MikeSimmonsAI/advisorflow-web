@@ -428,13 +428,12 @@ def _link_contact(db: Session, org_id: str, contact_id: Optional[str], lead_id: 
     link them so the person is still one record."""
     if not contact_id:
         return
-    from app.models.intake_models import OrgContact
-    c = (db.query(OrgContact).filter(OrgContact.id == contact_id,
-                                     OrgContact.organization_id == org_id).first())
+    # The link and the contact's do-not-contact state travel together
+    # (intake.capture.link_direct_lead): a direct-path Lead for a DNC contact
+    # is itself DNC, never a fresh contactable record.
+    from app.services.intake.capture import link_direct_lead
     lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org_id).first()
-    if c is not None and lead is not None and not c.lead_id:
-        c.lead_id = lead.id
-        lead.org_contact_id = c.id
+    link_direct_lead(db, org_id, contact_id, lead)
 
 
 def attach_imported_owners(db: Session, org_id: str, user: Optional[User],

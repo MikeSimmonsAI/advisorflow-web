@@ -101,9 +101,13 @@ def is_held(lead: Optional[Lead]) -> bool:
 
 
 def held_query(db: Session, org_id: str):
+    # Internal test records never consume or wait for plan capacity (they are
+    # excluded from plan usage in plan_limits), so they are not part of the
+    # held queue's counts or its release headroom either.
     return (db.query(Lead)
             .filter(Lead.organization_id == org_id,
-                    Lead.capacity_state == OVER_CAPACITY))
+                    Lead.capacity_state == OVER_CAPACITY,
+                    Lead.is_test.isnot(True)))
 
 
 def held_count(db: Session, org_id: Optional[str]) -> int:
@@ -160,11 +164,17 @@ def hold_if_over_capacity(db: Session, lead: Lead,
     `counter` lets a batch path decide against one count instead of re-counting
     per row; without one, capacity is checked directly.
     """
+    # An internal test record does not consume a plan seat, so it is never
+    # held over capacity and never takes a slot from a batch counter.
+    if getattr(lead, "is_test", False):
+        return False
+
     if org is None and getattr(lead, "organization_id", None):
         org = (db.query(Organization)
                .filter(Organization.id == lead.organization_id).first())
 
     if counter is not None:
+
         room = counter.has_room(1)
         if room:
             counter.take(1)

@@ -358,3 +358,27 @@ def test_settings_admin_writes_refused_where_only_advisor(client, db_session, sp
     # Admin in A: allowed.
     assert client.put("/settings/appointment-types", headers=_h(db_session, p, a),
                       json={"appointment_types": ["Only A"]}).status_code == 200
+
+
+def test_foreign_super_admin_cannot_edit_or_read_another_brands_user_profile(client, db_session,
+                                                                             brands):
+    """Editing a victim's email is an account takeover via the reset link."""
+    victim = _user(db_session, "advisor", org=brands["org_a"], label="profvictim")
+    before = victim.email
+    r = client.patch("/settings/admin/profile/%s" % victim.id, headers=_h(db_session, brands["super_b"]),
+                     json={"email": "attacker@evil.test"})
+    assert r.status_code == 404, r.text
+    assert client.get("/settings/admin/profile/%s" % victim.id,
+                      headers=_h(db_session, brands["super_b"])).status_code == 404
+    db_session.refresh(victim)
+    assert victim.email == before
+    r = client.patch("/settings/admin/profile/%s" % victim.id, headers=_h(db_session, brands["super_a"]),
+                     json={"full_name": "Renamed By Own Brand"})
+    assert r.status_code == 200, r.text
+
+
+def test_org_admin_cannot_edit_an_elevated_account_in_its_org(client, db_session, brands):
+    admin = _user(db_session, "org_admin", org=brands["org_a"], label="oadm")
+    r = client.patch("/settings/admin/profile/%s" % brands["super_a"].id, headers=_h(db_session, admin),
+                     json={"email": "x@evil.test"})
+    assert r.status_code == 404, r.text

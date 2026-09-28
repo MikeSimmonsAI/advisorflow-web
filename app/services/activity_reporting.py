@@ -41,6 +41,11 @@ from sqlalchemy.orm import Session
 from app.models.models import (
     CadenceTouchLog, EmailMessage, Lead, Message, Reply, User,
 )
+# INTERNAL TEST LEADS ARE NOT ACTIVITY. Lead.is_test rows (staff and QA
+# fixtures) stay in the leads list, but a send to one is not real outreach and
+# must not appear in the day's totals, the sent list or the period reports.
+# One shared rule; every query below already joins Lead, so it applies there.
+from app.services.test_records import exclude_test_records
 
 UNRECORDED = "unrecorded"
 
@@ -107,14 +112,16 @@ def sent_today(db: Session, organization_id: str, *,
 
     rows: List[Dict[str, Any]] = []
 
-    sms = (db.query(Message, Lead)
-           .join(Lead, Message.lead_id == Lead.id)
-           .filter(Lead.organization_id == organization_id,
-                   Message.sent_at >= start, Message.sent_at < end))
-    emails = (db.query(EmailMessage, Lead)
-              .join(Lead, EmailMessage.lead_id == Lead.id)
-              .filter(Lead.organization_id == organization_id,
-                      EmailMessage.sent_at >= start, EmailMessage.sent_at < end))
+    sms = exclude_test_records(
+        db.query(Message, Lead)
+        .join(Lead, Message.lead_id == Lead.id)
+        .filter(Lead.organization_id == organization_id,
+                Message.sent_at >= start, Message.sent_at < end))
+    emails = exclude_test_records(
+        db.query(EmailMessage, Lead)
+        .join(Lead, EmailMessage.lead_id == Lead.id)
+        .filter(Lead.organization_id == organization_id,
+                EmailMessage.sent_at >= start, EmailMessage.sent_at < end))
 
     if user_ids:
         from sqlalchemy import or_
@@ -163,10 +170,11 @@ def sent_today(db: Session, organization_id: str, *,
     by_channel: Dict[str, int] = {}
     for channel, model, ts in (("sms", Message, Message.sent_at),
                                ("email", EmailMessage, EmailMessage.sent_at)):
-        grouped = (db.query(Lead.id, func.count(model.id))
-                   .join(model, model.lead_id == Lead.id)
-                   .filter(Lead.organization_id == organization_id,
-                           ts >= start, ts < end))
+        grouped = exclude_test_records(
+            db.query(Lead.id, func.count(model.id))
+            .join(model, model.lead_id == Lead.id)
+            .filter(Lead.organization_id == organization_id,
+                    ts >= start, ts < end))
         if user_ids:
             grouped = grouped.filter(or_(model.sent_by_user_id.in_(user_ids),
                                          model.sender_id.in_(user_ids),
@@ -178,10 +186,11 @@ def sent_today(db: Session, organization_id: str, *,
     by_source: Dict[str, int] = {}
     for model, ts in ((Message, Message.sent_at),
                       (EmailMessage, EmailMessage.sent_at)):
-        grouped = (db.query(model.send_source, func.count(model.id))
-                   .join(Lead, model.lead_id == Lead.id)
-                   .filter(Lead.organization_id == organization_id,
-                           ts >= start, ts < end))
+        grouped = exclude_test_records(
+            db.query(model.send_source, func.count(model.id))
+            .join(Lead, model.lead_id == Lead.id)
+            .filter(Lead.organization_id == organization_id,
+                    ts >= start, ts < end))
         if user_ids:
             grouped = grouped.filter(or_(model.sent_by_user_id.in_(user_ids),
                                          model.sender_id.in_(user_ids),
@@ -283,11 +292,12 @@ def email_performance(db: Session, organization_id: str, *,
     since = since or (until - timedelta(days=30))
     group_by = group_by if group_by in ("source", "user", "day", "status") else "source"
 
-    base = (db.query(EmailMessage, Lead)
-            .join(Lead, EmailMessage.lead_id == Lead.id)
-            .filter(Lead.organization_id == organization_id,
-                    EmailMessage.sent_at >= since,
-                    EmailMessage.sent_at <= until))
+    base = exclude_test_records(
+        db.query(EmailMessage, Lead)
+        .join(Lead, EmailMessage.lead_id == Lead.id)
+        .filter(Lead.organization_id == organization_id,
+                EmailMessage.sent_at >= since,
+                EmailMessage.sent_at <= until))
     rows = base.all()
 
     totals = {state: 0 for state in _EMAIL_STATES}
@@ -369,10 +379,14 @@ def cadence_outcomes(db: Session, organization_id: str, *,
     """
     until = until or datetime.utcnow()
     since = since or (until - timedelta(days=30))
-    rows = (db.query(CadenceTouchLog.outcome, func.count(CadenceTouchLog.id))
-            .filter(CadenceTouchLog.organization_id == organization_id,
-                    CadenceTouchLog.created_at >= since,
-                    CadenceTouchLog.created_at <= until)
+    # lead_id is NOT NULL on cadence_touch_logs, so the inner join drops no
+    # real rows; it exists only so test-lead attempts are not counted.
+    rows = (exclude_test_records(
+                db.query(CadenceTouchLog.outcome, func.count(CadenceTouchLog.id))
+                .join(Lead, CadenceTouchLog.lead_id == Lead.id)
+                .filter(CadenceTouchLog.organization_id == organization_id,
+                        CadenceTouchLog.created_at >= since,
+                        CadenceTouchLog.created_at <= until))
             .group_by(CadenceTouchLog.outcome).all())
     return {
         "organization_id": organization_id,

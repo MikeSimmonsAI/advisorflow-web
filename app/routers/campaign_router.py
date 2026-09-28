@@ -113,6 +113,10 @@ def _apply_filters(query, organization_id: str, criteria: dict, include_dnc: boo
     """
     query = query.filter(Lead.organization_id == organization_id, Lead.is_duplicate == False)
 
+    # Internal test records never enter a campaign audience (send or count).
+    from app.services import test_records
+    query = test_records.exclude_test_records(query)
+
     if criteria.get("tier"):
         query = query.filter(Lead.tier == criteria["tier"])
 
@@ -188,8 +192,12 @@ def _compliance_check(lead: Lead, channel: str = "sms") -> tuple[bool, str]:
     A lead that fails this must never be sent to, no exceptions.
     channel: "sms" | "email" | "auto"
     """
+    from app.services import test_records
+    if test_records.is_test_record(lead):
+        return False, test_records.blocked_reason(lead)
     if lead.status == "dnc":
         return False, "DNC"
+
     if lead.is_duplicate:
         return False, "duplicate"
     # Manual flag gate — remove_all blocks all channels; bad_email blocks email only

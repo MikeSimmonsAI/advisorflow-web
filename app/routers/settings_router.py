@@ -483,6 +483,27 @@ class AdminProfileRequest(BaseModel):
     twilio_auth_token: Optional[str] = None   # plaintext â€” encrypted before storage
 
 
+def _admin_profile_target(db: Session, current_user: User, user_id: str) -> User:
+    """The user an admin may view/edit here, else 404.
+
+    super_admin is a BRAND-scoped operator: it goes through load_user_in_scope
+    (own platform only, never another elevated account). This endpoint used to
+    let any super_admin edit ANY user on the box - email included, which is an
+    account takeover via the reset link. An org_admin stays inside its own org
+    and may not edit an elevated account there either (own account is fine).
+    """
+    from app.deps import load_user_in_scope, ELEVATED_ROLES
+    if current_user.role in ("god_admin", "super_admin"):
+        return load_user_in_scope(db, current_user, user_id)
+    target = (db.query(User).filter(User.id == user_id,
+                                    User.organization_id == current_user.organization_id)
+              .first())
+    if (not target or current_user.organization_id is None
+            or (target.id != current_user.id and target.role in ELEVATED_ROLES)):
+        raise HTTPException(status_code=404, detail="User not found.")
+    return target
+
+
 @router.patch("/admin/profile/{user_id}")
 def admin_update_profile(
     user_id: str,
@@ -500,13 +521,7 @@ def admin_update_profile(
     if current_user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Admin access required.")
 
-    q = db.query(User).filter(User.id == user_id)
-    if current_user.role == "org_admin":
-        q = q.filter(User.organization_id == current_user.organization_id)
-
-    target = q.first()
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found.")
+    target = _admin_profile_target(db, current_user, user_id)
 
     if req.full_name is not None:
         target.full_name = req.full_name.strip() or target.full_name
@@ -576,13 +591,7 @@ def admin_get_profile(
     if current_user.role not in ("org_admin", "super_admin", "god_admin"):
         raise HTTPException(status_code=403, detail="Admin access required.")
 
-    q = db.query(User).filter(User.id == user_id)
-    if current_user.role == "org_admin":
-        q = q.filter(User.organization_id == current_user.organization_id)
-
-    target = q.first()
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found.")
+    target = _admin_profile_target(db, current_user, user_id)
 
     return {
         "id": target.id,

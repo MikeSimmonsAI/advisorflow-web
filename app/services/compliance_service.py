@@ -72,7 +72,7 @@ CHANNEL_EMAIL = "email"
 
 
 def check_compliance_preflight(db: Session, lead: Lead,
-                               channel: str = CHANNEL_SMS) -> None:
+                               channel: str = CHANNEL_SMS, *, allow_test: bool = False) -> None:
     """
     Pre-send compliance gate. Returns None when the lead is clear to contact
     on `channel`, and raises ValueError naming the reason otherwise.
@@ -117,8 +117,21 @@ def check_compliance_preflight(db: Session, lead: Lead,
     allow_email; routing it through here is a deliberate decision for a
     separate batch, not a side effect of this function existing.
     """
+    # INTERNAL TEST RECORDS are refused on every channel, beside DNC and in
+    # the same style, so callers handle both refusals identically.
+    from app.services import test_records
+    # A deliberate one-to-one MANUAL send by a person who can see the TEST
+    # badge is allowed (test_records docstring: testers still need to test);
+    # every automated and bulk path passes allow_test=False.
+    if test_records.is_test_record(lead) and not allow_test:
+        raise ValueError(
+            f"Lead {lead.id} is an {test_records.blocked_reason(lead)} - "
+            f"blocked from sending on any channel."
+        )
+
     status = getattr(lead, "status", None)
     # LeadStatus is a str enum, so a plain string column value and the enum
+
     # member compare equal; normalise anyway so neither form slips through.
     status_value = getattr(status, "value", status)
     if status_value == "dnc":

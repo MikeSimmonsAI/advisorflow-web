@@ -421,7 +421,9 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     # It raises before the provider is reached, so a blocked lead costs no
     # provider call and writes no EmailMessage row.
     from app.services.compliance_service import check_compliance_preflight
-    check_compliance_preflight(db, lead, channel="email")
+    from app.services import send_source as _ss
+    check_compliance_preflight(db, lead, channel="email",
+                               allow_test=(send_source == _ss.MANUAL))
 
     from app.services.sms_service import create_booking_link
     from app.models.models import Organization

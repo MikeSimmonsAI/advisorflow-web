@@ -64,12 +64,14 @@ def _converge(db, prop, person: EvoSensePerson, cp, lead) -> None:
 def _capture(db, prop, person: EvoSensePerson, cp, first, last, *, user=None):
     """WHO THIS OWNER IS, through Universal Intake: the one matcher (an owner
     already in the workspace is reused, never duplicated), the org contact, a
-    batch that can be rolled back. Returns (lead, created) or (None, False).
+    batch that can be rolled back. Returns (lead, created, contact_id):
+    (None, False, contact_id) when intake kept the owner as a contact but made
+    no Lead (e.g. do-not-contact), (None, False, None) on an intake error.
 
     Sandbox owners are synthetic and never enter the contact database. Any
     intake error falls back to the direct path; it is logged, never raised."""
     if prop.is_test:
-        return None, False
+        return None, False, None
     from app.models.models import Organization
     org = db.query(Organization).filter(Organization.id == prop.organization_id).first()
     # capture_one commits as it goes; persist the engagement state written so
@@ -86,7 +88,7 @@ def _capture(db, prop, person: EvoSensePerson, cp, first, last, *, user=None):
             source="evosense", source_detail="EvoSense property owner",
             list_name="EvoSense owners", classification="cold_prospect",
             actor_label="EvoSense", external=False, explicit=True, user=user)
-        return cap.lead, cap.lead_created
+        return cap.lead, cap.lead_created, cap.contact_id
     except Exception as exc:  # noqa: BLE001 - intake must never stop outreach bookkeeping
         db.rollback()
         C.log.exception("evosense: universal intake failed; direct path used")
@@ -98,7 +100,7 @@ def _capture(db, prop, person: EvoSensePerson, cp, first, last, *, user=None):
                         details={"error": _safe_error(exc)})
         except Exception:  # noqa: BLE001
             pass
-        return None, False
+        return None, False, None
 
 
 def ensure_lead(db, prop, person: EvoSensePerson, cp, *, user=None) -> Lead:
@@ -115,7 +117,7 @@ def ensure_lead(db, prop, person: EvoSensePerson, cp, *, user=None) -> Lead:
     plan_limits.require_capacity_for_org_id(db, prop.organization_id, plan_limits.LIMIT_LEADS, adding=1)
     from app.services.dedup_service import normalize_phone
     first, last = _split_name(person.full_name)
-    lead, created = _capture(db, prop, person, cp, first, last, user=user)
+    lead, created, contact_id = _capture(db, prop, person, cp, first, last, user=user)
     if lead is not None:
         if created:
             lead.source_category = "evosense"
@@ -152,6 +154,14 @@ def ensure_lead(db, prop, person: EvoSensePerson, cp, *, user=None) -> Lead:
                                     ingestion_path="evosense.outreach.ensure_lead")
     except Exception as exc:  # noqa: BLE001
         C.log.info("evosense: master contact record skipped: %s", exc)
+    if contact_id:
+        # Intake kept this owner as a contact without a Lead: the direct Lead
+        # is linked to it (one person, one record) and carries its
+        # do-not-contact state, instead of being a second, unlinked person.
+        from app.services.intake.capture import link_direct_lead
+        link_direct_lead(db, prop.organization_id, contact_id, lead)
+        db.flush()
+        _converge(db, prop, person, cp, lead)
     person.lead_id = lead.id
     return lead
 

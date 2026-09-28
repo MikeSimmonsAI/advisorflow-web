@@ -240,9 +240,29 @@ def update_lead_fields(
         lead.first_name = payload.first_name.strip() or lead.first_name
     if payload.last_name is not None:
         lead.last_name = payload.last_name.strip() or lead.last_name
+    consent_note = None
     if payload.phone is not None:
         normalized = normalize_phone(payload.phone.strip())
-        lead.phone = normalized or payload.phone.strip() or None
+        old_phone = lead.phone
+        new_phone = normalized or payload.phone.strip() or None
+        if (normalize_phone(old_phone or "") or (old_phone or None)) != \
+                (normalized or new_phone) and getattr(lead, "sms_consent", False):
+            # SMS consent was given FOR THE OLD NUMBER and does not carry to a
+            # new one (same rule as the Wholesale seller edit). The evidence
+            # columns describe that old consent, so they are cleared with it;
+            # a dated note keeps the history on the record.
+            consent_note = ("%s - Phone changed: SMS consent given %s for %s does not carry to "
+                            "the new number and was cleared." % (
+                                datetime.utcnow().strftime("%Y-%m-%d"),
+                                lead.sms_consent_timestamp.strftime("%Y-%m-%d")
+                                if getattr(lead, "sms_consent_timestamp", None) else "earlier",
+                                old_phone or "the previous number"))
+            lead.sms_consent = False
+            lead.sms_consent_timestamp = None
+            lead.sms_consent_ip = None
+            lead.sms_consent_text = None
+            lead.sms_consent_source = None
+        lead.phone = new_phone
         try:
             lead.phone_raw = payload.phone.strip() or None
         except Exception:
@@ -255,6 +275,8 @@ def update_lead_fields(
         lead.email = payload.email.strip() or None
     if payload.notes is not None:
         lead.notes = payload.notes
+    if consent_note:
+        lead.notes = ((lead.notes or "").rstrip() + "\n" + consent_note).strip()
     if payload.tier is not None:
         lead.tier = payload.tier
     if payload.street_address is not None:

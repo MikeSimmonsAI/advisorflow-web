@@ -593,7 +593,13 @@ def launch_pipeline(
             if lead.status == "dnc" or lead.is_duplicate or is_held(lead):
                 skipped += 1
                 continue
+            # Internal test records never get pipeline outreach.
+            from app.services import test_records
+            if test_records.is_test_record(lead):
+                skipped += 1
+                continue
             # A Wholesale seller is never put on the generic AI auto-conversation
+
             # (booking links, auto-send). Sellers are worked from Wholesale.
             from app.services import wholesale_seller_context as _WSC
             if _WSC.is_seller(db, lead):

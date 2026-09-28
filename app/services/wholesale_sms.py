@@ -252,9 +252,12 @@ def record_consent(db, org_id: str, *, phone_raw: str, disclosure_text: str,
         messaging_service_sid=getattr(s, "sms_messaging_service_sid", None),
         created_at=now, updated_at=now)
     db.add(rec)
-    if lead is not None:
+    if lead is not None and normalize_e164(getattr(lead, "phone", None)) == e164:
         # Mirror onto the lead's existing consent columns so every existing
         # screen says the same thing. Server time, verbatim wording.
+        # ONLY when the lead's own number IS the consenting number: consent is
+        # per phone, and a lead whose number differs (a reused/matched lead,
+        # a changed number) must not be marked as consenting for its number.
         lead.sms_consent = True
         lead.sms_consent_timestamp = now
         lead.sms_consent_ip = rec.ip_address

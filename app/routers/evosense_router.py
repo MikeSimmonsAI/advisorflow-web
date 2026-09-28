@@ -97,7 +97,9 @@ def _prop(db, org_id, property_id) -> EvoSenseProperty:
 @router.get("/command-center")
 def command_center(hours: int = Query(24, ge=1, le=24 * 30), db: Session = Depends(get_db),
                    user: User = Depends(require_tenant_or_observer)):
-    return V.command_center(db, _read_org(db, user), hours=hours)
+    org_id = _read_org(db, user)
+    # Test rows are excluded unless the workspace is sandbox-only (see V.sandbox_only).
+    return V.command_center(db, org_id, hours=hours, include_test=V.sandbox_only(db, org_id))
 
 
 @router.get("/inbox")

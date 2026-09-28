@@ -528,6 +528,16 @@ def send_sms(
     # place the call and find out afterwards.
     _demo_send_guard(db, lead, "SMS")
 
+    # INTERNAL TEST RECORDS never reach a real provider. Raised as a
+    # ValueError exactly like the DNC refusal below so every caller that
+    # already handles "blocked from sending" handles this identically.
+    from app.services import test_records
+    from app.services import send_source as _ss
+    # Automated and bulk sends never reach a test record; a deliberate
+    # one-to-one MANUAL send by a person who sees the TEST badge may.
+    if test_records.is_test_record(lead) and send_source != _ss.MANUAL:
+        raise ValueError(test_records.blocked_reason(lead))
+
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC (likely a duplicate) - blocked from sending.")
 
@@ -656,6 +666,14 @@ def send_mms(
     # The demonstration boundary, first, for the same reason as in send_sms.
     _demo_send_guard(db, lead, "MMS")
 
+    # Internal test records never reach a real provider (see send_sms).
+    from app.services import test_records
+    from app.services import send_source as _ss
+    # Automated and bulk sends never reach a test record; a deliberate
+    # one-to-one MANUAL send by a person who sees the TEST badge may.
+    if test_records.is_test_record(lead) and send_source != _ss.MANUAL:
+        raise ValueError(test_records.blocked_reason(lead))
+
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC - blocked from sending.")
 
@@ -747,12 +765,17 @@ def send_batch(
     template: str,
     include_booking_link: bool = True,
 ) -> dict:
-    """Sends to multiple leads, skipping any that are DNC/duplicate/held."""
+    """Sends to multiple leads, skipping any that are DNC/duplicate/held/test."""
     from app.services.lead_capacity import is_held
+    from app.services import test_records
     sent = []
     skipped = []
     for lead in leads:
+        if test_records.is_test_record(lead):
+            skipped.append(lead.id)
+            continue
         if lead.is_duplicate or lead.status == "dnc" or is_held(lead):
+
             skipped.append(lead.id)
             continue
         try:

@@ -128,6 +128,12 @@ def start_cadence(db: Session, lead: Lead) -> CadenceState | None:
     in any active outreach cadence (DNC, duplicate, needs tier review,
     email-only - email has its own nurture flow, not this SMS cadence).
     """
+    # ONE GATE for internal test records and the other suppression signals
+    # (DNC, manual remove_all) - see app/services/test_records.py. A test
+    # record is never enrolled, so no cadence can ever text it.
+    from app.services import test_records
+    if not test_records.is_outreach_eligible(lead):
+        return None
     if lead.status in ("dnc", "needs_tier_review", "replied", "booked", "hot"):
         return None
     if lead.is_duplicate:
@@ -551,7 +557,22 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 stop_cadence_for_lead(db, lead.id, reason)
                 continue
 
+            # An internal test record that somehow got enrolled (flagged after
+            # enrolment, or enrolled by a path that predates the guard) is
+            # STOPPED with the reason recorded - never texted, never silent.
+            from app.services import test_records
+            if test_records.is_test_record(lead):
+
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
+                           outcome=OUTCOME_STOPPED,
+                           reason="test record",
+                           scheduled_for=scheduled_for)
+                stop_cadence_for_lead(db, lead.id, "stopped_test_record")
+                continue
+
             has_reply = db.query(Reply).filter(Reply.lead_id == lead.id).first()
+
             if has_reply:
                 _log_touch(db, state, lead, touch_number=touch_number,
                            attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,

@@ -300,6 +300,9 @@ def overview_sparklines(
     base_lead_filters = [Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db)]
     if not is_manager:
         base_lead_filters.append(Lead.assigned_to_id == current_user.id)
+    # KPI sparklines reflect real performance: internal test records never
+    # inflate them (app/services/test_records.py).
+    base_lead_filters.append(Lead.is_test.isnot(True))
 
     imported_rows = (
         db.query(Lead.created_at)
@@ -382,10 +385,16 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(r
         or 0
     )
 
+    # Performance counts below exclude internal test records. The two work-queue
+    # counts above (replies needing attention, cadence touches due) deliberately
+    # do NOT: they must match the inbox / cadence queue the rep clicks through
+    # to, which still show test records (see the drift note above).
+    real_lead_filters = [*base_lead_filters, Lead.is_test.isnot(True)]
+
     leads_imported_last_24h = (
         db.query(func.count(Lead.id))
         .filter(
-            *base_lead_filters,
+            *real_lead_filters,
             Lead.created_at >= start_24h,
         )
         .scalar()
@@ -396,7 +405,7 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(r
         db.query(func.count(distinct(BookingLink.lead_id)))
         .join(Lead, BookingLink.lead_id == Lead.id)
         .filter(
-            *base_lead_filters,
+            *real_lead_filters,
             BookingLink.status == "booked",
             BookingLink.booked_time.isnot(None),
             BookingLink.booked_time >= start_7d,
@@ -410,7 +419,7 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(r
         db.query(func.count(distinct(BookingLink.lead_id)))
         .join(Lead, BookingLink.lead_id == Lead.id)
         .filter(
-            *base_lead_filters,
+            *real_lead_filters,
             BookingLink.status.in_(["booked", "confirmed"]),
         )
         .scalar()
@@ -436,6 +445,7 @@ def engagement_breakdown(db: Session = Depends(get_db), current_user: User = Dep
     eng_filters = [Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db)]
     if not is_manager:
         eng_filters.append(Lead.assigned_to_id == current_user.id)
+    eng_filters.append(Lead.is_test.isnot(True))  # test records never inflate metrics
     rows = (
         db.query(Lead.engagement_temperature, func.count(Lead.id))
         .filter(*eng_filters)
@@ -469,6 +479,7 @@ def status_funnel(db: Session = Depends(get_db), current_user: User = Depends(re
     ]
     if not is_manager:
         funnel_filters.append(Lead.assigned_to_id == current_user.id)
+    funnel_filters.append(Lead.is_test.isnot(True))  # test records never inflate metrics
     rows = (
         db.query(Lead.status, func.count(Lead.id))
         .filter(*funnel_filters)

@@ -35,6 +35,10 @@ from sqlalchemy.orm import Session
 import json
 from app.deps import get_db, require_admin, require_tenant_user
 from app.services import lead_scope
+# Internal/QA leads (Lead.is_test) are kept in the database but must not
+# inflate performance reporting. Every Lead-based query below goes through the
+# one shared rule rather than re-deriving `is_test` at each call site.
+from app.services.test_records import exclude_test_records
 from app.models.models import (
     User, Lead, Message, Reply, ReplyClassification, BookingLink,
     LeadOutcome, CRMContact, Organization,
@@ -195,30 +199,27 @@ def conversion_trend(
     start, end = _resolve_date_range(start_date, end_date)
     org_ids = _get_org_ids(db, current_user, platform_id=platform_id)
 
-    replies = (
+    replies = exclude_test_records(
         db.query(Reply, Lead.id)
         .join(Lead, Reply.lead_id == Lead.id)
         .filter(Lead.organization_id.in_(org_ids), Reply.received_at >= start, Reply.received_at <= end)
-        .all()
-    )
-    bookings = (
+    ).all()
+    bookings = exclude_test_records(
         db.query(BookingLink)
         .join(Lead, BookingLink.lead_id == Lead.id)
         .filter(
             Lead.organization_id.in_(org_ids), BookingLink.status == "booked",
             BookingLink.booked_time.isnot(None), BookingLink.booked_time >= start, BookingLink.booked_time <= end,
         )
-        .all()
-    )
-    sales = (
+    ).all()
+    sales = exclude_test_records(
         db.query(LeadOutcome)
         .join(Lead, LeadOutcome.lead_id == Lead.id)
         .filter(
             Lead.organization_id.in_(org_ids), LeadOutcome.resulted_in_sale == True,
             LeadOutcome.created_at >= start, LeadOutcome.created_at <= end,
         )
-        .all()
-    )
+    ).all()
 
     by_day: dict[str, dict[str, int]] = {}
 
@@ -299,23 +300,28 @@ def engagement_vs_conversion(
 
     # 1. Messages sent per advisor: distinct leads contacted in the window
     msg_counts = dict(
-        db.query(Message.sender_id, func.count(distinct(Message.lead_id)))
-        .join(Lead, Message.lead_id == Lead.id)
-        .filter(
-            Lead.organization_id.in_(org_ids),
-            Message.sent_at >= start, Message.sent_at <= end,
+        exclude_test_records(
+            db.query(Message.sender_id, func.count(distinct(Message.lead_id)))
+            .join(Lead, Message.lead_id == Lead.id)
+            .filter(
+                Lead.organization_id.in_(org_ids),
+                Message.sent_at >= start, Message.sent_at <= end,
+            )
         )
         .group_by(Message.sender_id)
         .all()
     )
 
-    # 2. Subquery: (advisor_id, lead_id) pairs messaged in the window
+    # 2. Subquery: (advisor_id, lead_id) pairs messaged in the window. Test
+    # leads are dropped here, so every downstream count (3-6) inherits it.
     lead_subq = (
-        db.query(Message.sender_id.label("advisor_id"), Message.lead_id)
-        .join(Lead, Message.lead_id == Lead.id)
-        .filter(
-            Lead.organization_id.in_(org_ids),
-            Message.sent_at >= start, Message.sent_at <= end,
+        exclude_test_records(
+            db.query(Message.sender_id.label("advisor_id"), Message.lead_id)
+            .join(Lead, Message.lead_id == Lead.id)
+            .filter(
+                Lead.organization_id.in_(org_ids),
+                Message.sent_at >= start, Message.sent_at <= end,
+            )
         )
         .distinct()
         .subquery()
@@ -437,19 +443,21 @@ def by_client_list(
     # Leads created in the window, per list. This is the denominator: what the
     # operator actually put into the system for that client.
     received = {}
-    for name, n in (db.query(Lead.import_list_name, func.count(Lead.id))
-                    .filter(Lead.organization_id.in_(org_ids),
-                            Lead.created_at >= start, Lead.created_at <= end)
+    for name, n in (exclude_test_records(
+                        db.query(Lead.import_list_name, func.count(Lead.id))
+                        .filter(Lead.organization_id.in_(org_ids),
+                                Lead.created_at >= start, Lead.created_at <= end))
                     .group_by(Lead.import_list_name).all()):
         received[key(name)] = received.get(key(name), 0) + n
 
     # Every metric below is measured against the leads MESSAGED in the window,
     # the same basis `engagement_vs_conversion` uses, so the two reports agree.
     lead_subq = (
-        db.query(Lead.import_list_name.label("list_name"), Message.lead_id.label("lead_id"))
-        .join(Lead, Message.lead_id == Lead.id)
-        .filter(Lead.organization_id.in_(org_ids),
-                Message.sent_at >= start, Message.sent_at <= end)
+        exclude_test_records(
+            db.query(Lead.import_list_name.label("list_name"), Message.lead_id.label("lead_id"))
+            .join(Lead, Message.lead_id == Lead.id)
+            .filter(Lead.organization_id.in_(org_ids),
+                    Message.sent_at >= start, Message.sent_at <= end))
         .distinct()
         .subquery()
     )
@@ -540,15 +548,14 @@ def revenue_by_period(
     # that customer's. See lead_scope.god_sees_all_orgs.
     is_god = lead_scope.god_sees_all_orgs(current_user)
 
-    sale_outcomes = (
+    sale_outcomes = exclude_test_records(
         db.query(LeadOutcome)
         .join(Lead, LeadOutcome.lead_id == Lead.id)
         .filter(
             Lead.organization_id.in_(org_ids), LeadOutcome.resulted_in_sale == True,
             LeadOutcome.created_at >= start, LeadOutcome.created_at <= end,
         )
-        .all()
-    )
+    ).all()
 
     sales_by_advisor: dict[str, int] = {}
     for outcome in sale_outcomes:
@@ -613,10 +620,17 @@ def crm_summary(
               or current_user.organization_id)
     org = db.query(Organization).filter(Organization.id == org_id).first()
 
-    # Stage breakdown
-    contacts = db.query(CRMContact).filter(
-        CRMContact.organization_id.in_(org_ids),
-        CRMContact.is_archived == False,
+    # Stage breakdown. A contact linked to an internal test lead is itself a
+    # test record and must not inflate the CRM summary. OUTER join so contacts
+    # with no linked lead (lead_id NULL) are kept: Lead.is_test is NULL for
+    # them and `IS NOT TRUE` passes it.
+    contacts = exclude_test_records(
+        db.query(CRMContact)
+        .outerjoin(Lead, CRMContact.lead_id == Lead.id)
+        .filter(
+            CRMContact.organization_id.in_(org_ids),
+            CRMContact.is_archived == False,
+        )
     ).all()
 
     stage_counts: dict[str, int] = {}
