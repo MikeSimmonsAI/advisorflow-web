@@ -516,14 +516,42 @@ def test_platform_health_gives_every_section_a_canonical_severity(
         assert s["severity_label"] == sev.LABELS[s["severity"]]
 
 
-def test_a_subsystem_we_cannot_see_is_never_reported_as_healthy(
+def test_job_health_is_read_from_the_job_ledger_and_silence_is_not_healthy(
         client, db_session, god):
-    """Background jobs leave no durable record. That is not a clean bill of
-    health, and the endpoint must not round it up to one."""
+    """Background jobs now write a durable record of every run (job_runs).
+    A loop that has never reported a run is not a clean bill of health, and the
+    endpoint must not round it up to one."""
     body = client.get("/god/platform-health", headers=_h(db_session, god)).json()
     jobs = [s for s in body["sections"] if s["key"] == "jobs"][0]
-    assert jobs["severity"] == sev.UNAVAILABLE
+    assert jobs["severity"] != sev.HEALTHY
     assert body["overall"]["overall"] != sev.HEALTHY
+
+
+def test_a_failed_last_run_is_action_required(client, db_session, god):
+    from datetime import datetime
+    from app.models.job_models import JobName, JobRun, LOOP_JOB_NAMES
+    now = datetime.utcnow()
+    for n in LOOP_JOB_NAMES:
+        db_session.add(JobRun(job_name=n, status="success", started_at=now))
+    db_session.add(JobRun(job_name=JobName.CADENCE_CRON, status="error", started_at=now,
+                          error_summary="boom"))
+    db_session.commit()
+    body = client.get("/god/platform-health", headers=_h(db_session, god)).json()
+    jobs = [s for s in body["sections"] if s["key"] == "jobs"][0]
+    assert jobs["status"] == "bad"
+    assert "cadence cron" in jobs["detail"]
+
+
+def test_all_jobs_recent_and_successful_is_healthy(client, db_session, god):
+    from datetime import datetime
+    from app.models.job_models import ALL_JOB_NAMES, JobRun
+    now = datetime.utcnow()
+    for n in ALL_JOB_NAMES:
+        db_session.add(JobRun(job_name=n, status="success", started_at=now))
+    db_session.commit()
+    body = client.get("/god/platform-health", headers=_h(db_session, god)).json()
+    jobs = [s for s in body["sections"] if s["key"] == "jobs"][0]
+    assert jobs["status"] == "ok"
 
 
 def test_platform_health_does_not_answer_in_engineering_vocabulary(
@@ -554,9 +582,9 @@ def test_platform_health_says_what_would_have_to_change_in_plain_words(
         client, db_session, god):
     """A section that cannot report must name an OUTCOME, not a schema object."""
     body = client.get("/god/platform-health", headers=_h(db_session, god)).json()
-    jobs = [s for s in body["sections"] if s["key"] == "jobs"][0]
-    assert jobs["needs"]
-    assert "record of each scheduled run" in jobs["needs"]
+    for s in body["sections"]:
+        if s["status"] == "no_source" and s.get("needs"):
+            assert "table" not in s["needs"].lower()
 
 
 def test_platform_health_ships_the_legend_it_is_rendered_with(

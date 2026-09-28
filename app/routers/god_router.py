@@ -551,18 +551,61 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
                             technical=str(e)[:160]))
 
     # ── background jobs ────────────────────────────────────────────────────
-    # THERE IS NO JOB TABLE. Scheduled sends run in-process and leave no
-    # durable record of success or failure, so there is nothing truthful to
-    # report. A green tick here would be a lie about the one subsystem whose
-    # silent failure nobody would notice.
-    out.append(_section(
-        "jobs", "Automated follow-ups", "no_source",
-        "Not measured yet",
-        "Reminders and follow-up messages run on a schedule in the background. "
-        "They do not currently write down whether each run finished, so we "
-        "cannot show you that they did. This is not a report that anything has "
-        "failed — it is a gap in what we can see.",
-        needs="a record of each scheduled run and whether it succeeded"))
+    # READ FROM THE JOB LEDGER. This section used to say "not measured yet"
+    # because there was no durable record of runs. There is now (job_runs,
+    # written by every loop and cron and read by /god/job-runs/latest), so the
+    # owner gets the real answer. Same rules as that screen: a failed last run
+    # is action required, a job that has stopped is attention, retired jobs
+    # never count. If the ledger cannot be read, we say we could not check.
+    try:
+        jr = get_job_runs_latest(_god=god, db=db)
+        if not (jr.get("ledger") or {}).get("table_present", True) or "jobs_in_error" not in jr:
+            raise RuntimeError((jr.get("ledger") or {}).get("error") or "job ledger unavailable")
+        in_error = list(jr.get("jobs_in_error") or [])
+        stale = list(jr.get("stale_jobs") or [])
+        tracked = [n for n, rec in (jr.get("jobs") or {}).items() if not rec.get("retired")]
+        never = [n for n in tracked if (jr["jobs"][n] or {}).get("status") == "never_run"]
+        # A loop runs every few minutes inside the app; one that has never
+        # reported a run is not healthy. A daily cron may legitimately not have
+        # run yet since a restart.
+        from app.models.job_models import LOOP_JOB_NAMES as _LOOPS
+        silent_loops = [n for n in never if n in _LOOPS]
+        never = [n for n in never if n not in _LOOPS]
+        def _names(ns):
+            return ", ".join(n.replace("_", " ") for n in ns)
+        if in_error:
+            out.append(_section(
+                "jobs", "Automated follow-ups", "bad",
+                "%d scheduled job%s failed" % (len(in_error), "" if len(in_error) == 1 else "s"),
+                "The most recent run of %s did not finish successfully. Follow-ups "
+                "that depend on it may not have gone out until it runs cleanly "
+                "again." % _names(in_error),
+                to="/god/diagnostics/job-runs"))
+        elif stale or silent_loops:
+            quiet = stale + silent_loops
+            out.append(_section(
+                "jobs", "Automated follow-ups", "warn",
+                "%d scheduled job%s not running" % (len(quiet), "" if len(quiet) == 1 else "s"),
+                "%s has not run as often as it should, so follow-ups that depend "
+                "on it may be waiting." % _names(quiet),
+                to="/god/diagnostics/job-runs"))
+        else:
+            detail = ("Every scheduled job ran on time and its last run succeeded "
+                      "(%d tracked)." % len(tracked))
+            if never:
+                detail += (" %s has not run since the last restart, which is "
+                           "normal for a job that runs once a day." % _names(never))
+            out.append(_section(
+                "jobs", "Automated follow-ups", "ok",
+                "All scheduled jobs healthy", detail, to="/god/diagnostics/job-runs"))
+    except Exception as e:                                   # pragma: no cover
+        log.warning("platform-health jobs failed: %s", e)
+        db.rollback()
+        out.append(_section(
+            "jobs", "Automated follow-ups", "no_source",
+            "Can't check right now", UNCHECKED,
+            needs="a readable record of each scheduled run and whether it succeeded",
+            technical=str(e)[:160]))
 
     # ── integrations ───────────────────────────────────────────────────────
     try:
