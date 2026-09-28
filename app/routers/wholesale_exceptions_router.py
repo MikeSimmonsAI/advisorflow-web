@@ -4,7 +4,8 @@
     GET   /wholesale/exceptions?scope=mine|all|escalated|unassigned
     GET   /wholesale/exceptions/summary               counts for My Work (assigned to me; admin: + unassigned, escalated)
     POST  /wholesale/exceptions                       raise one by hand (admin)
-    POST  /wholesale/exceptions/sweep                 raise what the data shows (admin, idempotent)
+    POST  /wholesale/exceptions/sweep                 raise what the data shows (admin, idempotent;
+                                                      sandbox records only with ?include_test=true)
     POST  /wholesale/exceptions/{id}/assign           (admin)
     POST  /wholesale/exceptions/{id}/resolve          complete | unable_to_verify | needs_more_info | escalate
 
@@ -94,11 +95,14 @@ def raise_one(payload: RaiseIn, db: Session = Depends(get_db), user: User = Depe
 
 
 @router.post("/sweep")
-def sweep(db: Session = Depends(get_db), user: User = Depends(require_queue),
-          _g: User = Depends(require_not_observation)):
+def sweep(include_test: bool = False, db: Session = Depends(get_db),
+          user: User = Depends(require_queue), _g: User = Depends(require_not_observation)):
+    """Test (sandbox) records are left out unless `include_test=true` is asked
+    for explicitly - the same rule as the hourly pass, so a sweep never puts
+    sandbox work in front of a real person by default."""
     org_id = svc.write_org_id(db, user)
     _manager(db, user)
-    made = EX.sweep(db, org_id, user=user)
+    made = EX.sweep(db, org_id, user=user, include_test=include_test)
     db.commit()
     return {"raised": made}
 

@@ -703,3 +703,73 @@ def test_an_unreadable_phone_number_is_blocked_rather_than_thrown(
     assert result["blocked"] == 1
     assert result["sent"] == 1
     assert "not a usable US number" in _logs(db_session, bad)[-1].reason
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Production incident 2026-09-22: a touch skipped twice wedged the runner
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Skipped / blocked rows were numbered from FAILURES only, so the second skip
+# of the same touch reused attempt 1, hit uq_cadence_touch_attempt, and the
+# IntegrityError aborted the whole pass - for every tenant - every hour.
+
+def _redue(db_session, state):
+    db_session.refresh(state)
+    state.next_touch_due_at = datetime.utcnow() - timedelta(minutes=1)
+    db_session.commit()
+
+
+def test_a_touch_skipped_again_and_again_never_wedges_the_runner(
+        db_session, sample_org, sample_advisor, monkeypatch):
+    monkeypatch.delenv("CADENCE_SMS_SENDING", raising=False)
+    lead = _lead(db_session, sample_org, sample_advisor)
+    state = _due(db_session, lead)
+    other = _lead(db_session, sample_org, sample_advisor, phone="12145552002")
+    other_state = _due(db_session, other, minutes_ago=1)
+    for _ in range(3):
+        _redue(db_session, state)
+        _redue(db_session, other_state)
+        result = cs.run_due_cadences(db_session, now=AT)       # must not raise
+        assert result["skipped"] == 2 and result["sent"] == 0
+    logs = _logs(db_session, lead)
+    assert [l.outcome for l in logs] == [cs.OUTCOME_SKIPPED] * 3
+    assert len({(l.touch_number, l.attempt_seq) for l in logs}) == 3
+    db_session.refresh(state)
+    assert state.current_touch_number == 0, "a skipped touch still never advances"
+
+
+def test_after_skips_and_blocks_the_touch_can_still_be_sent_once(
+        db_session, sample_org, sample_advisor, monkeypatch):
+    """Skips must not eat the send's slot or its retry budget."""
+    monkeypatch.delenv("CADENCE_SMS_SENDING", raising=False)
+    lead = _lead(db_session, sample_org, sample_advisor)
+    state = _due(db_session, lead)
+    for _ in range(cs.MAX_ATTEMPTS_PER_TOUCH + 1):
+        _redue(db_session, state)
+        cs.run_due_cadences(db_session, now=AT)
+    _sending_on(monkeypatch)
+    _redue(db_session, state)
+    with patch("app.services.sms_service._resolve_twilio_creds",
+               return_value=(_twilio(), "+19998887777", None)):
+        result = cs.run_due_cadences(db_session, now=AT)
+    assert result["sent"] == 1
+    sent = [l for l in _logs(db_session, lead) if l.outcome == cs.OUTCOME_SENT]
+    assert len(sent) == 1
+    db_session.refresh(state)
+    assert state.current_touch_number == 1
+
+
+def test_a_stop_after_earlier_skips_is_recorded_not_a_crash(
+        db_session, sample_org, sample_advisor, monkeypatch):
+    monkeypatch.delenv("CADENCE_SMS_SENDING", raising=False)
+    lead = _lead(db_session, sample_org, sample_advisor)
+    state = _due(db_session, lead)
+    cs.run_due_cadences(db_session, now=AT)                     # skipped, slot 1
+    lead.status = "dnc"
+    db_session.commit()
+    _redue(db_session, state)
+    cs.run_due_cadences(db_session, now=AT)                     # stop must not collide
+    logs = _logs(db_session, lead)
+    assert logs[-1].outcome == cs.OUTCOME_STOPPED
+    db_session.refresh(state)
+    assert state.status != "active"

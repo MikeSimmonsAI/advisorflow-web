@@ -393,19 +393,40 @@ def _already_sent(db: Session, state, touch_number: int) -> bool:
     ).first() is not None
 
 
-def _next_attempt_seq(db: Session, state, touch_number: int) -> int:
-    """Attempts are counted from FAILURES only.
+def _failed_attempts(db: Session, state, touch_number: int) -> int:
+    """The RETRY BUDGET: provider failures for this touch.
 
     A delivered touch is never retried - `_already_sent` refuses it outright -
-    so the sequence exists to number the retries of a touch that has not landed
-    yet, and MAX_ATTEMPTS_PER_TOUCH is a budget for provider failures.
+    so MAX_ATTEMPTS_PER_TOUCH is a budget for provider failures only. Skips,
+    blocks and stops never spend it.
     """
-    used = (db.query(func.count(CadenceTouchLog.id))
+    return (db.query(func.count(CadenceTouchLog.id))
             .filter(CadenceTouchLog.cadence_state_id == state.id,
                     CadenceTouchLog.touch_number == touch_number,
                     CadenceTouchLog.outcome == OUTCOME_FAILED)
             .scalar()) or 0
-    return used + 1
+
+
+def _next_attempt_seq(db: Session, state, touch_number: int) -> int:
+    """The next free ROW SLOT for this touch: max(attempt_seq) + 1.
+
+    PRODUCTION INCIDENT 2026-09-22. This used to be "failures + 1", which is a
+    retry count, not a slot. Every skip / block / stop row took slot 1 as long
+    as nothing had FAILED, so the second skip of the same touch collided with
+    the first on `uq_cadence_touch_attempt` - and because those rows were not
+    written under a savepoint, the IntegrityError aborted the entire pass,
+    for every tenant, every hour, from that moment on.
+
+    The unique index is the concurrency lock, and it still is: two runners
+    computing the same slot for the same touch get one insert and one
+    IntegrityError. The retry BUDGET is counted separately by
+    `_failed_attempts`, so skips never eat it.
+    """
+    top = (db.query(func.max(CadenceTouchLog.attempt_seq))
+           .filter(CadenceTouchLog.cadence_state_id == state.id,
+                   CadenceTouchLog.touch_number == touch_number)
+           .scalar()) or 0
+    return top + 1
 
 
 def run_due_cadences(db: Session, organization_id: str = None,
@@ -506,7 +527,8 @@ def run_due_cadences(db: Session, organization_id: str = None,
         # ── STOPS. The cadence ends here, and the reason is recorded. ───────
         if lead.status in ("dnc", "hot", "replied", "booked"):
             reason = "stopped_dnc" if lead.status == "dnc" else "stopped_replied"
-            _log_touch(db, state, lead, touch_number=touch_number, attempt_seq=1,
+            _log_touch(db, state, lead, touch_number=touch_number,
+                       attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
                        outcome=OUTCOME_STOPPED,
                        reason=f"lead status is {lead.status}",
                        scheduled_for=scheduled_for)
@@ -515,7 +537,8 @@ def run_due_cadences(db: Session, organization_id: str = None,
 
         has_reply = db.query(Reply).filter(Reply.lead_id == lead.id).first()
         if has_reply:
-            _log_touch(db, state, lead, touch_number=touch_number, attempt_seq=1,
+            _log_touch(db, state, lead, touch_number=touch_number,
+                       attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
                        outcome=OUTCOME_STOPPED,
                        reason="the family replied", scheduled_for=scheduled_for)
             stop_cadence_for_lead(db, lead.id, "stopped_replied")
@@ -533,7 +556,8 @@ def run_due_cadences(db: Session, organization_id: str = None,
                           BookingLink.status.in_(("booked", "confirmed")))
                   .first())
         if booked is not None:
-            _log_touch(db, state, lead, touch_number=touch_number, attempt_seq=1,
+            _log_touch(db, state, lead, touch_number=touch_number,
+                       attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
                        outcome=OUTCOME_STOPPED,
                        reason="an appointment is already booked",
                        scheduled_for=scheduled_for)
@@ -559,7 +583,8 @@ def run_due_cadences(db: Session, organization_id: str = None,
                       .first())
             if manual is not None:
                 _log_touch(db, state, lead, touch_number=touch_number,
-                           attempt_seq=1, outcome=OUTCOME_STOPPED,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number),
+                           claim=True, outcome=OUTCOME_STOPPED,
                            reason="a person has taken this conversation over",
                            scheduled_for=scheduled_for)
                 stop_cadence_for_lead(db, lead.id, "stopped_manual_takeover")
@@ -573,7 +598,7 @@ def run_due_cadences(db: Session, organization_id: str = None,
         if is_held(lead):
             _log_touch(db, state, lead, touch_number=touch_number,
                        attempt_seq=_next_attempt_seq(db, state, touch_number),
-                       outcome=OUTCOME_SKIPPED,
+                       claim=True, outcome=OUTCOME_SKIPPED,
                        reason="lead is held over plan capacity",
                        scheduled_for=scheduled_for)
             state.next_touch_due_at = now + RETRY_BACKOFF
@@ -585,7 +610,7 @@ def run_due_cadences(db: Session, organization_id: str = None,
         if not advisor:
             _log_touch(db, state, lead, touch_number=touch_number,
                        attempt_seq=_next_attempt_seq(db, state, touch_number),
-                       outcome=OUTCOME_SKIPPED, reason="no advisor assigned",
+                       claim=True, outcome=OUTCOME_SKIPPED, reason="no advisor assigned",
                        scheduled_for=scheduled_for)
             state.next_touch_due_at = now + RETRY_BACKOFF
             skipped_count += 1
@@ -617,7 +642,7 @@ def run_due_cadences(db: Session, organization_id: str = None,
                       else "the organization is not entitled to cadences")
             _log_touch(db, state, lead, touch_number=touch_number,
                        attempt_seq=_next_attempt_seq(db, state, touch_number),
-                       outcome=OUTCOME_SKIPPED, reason=reason,
+                       claim=True, outcome=OUTCOME_SKIPPED, reason=reason,
                        scheduled_for=scheduled_for)
             state.next_touch_due_at = now + RETRY_BACKOFF
             skipped_count += 1
@@ -630,7 +655,7 @@ def run_due_cadences(db: Session, organization_id: str = None,
         except ValueError as blocked:
             _log_touch(db, state, lead, touch_number=touch_number,
                        attempt_seq=_next_attempt_seq(db, state, touch_number),
-                       outcome=OUTCOME_BLOCKED, reason=str(blocked),
+                       claim=True, outcome=OUTCOME_BLOCKED, reason=str(blocked),
                        scheduled_for=scheduled_for, attempted_at=now)
             state.next_touch_due_at = now + RETRY_BACKOFF
             blocked_count += 1
@@ -652,7 +677,7 @@ def run_due_cadences(db: Session, organization_id: str = None,
         if not hours["permitted"]:
             _log_touch(db, state, lead, touch_number=touch_number,
                        attempt_seq=_next_attempt_seq(db, state, touch_number),
-                       outcome=OUTCOME_BLOCKED,
+                       claim=True, outcome=OUTCOME_BLOCKED,
                        reason="quiet hours: %s" % hours["reason"],
                        scheduled_for=scheduled_for)
             # Re-scheduled to the next moment it IS permitted, so the touch is
@@ -679,9 +704,9 @@ def run_due_cadences(db: Session, organization_id: str = None,
             continue
 
         attempt_seq = _next_attempt_seq(db, state, touch_number)
-        if attempt_seq > MAX_ATTEMPTS_PER_TOUCH:
+        if _failed_attempts(db, state, touch_number) >= MAX_ATTEMPTS_PER_TOUCH:
             _log_touch(db, state, lead, touch_number=touch_number,
-                       attempt_seq=attempt_seq, outcome=OUTCOME_ABANDONED,
+                       attempt_seq=attempt_seq, claim=True, outcome=OUTCOME_ABANDONED,
                        reason=f"{MAX_ATTEMPTS_PER_TOUCH} attempts failed",
                        scheduled_for=scheduled_for)
             state.current_touch_number = touch_number

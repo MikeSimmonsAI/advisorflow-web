@@ -211,3 +211,14 @@ def test_my_work_count_is_per_person(client, db_session, admin, sample_org):
                    json={"outcome": "escalate", "note": "Two people claim to own it"}))
     assert ok(client.get("/wholesale/exceptions/summary", headers=_h(db_session, va)))["assigned_to_me"] == 0
     assert ok(client.get("/wholesale/exceptions/summary", headers=_h(db_session, admin)))["escalated"] == 1
+
+
+def test_the_manual_sweep_leaves_sandbox_records_alone_unless_asked(client, db_session, admin):
+    ok(client.post("/wholesale/properties", headers=_h(db_session, admin),
+                   json={"street_address": "13 Sandbox Only St", "city": "Dallas", "state": "TX",
+                         "zip_code": "75215", "is_test": True}))
+    assert ok(client.post("/wholesale/exceptions/sweep", headers=_h(db_session, admin)))["raised"] == {}
+    assert _open(db_session, "verify_owner") == []
+    made = ok(client.post("/wholesale/exceptions/sweep?include_test=true", headers=_h(db_session, admin)))
+    assert made["raised"] == {"verify_owner": 1}
+    assert _open(db_session, "verify_owner")[0].is_test is True

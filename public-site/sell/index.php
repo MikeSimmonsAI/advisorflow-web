@@ -170,6 +170,13 @@ h2{font-size:clamp(30px,3.2vw,44px);line-height:1.12}
 .top .dnav .home{display:inline-flex;align-items:center;gap:7px;padding-right:24px;border-right:1px solid rgba(255,255,255,.22)}
 .top .dnav .home svg,.mnav .home svg{width:17px;height:17px;flex:none;color:var(--gold-2)}
 .mnav{display:none;position:relative}
+/* Parent-platform strip: on tablet/phone the desktop nav (with its EvoSysPro
+   Home link) collapses into the menu, so the relationship stays visible here. */
+.eco-bar{display:none;background:#08162a;border-bottom:1px solid rgba(212,174,90,.28)}
+.eco-bar a{display:flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:6px 16px;color:#dfe6f1;text-decoration:none;font:600 13px/1.2 var(--sans);letter-spacing:.02em}
+.eco-bar a b{color:var(--gold-2);font-weight:700}
+.eco-bar svg{width:15px;height:15px;flex:none;color:var(--gold-2)}
+.eco-bar a:hover,.eco-bar a:focus-visible{color:#fff;text-decoration:underline;text-underline-offset:4px}
 .mnav summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:9px 16px;border:1.5px solid rgba(255,255,255,.5);border-radius:10px;font:700 14px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:#fff}
 .mnav summary::-webkit-details-marker{display:none}
 .mnav summary svg{width:18px;height:18px}
@@ -310,6 +317,7 @@ textarea.i{min-height:110px;resize:vertical}
   .wrap{padding:0 28px}
   .top .dnav{display:none}
   .mnav{display:block}
+  .eco-bar{display:block}
   .trust ul{grid-template-columns:repeat(2,minmax(0,1fr))}
   .trust li{border-left:0;padding-left:0}
   .steps{grid-template-columns:minmax(0,1fr);gap:18px}
@@ -366,6 +374,7 @@ textarea.i{min-height:110px;resize:vertical}
   <symbol id="i-phone" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M6.6 3.5h3l1.5 4-2 1.3a11 11 0 005.9 5.9l1.3-2 4 1.5v3a2 2 0 01-2.2 2A17 17 0 014.6 5.7a2 2 0 012-2.2z"/></symbol>
 </svg>
 
+<div class="eco-bar"><a href="/"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 11l8-7 8 7M6.5 9.5V20h11V9.5"/></svg><span>A product of <b>EvoSysPro</b> &middot; EvoSysPro Home</span></a></div>
 <header class="top dark" role="banner">
   <div class="wrap">
     <a class="brand" href="/sell" aria-label="EvoSys Wholesale, home">
