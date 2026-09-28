@@ -60,3 +60,15 @@ Atlantis import, $0 spend. Commits on `main` (see bottom for the final list).
 
 ## 7. UX / responsive
 - Context banner readable on phones. No page-level horizontal overflow on 16 audited routes at 375px; tables scroll inside their panels. No links to undeclared routes found.
+
+## 8. Commits (main)
+| Commit | Contents | Full suite (Windows) |
+|---|---|---|
+| 519fa02 | Batch 1: SS fixes, product catalog, Leads table, cadence isolation, job staleness, security scope, performance | 6165 passed / 0 failed |
+| aa8bc28 | Batch 2: test-record guards, intake consent/DNC, KPI/report hygiene, admin-profile takeover fix, post-appointment claim, timeline cursor, phone banner | 6223 passed / 0 failed |
+| e6ae362 | Batch 3: launch-experience/commercial scope, destructive-route audit + availability cancel fix, proposal-file hardening | 6275 passed / 0 failed (FINAL) |
+
+No migrations beyond one additive column (`organizations.products` TEXT via auto_migrate). No production data changed. No SMS/email sent, no provider calls, $0.
+
+## 9. Needs Mike
+SS2 Custom-plan policy · SS8 AI Hub funnel + Send Queue source · bulk AI SMS switch · ai_conversation_cron service (stale since 9/19) · /sell fallback replacement · availability cancellation texts (broken import; fixing sends SMS) · proposal files signed URLs · legacy CRM-inbound orgs · CORS localhost removal · 8 non-canonical inbound Lead paths (three contact stores).
