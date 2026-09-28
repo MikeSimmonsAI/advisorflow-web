@@ -275,6 +275,12 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
                 except Exception:
                     pass
 
+            # Commit THIS email's Reply now, before the alert and before the
+            # Graph message is tagged processed. A later email's failure can
+            # no longer roll this one back, and a message is never tagged
+            # processed while its Reply exists only in an open transaction.
+            db.commit()
+
             # Refresh reply from DB — pipeline/AI handler may have set is_hot=True
             try:
                 db.refresh(reply)
@@ -295,6 +301,8 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             logger.info("Email reply captured: %s → lead %s", sender_email, lead.id)
 
         except Exception as e:
+            # One bad email must not poison the session for the rest.
+            db.rollback()
             logger.error("Error processing email %s: %s", email.get("id", "?"), e)
             errors += 1
 
@@ -314,7 +322,16 @@ def poll_all_advisors(db: Session, organization_id: str) -> dict:
 
     total = {"checked": 0, "matched": 0, "errors": 0, "auth_errors": 0}
     for advisor in advisors:
-        result = poll_inbox_for_replies(db, advisor.id)
+        advisor_id = advisor.id
+        try:
+            result = poll_inbox_for_replies(db, advisor_id)
+        except Exception as e:
+            # One advisor's failure must not stop (or poison the session for)
+            # the rest of the organization.
+            db.rollback()
+            logger.error("poll_all_advisors: error on advisor %s: %s", advisor_id, e)
+            total["errors"] += 1
+            continue
         total["checked"] += result.get("checked", 0)
         total["matched"] += result.get("matched", 0)
         total["errors"] += result.get("errors", 0)
@@ -339,15 +356,17 @@ def poll_all_orgs(db: Session) -> dict:
 
     total = {"checked": 0, "matched": 0, "errors": 0, "auth_errors": 0, "advisors_polled": 0}
     for advisor in advisors:
+        advisor_id = advisor.id
         try:
-            result = poll_inbox_for_replies(db, advisor.id)
+            result = poll_inbox_for_replies(db, advisor_id)
             total["checked"] += result.get("checked", 0)
             total["matched"] += result.get("matched", 0)
             total["errors"] += result.get("errors", 0)
             total["auth_errors"] += result.get("auth_errors", 0)
             total["advisors_polled"] += 1
         except Exception as e:
-            logger.error("poll_all_orgs: error on advisor %s: %s", advisor.id, e)
+            db.rollback()
+            logger.error("poll_all_orgs: error on advisor %s: %s", advisor_id, e)
             total["errors"] += 1
 
     logger.info(
@@ -361,6 +380,7 @@ def poll_all_orgs(db: Session) -> dict:
         followups_sent = check_and_send_followups(db)
         total["followups_sent"] = followups_sent
     except Exception as e:
+        db.rollback()
         logger.error("post_appointment check failed: %s", e)
         total["followups_sent"] = 0
 

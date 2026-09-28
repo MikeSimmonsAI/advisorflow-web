@@ -5,13 +5,14 @@ Full CRUD for org cadence templates + pre-built defaults seeder.
 
 import uuid
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.deps import get_db, get_current_user, require_admin, require_tenant_user
 from app.models.models import CadenceTemplate, CadenceTemplateTouch, User
+from app.services.lead_scope import active_workspace_org_id
 
 router = APIRouter(prefix="/cadence-templates", tags=["cadence-templates"])
 
@@ -252,15 +253,27 @@ def _seed_defaults_for_org(db: Session, organization_id: str, created_by_id: str
     db.commit()
     return seeded
 
+def _org_id(db: Session, current_user: User, request: Request):
+    """The ACTIVE workspace org - the one require_admin / require_tenant_user
+    evaluated the caller against - not the home `users.organization_id`.
+
+    Reading the home column here meant an admin who passed require_admin inside
+    workspace B then read and wrote workspace A's (home) cadence templates, and
+    a user who is admin at home but only an advisor in B could not be stopped
+    from editing A while standing in B."""
+    return active_workspace_org_id(current_user, db, request)
+
+
 @router.get("/")
-def list_templates(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
+def list_templates(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
+    org_id = _org_id(db, current_user, request)
     from app.models.models import Organization as _Org
     from sqlalchemy import or_ as _or
-    _org = db.query(_Org).filter(_Org.id == current_user.organization_id).first()
+    _org = db.query(_Org).filter(_Org.id == org_id).first()
     _cadence_industry = get_cadence_industry((_org.industry if _org else None) or "funeral")
 
     templates = db.query(CadenceTemplate).filter(
-        CadenceTemplate.organization_id == current_user.organization_id,
+        CadenceTemplate.organization_id == org_id,
         CadenceTemplate.is_active == True,
         _or(
             CadenceTemplate.industry == _cadence_industry,
@@ -272,9 +285,9 @@ def list_templates(db: Session = Depends(get_db), current_user: User = Depends(r
     # Auto-seed industry-appropriate defaults if this org has no matching templates
     if not templates:
         try:
-            _seed_defaults_for_org(db, current_user.organization_id, current_user.id, industry=_cadence_industry)
+            _seed_defaults_for_org(db, org_id, current_user.id, industry=_cadence_industry)
             templates = db.query(CadenceTemplate).filter(
-                CadenceTemplate.organization_id == current_user.organization_id,
+                CadenceTemplate.organization_id == org_id,
                 CadenceTemplate.is_active == True,
                 _or(
                     CadenceTemplate.industry == _cadence_industry,
@@ -289,10 +302,11 @@ def list_templates(db: Session = Depends(get_db), current_user: User = Depends(r
 
 
 @router.get("/{template_id}")
-def get_template(template_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
+def get_template(template_id: str, request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
+    org_id = _org_id(db, current_user, request)
     t = db.query(CadenceTemplate).filter(
         CadenceTemplate.id == template_id,
-        CadenceTemplate.organization_id == current_user.organization_id,
+        CadenceTemplate.organization_id == org_id,
     ).first()
     if not t:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -301,24 +315,28 @@ def get_template(template_id: str, db: Session = Depends(get_db), current_user: 
 
 @router.post("/seed-defaults")
 def seed_default_templates(
+    request: Request,
     industry: str = "funeral",
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     """Seed the pre-built default templates for this org. Requires org_admin or super_admin."""
-    seeded = _seed_defaults_for_org(db, current_user.organization_id, current_user.id, industry=industry)
+    org_id = _org_id(db, current_user, request)
+    seeded = _seed_defaults_for_org(db, org_id, current_user.id, industry=industry)
     return {"seeded": seeded}
 
 
 @router.post("/")
 def create_template(
     req: TemplateCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    org_id = _org_id(db, current_user, request)
     template = CadenceTemplate(
         id=str(uuid.uuid4()),
-        organization_id=current_user.organization_id,
+        organization_id=org_id,
         name=req.name,
         description=req.description,
         industry=req.industry,
@@ -354,12 +372,14 @@ def create_template(
 def update_template(
     template_id: str,
     req: TemplateUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    org_id = _org_id(db, current_user, request)
     t = db.query(CadenceTemplate).filter(
         CadenceTemplate.id == template_id,
-        CadenceTemplate.organization_id == current_user.organization_id,
+        CadenceTemplate.organization_id == org_id,
     ).first()
     if not t:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -395,12 +415,14 @@ def update_template(
 @router.delete("/{template_id}")
 def delete_template(
     template_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    org_id = _org_id(db, current_user, request)
     t = db.query(CadenceTemplate).filter(
         CadenceTemplate.id == template_id,
-        CadenceTemplate.organization_id == current_user.organization_id,
+        CadenceTemplate.organization_id == org_id,
     ).first()
     if not t:
         raise HTTPException(status_code=404, detail="Template not found")

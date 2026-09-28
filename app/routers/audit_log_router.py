@@ -10,12 +10,13 @@ import json
 from datetime import datetime, date
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_admin
 from app.models.models import AuditLogEntry, User
+from app.services.lead_scope import active_workspace_org_id
 
 router = APIRouter(prefix="/audit-log", tags=["audit-log"])
 
@@ -117,21 +118,25 @@ class AuditLogListResponse(BaseModel):
 
 @router.get("/actions")
 def list_audit_actions(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     """Return distinct action names for this org — used to populate the action filter dropdown."""
     from sqlalchemy import text
+    # The workspace require_admin was evaluated against - not the home org.
+    org_id = active_workspace_org_id(current_user, db, request)
     rows = db.execute(text("""
         SELECT DISTINCT action FROM audit_log_entries
         WHERE organization_id = :org_id
         ORDER BY action
-    """), {"org_id": current_user.organization_id}).mappings().all()
+    """), {"org_id": org_id}).mappings().all()
     return {"actions": [r["action"] for r in rows]}
 
 
 @router.get("", response_model=AuditLogListResponse)
 def list_audit_log(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
     action: str | None = Query(default=None, description="Optional exact action filter."),
@@ -144,11 +149,16 @@ def list_audit_log(
     """
     Admin-only, organization-scoped audit log.
 
-    A caller can only see events for current_user.organization_id. Even if a
-    valid target_id from another org is guessed, it does not matter because
-    the query is constrained at the organization boundary first.
+    A caller can only see events for the ACTIVE workspace - the one
+    require_admin evaluated their admin role in (X-Workspace-Id backed by a
+    membership, else their home organization). Reading the home column here
+    would let an admin of workspace B read home org A's log after passing an
+    admin check in B, and would show B's admin the wrong tenant's history.
+    Even if a valid target_id from another org is guessed, it does not matter
+    because the query is constrained at the organization boundary first.
     """
-    query = db.query(AuditLogEntry).filter(AuditLogEntry.organization_id == current_user.organization_id)
+    org_id = active_workspace_org_id(current_user, db, request)
+    query = db.query(AuditLogEntry).filter(AuditLogEntry.organization_id == org_id)
 
     if action:
         query = query.filter(AuditLogEntry.action == action)
@@ -166,7 +176,7 @@ def list_audit_log(
         matched_actors = (
             db.query(User.id)
             .filter(
-                User.organization_id == current_user.organization_id,
+                User.organization_id == org_id,
                 User.full_name.ilike(f"%{actor}%"),
             )
             .all()

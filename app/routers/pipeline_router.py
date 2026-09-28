@@ -166,11 +166,12 @@ def get_flagged(
     )
     if not _is_elevated(current_user):
         q = q.filter(PipelineConversation.advisor_id == current_user.id)
-    flagged = q.order_by(PipelineConversation.flagged_at.desc()).all()
+    flagged = q.order_by(PipelineConversation.flagged_at.desc()).limit(200).all()
 
+    leads = _authorized_leads_by_id(db, current_user, flagged)
     result = []
     for p in flagged:
-        lead = authorized_lead_query(db, current_user).filter(Lead.id == p.lead_id).first()
+        lead = leads.get(p.lead_id)
         result.append({
             "pipeline_id": p.id,
             "lead_id": p.lead_id,
@@ -261,6 +262,16 @@ def dismiss_flagged(
     return {"dismissed": True}
 
 
+def _authorized_leads_by_id(db: Session, user: User, pipelines) -> dict:
+    """One scoped query for every lead on the page instead of one per row.
+    Leads outside the caller's scope are simply absent (rendered "Unknown",
+    exactly as the per-row lookup did)."""
+    ids = {p.lead_id for p in pipelines if p.lead_id}
+    if not ids:
+        return {}
+    return {l.id: l for l in authorized_lead_query(db, user).filter(Lead.id.in_(ids)).all()}
+
+
 @router.get("/conversations")
 def get_conversations(
     stage: Optional[str] = None,
@@ -278,9 +289,10 @@ def get_conversations(
 
     pipelines = query.order_by(PipelineConversation.updated_at.desc()).limit(200).all()
 
+    leads = _authorized_leads_by_id(db, current_user, pipelines)
     result = []
     for p in pipelines:
-        lead = authorized_lead_query(db, current_user).filter(Lead.id == p.lead_id).first()
+        lead = leads.get(p.lead_id)
         result.append({
             "pipeline_id": p.id,
             "lead_id": p.lead_id,

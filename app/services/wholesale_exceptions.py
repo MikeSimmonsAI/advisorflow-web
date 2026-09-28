@@ -305,11 +305,13 @@ def sweep_all(db: Session) -> Dict[str, Any]:
     from app.services.entitlements import org_has_feature
     report: Dict[str, Any] = {"orgs": 0, "raised": 0, "failed": 0}
     for org_id in _wholesale_org_ids(db):
-        org = db.query(Organization).filter(Organization.id == org_id).first()
-        if org is None or getattr(org, "is_active", True) is False \
-                or not org_has_feature(org, "wholesale_real_estate"):
-            continue
         try:
+            # The eligibility lookup is inside the per-org try too: a failure
+            # resolving one tenant's entitlements must not end the pass.
+            org = db.query(Organization).filter(Organization.id == org_id).first()
+            if org is None or getattr(org, "is_active", True) is False \
+                    or not org_has_feature(org, "wholesale_real_estate"):
+                continue
             made = sweep(db, org_id, None, include_test=False, cap_per_kind=AUTO_CAP_PER_KIND)
             db.commit()
         except Exception:  # noqa: BLE001 - one tenant never stops the pass
@@ -379,11 +381,18 @@ def _subject(db: Session, org_id: str, ex: WholesaleWorkException) -> Dict[str, 
     return {"type": ex.subject_type, "label": None}
 
 
-def exception_json(db: Session, org_id: str, ex: WholesaleWorkException, names=None) -> Dict[str, Any]:
+def exception_json(db: Session, org_id: str, ex: WholesaleWorkException, names=None,
+                   subjects: Optional[Dict[Any, Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """`subjects` is an optional preloaded map from `load_subjects()` keyed by
+    (subject_type, subject_id); when absent the subject is looked up per row."""
     iso = lambda d: d.isoformat() if d else None  # noqa: E731
+    if subjects is not None:
+        subject = subjects.get((ex.subject_type, ex.subject_id)) or {"type": ex.subject_type, "label": None}
+    else:
+        subject = _subject(db, org_id, ex)
     return {"id": ex.id, "kind": ex.kind, "kind_label": KIND_LABELS.get(ex.kind, ex.kind),
             "title": ex.title, "detail": ex.detail, "priority": ex.priority, "status": ex.status,
-            "subject": _subject(db, org_id, ex), "assigned_to_id": ex.assigned_to_id,
+            "subject": subject, "assigned_to_id": ex.assigned_to_id,
             "assigned_to_name": (names or {}).get(ex.assigned_to_id), "assigned_at": iso(ex.assigned_at),
             "outcome": ex.outcome, "outcome_note": ex.outcome_note, "resolved_at": iso(ex.resolved_at),
             "source": ex.source, "raised_by_actor": ex.raised_by_actor, "created_at": iso(ex.created_at),
@@ -404,18 +413,86 @@ def can_work(db: Session, user, ex: WholesaleWorkException) -> bool:
 
 
 def queue(db: Session, org_id: str, user, *, include_closed: bool = False,
-          scope: str = "mine") -> List[WholesaleWorkException]:
+          scope: str = "mine", limit: Optional[int] = None, offset: int = 0,
+          manager: Optional[bool] = None) -> List[WholesaleWorkException]:
+    """`limit`/`offset` page the result (no limit when None, for existing
+    callers); `manager` lets a caller that already resolved is_manager skip
+    the repeat lookup."""
     q = db.query(WholesaleWorkException).filter(WholesaleWorkException.organization_id == org_id)
     if not include_closed:
         q = q.filter(WholesaleWorkException.status.in_(EXCEPTION_OPEN_STATUSES))
-    manager = is_manager(db, user)
+    if manager is None:
+        manager = is_manager(db, user)
     if not manager or scope == "mine":
         q = q.filter(WholesaleWorkException.assigned_to_id == user.id)
     elif scope == "escalated":
         q = q.filter(WholesaleWorkException.status == "escalated")
     elif scope == "unassigned":
         q = q.filter(WholesaleWorkException.assigned_to_id.is_(None))
-    return q.order_by(WholesaleWorkException.priority, WholesaleWorkException.created_at).all()
+    q = q.order_by(WholesaleWorkException.priority, WholesaleWorkException.created_at,
+                   WholesaleWorkException.id)
+    if offset:
+        q = q.offset(max(0, int(offset)))
+    if limit is not None:
+        q = q.limit(max(0, int(limit)))
+    return q.all()
+
+
+def _address_label(p) -> str:
+    return ", ".join(x for x in (p.street_address, p.city, p.state, p.zip_code) if x)
+
+
+def load_subjects(db: Session, org_id: str,
+                  rows: List[WholesaleWorkException]) -> Dict[Any, Dict[str, Any]]:
+    """Batch form of `_subject`: one query per subject type (deals add one for
+    their properties) instead of one or two per row. Returns a map keyed by
+    (subject_type, subject_id); rows whose subject is missing or of an unknown
+    type are simply absent (exception_json falls back to {type, label: None})."""
+    by_type: Dict[str, set] = {}
+    for r in rows:
+        if r.subject_id is not None:
+            by_type.setdefault(r.subject_type, set()).add(r.subject_id)
+    out: Dict[Any, Dict[str, Any]] = {}
+    ids = by_type.get("property")
+    if ids:
+        for p in db.query(WholesaleProperty).filter(WholesaleProperty.id.in_(ids),
+                                                    WholesaleProperty.organization_id == org_id).all():
+            out[("property", p.id)] = {"type": "property", "label": _address_label(p),
+                                       "county": p.county, "parcel_apn": getattr(p, "parcel_apn", None)}
+    ids = by_type.get("buyer")
+    if ids:
+        for b in db.query(WholesaleBuyer).filter(WholesaleBuyer.id.in_(ids),
+                                                 WholesaleBuyer.organization_id == org_id).all():
+            out[("buyer", b.id)] = {"type": "buyer", "label": b.company_name or b.contact_name,
+                                    "contact_name": b.contact_name, "email": b.email, "phone": b.phone}
+    ids = by_type.get("deal")
+    if ids:
+        deals = db.query(WholesaleDeal).filter(WholesaleDeal.id.in_(ids),
+                                               WholesaleDeal.organization_id == org_id).all()
+        prop_ids = {d.property_id for d in deals if d.property_id is not None}
+        props = {}
+        if prop_ids:
+            props = {p.id: p for p in db.query(WholesaleProperty).filter(
+                WholesaleProperty.id.in_(prop_ids), WholesaleProperty.organization_id == org_id).all()}
+        for d in deals:
+            p = props.get(d.property_id)
+            if p:
+                out[("deal", d.id)] = {"type": "deal", "deal_id": d.id, "stage": d.stage,
+                                       "label": _address_label(p)}
+    ids = by_type.get("evosense_property")
+    if ids:
+        from app.models.evosense_models import EvoSenseProperty
+        for p in db.query(EvoSenseProperty).filter(EvoSenseProperty.id.in_(ids),
+                                                   EvoSenseProperty.organization_id == org_id).all():
+            out[("evosense_property", p.id)] = {"type": "evosense_property", "label": _address_label(p),
+                                                "county": p.county, "parcel_apn": p.parcel_apn}
+    ids = by_type.get("lead")
+    if ids:
+        from app.models.models import Lead
+        for lead in db.query(Lead).filter(Lead.id.in_(ids), Lead.organization_id == org_id).all():
+            out[("lead", lead.id)] = {"type": "lead", "label": " ".join(
+                x for x in (lead.first_name, lead.last_name) if x) or "Seller", "phone": lead.phone}
+    return out
 
 
 def assign(db: Session, org_id: str, ex: WholesaleWorkException, user, assignee_id: Optional[str]):

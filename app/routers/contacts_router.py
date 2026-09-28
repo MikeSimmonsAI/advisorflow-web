@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -60,12 +60,15 @@ def _row_to_dict(row) -> dict:
 
 @router.get("/contacts")
 def list_contacts(
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
     rows = db.execute(text(
         "SELECT * FROM crm_contacts WHERE organization_id = :org_id ORDER BY created_at DESC"
-    ), {"org_id": current_user.organization_id}).fetchall()
+        " LIMIT :limit OFFSET :offset"
+    ), {"org_id": current_user.organization_id, "limit": limit, "offset": offset}).fetchall()
     return [_row_to_dict(r) for r in rows]
 
 

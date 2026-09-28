@@ -70,9 +70,17 @@ def get_lead_timeline(
 
     # ── Outbound SMS (Message) ───────────────────────────────────────────
     sms_messages = db.query(Message).filter(Message.lead_id == lead_id).all()
+    emails = db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id).all()
+    outcomes = db.query(LeadOutcome).filter(LeadOutcome.lead_id == lead_id).all()
+    # Every sender/recorder on the timeline in one query instead of one per row.
+    _user_ids = ({m.sender_id for m in sms_messages} | {e.sender_id for e in emails}
+                 | {o.recorded_by_id for o in outcomes}) - {None}
+    users_by_id = (
+        {u.id: u for u in db.query(User).filter(User.id.in_(_user_ids)).all()}
+        if _user_ids else {}
+    )
     for m in sms_messages:
-        # Look up sender name lazily
-        sender = db.query(User).filter(User.id == m.sender_id).first()
+        sender = users_by_id.get(m.sender_id)
         sender_name = sender.full_name if sender else "Advisor"
         events.append({
             "id": f"sms-out-{m.id}",
@@ -108,10 +116,11 @@ def get_lead_timeline(
         })
 
     # ── Outbound Email (EmailMessage) ────────────────────────────────────
-    emails = db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id).all()
     for e in emails:
-        sender = db.query(User).filter(User.id == e.sender_id).first()
-        sender_name = f"{sender.first_name} {sender.last_name}".strip() if sender else "Advisor"
+        sender = users_by_id.get(e.sender_id)
+        # User has no first_name/last_name columns; reading them raised
+        # AttributeError (a 500) for any lead with an email on its timeline.
+        sender_name = (sender.full_name or "Advisor") if sender else "Advisor"
         events.append({
             "id": f"email-{e.id}",
             "type": "email_sent",
@@ -151,9 +160,8 @@ def get_lead_timeline(
         })
 
     # ── Lead Outcomes ────────────────────────────────────────────────────
-    outcomes = db.query(LeadOutcome).filter(LeadOutcome.lead_id == lead_id).all()
     for o in outcomes:
-        recorder = db.query(User).filter(User.id == o.recorded_by_id).first()
+        recorder = users_by_id.get(o.recorded_by_id)
         recorder_name = recorder.full_name if recorder else "Advisor"
         sale_note = ""
         if o.resulted_in_sale:

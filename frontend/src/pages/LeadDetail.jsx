@@ -215,6 +215,162 @@ function DeliveryChip({ delivery }) {
   )
 }
 
+// ── TIMELINE PAGING (SS5) ────────────────────────────────────────────────────
+//
+// /leads/{id}/timeline returns the newest page (up to `limit` rows per channel)
+// plus has_more / next_before. Older pages are fetched with `before` and merged
+// in; timeline events carry no id, so they are deduplicated on a composite key.
+function timelineEventKey(e) {
+  if (!e) return ''
+  if (e.id != null) return `id|${e.channel || ''}|${e.id}`
+  return [
+    e.type || '', e.channel || '', e.timestamp || '',
+    (e.subject || '').slice(0, 60), (e.body || e.body_preview || '').slice(0, 60),
+  ].join('|')
+}
+
+function timelineTs(t) {
+  if (!t) return null
+  const n = Date.parse(t)
+  return Number.isNaN(n) ? null : n
+}
+
+function mergeTimelineEvents(...lists) {
+  const seen = new Set()
+  const out = []
+  for (const list of lists) {
+    for (const e of list || []) {
+      const k = timelineEventKey(e)
+      if (seen.has(k)) continue
+      seen.add(k)
+      out.push(e)
+    }
+  }
+  // Same order as the backend: oldest first, undated last.
+  return out.sort((a, b) => {
+    const ta = timelineTs(a.timestamp)
+    const tb = timelineTs(b.timestamp)
+    if (ta === null && tb === null) return 0
+    if (ta === null) return 1
+    if (tb === null) return -1
+    return ta - tb
+  })
+}
+
+// The cursor for the page OLDER than `page`. The backend's next_before is the
+// oldest timestamp across every channel, but only the channels that filled a
+// whole page are truncated - a quiet channel reaching further back would make
+// that cursor skip rows of a busy one. So the safe cursor is the NEWEST of the
+// full channels' oldest timestamps; anything older that this page already
+// returned comes back again and is removed by the dedupe above.
+function olderTimelineCursor(page) {
+  if (!page || !page.has_more) return { hasMore: false, before: null }
+  const limit = page.limit || 200
+  const groups = { 'outbound|sms': [], 'inbound|sms': [], 'outbound|email': [] }
+  for (const e of page.events || []) {
+    const g = groups[`${e.type}|${e.channel}`]
+    if (g && e.timestamp) g.push(e.timestamp)
+  }
+  let best = null
+  for (const stamps of Object.values(groups)) {
+    if (stamps.length < limit) continue
+    let oldest = null
+    for (const t of stamps) {
+      if (oldest === null || timelineTs(t) < timelineTs(oldest)) oldest = t
+    }
+    if (oldest !== null && (best === null || timelineTs(oldest) > timelineTs(best))) best = oldest
+  }
+  const before = best || page.next_before || null
+  return { hasMore: Boolean(before), before }
+}
+
+// ── CADENCE HISTORY (SS6) ────────────────────────────────────────────────────
+const CADENCE_OUTCOMES = {
+  sent:       { label: 'Sent',       color: 'var(--signal-green, #1ef082)' },
+  failed:     { label: 'Failed',     color: 'var(--signal-red, #ff5050)' },
+  blocked:    { label: 'Blocked',    color: 'var(--signal-amber, #ffb41e)' },
+  skipped:    { label: 'Skipped',    color: 'var(--text-tertiary, #888)' },
+  stopped:    { label: 'Stopped',    color: 'var(--text-tertiary, #888)' },
+  abandoned:  { label: 'Abandoned',  color: 'var(--signal-red, #ff5050)' },
+  suppressed: { label: 'Suppressed', color: 'var(--signal-amber, #ffb41e)' },
+}
+
+function groupCadenceTouches(history) {
+  const byTouch = new Map()
+  for (const a of history || []) {
+    const n = a.touch_number ?? 0
+    if (!byTouch.has(n)) byTouch.set(n, [])
+    byTouch.get(n).push(a)
+  }
+  return [...byTouch.entries()].sort((x, y) => x[0] - y[0])
+}
+
+function CadencePanel({ cadence, loading }) {
+  if (loading && !cadence) {
+    return <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Loading cadence…</div>
+  }
+  if (!cadence || cadence.unavailable) {
+    return (
+      <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
+        {cadence?.notFound || !cadence ? 'Not enrolled in a cadence.' : (cadence.error || 'Cadence history unavailable.')}
+      </div>
+    )
+  }
+  const history = cadence.history || []
+  if (!cadence.status && history.length === 0) {
+    return <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Not enrolled in a cadence.</div>
+  }
+  const total = cadence.total_touches
+  const current = cadence.current_touch_number || 0
+  const touches = groupCadenceTouches(history)
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
+        Touch {current}{total ? ` of ${total}` : ''}
+        {cadence.status && <span style={{ color: 'var(--text-tertiary)' }}> · {cadence.status}</span>}
+        {cadence.next_touch_due_at && (
+          <span style={{ color: 'var(--text-tertiary)', display: 'block', fontSize: 11, marginTop: 2 }}>
+            Next touch due: {new Date(cadence.next_touch_due_at).toLocaleString()}
+          </span>
+        )}
+      </div>
+      {touches.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>No touches attempted yet.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+          {touches.map(([touchNumber, attempts]) => (
+            <div key={touchNumber} style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: '6px 10px' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                Touch {touchNumber}{total ? ` of ${total}` : ''}
+              </div>
+              {attempts.map((a, idx) => {
+                const oc = CADENCE_OUTCOMES[a.outcome] || { label: a.outcome || 'Unknown', color: 'var(--text-tertiary, #888)' }
+                const when = a.attempted_at || a.scheduled_for
+                const providerErr = [a.provider_error_code, a.provider_error_message].filter(Boolean).join(': ')
+                return (
+                  <div key={`${touchNumber}-${a.attempt ?? idx}`} style={{ fontSize: 12, marginTop: idx ? 4 : 0 }}>
+                    <span style={{ fontWeight: 600, color: oc.color }}>{oc.label}</span>
+                    {a.channel && <span style={{ color: 'var(--text-secondary)' }}> · {a.channel}</span>}
+                    {when && <span style={{ color: 'var(--text-tertiary)' }}> · {new Date(when).toLocaleString()}</span>}
+                    {a.attempt > 1 && <span style={{ color: 'var(--text-tertiary)' }}> · attempt {a.attempt}</span>}
+                    {a.reason && <div style={{ color: 'var(--text-secondary)' }}>Reason: {a.reason}</div>}
+                    {providerErr && <div style={{ color: 'var(--signal-red)' }}>Provider: {providerErr}</div>}
+                    {a.body_preview && (
+                      <div style={{ color: 'var(--text-tertiary)', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {a.body_preview}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ConversationBubble is a proper sub-component (not inline in .map)
 // so useState hooks are always called at the top level — no rules-of-hooks violations.
 function ConversationBubble({ event: e }) {
@@ -337,6 +493,15 @@ export default function LeadDetail() {
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
   const [activeTab, setActiveTab] = useState('conversation') // 'conversation' | 'calls' | 'timeline'
+  // SS5: older timeline pages, kept apart from `data` so the 30s refresh of the
+  // newest page never discards what the advisor has scrolled back through.
+  const [olderEvents, setOlderEvents] = useState([])
+  const [olderCursorState, setOlderCursorState] = useState(null) // null = derive from newest page
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [olderError, setOlderError] = useState('')
+  // SS6: per-touch cadence attempts from /cadence/lead/{id}/history
+  const [cadenceHistory, setCadenceHistory] = useState(null)
+  const [cadenceLoading, setCadenceLoading] = useState(false)
   const [apptTypeOptions, setApptTypeOptions] = useState(DEFAULT_APPT_TYPE_OPTIONS)
   // The timeline load preselects an appointment label and can finish before or
   // after the org's own type list arrives, so the list is read through a ref
@@ -416,6 +581,35 @@ export default function LeadDetail() {
       .finally(() => setLoading(false))
     // Also load activity log in background
     loadActivity(true)
+    loadCadenceHistory()
+  }
+
+  function loadCadenceHistory() {
+    setCadenceLoading(true)
+    api.get(`/cadence/lead/${leadId}/history`)
+      .then((c) => setCadenceHistory(c))
+      .catch((err) => setCadenceHistory({
+        unavailable: true,
+        notFound: err?.status === 404,
+        error: err?.message || '',
+      }))
+      .finally(() => setCadenceLoading(false))
+  }
+
+  async function loadOlderActivity() {
+    const cursor = olderCursorState || olderTimelineCursor(data)
+    if (!cursor.hasMore || !cursor.before || loadingOlder) return
+    setLoadingOlder(true)
+    setOlderError('')
+    try {
+      const page = await api.get(`/leads/${leadId}/timeline`, { params: { before: cursor.before } })
+      setOlderEvents((prev) => mergeTimelineEvents(prev, page?.events || []))
+      setOlderCursorState(olderTimelineCursor(page))
+    } catch (err) {
+      setOlderError(err?.message || 'Could not load older activity')
+    } finally {
+      setLoadingOlder(false)
+    }
   }
 
   // Load org-specific appointment types once on mount
@@ -426,7 +620,13 @@ export default function LeadDetail() {
   }, [])
 
   // Initial load
-  useEffect(() => { load() }, [leadId])
+  useEffect(() => {
+    setOlderEvents([])
+    setOlderCursorState(null)
+    setOlderError('')
+    setCadenceHistory(null)
+    load()
+  }, [leadId])
 
   // Auto-refresh every 30 seconds — reuses existing load(), clears on unmount
   useEffect(() => {
@@ -753,7 +953,19 @@ export default function LeadDetail() {
     </div>
   )
 
-  const { lead, events, ai_quality, booking } = data
+  const { lead, ai_quality, booking } = data
+  const events = olderEvents.length
+    ? mergeTimelineEvents(olderEvents, data.events || [])
+    : (data.events || [])
+  const olderCursor = olderCursorState || olderTimelineCursor(data)
+  // Stable keys: index keys would shift every bubble's expanded state when
+  // older pages are prepended.
+  const eventKeyCounts = {}
+  const eventKeys = events.map((e) => {
+    const k = timelineEventKey(e)
+    eventKeyCounts[k] = (eventKeyCounts[k] || 0) + 1
+    return `${k}#${eventKeyCounts[k]}`
+  })
   const wholesaleLinks = composeCtx?.wholesale || []
 
   // ── CHANNEL CAPABILITY ────────────────────────────────────────────────────
@@ -1065,8 +1277,23 @@ export default function LeadDetail() {
                   ref={timelineRef}
                   style={{ maxHeight: '420px', overflowY: 'auto' }}
                 >
+                  {olderCursor.hasMore && (
+                    <div style={{ textAlign: 'center', margin: '4px 0 10px' }}>
+                      <button
+                        className="btn btn--secondary"
+                        style={{ fontSize: 12, padding: '4px 12px' }}
+                        onClick={loadOlderActivity}
+                        disabled={loadingOlder}
+                      >
+                        {loadingOlder ? 'Loading older activity…' : 'Load older activity'}
+                      </button>
+                      {olderError && (
+                        <div style={{ fontSize: 12, color: 'var(--signal-red)', marginTop: 4 }}>{olderError}</div>
+                      )}
+                    </div>
+                  )}
                   {events.map((e, i) => (
-                    <ConversationBubble key={i} event={e} />
+                    <ConversationBubble key={eventKeys[i]} event={e} />
                   ))}
                 </div>
               )
@@ -1614,7 +1841,7 @@ export default function LeadDetail() {
 
             {aiConvStatus?.active && !aiConvStatus?.flagged && (
               <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                Touch {aiConvStatus.touch_number || 0} of 8 · {aiConvStatus.messages_sent || 0} sent
+                Touch {aiConvStatus.touch_number || 0}{aiConvStatus.total_touches ? ` of ${aiConvStatus.total_touches}` : ''} · {aiConvStatus.messages_sent || 0} sent
                 {aiConvStatus.next_send_at && (
                   <span style={{ color: 'var(--text-tertiary)', display: 'block', fontSize: 11, marginTop: 2 }}>
                     Next: {new Date(aiConvStatus.next_send_at).toLocaleString()}
@@ -1688,6 +1915,21 @@ export default function LeadDetail() {
                 )}
               </div>
             )}
+          </section>
+
+          {/* ── Cadence (SS6) ── */}
+          <section className="panel lead-detail-panel">
+            <div className="panel-header">
+              <h2 className="panel-title">🔁 Cadence</h2>
+              <button
+                onClick={loadCadenceHistory}
+                disabled={cadenceLoading}
+                style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}
+              >
+                {cadenceLoading ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+            <CadencePanel cadence={cadenceHistory} loading={cadenceLoading} />
           </section>
 
           {/* ── Voice Call ── */}

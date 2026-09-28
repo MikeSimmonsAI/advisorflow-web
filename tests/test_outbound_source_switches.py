@@ -214,7 +214,10 @@ def test_bulk_ai_email_stays_refused_end_to_end_with_the_source_off(
     provider.assert_not_called()
     body = response.json()
     assert body["sent"] == 0
-    assert body["errors"] == 1
+    # SS10: a switched-off source is reported as `disabled`, not as a fault.
+    assert body["errors"] == 0
+    assert body["disabled"] == 1
+    assert body["results"][0]["action"] == "disabled"
     assert "OUTBOUND_EMAIL_BULK_AI" in body["results"][0]["reason"]
 
 

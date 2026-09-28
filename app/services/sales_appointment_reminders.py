@@ -230,72 +230,117 @@ def process_due(db: Session, now: Optional[datetime] = None,
 
     for row in due_reminders(db, now=now, limit=limit):
         report["examined"] += 1
-        appt = (db.query(SalesAppointment)
-                .filter(SalesAppointment.id == row.appointment_id).first())
+        row_id = row.id
+        try:
+            _process_one(db, row, now, send, report)
+            # Committed per reminder: one bad row can no longer roll back the
+            # outcomes already recorded for the others in this pass.
+            db.commit()
+        except Exception as exc:                                 # noqa: BLE001
+            db.rollback()
+            log.error("process_due: reminder %s failed: %s", row_id, exc)
+            report["failed"] += 1
+            report["errors"].append({"reminder_id": row_id,
+                                     "error": str(exc)[:200]})
 
-        if appt is None or appt.status != APPT_SCHEDULED:
-            row.status = REMINDER_SUPPRESSED
-            row.detail = "The meeting is no longer scheduled."
-            report["suppressed"] += 1
-            continue
+    return report
 
-        if appt.starts_at != row.target_starts_at:
-            # Rescheduled since this was claimed. The new time has its own rows.
-            row.status = REMINDER_SUPPRESSED
-            row.detail = "The meeting was rescheduled after this was scheduled."
-            report["suppressed"] += 1
-            continue
 
-        if appt.starts_at <= now:
-            row.status = REMINDER_SKIPPED
-            row.detail = "The meeting had already started."
-            report["skipped"] += 1
-            continue
+# In flight: claimed for delivery by one pass, outcome not yet recorded. Not
+# picked up again by `due_reminders` (which reads only pending rows), so a pass
+# that dies between the send and its bookkeeping leaves a row that says so
+# rather than one the next pass sends a second time.
+REMINDER_SENDING = "sending"
 
-        late_by = now - row.scheduled_for
-        if late_by > timedelta(minutes=LATE_TOLERANCE_MINUTES.get(row.kind, 60)):
-            row.status = REMINDER_SKIPPED
-            row.detail = ("Missed its window by %d minutes; sending it now would "
-                          "be a confusing second message rather than a reminder."
-                          % int(late_by.total_seconds() // 60))
-            report["skipped"] += 1
-            continue
 
-        if not appt.prospect_email:
-            row.status = REMINDER_SKIPPED
-            row.detail = "No prospect email address."
-            report["skipped"] += 1
-            continue
+def _process_one(db: Session, row: AppointmentReminder, now: datetime,
+                 send: bool, report: dict) -> None:
+    appt = (db.query(SalesAppointment)
+            .filter(SalesAppointment.id == row.appointment_id).first())
 
+    if appt is None or appt.status != APPT_SCHEDULED:
+        row.status = REMINDER_SUPPRESSED
+        row.detail = "The meeting is no longer scheduled."
+        report["suppressed"] += 1
+        return
+
+    if appt.starts_at != row.target_starts_at:
+        # Rescheduled since this was claimed. The new time has its own rows.
+        row.status = REMINDER_SUPPRESSED
+        row.detail = "The meeting was rescheduled after this was scheduled."
+        report["suppressed"] += 1
+        return
+
+    if appt.starts_at <= now:
+        row.status = REMINDER_SKIPPED
+        row.detail = "The meeting had already started."
+        report["skipped"] += 1
+        return
+
+    late_by = now - row.scheduled_for
+    if late_by > timedelta(minutes=LATE_TOLERANCE_MINUTES.get(row.kind, 60)):
+        row.status = REMINDER_SKIPPED
+        row.detail = ("Missed its window by %d minutes; sending it now would "
+                      "be a confusing second message rather than a reminder."
+                      % int(late_by.total_seconds() // 60))
+        report["skipped"] += 1
+        return
+
+    if not appt.prospect_email:
+        row.status = REMINDER_SKIPPED
+        row.detail = "No prospect email address."
+        report["skipped"] += 1
+        return
+
+    if not send:
         row.attempts = (row.attempts or 0) + 1
         row.attempted_at = now
         row.recipient = appt.prospect_email
+        row.status = REMINDER_SENT
+        row.sent_at = now
+        row.detail = "Simulated: delivery not attempted."
+        report["sent"] += 1
+        return
 
-        if not send:
-            row.status = REMINDER_SENT
-            row.sent_at = now
-            row.detail = "Simulated: delivery not attempted."
-            report["sent"] += 1
-            continue
-
-        try:
-            _deliver(db, appt, row)
-            row.status = REMINDER_SENT
-            row.sent_at = now
-            row.detail = None
-            report["sent"] += 1
-        except Exception as exc:                                 # noqa: BLE001
-            # LEFT AS FAILED, NOT RETURNED TO PENDING. A reminder that keeps
-            # failing must not be retried forever into a window it has already
-            # left; the row records what happened and an operator decides.
-            row.status = REMINDER_FAILED
-            row.detail = str(exc)[:300]
-            report["failed"] += 1
-            report["errors"].append({"reminder_id": row.id,
-                                     "error": str(exc)[:200]})
-
+    # ── CLAIM, COMMIT, THEN DELIVER ────────────────────────────────────────
+    # A conditional UPDATE that only wins while the row is still pending, and
+    # it is committed BEFORE the provider is called. An overlapping pass loses
+    # the claim; a commit that fails after the send can no longer leave the
+    # row pending for the next pass to send again.
+    claimed = (db.query(AppointmentReminder)
+               .filter(AppointmentReminder.id == row.id,
+                       AppointmentReminder.status == REMINDER_PENDING)
+               .update({AppointmentReminder.status: REMINDER_SENDING,
+                        AppointmentReminder.attempts:
+                            AppointmentReminder.attempts + 1,
+                        AppointmentReminder.attempted_at: now,
+                        AppointmentReminder.recipient: appt.prospect_email,
+                        AppointmentReminder.detail:
+                            "Delivery in progress; if this remains, the "
+                            "outcome of the send is unknown."},
+                       synchronize_session=False))
     db.commit()
-    return report
+    if claimed != 1:
+        return                    # another pass owns it
+    db.refresh(row)
+
+    try:
+        _deliver(db, appt, row)
+        row.status = REMINDER_SENT
+        row.sent_at = now
+        row.detail = None
+        report["sent"] += 1
+    except Exception as exc:                                     # noqa: BLE001
+        # LEFT AS FAILED, NOT RETURNED TO PENDING. A reminder that keeps
+        # failing must not be retried forever into a window it has already
+        # left; the row records what happened and an operator decides.
+        if not db.is_active:
+            db.rollback()
+        row.status = REMINDER_FAILED
+        row.detail = str(exc)[:300]
+        report["failed"] += 1
+        report["errors"].append({"reminder_id": row.id,
+                                 "error": str(exc)[:200]})
 
 
 def _deliver(db: Session, appt: SalesAppointment, row: AppointmentReminder) -> None:

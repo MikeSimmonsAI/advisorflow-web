@@ -993,12 +993,31 @@ def list_calendar_events(
     else:
         q = db.query(BookingLink).filter(BookingLink.user_id == current_user.id)
 
+    # The time window is applied in SQL (booked_time is a naive UTC column);
+    # the per-row check below is kept as a guard for tz-aware stored values.
+    now_naive = now.replace(tzinfo=None)
+    cutoff_naive = cutoff.replace(tzinfo=None)
     bookings = q.filter(
-        BookingLink.status.in_(["booked", "confirmed"])
+        BookingLink.status.in_(["booked", "confirmed"]),
+        BookingLink.booked_time.isnot(None),
+        BookingLink.booked_time >= now_naive,
+        BookingLink.booked_time <= cutoff_naive,
     ).all()
+
+    # Batch-load the leads (and, org-wide, the advisors) instead of per row.
+    lead_ids = {b.lead_id for b in bookings if b.lead_id}
+    leads_by_id = (
+        {l.id: l for l in db.query(Lead).filter(Lead.id.in_(lead_ids)).all()}
+        if lead_ids else {}
+    )
 
     # Cache advisor names to avoid N+1 queries in org_wide mode
     advisor_cache = {}
+    if org_wide and is_admin:
+        advisor_ids = {b.user_id for b in bookings if b.user_id}
+        if advisor_ids:
+            for u in db.query(User).filter(User.id.in_(advisor_ids)).all():
+                advisor_cache[u.id] = u.full_name
     def get_advisor_name(user_id):
         if user_id not in advisor_cache:
             u = db.query(User).filter(User.id == user_id).first()
@@ -1015,7 +1034,7 @@ def list_calendar_events(
         if bt < now or bt > cutoff:
             continue
 
-        lead = db.query(Lead).filter(Lead.id == b.lead_id).first() if b.lead_id else None
+        lead = leads_by_id.get(b.lead_id) if b.lead_id else None
         lead_name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() if lead else "Lead"
 
         event = {

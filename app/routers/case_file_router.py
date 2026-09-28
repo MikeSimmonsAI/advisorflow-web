@@ -52,15 +52,9 @@ NEXT_ACTIONS = [
     "set_reminder", "refer_to_specialist", "close_case", "none",
 ]
 
-PRODUCTS = [
-    "final_expense", "term_life_10yr", "term_life_20yr", "term_life_30yr",
-    "whole_life", "universal_life_iul", "universal_life_vul", "universal_life_gul",
-    "annuity_fixed", "annuity_fixed_indexed", "annuity_variable",
-    "medicare_supplement", "medicare_advantage", "long_term_care",
-    "disability_income", "dental_vision_hearing",
-    "burial_preneed", "cemetery_property", "marker_monument", "memorial",
-    "funeral_arrangement", "veterans_benefits", "other",
-]
+# Products are NOT listed here. They are per organization: the industry
+# template (app/services/industry_templates.py) or the org's own
+# Organization.products override. See GET /settings/products.
 
 # ── Pydantic Schema ───────────────────────────────────────────────────────────
 
@@ -505,11 +499,27 @@ async def crm_push(
 
 
 @router.get("/constants/all")
-def get_constants(current_user: User = Depends(require_tenant_user)):
-    """Returns all valid enum values for the frontend dropdowns."""
+def get_constants(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    """Returns all valid enum values for the frontend dropdowns.
+
+    `products` keeps its historic shape (a list of keys) but is now the
+    CALLER'S ORGANIZATION'S resolved list, not a hard-coded insurance/funeral
+    catalogue. `product_catalog` carries the full {key, label, icon} objects.
+    """
+    from app.models.models import Organization
+    from app.services import industry_templates
+    org = None
+    if current_user.organization_id:
+        org = db.query(Organization).filter_by(id=current_user.organization_id).first()
+    resolved = industry_templates.products_for_org(org)
     return {
         "case_statuses": CASE_STATUSES,
         "outcome_types": OUTCOME_TYPES,
         "next_actions": NEXT_ACTIONS,
-        "products": PRODUCTS,
+        "products": [p["key"] for p in resolved["products"]],
+        "product_catalog": resolved["products"],
+        "legacy_product_labels": resolved["legacy_labels"],
     }

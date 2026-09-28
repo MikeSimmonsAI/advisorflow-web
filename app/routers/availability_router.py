@@ -423,18 +423,23 @@ def get_upcoming_appointments(
 
         # Cache advisor names
         advisor_cache = {}
+        _advisor_ids = {b.user_id for b in bookings if b.user_id}
+        if _advisor_ids:
+            for u in db.query(User).filter(User.id.in_(_advisor_ids)).all():
+                advisor_cache[u.id] = u.full_name
         def get_advisor_name(user_id):
             if user_id not in advisor_cache:
                 u = db.query(User).filter(User.id == user_id).first()
                 advisor_cache[user_id] = u.full_name if u else "Advisor"
             return advisor_cache[user_id]
 
+        leads_by_id = _leads_by_id(db, bookings)
         result = []
         for b in bookings:
             lead_name = "Unknown"
             lead_phone = None
             if b.lead_id:
-                lead = db.query(Lead).filter(Lead.id == b.lead_id).first()
+                lead = leads_by_id.get(b.lead_id)
                 if lead:
                     parts = [lead.first_name or "", lead.last_name or ""]
                     lead_name = " ".join(p for p in parts if p).strip() or "Unknown"
@@ -459,15 +464,13 @@ def get_upcoming_appointments(
         BookingLink.booked_time >= now,
     ).order_by(BookingLink.booked_time.asc()).limit(20).all()
 
+    leads_by_id = _leads_by_id(db, bookings, org_id=target.organization_id)
     result = []
     for b in bookings:
         lead_name = "Unknown"
         lead_phone = None
         if b.lead_id:
-            lead = db.query(Lead).filter(
-                Lead.id == b.lead_id,
-                Lead.organization_id == target.organization_id,
-            ).first()
+            lead = leads_by_id.get(b.lead_id)
             if lead:
                 parts = [lead.first_name or "", lead.last_name or ""]
                 lead_name = " ".join(p for p in parts if p).strip() or "Unknown"
@@ -480,6 +483,21 @@ def get_upcoming_appointments(
             "booked_time": b.booked_time.isoformat() if b.booked_time else None,
         })
     return result
+
+
+_NO_ORG_FILTER = object()
+
+
+def _leads_by_id(db: Session, bookings, org_id=_NO_ORG_FILTER) -> dict:
+    """One IN query for every booking's lead instead of one per booking.
+    `org_id`, when given (even None), keeps the per-row organization filter."""
+    ids = {b.lead_id for b in bookings if b.lead_id}
+    if not ids:
+        return {}
+    q = db.query(Lead).filter(Lead.id.in_(ids))
+    if org_id is not _NO_ORG_FILTER:
+        q = q.filter(Lead.organization_id == org_id)
+    return {l.id: l for l in q.all()}
 
 
 def _cancel_bookings_in_range(db: Session, advisor: User, start: date, end: date) -> list:
@@ -495,10 +513,11 @@ def _cancel_bookings_in_range(db: Session, advisor: User, start: date, end: date
         BookingLink.booked_time <= end_dt,
     ).all()
 
+    leads_by_id = _leads_by_id(db, bookings)
     cancelled = []
     for booking in bookings:
         booking.status = "cancelled"
-        lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
+        lead = leads_by_id.get(booking.lead_id)
         if lead and lead.phone:
             try:
                 from app.services.sms_service import send_raw_sms

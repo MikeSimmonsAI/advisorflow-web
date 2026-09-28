@@ -18,8 +18,43 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, Message, EmailMessage
 from app.services import lead_scope
+from app.services import send_source as _src
 
 router = APIRouter(prefix="/activity", tags=["activity"])
+
+
+# SS4 — WHICH SEND SOURCES MEAN "AN AI WROTE THIS".
+#
+# send_source.py records WHY a send happened; it has no AI/not-AI axis of its
+# own, so the Activity screen could not tell a robot's message from a human's.
+# These are the sources whose content an AI model produced:
+#   BULK_AI              AI drafted, an advisor triggered the batch
+#   AI_CONVERSATION      the AI conversation engine, no human in the loop
+#   PIPELINE_AUTO_REPLY  the pipeline answered an inbound automatically
+#   AI_EMPLOYEE          an AI workforce employee
+# Deliberately NOT included: CADENCE (scheduled templates), AUTO_SEND (the
+# message row does not record whether the queued draft came from AI - claiming
+# it did would be a guess), VOICE_BOOKING_LINK (a link sent around a call), and
+# NULL, which means "unrecorded" and is never reported as either.
+AI_GENERATED_SOURCES = frozenset({
+    _src.BULK_AI,
+    _src.AI_CONVERSATION,
+    _src.PIPELINE_AUTO_REPLY,
+    _src.AI_EMPLOYEE,
+})
+
+
+def is_ai_generated(source) -> bool:
+    return bool(source) and source in AI_GENERATED_SOURCES
+
+
+def _source_fields(source) -> dict:
+    """The additive attribution fields every activity row carries."""
+    return {
+        "send_source": source,
+        "send_source_label": _src.source_label(source),
+        "ai_generated": is_ai_generated(source),
+    }
 
 
 @router.get("/today")
@@ -49,8 +84,13 @@ def sent_today(
     if not lead_scope.is_manager_here(current_user, db):
         user_ids = [current_user.id]
     from app.services import activity_reporting
-    return activity_reporting.sent_today(
+    result = activity_reporting.sent_today(
         db, org_id, user_ids=user_ids, limit=limit, tzname=tz)
+    # Additive: the same AI flag /activity/sent carries, so both lists agree.
+    for item in (result or {}).get("items") or []:
+        item.setdefault("send_source_label", _src.source_label(item.get("send_source")))
+        item.setdefault("ai_generated", is_ai_generated(item.get("send_source")))
+    return result
 
 
 @router.get("/sent")
@@ -95,6 +135,7 @@ def sent_activity(
             "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
             "delivery_status": msg.delivery_status or msg.twilio_status or "pending",
             "delivery_status_at": msg.delivery_status_at.isoformat() if getattr(msg, "delivery_status_at", None) else None,
+            **_source_fields(getattr(msg, "send_source", None)),
         }
         for msg, lead in sms_rows
     ]
@@ -124,6 +165,7 @@ def sent_activity(
             "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
             "delivery_status": msg.status or "sent",
             "delivery_status_at": None,
+            **_source_fields(getattr(msg, "send_source", None)),
         }
         for msg, lead in email_rows
     ]

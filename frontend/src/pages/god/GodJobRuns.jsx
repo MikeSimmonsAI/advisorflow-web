@@ -30,10 +30,15 @@ const STATUS_COLORS = {
   // a broken ledger, and rendering the two the same shade is the exact
   // ambiguity this status was added to end.
   ledger_unavailable: { bg: 'var(--gm-pill-red-bg)', text: 'var(--gm-red)', border: 'var(--gm-pill-red-bd)' },
+  // A last run that "succeeded" long ago is a stopped job (see the backend's
+  // EXPECTED_INTERVAL_MINUTES). Amber, and the word says why.
+  stale:     { bg: 'var(--gm-pill-amber-bg, rgba(245,166,35,.12))', text: 'var(--gm-amber, #f5a623)', border: 'var(--gm-amber, #f5a623)' },
 }
 
 function PulseCard({ jobName, info }) {
-  const s = info?.status || 'never_run'
+  const raw = info?.status || 'never_run'
+  // Stale only overrides a success/running badge: an error stays an error.
+  const s = info?.stale && raw !== 'error' ? 'stale' : raw
   const colors = STATUS_COLORS[s] || STATUS_COLORS.never_run
   const label = JOB_LABELS[jobName] || jobName
 
@@ -53,6 +58,12 @@ function PulseCard({ jobName, info }) {
       {info?.started_at && (
         <div style={{ fontSize: 11, color: colors.text, opacity: .8 }}>
           {new Date(info.started_at).toLocaleString()}
+        </div>
+      )}
+      {s === 'stale' && (
+        <div style={{ fontSize: 11, color: colors.text, opacity: .9 }}>
+          last run was {raw}; expected every {info.expected_every_minutes >= 60
+            ? `${Math.round(info.expected_every_minutes / 60)}h` : `${info.expected_every_minutes}m`}
         </div>
       )}
       {info?.duration_ms != null && (

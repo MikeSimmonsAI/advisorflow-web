@@ -411,32 +411,52 @@ def run_daily_intelligence(db: Session, *, day: Optional[str] = None,
     day = day or (now - timedelta(days=1)).strftime("%Y-%m-%d")
     result: Dict[str, Any] = {"day": day}
 
+    # Each step is committed on success and rolled back on failure, so one
+    # step's error neither poisons the session for the next step nor throws
+    # away the work of the steps that already succeeded.
     try:
         result["sla_refresh"] = support_tickets.refresh_open_sla_states(db, now=now)
+        db.commit()
     except Exception:                                          # noqa: BLE001
+        db.rollback()
         log.exception("support_brief: SLA refresh failed")
         result["sla_refresh"] = {"error": True}
 
     try:
         result["correlation"] = support_incidents.correlate(db, now=now)
+        db.commit()
     except Exception:                                          # noqa: BLE001
+        db.rollback()
         log.exception("support_brief: correlation failed")
         result["correlation"] = {"error": True}
 
     try:
         result["learning"] = support_knowledge.scan_for_candidates(db)
+        db.commit()
     except Exception:                                          # noqa: BLE001
+        db.rollback()
         log.exception("support_brief: candidate scan failed")
         result["learning"] = {"error": True}
 
     briefs = []
     try:
-        briefs.append(brief_view(generate(db, day=day, platform_id=None, now=now)))
-        for platform in db.query(Platform).all():
-            briefs.append(brief_view(generate(db, day=day, platform_id=platform.id,
-                                              now=now)))
+        platform_ids = [p.id for p in db.query(Platform).all()]
     except Exception:                                          # noqa: BLE001
-        log.exception("support_brief: brief generation failed")
+        db.rollback()
+        log.exception("support_brief: platform list failed")
+        platform_ids = []
+    # The platform-wide brief first, then one per brand - each in its own
+    # try, so one brand's failure does not cost every brand after it.
+    for platform_id in [None] + platform_ids:
+        try:
+            view = brief_view(generate(db, day=day, platform_id=platform_id,
+                                       now=now))
+            db.commit()
+            briefs.append(view)
+        except Exception:                                      # noqa: BLE001
+            db.rollback()
+            log.exception("support_brief: brief generation failed for "
+                          "platform %s", platform_id or "(all)")
     result["briefs"] = briefs
     db.commit()
     return result

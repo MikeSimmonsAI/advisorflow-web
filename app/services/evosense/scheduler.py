@@ -22,6 +22,7 @@ a message.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
@@ -31,6 +32,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models.evosense_models import EvoSenseHuntSchedule, EvoSenseStrategy
 from app.services.evosense import common as C
+
+log = logging.getLogger(__name__)
 
 CADENCES = ("manual", "daily", "interval")
 DEFAULT_CADENCE = "daily"
@@ -171,10 +174,17 @@ def backfill_contactability(db, *, org_id: Optional[str] = None, limit: int = BA
         q = q.filter(EvoSenseProperty.organization_id == org_id)
     n = 0
     for prop in q.limit(limit).all():
-        CB.refresh_evosense(db, prop)
-        n += 1
-    if n:
-        db.commit()
+        prop_id = prop.id
+        # One property whose stored data trips the derivation must not stop
+        # (or poison the session for) the rest of the batch. Committed per
+        # property so a later rollback cannot discard earlier results.
+        try:
+            CB.refresh_evosense(db, prop)
+            db.commit()
+            n += 1
+        except Exception as exc:                               # noqa: BLE001
+            db.rollback()
+            log.error("backfill_contactability: property %s failed: %s", prop_id, exc)
     return n
 
 

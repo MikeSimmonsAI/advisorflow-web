@@ -2062,6 +2062,13 @@ def list_deals(db: Session = Depends(get_db),
             db.query(WholesaleProperty.id).filter(
                 WholesaleProperty.organization_id == org_id,
                 WholesaleProperty.street_address.ilike(needle))))
+    if band:
+        # In SQL, before counting and paging - filtering the fetched page in
+        # Python made `total` (and every page after the first) wrong.
+        query = query.filter(WholesaleDeal.seller_profile_id.in_(
+            db.query(WholesaleSellerProfile.id).filter(
+                WholesaleSellerProfile.organization_id == org_id,
+                WholesaleSellerProfile.qualification_band == band)))
     if with_next_action and limit > 50:
         limit = 50
     total = query.count()
@@ -2104,8 +2111,6 @@ def list_deals(db: Session = Depends(get_db),
     out = []
     for d in rows:
         profile = profiles.get(d.seller_profile_id)
-        if band and getattr(profile, "qualification_band", None) != band:
-            continue
         lead = leads.get(d.seller_lead_id)
         item = deal_json(d, settings)
         item["property"] = property_json(props[d.property_id]) if d.property_id in props else None

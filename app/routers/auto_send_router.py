@@ -173,6 +173,19 @@ def _deliver(db: Session, item, lead: Lead, advisor: User) -> None:
 
 # ── Existing Endpoints (unchanged) ────────────────────────────────────────────
 
+# Upper bound on one /queue response (oldest first); the queue is worked
+# top-down, so anything past this shows up as earlier items are actioned.
+QUEUE_LIMIT = 500
+
+
+def _leads_by_id(db: Session, items) -> dict:
+    """One IN query for every lead on the page instead of one per item."""
+    ids = {i.lead_id for i in items if i.lead_id}
+    if not ids:
+        return {}
+    return {l.id: l for l in db.query(Lead).filter(Lead.id.in_(ids)).all()}
+
+
 @router.get("/queue")
 def get_queue(
     db: Session = Depends(get_db),
@@ -187,13 +200,11 @@ def get_queue(
             AutoSendItem.status == "pending",
         )
         .order_by(AutoSendItem.created_at.asc())
+        .limit(QUEUE_LIMIT)
         .all()
     )
-    result = []
-    for item in items:
-        lead = db.query(Lead).filter(Lead.id == item.lead_id).first()
-        result.append(_serialize(item, lead))
-    return result
+    leads = _leads_by_id(db, items)
+    return [_serialize(item, leads.get(item.lead_id)) for item in items]
 
 
 @router.get("/history")
@@ -213,11 +224,8 @@ def get_history(
         .limit(50)
         .all()
     )
-    result = []
-    for item in items:
-        lead = db.query(Lead).filter(Lead.id == item.lead_id).first()
-        result.append(_serialize(item, lead))
-    return result
+    leads = _leads_by_id(db, items)
+    return [_serialize(item, leads.get(item.lead_id)) for item in items]
 
 
 @router.get("/settings")

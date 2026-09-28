@@ -167,11 +167,27 @@ def create(db: Session, opp: Opportunity, actor, *, title: str, html: str,
         return {"ok": False, "error": "Give the demo a title the prospect will see."}
 
     slot = normalize_slot(slot)
-    if retire_previous:
-        for old in for_opportunity(db, opp.id):
-            if old.is_live(now) and (old.slot or DEFAULT_SLOT) == slot:
-                old.revoked_at = now
-                old.is_active = False
+
+    # Validate the requested name BEFORE anything is retired, so a bad name
+    # cannot leave the old version revoked with nothing replacing it.
+    try:
+        slug = normalize_slug(slug)
+    except ValueError as bad:
+        return {"ok": False, "error": str(bad)}
+
+    # NO NAME PASSED MEANS "KEEP THE NAME", NOT "DROP IT".
+    #
+    # A republish that does not mention a slug inherits the one held by the
+    # live version it is superseding in this deal + slot. Without this the
+    # name stayed on the old row - and with retire_previous that row was
+    # revoked, so the vanity link the rep had already read out went dead.
+    # Found before the retire loop below, which clears retired rows' names.
+    if slug is None:
+        for prev in for_opportunity(db, opp.id):
+            if (prev.slug and prev.is_live(now)
+                    and (prev.slot or DEFAULT_SLOT) == slot):
+                slug = prev.slug
+                break
 
     # THE VANITY NAME MOVES TO THE NEW VERSION. THE TOKEN DOES NOT.
     #
@@ -181,11 +197,6 @@ def create(db: Session, opp: Opportunity, actor, *, title: str, html: str,
     # transferred off whichever row in this brand currently holds it, so
     # /demo/countryside keeps opening the current version while every
     # historical token still opens its own historical HTML.
-    try:
-        slug = normalize_slug(slug)
-    except ValueError as bad:
-        return {"ok": False, "error": str(bad)}
-
     if slug:
         holder = slug_owner(db, opp.brand_sales_org_id, slug)
         if holder is not None and holder.opportunity_id != opp.id:
@@ -195,6 +206,18 @@ def create(db: Session, opp: Opportunity, actor, *, title: str, html: str,
         if holder is not None:
             holder.slug = None
             db.flush()
+
+    # Retired only once the name has cleared the in-use check above, so a
+    # refused publish never leaves the previous version revoked.
+    if retire_previous:
+        for old in for_opportunity(db, opp.id):
+            if old.is_live(now) and (old.slot or DEFAULT_SLOT) == slot:
+                old.revoked_at = now
+                old.is_active = False
+                # A retired row never keeps a name: either it moves to the new
+                # version below, or it is released - same rule as revoke().
+                old.slug = None
+        db.flush()
 
     row = DemoSite(
         opportunity_id=opp.id,

@@ -773,3 +773,34 @@ def test_a_stop_after_earlier_skips_is_recorded_not_a_crash(
     assert logs[-1].outcome == cs.OUTCOME_STOPPED
     db_session.refresh(state)
     assert state.status != "active"
+
+
+def test_one_broken_enrollment_does_not_stop_the_others(
+        db_session, sample_org, sample_advisor, monkeypatch):
+    """A single bad row used to abort the whole pass for every tenant. Now the
+    others are processed and the pass still FAILS loudly at the end."""
+    monkeypatch.delenv("CADENCE_SMS_SENDING", raising=False)
+    bad = _lead(db_session, sample_org, sample_advisor, phone="12145552101")
+    good = _lead(db_session, sample_org, sample_advisor, phone="12145552102")
+    bad_state = _due(db_session, bad, minutes_ago=10)
+    good_state = _due(db_session, good, minutes_ago=5)
+    real = cs._get_org_cadence_schedule
+
+    def boom(db, org_id):
+        raise RuntimeError("corrupt schedule")
+
+    calls = {"n": 0}
+
+    def first_call_breaks(db, org_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return boom(db, org_id)
+        return real(db, org_id)
+
+    monkeypatch.setattr(cs, "_get_org_cadence_schedule", first_call_breaks)
+    with pytest.raises(cs.CadencePassErrors) as err:
+        cs.run_due_cadences(db_session, now=AT)
+    assert err.value.report["evaluated"] == 2
+    assert len(err.value.failures) == 1 and "corrupt schedule" in err.value.failures[0]
+    # The other enrollment was still processed (skipped: sending is off).
+    assert [l.outcome for l in _logs(db_session, good)] == [cs.OUTCOME_SKIPPED]

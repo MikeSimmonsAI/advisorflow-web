@@ -459,3 +459,39 @@ class TestGodJobRunsEndpoints:
                     assert len(r["error_summary"]) <= 512
         finally:
             app.dependency_overrides.clear()
+
+
+def test_a_job_whose_last_success_is_long_ago_is_reported_stale():
+    """'Last run: success' nine days ago is a stopped job, not a healthy one."""
+    from datetime import datetime, timedelta
+    from app.models.job_models import JobName, is_stale
+    now = datetime.utcnow()
+    assert is_stale(JobName.AI_CONVERSATION_CRON, now - timedelta(days=9), now) is True
+    assert is_stale(JobName.CADENCE_LOOP, now - timedelta(minutes=50), now) is False
+    assert is_stale(JobName.CADENCE_LOOP, now - timedelta(hours=3), now) is True
+    assert is_stale(JobName.EMAIL_POLLER, now - timedelta(minutes=12), now) is False
+    assert is_stale("unknown_job", now - timedelta(days=30), now) is False
+
+
+def test_every_known_job_has_an_expected_interval():
+    from app.models.job_models import ALL_JOB_NAMES, EXPECTED_INTERVAL_MINUTES
+    assert set(ALL_JOB_NAMES) <= set(EXPECTED_INTERVAL_MINUTES)
+
+
+def test_the_latest_endpoint_flags_stale_jobs(engine, db_session):
+    from datetime import datetime, timedelta, timezone
+    from app.models.job_models import JobName, JobRun
+    db_session.add(JobRun(job_name=JobName.AI_CONVERSATION_CRON, status="success",
+                          started_at=datetime.now(timezone.utc) - timedelta(days=9)))
+    db_session.add(JobRun(job_name=JobName.CADENCE_LOOP, status="success",
+                          started_at=datetime.now(timezone.utc)))
+    db_session.commit()
+    client, app = _make_god_client(engine)
+    try:
+        data = client.get("/god/job-runs/latest").json()
+        assert data["jobs"][JobName.AI_CONVERSATION_CRON]["stale"] is True
+        assert data["jobs"][JobName.CADENCE_LOOP]["stale"] is False
+        assert JobName.AI_CONVERSATION_CRON in data["stale_jobs"]
+        assert data["jobs"][JobName.CADENCE_LOOP]["expected_every_minutes"] == 60
+    finally:
+        app.dependency_overrides.clear()

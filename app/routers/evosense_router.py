@@ -60,8 +60,27 @@ def _read_org(db, user) -> str:
     return org_id
 
 
-def _admin(user):
-    if getattr(user, "role", None) not in ADMIN_ROLES:
+def _admin(user, db):
+    """Workspace admin check FOR THE WORKSPACE BEING ACTED ON.
+
+    Every admin action here operates on `svc.write_org_id` / `_read_org`, i.e.
+    the ACTIVE workspace (X-Workspace-Id backed by a membership). This used to
+    read the account-global `users.role`, so a person who is org_admin of
+    workspace A but an advisor/viewer in workspace B could change budgets,
+    provider switches, ground truth and reprocess runs inside B.
+
+    Now the role is `lead_scope.effective_role` - the caller's membership role
+    in the selected workspace, falling back to `users.role` only when no
+    workspace is selected (same resolution deps.require_admin uses, and the
+    same ambient request svc.write_org_id reads). Platform operators
+    (god_admin / super_admin) keep today's behaviour: their authority is not a
+    customer membership grant, and the org they can reach is already bounded
+    by write_org_id/_read_org.
+    """
+    if getattr(user, "role", None) in ("god_admin", "super_admin"):
+        return
+    from app.services.lead_scope import effective_role
+    if effective_role(user, db) not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Only a workspace admin can change this.")
 
 
@@ -887,7 +906,7 @@ def run_provider_evaluation(payload: EvaluationIn, db: Session = Depends(get_db)
     real provider is saved as PLANNED and runs only through /execute with
     "RUN PAID EVALUATION <id>". Admin only."""
     from app.services.evosense import provider_eval as PE
-    _admin(user)
+    _admin(user, db)
     org_id = svc.write_org_id(db, user)
     try:
         ev = PE.plan(db, org_id, name=payload.name, provider_keys=payload.provider_keys,
@@ -914,7 +933,7 @@ def execute_provider_evaluation(evaluation_id: str, payload: ExecuteIn, db: Sess
     "RUN PAID EVALUATION <id>" and never spends beyond its planned maximum."""
     from app.models.evosense_models import EvoSenseProviderEvaluation
     from app.services.evosense import provider_eval as PE
-    _admin(user)
+    _admin(user, db)
     org_id = svc.write_org_id(db, user)
     ev = (db.query(EvoSenseProviderEvaluation)
           .filter(EvoSenseProviderEvaluation.id == evaluation_id,
@@ -943,7 +962,7 @@ def list_ground_truth(db: Session = Depends(get_db), user: User = Depends(requir
     evaluations. Admin only (they can hold people's phone numbers)."""
     from app.models.evosense_models import EvoSenseEvalGroundTruth
     from app.services.evosense import provider_eval as PE
-    _admin(user)
+    _admin(user, db)
     org_id = _read_org(db, user)
     rows = (db.query(EvoSenseEvalGroundTruth).filter(EvoSenseEvalGroundTruth.organization_id == org_id)
             .order_by(EvoSenseEvalGroundTruth.created_at.desc()).limit(500).all())
@@ -954,7 +973,7 @@ def list_ground_truth(db: Session = Depends(get_db), user: User = Depends(requir
 def add_ground_truth(payload: GroundTruthIn, db: Session = Depends(get_db),
                      user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
     from app.services.evosense import provider_eval as PE
-    _admin(user)
+    _admin(user, db)
     org_id = svc.write_org_id(db, user)
     try:
         row = PE.add_ground_truth(db, org_id, kind=payload.kind, data=payload.data,
@@ -972,7 +991,7 @@ def add_ground_truth(payload: GroundTruthIn, db: Session = Depends(get_db),
 def delete_ground_truth(truth_id: str, db: Session = Depends(get_db),
                         user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
     from app.models.evosense_models import EvoSenseEvalGroundTruth
-    _admin(user)
+    _admin(user, db)
     org_id = svc.write_org_id(db, user)
     row = (db.query(EvoSenseEvalGroundTruth)
            .filter(EvoSenseEvalGroundTruth.id == truth_id,
@@ -1007,7 +1026,7 @@ def attest_truth_gate(provider_key: str, payload: GateIn, db: Session = Depends(
                       user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
     """Record one attested criterion WITH its evidence. Admin only."""
     from app.services.evosense import truth_gate as TG
-    _admin(user)
+    _admin(user, db)
     org_id = svc.write_org_id(db, user)
     try:
         out = TG.attest(db, org_id, provider_key, payload.criterion, met=payload.met,
@@ -1043,7 +1062,7 @@ def purge_provider_evaluation(evaluation_id: str, db: Session = Depends(get_db),
     and keep only its aggregate metrics. Admin only; irreversible."""
     from app.models.evosense_models import EvoSenseProviderEvaluation
     from app.services.evosense import provider_eval as PE
-    _admin(user)
+    _admin(user, db)
     org_id = svc.write_org_id(db, user)
     ev = (db.query(EvoSenseProviderEvaluation)
           .filter(EvoSenseProviderEvaluation.id == evaluation_id,
@@ -1121,7 +1140,7 @@ def verify_source(payload: VerifyIn, db: Session = Depends(get_db),
     an adapter, not a record). Only a success makes a source HEALTHY."""
     source_key = payload.key
     org_id = svc.write_org_id(db, user)
-    _admin(user)
+    _admin(user, db)
     if source_key not in PV.PROVIDERS:
         raise HTTPException(status_code=404, detail="Unknown source")
     res = PV.verify_source(db, org_id, source_key,
@@ -1145,7 +1164,7 @@ def patch_provider(payload: ProviderPatch, db: Session = Depends(get_db),
     """Configure one of THIS organization's providers. The key names an adapter,
     not a record, and the row edited is always the caller's own."""
     org_id = svc.write_org_id(db, user)
-    _admin(user)
+    _admin(user, db)
     key = payload.key
     if key not in PV.PROVIDERS:
         raise HTTPException(status_code=404, detail="Unknown provider")
@@ -1191,12 +1210,12 @@ def patch_controls(payload: ControlsPatch, db: Session = Depends(get_db),
     data = payload.model_dump(exclude_unset=True)
     for k, v in data.items():
         if k == "score_weights":
-            _admin(user)
+            _admin(user, db)
             from app.services.evosense import scoring as SC
             ctl.score_weights = C.jdump(SC.clean_weights(v)) if v else None
             continue
         if k == "scoring_options":
-            _admin(user)
+            _admin(user, db)
             from app.services.evosense import scoring as SC
             opts = SC.clean_options(v) if v else None
             ctl.scoring_options = C.jdump(opts) if opts and opts != SC.DEFAULT_OPTIONS else None
@@ -1207,7 +1226,7 @@ def patch_controls(payload: ControlsPatch, db: Session = Depends(get_db),
             if v is False and getattr(ctl, k) and getattr(user, "role", None) not in ADMIN_ROLES:
                 raise HTTPException(status_code=403, detail="Anyone can pause; only a workspace admin can resume.")
         else:
-            _admin(user)
+            _admin(user, db)
             if v is not None and v < 0:
                 raise HTTPException(status_code=422, detail="%s cannot be negative" % k)
         setattr(ctl, k, v)
@@ -1244,7 +1263,7 @@ def _run_or_404(db, org_id, run_id):
 def reprocess_dry_run(payload: ReprocessIn, db: Session = Depends(get_db),
                       user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
     from app.services.evosense import reprocess as RP
-    _admin(user)
+    _admin(user, db)
     org_id = svc.write_org_id(db, user)
     if payload.strategy_id:
         ST.get(db, org_id, payload.strategy_id)          # 404 for another tenant's strategy
@@ -1276,7 +1295,7 @@ def reprocess_apply(run_id: str, payload: ConfirmIn, db: Session = Depends(get_d
     from app.services.evosense import reprocess as RP
     org_id = svc.write_org_id(db, user)
     run = _run_or_404(db, org_id, run_id)
-    _admin(user)
+    _admin(user, db)
     if payload.confirm != "APPLY %s" % run.id:
         raise HTTPException(status_code=422, detail="Type APPLY %s to confirm." % run.id)
     try:
@@ -1293,7 +1312,7 @@ def reprocess_rollback(run_id: str, payload: ConfirmIn, db: Session = Depends(ge
     from app.services.evosense import reprocess as RP
     org_id = svc.write_org_id(db, user)
     run = _run_or_404(db, org_id, run_id)
-    _admin(user)
+    _admin(user, db)
     if payload.confirm != "ROLLBACK %s" % run.id:
         raise HTTPException(status_code=422, detail="Type ROLLBACK %s to confirm." % run.id)
     try:

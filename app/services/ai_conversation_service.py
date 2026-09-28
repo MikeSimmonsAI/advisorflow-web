@@ -991,6 +991,13 @@ def process_scheduled_touches(db: Session, org_id: str = None) -> dict:
         return _process_scheduled_touches(db, org_id)
 
 
+# How far a due conversation's next_send_at is pushed when a pass CLAIMS it,
+# at minimum. The claim is committed before the provider is called, so a pass
+# that dies (or whose commit fails) after the send leaves the conversation
+# out of the 2-minute loop's due set instead of re-sending on the next pass.
+_TOUCH_CLAIM_LEASE = timedelta(hours=1)
+
+
 def _process_scheduled_touches(db: Session, org_id: str = None) -> dict:
     # ── PREFLIGHT. ONE FAILURE, NOT TWENTY-FIVE. ────────────────────────────
     # Before the query, so an unconfigured service does not walk a set of real
@@ -1064,7 +1071,32 @@ def _process_scheduled_touches(db: Session, org_id: str = None) -> dict:
                 skipped += 1
                 continue
 
+            # ── CLAIM BEFORE SENDING ──────────────────────────────────────
+            # Move next_send_at forward with a conditional UPDATE keyed on the
+            # value this pass read, and COMMIT it before the provider is
+            # called. A second runner that read the same row loses the claim;
+            # a commit that fails after the send can no longer leave the
+            # conversation due for the next pass two minutes later.
+            orig_next = conv.next_send_at
+            claim_until = _next_send_time(touch_num + 1, conv.started_at)
+            if claim_until is None or claim_until < now + _TOUCH_CLAIM_LEASE:
+                claim_until = now + _TOUCH_CLAIM_LEASE
+            claimed = db.query(PipelineConversation).filter(
+                PipelineConversation.id == conv.id,
+                PipelineConversation.next_send_at == orig_next,
+                PipelineConversation.touch_number == touch_num,
+            ).update({PipelineConversation.next_send_at: claim_until},
+                     synchronize_session=False)
+            db.commit()
+            if claimed != 1:
+                skipped += 1
+                continue
+
             result = _send_touch(db, lead, advisor, conv, touch_num)
+            if not result.get("success") and not db.is_active:
+                # A failed flush/commit inside _send_touch leaves the session
+                # needing a rollback before anything else can use it.
+                db.rollback()
             if result.get("success"):
                 next_touch = touch_num + 1
                 conv.touch_number = next_touch
@@ -1079,6 +1111,29 @@ def _process_scheduled_touches(db: Session, org_id: str = None) -> dict:
                 sent += 1
             else:
                 errors += 1
+                # Release the claim only when nothing can have been sent, so
+                # those conversations stay due exactly as before. Any other
+                # failure (the send itself, or the commit after it) keeps the
+                # claim: retried at claim_until, never two minutes later.
+                definitely_unsent = bool(
+                    result.get("generation_failed")
+                    or result.get("provider_unavailable")
+                    or result.get("error") in ("Lead has no email address",
+                                               "Escalated to advisor")
+                    or conv.stage == "stopped"
+                )
+                if definitely_unsent:
+                    db.query(PipelineConversation).filter(
+                        PipelineConversation.id == conv.id,
+                        PipelineConversation.next_send_at == claim_until,
+                    ).update({PipelineConversation.next_send_at: orig_next},
+                             synchronize_session=False)
+                    db.commit()
+                else:
+                    logger.error(
+                        "process_scheduled_touches: touch %s for conv=%s failed "
+                        "after claim (%s) - held until %s, not retried now",
+                        touch_num, conv.id, result.get("error"), claim_until)
                 # ONE PROVIDER FAILURE, NOT ONE PER LEAD. See
                 # PROVIDER_LEVEL_ERRORS. The rest of the due set stays due and
                 # untouched; the next pass tries again.
@@ -1092,6 +1147,9 @@ def _process_scheduled_touches(db: Session, org_id: str = None) -> dict:
                     break
 
         except Exception as e:
+            # One bad conversation must not poison the shared session for
+            # the rest of the pass.
+            db.rollback()
             logger.error("process_scheduled_touches error conv=%s: %s", conv.id, e)
             errors += 1
 

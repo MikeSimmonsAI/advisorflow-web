@@ -989,6 +989,8 @@ COLUMNS_TO_ADD = [
     ("organizations", "tier_config", "TEXT"),
     # Per-org appointment type options — JSON array of strings for the Appt type dropdown
     ("organizations", "appointment_types", "TEXT"),
+    # Per-org product/service list override — JSON array of {key,label,icon}; NULL = industry template
+    ("organizations", "products", "TEXT"),
     # AI lead quality note — Phase 2 field added to Lead model
     ("leads", "ai_lead_quality_note", "TEXT"),
     # Reply review tracking — when a reply was reviewed/actioned by an advisor

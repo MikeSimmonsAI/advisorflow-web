@@ -299,3 +299,111 @@ def test_publishing_requires_an_authenticated_caller(client):
 def test_revoking_requires_an_authenticated_caller(client):
     r = client.post("/sales/demo-sites/does-not-exist/revoke")
     assert r.status_code in (401, 403), r.status_code
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SS9 FIX — republish WITHOUT passing the name, and retire_previous
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _republish(db_session, opp, *, slug=None, html, retire_previous=False,
+               slot=None):
+    kw = {"slot": slot} if slot else {}
+    return ds.create(db_session, opp, None, title="Demo", html=html, slug=slug,
+                     retire_previous=retire_previous, **kw)
+
+
+def test_republish_without_a_name_keeps_the_link_on_the_new_version(
+        db_session, brand_world):
+    opp = brand_world["brand-a"]["opp"]
+    first = _publish(db_session, opp, slug="keep-me", html="<p>v1</p>")["demo"]
+    db_session.commit()
+
+    out = _republish(db_session, opp, html="<p>v2</p>")
+    assert out["ok"], out.get("error")
+    db_session.commit()
+    second = out["demo"]
+
+    assert second.slug == "keep-me"
+    db_session.refresh(first)
+    assert first.slug is None, "the name moved; it is on exactly one row"
+    by_name = ds.resolve(db_session, "keep-me")
+    assert by_name.id == second.id and "v2" in by_name.html
+    # The old version stays live by default and still opens by its token.
+    assert ds.resolve(db_session, first.token).id == first.id
+
+
+def test_republish_without_a_name_and_retire_previous_keeps_the_link_alive(
+        db_session, brand_world):
+    """The reported bug: the retired row kept the name, so the link died."""
+    opp = brand_world["brand-a"]["opp"]
+    first = _publish(db_session, opp, slug="still-alive", html="<p>v1</p>")["demo"]
+    db_session.commit()
+
+    out = _republish(db_session, opp, html="<p>v2</p>", retire_previous=True)
+    assert out["ok"], out.get("error")
+    db_session.commit()
+
+    db_session.refresh(first)
+    assert first.revoked_at is not None and first.slug is None
+    by_name = ds.resolve(db_session, "still-alive")
+    assert by_name is not None and by_name.id == out["demo"].id
+    assert "v2" in by_name.html
+    assert ds.resolve(db_session, first.token) is None
+
+
+def test_retire_previous_with_a_new_name_clears_the_old_name(
+        db_session, brand_world):
+    opp = brand_world["brand-a"]["opp"]
+    first = _publish(db_session, opp, slug="old-name", html="<p>v1</p>")["demo"]
+    db_session.commit()
+
+    out = _republish(db_session, opp, slug="new-name", html="<p>v2</p>",
+                     retire_previous=True)
+    assert out["ok"], out.get("error")
+    db_session.commit()
+
+    db_session.refresh(first)
+    assert first.slug is None, "a retired row must not hold a name"
+    assert ds.resolve(db_session, "old-name") is None
+    assert ds.resolve(db_session, "new-name").id == out["demo"].id
+    # The released name is reusable by another deal.
+    assert _publish(db_session, brand_world["brand-a"]["opp2"], slug="old-name")["ok"]
+
+
+def test_inheritance_is_per_slot(db_session, brand_world):
+    """A website concept does not take the product demo's name."""
+    opp = brand_world["brand-a"]["opp"]
+    _publish(db_session, opp, slug="product-name", html="<p>p1</p>")
+    db_session.commit()
+    web = _republish(db_session, opp, html="<p>w1</p>", slot="website")
+    assert web["ok"], web.get("error")
+    assert web["demo"].slug is None
+    assert ds.resolve(db_session, "product-name") is not None
+
+
+def test_a_refused_name_does_not_retire_the_live_version(db_session, brand_world):
+    a = brand_world["brand-a"]
+    _publish(db_session, a["opp2"], slug="taken-elsewhere")
+    live = _publish(db_session, a["opp"], slug="mine", html="<p>v1</p>")["demo"]
+    db_session.commit()
+
+    out = _republish(db_session, a["opp"], slug="taken-elsewhere",
+                     html="<p>v2</p>", retire_previous=True)
+    assert out["ok"] is False and "already in use" in out["error"]
+    db_session.refresh(live)
+    assert live.revoked_at is None and live.slug == "mine"
+    assert ds.resolve(db_session, "mine").id == live.id
+
+
+def test_revoking_the_current_version_stops_the_inherited_link(
+        db_session, brand_world):
+    opp = brand_world["brand-a"]["opp"]
+    _publish(db_session, opp, slug="stop-me", html="<p>v1</p>")
+    db_session.commit()
+    second = _republish(db_session, opp, html="<p>v2</p>", retire_previous=True)["demo"]
+    db_session.commit()
+
+    ds.revoke(db_session, second)
+    db_session.commit()
+    assert ds.resolve(db_session, "stop-me") is None
+    assert ds.resolve(db_session, second.token) is None

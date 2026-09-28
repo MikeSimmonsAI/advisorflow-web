@@ -201,6 +201,102 @@
 .workqueue-pill--amber { color: var(--signal-amber); background: var(--signal-amber-dim); }
 .workqueue-pill--green { color: var(--signal-green); background: var(--signal-green-dim); }
 
+/* ── Operational queues (SS7) ───────────────────────────────────────────── */
+
+.workqueue-queues {
+  min-height: 0;
+  border-color: rgba(47, 182, 255, 0.24);
+}
+
+.workqueue-queue-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.workqueue-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.workqueue-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 6px 8px 6px 14px;
+  background: var(--bg-row);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.workqueue-tab:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-row-hover);
+}
+
+.workqueue-tab--active {
+  color: var(--text-primary);
+  border-color: rgba(47, 182, 255, 0.5);
+  box-shadow: var(--glow-blue-sm);
+}
+
+.workqueue-tab .workqueue-count {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.workqueue-queue-body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 16px;
+}
+
+.workqueue-queue-group {
+  display: grid;
+  gap: 8px;
+}
+
+.workqueue-queue-group-title {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workqueue-queue-group-title .mono {
+  margin-left: 6px;
+  color: var(--text-secondary);
+}
+
+a.workqueue-queue-row {
+  text-decoration: none;
+}
+
+.workqueue-blockers {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  color: var(--signal-amber);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 @media (max-width: 1100px) {
   .workqueue-grid {
     grid-template-columns: 1fr;

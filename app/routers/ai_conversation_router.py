@@ -221,15 +221,57 @@ def preview_auto_reply(
     return {"lead_id": lead.id, "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(), "phone": lead.phone, **result}
 
 
+# Channels bulk AI may SEND on. Email only: it is the one channel with a
+# deployment + organization switch (OUTBOUND_EMAIL_BULK_AI) in front of it.
+# There is no equivalent switch for AI-authored bulk SMS, so opening that path
+# is a business decision, not a bug fix. Until it is made, an auto-send request
+# on any other channel is refused outright - it used to be silently sent as
+# email to any lead with an address, which is worse than refusing.
+BULK_AI_SEND_CHANNELS = ("email",)
+
+
+def _is_fallback(ai_result: dict) -> bool:
+    """A canned fallback is not a generation, and must never reach a family."""
+    return (ai_result.get("source") == "fallback"
+            or bool(ai_result.get("error_kind"))
+            or not (ai_result.get("reply") or "").strip())
+
+
 @router.post("/generate-batch")
 def generate_batch_replies(
     req: AutoReplyRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Draft (and, for email only, optionally send) an AI message per lead.
+
+    auto_send=False returns DRAFTS to the caller. Nothing is persisted: the
+    only tables that ever held a "review queue" (auto_send_queue,
+    ai_work_items) are superseded - see operational_queues - so the response
+    says `persisted: False` rather than claiming anything was queued.
+
+    Every lead lands in exactly one bucket:
+      sent             the gate cleared and the provider accepted it
+      drafted          returned for review, not sent, not stored
+      skipped          the AI said stop, or compliance blocked the lead
+      skipped_fallback the AI failed and a canned fallback came back - never
+                       sent and never offered as a draft
+      disabled         the outbound email switch (deployment or org) is off
+      errors           a real fault
+    """
+    channel = (req.channel or "email").strip().lower()
+    if req.auto_send and channel not in BULK_AI_SEND_CHANNELS:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"Bulk AI auto-send supports email only; channel {channel!r} "
+                    f"is not available for AI bulk sends. Nothing was sent. "
+                    f"Draft the message and send it through the regular "
+                    f"compose flow instead."),
+        )
+
     leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(req.lead_ids)).all()
     results = []
-    sent = skipped = queued = errors = 0
+    sent = skipped = drafted = skipped_fallback = disabled = errors = 0
     for lead in leads:
         try:
             ai_result = generate_auto_reply(
@@ -243,20 +285,28 @@ def generate_batch_replies(
                 skipped += 1
                 results.append({"lead_id": lead.id, "action": "skipped", "reason": ai_result["reason"], "reply": ""})
                 continue
-            if req.auto_send and ai_result["reply"] and lead.email:
+            if _is_fallback(ai_result):
+                # Checked BEFORE any send: with the gates on, the canned
+                # sentence would otherwise go to a real person as if an
+                # advisor had written it.
+                skipped_fallback += 1
+                results.append({
+                    "lead_id": lead.id, "action": "skipped_fallback",
+                    "error_kind": ai_result.get("error_kind") or "empty_generation",
+                    "reason": "AI generation failed; the fallback text was not sent.",
+                    "reply": "",
+                })
+                continue
+            if req.auto_send:
                 try:
-                    # THE GATE THAT WAS NEVER HERE. This branch called
-                    # _send_email_via_graph, which is defined nowhere, so every
-                    # call raised ImportError into the handler below and was
-                    # counted as an error - while the UI rendered a green tick.
-                    # Nothing checked DNC, allow_email or a bad address first.
-                    # The gate runs now; the sender is still deliberately
-                    # absent and gate_lead_email always raises.
+                    # The gate runs first (demo boundary, compliance preflight
+                    # incl. DNC / allow_email / missing address, then the
+                    # deployment and organization switches) and only then the
+                    # provider.
                     outbound_email_gate.send_lead_email(
                         db, lead,
                         advisor=acting_advisor(db, lead, current_user),
-                        subject=ai_result.get(
-                            "subject", f"Following up, {lead.first_name or 'there'}"),
+                        subject=ai_result.get("subject") or f"Following up, {lead.first_name or 'there'}",
                         body_html=plain_text_to_html(ai_result["reply"]),
                         send_source=send_source.BULK_AI,
                         # The human who pressed the button, which is NOT the
@@ -267,10 +317,14 @@ def generate_batch_replies(
                     sent += 1
                     log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.auto_sent", target_type="lead", target_id=lead.id)
                     results.append({"lead_id": lead.id, "action": "sent", "reply": ai_result["reply"]})
+                except outbound_email_gate.EmailSendDisabled as off:
+                    # A switch that is off is a configuration state, not a
+                    # fault. Reported by name so the operator knows which one.
+                    disabled += 1
+                    results.append({"lead_id": lead.id, "action": "disabled", "reason": str(off), "reply": ""})
                 except ValueError as blocked:
-                    # A compliance refusal is not a fault. It is counted and
-                    # reported separately so an operator can tell "we may not
-                    # contact this family" from "the send broke".
+                    # A compliance refusal is not a fault either: "we may not
+                    # contact this family" is not "the send broke".
                     skipped += 1
                     log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.blocked", target_type="lead", target_id=lead.id)
                     results.append({"lead_id": lead.id, "action": "blocked", "reason": str(blocked), "reply": ""})
@@ -278,12 +332,26 @@ def generate_batch_replies(
                     errors += 1
                     results.append({"lead_id": lead.id, "action": "error", "reason": str(e)})
             else:
-                queued += 1
-                results.append({"lead_id": lead.id, "action": "queued", "reply": ai_result["reply"], "booking_url": ai_result.get("booking_url", "")})
+                drafted += 1
+                results.append({
+                    "lead_id": lead.id, "action": "draft",
+                    "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip(),
+                    "subject": ai_result.get("subject", ""),
+                    "reply": ai_result["reply"],
+                    "booking_url": ai_result.get("booking_url", ""),
+                })
         except Exception as e:
             errors += 1
             results.append({"lead_id": lead.id, "action": "error", "reason": str(e)})
-    return {"total": len(leads), "sent": sent, "queued": queued, "skipped": skipped, "errors": errors, "results": results}
+    return {
+        "total": len(leads), "channel": channel, "auto_send": req.auto_send,
+        "sent": sent, "drafted": drafted, "skipped": skipped,
+        "skipped_fallback": skipped_fallback, "disabled": disabled,
+        "errors": errors,
+        # Drafts are returned for review only; nothing is stored or queued.
+        "persisted": False,
+        "results": results,
+    }
 
 
 @router.post("/send-approved")

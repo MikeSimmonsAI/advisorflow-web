@@ -429,6 +429,15 @@ def _next_attempt_seq(db: Session, state, touch_number: int) -> int:
     return top + 1
 
 
+class CadencePassErrors(RuntimeError):
+    """Some enrollments failed unexpectedly; every other one was processed."""
+
+    def __init__(self, failures, report):
+        self.failures, self.report = failures, report
+        super().__init__("%d cadence enrollment(s) failed: %s" % (
+            len(failures), "; ".join(failures[:3])))
+
+
 def run_due_cadences(db: Session, organization_id: str = None,
                      now: "datetime | None" = None) -> dict:
     """Send every touch that is due, and record what happened to each one.
@@ -516,255 +525,275 @@ def run_due_cadences(db: Session, organization_id: str = None,
     errors = []
     org_cache = {}
 
+    unexpected = []
     for state in due_states:
-        lead = state.lead
-        if lead is None:
-            continue
-
-        scheduled_for = state.next_touch_due_at
-        touch_number = state.current_touch_number + 1
-
-        # ── STOPS. The cadence ends here, and the reason is recorded. ───────
-        if lead.status in ("dnc", "hot", "replied", "booked"):
-            reason = "stopped_dnc" if lead.status == "dnc" else "stopped_replied"
-            _log_touch(db, state, lead, touch_number=touch_number,
-                       attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
-                       outcome=OUTCOME_STOPPED,
-                       reason=f"lead status is {lead.status}",
-                       scheduled_for=scheduled_for)
-            stop_cadence_for_lead(db, lead.id, reason)
-            continue
-
-        has_reply = db.query(Reply).filter(Reply.lead_id == lead.id).first()
-        if has_reply:
-            _log_touch(db, state, lead, touch_number=touch_number,
-                       attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
-                       outcome=OUTCOME_STOPPED,
-                       reason="the family replied", scheduled_for=scheduled_for)
-            stop_cadence_for_lead(db, lead.id, "stopped_replied")
-            continue
-
-        # ── THE BOOKING ITSELF, NOT ONLY THE STATUS THAT SHOULD FOLLOW IT ──
-        #
-        # `lead.status == "booked"` is checked above and is the usual signal,
-        # but a booking made outside the flow that flips it - a rep booking on
-        # the phone, a link booked while the status write failed - leaves a
-        # real appointment and an unchanged status. Nine more texts to somebody
-        # who has already booked is the worst message this engine can send.
-        booked = (db.query(BookingLink)
-                  .filter(BookingLink.lead_id == lead.id,
-                          BookingLink.status.in_(("booked", "confirmed")))
-                  .first())
-        if booked is not None:
-            _log_touch(db, state, lead, touch_number=touch_number,
-                       attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
-                       outcome=OUTCOME_STOPPED,
-                       reason="an appointment is already booked",
-                       scheduled_for=scheduled_for)
-            stop_cadence_for_lead(db, lead.id, "stopped_booked")
-            continue
-
-        # ── MANUAL TAKEOVER ────────────────────────────────────────────────
-        #
-        # A person picked this lead up. Once a human has texted them by hand,
-        # an automated sequence carrying on underneath is the machine talking
-        # over its own colleague - the family gets two voices and the rep does
-        # not know why.
-        #
-        # This is only answerable because send_source exists now. It reads
-        # HUMAN_INITIATED sends made AFTER the cadence started, so the touches
-        # the cadence itself sent do not stop the cadence.
-        since = state.cadence_started_at
-        if since is not None:
-            manual = (db.query(Message)
-                      .filter(Message.lead_id == lead.id,
-                              Message.send_source.in_(list(_src.HUMAN_INITIATED)),
-                              Message.sent_at > since)
-                      .first())
-            if manual is not None:
-                _log_touch(db, state, lead, touch_number=touch_number,
-                           attempt_seq=_next_attempt_seq(db, state, touch_number),
-                           claim=True, outcome=OUTCOME_STOPPED,
-                           reason="a person has taken this conversation over",
-                           scheduled_for=scheduled_for)
-                stop_cadence_for_lead(db, lead.id, "stopped_manual_takeover")
+        # ONE BAD ENROLLMENT NEVER STOPS THE PASS. Each state is its own
+        # unit of work (every branch below commits); an unexpected error is
+        # rolled back, logged and counted, the other tenants' touches still
+        # run, and the pass then FAILS LOUDLY at the end so the job ledger
+        # shows it - isolation, not suppression.
+        try:
+            lead = state.lead
+            if lead is None:
                 continue
 
-        # ── TEMPORARY SKIPS. Recorded, and the cadence resumes later. ───────
-        #
-        # A capacity hold is temporary, so the cadence is skipped rather than
-        # torn down - but the skip is now visible instead of being a bare
-        # `continue` that repeated silently every hour.
-        if is_held(lead):
-            _log_touch(db, state, lead, touch_number=touch_number,
-                       attempt_seq=_next_attempt_seq(db, state, touch_number),
-                       claim=True, outcome=OUTCOME_SKIPPED,
-                       reason="lead is held over plan capacity",
-                       scheduled_for=scheduled_for)
-            state.next_touch_due_at = now + RETRY_BACKOFF
-            skipped_count += 1
+            scheduled_for = state.next_touch_due_at
+            touch_number = state.current_touch_number + 1
+
+            # ── STOPS. The cadence ends here, and the reason is recorded. ───────
+            if lead.status in ("dnc", "hot", "replied", "booked"):
+                reason = "stopped_dnc" if lead.status == "dnc" else "stopped_replied"
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
+                           outcome=OUTCOME_STOPPED,
+                           reason=f"lead status is {lead.status}",
+                           scheduled_for=scheduled_for)
+                stop_cadence_for_lead(db, lead.id, reason)
+                continue
+
+            has_reply = db.query(Reply).filter(Reply.lead_id == lead.id).first()
+            if has_reply:
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
+                           outcome=OUTCOME_STOPPED,
+                           reason="the family replied", scheduled_for=scheduled_for)
+                stop_cadence_for_lead(db, lead.id, "stopped_replied")
+                continue
+
+            # ── THE BOOKING ITSELF, NOT ONLY THE STATUS THAT SHOULD FOLLOW IT ──
+            #
+            # `lead.status == "booked"` is checked above and is the usual signal,
+            # but a booking made outside the flow that flips it - a rep booking on
+            # the phone, a link booked while the status write failed - leaves a
+            # real appointment and an unchanged status. Nine more texts to somebody
+            # who has already booked is the worst message this engine can send.
+            booked = (db.query(BookingLink)
+                      .filter(BookingLink.lead_id == lead.id,
+                              BookingLink.status.in_(("booked", "confirmed")))
+                      .first())
+            if booked is not None:
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
+                           outcome=OUTCOME_STOPPED,
+                           reason="an appointment is already booked",
+                           scheduled_for=scheduled_for)
+                stop_cadence_for_lead(db, lead.id, "stopped_booked")
+                continue
+
+            # ── MANUAL TAKEOVER ────────────────────────────────────────────────
+            #
+            # A person picked this lead up. Once a human has texted them by hand,
+            # an automated sequence carrying on underneath is the machine talking
+            # over its own colleague - the family gets two voices and the rep does
+            # not know why.
+            #
+            # This is only answerable because send_source exists now. It reads
+            # HUMAN_INITIATED sends made AFTER the cadence started, so the touches
+            # the cadence itself sent do not stop the cadence.
+            since = state.cadence_started_at
+            if since is not None:
+                manual = (db.query(Message)
+                          .filter(Message.lead_id == lead.id,
+                                  Message.send_source.in_(list(_src.HUMAN_INITIATED)),
+                                  Message.sent_at > since)
+                          .first())
+                if manual is not None:
+                    _log_touch(db, state, lead, touch_number=touch_number,
+                               attempt_seq=_next_attempt_seq(db, state, touch_number),
+                               claim=True, outcome=OUTCOME_STOPPED,
+                               reason="a person has taken this conversation over",
+                               scheduled_for=scheduled_for)
+                    stop_cadence_for_lead(db, lead.id, "stopped_manual_takeover")
+                    continue
+
+            # ── TEMPORARY SKIPS. Recorded, and the cadence resumes later. ───────
+            #
+            # A capacity hold is temporary, so the cadence is skipped rather than
+            # torn down - but the skip is now visible instead of being a bare
+            # `continue` that repeated silently every hour.
+            if is_held(lead):
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number),
+                           claim=True, outcome=OUTCOME_SKIPPED,
+                           reason="lead is held over plan capacity",
+                           scheduled_for=scheduled_for)
+                state.next_touch_due_at = now + RETRY_BACKOFF
+                skipped_count += 1
+                db.commit()
+                continue
+
+            advisor = lead.assigned_to
+            if not advisor:
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number),
+                           claim=True, outcome=OUTCOME_SKIPPED, reason="no advisor assigned",
+                           scheduled_for=scheduled_for)
+                state.next_touch_due_at = now + RETRY_BACKOFF
+                skipped_count += 1
+                error_count += 1
+                errors.append(f"Lead {lead.id}: no advisor assigned")
+                db.commit()
+                continue
+
+            schedule = _get_org_cadence_schedule(db, lead.organization_id)
+            total_touches = len(schedule)
+            touch_def = next((t for t in schedule if t["touch_number"] == touch_number), None)
+            if not touch_def:
+                state.status = "completed"
+                state.completed_at = now
+                completed_count += 1
+                db.commit()
+                continue
+
+            # ── ENTITLEMENT AND THE DEPLOYMENT SWITCH ──────────────────────────
+            org = org_cache.get(lead.organization_id)
+            if org is None and lead.organization_id:
+                org = (db.query(Organization)
+                       .filter(Organization.id == lead.organization_id).first())
+                org_cache[lead.organization_id] = org
+
+            if not sending_on or not entitlements.org_has_feature(org, "cadences"):
+                reason = ("cadence SMS sending is disabled for this deployment"
+                          if not sending_on
+                          else "the organization is not entitled to cadences")
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number),
+                           claim=True, outcome=OUTCOME_SKIPPED, reason=reason,
+                           scheduled_for=scheduled_for)
+                state.next_touch_due_at = now + RETRY_BACKOFF
+                skipped_count += 1
+                db.commit()
+                continue
+
+            # ── COMPLIANCE, BEFORE ANY PROVIDER IS RESOLVED ────────────────────
+            try:
+                check_compliance_preflight(db, lead, channel="sms")
+            except ValueError as blocked:
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number),
+                           claim=True, outcome=OUTCOME_BLOCKED, reason=str(blocked),
+                           scheduled_for=scheduled_for, attempted_at=now)
+                state.next_touch_due_at = now + RETRY_BACKOFF
+                blocked_count += 1
+                db.commit()
+                continue
+
+            # ── PERMITTED CONTACT HOURS, IN THE LEAD'S OWN TIME ────────────────
+            #
+            # The engine had no clock at all. `touch_def["send_hour"]` was read
+            # into the schedule and never used, so a touch fired whenever the
+            # runner came round - which on a UTC server is the middle of the night
+            # for most of the United States.
+            #
+            # UNKNOWN MEANS NO. A lead whose zone cannot be determined is refused
+            # rather than texted on the server's clock; see contact_hours for why,
+            # and `cadence_backlog` for how many that is before anything is
+            # switched on.
+            hours = contact_hours.check(lead, now)
+            if not hours["permitted"]:
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number),
+                           claim=True, outcome=OUTCOME_BLOCKED,
+                           reason="quiet hours: %s" % hours["reason"],
+                           scheduled_for=scheduled_for)
+                # Re-scheduled to the next moment it IS permitted, so the touch is
+                # delivered at a decent hour rather than re-refused every hour all
+                # night. A lead with no resolvable zone has no such moment, and
+                # backing off keeps it visible in the diagnostic instead of
+                # wedging the row.
+                nxt = contact_hours.next_permitted_utc(lead, now)
+                state.next_touch_due_at = nxt or (now + RETRY_BACKOFF)
+                blocked_count += 1
+                db.commit()
+                continue
+
+            # ── THE CLAIM. One row, one send. ──────────────────────────────────
+            #
+            # A touch that already delivered is never re-sent, whatever the state
+            # counter says. That covers the crash-between-send-and-commit case as
+            # well as the concurrent-runner one: the evidence that a family was
+            # contacted is the log row, not the integer.
+            if _already_sent(db, state, touch_number):
+                logger.info(
+                    "cadence: touch %s for lead %s has already been delivered; "
+                    "leaving it to the runner that sent it", touch_number, lead.id)
+                continue
+
+            attempt_seq = _next_attempt_seq(db, state, touch_number)
+            if _failed_attempts(db, state, touch_number) >= MAX_ATTEMPTS_PER_TOUCH:
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=attempt_seq, claim=True, outcome=OUTCOME_ABANDONED,
+                           reason=f"{MAX_ATTEMPTS_PER_TOUCH} attempts failed",
+                           scheduled_for=scheduled_for)
+                state.current_touch_number = touch_number
+                _advance_schedule(state, schedule, touch_number, total_touches, now)
+                if state.status == "completed":
+                    completed_count += 1
+                db.commit()
+                continue
+
+            body = render_cadence_message(
+                db, lead, advisor, touch_number, "",
+                touch_def.get("message_template"))
+
+            claim = _log_touch(db, state, lead, touch_number=touch_number,
+                               attempt_seq=attempt_seq, outcome=OUTCOME_SENT,
+                               scheduled_for=scheduled_for, attempted_at=now,
+                               body_preview=body, claim=True)
+            if claim is None:
+                # Another runner owns this touch. Not an error.
+                continue
             db.commit()
-            continue
 
-        advisor = lead.assigned_to
-        if not advisor:
-            _log_touch(db, state, lead, touch_number=touch_number,
-                       attempt_seq=_next_attempt_seq(db, state, touch_number),
-                       claim=True, outcome=OUTCOME_SKIPPED, reason="no advisor assigned",
-                       scheduled_for=scheduled_for)
-            state.next_touch_due_at = now + RETRY_BACKOFF
-            skipped_count += 1
-            error_count += 1
-            errors.append(f"Lead {lead.id}: no advisor assigned")
-            db.commit()
-            continue
+            try:
+                message = send_sms(
+                    db=db, advisor=advisor, lead=lead, template=body,
+                    include_booking_link=False,
+                    send_source=_src.CADENCE,
+                    # A cron. No authenticated human, and NULL says so honestly.
+                    sent_by_user_id=None,
+                )
+            except Exception as exc:                                 # noqa: BLE001
+                db.rollback()
+                claim = db.query(CadenceTouchLog).filter(
+                    CadenceTouchLog.id == claim.id).first()
+                if claim is not None:
+                    is_guard = exc.__class__.__name__ == "DemoBoundaryViolation"
+                    claim.outcome = OUTCOME_SUPPRESSED if is_guard else OUTCOME_FAILED
+                    claim.reason = str(exc)[:500]
+                state.next_touch_due_at = now + RETRY_BACKOFF
+                error_count += 1
+                errors.append(f"Lead {lead.id}: {exc}")
+                db.commit()
+                continue
 
-        schedule = _get_org_cadence_schedule(db, lead.organization_id)
-        total_touches = len(schedule)
-        touch_def = next((t for t in schedule if t["touch_number"] == touch_number), None)
-        if not touch_def:
-            state.status = "completed"
-            state.completed_at = now
-            completed_count += 1
-            db.commit()
-            continue
+            # ── SUCCESS. Only now does anything advance. ───────────────────────
+            claim.message_id = getattr(message, "id", None)
+            claim.provider = "twilio"
+            claim.provider_message_id = getattr(message, "twilio_sid", None)
+            claim.provider_error_code = getattr(message, "error_code", None)
+            claim.provider_error_message = getattr(message, "error_message", None)
 
-        # ── ENTITLEMENT AND THE DEPLOYMENT SWITCH ──────────────────────────
-        org = org_cache.get(lead.organization_id)
-        if org is None and lead.organization_id:
-            org = (db.query(Organization)
-                   .filter(Organization.id == lead.organization_id).first())
-            org_cache[lead.organization_id] = org
-
-        if not sending_on or not entitlements.org_has_feature(org, "cadences"):
-            reason = ("cadence SMS sending is disabled for this deployment"
-                      if not sending_on
-                      else "the organization is not entitled to cadences")
-            _log_touch(db, state, lead, touch_number=touch_number,
-                       attempt_seq=_next_attempt_seq(db, state, touch_number),
-                       claim=True, outcome=OUTCOME_SKIPPED, reason=reason,
-                       scheduled_for=scheduled_for)
-            state.next_touch_due_at = now + RETRY_BACKOFF
-            skipped_count += 1
-            db.commit()
-            continue
-
-        # ── COMPLIANCE, BEFORE ANY PROVIDER IS RESOLVED ────────────────────
-        try:
-            check_compliance_preflight(db, lead, channel="sms")
-        except ValueError as blocked:
-            _log_touch(db, state, lead, touch_number=touch_number,
-                       attempt_seq=_next_attempt_seq(db, state, touch_number),
-                       claim=True, outcome=OUTCOME_BLOCKED, reason=str(blocked),
-                       scheduled_for=scheduled_for, attempted_at=now)
-            state.next_touch_due_at = now + RETRY_BACKOFF
-            blocked_count += 1
-            db.commit()
-            continue
-
-        # ── PERMITTED CONTACT HOURS, IN THE LEAD'S OWN TIME ────────────────
-        #
-        # The engine had no clock at all. `touch_def["send_hour"]` was read
-        # into the schedule and never used, so a touch fired whenever the
-        # runner came round - which on a UTC server is the middle of the night
-        # for most of the United States.
-        #
-        # UNKNOWN MEANS NO. A lead whose zone cannot be determined is refused
-        # rather than texted on the server's clock; see contact_hours for why,
-        # and `cadence_backlog` for how many that is before anything is
-        # switched on.
-        hours = contact_hours.check(lead, now)
-        if not hours["permitted"]:
-            _log_touch(db, state, lead, touch_number=touch_number,
-                       attempt_seq=_next_attempt_seq(db, state, touch_number),
-                       claim=True, outcome=OUTCOME_BLOCKED,
-                       reason="quiet hours: %s" % hours["reason"],
-                       scheduled_for=scheduled_for)
-            # Re-scheduled to the next moment it IS permitted, so the touch is
-            # delivered at a decent hour rather than re-refused every hour all
-            # night. A lead with no resolvable zone has no such moment, and
-            # backing off keeps it visible in the diagnostic instead of
-            # wedging the row.
-            nxt = contact_hours.next_permitted_utc(lead, now)
-            state.next_touch_due_at = nxt or (now + RETRY_BACKOFF)
-            blocked_count += 1
-            db.commit()
-            continue
-
-        # ── THE CLAIM. One row, one send. ──────────────────────────────────
-        #
-        # A touch that already delivered is never re-sent, whatever the state
-        # counter says. That covers the crash-between-send-and-commit case as
-        # well as the concurrent-runner one: the evidence that a family was
-        # contacted is the log row, not the integer.
-        if _already_sent(db, state, touch_number):
-            logger.info(
-                "cadence: touch %s for lead %s has already been delivered; "
-                "leaving it to the runner that sent it", touch_number, lead.id)
-            continue
-
-        attempt_seq = _next_attempt_seq(db, state, touch_number)
-        if _failed_attempts(db, state, touch_number) >= MAX_ATTEMPTS_PER_TOUCH:
-            _log_touch(db, state, lead, touch_number=touch_number,
-                       attempt_seq=attempt_seq, claim=True, outcome=OUTCOME_ABANDONED,
-                       reason=f"{MAX_ATTEMPTS_PER_TOUCH} attempts failed",
-                       scheduled_for=scheduled_for)
             state.current_touch_number = touch_number
+            state.last_touch_sent_at = now
             _advance_schedule(state, schedule, touch_number, total_touches, now)
             if state.status == "completed":
                 completed_count += 1
+            sent_count += 1
             db.commit()
-            continue
 
-        body = render_cadence_message(
-            db, lead, advisor, touch_number, "",
-            touch_def.get("message_template"))
-
-        claim = _log_touch(db, state, lead, touch_number=touch_number,
-                           attempt_seq=attempt_seq, outcome=OUTCOME_SENT,
-                           scheduled_for=scheduled_for, attempted_at=now,
-                           body_preview=body, claim=True)
-        if claim is None:
-            # Another runner owns this touch. Not an error.
-            continue
-        db.commit()
-
-        try:
-            message = send_sms(
-                db=db, advisor=advisor, lead=lead, template=body,
-                include_booking_link=False,
-                send_source=_src.CADENCE,
-                # A cron. No authenticated human, and NULL says so honestly.
-                sent_by_user_id=None,
-            )
         except Exception as exc:                                 # noqa: BLE001
             db.rollback()
-            claim = db.query(CadenceTouchLog).filter(
-                CadenceTouchLog.id == claim.id).first()
-            if claim is not None:
-                is_guard = exc.__class__.__name__ == "DemoBoundaryViolation"
-                claim.outcome = OUTCOME_SUPPRESSED if is_guard else OUTCOME_FAILED
-                claim.reason = str(exc)[:500]
-            state.next_touch_due_at = now + RETRY_BACKOFF
+            logger.exception("cadence: state %s failed", getattr(state, 'id', None))
             error_count += 1
-            errors.append(f"Lead {lead.id}: {exc}")
-            db.commit()
+            unexpected.append("state %s: %s: %s" % (getattr(state, 'id', None),
+                                                   type(exc).__name__, str(exc)[:200]))
             continue
 
-        # ── SUCCESS. Only now does anything advance. ───────────────────────
-        claim.message_id = getattr(message, "id", None)
-        claim.provider = "twilio"
-        claim.provider_message_id = getattr(message, "twilio_sid", None)
-        claim.provider_error_code = getattr(message, "error_code", None)
-        claim.provider_error_message = getattr(message, "error_message", None)
-
-        state.current_touch_number = touch_number
-        state.last_touch_sent_at = now
-        _advance_schedule(state, schedule, touch_number, total_touches, now)
-        if state.status == "completed":
-            completed_count += 1
-        sent_count += 1
-        db.commit()
+    if unexpected:
+        raise CadencePassErrors(unexpected, {
+            "evaluated": len(due_states), "sent": sent_count,
+            "completed": completed_count, "errors": error_count})
 
     return {
         "evaluated": len(due_states),

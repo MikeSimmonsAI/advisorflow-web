@@ -198,7 +198,14 @@
 }
 
 /* ── Table ── */
-.leads-table-panel { padding: 0; overflow: hidden; }
+/* Scroll sideways instead of clipping columns. overflow-x:auto still clips
+   to the panel's border radius, so the rounded corners are kept. */
+.leads-table-panel {
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
 
 .leads-table {
   width: 100%;
@@ -258,6 +265,87 @@
 }
 
 .leads-secondary { color: var(--text-tertiary) !important; }
+
+/* ── Compact table (PF1) ──
+   Selectors avoid nth-child: the checkbox column is absent in review view,
+   so positions shift. Cells are targeted by class (.mono), by the name-cell
+   wrapper, and by :last-child for the actions/assign column. */
+.leads-table {
+  min-width: 960px;
+}
+
+.leads-table thead th {
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.leads-row td {
+  padding: 7px 10px;
+  line-height: 1.3;
+}
+
+.leads-name-cell {
+  flex-wrap: nowrap;
+  gap: 8px;
+  max-width: 280px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.leads-name-cell .leads-avatar {
+  width: 26px;
+  height: 26px;
+  font-size: 10px;
+}
+
+/* The name itself: shrinks and ellipsizes so inline pills never force a wrap. */
+.leads-name-cell > span:first-of-type {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pills after the name keep their size. */
+.leads-name-cell > span + span {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Phone, email and source: one line each, truncated. */
+.leads-row td.mono {
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.leads-row td.mono > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+/* Source cell: secondary lines (importer, created date) smaller and tight. */
+.leads-row td.mono > div + div {
+  font-size: 10px !important;
+  margin-top: 0 !important;
+  opacity: 0.85;
+}
+
+/* Last column (row actions, or Assign tier in review): shrink to fit. */
+.leads-table thead th:last-child,
+.leads-row td:last-child {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.leads-row td:last-child .btn {
+  vertical-align: middle;
+}
 
 /* ── Floating Bulk Bar (legacy — now handled inline) ── */
 .leads-bulk-bar {
@@ -324,6 +412,11 @@
   .leads-kpi-grid { grid-template-columns: 1fr; }
   .leads-bulk-bar { left: 16px; right: 16px; transform: none; }
   .leads-preview-grid { grid-template-columns: repeat(2, 1fr); }
+  .leads-table { min-width: 880px; }
+  .leads-table thead th { padding: 7px 8px; }
+  .leads-row td { padding: 6px 8px; font-size: 12px; }
+  .leads-name-cell { max-width: 220px; }
+  .leads-row td.mono { max-width: 180px; }
 }
 
 .leads-add-panel { margin-bottom: 16px; }

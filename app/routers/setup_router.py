@@ -121,19 +121,47 @@ def _verify_token(token: str) -> str:
 @router.post("/admin/setup-link/{user_id}")
 def generate_setup_link(
     user_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Admin-only. Returns a 48-hour link the advisor can use to connect integrations."""
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+    """Admin-only. Returns a 48-hour link the advisor can use to connect integrations.
+
+    SCOPE. A setup link binds a third party's calendar/mailbox grant to the
+    target account, so minting one is an act ON that account. It used to be
+    allowed for any super_admin against any user on any brand, and the
+    org_admin check compared against `current_user.organization_id`, which is
+    NULL for a brand-sales identity (and is the home org, not the workspace the
+    admin is standing in). Now:
+
+      * god_admin: any user (owner control plane).
+      * super_admin: `load_user_in_scope` - own platform only, never another
+        elevated account, never a brand-sales (organization_id NULL) identity.
+      * workspace admin: the target must belong to the ACTIVE workspace org,
+        which must be non-NULL.
+
+    Out of scope is 404, not 403, so user ids cannot be enumerated.
+    """
+    from app.services.lead_scope import is_manager_here, active_workspace_org_id
+
+    if current_user.role != "god_admin" and not is_manager_here(current_user, db, request):
         raise HTTPException(status_code=403, detail="Admin only.")
 
     advisor = db.query(User).filter(User.id == user_id).first()
     if not advisor:
         raise HTTPException(status_code=404, detail="User not found.")
-    # Org admin can only generate links for advisors in their own org
-    if current_user.role == "org_admin" and advisor.organization_id != current_user.organization_id:
-        raise HTTPException(status_code=403, detail="Cannot generate a setup link for a user outside your organization.")
+
+    if current_user.role == "super_admin":
+        from app.deps import load_user_in_scope
+        advisor = load_user_in_scope(db, current_user, user_id)
+    elif current_user.role != "god_admin":
+        active_org = active_workspace_org_id(current_user, db, request)
+        if (advisor.organization_id is None
+                or active_org is None
+                or str(advisor.organization_id) != str(active_org)
+                or (advisor.role in ("super_admin", "god_admin")
+                    and advisor.id != current_user.id)):
+            raise HTTPException(status_code=404, detail="User not found.")
 
     token = _generate_token(user_id)
     link = f"{FRONTEND_URL}/setup-integrations?token={token}"

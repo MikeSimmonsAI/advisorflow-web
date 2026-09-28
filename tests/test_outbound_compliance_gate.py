@@ -367,11 +367,14 @@ def test_bulk_ai_email_reports_a_block_separately_from_an_error(
     provider.assert_not_called()
     assert body["sent"] == 0, "nothing may be reported as sent while the sender is disabled"
     assert body["skipped"] == 1, "the DNC lead is a block, not a failure"
-    assert body["errors"] == 1, "the permitted lead fails loudly on the disabled sender"
+    # SS10: the switched-off sender is reported as `disabled` - loudly and by
+    # name, but separately from real faults.
+    assert body["errors"] == 0
+    assert body["disabled"] == 1, "the permitted lead is refused by the off switch"
 
     actions = {r["lead_id"]: r["action"] for r in body["results"]}
     assert actions[blocked.id] == "blocked"
-    assert actions[allowed.id] == "error"
+    assert actions[allowed.id] == "disabled"
 
 
 def test_no_call_site_references_the_missing_sender_any_more():

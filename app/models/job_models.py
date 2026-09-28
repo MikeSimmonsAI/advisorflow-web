@@ -91,6 +91,37 @@ LOOP_JOB_NAMES = (
 
 ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES
 
+# HOW OFTEN EACH JOB IS EXPECTED TO RUN, in minutes, taken from the loops'
+# sleep() calls in app/main.py and the cron schedules in render.yaml. The
+# health endpoint marks a job STALE when its last run is older than twice its
+# interval (plus a margin for a deploy restart). "Last run: success" nine days
+# ago is not healthy, it is stopped - and without this the screen said success.
+EXPECTED_INTERVAL_MINUTES = {
+    JobName.CADENCE_LOOP: 60,
+    JobName.AI_CONVERSATION: 2,
+    JobName.REVIEW_REQUEST: 30,
+    JobName.SUPPORT_INTELLIGENCE: 6 * 60,
+    JobName.SESSION_CLEANUP: 24 * 60,
+    JobName.SALES_REMINDERS: 15,
+    JobName.EVOSENSE_HUNT: 15,
+    JobName.WHOLESALE_EXCEPTIONS: 60,
+    JobName.CADENCE_CRON: 24 * 60,        # render.yaml: "0 14 * * *"
+    JobName.EMAIL_POLLER: 5,              # render.yaml: "*/5 * * * *"
+    # ai_conversation_cron has no service in render.yaml; the in-process
+    # ai_conversation_loop does this work. Daily is the most it ever ran.
+    JobName.AI_CONVERSATION_CRON: 24 * 60,
+}
+STALE_MARGIN_MINUTES = 30
+
+
+def is_stale(job_name: str, last_started_at, now) -> bool:
+    """True when a job that should have run by now has not."""
+    every = EXPECTED_INTERVAL_MINUTES.get(job_name)
+    if not every or last_started_at is None:
+        return False
+    from datetime import timedelta
+    return now - last_started_at > timedelta(minutes=2 * every + STALE_MARGIN_MINUTES)
+
 
 class JobRun(Base):
     """One record per background-loop invocation.

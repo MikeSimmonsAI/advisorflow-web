@@ -135,12 +135,15 @@ def get_lead_timeline(lead_id: str,
     """
     from app.models.models import Message, Reply, BookingLink, EmailMessage, CadenceState, VoiceCall as _VoiceCall
 
-    is_manager_tl = lead_scope.is_manager_here(current_user, db)
-    q_tl = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db))
-    if not is_manager_tl:
-        q_tl = q_tl.filter(Lead.assigned_to_id == current_user.id)
-    lead = q_tl.first()
-    if not lead:
+    # SCOPE: the same helper /history uses (load_lead_in_scope), INTERSECTED
+    # with the active-workspace org filter this endpoint always applied.
+    # load_lead_in_scope alone lets a god_admin with no workspace selected read
+    # any tenant's lead; the old inline check returned 404 there, so the org
+    # comparison is kept and this can only ever be narrower than before - for
+    # managers and advisors it is identical, and a role that is neither is now
+    # refused instead of silently scoped to assigned_to_id.
+    lead = lead_scope.load_lead_in_scope(db, current_user, lead_id)
+    if lead.organization_id != lead_scope.active_workspace_org_id(current_user, db):
         raise HTTPException(status_code=404, detail="Lead not found")
 
     # PAGINATION, WHICH THIS ENDPOINT DID NOT HAVE AT ALL.

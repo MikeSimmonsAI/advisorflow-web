@@ -241,10 +241,20 @@ export default function GodBillingOps() {
     try {
       const detail = await api.get(
         `/god/billing/brands/${encodeURIComponent(row.platform_id)}`);
+      // Only plans the server will actually accept here. A non-purchasable
+      // tier (Custom) is refused by billing_catalog.require_purchasable with a
+      // 409, so offering it only produced an error. Custom customers are set
+      // up by recording their entitlements, not by a plan switch.
+      const active = (detail.plans || []).filter(p => p.is_active);
+      const plans = active.filter(p => p.is_purchasable);
+      const unlisted = active.filter(p => !p.is_purchasable);
       setChangeForm({
         row,
-        plans: (detail.plans || []).filter(p => p.is_active),
-        planKey: row.plan_key || '',
+        plans,
+        unlisted,
+        // Preselect their current plan only if it can be chosen; otherwise a
+        // hidden Custom key would sit in state and the preview would 409.
+        planKey: plans.some(p => p.key === row.plan_key) ? row.plan_key : '',
         // Blank means KEEP the commitment they are on. Offered explicitly so
         // an operator can also change it on purpose.
         commitmentKey: '',
@@ -502,6 +512,14 @@ export default function GodBillingOps() {
                 <option value="month_to_month">Month-to-month</option>
                 <option value="term_agreement">Committed term</option>
               </select>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--gm-text)', opacity: 0.85,
+                          marginBottom: 10 }}>
+              {changeForm.unlisted && changeForm.unlisted.length > 0
+                ? `Not listed (not self-service): ${changeForm.unlisted.map(p => p.name || p.key).join(', ')}. `
+                : ''}
+              Custom plans are configured by recording the customer&apos;s
+              entitlements, not by switching plans here.
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button

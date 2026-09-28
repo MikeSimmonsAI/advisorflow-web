@@ -45,31 +45,20 @@ const APPT_TYPE_LABELS = {
   other: '📌 Other',
 }
 
-const PRODUCTS = [
-  { key: 'final_expense',        label: 'Final Expense',            icon: '🪦' },
-  { key: 'term_life_10yr',       label: 'Term Life — 10yr',         icon: '📄' },
-  { key: 'term_life_20yr',       label: 'Term Life — 20yr',         icon: '📄' },
-  { key: 'term_life_30yr',       label: 'Term Life — 30yr',         icon: '📄' },
-  { key: 'whole_life',           label: 'Whole Life',               icon: '🛡️' },
-  { key: 'universal_life_iul',   label: 'IUL (Indexed UL)',         icon: '📈' },
-  { key: 'universal_life_vul',   label: 'VUL (Variable UL)',        icon: '📊' },
-  { key: 'universal_life_gul',   label: 'GUL (Guaranteed UL)',      icon: '🔒' },
-  { key: 'annuity_fixed',        label: 'Fixed Annuity',            icon: '💰' },
-  { key: 'annuity_fixed_indexed',label: 'Fixed Indexed Annuity',    icon: '💹' },
-  { key: 'annuity_variable',     label: 'Variable Annuity',         icon: '📉' },
-  { key: 'medicare_supplement',  label: 'Medicare Supplement',      icon: '🏥' },
-  { key: 'medicare_advantage',   label: 'Medicare Advantage',       icon: '🏨' },
-  { key: 'long_term_care',       label: 'Long-Term Care',           icon: '🏠' },
-  { key: 'disability_income',    label: 'Disability Income',        icon: '🦽' },
-  { key: 'dental_vision_hearing',label: 'Dental / Vision / Hearing',icon: '👁️' },
-  { key: 'burial_preneed',       label: 'Burial / Pre-Need',        icon: '⚱️' },
-  { key: 'cemetery_property',    label: 'Cemetery Property',        icon: '🌿' },
-  { key: 'marker_monument',      label: 'Marker / Monument',        icon: '🪨' },
-  { key: 'memorial',             label: 'Memorial',                 icon: '🕊️' },
-  { key: 'funeral_arrangement',  label: 'Funeral Arrangement',      icon: '🌹' },
-  { key: 'veterans_benefits',    label: 'Veterans Benefits',        icon: '🎖️' },
-  { key: 'other',                label: 'Other',                    icon: '📌' },
-]
+// Products are per organization (industry template or the org's own list),
+// served by GET /settings/products. Keys already stored on a case file that
+// the current list no longer offers are still shown, labelled from
+// `legacy_labels`, so a saved selection never silently disappears.
+function withSelectedExtras(catalog, legacyLabels, selectedKeys) {
+  const known = new Set(catalog.map(p => p.key))
+  const extras = []
+  for (const key of selectedKeys) {
+    if (!key || known.has(key)) continue
+    known.add(key)
+    extras.push({ key, label: (legacyLabels && legacyLabels[key]) || key, icon: '📌', legacy: true })
+  }
+  return [...catalog, ...extras]
+}
 
 const CHECKLIST_ITEMS = [
   { key: 'chk_id_verified',            label: 'ID / Driver\'s License Verified' },
@@ -114,6 +103,17 @@ export default function CaseFile({ lead, onClose, onSaved }) {
   const [closeNotes, setCloseNotes] = useState('')
   const [showCloseModal, setShowCloseModal] = useState(false)
   const [toast, setToast] = useState(null)
+  const [productCatalog, setProductCatalog] = useState([])
+  const [legacyLabels, setLegacyLabels] = useState({})
+
+  useEffect(() => {
+    api.get('/settings/products')
+      .then(r => {
+        setProductCatalog(Array.isArray(r?.products) ? r.products : [])
+        setLegacyLabels(r?.legacy_labels || {})
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!lead?.id) return
@@ -338,7 +338,10 @@ export default function CaseFile({ lead, onClose, onSaved }) {
           )}
 
           {/* ── Tab 1: Products ────────────────────────────────────────────── */}
-          {activeTab === 1 && (
+          {activeTab === 1 && (() => {
+            const productOptions = withSelectedExtras(productCatalog, legacyLabels,
+              [...(form.products_discussed || []), ...(form.products_sold || [])])
+            return (
             <div className="cf-products-layout">
               <div className="cf-products-col">
                 <div className="cf-products-header">
@@ -346,7 +349,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
                   <span className="cf-products-count">{form.products_discussed.length} selected</span>
                 </div>
                 <div className="cf-products-grid">
-                  {PRODUCTS.map(p => (
+                  {productOptions.map(p => (
                     <div key={p.key}
                       className={`cf-product-chip ${form.products_discussed.includes(p.key) ? 'cf-product-chip--discussed' : ''}`}
                       onClick={() => toggleProduct(p.key, 'products_discussed')}>
@@ -363,7 +366,7 @@ export default function CaseFile({ lead, onClose, onSaved }) {
                   <span className="cf-products-count sold">{form.products_sold.length} sold</span>
                 </div>
                 <div className="cf-products-grid">
-                  {PRODUCTS.map(p => (
+                  {productOptions.map(p => (
                     <div key={p.key}
                       className={`cf-product-chip ${form.products_sold.includes(p.key) ? 'cf-product-chip--sold' : ''}`}
                       onClick={() => toggleProduct(p.key, 'products_sold')}>
@@ -375,7 +378,8 @@ export default function CaseFile({ lead, onClose, onSaved }) {
                 </div>
               </div>
             </div>
-          )}
+            )
+          })()}
 
           {/* ── Tab 2: Policy Details ──────────────────────────────────────── */}
           {activeTab === 2 && (

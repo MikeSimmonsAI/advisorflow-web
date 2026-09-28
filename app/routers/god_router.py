@@ -1705,6 +1705,24 @@ def get_job_runs_latest(
         n for n in known_jobs if result.get(n, {}).get("status") == "error"
     )
 
+    # STALE: the last run may say "success", but if it was long ago the job
+    # has stopped. Reported per job and as a list; `all_healthy` keeps its
+    # existing meaning for existing consumers.
+    from datetime import datetime as _dt, timezone as _tz
+    from app.models.job_models import EXPECTED_INTERVAL_MINUTES, is_stale
+    _now = _dt.utcnow()
+    for n, rec in result.items():
+        started = rec.get("started_at")
+        try:
+            started_dt = _dt.fromisoformat(started) if started else None
+            if started_dt is not None and started_dt.tzinfo is not None:
+                started_dt = started_dt.astimezone(_tz.utc).replace(tzinfo=None)
+        except ValueError:
+            started_dt = None
+        rec["expected_every_minutes"] = EXPECTED_INTERVAL_MINUTES.get(n)
+        rec["stale"] = bool(started_dt is not None and is_stale(n, started_dt, _now))
+    stale_jobs = sorted(n for n in known_jobs if result.get(n, {}).get("stale"))
+
     # Jobs with rows that nobody enumerates. Reported rather than hidden: a job
     # that writes to the ledger and is missing from `known_jobs` is invisible on
     # the screen while looking perfectly healthy in the database.
@@ -1714,6 +1732,7 @@ def get_job_runs_latest(
         "jobs": result,
         "all_healthy": all_healthy,
         "jobs_in_error": jobs_in_error,
+        "stale_jobs": stale_jobs,
         "ledger": ledger,
     }
 

@@ -221,17 +221,20 @@ def check_and_send_followups(db: Session) -> int:
         if booking.id in sent_booking_ids:
             continue
 
-        lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
-        advisor = db.query(User).filter(User.id == booking.user_id).first()
-
-        if not lead or not advisor:
-            continue
-
+        booking_id = booking.id
         try:
+            lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
+            advisor = db.query(User).filter(User.id == booking.user_id).first()
+
+            if not lead or not advisor:
+                continue
+
             _send_followup(db, booking, lead, advisor)
             count += 1
         except Exception as e:
-            logger.error("Failed to send post-appt followup booking=%s: %s", booking.id, e)
+            # One bad booking must not poison the session for the rest.
+            db.rollback()
+            logger.error("Failed to send post-appt followup booking=%s: %s", booking_id, e)
 
     if count:
         logger.info("[post_appointment] Sent %d post-appointment followup(s).", count)

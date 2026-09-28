@@ -413,6 +413,11 @@ class Organization(Base):
     # falls back to the built-in default list so existing orgs are unaffected.
     appointment_types = Column(Text, nullable=True)
 
+    # Per-org product/service list for the Client Record "Products" tab —
+    # JSON array of {key, label, icon}. NULL = inherit the industry template
+    # (industry_templates.products_for_org), same contract as appointment_types.
+    products = Column(Text, nullable=True)
+
     # Per-org feature flags (super admin only). JSON array of feature keys.
     # null = all features enabled (backward-compatible default).
     # [] = no optional features. ["campaigns", "reports", ...] = explicit allow-list.

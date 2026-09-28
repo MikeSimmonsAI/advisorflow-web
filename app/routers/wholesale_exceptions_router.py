@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -69,14 +69,20 @@ def summary(db: Session = Depends(get_db), user: User = Depends(require_queue)):
 
 
 @router.get("")
-def list_queue(scope: str = "mine", include_closed: bool = False, db: Session = Depends(get_db),
-               user: User = Depends(require_queue)):
+def list_queue(scope: str = "mine", include_closed: bool = False,
+               limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0),
+               db: Session = Depends(get_db), user: User = Depends(require_queue)):
     org_id = svc.write_org_id(db, user)
-    rows = EX.queue(db, org_id, user, include_closed=include_closed, scope=scope)
+    manager = EX.is_manager(db, user)
+    rows = EX.queue(db, org_id, user, include_closed=include_closed, scope=scope,
+                    limit=limit, offset=offset, manager=manager)
     ids = {r.assigned_to_id for r in rows if r.assigned_to_id}
-    names = {u.id: (u.full_name or u.email) for u in db.query(User).filter(User.id.in_(ids or [""])).all()}
-    return {"manager": EX.is_manager(db, user), "scope": scope if EX.is_manager(db, user) else "mine",
-            "items": [EX.exception_json(db, org_id, r, names) for r in rows]}
+    names = ({u.id: (u.full_name or u.email) for u in db.query(User).filter(User.id.in_(ids)).all()}
+             if ids else {})
+    subjects = EX.load_subjects(db, org_id, rows)
+    return {"manager": manager, "scope": scope if manager else "mine",
+            "limit": limit, "offset": offset,
+            "items": [EX.exception_json(db, org_id, r, names, subjects=subjects) for r in rows]}
 
 
 @router.post("")

@@ -1235,3 +1235,210 @@ INDUSTRY_APPT_TYPES: Dict[str, List[str]] = {
     key: list(tpl["appointment_types"]) for key, tpl in TEMPLATES.items()
 }
 INDUSTRY_APPT_TYPES["custom"] = list(TEMPLATES[GENERIC_KEY]["appointment_types"])
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PRODUCTS AND SERVICES — what a Client Record's "Products" tab offers
+# ════════════════════════════════════════════════════════════════════════════
+#
+# THE DEFECT THIS CLOSES. The case-file Products tab was a literal list of
+# twenty-three insurance and funeral products in CaseFile.jsx, with a second
+# copy in case_file_router. Every organization — a roofer, an energy broker, a
+# cleaning company — was asked whether it had discussed a Variable Annuity.
+#
+# SAME PATTERN AS APPOINTMENT TYPES. Each template carries a `products` list of
+# {key, label, icon}. `Organization.products` (JSON, NULL = inherit) overrides
+# it per organization; `products_for_org` is the one resolver. An unknown
+# industry resolves to GENERIC's neutral list — never to insurance.
+#
+# KEYS ARE DATA. Case files store product KEYS in products_discussed /
+# products_sold. The keys below are exactly the ones that list used, so no
+# stored selection changes meaning, and LEGACY_PRODUCT_LABELS keeps every one
+# of them renderable even for an organization whose current list no longer
+# offers it.
+
+# The retired hard-coded catalogue, verbatim (key, label, icon). Kept as the
+# label source for keys already stored on case files.
+LEGACY_PRODUCTS: List[Dict[str, str]] = [
+    {"key": "final_expense", "label": "Final Expense", "icon": "\U0001faa6"},
+    {"key": "term_life_10yr", "label": "Term Life \u2014 10yr", "icon": "\U0001f4c4"},
+    {"key": "term_life_20yr", "label": "Term Life \u2014 20yr", "icon": "\U0001f4c4"},
+    {"key": "term_life_30yr", "label": "Term Life \u2014 30yr", "icon": "\U0001f4c4"},
+    {"key": "whole_life", "label": "Whole Life", "icon": "\U0001f6e1\ufe0f"},
+    {"key": "universal_life_iul", "label": "IUL (Indexed UL)", "icon": "\U0001f4c8"},
+    {"key": "universal_life_vul", "label": "VUL (Variable UL)", "icon": "\U0001f4ca"},
+    {"key": "universal_life_gul", "label": "GUL (Guaranteed UL)", "icon": "\U0001f512"},
+    {"key": "annuity_fixed", "label": "Fixed Annuity", "icon": "\U0001f4b0"},
+    {"key": "annuity_fixed_indexed", "label": "Fixed Indexed Annuity", "icon": "\U0001f4b9"},
+    {"key": "annuity_variable", "label": "Variable Annuity", "icon": "\U0001f4c9"},
+    {"key": "medicare_supplement", "label": "Medicare Supplement", "icon": "\U0001f3e5"},
+    {"key": "medicare_advantage", "label": "Medicare Advantage", "icon": "\U0001f3e8"},
+    {"key": "long_term_care", "label": "Long-Term Care", "icon": "\U0001f3e0"},
+    {"key": "disability_income", "label": "Disability Income", "icon": "\U0001f9bd"},
+    {"key": "dental_vision_hearing", "label": "Dental / Vision / Hearing", "icon": "\U0001f441\ufe0f"},
+    {"key": "burial_preneed", "label": "Burial / Pre-Need", "icon": "\u26b1\ufe0f"},
+    {"key": "cemetery_property", "label": "Cemetery Property", "icon": "\U0001f33f"},
+    {"key": "marker_monument", "label": "Marker / Monument", "icon": "\U0001faa8"},
+    {"key": "memorial", "label": "Memorial", "icon": "\U0001f54a\ufe0f"},
+    {"key": "funeral_arrangement", "label": "Funeral Arrangement", "icon": "\U0001f339"},
+    {"key": "veterans_benefits", "label": "Veterans Benefits", "icon": "\U0001f396\ufe0f"},
+    {"key": "other", "label": "Other", "icon": "\U0001f4cc"},
+]
+
+LEGACY_PRODUCT_LABELS: Dict[str, str] = {p["key"]: p["label"] for p in LEGACY_PRODUCTS}
+LEGACY_PRODUCT_ICONS: Dict[str, str] = {p["key"]: p["icon"] for p in LEGACY_PRODUCTS}
+
+
+def _legacy(*keys: str) -> List[Dict[str, str]]:
+    """The retired entries for these keys, byte-for-byte (label and icon)."""
+    by_key = {p["key"]: p for p in LEGACY_PRODUCTS}
+    return [dict(by_key[k]) for k in keys]
+
+
+def _p(key: str, label: str, icon: str) -> Dict[str, str]:
+    return {"key": key, "label": label, "icon": icon}
+
+
+_OTHER = _legacy("other")[0]
+
+PRODUCT_CATALOGS: Dict[str, List[Dict[str, str]]] = {
+    GENERIC_KEY: [
+        _p("consultation", "Consultation", "\U0001f4ac"),
+        _p("standard_service", "Standard Service", "\U0001f9f0"),
+        _p("premium_service", "Premium Service", "\u2b50"),
+        _p("maintenance_plan", "Maintenance Plan", "\U0001f501"),
+        dict(_OTHER),
+    ],
+    "insurance": _legacy(
+        "final_expense", "term_life_10yr", "term_life_20yr", "term_life_30yr",
+        "whole_life", "universal_life_iul", "universal_life_vul",
+        "universal_life_gul", "annuity_fixed", "annuity_fixed_indexed",
+        "annuity_variable", "medicare_supplement", "medicare_advantage",
+        "long_term_care", "disability_income", "dental_vision_hearing",
+        "veterans_benefits", "other"),
+    "funeral": _legacy(
+        "burial_preneed", "cemetery_property", "marker_monument", "memorial",
+        "funeral_arrangement", "final_expense", "veterans_benefits", "other"),
+    "energy": [
+        _p("electricity_plan", "Electricity Plan", "\u26a1"),
+        _p("natural_gas_plan", "Natural Gas Plan", "\U0001f525"),
+        _p("solar", "Solar", "\u2600\ufe0f"),
+        _p("energy_audit", "Energy Audit", "\U0001f50e"),
+        _p("contract_renewal", "Contract Renewal", "\U0001f504"),
+        dict(_OTHER),
+    ],
+    "roofing": [
+        _p("roof_replacement", "Roof Replacement", "\U0001f3e0"),
+        _p("roof_repair", "Roof Repair", "\U0001f528"),
+        _p("roof_inspection", "Roof Inspection", "\U0001f50e"),
+        _p("storm_damage_claim", "Storm Damage Claim", "\u26c8\ufe0f"),
+        _p("gutters", "Gutters", "\U0001f327\ufe0f"),
+        dict(_OTHER),
+    ],
+    "real_estate": [
+        _p("sell_property", "Sell Property", "\U0001f3f7\ufe0f"),
+        _p("buy_property", "Buy Property", "\U0001f511"),
+        _p("rental", "Rental / Leasing", "\U0001f3e2"),
+        _p("investment_property", "Investment Property", "\U0001f4c8"),
+        _p("home_valuation", "Home Valuation", "\U0001f4ca"),
+        dict(_OTHER),
+    ],
+    "fiber": [
+        _p("internet_plan", "Internet Plan", "\U0001f310"),
+        _p("tv_bundle", "TV Bundle", "\U0001f4fa"),
+        _p("phone_service", "Phone Service", "\U0001f4de"),
+        _p("business_internet", "Business Internet", "\U0001f3e2"),
+        dict(_OTHER),
+    ],
+    "home_services": [
+        _p("installation", "Installation", "\U0001f527"),
+        _p("repair", "Repair", "\U0001f6e0\ufe0f"),
+        _p("inspection", "Inspection", "\U0001f50e"),
+        _p("maintenance_plan", "Maintenance Plan", "\U0001f501"),
+        _p("replacement", "Replacement", "\U0001f504"),
+        dict(_OTHER),
+    ],
+    "cleaning": [
+        _p("recurring_cleaning", "Recurring Cleaning", "\U0001f501"),
+        _p("deep_cleaning", "Deep Cleaning", "\U0001f9fd"),
+        _p("move_in_out", "Move-In / Move-Out", "\U0001f4e6"),
+        _p("post_construction", "Post-Construction", "\U0001f3d7\ufe0f"),
+        _p("floor_care", "Floor Care", "\u2728"),
+        dict(_OTHER),
+    ],
+    "dental": [
+        _p("cleaning_exam", "Cleaning & Exam", "\U0001fa75"),
+        _p("whitening", "Whitening", "\u2728"),
+        _p("orthodontics", "Orthodontics", "\U0001f601"),
+        _p("implants", "Implants", "\U0001f9b7"),
+        _p("cosmetic", "Cosmetic", "\U0001f48e"),
+        dict(_OTHER),
+    ],
+}
+
+# Every template carries its list, so `resolve(industry)["products"]` works
+# like every other piece of a template. A template without its own catalogue
+# gets the neutral one, never another vertical's.
+for _key, _tpl in TEMPLATES.items():
+    _tpl["products"] = copy.deepcopy(
+        PRODUCT_CATALOGS.get(_key, PRODUCT_CATALOGS[GENERIC_KEY]))
+
+
+def products(industry: Optional[str]) -> List[Dict[str, str]]:
+    """This industry's starting product/service list: [{key, label, icon}].
+
+    Falls back to GENERIC (neutral), never to insurance or funeral. Returns
+    copies so a caller cannot edit the registry for every organization.
+    """
+    return copy.deepcopy(resolve(industry).get("products")
+                         or PRODUCT_CATALOGS[GENERIC_KEY])
+
+
+def parse_product_override(raw: Optional[str]) -> Optional[List[Dict[str, str]]]:
+    """An Organization.products value as a clean list, or None to inherit.
+
+    Tolerates rows written by hand: bare string keys become {key, label}, and
+    anything unreadable means "inherit", never an empty tab.
+    """
+    import json
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(data, list):
+        return None
+    out: List[Dict[str, str]] = []
+    for item in data:
+        if isinstance(item, str) and item.strip():
+            key = item.strip()
+            out.append({"key": key,
+                        "label": LEGACY_PRODUCT_LABELS.get(key, key),
+                        "icon": LEGACY_PRODUCT_ICONS.get(key, "")})
+        elif isinstance(item, dict) and item.get("key"):
+            key = str(item["key"])
+            out.append({"key": key,
+                        "label": str(item.get("label") or
+                                     LEGACY_PRODUCT_LABELS.get(key, key)),
+                        "icon": str(item.get("icon") or "")})
+    return out or None
+
+
+def products_for_org(org: Any) -> Dict[str, Any]:
+    """The resolved product list for an organization, and where it came from.
+
+    The org's own override when it has one, else its industry's template.
+    Also carries `legacy_labels` so a key already stored on a case file that
+    this list no longer offers still renders with its original name.
+    """
+    industry = getattr(org, "industry", None) if org is not None else None
+    override = parse_product_override(
+        getattr(org, "products", None) if org is not None else None)
+    return {
+        "products": override if override is not None else products(industry),
+        "is_custom": override is not None,
+        "industry": normalize(industry),
+        "industry_matched": is_known(industry),
+        "legacy_labels": dict(LEGACY_PRODUCT_LABELS),
+    }

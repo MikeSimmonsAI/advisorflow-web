@@ -563,10 +563,9 @@ export default function Leads() {
         ai_direction: bulkAiDirection.trim() || null,
         relationship_type: bulkRelationshipType || null,
       })
+      // Drafts (auto_send false) come back in result.results and are NOT
+      // stored or queued anywhere server-side (result.persisted === false).
       setAiResult({ mode, ...result })
-      if (!autoSend) {
-        // Queued — tell user to go check Auto-Send Queue
-      }
     } catch (err) {
       setAiResult({ error: err.message })
     } finally {
@@ -1710,7 +1709,7 @@ export default function Leads() {
                   onClick={() => handleAiAction('queue')}
                   disabled={!!aiActioning || sendableSelectedIds.length === 0}
                 >
-                  {aiActioning === 'queue' ? '⏳ Queuing…' : '📥 AI Queue for review'}
+                  {aiActioning === 'queue' ? '⏳ Drafting…' : '📥 AI drafts for review'}
                 </button>
                 <button
                   className="btn btn--primary"
@@ -1725,35 +1724,64 @@ export default function Leads() {
               {bulkResult && (
                 <div className="leads-bulk-result" style={{ marginTop: 8 }}>✓ Sent: {bulkResult.sent_count} · Skipped: {bulkResult.skipped_count}</div>
               )}
-              {aiResult && !aiResult.error && (
-                <div className="leads-ai-result" style={{ marginTop: 8 }}>
-                  {/*
-                    THE BACKEND HAS ALWAYS RETURNED `errors` AND `results[]`.
-                    Neither was rendered, so a batch in which every single lead
-                    failed still drew a green "✓ Sent: 0 · Queued: 0 · Skipped: 0"
-                    and the operator believed the send had gone out. Never lead
-                    with a tick when anything failed, and show the reasons.
-                  */}
-                  {aiResult.errors > 0
-                    ? `⚠ ${aiResult.errors} of ${aiResult.total} failed · Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped}`
-                    : aiResult.mode === 'queue'
-                      ? `✓ ${aiResult.queued} messages queued for review`
-                      : `✓ Sent: ${aiResult.sent} · Queued: ${aiResult.queued} · Skipped: ${aiResult.skipped}`}
-                </div>
-              )}
-              {aiResult?.errors > 0 && (
-                <ul className="compose-error" style={{ marginTop: 6, paddingLeft: 18 }}>
-                  {(aiResult.results || [])
-                    .filter(r => r.action === 'error')
-                    .slice(0, 5)
-                    .map(r => (
-                      <li key={r.lead_id}>{r.reason || 'Unknown error'}</li>
-                    ))}
-                  {(aiResult.results || []).filter(r => r.action === 'error').length > 5 && (
-                    <li>…and {(aiResult.results || []).filter(r => r.action === 'error').length - 5} more</li>
-                  )}
-                </ul>
-              )}
+              {aiResult && !aiResult.error && (() => {
+                // Honest summary. Every lead lands in exactly one bucket and
+                // each bucket is shown by name: a switched-off sender is
+                // "disabled", a failed AI generation is "skipped (AI failed)",
+                // and only real faults are "errors". Drafts are returned to
+                // this screen only — nothing is queued or stored server-side.
+                const rs = aiResult.results || []
+                const parts = []
+                if (aiResult.sent) parts.push(`Sent: ${aiResult.sent}`)
+                if (aiResult.drafted) parts.push(`Drafts: ${aiResult.drafted}`)
+                if (aiResult.disabled) parts.push(`Disabled: ${aiResult.disabled}`)
+                if (aiResult.skipped) parts.push(`Skipped: ${aiResult.skipped}`)
+                if (aiResult.skipped_fallback) parts.push(`Skipped (AI failed): ${aiResult.skipped_fallback}`)
+                if (aiResult.errors) parts.push(`Errors: ${aiResult.errors}`)
+                const problems = rs.filter(r => ['error', 'disabled', 'skipped_fallback', 'blocked'].includes(r.action))
+                const drafts = rs.filter(r => r.action === 'draft')
+                const allGood = !aiResult.errors && !aiResult.disabled && !aiResult.skipped_fallback
+                const headline = aiResult.mode === 'queue'
+                  ? `${allGood ? '✓' : '⚠'} ${aiResult.drafted || 0} of ${aiResult.total} drafts ready — review before sending (not queued or sent)`
+                  : `${allGood ? '✓' : '⚠'} ${aiResult.sent || 0} of ${aiResult.total} sent`
+                return (
+                  <>
+                    <div className="leads-ai-result" style={{ marginTop: 8 }}>
+                      {headline}{parts.length ? ` · ${parts.join(' · ')}` : ''}
+                    </div>
+                    {problems.length > 0 && (
+                      <ul className="compose-error" style={{ marginTop: 6, paddingLeft: 18 }}>
+                        {problems.slice(0, 5).map(r => (
+                          <li key={r.lead_id}>
+                            {r.action === 'disabled' ? 'Disabled: '
+                              : r.action === 'skipped_fallback' ? `AI failed${r.error_kind ? ` (${r.error_kind})` : ''}: `
+                              : r.action === 'blocked' ? 'Blocked: '
+                              : 'Error: '}
+                            {r.reason || 'Unknown reason'}
+                          </li>
+                        ))}
+                        {problems.length > 5 && <li>…and {problems.length - 5} more</li>}
+                      </ul>
+                    )}
+                    {drafts.length > 0 && (
+                      <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 12, color: 'var(--text-secondary)' }}>
+                        {drafts.slice(0, 10).map(r => (
+                          <li key={r.lead_id} style={{ marginBottom: 4 }}>
+                            <strong>{r.lead_name || r.lead_id}</strong>: {r.reply.length > 160 ? `${r.reply.slice(0, 160)}…` : r.reply}
+                            {' '}
+                            <button
+                              type="button"
+                              onClick={() => setBulkMessage(r.reply)}
+                              style={{ fontSize: 11, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--signal-blue)', padding: 0 }}
+                            >Use this draft</button>
+                          </li>
+                        ))}
+                        {drafts.length > 10 && <li>…and {drafts.length - 10} more</li>}
+                      </ul>
+                    )}
+                  </>
+                )
+              })()}
               {aiResult?.error && <div className="compose-error" style={{ marginTop: 8 }}>{aiResult.error}</div>}
             </div>
           )}

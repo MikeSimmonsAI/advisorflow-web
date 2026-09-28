@@ -633,11 +633,28 @@ def _resolve_appt_org(current_user: User, org_id: Optional[str], db) -> "Organiz
     `?org_id=` was loaded by id alone for any super_admin, letting one brand's
     operator read and WRITE another brand's appointment types. Routed through
     the same existing guard. See `_resolve_org` in org_settings_router.py.
+
+    With no `?org_id=`, the org is the ACTIVE workspace (X-Workspace-Id backed
+    by a membership, else the home org) - the same workspace `_is_admin_here`
+    evaluates the admin role in. Using the home column here let an admin check
+    pass in one workspace while the write landed in another.
     """
     from app.models.models import Organization
+    from app.services.lead_scope import active_workspace_org_id
     if org_id and current_user.role in ("super_admin", "god_admin"):
         return load_org_in_scope(db, current_user, org_id)
-    return db.query(Organization).filter_by(id=current_user.organization_id).first()
+    active = active_workspace_org_id(current_user, db)
+    if active is None:
+        return None
+    return db.query(Organization).filter_by(id=active).first()
+
+
+def _is_admin_here(current_user: User, db) -> bool:
+    """Workspace-aware admin check (same answer as deps.require_admin):
+    the caller's role IN the selected workspace, not the account-global
+    `users.role`. The request is read from the request context middleware."""
+    from app.services.lead_scope import is_manager_here
+    return is_manager_here(current_user, db)
 
 
 @router.get("/appointment-types")
@@ -684,7 +701,7 @@ def update_appointment_types(
     Super admin / god admin can pass ?org_id= to manage any org.
     """
     import json
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+    if not _is_admin_here(current_user, db):
         raise HTTPException(status_code=403, detail="Admin access required.")
     if not req.appointment_types:
         raise HTTPException(status_code=400, detail="At least one appointment type required.")
@@ -708,7 +725,7 @@ def reset_appointment_types(
     """Reset to industry defaults.
     Super admin / god admin can pass ?org_id= to manage any org.
     """
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+    if not _is_admin_here(current_user, db):
         raise HTTPException(status_code=403, detail="Admin access required.")
     org = _resolve_appt_org(current_user, org_id, db)
     if org:
@@ -719,3 +736,107 @@ def reset_appointment_types(
             "is_custom": False,
             "industry": industry_templates.normalize(industry),
             "industry_matched": industry_templates.is_known(industry)}
+
+
+# -- Per-org products / services (Client Record -> Products tab) ---------------
+#
+# Same contract as appointment types above: `Organization.products` is a JSON
+# override (NULL = inherit), the industry registry supplies the default, and an
+# unrecognised industry gets the neutral generic list - never insurance.
+# `legacy_labels` names every key the retired hard-coded list could have stored
+# on a case file, so an old selection never renders as a bare key or vanishes.
+
+MAX_PRODUCTS = 100
+_PRODUCT_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9_]{0,63}$")
+
+
+class ProductItem(BaseModel):
+    key: str
+    label: str
+    icon: Optional[str] = None
+
+
+class ProductsRequest(BaseModel):
+    products: list[ProductItem]
+
+
+def _clean_products(items: list) -> list:
+    """Validate and dedupe (first occurrence of a key wins). Raises 400."""
+    if not items:
+        raise HTTPException(status_code=400, detail="At least one product required.")
+    if len(items) > MAX_PRODUCTS:
+        raise HTTPException(status_code=400,
+                            detail=f"At most {MAX_PRODUCTS} products allowed.")
+    out, seen = [], set()
+    for item in items:
+        key = (item.key or "").strip()
+        label = (item.label or "").strip()
+        icon = (item.icon or "").strip()
+        if not _PRODUCT_KEY_RE.match(key):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid product key {key!r}: use lowercase letters, "
+                       "digits and underscores (max 64).")
+        if not label or len(label) > 80:
+            raise HTTPException(status_code=400,
+                                detail=f"Product {key!r} needs a label of 1-80 characters.")
+        if len(icon) > 16:
+            raise HTTPException(status_code=400,
+                                detail=f"Product {key!r} icon is too long.")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"key": key, "label": label, "icon": icon})
+    return out
+
+
+@router.get("/products")
+def get_products(
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    """Return this org's product/service list (falls back to industry defaults).
+    Super admin / god admin can pass ?org_id= to inspect any org in scope.
+    """
+    org = _resolve_appt_org(current_user, org_id, db)
+    return industry_templates.products_for_org(org)
+
+
+@router.put("/products")
+def update_products(
+    req: ProductsRequest,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    """Save an org-specific product/service list. Admin only."""
+    import json
+    if not _is_admin_here(current_user, db):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    cleaned = _clean_products(req.products)
+    org = _resolve_appt_org(current_user, org_id, db)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    org.products = json.dumps(cleaned)
+    db.commit()
+    log_action(db, org.id, current_user.id,
+               action="settings.products_updated", target_type="organization",
+               target_id=str(org.id))
+    return industry_templates.products_for_org(org)
+
+
+@router.delete("/products")
+def reset_products(
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    """Reset to the industry default product list. Admin only."""
+    if not _is_admin_here(current_user, db):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    org = _resolve_appt_org(current_user, org_id, db)
+    if org:
+        org.products = None
+        db.commit()
+    return industry_templates.products_for_org(org)

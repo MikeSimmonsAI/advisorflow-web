@@ -44,6 +44,12 @@ export default function DemoSitesPanel({ opp, onChanged }) {
   const [html, setHtml] = useState('')
   const [fileName, setFileName] = useState('')
   const [retire, setRetire] = useState(false)
+  // The vanity link name. Pre-filled from the live demo in the chosen slot so
+  // a republish keeps the name the rep already gave out; `slugTouched` stops
+  // the pre-fill from overwriting what the rep typed.
+  const [slugName, setSlugName] = useState('')
+  const [slugTouched, setSlugTouched] = useState(false)
+  const [slugError, setSlugError] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -56,6 +62,15 @@ export default function DemoSitesPanel({ opp, onChanged }) {
   }, [opp.id])
 
   useEffect(() => { load() }, [load])
+
+  // The name currently live in a slot, if any (the list is newest first).
+  const currentSlug = useCallback(
+    (s) => ((demos || []).find(d => d.is_live && (d.slot || 'platform') === s && d.slug) || {}).slug || '',
+    [demos])
+
+  useEffect(() => {
+    if (open && !slugTouched) setSlugName(currentSlug(slot))
+  }, [open, slot, slugTouched, currentSlug])
 
   function pickFile(e) {
     const f = e.target.files && e.target.files[0]
@@ -85,18 +100,25 @@ export default function DemoSitesPanel({ opp, onChanged }) {
   async function publish() {
     if (!title.trim()) { setError('Give it a title â€” the prospect sees it.'); return }
     if (!html.trim()) { setError('Choose the HTML file first.'); return }
-    setBusy(true); setError(null)
+    setBusy(true); setError(null); setSlugError(null)
     try {
-      const r = await api.post(`/sales/opportunities/${opp.id}/demo-site`, {
-        title: title.trim(), html, slot, retire_previous: retire,
-      })
+      const payload = { title: title.trim(), html, slot, retire_previous: retire }
+      // Sent only when there is one. Left blank, the server keeps whatever name
+      // the live version in this slot already has, so the link survives.
+      if (slugName.trim()) payload.slug = slugName.trim()
+      const r = await api.post(`/sales/opportunities/${opp.id}/demo-site`, payload)
       setOpen(false)
       setHtml(''); setFileName(''); setTitle(''); setRetire(false)
+      setSlugName(''); setSlugTouched(false)
       await load()
       if (onChanged) onChanged()
       if (r && r.url) copy(r.url)
     } catch (e) {
-      setError(e?.message || 'Publish failed')
+      const msg = e?.message || 'Publish failed'
+      // A taken or invalid name comes back as a 400 naming the problem; show
+      // it beside the field as well as in the error bar.
+      if (/link name/i.test(msg)) setSlugError(msg)
+      setError(msg)
     } finally {
       setBusy(false)
     }
@@ -231,6 +253,22 @@ export default function DemoSitesPanel({ opp, onChanged }) {
             )}
           </div>
 
+          <div className="sw-field">
+            <label>LINK NAME</label>
+            <input className="sw-input" value={slugName}
+                   placeholder="e.g. countryside (optional)"
+                   onChange={e => { setSlugName(e.target.value); setSlugTouched(true); setSlugError(null) }} />
+            {slugError ? (
+              <div className="sw-subtle" style={{ color: 'var(--signal-red, #d33)' }}>{slugError}</div>
+            ) : (
+              <div className="sw-subtle">
+                A readable address: /demo/<code>{slugName.trim() || 'name'}</code>. It moves
+                to each new version, so the link you already gave out keeps working.
+                Leave blank to keep the current name (or use the private token link).
+              </div>
+            )}
+          </div>
+
           <label className="sw-flex sw-mt" style={{ gap: 8, alignItems: 'center' }}>
             <input type="checkbox" checked={retire}
                    onChange={e => setRetire(e.target.checked)} />
@@ -244,7 +282,7 @@ export default function DemoSitesPanel({ opp, onChanged }) {
 
           <div className="sw-flex sw-mt" style={{ justifyContent: 'flex-end', gap: 8 }}>
             <button className="sw-btn" disabled={busy}
-                    onClick={() => { setOpen(false); setError(null) }}>Cancel</button>
+                    onClick={() => { setOpen(false); setError(null); setSlugError(null); setSlugTouched(false) }}>Cancel</button>
             <button className="sw-btn sw-primary" disabled={busy} onClick={publish}>
               {busy ? 'Publishingâ€¦' : 'Publish and copy link'}
             </button>

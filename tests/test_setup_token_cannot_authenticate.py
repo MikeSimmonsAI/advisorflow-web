@@ -248,4 +248,7 @@ def test_an_org_admin_cannot_generate_a_link_for_another_orgs_advisor(
     db_session.commit()
 
     r = client.post("/admin/setup-link/%s" % outsider.id, headers=admin_headers)
-    assert r.status_code == 403
+    # 404, not 403: an out-of-scope user is answered exactly like a missing
+    # one, so user ids in other organizations cannot be enumerated
+    # (same contract as deps.load_user_in_scope).
+    assert r.status_code == 404

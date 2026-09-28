@@ -173,7 +173,7 @@ export default function AIHub() {
                   <div className="aihub-conv-info">
                     <div className="aihub-conv-name">{conv.lead_name || 'Unknown'}</div>
                     <div className="aihub-conv-meta">
-                      Touch {conv.touch_number || 0} of 8 · {conv.messages_sent || 0} sent · {conv.replies_received || 0} replies
+                      Touch {conv.touch_number || 0}{conv.total_touches ? ` of ${conv.total_touches}` : ''} · {conv.messages_sent || 0} sent · {conv.replies_received || 0} replies
                     </div>
                   </div>
                   <div className="aihub-conv-right">
