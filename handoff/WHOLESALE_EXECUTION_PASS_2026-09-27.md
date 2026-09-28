@@ -256,3 +256,28 @@ seller site and SMS consent work (`78759ad`) is complete and was not reopened.
   off the event loop, per-org transaction). Writes only exception rows + audit events.
 - `GET /wholesale/exceptions/summary` → My Work card: "assigned to me" (+ unassigned/escalated for admins).
   `/workqueue/today` shape unchanged (a test pins it).
+
+### Deployed + verified (evening)
+- 318a392 (P3/P5/P6): full suite 6,061 passed / 0 failed; live, health 200.
+  - Prod: buyer link dry run + real run → only the ZZTEST buyer exists, skipped (is_test); re-run idempotent.
+  - Packet on test deal 2df6021c: ARV "Not established", MAO "NOT CALCULATED", repairs "Not on file", 0 comps,
+    storage-not-configured note, TEST DATA banner, disclaimer. Nothing sent.
+  - Manual sweep (EVO org): 7 `title_ownership_anomaly` on real EvoSense properties with owner review flags;
+    second sweep raised 0 (idempotent). No AI / disposition exceptions — no qualifying data in prod today.
+  - My Work shows the Exceptions card (7 unassigned for the owner). Funding Partners page + nav live.
+  - Hourly loop `wholesale_exception_sweep_loop` registered in the job ledger.
+
+## Importer P0 — Classify loop (fb7b8ca)
+- Bug: after "Apply classification & re-analyze" the wizard was hard-coded back to Step 3, and nothing
+  server-side recorded that Classify was done, so every reload also fell back to Analyze (loop).
+- Fix: `save_mapping` stores `classification_json.confirmed_at` (cleared when a different classification
+  column is mapped); every batch payload carries `workflow: {step, analyzed, classified}` computed from
+  persisted state; wizard goes to Step 5 after Apply and shows re-analysis progress there; refresh / Back /
+  ledger land on the server's step; stale ?step= values beyond what the batch can show are ignored.
+- Tests: tests/test_intake_classify_workflow.py (25-row Atlantis-shaped file).
+- Prod re-run of ATL-20260928-001 (Atlantis Light & Power): Step 4 → Apply → Step 5; refresh/bare URL → 5;
+  Back/Forward correct; 25 staged (no duplication), 4 in-file dups, 1 email review, 25 previous_customer
+  (contact-only), 0 SMS ready, 0 leads; approved as **Keep staged (no import)** → status staged; Step 7
+  Results opens. Nothing entered Atlantis's CRM. A real import is Mike's decision.
+- Follow-up fix: Step 7 "Still staged" tile showed 0 for a stage-only batch (no commit report) → now shows
+  the staged row count.

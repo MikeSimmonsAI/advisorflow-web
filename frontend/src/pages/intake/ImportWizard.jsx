@@ -821,7 +821,7 @@ function ResultsStep({ batch, onLedger }) {
         <Tile label="Skipped" value={r.skipped} tone="muted" />
         <Tile label="Held — plan capacity" value={r.held_for_capacity} tone="amber" />
         <Tile label="Failed" value={r.failed} tone="red" />
-        <Tile label="Still staged" value={r.rows_still_staged} tone="amber" />
+        <Tile label="Still staged" value={r.rows_still_staged ?? (batch.status === 'staged' ? batch.rows_staged : undefined)} tone="amber" />
       </div>
       {r.lead_not_activated && Object.keys(r.lead_not_activated).length > 0 && (
         <div className="ic-note">Opportunity rows not activated as leads:{' '}
