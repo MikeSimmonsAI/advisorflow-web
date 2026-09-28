@@ -738,7 +738,12 @@ def reset_appointment_types(
         raise HTTPException(status_code=403, detail="Admin access required.")
     org = _resolve_appt_org(current_user, org_id, db)
     if org:
+        previous = org.appointment_types
         org.appointment_types = None
+        log_action(db, org.id, current_user.id,
+                   action="settings.appointment_types_reset", target_type="organization",
+                   target_id=str(org.id), before={"appointment_types": previous},
+                   commit=False)
         db.commit()
     industry = getattr(org, "industry", None) if org else None
     return {"appointment_types": industry_templates.appointment_types(industry),
@@ -846,6 +851,11 @@ def reset_products(
         raise HTTPException(status_code=403, detail="Admin access required.")
     org = _resolve_appt_org(current_user, org_id, db)
     if org:
+        previous = org.products
         org.products = None
+        log_action(db, org.id, current_user.id,
+                   action="settings.products_reset", target_type="organization",
+                   target_id=str(org.id), before={"products": previous},
+                   commit=False)
         db.commit()
     return industry_templates.products_for_org(org)

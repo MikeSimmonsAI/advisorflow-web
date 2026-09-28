@@ -36,6 +36,7 @@ from sqlalchemy import text
 
 from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User
+from app.routers.audit_log_router import log_action
 from app.services import crm_service, crm_secrets
 from app.services import integration_auth
 from app.models.integration_models import (
@@ -273,9 +274,16 @@ def delete_connection(
 ):
     _require_admin(current_user)
     org_id = _get_org_id(current_user)
-    _get_connection_or_404(db, conn_id, org_id)
+    conn = _get_connection_or_404(db, conn_id, org_id)
 
     db.execute(text("DELETE FROM crm_connections WHERE id = :id"), {"id": conn_id})
+    # Non-secret descriptors only: no webhook URL, secret or API key.
+    log_action(db, conn.get("organization_id") or org_id, current_user.id,
+               action="crm_connection.deleted", target_type="crm_connection",
+               target_id=conn_id,
+               before={"name": conn.get("name"), "crm_type": conn.get("crm_type"),
+                       "sync_mode": conn.get("sync_mode")},
+               commit=False)
     db.commit()
     return {"message": "Deleted"}
 

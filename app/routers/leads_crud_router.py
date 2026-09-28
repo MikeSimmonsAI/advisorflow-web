@@ -336,11 +336,15 @@ def delete_lead(
         raise HTTPException(status_code=404, detail="Lead not found")
 
     # ALLOWLIST, not a denylist — same reasoning as the edit guard above.
-    if current_user.role not in ("org_admin", "super_admin", "god_admin") \
-            and lead.assigned_to_id != current_user.id:
+    # Admin authority is the role IN THE ACTIVE WORKSPACE (is_manager_here, as
+    # deps.require_admin), not users.role; platform operators pass as before.
+    is_admin_here = (current_user.role in ("super_admin", "god_admin")
+                     or lead_scope.is_manager_here(current_user, db))
+    if not is_admin_here and lead.assigned_to_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only delete your own leads")
 
-    log_action(db, current_user.organization_id, current_user.id, action="lead.delete", target_type="lead", target_id=lead_id)
+    # Audited against the lead's own organization, not the caller's home org.
+    log_action(db, lead.organization_id, current_user.id, action="lead.delete", target_type="lead", target_id=lead_id, commit=False)
     db.delete(lead)
     db.commit()
     return {"deleted": True, "id": lead_id}

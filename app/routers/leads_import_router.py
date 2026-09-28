@@ -34,6 +34,7 @@ from app.services import lead_scope
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _is_suppressed(db: Session, lead: Lead) -> bool:
@@ -393,10 +394,15 @@ def delete_import_batch(
     + their contact registry entries so a clean re-import works without
     duplicate flags. Restricted to org_admin / super_admin.
     """
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+    # Admin IN THE WORKSPACE BEING WORKED IN (is_manager_here, as
+    # deps.require_admin), and the batch is looked up in that same workspace.
+    # Without a workspace header both are the home org, exactly as before.
+    # Platform operators (super_admin / god_admin) keep their platform-role pass.
+    if not (current_user.role in ("super_admin", "god_admin")
+            or lead_scope.is_manager_here(current_user, db)):
         raise HTTPException(status_code=403, detail="Only admins can delete import batches.")
 
-    org_id = current_user.organization_id
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
 
     # Collect lead IDs for this batch using a subquery so we hit the DB once.
     from sqlalchemy import text as sa_text
@@ -438,67 +444,65 @@ def delete_import_batch(
 
     deleted = {}
 
+    # EVERY OPTIONAL STEP RUNS IN ITS OWN SAVEPOINT.
+    #
+    # The "table may not exist in this deployment" tolerance used to be
+    # `except: db.rollback(); db.begin()`. A full rollback does not skip one
+    # statement - it throws away the WHOLE transaction: the duplicate_of_lead_id
+    # un-linking and every child delete that had already succeeded. The loop
+    # then carried on, so the batch was "deleted" with its earlier children
+    # silently restored (orphans / FK failures on the final leads delete). And
+    # the two `except: pass` steps were worse on Postgres: a failed statement
+    # aborts the transaction, so every later statement would have failed too.
+    #
+    # A savepoint undoes only the step that failed; everything else still
+    # commits - or fails - together at the single db.commit() below.
+    def _optional(sql: str, key: Optional[str] = None) -> None:
+        try:
+            with db.begin_nested():
+                r = db.execute(sa_text(sql), p)
+            if key and r.rowcount:
+                deleted[key] = r.rowcount
+        except Exception:
+            # Table/column absent in this deployment - skip just this step.
+            logger.info("delete_import_batch: skipped optional step %s", key or sql[:40])
+
     # NULL out duplicate_of_lead_id on any leads OUTSIDE this batch that
     # point INTO it — otherwise the leads delete will hit a self-FK violation
-    try:
-        db.execute(
-            sa_text(
-                f"UPDATE leads SET duplicate_of_lead_id = NULL "
-                f"WHERE duplicate_of_lead_id IN ({batch_subq})"
-            ),
-            p,
-        )
-    except Exception:
-        pass  # column may not exist in older schemas
+    _optional(
+        f"UPDATE leads SET duplicate_of_lead_id = NULL "
+        f"WHERE duplicate_of_lead_id IN ({batch_subq})"
+    )
 
     for table in dependents_by_lead_id:
-        try:
-            r = db.execute(
-                sa_text(f"DELETE FROM {table} WHERE lead_id IN ({batch_subq})"), p
-            )
-            if r.rowcount:
-                deleted[table] = r.rowcount
-        except Exception:
-            # Table may not exist yet in this deployment — skip and continue
-            db.rollback()
-            db.begin()
+        _optional(f"DELETE FROM {table} WHERE lead_id IN ({batch_subq})", table)
 
     # booking_links last (booking_followups.booking_link_id → booking_links)
-    try:
-        r = db.execute(
-            sa_text(f"DELETE FROM booking_links WHERE lead_id IN ({batch_subq})"), p
-        )
-        if r.rowcount:
-            deleted["booking_links"] = r.rowcount
-    except Exception:
-        db.rollback()
-        db.begin()
+    _optional(f"DELETE FROM booking_links WHERE lead_id IN ({batch_subq})", "booking_links")
 
     # contact_registry: remove entries whose first_seen_lead_id is in this batch
     # so re-import doesn't flag every lead as a duplicate
+    _optional(
+        f"DELETE FROM contact_registry WHERE organization_id = :org "
+        f"AND first_seen_lead_id IN ({batch_subq})",
+        "contact_registry",
+    )
+
+    # Finally delete the leads themselves. NOT optional: if this fails the
+    # whole request fails and nothing above is committed.
     try:
         r = db.execute(
             sa_text(
-                f"DELETE FROM contact_registry WHERE organization_id = :org "
-                f"AND first_seen_lead_id IN ({batch_subq})"
+                "DELETE FROM leads WHERE organization_id = :org AND source_file = :sf"
             ),
             p,
         )
-        if r.rowcount:
-            deleted["contact_registry"] = r.rowcount
     except Exception:
-        pass
-
-    # Finally delete the leads themselves
-    r = db.execute(
-        sa_text(
-            "DELETE FROM leads WHERE organization_id = :org AND source_file = :sf"
-        ),
-        p,
-    )
+        db.rollback()
+        logger.exception("delete_import_batch: lead delete failed; batch left intact")
+        raise HTTPException(status_code=500,
+                            detail="Could not delete the import batch; nothing was changed.")
     deleted["leads"] = r.rowcount
-
-    db.commit()
 
     log_action(
         db,
@@ -508,7 +512,9 @@ def delete_import_batch(
         target_type="lead_batch",
         target_id=source_file,
         details=f"Deleted {deleted.get('leads', 0)} leads from batch '{source_file}'",
+        commit=False,
     )
+    db.commit()
 
     return {"deleted": deleted, "source_file": source_file}
 

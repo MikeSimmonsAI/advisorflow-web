@@ -266,9 +266,15 @@ class RecurringBlockRequest(BaseModel):
 def _resolve_advisor(db: Session, current_user: User, advisor_id: Optional[str]) -> User:
     """Return the target advisor. Admins may pass advisor_id to manage another advisor."""
     if advisor_id and lead_scope.is_manager_here(current_user, db):
+        # The advisor must belong to the workspace the caller is a manager IN.
+        # is_manager_here answers for the SELECTED workspace, so the lookup is
+        # confined to that same workspace; filtering on the home column let an
+        # admin-of-B (advisor at home in A) manage A's advisors while standing
+        # in B. Without a workspace header both are the home org, as before.
+        scope_org_id = lead_scope.active_workspace_org_id(current_user, db)
         target = db.query(User).filter(
             User.id == advisor_id,
-            User.organization_id == current_user.organization_id,
+            User.organization_id == scope_org_id,
         ).first()
         if target:
             return target
@@ -298,7 +304,24 @@ def block_date_range(
 
     cancelled = []
     if req.cancel_existing:
-        cancelled = _cancel_bookings_in_range(db, current_user, req.start_date, req.end_date)
+        # The bookings being cleared are the TARGET advisor's - the person whose
+        # time is being blocked - not the caller's. Passing current_user here
+        # cancelled the admin's own appointments and left the advisor's booked.
+        cancelled = _cancel_bookings_in_range(db, target, req.start_date, req.end_date)
+        if cancelled:
+            from app.routers.audit_log_router import log_action
+            db.flush()
+            log_action(
+                db, target.organization_id, current_user.id,
+                action="availability.bookings_cancelled",
+                target_type="user", target_id=str(target.id),
+                details={"block_id": block.id,
+                         "advisor_id": target.id,
+                         "start_date": req.start_date.isoformat(),
+                         "end_date": req.end_date.isoformat(),
+                         "cancelled_booking_ids": cancelled},
+                commit=False,
+            )
 
     db.commit()
     return {"block_id": block.id, "cancelled_bookings": len(cancelled)}

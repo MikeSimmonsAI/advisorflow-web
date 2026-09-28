@@ -69,10 +69,16 @@ def _actor_platform_ids(db: Session, actor: User) -> set:
     A brand-sales identity has no organization; its reach comes from the brand
     sales orgs it is a member of, each of which names a platform. A platform
     admin carries `platform_id` directly.
+
+    ONLY A super_admin's `platform_id` IS A GRANT. Customer identities carry
+    the column too — customer_activation stamps org.platform_id on every
+    org_admin / advisor / viewer it creates — so counting it for any role made
+    a customer's org_admin "staff" of their whole brand: they could read every
+    other customer's onboarding progress and overrides by id.
     """
     ids = set()
     pid = getattr(actor, "platform_id", None)
-    if pid:
+    if pid and getattr(actor, "role", None) == "super_admin":
         ids.add(pid)
     scope_ids = [m.scope_id for m in sales_memberships(actor, db)]
     if scope_ids:

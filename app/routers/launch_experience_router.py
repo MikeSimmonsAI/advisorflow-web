@@ -58,9 +58,18 @@ router = APIRouter(prefix="/launch-experience", tags=["Launch Experience"])
 # ── scope ───────────────────────────────────────────────────────────────────
 
 def _actor_platform_ids(db: Session, actor: User) -> set:
+    """Platforms this staff actor may reach. Empty for a customer user.
+
+    `users.platform_id` is a PLATFORM-ADMIN grant only for a super_admin (see
+    the column comment and get_platform_org_ids). Customer identities carry it
+    too — customer_activation stamps org.platform_id on every org_admin /
+    advisor / viewer it creates — so counting it for any role let a customer's
+    org_admin preview every other customer on the same brand, and rewrite the
+    brand-level and other customers' launch experience through PUT /config.
+    """
     ids = set()
     pid = getattr(actor, "platform_id", None)
-    if pid:
+    if pid and getattr(actor, "role", None) == "super_admin":
         ids.add(pid)
     scope_ids = [m.scope_id for m in sales_memberships(actor, db)]
     if scope_ids:

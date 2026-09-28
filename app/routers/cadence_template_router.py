@@ -13,6 +13,7 @@ from typing import Optional
 from app.deps import get_db, get_current_user, require_admin, require_tenant_user
 from app.models.models import CadenceTemplate, CadenceTemplateTouch, User
 from app.services.lead_scope import active_workspace_org_id
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/cadence-templates", tags=["cadence-templates"])
 
@@ -392,7 +393,17 @@ def update_template(
     t.updated_at = datetime.utcnow()
 
     if req.touches is not None:
+        old_touch_ids = [r[0] for r in db.query(CadenceTemplateTouch.id)
+                         .filter(CadenceTemplateTouch.template_id == t.id)
+                         .order_by(CadenceTemplateTouch.touch_number).all()]
         db.query(CadenceTemplateTouch).filter(CadenceTemplateTouch.template_id == t.id).delete()
+        # Same transaction as the replacement; org is the template's own.
+        log_action(db, t.organization_id, current_user.id,
+                   action="cadence_template.touches_replaced",
+                   target_type="cadence_template", target_id=t.id,
+                   before={"touch_count": len(old_touch_ids), "touch_ids": old_touch_ids},
+                   after={"touch_count": len(req.touches)},
+                   commit=False)
         for touch_data in req.touches:
             touch = CadenceTemplateTouch(
                 id=str(uuid.uuid4()),

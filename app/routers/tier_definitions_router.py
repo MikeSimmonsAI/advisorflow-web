@@ -253,5 +253,16 @@ def reset_default_tiers(
         from app.models.models import Organization
         org = db.query(Organization).filter(Organization.id == target_org_id).first()
         industry = org.industry if org else None
+    before_count = (db.query(TierDefinition)
+                    .filter(TierDefinition.organization_id == target_org_id).count())
     created = clear_and_reseed_tier_definitions(db, target_org_id, industry)
+    # clear_and_reseed commits internally (it owns its own transaction), so the
+    # entry is written with the helper's default commit afterwards, the same
+    # way every other log_action call in this router is.
+    log_action(db, target_org_id, current_user.id,
+               action="tier_definitions.reset_defaults",
+               target_type="organization", target_id=str(target_org_id),
+               details={"industry": industry},
+               before={"count": before_count},
+               after={"count": len(created)})
     return {"reset": len(created), "industry": industry, "message": f"Reset to {len(created)} {industry} industry defaults."}

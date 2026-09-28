@@ -396,12 +396,18 @@ def bulk_delete_duplicate_leads(
 
     Requires org_admin or super_admin role - advisors cannot bulk delete.
     """
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+    # Admin IN THE WORKSPACE BEING WORKED IN (lead_scope.is_manager_here, the
+    # same rule deps.require_admin enforces), not the account-global users.role:
+    # the rows deleted below belong to the active workspace. Platform operators
+    # (super_admin / god_admin) keep the platform-role pass they had before.
+    if not (current_user.role in ("super_admin", "god_admin")
+            or lead_scope.is_manager_here(current_user, db)):
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Admin role required to bulk delete leads.")
 
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
     duplicates = db.query(Lead).filter(
-        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
+        Lead.organization_id == org_id,
         Lead.is_duplicate == True,
     ).all()
 
@@ -411,13 +417,15 @@ def bulk_delete_duplicate_leads(
 
     db.commit()
 
+    # The org the deleted rows belonged to - the active workspace - not the
+    # caller's home column.
     log_action(
         db,
-        organization_id=current_user.organization_id,
+        organization_id=org_id,
         actor_user_id=current_user.id,
         action="lead.bulk_delete_duplicates",
         target_type="organization",
-        target_id=current_user.organization_id,
+        target_id=org_id,
         details={"deleted_count": count},
     )
 

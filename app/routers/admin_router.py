@@ -2962,6 +2962,16 @@ def wipe_demo_data(
         .delete(synchronize_session=False)
     )
 
+    # Same transaction as the deletes: the wipe and its record commit together.
+    log_action(
+        db, str(target_org.id), current_user.id,
+        action="demo.wipe", target_type="organization", target_id=str(target_org.id),
+        details={"leads_deleted": len(lead_ids),
+                 "demo_advisors_deleted": demo_advisors_deleted},
+        platform_id=getattr(target_org, "platform_id", None),
+        commit=False,
+    )
+
     db.commit()
 
     return {

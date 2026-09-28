@@ -28,6 +28,7 @@ from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Organization, CRMContact, CRMNote, Lead
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 from app.services import lead_scope
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/crm-native", tags=["crm-native"])
 
@@ -197,7 +198,12 @@ def reset_stages(
     org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Org not found")
+    previous = org.crm_stages
     org.crm_stages = None
+    log_action(db, org.id, current_user.id,
+               action="crm_native.stages_reset", target_type="organization",
+               target_id=str(org.id), before={"crm_stages": previous},
+               commit=False)
     db.commit()
     default = _industry_default_stages(org)
     return {"reset": True, "stages": default}

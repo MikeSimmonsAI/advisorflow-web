@@ -20,6 +20,7 @@ from app.models.import_models import (
     ImportBatch, ImportBatchStatus, ImportRowReviewStatus, ImportStagedRow,
 )
 from app.models.models import gen_uuid
+from app.routers.audit_log_router import log_action
 from app.services.import_permissions import (
     require_import_leads, require_import_review,
     require_import_commit, require_import_admin,
@@ -267,7 +268,16 @@ def delete_batch(batch_id: str, db: Session = Depends(get_db), user=Depends(requ
     if b.status in (ImportBatchStatus.COMMITTING, ImportBatchStatus.COMMITTED,
                     ImportBatchStatus.PARTIALLY_COMMITTED):
         raise HTTPException(409, "Cannot delete a committed or in-progress batch")
-    db.query(ImportStagedRow).filter(ImportStagedRow.batch_id == batch_id).delete()
+    staged_rows_deleted = (db.query(ImportStagedRow)
+                           .filter(ImportStagedRow.batch_id == batch_id).delete())
+    org_id = b.organization_id
+    before = {"status": getattr(b.status, "value", b.status),
+              "source_filename": b.source_filename, "display_name": b.display_name}
     db.delete(b)
+    log_action(db, org_id, user.id,
+               action="import_batch.deleted", target_type="import_batch",
+               target_id=batch_id,
+               details={"staged_rows_deleted": staged_rows_deleted},
+               before=before, commit=False)
     db.commit()
     return {"deleted": True, "id": batch_id}

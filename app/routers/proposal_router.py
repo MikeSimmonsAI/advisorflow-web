@@ -653,12 +653,25 @@ def serve_proposal_file(file_id: str, db: Session = Depends(get_db)):
     pf = db.query(ProposalFile).filter_by(id=file_id).first()
     if not pf:
         raise HTTPException(404, "File not found")
+    # A file stops being served when its proposal is deleted. The URL is a
+    # capability link (unguessable UUID, needed by the no-login client portal),
+    # so deleting the proposal is the owner's only way to revoke it.
+    if pf.proposal_id:
+        parent = db.query(Proposal).filter_by(id=pf.proposal_id).first()
+        if parent is None or getattr(parent, "deleted_at", None) is not None:
+            raise HTTPException(404, "File not found")
+    # Quotes/CR/LF in an uploaded filename must not break out of the header.
+    safe_name = "".join(ch for ch in (pf.filename or "file")
+                        if ch not in '"\\\r\n') or "file"
     return Response(
         content=pf.file_data,
         media_type=pf.content_type,
         headers={
-            "Content-Disposition": f'inline; filename="{pf.filename}"',
-            "Cache-Control": "public, max-age=86400",
+            "Content-Disposition": f'inline; filename="{safe_name}"',
+            # private: shared caches/CDNs must not keep a copy that outlives
+            # a revocation; nosniff: the browser uses the declared type only.
+            "Cache-Control": "private, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 

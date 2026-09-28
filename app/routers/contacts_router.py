@@ -24,6 +24,7 @@ from sqlalchemy import text
 
 from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import User
+from app.routers.audit_log_router import log_action
 
 router = APIRouter(prefix="/crm", tags=["crm-contacts"])
 
@@ -130,12 +131,26 @@ def delete_contact(
     current_user: User = Depends(require_tenant_user),
 ):
     row = db.execute(text(
-        "SELECT id FROM crm_contacts WHERE id = :id AND organization_id = :org_id"
+        # SELECT * rather than named columns: this table's shape differs between
+        # deployments (full_name vs first_name/last_name), and the snapshot
+        # below must never be the reason a delete fails.
+        "SELECT * FROM crm_contacts WHERE id = :id AND organization_id = :org_id"
     ), {"id": contact_id, "org_id": current_user.organization_id}).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Contact not found")
+    snapshot = _row_to_dict(row)
     db.execute(text("DELETE FROM crm_contact_notes WHERE contact_id = :id"), {"id": contact_id})
     db.execute(text("DELETE FROM crm_contacts WHERE id = :id"), {"id": contact_id})
+    # Recorded in the same transaction as the delete; the org is the row's own.
+    log_action(db, snapshot["organization_id"], current_user.id,
+               action="crm_contact.deleted", target_type="crm_contact",
+               target_id=contact_id,
+               before={"full_name": snapshot.get("full_name"),
+                       "first_name": snapshot.get("first_name"),
+                       "last_name": snapshot.get("last_name"),
+                       "email": snapshot.get("email"),
+                       "phone": snapshot.get("phone")},
+               commit=False)
     db.commit()
     return None
 
