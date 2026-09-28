@@ -509,9 +509,16 @@ def get_or_create_webhook_token(
     Requires org_admin or super_admin.
     """
 
+    # THE WORKSPACE require_admin JUDGED, not the home column. With the home
+    # column, a person who is an advisor at home but org_admin of workspace B
+    # passed require_admin in B and was handed HOME org's inbound webhook
+    # credential - a secret of an org they do not administer. Without
+    # X-Workspace-Id this is the home column, exactly as before.
+    from app.services.lead_scope import active_workspace_org_id
+    org_id = active_workspace_org_id(current_user, db)
     org = db.query(Organization).filter(
-        Organization.id == current_user.organization_id
-    ).first()
+        Organization.id == org_id
+    ).first() if org_id else None
     if not org:
         raise HTTPException(status_code=404, detail="Org not found")
 

@@ -99,7 +99,10 @@ def call_readiness(
         raise HTTPException(status_code=404, detail="Lead not found")
 
     try:
-        elig = check_call_eligibility(db, lead, current_user.organization_id)
+        # The LEAD'S organization (the workspace authorized_lead_query resolved),
+        # not the caller's home column: calling workspace B's family under home
+        # org A's voice configuration and limits was a cross-tenant write.
+        elig = check_call_eligibility(db, lead, lead.organization_id)
     except Exception as e:
         logger.exception("voice readiness failed for lead %s", lead_id)
         return {"ready": False, "reason": "Voice configuration could not be read: %s" % e,
@@ -115,7 +118,7 @@ def call_readiness(
     # of provider imports - a gate enforces it - and resolving the use-case
     # level needs the voice config, which comes from the provider layer.
     from app.services.voice_orchestrator import attempt_summary
-    attempts = attempt_summary(db, lead, current_user.organization_id)
+    attempts = attempt_summary(db, lead, lead.organization_id)
 
     return {"ready": bool(elig.ok), "reason": elig.reason, "code": elig.code,
             "attempts": attempts}
@@ -151,14 +154,15 @@ def initiate_call(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    elig = check_call_eligibility(db, lead, current_user.organization_id)
+    # The lead's organization, not the home column - see voice_readiness.
+    elig = check_call_eligibility(db, lead, lead.organization_id)
     if not elig.ok:
         # 409, not 400: this is a considered refusal with a reason worth
         # putting in front of the advisor verbatim.
         raise HTTPException(status_code=409, detail=elig.reason or "Call not permitted.")
 
     try:
-        call = start_file_check_call(db, lead, current_user.organization_id,
+        call = start_file_check_call(db, lead, lead.organization_id,
                                      advisor=current_user)
     except PermissionError as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -167,7 +171,7 @@ def initiate_call(
         raise HTTPException(status_code=502,
                             detail="The voice provider could not be reached: %s" % e)
 
-    log_action(db, current_user.organization_id, current_user.id,
+    log_action(db, lead.organization_id, current_user.id,
                action="voice.call_initiated", target_type="lead", target_id=lead_id)
 
     if call.status == "failed":
@@ -692,6 +696,13 @@ def create_campaign(
     if not req.lead_ids:
         raise HTTPException(status_code=400, detail="No leads selected")
 
+    # THE ACTIVE WORKSPACE - the one authorized_lead_query below draws the
+    # leads from. The campaign row, its audit entry and the background runner
+    # used the HOME column, so a campaign built from workspace B's families was
+    # owned by, and dialled under the voice configuration of, home org A.
+    # Without X-Workspace-Id this is the home column, exactly as before.
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
+
     # Validate leads belong to this CALLER, not merely to this organization.
     # Organization scope here meant an advisor could launch a bulk outbound
     # CALLING campaign against a colleague's families. Refused as a whole batch
@@ -719,7 +730,7 @@ def create_campaign(
             pass
 
     campaign = VoiceCallCampaign(
-        organization_id=current_user.organization_id,
+        organization_id=org_id,
         advisor_id=current_user.id,
         name=req.name,
         description=req.description,
@@ -735,7 +746,7 @@ def create_campaign(
     db.add(campaign)
     db.commit()
 
-    log_action(db, current_user.organization_id, current_user.id,
+    log_action(db, org_id, current_user.id,
                action="voice.campaign_created", target_type="campaign", target_id=campaign.id)
 
     # If no schedule — fire immediately in background thread
@@ -744,7 +755,7 @@ def create_campaign(
         db.commit()
         thread = threading.Thread(
             target=_run_campaign_background,
-            args=(campaign.id, current_user.id, current_user.organization_id),
+            args=(campaign.id, current_user.id, org_id),
             daemon=True
         )
         thread.start()
@@ -921,9 +932,9 @@ def list_campaigns(
     # campaigns and their per-campaign answer, voicemail and booking counts.
     campaigns = lead_scope.own_records_only(
         db.query(VoiceCallCampaign).filter(
-            VoiceCallCampaign.organization_id == current_user.organization_id,
+            VoiceCallCampaign.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         ),
-        VoiceCallCampaign.advisor_id, current_user,
+        VoiceCallCampaign.advisor_id, current_user, db,
     ).order_by(VoiceCallCampaign.created_at.desc()).limit(50).all()
 
     return [{
@@ -955,9 +966,9 @@ def get_campaign(
     c = lead_scope.own_records_only(
         db.query(VoiceCallCampaign).filter(
             VoiceCallCampaign.id == campaign_id,
-            VoiceCallCampaign.organization_id == current_user.organization_id,
+            VoiceCallCampaign.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         ),
-        VoiceCallCampaign.advisor_id, current_user,
+        VoiceCallCampaign.advisor_id, current_user, db,
     ).first()
     if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -997,9 +1008,9 @@ def pause_campaign(
     c = lead_scope.own_records_only(
         db.query(VoiceCallCampaign).filter(
             VoiceCallCampaign.id == campaign_id,
-            VoiceCallCampaign.organization_id == current_user.organization_id,
+            VoiceCallCampaign.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         ),
-        VoiceCallCampaign.advisor_id, current_user,
+        VoiceCallCampaign.advisor_id, current_user, db,
     ).first()
     if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -1018,9 +1029,9 @@ def cancel_campaign(
     c = lead_scope.own_records_only(
         db.query(VoiceCallCampaign).filter(
             VoiceCallCampaign.id == campaign_id,
-            VoiceCallCampaign.organization_id == current_user.organization_id,
+            VoiceCallCampaign.organization_id == lead_scope.active_workspace_org_id(current_user, db),
         ),
-        VoiceCallCampaign.advisor_id, current_user,
+        VoiceCallCampaign.advisor_id, current_user, db,
     ).first()
     if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")

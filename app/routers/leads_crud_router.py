@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta, time, timezone
 
-from app.deps import get_db, require_tenant_user, require_tenant_or_observer
+from app.deps import get_db, require_tenant_user, require_tenant_or_observer, require_not_observation
 from app.limiter import limiter
 from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Lead, Reply, ReplyClassification, CadenceState, BookingLink, EngagementTemperature, CRMContact, VoiceCall
@@ -53,7 +53,7 @@ class ManualLeadCreate(BaseModel):
     notes: Optional[str] = None
 
 
-@router.post("/create", status_code=201)
+@router.post("/create", status_code=201, dependencies=[Depends(require_not_observation)])
 def create_lead_manually(
     payload: ManualLeadCreate,
     db: Session = Depends(get_db),
@@ -65,6 +65,14 @@ def create_lead_manually(
     """
     import uuid
     from app.services.dedup_service import normalize_phone, normalize_last_name
+
+    # ONE ORGANIZATION FOR THE WHOLE CREATE - the active workspace. The dedup
+    # below already ran against the selected workspace while the capacity
+    # check, the Lead row, its audit entry and its CRM contact used the HOME
+    # column, so a lead added while standing in workspace B was deduped
+    # against B, charged to and created in A. Without X-Workspace-Id this is
+    # the home column, exactly as before.
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
 
     phone_normalized = normalize_phone(payload.phone or "")
     last_name_normalized = normalize_last_name(payload.last_name or "")  # was: return value discarded
@@ -87,7 +95,7 @@ def create_lead_manually(
     dup_of = None
     if phone_normalized and last_name_normalized:
         for existing in db.query(Lead).filter(
-            Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
+            Lead.organization_id == org_id,
             Lead.phone == phone_normalized,
             Lead.is_duplicate == False,
             Lead.duplicate_resolved_at.is_(None),
@@ -107,12 +115,12 @@ def create_lead_manually(
     from app.models.models import Organization
     from app.services import lead_capacity
     _org = (db.query(Organization)
-            .filter(Organization.id == current_user.organization_id).first())
+            .filter(Organization.id == org_id).first())
     lead_capacity.require_capacity_user_initiated(db, _org, adding=1)
 
     lead = Lead(
         id=str(uuid.uuid4()),
-        organization_id=current_user.organization_id,
+        organization_id=org_id,
         assigned_to_id=current_user.id,
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
@@ -146,19 +154,19 @@ def create_lead_manually(
     db.commit()
     db.refresh(lead)
 
-    log_action(db, current_user.organization_id, current_user.id, action="lead.create_manual", target_type="lead", target_id=lead.id)
+    log_action(db, org_id, current_user.id, action="lead.create_manual", target_type="lead", target_id=lead.id)
 
     # Auto-create a CRM contact so this lead shows up in the CRM immediately.
     # Silently skip if one already exists (shouldn't happen for a brand-new lead, but defensive).
     try:
         already_in_crm = db.query(CRMContact).filter(
             CRMContact.lead_id == lead.id,
-            CRMContact.organization_id == current_user.organization_id,
+            CRMContact.organization_id == org_id,
             CRMContact.is_archived == False,
         ).first()
         if not already_in_crm:
             crm_contact = CRMContact(
-                organization_id=current_user.organization_id,
+                organization_id=org_id,
                 first_name=lead.first_name,
                 last_name=lead.last_name,
                 phone=lead.phone,
@@ -222,7 +230,7 @@ def update_lead_fields(
     # OWNERSHIP IS NOT AN EDITABLE FIELD. Checked BEFORE the lead is loaded, so
     # an advisor probing another advisor's id with a reassignment payload gets
     # the same answer whether or not that lead exists.
-    reject_ownership_fields(current_user, payload, request)
+    reject_ownership_fields(current_user, payload, request, db=db)
 
     lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
@@ -232,7 +240,11 @@ def update_lead_fields(
     # role outside the ladder (e.g. the grantable-but-unguarded "viewer", or any
     # future role) silently skipped the ownership check and could edit every
     # lead in the org. Name the roles allowed to bypass; everyone else is owner-only.
-    if current_user.role not in ("org_admin", "super_admin", "god_admin") \
+    # Admin authority is the role IN THE ACTIVE WORKSPACE (is_manager_here, as
+    # deps.require_admin), not users.role - the lead above was loaded from that
+    # workspace. Platform operators keep their platform-role pass.
+    if not (current_user.role in ("super_admin", "god_admin")
+            or lead_scope.is_manager_here(current_user, db)) \
             and lead.assigned_to_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only edit your own leads")
 
@@ -301,7 +313,7 @@ def update_lead_fields(
     db.refresh(lead)
 
     try:
-        log_action(db, current_user.organization_id, current_user.id,
+        log_action(db, lead.organization_id, current_user.id,
                    action="lead.update", target_type="lead", target_id=lead_id)
     except Exception:
         pass
@@ -374,7 +386,7 @@ def update_lead_type(
         lead.notes = (lead.notes or "") + f"\n[AI Direction]: {payload.ai_direction}"
     lead.updated_at = datetime.utcnow()
     db.commit()
-    log_action(db, current_user.organization_id, current_user.id, action="lead.update_type", target_type="lead", target_id=lead_id)
+    log_action(db, lead.organization_id, current_user.id, action="lead.update_type", target_type="lead", target_id=lead_id)
     return {"updated": True}
 
 
@@ -411,7 +423,7 @@ def flag_lead(
     db.commit()
 
     action = "lead.unflag" if not payload.flag_type else f"lead.flag.{payload.flag_type}"
-    log_action(db, current_user.organization_id, current_user.id, action=action, target_type="lead", target_id=lead_id)
+    log_action(db, lead.organization_id, current_user.id, action=action, target_type="lead", target_id=lead_id)
     return {"flagged": bool(payload.flag_type), "flag_type": payload.flag_type}
 
 

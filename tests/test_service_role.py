@@ -100,7 +100,8 @@ def test_a_cron_container_starts_no_in_process_loop(monkeypatch):
 
 
 def test_the_cron_job_names_are_not_in_the_in_process_ownership_table():
-    """`ai_conversation_cron` and `cadence_cron` are separate Render services
+    """`cadence_cron` and `email_poller` are separate Render services (ai_conversation_cron
+    was retired 2026-09-19; see job_models.RETIRED_JOB_NAMES)
     running job scripts. If either appeared here, a web process would be
     running the cron's work as well as the cron - which is the exact shape of
     the defect this module exists to remove."""

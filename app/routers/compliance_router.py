@@ -22,7 +22,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, require_admin, get_current_user, require_tenant_user
+from app.deps import (get_db, require_admin, get_current_user, require_tenant_user,
+                      require_not_observation)
 from app.services.platform_owner import require_tenant_context
 from app.models.models import User, Lead, SuppressionEntry, SuppressionSource
 from app.routers.audit_log_router import log_action
@@ -92,6 +93,29 @@ def _find_existing_entry(db: Session, organization_id: str, normalized_phone: st
     )
 
 
+def _org_id(db: Session, current_user: User):
+    """The ACTIVE workspace org - the one require_admin / require_tenant_user
+    evaluated the caller in - not the home `users.organization_id`.
+
+    The mixed case that made this matter: POST /permanent-dnc marked the
+    SELECTED workspace's leads DNC but wrote the suppression entry (and the
+    audit entry) into the caller's HOME org, so workspace B's number was left
+    unsuppressed in B while A gained an entry nobody asked for. Without
+    X-Workspace-Id this is the home column, exactly as before.
+    """
+    return lead_scope.active_workspace_org_id(current_user, db)
+
+
+def _write_org_id(db: Session, current_user: User) -> str:
+    """The org a new suppression row belongs to, or the platform's 409 (the
+    same refusal require_tenant_context gave a neutral owner)."""
+    from app.services.platform_owner import _NO_CONTEXT_DETAIL, is_platform_pseudo_org
+    org_id = _org_id(db, current_user)
+    if not org_id or is_platform_pseudo_org(org_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_NO_CONTEXT_DETAIL)
+    return str(org_id)
+
+
 def _build_stats(db: Session, organization_id: str) -> SuppressionStats:
     entries = db.query(SuppressionEntry).filter(SuppressionEntry.organization_id == organization_id).all()
     manual = sum(1 for e in entries if e.source == SuppressionSource.MANUAL)
@@ -106,26 +130,32 @@ def list_suppression_entries(
     limit: int = Query(default=500, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ):
+    org_id = _org_id(db, current_user)
     entries = (
         db.query(SuppressionEntry)
-        .filter(SuppressionEntry.organization_id == current_user.organization_id)
+        .filter(SuppressionEntry.organization_id == org_id)
         .order_by(SuppressionEntry.added_at.desc())
         .limit(limit)
         .offset(offset)
         .all()
     )
-    return SuppressionListResponse(stats=_build_stats(db, current_user.organization_id), entries=entries)
+    return SuppressionListResponse(stats=_build_stats(db, org_id), entries=entries)
 
 
-@router.post("/suppression-list", response_model=SuppressionOut, status_code=status.HTTP_201_CREATED)
+@router.post("/suppression-list", response_model=SuppressionOut, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_not_observation)])
 def add_suppression_entry(
     payload: SuppressionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_tenant_context),   # ALL users can add
+    current_user: User = Depends(get_current_user),   # ALL users can add
 ):
+    # Replaces require_tenant_context, which judged the HOME column only: it
+    # refused a member working in a workspace they hold, and filed the row
+    # under the home org. Same 409 for a neutral owner.
+    org_id = _write_org_id(db, current_user)
     normalized_phone = normalize_phone(payload.phone)
 
-    existing = _find_existing_entry(db, current_user.organization_id, normalized_phone)
+    existing = _find_existing_entry(db, org_id, normalized_phone)
     if existing:
         # Idempotent: adding the same number twice returns the existing
         # record rather than creating a duplicate row (the org+phone
@@ -134,7 +164,7 @@ def add_suppression_entry(
         return existing
 
     entry = SuppressionEntry(
-        organization_id=current_user.organization_id,
+        organization_id=org_id,
         phone=normalized_phone,
         reason=payload.reason.strip(),
         source=payload.source,
@@ -143,7 +173,7 @@ def add_suppression_entry(
     db.commit()
 
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, org_id, current_user.id,
         action="compliance.suppress", target_type="suppression_entry", target_id=entry.id,
         details={"phone": normalized_phone, "reason": entry.reason, "source": entry.source.value if hasattr(entry.source, "value") else entry.source},
     )
@@ -151,7 +181,8 @@ def add_suppression_entry(
     return entry
 
 
-@router.post("/permanent-dnc", response_model=SuppressionOut, status_code=status.HTTP_201_CREATED)
+@router.post("/permanent-dnc", response_model=SuppressionOut, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_not_observation)])
 def add_permanent_dnc(
     payload: PermanentDNCCreate,
     db: Session = Depends(get_db),
@@ -163,11 +194,13 @@ def add_permanent_dnc(
     manual "Add Permanent DNC" action from the Compliance Center.
     """
     normalized_phone = normalize_phone(payload.phone)
+    # ONE org for the suppression row, the leads and the audit entry.
+    org_id = _write_org_id(db, current_user)
 
-    entry = _find_existing_entry(db, current_user.organization_id, normalized_phone)
+    entry = _find_existing_entry(db, org_id, normalized_phone)
     if not entry:
         entry = SuppressionEntry(
-            organization_id=current_user.organization_id,
+            organization_id=org_id,
             phone=normalized_phone,
             reason=(payload.reason or "Permanent DNC").strip(),
             source=SuppressionSource.MANUAL,
@@ -176,7 +209,7 @@ def add_permanent_dnc(
 
     leads = (
         db.query(Lead)
-        .filter(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db), Lead.phone == normalized_phone)
+        .filter(Lead.organization_id == org_id, Lead.phone == normalized_phone)
         .all()
     )
     for lead in leads:
@@ -185,7 +218,7 @@ def add_permanent_dnc(
     db.commit()
 
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, org_id, current_user.id,
         action="compliance.permanent_dnc", target_type="suppression_entry", target_id=entry.id,
         details={
             "phone": normalized_phone,
@@ -197,17 +230,19 @@ def add_permanent_dnc(
     return entry
 
 
-@router.delete("/suppression-list/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/suppression-list/{entry_id}", status_code=status.HTTP_204_NO_CONTENT,
+               dependencies=[Depends(require_not_observation)])
 def delete_suppression_entry(
     entry_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    org_id = _org_id(db, current_user)
     entry = (
         db.query(SuppressionEntry)
-        .filter(SuppressionEntry.id == entry_id, SuppressionEntry.organization_id == current_user.organization_id)
+        .filter(SuppressionEntry.id == entry_id, SuppressionEntry.organization_id == org_id)
         .first()
-    )
+    ) if org_id else None
     if not entry:
         raise HTTPException(status_code=404, detail="Suppression entry not found.")
 
@@ -223,7 +258,7 @@ def delete_suppression_entry(
     db.commit()
 
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, org_id, current_user.id,
         action="compliance.unsuppress", target_type="suppression_entry", target_id=deleted_id,
         details={"phone": deleted_phone, "original_reason": deleted_reason},
     )

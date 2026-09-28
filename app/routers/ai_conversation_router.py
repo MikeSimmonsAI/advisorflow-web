@@ -27,6 +27,11 @@ from app.services.email_service import plain_text_to_html
 
 router = APIRouter(prefix="/ai-conversation", tags=["ai-conversation"])
 
+# AUDIT TENANT. Every log_action below is recorded against the LEAD'S
+# organization - the workspace authorized_lead_query resolved - not the
+# caller's home `users.organization_id`, which filed B's conversation events
+# in A's audit log whenever the caller was standing in workspace B.
+
 
 class StartConversationRequest(BaseModel):
     lead_id: str
@@ -85,7 +90,7 @@ def start_conversation(
     result = start_ai_conversation(db, lead, current_user, channel=req.channel,
                                    actor=current_user.id)
     if result.get("success"):
-        log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.started", target_type="lead", target_id=req.lead_id)
+        log_action(db, lead.organization_id, current_user.id, action="ai_conversation.started", target_type="lead", target_id=req.lead_id)
     return result
 
 
@@ -131,7 +136,7 @@ def bulk_start_conversations(
             if result.get("success"):
                 started.append(lead_id)
                 log_action(
-                    db, current_user.organization_id, current_user.id,
+                    db, lead.organization_id, current_user.id,
                     action="ai_conversation.bulk_started",
                     target_type="lead", target_id=str(lead_id),
                 )
@@ -162,7 +167,7 @@ def pause_conversation(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     result = pause_ai_conversation(db, req.lead_id, current_user.id, req.reason or "Advisor paused")
-    log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.paused", target_type="lead", target_id=req.lead_id)
+    log_action(db, lead.organization_id, current_user.id, action="ai_conversation.paused", target_type="lead", target_id=req.lead_id)
     return result
 
 
@@ -176,7 +181,7 @@ def resume_conversation(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     result = resume_ai_conversation(db, req.lead_id, current_user.id)
-    log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.resumed", target_type="lead", target_id=req.lead_id)
+    log_action(db, lead.organization_id, current_user.id, action="ai_conversation.resumed", target_type="lead", target_id=req.lead_id)
     return result
 
 
@@ -315,7 +320,7 @@ def generate_batch_replies(
                         actor_user_id=current_user.id,
                     )
                     sent += 1
-                    log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.auto_sent", target_type="lead", target_id=lead.id)
+                    log_action(db, lead.organization_id, current_user.id, action="ai_conversation.auto_sent", target_type="lead", target_id=lead.id)
                     results.append({"lead_id": lead.id, "action": "sent", "reply": ai_result["reply"]})
                 except outbound_email_gate.EmailSendDisabled as off:
                     # A switch that is off is a configuration state, not a
@@ -326,7 +331,7 @@ def generate_batch_replies(
                     # A compliance refusal is not a fault either: "we may not
                     # contact this family" is not "the send broke".
                     skipped += 1
-                    log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.blocked", target_type="lead", target_id=lead.id)
+                    log_action(db, lead.organization_id, current_user.id, action="ai_conversation.blocked", target_type="lead", target_id=lead.id)
                     results.append({"lead_id": lead.id, "action": "blocked", "reason": str(blocked), "reply": ""})
                 except Exception as e:
                     errors += 1
@@ -369,5 +374,5 @@ def send_approved_reply(
         raise HTTPException(status_code=400, detail="Lead is DNC")
     from app.services.sms_service import send_sms
     send_sms(db=db, lead=lead, advisor=current_user, template=req.message, include_booking_link=req.include_booking_link)
-    log_action(db, current_user.organization_id, current_user.id, action="ai_conversation.approved_sent", target_type="lead", target_id=req.lead_id)
+    log_action(db, lead.organization_id, current_user.id, action="ai_conversation.approved_sent", target_type="lead", target_id=req.lead_id)
     return {"sent": True, "lead_id": lead.id}

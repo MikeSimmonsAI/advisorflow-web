@@ -427,7 +427,9 @@ def resend_booking_link(
     booking_url = public_booking_url(db, lead.organization_id, link.token)
 
     # Build the email
-    org = db.query(Organization).filter_by(id=current_user.organization_id).first()
+    # The LEAD'S organization, like the booking URL above - not the caller's
+    # home column, which signed workspace B's email with home org A's name.
+    org = db.query(Organization).filter_by(id=lead.organization_id).first()
     org_name = org.name if org else "our organization"
     advisor_name = _advisor.full_name or "Your Advisor"
     first_name = lead.first_name or "there"

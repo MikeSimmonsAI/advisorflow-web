@@ -74,8 +74,21 @@ class JobName:
 # invisible by construction rather than by accident.
 CRON_JOB_NAMES = (
     JobName.CADENCE_CRON,
-    JobName.AI_CONVERSATION_CRON,
     JobName.EMAIL_POLLER,
+)
+
+# RETIRED JOBS: no longer scheduled anywhere, so they are never expected to run
+# and are never reported stale or in error. Their historical ledger rows are
+# still shown (god_router adds them to known_jobs) so the history is not lost.
+#
+# ai_conversation_cron (Render cron `advisorflow-ai-conversation`) was suspended
+# 2026-09-19 and deliberately removed from render.yaml (see the RETIRED block
+# there). The in-process ai_conversation_loop runs the same
+# process_scheduled_touches per org every 2 minutes. app/jobs/
+# run_ai_conversation_job.py remains a manual one-shot entrypoint and still
+# records under this name if someone runs it by hand.
+RETIRED_JOB_NAMES = (
+    JobName.AI_CONVERSATION_CRON,
 )
 
 LOOP_JOB_NAMES = (
@@ -107,9 +120,8 @@ EXPECTED_INTERVAL_MINUTES = {
     JobName.WHOLESALE_EXCEPTIONS: 60,
     JobName.CADENCE_CRON: 24 * 60,        # render.yaml: "0 14 * * *"
     JobName.EMAIL_POLLER: 5,              # render.yaml: "*/5 * * * *"
-    # ai_conversation_cron has no service in render.yaml; the in-process
-    # ai_conversation_loop does this work. Daily is the most it ever ran.
-    JobName.AI_CONVERSATION_CRON: 24 * 60,
+    # ai_conversation_cron is RETIRED (see RETIRED_JOB_NAMES): no interval, so
+    # it is never reported stale.
 }
 STALE_MARGIN_MINUTES = 30
 

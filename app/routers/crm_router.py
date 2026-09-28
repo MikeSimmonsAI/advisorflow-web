@@ -34,7 +34,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.deps import get_db, get_current_user, require_tenant_user
+from app.deps import get_db, get_current_user, require_tenant_user, require_not_observation
 from app.models.models import User
 from app.routers.audit_log_router import log_action
 from app.services import crm_service, crm_secrets
@@ -137,17 +137,63 @@ class InboundPayload(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _get_org_id(current_user: User) -> str:
-    return str(current_user.organization_id)
+def _get_org_id(current_user: User, db: Session = None,
+                request: Optional[Request] = None) -> Optional[str]:
+    """The ACTIVE workspace org - the one the admin check below is evaluated in.
+
+    THE DEFECT THIS CLOSES. This returned `str(current_user.organization_id)`,
+    the HOME column, while the request may be standing in a different workspace
+    (X-Workspace-Id, backed by a membership). So an admin of home org A who had
+    selected workspace B listed, created, edited, deleted and fired test
+    webhooks against A's CRM connections from inside B - and a membership-only
+    user (no home column) had `str(None)` == "None" used as an organization id,
+    which inserted connections owned by a tenant called "None".
+
+    `lead_scope.active_workspace_org_id` is the platform's one answer to "which
+    workspace is this request in": a selected workspace the caller holds a
+    membership in, else the home column - so a request without the header
+    behaves exactly as before. god_admin's X-Org-Override already lives in the
+    home column, so the owner's platform pass is unchanged.
+    """
+    from app.services.lead_scope import active_workspace_org_id
+    org_id = active_workspace_org_id(current_user, db, request)
+    return str(org_id) if org_id else None
 
 
-def _require_admin(current_user: User):
-    # User model uses `role`, not is_admin/is_super_admin attributes.
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+def _write_org_id(current_user: User, db: Session, request: Request) -> str:
+    """The workspace a CREATE is attributed to, or the platform's 409."""
+    from app.services.platform_owner import (_NO_CONTEXT_DETAIL,
+                                             is_platform_pseudo_org)
+    org_id = _get_org_id(current_user, db, request)
+    if not org_id or is_platform_pseudo_org(org_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail=_NO_CONTEXT_DETAIL)
+    return org_id
+
+
+def _require_admin(current_user: User, db: Session = None,
+                   request: Optional[Request] = None):
+    """Admin authority IN THE SELECTED WORKSPACE (same answer as deps.require_admin).
+
+    This read `current_user.role` - one value for a whole human - so an
+    org_admin of A who is only an advisor of B passed here while acting in B.
+    `is_manager_here` resolves the caller's membership role in the selected
+    workspace and falls back to `users.role` when none is selected, so a
+    single-workspace customer behaves as before. Platform operators
+    (super_admin / god_admin) keep the platform-role pass they had, as in the
+    leads delete / dedup fixes; the org they act on is still the active one.
+    """
+    from app.services.lead_scope import is_manager_here
+    if not (current_user.role in ("super_admin", "god_admin")
+            or is_manager_here(current_user, db, request)):
         raise HTTPException(status_code=403, detail="Admin required")
 
 
-def _get_connection_or_404(db: Session, conn_id: str, org_id: str) -> dict:
+def _get_connection_or_404(db: Session, conn_id: str, org_id: Optional[str]) -> dict:
+    # A connection outside the active workspace answers exactly like one that
+    # does not exist: 404, so a guessed id confirms nothing.
+    if not org_id:
+        raise HTTPException(status_code=404, detail="CRM connection not found")
     row = db.execute(
         text("SELECT * FROM crm_connections WHERE id = :id AND organization_id = :org_id"),
         {"id": conn_id, "org_id": org_id},
@@ -161,11 +207,14 @@ def _get_connection_or_404(db: Session, conn_id: str, org_id: str) -> dict:
 
 @router.get("/connections")
 def list_connections(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    _require_admin(current_user)
-    org_id = _get_org_id(current_user)
+    _require_admin(current_user, db, request)
+    org_id = _get_org_id(current_user, db, request)
+    if not org_id:
+        return []
     rows = db.execute(
         text("SELECT * FROM crm_connections WHERE organization_id = :org_id ORDER BY created_at DESC"),
         {"org_id": org_id},
@@ -185,14 +234,15 @@ def list_connections(
     return results
 
 
-@router.post("/connections")
+@router.post("/connections", dependencies=[Depends(require_not_observation)])
 def create_connection(
     payload: CRMConnectionCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    _require_admin(current_user)
-    org_id = _get_org_id(current_user)
+    _require_admin(current_user, db, request)
+    org_id = _write_org_id(current_user, db, request)
 
     conn_id = str(uuid.uuid4())
     db.execute(text("""
@@ -224,15 +274,16 @@ def create_connection(
     return {"id": conn_id, "message": "CRM connection created"}
 
 
-@router.put("/connections/{conn_id}")
+@router.put("/connections/{conn_id}", dependencies=[Depends(require_not_observation)])
 def update_connection(
     conn_id: str,
     payload: CRMConnectionUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    _require_admin(current_user)
-    org_id = _get_org_id(current_user)
+    _require_admin(current_user, db, request)
+    org_id = _get_org_id(current_user, db, request)
     _get_connection_or_404(db, conn_id, org_id)  # verify ownership
 
     updates = {}
@@ -260,23 +311,29 @@ def update_connection(
     if updates:
         set_clause = ", ".join(f"{k} = :{k}" for k in updates)
         updates["id"] = conn_id
-        db.execute(text(f"UPDATE crm_connections SET {set_clause} WHERE id = :id"), updates)
+        updates["org_id"] = org_id
+        # Org in the WHERE as well as in the ownership check above: the write
+        # itself cannot land outside the active workspace.
+        db.execute(text(f"UPDATE crm_connections SET {set_clause} "
+                        f"WHERE id = :id AND organization_id = :org_id"), updates)
         db.commit()
 
     return {"message": "Updated"}
 
 
-@router.delete("/connections/{conn_id}")
+@router.delete("/connections/{conn_id}", dependencies=[Depends(require_not_observation)])
 def delete_connection(
     conn_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    _require_admin(current_user)
-    org_id = _get_org_id(current_user)
+    _require_admin(current_user, db, request)
+    org_id = _get_org_id(current_user, db, request)
     conn = _get_connection_or_404(db, conn_id, org_id)
 
-    db.execute(text("DELETE FROM crm_connections WHERE id = :id"), {"id": conn_id})
+    db.execute(text("DELETE FROM crm_connections WHERE id = :id AND organization_id = :org_id"),
+               {"id": conn_id, "org_id": org_id})
     # Non-secret descriptors only: no webhook URL, secret or API key.
     log_action(db, conn.get("organization_id") or org_id, current_user.id,
                action="crm_connection.deleted", target_type="crm_connection",
@@ -288,14 +345,15 @@ def delete_connection(
     return {"message": "Deleted"}
 
 
-@router.post("/connections/{conn_id}/test")
+@router.post("/connections/{conn_id}/test", dependencies=[Depends(require_not_observation)])
 def test_connection(
     conn_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    _require_admin(current_user)
-    org_id = _get_org_id(current_user)
+    _require_admin(current_user, db, request)
+    org_id = _get_org_id(current_user, db, request)
     conn = _get_connection_or_404(db, conn_id, org_id)
 
     # Build a fake lead object for the test payload

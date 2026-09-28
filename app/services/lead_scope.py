@@ -232,7 +232,8 @@ def is_manager_here(user: User, db: Session = None,
     return effective_role(user, db, request) in MANAGER_ROLES + (GOD_ROLE,)
 
 
-def own_records_only(query, owner_column, user: User):
+def own_records_only(query, owner_column, user: User, db: Session = None,
+                     request: Optional[Request] = None):
     """Narrow an ALREADY organization-scoped query on a child table to the caller.
 
     Lead scope answers "which families may this person see". It does not answer
@@ -247,8 +248,18 @@ def own_records_only(query, owner_column, user: User):
     owner column, because these tables do not agree on a name: AutoSendItem and
     VoiceCallCampaign say advisor_id, PipelineConversation says advisor_id,
     EmailMessage says sender_id.
+
+    JUDGED ON THE ROLE IN THE WORKSPACE BEING WORKED IN. This read
+    `users.role` (via `is_owner_scoped`), the account-global role, so a home
+    org_admin who is only an advisor in the selected workspace saw and acted on
+    every colleague's queue there, and a home advisor who administers that
+    workspace was confined to their own rows in the workspace they run. With a
+    `db` session the role is `effective_role` - the membership role in the
+    selected workspace, god answered first - exactly like `is_manager_here`.
+    Without one (or without a selected workspace) it is `users.role`, so every
+    caller that passes nothing behaves exactly as before.
     """
-    if is_owner_scoped(user):
+    if effective_role(user, db, request) in OWNER_SCOPED_ROLES:
         return query.filter(owner_column == user.id)
     return query
 
@@ -433,7 +444,8 @@ OWNERSHIP_FIELDS = frozenset({
 })
 
 
-def reject_ownership_fields(user: User, payload, request: Optional[Request] = None) -> None:
+def reject_ownership_fields(user: User, payload, request: Optional[Request] = None,
+                            db: Session = None) -> None:
     """Refuse an advisor's attempt to rewrite ownership through the body.
 
     Reads `model_fields_set` on a pydantic model, so a field the caller
@@ -445,7 +457,9 @@ def reject_ownership_fields(user: User, payload, request: Optional[Request] = No
     Managers and god pass: reassignment is a real capability they hold, and it
     has its own endpoint with its own audit.
     """
-    if not is_owner_scoped(user):
+    # Judged on the role in the workspace being worked in when a db session is
+    # given (effective_role, like own_records_only); users.role otherwise.
+    if effective_role(user, db, request) not in OWNER_SCOPED_ROLES:
         return
     if payload is None:
         return

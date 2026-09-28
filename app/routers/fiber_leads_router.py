@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, get_current_user, require_tenant_user
+from app.deps import get_db, get_current_user, require_tenant_user, require_not_observation
 from app.services.platform_owner import require_tenant_context
 from app.models.models import Lead, gen_uuid
 from app.services import lead_scope
@@ -45,7 +45,7 @@ class FiberLeadCreate(BaseModel):
     verbal_sms_consent: bool = False
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_not_observation)])
 def create_fiber_lead(
     payload: FiberLeadCreate,
     db: Session = Depends(get_db),
@@ -63,10 +63,16 @@ def create_fiber_lead(
     if not phone_clean:
         raise HTTPException(status_code=422, detail="Phone number is required.")
 
+    # ONE ORGANIZATION FOR THE WHOLE CREATE - the active workspace (selected
+    # X-Workspace-Id backed by a membership, else the home column). Dedup ran
+    # against the workspace while capacity and the Lead row used the home
+    # column, so a lead captured in workspace B landed in A.
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
+
     # Deduplicate by phone within org
     existing = db.query(Lead).filter(
         Lead.phone == phone_clean,
-        Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db),
+        Lead.organization_id == org_id,
     ).first()
     if existing:
         return {
@@ -97,15 +103,14 @@ def create_fiber_lead(
     # PLAN_CAPACITY_REACHED rather than quietly holding a lead they believe
     # they just captured.
     #
-    # Charged to `current_user.organization_id` and not the workspace org,
-    # because that is what the Lead() below sets. Note this endpoint already
-    # dedups against `active_workspace_org_id` while creating against
-    # `current_user.organization_id` - a pre-existing mismatch, untouched
-    # here. The limit follows the row, not the dedup query.
+    # Charged to the org the Lead() below is created in - the active
+    # workspace, the same one the dedup above ran against. (This used to be
+    # the home column: a pre-existing mismatch, now closed.) The limit
+    # follows the row.
     from app.models.models import Organization
     from app.services import lead_capacity
     _org = (db.query(Organization)
-            .filter(Organization.id == current_user.organization_id).first())
+            .filter(Organization.id == org_id).first())
     lead_capacity.require_capacity_user_initiated(db, _org, adding=1)
 
     lead = Lead(
@@ -118,7 +123,7 @@ def create_fiber_lead(
         tier="prospect",
         message_track="new_inquiry_intro",
         source="fiber_field",
-        organization_id=current_user.organization_id,
+        organization_id=org_id,
         street_address=payload.service_address,
         city=payload.city.strip() if payload.city else None,
         state=payload.state.strip() if payload.state else None,
@@ -138,7 +143,7 @@ def create_fiber_lead(
 
     logger.info(
         "fiber_lead created id=%s by rep=%s org=%s",
-        lead.id, current_user.id, current_user.organization_id,
+        lead.id, current_user.id, org_id,
     )
     return {
         "lead_id": lead.id,

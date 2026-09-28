@@ -76,8 +76,8 @@ ENV_VAR = "SERVICE_ROLE"
 #                          removed from render.yaml. It could not do this work -
 #                          no OPENAI_API_KEY, no sender - and giving it those
 #                          would have been worse than useless:
-#                          process_scheduled_touches takes no row lock, so two
-#                          executors on the same due set both send. The backend
+#                          at the time process_scheduled_touches took no row
+#                          lock (it now claims each touch before sending). The backend
 #                          already covers every active org every two minutes,
 #                          which is a superset of the cron's unscoped call.
 #

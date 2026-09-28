@@ -17,7 +17,7 @@ const JOB_LABELS = {
   review_request_loop:   'Review Requests',
   // Render cron services — separate processes, separate schedules
   cadence_cron:          'Cadence (cron)',
-  ai_conversation_cron:  'AI Conversation (cron)',
+  ai_conversation_cron:  'AI Conversation (cron, retired)',
   email_poller:          'Email Poller (cron)',
 }
 
@@ -171,7 +171,8 @@ export default function GodJobRuns() {
   // cadence work quietly halts, and both run cadence on different schedules.
   const KNOWN_JOBS = [
     'cadence_loop', 'ai_conversation_loop', 'review_request_loop',
-    'cadence_cron', 'ai_conversation_cron', 'email_poller',
+    // ai_conversation_cron retired 2026-09-19 (ai_conversation_loop does the work).
+    'cadence_cron', 'email_poller',
   ]
 
   return (

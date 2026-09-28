@@ -252,7 +252,7 @@ def set_lead_tier(
     db.commit()
 
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, lead.organization_id, current_user.id,
         action="lead.set_tier", target_type="lead", target_id=lead.id,
         details={"from": previous_tier, "to": tier_enum.value, "lead_assigned_to_id": lead.assigned_to_id},
     )

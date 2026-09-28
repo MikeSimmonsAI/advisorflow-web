@@ -466,7 +466,9 @@ def test_a_job_whose_last_success_is_long_ago_is_reported_stale():
     from datetime import datetime, timedelta
     from app.models.job_models import JobName, is_stale
     now = datetime.utcnow()
-    assert is_stale(JobName.AI_CONVERSATION_CRON, now - timedelta(days=9), now) is True
+    assert is_stale(JobName.CADENCE_CRON, now - timedelta(days=9), now) is True
+    # Retired: never expected to run, so never stale.
+    assert is_stale(JobName.AI_CONVERSATION_CRON, now - timedelta(days=9), now) is False
     assert is_stale(JobName.CADENCE_LOOP, now - timedelta(minutes=50), now) is False
     assert is_stale(JobName.CADENCE_LOOP, now - timedelta(hours=3), now) is True
     assert is_stale(JobName.EMAIL_POLLER, now - timedelta(minutes=12), now) is False
@@ -481,7 +483,7 @@ def test_every_known_job_has_an_expected_interval():
 def test_the_latest_endpoint_flags_stale_jobs(engine, db_session):
     from datetime import datetime, timedelta, timezone
     from app.models.job_models import JobName, JobRun
-    db_session.add(JobRun(job_name=JobName.AI_CONVERSATION_CRON, status="success",
+    db_session.add(JobRun(job_name=JobName.CADENCE_CRON, status="success",
                           started_at=datetime.now(timezone.utc) - timedelta(days=9)))
     db_session.add(JobRun(job_name=JobName.CADENCE_LOOP, status="success",
                           started_at=datetime.now(timezone.utc)))
@@ -489,9 +491,33 @@ def test_the_latest_endpoint_flags_stale_jobs(engine, db_session):
     client, app = _make_god_client(engine)
     try:
         data = client.get("/god/job-runs/latest").json()
-        assert data["jobs"][JobName.AI_CONVERSATION_CRON]["stale"] is True
+        assert data["jobs"][JobName.CADENCE_CRON]["stale"] is True
         assert data["jobs"][JobName.CADENCE_LOOP]["stale"] is False
-        assert JobName.AI_CONVERSATION_CRON in data["stale_jobs"]
+        assert JobName.CADENCE_CRON in data["stale_jobs"]
         assert data["jobs"][JobName.CADENCE_LOOP]["expected_every_minutes"] == 60
+    finally:
+        app.dependency_overrides.clear()
+
+def test_a_retired_job_keeps_its_history_but_is_never_stale_or_in_error(engine, db_session):
+    """ai_conversation_cron was retired 2026-09-19 (the in-process loop does the
+    work). Its old rows still show, it is not 'untracked', and it cannot turn
+    the monitor amber or red."""
+    from datetime import datetime, timedelta, timezone
+    from app.models.job_models import (ALL_JOB_NAMES, EXPECTED_INTERVAL_MINUTES, JobName,
+                                       JobRun, RETIRED_JOB_NAMES)
+    assert JobName.AI_CONVERSATION_CRON in RETIRED_JOB_NAMES
+    assert JobName.AI_CONVERSATION_CRON not in ALL_JOB_NAMES
+    assert JobName.AI_CONVERSATION_CRON not in EXPECTED_INTERVAL_MINUTES
+    db_session.add(JobRun(job_name=JobName.AI_CONVERSATION_CRON, status="error",
+                          started_at=datetime.now(timezone.utc) - timedelta(days=9)))
+    db_session.commit()
+    client, app = _make_god_client(engine)
+    try:
+        data = client.get("/god/job-runs/latest").json()
+        rec = data["jobs"][JobName.AI_CONVERSATION_CRON]
+        assert rec["retired"] is True and rec["stale"] is False
+        assert JobName.AI_CONVERSATION_CRON not in data["stale_jobs"]
+        assert JobName.AI_CONVERSATION_CRON not in data["jobs_in_error"]
+        assert JobName.AI_CONVERSATION_CRON not in data["ledger"]["untracked_jobs"]
     finally:
         app.dependency_overrides.clear()

@@ -78,7 +78,17 @@ def _resolve_org(current_user: User, org_id: Optional[str], db: Session) -> Orga
     """
     if org_id and current_user.role in ("super_admin", "god_admin"):
         return load_org_in_scope(db, current_user, org_id)
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    # WITHOUT ?org_id= THE ORG IS THE ACTIVE WORKSPACE - the one require_admin
+    # and require_capability evaluated the caller in - not the home column.
+    # Reading `users.organization_id` here meant a person who is an advisor at
+    # home but org_admin of workspace B passed require_admin in B and then read
+    # and overwrote HOME org's branding, industry, tiers and Twilio
+    # credentials. Same fix as settings_router._resolve_appt_org. Without
+    # X-Workspace-Id this is the home column, exactly as before.
+    from app.services.lead_scope import active_workspace_org_id
+    active = active_workspace_org_id(current_user, db)
+    org = (db.query(Organization).filter(Organization.id == active).first()
+           if active else None)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
     return org

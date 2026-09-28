@@ -100,6 +100,21 @@ CAMPAIGN_PURPOSES = CAMPAIGN_PURPOSES_BY_INDUSTRY["custom"]
 _DNC_STATUS = "dnc"
 
 
+def _org_id(db: Session, current_user: User):
+    """The ACTIVE workspace org - the one require_admin / require_tenant_user
+    and authorized_lead_query evaluate the caller in.
+
+    Every route here read `_org_id(db, current_user)`, the HOME org, while
+    its gate (require_admin) and its lead scope (authorized_lead_query) judged
+    the SELECTED workspace. The worst consequence: a person who is an advisor
+    at home but org_admin of workspace B passed require_admin in B and then
+    POST /campaigns/{id}/send texted HOME org's families from a campaign in an
+    org they do not administer. Without X-Workspace-Id this is the home column,
+    exactly as before.
+    """
+    return lead_scope.active_workspace_org_id(current_user, db)
+
+
 def _apply_filters(query, organization_id: str, criteria: dict, include_dnc: bool = False):
     """Apply all filter criteria to a Lead query. All comparisons use plain strings.
 
@@ -383,7 +398,7 @@ def get_purposes(
     current_user: User = Depends(require_tenant_user),
 ):
     from app.models.models import Organization
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    org = db.query(Organization).filter(Organization.id == _org_id(db, current_user)).first()
     industry = (org.industry if org else None) or "funeral"
     return CAMPAIGN_PURPOSES_BY_INDUSTRY.get(industry, CAMPAIGN_PURPOSES_BY_INDUSTRY["custom"])
 
@@ -396,7 +411,7 @@ def generate_message(
 ):
     """AI generates an opening campaign message based on purpose and tone."""
     from app.models.models import Organization
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    org = db.query(Organization).filter(Organization.id == _org_id(db, current_user)).first()
     org_name = org.name if org else "our organization"
     industry = (org.industry if org else None) or "funeral"
     advisor_name = current_user.full_name or "your advisor"
@@ -405,7 +420,7 @@ def generate_message(
         req.purpose, req.tone, org_name, advisor_name,
         lead_type=req.lead_type, ai_direction=req.ai_direction, industry=industry,
         offer_hook=req.offer_hook,
-        actor=current_user.id, org_id=current_user.organization_id,
+        actor=current_user.id, org_id=_org_id(db, current_user),
     )
     return {"message": message, "purpose": req.purpose, "tone": req.tone}
 
@@ -438,7 +453,7 @@ def preview_campaign_leads(
     criteria = req.filter_criteria.dict(exclude_none=True)
     query = _apply_filters(
         lead_scope.authorized_lead_query(db, current_user),
-        current_user.organization_id, criteria)
+        _org_id(db, current_user), criteria)
     total = query.count()
     sample = query.limit(10).all()
 
@@ -481,7 +496,7 @@ def get_campaign_history(
     """Return past campaigns with stats for the Campaign Builder history tab."""
     campaigns = (
         db.query(Campaign)
-        .filter(Campaign.organization_id == current_user.organization_id)
+        .filter(Campaign.organization_id == _org_id(db, current_user))
         .order_by(Campaign.created_at.desc())
         .limit(50)
         .all()
@@ -512,7 +527,7 @@ def create_campaign(
 ):
     campaign = Campaign(
         id=str(uuid.uuid4()),
-        organization_id=current_user.organization_id,
+        organization_id=_org_id(db, current_user),
         name=payload.name,
         created_by_id=current_user.id,
         filter_criteria=json.dumps(payload.filter_criteria.dict(exclude_none=True)),
@@ -522,7 +537,7 @@ def create_campaign(
     db.add(campaign)
     db.commit()
     db.refresh(campaign)
-    log_action(db, current_user.organization_id, current_user.id, action="campaign.create", target_type="campaign", target_id=campaign.id)
+    log_action(db, _org_id(db, current_user), current_user.id, action="campaign.create", target_type="campaign", target_id=campaign.id)
     return {"id": campaign.id, "name": campaign.name}
 
 
@@ -533,7 +548,7 @@ def list_campaigns(
 ):
     campaigns = (
         db.query(Campaign)
-        .filter(Campaign.organization_id == current_user.organization_id)
+        .filter(Campaign.organization_id == _org_id(db, current_user))
         .order_by(Campaign.created_at.desc())
         .limit(500)
         .all()
@@ -602,8 +617,8 @@ def preview_campaign(
     decision. Rebuilt on the CURRENT _apply_filters rather than the old
     private query helper, so it cannot drift from /send.
     """
-    campaign = _campaign_or_404(db, campaign_id, current_user.organization_id)
-    matching_leads = _campaign_matching_leads(db, campaign, current_user.organization_id)
+    campaign = _campaign_or_404(db, campaign_id, _org_id(db, current_user))
+    matching_leads = _campaign_matching_leads(db, campaign, _org_id(db, current_user))
 
     skipped_dnc = [lead for lead in matching_leads if lead.status == _DNC_STATUS]
     eligible = [lead for lead in matching_leads if lead.status != _DNC_STATUS]
@@ -659,8 +674,8 @@ def apply_campaign(
     from app.services.cadence_service import start_cadence
 
     payload = payload or CampaignApplyRequest()
-    campaign = _campaign_or_404(db, campaign_id, current_user.organization_id)
-    matching_leads = _campaign_matching_leads(db, campaign, current_user.organization_id)
+    campaign = _campaign_or_404(db, campaign_id, _org_id(db, current_user))
+    matching_leads = _campaign_matching_leads(db, campaign, _org_id(db, current_user))
 
     matched_count = len(matching_leads)
     updated_count = 0
@@ -685,7 +700,7 @@ def apply_campaign(
     db.commit()
 
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, _org_id(db, current_user), current_user.id,
         action="campaign.apply", target_type="campaign", target_id=campaign.id,
         details={
             "campaign_name": campaign.name,
@@ -716,13 +731,13 @@ def send_campaign(
     """Execute the campaign — send messages to all matched leads."""
     campaign = db.query(Campaign).filter(
         Campaign.id == campaign_id,
-        Campaign.organization_id == current_user.organization_id,
+        Campaign.organization_id == _org_id(db, current_user),
     ).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
     criteria = json.loads(campaign.filter_criteria) if campaign.filter_criteria else {}
-    query = _apply_filters(db.query(Lead), current_user.organization_id, criteria)
+    query = _apply_filters(db.query(Lead), _org_id(db, current_user), criteria)
     leads = query.all()
 
     from app.services.sms_service import send_sms
@@ -747,7 +762,7 @@ def send_campaign(
         except Exception:
             errors += 1
 
-    log_action(db, current_user.organization_id, current_user.id, action="campaign.send", target_type="campaign", target_id=campaign_id)
+    log_action(db, _org_id(db, current_user), current_user.id, action="campaign.send", target_type="campaign", target_id=campaign_id)
     return {"sent": sent, "skipped": skipped, "errors": errors, "total": len(leads)}
 
 
@@ -810,7 +825,7 @@ def builder_preview(
     # This was already advisor-scoped and correct. The role list was its OWN
     # copy of who counts as a manager, which is how the vocabularies drift
     # apart; it now asks lead_scope, the same function the query uses.
-    is_manager = lead_scope.is_manager(current_user)
+    is_manager = lead_scope.is_manager_here(current_user, db)
     criteria = {}
     if tier: criteria["tier"] = tier
     if status: criteria["status"] = status
@@ -824,7 +839,7 @@ def builder_preview(
     if relationship_type: criteria["relationship_type"] = relationship_type
     if channel and channel != "auto": criteria["channel"] = "email_only" if channel == "email" else channel
 
-    query = _apply_filters(db.query(Lead), current_user.organization_id, criteria)
+    query = _apply_filters(db.query(Lead), _org_id(db, current_user), criteria)
 
     # Advisors can only preview their own leads; managers see all
     if not is_manager:
@@ -923,7 +938,7 @@ def builder_send(
     # Create campaign record for history
     campaign = Campaign(
         id=str(uuid.uuid4()),
-        organization_id=current_user.organization_id,
+        organization_id=_org_id(db, current_user),
         name=req.name,
         created_by_id=current_user.id,
         filter_criteria=json.dumps(req.filters or {}),
@@ -1020,7 +1035,7 @@ def builder_send(
             setattr(campaign, attr, val)
     db.commit()
 
-    log_action(db, current_user.organization_id, current_user.id, action="campaign.builder_send", target_type="campaign", target_id=campaign.id)
+    log_action(db, _org_id(db, current_user), current_user.id, action="campaign.builder_send", target_type="campaign", target_id=campaign.id)
 
     return {
         "campaign_id": campaign.id,

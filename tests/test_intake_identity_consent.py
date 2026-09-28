@@ -278,16 +278,3 @@ def test_social_webhook_dedupes_formatted_phones_and_email_case(db_session):
     d = _upsert_social_lead(db_session, org, "C", "D", None, "casey@example.com", "facebook")
     assert c.id == d.id
     assert db_session.query(Lead).filter_by(organization_id=org.id).count() == 2
-
-
-def test_fiber_intake_dedupes_a_formatted_phone(db_session):
-    from app.routers.fiber_intake_router import fiber_intake_submit
-    org = _org(db_session, "fiber")
-    db_session.add(Lead(organization_id=org.id, first_name="F", last_name="G",
-                        phone="12145550303", status="new"))
-    db_session.commit()
-    fiber_intake_submit("fiber", db=db_session, first_name="F", last_name="G",
-                        phone="(214) 555-0303", email=None, service_address="1 Fiber Way",
-                        current_provider=None, current_speed=None, interested_tier=None,
-                        best_contact_time=None, sms_consent="yes")
-    assert db_session.query(Lead).filter_by(organization_id=org.id).count() == 1

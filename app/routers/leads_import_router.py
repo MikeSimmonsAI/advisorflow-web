@@ -349,7 +349,12 @@ def list_import_batches(
 
     The DELETE beside this endpoint was already admin-only. The read was not.
     """
-    if not lead_scope.is_manager(current_user):
+    # Manager IN THE WORKSPACE BEING READ (the query below is the active
+    # workspace). `lead_scope.is_manager` read users.role, so an org_admin of A
+    # who is only an advisor of B received B's whole import inventory - the
+    # exact disclosure this refusal exists to prevent.
+    if not (current_user.role in ("super_admin", "god_admin")
+            or lead_scope.is_manager_here(current_user, db)):
         lead_scope.log_denial(current_user, "advisor requested org import inventory",
                               None, request)
         raise HTTPException(

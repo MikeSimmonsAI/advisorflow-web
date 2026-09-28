@@ -14,8 +14,8 @@ prospect who must not mistake it for a working system. A customer's live
 website is the opposite: it IS the working thing, people reach it by typing
 the address, and a search engine has to be able to read it. The markup is
 written by staff through a god-only route, which is the same trust level as
-`fiber_intake_router`'s backend-rendered form that has served public traffic
-here for a year.
+the backend-rendered fiber intake form that used to live here
+(fiber_intake_router, never mounted; removed 2026-09-28).
 
 WHY THE INQUIRY ROUTE SHARES THE PUBLIC INTAKE BUDGET. `PUBLIC_INTAKE_SCOPE`
 is one rate-limit budget across every unauthenticated write in the platform,

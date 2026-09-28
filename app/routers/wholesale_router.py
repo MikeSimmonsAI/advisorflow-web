@@ -509,6 +509,20 @@ _POLICY_FIELDS = ("qualification_criteria", "nurture_default_days", "cold_seller
 _SMS_PROGRAM_FIELDS = ("public_intake_key", "sms_program_enabled", "sms_sender_number",
                        "sms_messaging_service_sid", "sms_campaign_sid", "sms_brand_sid")
 _ADMIN_ROLES = ("org_admin", "super_admin", "god_admin")
+
+
+def _is_admin_here(user: User, db: Session, extra: tuple = ()) -> bool:
+    """Administrator IN THE WORKSPACE BEING WRITTEN (svc.write_org_id is the
+    active workspace). These gates read the account-global `users.role`, so an
+    org_admin of A who is only an advisor of B could switch on B's seller SMS
+    program, change its qualification / email policy and re-mark its test
+    records. `effective_role` is the membership role in the selected workspace
+    and `users.role` when none is selected - unchanged without the header.
+    Platform operators keep their platform-role pass."""
+    if (getattr(user, "role", None) or "").lower() in ("super_admin", "god_admin"):
+        return True
+    from app.services.lead_scope import effective_role
+    return (effective_role(user, db) or "").lower() in _ADMIN_ROLES + tuple(extra)
 _SID_RULES = {"sms_messaging_service_sid": "MG", "sms_campaign_sid": "CM",
               "sms_brand_sid": "BN"}
 _INTAKE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{24,64}$")
@@ -695,7 +709,7 @@ def patch_settings(payload: SettingsPatch, request: Request,
     if any(k in data for k in _SMS_PROGRAM_FIELDS):
         # Who may switch on texting, or point a public form at this workspace,
         # is an administrator question, not an advisor one.
-        if (getattr(user, "role", None) or "").lower() not in _ADMIN_ROLES:
+        if not _is_admin_here(user, db):
             raise HTTPException(status_code=403,
                                 detail="Only an administrator can change the seller SMS program.")
         _clean_sms_program(db, org_id, data)
@@ -717,7 +731,7 @@ def patch_settings(payload: SettingsPatch, request: Request,
     if "inquiry_email_enabled" in data:
         data["inquiry_email_enabled"] = bool(data["inquiry_email_enabled"])
     if any(k in data for k in _POLICY_FIELDS):
-        if (getattr(user, "role", None) or "").lower() not in _ADMIN_ROLES:
+        if not _is_admin_here(user, db):
             raise HTTPException(status_code=403, detail="Only an administrator can change "
                                 "qualification, nurture or email policy.")
         from app.services import wholesale_seller_intel as SI
@@ -1066,7 +1080,7 @@ def set_property_test_flag(property_id: str, payload: TestFlagIn,
     typed to confirm. Reversible, audited, deletes nothing."""
     org_id = svc.write_org_id(db, user)
     prop = svc.get_property(db, org_id, property_id)
-    if (getattr(user, "role", None) or "").lower() not in _ADMIN_ROLES + ("admin", "owner"):
+    if not _is_admin_here(user, db, extra=("admin", "owner")):
         raise HTTPException(status_code=403, detail="Only a workspace admin can change test marking.")
     if (payload.confirm or "").strip().lower() != (prop.street_address or "").strip().lower():
         raise HTTPException(status_code=422, detail="Type the property's street address to confirm.")

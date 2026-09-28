@@ -291,7 +291,7 @@ def master_dashboard(db: Session = Depends(get_db), current_user: User = Depends
     )
 
     return {
-        "organization_id": current_user.organization_id if not is_god else "all",
+        "organization_id": _dashboard_org_label(db, current_user) if not is_god else "all",
         "is_god_view": is_god,
         "total_leads": total_leads,
         "total_duplicates_prevented": total_duplicates,
@@ -366,8 +366,78 @@ HOT_REPLY_CLASSIFICATIONS = attention_enum_values()
 
 def _get_org_ids(db: Session, current_user: User) -> list:
     """Return org IDs to scope queries to.
-    god_admin → all orgs; super_admin → platform-scoped orgs; everyone else → own org."""
-    return get_platform_org_ids(current_user, db)
+    god_admin → all orgs; super_admin → platform-scoped orgs; everyone else →
+    the workspace being worked in.
+
+    "Everyone else" read `users.organization_id` (via get_platform_org_ids), the
+    HOME column, while `require_admin` judged admin authority in the SELECTED
+    workspace. So a person who administers workspace B but is only an advisor
+    at home A passed the gate in B and was then shown home A's team, leads and
+    funnel. The dashboards now read the workspace the gate was evaluated in.
+    Platform operators keep exactly the platform scope they had. Without
+    X-Workspace-Id this is the home column, exactly as before.
+    """
+    if _is_operator(current_user):
+        return get_platform_org_ids(current_user, db)
+    return [str(_acting_org_id(db, current_user))]
+
+
+def _is_operator(user: User) -> bool:
+    """Platform operators keep the platform pass they had on these routes."""
+    return getattr(user, "role", None) in ELEVATED_ROLES
+
+
+def _acting_org_id(db: Session, current_user: User) -> Optional[str]:
+    """THE ORG THIS ADMIN REQUEST ACTS ON — the one `require_admin` judged.
+
+    `require_admin` resolves admin authority in the SELECTED workspace
+    (X-Workspace-Id backed by a membership), but these routes then read and
+    wrote `current_user.organization_id`, the home column. An org_admin of
+    workspace B who is only an advisor at home A therefore passed the gate in B
+    and deactivated, reactivated and force-logged-out home A's people. Same
+    resolution every other fixed router uses; without a workspace header it is
+    the home column (or the owner's X-Org-Override), exactly as before.
+    """
+    return lead_scope.active_workspace_org_id(current_user, db)
+
+
+def _dashboard_org_label(db: Session, current_user: User):
+    """The `organization_id` a dashboard reports. Unchanged for operators."""
+    if _is_operator(current_user):
+        return current_user.organization_id
+    return _acting_org_id(db, current_user)
+
+
+def _workspace_write_org_id(db: Session, current_user: User) -> str:
+    """The workspace a new user row belongs to, or the platform's 409.
+
+    Replaces `tenant_write_org_id(current_user)`, which read the home column: a
+    home ADVISOR who administers workspace B passed `require_admin` in B and
+    then created an org_admin in home A. A neutral owner still gets the same
+    409 as before.
+    """
+    from app.services.platform_owner import is_platform_pseudo_org
+    org_id = _acting_org_id(db, current_user)
+    if not org_id or is_platform_pseudo_org(org_id):
+        # Same refusal (and detail) tenant_write_org_id gives.
+        return _tenant_write_org_id(current_user)
+    return str(org_id)
+
+
+def _is_workspace_person(db: Session, org_id: str, user: Optional[User]) -> bool:
+    """Homed in this workspace, or an ACTIVE customer_org member of it."""
+    if user is None or not org_id:
+        return False
+    if str(getattr(user, "organization_id", None) or "") == str(org_id):
+        return True
+    from app.models.sales_models import Membership
+    from app.services.workspace_access import SCOPE_CUSTOMER_ORG
+    return db.query(Membership.id).filter(
+        Membership.user_id == user.id,
+        Membership.scope_type == SCOPE_CUSTOMER_ORG,
+        Membership.scope_id == str(org_id),
+        Membership.is_active.is_(True),
+    ).first() is not None
 
 
 def _safe_rate(numerator: int, denominator: int) -> float:
@@ -691,7 +761,7 @@ def dashboard_quality_metrics(db: Session = Depends(get_db), current_user: User 
     totals["dnc_rate"] = _safe_rate(totals["dnc_leads"], totals["leads_owned"])
 
     return {
-        "organization_id": current_user.organization_id if not is_god else "all",
+        "organization_id": _dashboard_org_label(db, current_user) if not is_god else "all",
         "is_god_view": is_god,
         "totals": totals,
         "advisors": advisor_rows,
@@ -746,7 +816,7 @@ def dashboard_funnel(db: Session = Depends(get_db), current_user: User = Depends
     ]
 
     return {
-        "organization_id": current_user.organization_id if not is_god else "all",
+        "organization_id": _dashboard_org_label(db, current_user) if not is_god else "all",
         "is_god_view": is_god,
         "total_leads": total_leads,
         "sent": sent,
@@ -775,7 +845,9 @@ def dashboard_revenue(db: Session = Depends(get_db), current_user: User = Depend
     What this CAN do reliably: how many sales, by whom, of what kind, and
     when - all of which come from structured boolean/date fields.
     """
-    org_id = current_user.organization_id
+    # The workspace require_admin judged (home column without a header);
+    # operators unchanged.
+    org_id = _dashboard_org_label(db, current_user)
 
     sale_outcomes = (
         db.query(LeadOutcome)
@@ -1029,7 +1101,9 @@ def create_user(
     # Nothing is pruned or disabled for an organization already over its limit
     # - the ceiling stops the NEXT addition, it does not delete people.
     from app.services import plan_limits
-    _target_org_id = _tenant_write_org_id(current_user)
+    # The WORKSPACE require_admin judged, not the home column. See
+    # _workspace_write_org_id.
+    _target_org_id = _workspace_write_org_id(db, current_user)
     _target_org = db.query(Organization).filter(
         Organization.id == _target_org_id).first()
     plan_limits.require_capacity(db, _target_org, plan_limits.LIMIT_USERS, adding=1)
@@ -1047,7 +1121,7 @@ def create_user(
         # refused by every tenant route, holding no membership, useless
         # in the sales workspace, and indistinguishable from a real one.
         # tenant_write_org_id returns a 409 naming what to select.
-        organization_id=_tenant_write_org_id(current_user),
+        organization_id=_target_org_id,
         email=req.email,
         password_hash=hash_password(secret),
         full_name=req.full_name,
@@ -1058,7 +1132,7 @@ def create_user(
     db.commit()
 
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, _target_org_id, current_user.id,
         action="user.create", target_type="user", target_id=new_user.id,
         details={"email": new_user.email, "role": new_user.role, "created_by": current_user.full_name},
     )
@@ -1101,12 +1175,17 @@ def _get_target_user_for_admin(user_id: str, current_user: User, db: Session) ->
     from fastapi import HTTPException
     if current_user.role == "god_admin":
         target = db.query(User).filter(User.id == user_id).first()
-    elif getattr(current_user, "organization_id", None) is None:
-        target = None
     else:
-        target = db.query(User).filter(
-            User.id == user_id, User.organization_id == current_user.organization_id
-        ).first()
+        # THE WORKSPACE BEING WORKED IN, not the home column (see
+        # _acting_org_id). Only people HOMED there: deactivation, reactivation
+        # and force-logout act on the whole account, so a person seconded in by
+        # membership from another tenant is that tenant's to manage.
+        org_id = _acting_org_id(db, current_user)
+        target = None
+        if org_id is not None:
+            target = db.query(User).filter(
+                User.id == user_id, User.organization_id == org_id
+            ).first()
         if target and target.role in ELEVATED_ROLES and target.id != current_user.id:
             target = None
     if not target:
@@ -1140,7 +1219,7 @@ def deactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
     db.commit()
 
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, target.organization_id or current_user.organization_id, current_user.id,
         action="user.deactivate", target_type="user", target_id=target.id,
         details={"email": target.email},
     )
@@ -1157,7 +1236,7 @@ def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
     db.commit()
 
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, target.organization_id or current_user.organization_id, current_user.id,
         action="user.reactivate", target_type="user", target_id=target.id,
         details={"email": target.email},
     )
@@ -1190,7 +1269,7 @@ def force_logout_user(user_id: str, db: Session = Depends(get_db), current_user:
     db.commit()
 
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, target.organization_id or current_user.organization_id, current_user.id,
         action="user.force_logout", target_type="user", target_id=target.id,
         details={"email": target.email},
     )
@@ -1207,15 +1286,17 @@ def clear_setup_flag(user_id: str, db: Session = Depends(get_db), current_user: 
     users in their own org.
     """
     from fastapi import HTTPException
+    # Workspace being worked in, not the home column (see _acting_org_id).
+    _org = _acting_org_id(db, current_user)
     target = db.query(User).filter(
-        User.id == user_id, User.organization_id == current_user.organization_id
-    ).first()
+        User.id == user_id, User.organization_id == _org
+    ).first() if _org is not None else None
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     target.must_change_password = False
     db.commit()
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, target.organization_id or current_user.organization_id, current_user.id,
         action="user.clear_setup", target_type="user", target_id=target.id,
         details={"email": target.email},
     )
@@ -1515,14 +1596,16 @@ def get_user_detail(
     user in their org; this is read-only regardless of role - editing
     still goes through PATCH /users/{user_id} (super_admin only) above.
     """
-    target = db.query(User).filter(
-        User.id == user_id, User.organization_id == current_user.organization_id
-    ).first()
-    if not target:
+    # The workspace being worked in, not the home column. Read-only, so the
+    # same people the workspace's user list shows (homed there or an active
+    # member), and every number is scoped to that workspace's leads.
+    org_id = _acting_org_id(db, current_user)
+    target = db.query(User).filter(User.id == user_id).first() if org_id else None
+    if not _is_workspace_person(db, org_id, target):
         raise HTTPException(status_code=404, detail="User not found")
 
-    metrics = _advisor_metrics(db, current_user.organization_id, target)
-    activity = _recent_activity_for_advisor(db, current_user.organization_id, target.id)
+    metrics = _advisor_metrics(db, org_id, target)
+    activity = _recent_activity_for_advisor(db, org_id, target.id)
 
     return {
         "id": target.id,
@@ -1568,17 +1651,21 @@ def reassign_leads(
     """
     from fastapi import HTTPException
 
+    # ONE org for both halves. The leads came from the selected workspace but
+    # the assignee was checked against the caller's HOME org, so a workspace
+    # admin could hand workspace B's families to a home-org A person, and
+    # could not assign them to B's own people who are homed elsewhere.
+    org_id = _acting_org_id(db, current_user)
     if req.new_assigned_to_id:
         target_advisor = db.query(User).filter(
             User.id == req.new_assigned_to_id,
-            User.organization_id == current_user.organization_id,
             User.is_active == True,
         ).first()
-        if not target_advisor:
+        if not _is_workspace_person(db, org_id, target_advisor):
             raise HTTPException(status_code=404, detail="Target advisor not found or inactive in this organization.")
 
     leads = db.query(Lead).filter(
-        Lead.id.in_(req.lead_ids), Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db)
+        Lead.id.in_(req.lead_ids), Lead.organization_id == org_id
     ).all()
     found_ids = {l.id for l in leads}
     skipped_ids = [lid for lid in req.lead_ids if lid not in found_ids]
@@ -1590,7 +1677,7 @@ def reassign_leads(
 
     if leads:
         log_action(
-            db, current_user.organization_id, current_user.id,
+            db, org_id, current_user.id,
             action="lead.reassign", target_type="lead_batch", target_id=",".join(found_ids) if len(found_ids) <= 20 else f"{len(found_ids)}_leads",
             details={
                 "lead_ids": sorted(found_ids),
@@ -2022,7 +2109,7 @@ def merge_leads(
         db.commit()
 
         log_action(
-            db, current_user.organization_id, current_user.id,
+            db, keep_lead.organization_id, current_user.id,
             action="lead.merge", target_type="lead", target_id=keep_lead.id,
             details={
                 "kept_lead_id": keep_lead.id,
@@ -2139,7 +2226,7 @@ def fix_lead_contact_info(
     changed = {k: {"from": before[k], "to": after[k]} for k in before if before[k] != after[k]}
     if changed:
         log_action(
-            db, current_user.organization_id, current_user.id,
+            db, lead.organization_id, current_user.id,
             action="lead.fix_contact_info", target_type="lead", target_id=lead.id,
             details=changed,
         )
@@ -2247,6 +2334,10 @@ def provision_client(
     # hash and the supervisor is reached by a one-time link.
     _issued_link = not req.supervisor_password
     raw_password = req.supervisor_password or _unknowable_password()
+    # Imported here as create_user does: the guard below referenced a name that
+    # was never imported in this module, so every provisioning call raised
+    # NameError (500) after the org row had been flushed.
+    from app.services import plan_limits
 
     # PLAN LIMIT. No bypass here, deliberately: this is the FIRST seat of an
     # organization created two statements ago, which has no plan yet, so the
@@ -2275,7 +2366,7 @@ def provision_client(
 
     try:
         log_action(
-            db, current_user.organization_id, current_user.id,
+            db, new_org.id, current_user.id,
             action="provision_client",
             target_type="organization",
             target_id=new_org.id,
@@ -2410,7 +2501,7 @@ def update_organization(
 
     try:
         log_action(
-            db, current_user.organization_id, current_user.id,
+            db, org.id, current_user.id,
             action="org.update",
             target_type="organization",
             target_id=org_id,
@@ -2472,6 +2563,7 @@ def seed_demo_data(
     # ceiling would mean seeding a demo could exhaust a real plan. The bypass
     # is role-checked (super_admin or god_admin) and audited, so a demo seed
     # is visible afterwards as a deliberate act on that organization.
+    from app.services import plan_limits
     plan_limits.require_capacity(
         db, target_org, plan_limits.LIMIT_LEADS, adding=body.num_leads,
         bypass=plan_limits.BYPASS_DEMO_SEED, actor=current_user)
@@ -2937,42 +3029,75 @@ def wipe_demo_data(
         ).all()
     ]
 
-    if lead_ids:
-        db.execute(sql_delete(LeadOutcome).where(LeadOutcome.lead_id.in_(lead_ids)))
-        db.execute(sql_delete(Reply).where(Reply.lead_id.in_(lead_ids)))
-        db.execute(sql_delete(Message).where(Message.lead_id.in_(lead_ids)))
+    # ALL-OR-NOTHING. Everything below is one transaction that either commits
+    # whole - deletes AND the demo.wipe audit entry - or is rolled back whole.
+    #
+    # This used to wrap the CadenceState delete in `try/except: pass`. On
+    # Postgres a failed statement aborts the enclosing transaction, so the
+    # swallowed error did not "skip" that step: every later statement then
+    # failed with InFailedSqlTransaction and the caller got an unrelated error
+    # about the Lead delete. On SQLite the same code silently carried on. The
+    # one step that is allowed to fail on its own (see _optional_step) now runs
+    # inside a SAVEPOINT, so its failure is rolled back to that savepoint and
+    # the outer transaction stays usable on every backend.
+    def _optional_step(label, stmt):
         try:
-            db.execute(sql_delete(CadenceState).where(CadenceState.lead_id.in_(lead_ids)))
+            with db.begin_nested():
+                db.execute(stmt)
         except Exception:
-            pass
-        # The selected ids, NOT every lead in the org. The line here used to be
-        # `where(Lead.organization_id == org_id)`, which ignored the id list
-        # that had just been carefully built.
-        db.execute(sql_delete(Lead).where(Lead.id.in_(lead_ids)))
+            logger.warning("demo wipe org=%s: optional step %s failed; skipped "
+                           "(savepoint rolled back, wipe continues)",
+                           org_id, label, exc_info=True)
 
-    # Demo advisors: ONLY ones the demo runner created, recognised by the same
-    # 'demo-' id prefix it deletes by. This previously deleted every user in the
-    # organization whose role was 'advisor' - which is most of a real funeral
-    # home's staff, along with their logins.
-    demo_advisors_deleted = (
-        db.query(User)
-        .filter(User.organization_id == org_id,
-                User.role == "advisor",
-                User.id.like(DEMO_PREFIX + "%"))
-        .delete(synchronize_session=False)
-    )
+    try:
+        if lead_ids:
+            db.execute(sql_delete(LeadOutcome).where(LeadOutcome.lead_id.in_(lead_ids)))
+            db.execute(sql_delete(Reply).where(Reply.lead_id.in_(lead_ids)))
+            db.execute(sql_delete(Message).where(Message.lead_id.in_(lead_ids)))
+            # Optional: cadence_states.lead_id is ON DELETE CASCADE, so the Lead
+            # delete below removes these rows on Postgres even if this explicit
+            # delete cannot run (e.g. an older deploy without the table).
+            _optional_step(
+                "cadence_states",
+                sql_delete(CadenceState).where(CadenceState.lead_id.in_(lead_ids)),
+            )
+            # The selected ids, NOT every lead in the org. The line here used to be
+            # `where(Lead.organization_id == org_id)`, which ignored the id list
+            # that had just been carefully built.
+            db.execute(sql_delete(Lead).where(Lead.id.in_(lead_ids)))
 
-    # Same transaction as the deletes: the wipe and its record commit together.
-    log_action(
-        db, str(target_org.id), current_user.id,
-        action="demo.wipe", target_type="organization", target_id=str(target_org.id),
-        details={"leads_deleted": len(lead_ids),
-                 "demo_advisors_deleted": demo_advisors_deleted},
-        platform_id=getattr(target_org, "platform_id", None),
-        commit=False,
-    )
+        # Demo advisors: ONLY ones the demo runner created, recognised by the same
+        # 'demo-' id prefix it deletes by. This previously deleted every user in the
+        # organization whose role was 'advisor' - which is most of a real funeral
+        # home's staff, along with their logins.
+        demo_advisors_deleted = (
+            db.query(User)
+            .filter(User.organization_id == org_id,
+                    User.role == "advisor",
+                    User.id.like(DEMO_PREFIX + "%"))
+            .delete(synchronize_session=False)
+        )
 
-    db.commit()
+        # Same transaction as the deletes: the wipe and its record commit together.
+        log_action(
+            db, str(target_org.id), current_user.id,
+            action="demo.wipe", target_type="organization", target_id=str(target_org.id),
+            details={"leads_deleted": len(lead_ids),
+                     "demo_advisors_deleted": demo_advisors_deleted},
+            platform_id=getattr(target_org, "platform_id", None),
+            commit=False,
+        )
+
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("demo wipe org=%s failed; transaction rolled back, "
+                         "nothing was deleted", org_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Demo wipe failed and was rolled back; nothing was deleted. "
+                   "(%s)" % type(exc).__name__,
+        )
 
     return {
         "success": True,

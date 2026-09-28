@@ -78,15 +78,29 @@ def launch(
         auto_respond=req.auto_respond,
         actor=current_user.id,
     )
-    log_action(db, current_user.organization_id, current_user.id,
+    _ws = _org_id(db, current_user)
+    log_action(db, _ws, current_user.id,
                action="pipeline.launched", target_type="batch",
-               target_id=current_user.organization_id)
+               target_id=_ws)
     return result
 
 
-def _is_elevated(user: User) -> bool:
-    """Returns True for roles that can see all org-wide pipeline data."""
-    return user.role in ("org_admin", "super_admin", "god_admin")
+def _is_elevated(user: User, db: Session = None) -> bool:
+    """True for a manager IN THE WORKSPACE BEING WORKED IN (is_manager_here).
+
+    This read `users.role`, so an org_admin of A who is only an advisor of B
+    saw - and could approve / dismiss - every advisor's pipeline in B, and B's
+    real admin (an advisor at home) saw only their own. Without a workspace
+    header this is `users.role` exactly as before.
+    """
+    return lead_scope.is_manager_here(user, db)
+
+
+def _org_id(db: Session, user: User):
+    """The ACTIVE workspace org (X-Workspace-Id backed by a membership, else
+    the home column) - the same workspace `_is_elevated` is evaluated in and
+    that authorized_lead_query already scopes the lead names to."""
+    return lead_scope.active_workspace_org_id(user, db)
 
 
 @router.get("/stats")
@@ -104,7 +118,7 @@ def pipeline_stats(
     banner reading "God View — All Organizations". See
     lead_scope.god_sees_all_orgs.
     """
-    advisor_id = None if _is_elevated(current_user) else current_user.id
+    advisor_id = None if _is_elevated(current_user, db) else current_user.id
     is_god = lead_scope.god_sees_all_orgs(current_user)
 
     if is_god:
@@ -146,7 +160,7 @@ def forecast(
     current_user: User = Depends(require_tenant_or_observer),
 ):
     """Get AI forecast and alerts for overview dashboard."""
-    advisor_id = None if _is_elevated(current_user) else current_user.id
+    advisor_id = None if _is_elevated(current_user, db) else current_user.id
     # Use active_workspace_org_id so executive observers get the observed org,
     # not current_user.organization_id which is None for brand executives.
     org_id = lead_scope.active_workspace_org_id(current_user, db)
@@ -160,11 +174,11 @@ def get_flagged(
 ):
     """Get conversations flagged for human review. Advisors see only their own."""
     q = db.query(PipelineConversation).filter(
-        PipelineConversation.organization_id == current_user.organization_id,
+        PipelineConversation.organization_id == _org_id(db, current_user),
         PipelineConversation.flagged == True,
         PipelineConversation.reviewed_at == None,
     )
-    if not _is_elevated(current_user):
+    if not _is_elevated(current_user, db):
         q = q.filter(PipelineConversation.advisor_id == current_user.id)
     flagged = q.order_by(PipelineConversation.flagged_at.desc()).limit(200).all()
 
@@ -203,13 +217,16 @@ def approve_flagged(
     # scope the READ to the advisor; these two WRITES did not, so an advisor
     # could clear a colleague's review flag - marking handled a conversation
     # nobody had handled, on a queue that exists specifically for human review.
-    pipeline = lead_scope.own_records_only(
-        db.query(PipelineConversation).filter(
-            PipelineConversation.id == pipeline_id,
-            PipelineConversation.organization_id == current_user.organization_id,
-        ),
-        PipelineConversation.advisor_id, current_user,
-    ).first()
+    pipeline = db.query(PipelineConversation).filter(
+        PipelineConversation.id == pipeline_id,
+        PipelineConversation.organization_id == _org_id(db, current_user),
+    )
+    # Owner-only for an advisor IN THIS WORKSPACE - own_records_only's rule,
+    # judged on the workspace role (it read users.role, so a home org_admin
+    # who is an advisor here passed).
+    if lead_scope.effective_role(current_user, db) in lead_scope.OWNER_SCOPED_ROLES:
+        pipeline = pipeline.filter(PipelineConversation.advisor_id == current_user.id)
+    pipeline = pipeline.first()
     if not pipeline:
         raise HTTPException(status_code=404, detail="Pipeline not found")
 
@@ -233,7 +250,7 @@ def approve_flagged(
             raise HTTPException(status_code=500, detail="Failed to send message. Please try again.")
 
     db.commit()
-    log_action(db, current_user.organization_id, current_user.id,
+    log_action(db, pipeline.organization_id, current_user.id,
                action="pipeline.approved", target_type="pipeline", target_id=pipeline_id)
     return {"approved": True, "sent": req.send}
 
@@ -246,13 +263,16 @@ def dismiss_flagged(
 ):
     """Dismiss a flagged conversation without sending — advisor will handle manually."""
     # Own conversation only - same reason as approve above.
-    pipeline = lead_scope.own_records_only(
-        db.query(PipelineConversation).filter(
-            PipelineConversation.id == pipeline_id,
-            PipelineConversation.organization_id == current_user.organization_id,
-        ),
-        PipelineConversation.advisor_id, current_user,
-    ).first()
+    pipeline = db.query(PipelineConversation).filter(
+        PipelineConversation.id == pipeline_id,
+        PipelineConversation.organization_id == _org_id(db, current_user),
+    )
+    # Owner-only for an advisor IN THIS WORKSPACE - own_records_only's rule,
+    # judged on the workspace role (it read users.role, so a home org_admin
+    # who is an advisor here passed).
+    if lead_scope.effective_role(current_user, db) in lead_scope.OWNER_SCOPED_ROLES:
+        pipeline = pipeline.filter(PipelineConversation.advisor_id == current_user.id)
+    pipeline = pipeline.first()
     if not pipeline:
         raise HTTPException(status_code=404, detail="Pipeline not found")
 
@@ -280,9 +300,9 @@ def get_conversations(
 ):
     """Get pipeline conversations. Advisors see only their own; admins see org-wide."""
     query = db.query(PipelineConversation).filter(
-        PipelineConversation.organization_id == current_user.organization_id,
+        PipelineConversation.organization_id == _org_id(db, current_user),
     )
-    if not _is_elevated(current_user):
+    if not _is_elevated(current_user, db):
         query = query.filter(PipelineConversation.advisor_id == current_user.id)
     if stage:
         query = query.filter(PipelineConversation.stage == stage)

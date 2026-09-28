@@ -60,6 +60,18 @@ def _read_org(db, user) -> str:
     return org_id
 
 
+def _is_admin_here(user, db) -> bool:
+    """The boolean form of `_admin` below, for the inline checks that gate a
+    FIELD rather than a whole route (budgets, resume, PII in evaluations).
+    Those still read `users.role` after `_admin` itself was fixed, so the same
+    org_admin-of-A / advisor-of-B person could set paid-data budgets, resume a
+    paused workspace, and read provider-evaluation phones and emails in B."""
+    if getattr(user, "role", None) in ("god_admin", "super_admin"):
+        return True
+    from app.services.lead_scope import effective_role
+    return effective_role(user, db) in ADMIN_ROLES
+
+
 def _admin(user, db):
     """Workspace admin check FOR THE WORKSPACE BEING ACTED ON.
 
@@ -690,7 +702,7 @@ def create_strategy(payload: StrategyIn, db: Session = Depends(get_db),
     if problems:
         raise HTTPException(status_code=422, detail=" ".join(problems))
     if (clean.get("daily_budget_cents") or clean.get("monthly_budget_cents")) and \
-            getattr(user, "role", None) not in ADMIN_ROLES:
+            not _is_admin_here(user, db):
         raise HTTPException(status_code=403, detail="Only a workspace admin can give a strategy a paid-data budget.")
     s = EvoSenseStrategy(organization_id=org_id, created_by_id=user.id, is_test=bool(data.get("is_test")))
     ST.apply(s, clean)
@@ -756,7 +768,7 @@ def edit_strategy(strategy_id: str, payload: StrategyIn, db: Session = Depends(g
     money_keys = {"daily_budget_cents", "monthly_budget_cents", "max_cost_per_property_cents",
                   "approval_over_cents", "enrichment_policy"}
     changed_money = [k for k in money_keys & set(clean) if clean[k] != getattr(s, k)]
-    if changed_money and getattr(user, "role", None) not in ADMIN_ROLES:
+    if changed_money and not _is_admin_here(user, db):
         raise HTTPException(status_code=403, detail="Only a workspace admin can change budgets.")
     before = ST.payload(s)
     ST.apply(s, clean)
@@ -1101,10 +1113,11 @@ def get_provider_evaluation(evaluation_id: str, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="Evaluation not found")
     # The returned values (people's phones and emails) are shown to a
     # workspace admin only; everyone else sees the metrics.
-    out = PE.payload(ev, with_records=getattr(user, "role", None) in ADMIN_ROLES)
+    _admin_here = _is_admin_here(user, db)
+    out = PE.payload(ev, with_records=_admin_here)
     if ev.status == "planned":
         out["readiness"] = PE.plan_readiness(db, ev)
-    if not getattr(user, "role", None) in ADMIN_ROLES and out.get("report"):
+    if not _admin_here and out.get("report"):
         out["report"] = dict(out["report"], examples=[])
     return out
 
@@ -1225,7 +1238,7 @@ def patch_controls(payload: ControlsPatch, db: Session = Depends(get_db),
         if k.startswith("paused_"):
             if v is None:
                 continue
-            if v is False and getattr(ctl, k) and getattr(user, "role", None) not in ADMIN_ROLES:
+            if v is False and getattr(ctl, k) and not _is_admin_here(user, db):
                 raise HTTPException(status_code=403, detail="Anyone can pause; only a workspace admin can resume.")
         else:
             _admin(user, db)

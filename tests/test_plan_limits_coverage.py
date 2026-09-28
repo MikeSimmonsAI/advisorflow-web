@@ -268,7 +268,6 @@ def test_seat_usage_counts_memberships_not_just_homed_users():
 # a decision somebody has to make here, in the open.
 INBOUND_PATHS = {
     "routers/social_webhooks_router.py",
-    "routers/fiber_intake_router.py",
     "routers/lead_scraper_router.py",
     "services/crm_service.py",
     "services/tenant_scheduling.py",

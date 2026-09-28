@@ -16,6 +16,20 @@ from app.routers.audit_log_router import log_action
 router = APIRouter(prefix="/templates", tags=["templates"])
 
 
+def _org_id(db: Session, current_user: User):
+    """The ACTIVE workspace org - the one require_admin evaluated the caller in.
+
+    Every route here is gated by require_admin, which is workspace-aware, and
+    then read and wrote `_org_id(db, current_user)` - the HOME org. So an
+    admin who passed require_admin inside workspace B edited home org A's
+    outreach wording (and audited it to A), and B's own admin could not reach
+    B's templates while standing in B. Without X-Workspace-Id this is the home
+    column, exactly as before. Same fix as cadence_template_router._org_id.
+    """
+    from app.services.lead_scope import active_workspace_org_id
+    return active_workspace_org_id(current_user, db)
+
+
 class TemplateUpdateRequest(BaseModel):
     message_track: str
     channel: str  # "sms" or "email"
@@ -86,7 +100,7 @@ def _tone(db: Session, user: User, track: str) -> Optional[str]:
     from app.services import tier_config_service
     try:
         tone = tier_config_service.get_tone_context_for_track(
-            db, user.organization_id, track)
+            db, _org_id(db, user), track)
     except Exception:                                        # noqa: BLE001
         return None
     if not tone or tone == "General outreach.":
@@ -102,7 +116,7 @@ def list_templates(db: Session = Depends(get_db), current_user: User = Depends(r
     nothing's been customized yet. Restricted to org_admin/super_admin
     since template wording affects every advisor's outreach.
     """
-    return list_all_templates_with_defaults(db, current_user.organization_id)
+    return list_all_templates_with_defaults(db, _org_id(db, current_user))
 
 
 @router.put("/")
@@ -112,18 +126,18 @@ def update_template(
     current_user: User = Depends(require_admin),
 ):
     track = _validate_track_and_channel(
-        db, current_user.organization_id, req.message_track, req.channel)
+        db, _org_id(db, current_user), req.message_track, req.channel)
 
     if req.channel == "email" and not req.email_subject_template:
         raise HTTPException(status_code=400, detail="email_subject_template is required for email templates")
 
     upsert_template(
-        db, current_user.organization_id, track, req.channel,
+        db, _org_id(db, current_user), track, req.channel,
         req.body_template, current_user.id, req.email_subject_template,
     )
 
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, _org_id(db, current_user), current_user.id,
         action="template.update", target_type="template", target_id=f"{req.message_track}:{req.channel}",
         details={"message_track": req.message_track, "channel": req.channel},
     )
@@ -139,13 +153,13 @@ def reset_template(
     current_user: User = Depends(require_admin),
 ):
     """Reverts a customized template back to the default."""
-    track = _validate_track(db, current_user.organization_id, message_track)
+    track = _validate_track(db, _org_id(db, current_user), message_track)
 
-    deleted = reset_template_to_default(db, current_user.organization_id, track, channel)
+    deleted = reset_template_to_default(db, _org_id(db, current_user), track, channel)
 
     if deleted:
         log_action(
-            db, current_user.organization_id, current_user.id,
+            db, _org_id(db, current_user), current_user.id,
             action="template.reset_to_default", target_type="template", target_id=f"{message_track}:{channel}",
             details={"message_track": message_track, "channel": channel},
         )
@@ -165,7 +179,7 @@ def ai_generate_template(
     fills the editor box, it never writes to the database itself.
     """
     track = _validate_track_and_channel(
-        db, current_user.organization_id, req.message_track, req.channel)
+        db, _org_id(db, current_user), req.message_track, req.channel)
     try:
         return generate_template(track, req.channel, req.instruction,
                                  track_context=_tone(db, current_user, track),
@@ -187,7 +201,7 @@ def ai_rewrite_template(
     save anything until the admin clicks Save.
     """
     track = _validate_track_and_channel(
-        db, current_user.organization_id, req.message_track, req.channel)
+        db, _org_id(db, current_user), req.message_track, req.channel)
     if req.channel == "email" and not req.current_subject:
         raise HTTPException(status_code=400, detail="current_subject is required when rewriting an email template")
     try:

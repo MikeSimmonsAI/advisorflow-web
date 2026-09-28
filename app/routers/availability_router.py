@@ -421,23 +421,29 @@ def get_upcoming_appointments(
     """
     from datetime import datetime as dt
 
-    ADMIN_ROLES = ("org_admin", "super_admin", "god_admin")
-    is_admin = current_user.role in ADMIN_ROLES
+    # Manager IN THE SELECTED WORKSPACE, and that workspace's advisors - not
+    # `users.role` and the home column. Reading those let an org_admin of A who
+    # is only an advisor of B pull A's whole appointment book while standing in
+    # B (and refused B's real admin). Only the NEUTRAL owner keeps the
+    # every-organization view; an owner who entered a customer sees that one.
+    # Without a workspace header this is the home org and users.role, as before.
+    is_admin = lead_scope.is_manager_here(current_user, db)
     now = dt.now()
 
     if org_wide and is_admin:
-        if current_user.role == "god_admin":
+        if lead_scope.god_sees_all_orgs(current_user):
             bookings = db.query(BookingLink).filter(
                 BookingLink.status == "booked",
                 BookingLink.booked_time >= now,
             ).order_by(BookingLink.booked_time.asc()).limit(100).all()
         else:
+            scope_org_id = lead_scope.active_workspace_org_id(current_user, db)
             org_user_ids = [
                 u.id for u in db.query(User).filter(
-                    User.organization_id == current_user.organization_id,
+                    User.organization_id == scope_org_id,
                     User.is_active == True,
                 ).all()
-            ]
+            ] if scope_org_id else []
             bookings = db.query(BookingLink).filter(
                 BookingLink.user_id.in_(org_user_ids),
                 BookingLink.status == "booked",

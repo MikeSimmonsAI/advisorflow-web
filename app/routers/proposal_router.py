@@ -58,6 +58,30 @@ def _gen_id() -> str:
     return str(uuid.uuid4())
 
 
+def _org_id(db: Session, current_user: User):
+    """The ACTIVE workspace org - the one require_admin evaluated the caller in.
+
+    Every admin route here is gated by require_admin (workspace-aware) and then
+    read/wrote `current_user.organization_id`, the HOME org: an admin who passed
+    in workspace B listed, edited, published, deleted and SENT home org A's
+    proposals, and B's real admin could not reach B's. Without X-Workspace-Id
+    this is the home column, exactly as before.
+    """
+    from app.services.lead_scope import active_workspace_org_id
+    return active_workspace_org_id(current_user, db)
+
+
+def _write_org(db: Session, current_user: User) -> str:
+    """`tenant_write_org_id`, for the active workspace: a neutral owner (or
+    anyone with no workspace) still gets the same 409, never a row owned by
+    nobody."""
+    from app.services.platform_owner import is_platform_pseudo_org
+    org_id = _org_id(db, current_user)
+    if not org_id or is_platform_pseudo_org(org_id):
+        return _tenant_write_org_id(current_user)  # raises the platform's 409
+    return str(org_id)
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -182,7 +206,7 @@ def create_proposal(
         # get a loud failure here - they get a proposal that belongs to
         # nobody and appears in no customer's list. tenant_write_org_id
         # turns that into a 409 naming the context to select.
-        organization_id=_tenant_write_org_id(current_user),
+        organization_id=_write_org(db, current_user),
         created_by_id=current_user.id,
         title=req.title,
         subtitle=req.subtitle,
@@ -208,7 +232,7 @@ def list_proposals(
     proposals = (
         db.query(Proposal)
         .filter(
-            Proposal.organization_id == current_user.organization_id,
+            Proposal.organization_id == _org_id(db, current_user),
             Proposal.deleted_at.is_(None),
         )
         .order_by(Proposal.updated_at.desc())
@@ -234,7 +258,7 @@ def get_proposal(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     d = _proposal_to_dict(p)
     d["blocks"] = [_block_to_dict(b) for b in p.blocks]
     d["tokens"] = [
@@ -260,7 +284,7 @@ def update_proposal(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     if req.title is not None:
         p.title = req.title
     if req.subtitle is not None:
@@ -289,7 +313,7 @@ def delete_proposal(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     p.deleted_at = _utcnow()
     db.commit()
     return {"deleted": True}
@@ -301,7 +325,7 @@ def publish_proposal(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     if not p.blocks:
         raise HTTPException(status_code=422, detail="Cannot publish a proposal with no content blocks")
     p.status = "published"
@@ -316,7 +340,7 @@ def unpublish_proposal(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     p.status = "draft"
     p.updated_at = _utcnow()
     db.commit()
@@ -337,7 +361,7 @@ def add_block(
 ):
     if req.block_type not in VALID_BLOCK_TYPES:
         raise HTTPException(status_code=422, detail=f"block_type must be one of {VALID_BLOCK_TYPES}")
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
 
     # Determine position
     if req.position is not None:
@@ -375,7 +399,7 @@ def update_block(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     block = next((b for b in p.blocks if b.id == block_id), None)
     if not block:
         raise HTTPException(status_code=404, detail="Block not found")
@@ -399,7 +423,7 @@ def delete_block(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     block = next((b for b in p.blocks if b.id == block_id), None)
     if not block:
         raise HTTPException(status_code=404, detail="Block not found")
@@ -419,7 +443,7 @@ def reorder_blocks(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     block_map = {b.id: b for b in p.blocks}
     for i, block_id in enumerate(req.block_ids):
         if block_id not in block_map:
@@ -440,11 +464,14 @@ def send_proposal_invite(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     if p.status != "published":
         raise HTTPException(status_code=422, detail="Proposal must be published before sending")
 
-    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    # Resolved HERE, inside the request: _send below runs as a background task
+    # with no request context, where the workspace could not be re-derived.
+    send_org_id = _org_id(db, current_user)
+    org = db.query(Organization).filter(Organization.id == send_org_id).first()
     org_name = org.name if org else "EvoSys Pro"
 
     # Create the token
@@ -488,7 +515,7 @@ This link is private and intended only for you. It expires in {req.expires_hours
         try:
             send_email(
                 db=db,
-                org_id=current_user.organization_id,
+                org_id=send_org_id,
                 to_email=req.recipient_email,
                 to_name=req.recipient_name or req.recipient_email,
                 subject=f"Your proposal from {org_name}: {p.title}",
@@ -516,7 +543,7 @@ def revoke_token(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     tok = next((t for t in p.tokens if t.id == token_id), None)
     if not tok:
         raise HTTPException(status_code=404, detail="Token not found")
@@ -533,7 +560,7 @@ def get_analytics(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    p = _get_proposal_or_404(db, proposal_id, current_user.organization_id)
+    p = _get_proposal_or_404(db, proposal_id, _org_id(db, current_user))
     views = p.views
     total_opens = len(views)
     unique_tokens = len({v.token_id for v in views if v.token_id})
@@ -609,7 +636,7 @@ async def upload_proposal_file(
     The file_url is a path to the public serve endpoint.
     """
     p = db.query(Proposal).filter_by(id=proposal_id,
-                                     organization_id=_tenant_write_org_id(current_user),
+                                     organization_id=_write_org(db, current_user),
                                      deleted_at=None).first()
     if not p:
         raise HTTPException(404, "Proposal not found")
@@ -624,7 +651,7 @@ async def upload_proposal_file(
     pf = ProposalFile(
         # ProposalFile.organization_id is nullable, so a context-less owner
         # would create a file row owned by nobody rather than being refused.
-        organization_id=_tenant_write_org_id(current_user),
+        organization_id=_write_org(db, current_user),
         proposal_id=proposal_id,
         filename=file.filename or "upload",
         content_type=file.content_type,

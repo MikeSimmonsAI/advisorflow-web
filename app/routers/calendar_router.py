@@ -967,28 +967,40 @@ def list_calendar_events(
     from app.models.models import Lead
     from datetime import timedelta, timezone
 
-    ADMIN_ROLES = ("org_admin", "super_admin", "god_admin")
-    is_admin = current_user.role in ADMIN_ROLES
+    # Manager IN THE SELECTED WORKSPACE (is_manager_here), and the workspace's
+    # own advisors - not `users.role` and the home column. The advisor_id
+    # branch also took ANY user id with no organization check at all, so an
+    # admin of one customer could read another customer's advisor's calendar
+    # (lead names included) by guessing an id; that now answers 404. Only the
+    # NEUTRAL owner keeps the every-organization view. Without a workspace
+    # header this is the home org and users.role, exactly as before.
+    is_admin = lead_scope.is_manager_here(current_user, db)
+    scope_org_id = lead_scope.active_workspace_org_id(current_user, db)
 
     cutoff = datetime.now(timezone.utc) + timedelta(days=days_ahead)
     now = datetime.now(timezone.utc)
 
     # Build the query filter based on access level
     if org_wide and is_admin:
-        # God admin: all orgs on the same platform; others: own org only
-        if current_user.role == "god_admin":
+        if lead_scope.god_sees_all_orgs(current_user):
             q = db.query(BookingLink)
         else:
-            # Collect all user IDs in this org
+            # Collect all user IDs in this workspace
             org_user_ids = [
                 u.id for u in db.query(User).filter(
-                    User.organization_id == current_user.organization_id,
+                    User.organization_id == scope_org_id,
                     User.is_active == True,
                 ).all()
-            ]
+            ] if scope_org_id else []
             q = db.query(BookingLink).filter(BookingLink.user_id.in_(org_user_ids))
     elif advisor_id and is_admin:
-        # Single specific advisor (admin viewing another advisor's calendar)
+        # Single specific advisor (admin viewing another advisor's calendar),
+        # who must belong to the workspace the caller manages.
+        if not lead_scope.god_sees_all_orgs(current_user):
+            in_scope = scope_org_id and db.query(User.id).filter(
+                User.id == advisor_id, User.organization_id == scope_org_id).first()
+            if not in_scope:
+                raise HTTPException(status_code=404, detail="Advisor not found")
         q = db.query(BookingLink).filter(BookingLink.user_id == advisor_id)
     else:
         q = db.query(BookingLink).filter(BookingLink.user_id == current_user.id)

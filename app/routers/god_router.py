@@ -1597,7 +1597,7 @@ def get_job_runs_latest(
                       indistinguishable from "the ledger does not exist".
     """
     from app.models.job_models import (
-        ALL_JOB_NAMES, LOOP_JOB_NAMES, JobRun, JobName,
+        ALL_JOB_NAMES, LOOP_JOB_NAMES, JobRun, JobName, RETIRED_JOB_NAMES,
     )
     from sqlalchemy import func as _func
 
@@ -1605,7 +1605,9 @@ def get_job_runs_latest(
     # Render cron services. The cron services were absent from this list for as
     # long as it existed, so a cron could stop dead without the health screen
     # changing by a single pixel.
-    known_jobs = list(ALL_JOB_NAMES)
+    # Retired jobs are listed so their history still shows (and they are not
+    # reported as untracked), but they are never stale or "in error".
+    known_jobs = list(ALL_JOB_NAMES) + list(RETIRED_JOB_NAMES)
 
     # ── THE LEDGER HAS TO BE ABLE TO REPORT ITS OWN ABSENCE ──────────────────
     #
@@ -1703,6 +1705,7 @@ def get_job_runs_latest(
     # Never-run is ambiguous for a cron; a failed run never is.
     jobs_in_error = sorted(
         n for n in known_jobs if result.get(n, {}).get("status") == "error"
+        and n not in RETIRED_JOB_NAMES
     )
 
     # STALE: the last run may say "success", but if it was long ago the job
@@ -1721,6 +1724,8 @@ def get_job_runs_latest(
             started_dt = None
         rec["expected_every_minutes"] = EXPECTED_INTERVAL_MINUTES.get(n)
         rec["stale"] = bool(started_dt is not None and is_stale(n, started_dt, _now))
+        if n in RETIRED_JOB_NAMES:
+            rec["retired"] = True
     stale_jobs = sorted(n for n in known_jobs if result.get(n, {}).get("stale"))
 
     # Jobs with rows that nobody enumerates. Reported rather than hidden: a job

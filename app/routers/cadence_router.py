@@ -57,7 +57,16 @@ def start_batch_cadence(lead_ids: list[str], db: Session = Depends(get_db), curr
 
 @router.post("/run-due")
 def run_due(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    result = run_due_cadences(db, organization_id=current_user.organization_id)
+    # THE WORKSPACE require_admin JUDGED, not the home column. With the home
+    # column an admin who passed in workspace B ran home org A's due touches -
+    # real SMS - and a membership-only admin of B (no home column) passed
+    # `organization_id=None`, which run_due_cadences reads as EVERY
+    # organization on the platform. Only the neutral owner keeps that
+    # platform-wide run; anyone else with no workspace is refused.
+    org_id = lead_scope.active_workspace_org_id(current_user, db)
+    if not org_id and not lead_scope.god_sees_all_orgs(current_user):
+        raise HTTPException(status_code=409, detail="No customer workspace is selected.")
+    result = run_due_cadences(db, organization_id=org_id)
     return result
 
 
@@ -126,7 +135,8 @@ def lead_cadence_history(lead_id: str,
 
 @router.get("/summary")
 def cadence_summary(db: Session = Depends(get_db), current_user: User = Depends(require_tenant_user)):
-    return get_cadence_summary(db, current_user.organization_id)
+    # The active workspace, like every other query in this router.
+    return get_cadence_summary(db, lead_scope.active_workspace_org_id(current_user, db))
 
 
 @router.get("/health-summary")

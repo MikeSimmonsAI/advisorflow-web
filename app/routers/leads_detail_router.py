@@ -386,7 +386,7 @@ def preview_messages_for_leads(
             # placeholder so the draft still reads naturally.
             from app.services.public_identity import booking_url as public_booking_url
             placeholder_booking_url = public_booking_url(
-                db, current_user.organization_id, "preview")
+                db, lead.organization_id, "preview")
             draft = render_cadence_message(db, lead, current_user, touch_number=1, booking_url=placeholder_booking_url)
 
         results.append(MessagePreviewItem(

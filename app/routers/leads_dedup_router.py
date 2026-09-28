@@ -97,7 +97,7 @@ def keep_lead_separate(
 
     log_action(
         db,
-        organization_id=current_user.organization_id,
+        organization_id=lead.organization_id,
         actor_user_id=current_user.id,
         action="lead.duplicate_resolved_keep_separate",
         target_type="lead",
@@ -265,7 +265,11 @@ def repair_duplicate_dnc(
     is a separate, honest fact, and resolving it is a human decision made
     through /not-duplicate.
     """
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+    # Admin IN THE WORKSPACE BEING WORKED IN (is_manager_here, as
+    # deps.require_admin), not users.role: the rows touched below belong to the
+    # active workspace. Platform operators keep their platform-role pass.
+    if not (current_user.role in ("super_admin", "god_admin")
+            or lead_scope.is_manager_here(current_user, db)):
         raise HTTPException(status_code=403, detail="Admin role required.")
 
     candidates = db.query(Lead).filter(
@@ -285,11 +289,12 @@ def repair_duplicate_dnc(
         db.commit()
         log_action(
             db,
-            organization_id=current_user.organization_id,
+            # The workspace whose leads were repaired, not the home column.
+            organization_id=lead_scope.active_workspace_org_id(current_user, db),
             actor_user_id=current_user.id,
             action="lead.duplicate_dnc_repaired",
             target_type="organization",
-            target_id=current_user.organization_id,
+            target_id=lead_scope.active_workspace_org_id(current_user, db),
             details={"repaired": len(repairable), "protected": len(protected)},
         )
 
@@ -338,7 +343,11 @@ def repair_stale_tier_review(
 
     A lead with no tier still needs a human. It is reported, not touched.
     """
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+    # Admin IN THE WORKSPACE BEING WORKED IN (is_manager_here, as
+    # deps.require_admin), not users.role: the rows touched below belong to the
+    # active workspace. Platform operators keep their platform-role pass.
+    if not (current_user.role in ("super_admin", "god_admin")
+            or lead_scope.is_manager_here(current_user, db)):
         raise HTTPException(status_code=403, detail="Admin role required.")
 
     parked = db.query(Lead).filter(
@@ -361,11 +370,12 @@ def repair_stale_tier_review(
         db.commit()
         log_action(
             db,
-            organization_id=current_user.organization_id,
+            # The workspace whose leads were released, not the home column.
+            organization_id=lead_scope.active_workspace_org_id(current_user, db),
             actor_user_id=current_user.id,
             action="lead.tier_status_repaired",
             target_type="organization",
-            target_id=current_user.organization_id,
+            target_id=lead_scope.active_workspace_org_id(current_user, db),
             details={"released": len(releasable), "still_need_a_tier": len(no_tier),
                      "blocked_for_another_reason": len(blocked)},
         )
@@ -448,7 +458,11 @@ def deduplicate_email_leads(
     call DELETE /leads/duplicates/bulk-delete to permanently remove them.
     Requires org_admin or super_admin.
     """
-    if current_user.role not in ("org_admin", "super_admin", "god_admin"):
+    # Admin IN THE WORKSPACE BEING WORKED IN (is_manager_here, as
+    # deps.require_admin), not users.role: the rows touched below belong to the
+    # active workspace. Platform operators keep their platform-role pass.
+    if not (current_user.role in ("super_admin", "god_admin")
+            or lead_scope.is_manager_here(current_user, db)):
         raise HTTPException(status_code=403, detail="Admin role required.")
 
     from sqlalchemy import func as sqlfunc

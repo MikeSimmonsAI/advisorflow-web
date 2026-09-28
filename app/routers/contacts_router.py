@@ -52,6 +52,17 @@ class NoteCreate(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _org_id(db: Session, current_user: User):
+    """The ACTIVE workspace org (X-Workspace-Id backed by a membership, else
+    the home column). Every route here used `current_user.organization_id`, so
+    a person standing in workspace B listed, edited, deleted and created HOME
+    org A's contacts, and a membership-only member (no home column) inserted
+    rows owned by NULL. Without X-Workspace-Id this is the home column,
+    exactly as before. A contact outside the workspace answers 404."""
+    from app.services.lead_scope import active_workspace_org_id
+    return active_workspace_org_id(current_user, db)
+
+
 def _row_to_dict(row) -> dict:
     """Convert a RowMapping to a plain dict."""
     return dict(row._mapping) if hasattr(row, '_mapping') else dict(row)
@@ -69,7 +80,7 @@ def list_contacts(
     rows = db.execute(text(
         "SELECT * FROM crm_contacts WHERE organization_id = :org_id ORDER BY created_at DESC"
         " LIMIT :limit OFFSET :offset"
-    ), {"org_id": current_user.organization_id, "limit": limit, "offset": offset}).fetchall()
+    ), {"org_id": _org_id(db, current_user), "limit": limit, "offset": offset}).fetchall()
     return [_row_to_dict(r) for r in rows]
 
 
@@ -79,6 +90,10 @@ def create_contact(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
+    org_id = _org_id(db, current_user)
+    if not org_id:
+        from app.services.platform_owner import _NO_CONTEXT_DETAIL
+        raise HTTPException(status_code=409, detail=_NO_CONTEXT_DETAIL)
     contact_id = str(uuid.uuid4())
     db.execute(text(
         """INSERT INTO crm_contacts
@@ -86,7 +101,7 @@ def create_contact(
            VALUES (:id, :org_id, :user_id, :full_name, :phone, :email, :company, :stage, NOW())"""
     ), {
         "id": contact_id,
-        "org_id": current_user.organization_id,
+        "org_id": org_id,
         "user_id": current_user.id,
         "full_name": payload.full_name,
         "phone": payload.phone,
@@ -108,7 +123,7 @@ def update_contact(
 ):
     row = db.execute(text(
         "SELECT * FROM crm_contacts WHERE id = :id AND organization_id = :org_id"
-    ), {"id": contact_id, "org_id": current_user.organization_id}).fetchone()
+    ), {"id": contact_id, "org_id": _org_id(db, current_user)}).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Contact not found")
 
@@ -118,7 +133,9 @@ def update_contact(
 
     set_clauses = ", ".join(f"{k} = :{k}" for k in updates)
     updates["contact_id"] = contact_id
-    db.execute(text(f"UPDATE crm_contacts SET {set_clauses} WHERE id = :contact_id"), updates)
+    updates["org_id"] = row._mapping["organization_id"]
+    db.execute(text(f"UPDATE crm_contacts SET {set_clauses} "
+                    f"WHERE id = :contact_id AND organization_id = :org_id"), updates)
     db.commit()
 
     updated = db.execute(text("SELECT * FROM crm_contacts WHERE id = :id"), {"id": contact_id}).fetchone()
@@ -130,12 +147,19 @@ def delete_contact(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
+    # A HARD DELETE (contact and its notes), so manager authority IN THIS
+    # WORKSPACE is required - any tenant user could delete any contact here.
+    # Platform operators keep their platform-role pass.
+    from app.services.lead_scope import is_manager_here
+    if not (current_user.role in ("super_admin", "god_admin")
+            or is_manager_here(current_user, db)):
+        raise HTTPException(status_code=403, detail="Admin access required")
     row = db.execute(text(
         # SELECT * rather than named columns: this table's shape differs between
         # deployments (full_name vs first_name/last_name), and the snapshot
         # below must never be the reason a delete fails.
         "SELECT * FROM crm_contacts WHERE id = :id AND organization_id = :org_id"
-    ), {"id": contact_id, "org_id": current_user.organization_id}).fetchone()
+    ), {"id": contact_id, "org_id": _org_id(db, current_user)}).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Contact not found")
     snapshot = _row_to_dict(row)
@@ -164,7 +188,7 @@ def list_notes(
     # Verify org ownership
     row = db.execute(text(
         "SELECT id FROM crm_contacts WHERE id = :id AND organization_id = :org_id"
-    ), {"id": contact_id, "org_id": current_user.organization_id}).fetchone()
+    ), {"id": contact_id, "org_id": _org_id(db, current_user)}).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Contact not found")
 
@@ -183,7 +207,7 @@ def add_note(
 ):
     row = db.execute(text(
         "SELECT id FROM crm_contacts WHERE id = :id AND organization_id = :org_id"
-    ), {"id": contact_id, "org_id": current_user.organization_id}).fetchone()
+    ), {"id": contact_id, "org_id": _org_id(db, current_user)}).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Contact not found")
 

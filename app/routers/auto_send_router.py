@@ -186,6 +186,17 @@ def _leads_by_id(db: Session, items) -> dict:
     return {l.id: l for l in db.query(Lead).filter(Lead.id.in_(ids)).all()}
 
 
+def _org_id(db: Session, current_user: User):
+    """The ACTIVE workspace org (X-Workspace-Id backed by a membership, else
+    the home column) - the same workspace authorized_lead_query draws leads
+    from. /enqueue and /proactive-scan took leads from the SELECTED workspace
+    and filed their drafts in the caller's HOME org's queue, where home org's
+    staff could read and approve messages to another customer's families.
+    Without X-Workspace-Id this is the home column, exactly as before."""
+    from app.services.lead_scope import active_workspace_org_id
+    return active_workspace_org_id(current_user, db)
+
+
 @router.get("/queue")
 def get_queue(
     db: Session = Depends(get_db),
@@ -195,7 +206,7 @@ def get_queue(
     items = (
         db.query(AutoSendItem)
         .filter(
-            AutoSendItem.organization_id == current_user.organization_id,
+            AutoSendItem.organization_id == _org_id(db, current_user),
             AutoSendItem.advisor_id == current_user.id,
             AutoSendItem.status == "pending",
         )
@@ -216,7 +227,7 @@ def get_history(
     items = (
         db.query(AutoSendItem)
         .filter(
-            AutoSendItem.organization_id == current_user.organization_id,
+            AutoSendItem.organization_id == _org_id(db, current_user),
             AutoSendItem.advisor_id == current_user.id,
             AutoSendItem.status.in_(["sent", "approved", "skipped", "failed"]),
         )
@@ -263,7 +274,7 @@ def update_settings(
     db.commit()
     log_action(
         db,
-        current_user.organization_id,
+        _org_id(db, current_user),
         current_user.id,
         action="auto_send.settings_updated",
         target_type="user",
@@ -292,10 +303,10 @@ def edit_item(
     item = lead_scope.own_records_only(
         db.query(AutoSendItem).filter(
             AutoSendItem.id == item_id,
-            AutoSendItem.organization_id == current_user.organization_id,
+            AutoSendItem.organization_id == _org_id(db, current_user),
             AutoSendItem.status == "pending",
         ),
-        AutoSendItem.advisor_id, current_user,
+        AutoSendItem.advisor_id, current_user, db,
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found or already actioned")
@@ -325,10 +336,10 @@ def approve_item(
     item = lead_scope.own_records_only(
         db.query(AutoSendItem).filter(
             AutoSendItem.id == item_id,
-            AutoSendItem.organization_id == current_user.organization_id,
+            AutoSendItem.organization_id == _org_id(db, current_user),
             AutoSendItem.status == "pending",
         ),
-        AutoSendItem.advisor_id, current_user,
+        AutoSendItem.advisor_id, current_user, db,
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found or already actioned")
@@ -351,7 +362,7 @@ def approve_item(
         item.actioned_at = datetime.utcnow()
         item.actioned_by_id = current_user.id
         db.commit()
-        log_action(db, current_user.organization_id, current_user.id,
+        log_action(db, _org_id(db, current_user), current_user.id,
                    action="auto_send.blocked", target_type="lead", target_id=lead.id)
         return {"status": item.status, "item_id": item_id,
                 "blocked_reason": item.ai_reason}
@@ -359,7 +370,7 @@ def approve_item(
     try:
         _deliver(db, item, lead, current_user)
         item.status = "sent"
-        log_action(db, current_user.organization_id, current_user.id, action="auto_send.approved", target_type="lead", target_id=lead.id)
+        log_action(db, _org_id(db, current_user), current_user.id, action="auto_send.approved", target_type="lead", target_id=lead.id)
     except Exception as e:
         item.status = "failed"
         item.ai_reason = str(e)
@@ -383,10 +394,10 @@ def skip_item(
     item = lead_scope.own_records_only(
         db.query(AutoSendItem).filter(
             AutoSendItem.id == item_id,
-            AutoSendItem.organization_id == current_user.organization_id,
+            AutoSendItem.organization_id == _org_id(db, current_user),
             AutoSendItem.status == "pending",
         ),
-        AutoSendItem.advisor_id, current_user,
+        AutoSendItem.advisor_id, current_user, db,
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found or already actioned")
@@ -395,7 +406,7 @@ def skip_item(
     item.actioned_at = datetime.utcnow()
     item.actioned_by_id = current_user.id
     db.commit()
-    log_action(db, current_user.organization_id, current_user.id, action="auto_send.skipped", target_type="lead", target_id=item.lead_id)
+    log_action(db, _org_id(db, current_user), current_user.id, action="auto_send.skipped", target_type="lead", target_id=item.lead_id)
     return {"status": "skipped", "item_id": item_id}
 
 
@@ -406,7 +417,7 @@ def approve_all(
 ):
     """Approve and send all pending items at once."""
     items = db.query(AutoSendItem).filter(
-        AutoSendItem.organization_id == current_user.organization_id,
+        AutoSendItem.organization_id == _org_id(db, current_user),
         AutoSendItem.advisor_id == current_user.id,
         AutoSendItem.status == "pending",
     ).all()
@@ -466,7 +477,7 @@ def enqueue_item(
 
     item = AutoSendItem(
         id=str(uuid.uuid4()),
-        organization_id=current_user.organization_id,
+        organization_id=_org_id(db, current_user),
         lead_id=req.lead_id,
         advisor_id=current_user.id,
         message=req.message,
@@ -706,7 +717,7 @@ def proactive_scan(
             completion = ai_gateway.chat_completion(
                 feature="auto_send.proactive_scan", capability="reengagement_draft",
                 mode=ai_gateway.MANUAL, actor=current_user.id,
-                org_id=current_user.organization_id,
+                org_id=_org_id(db, current_user),
                 messages=[{
                     "role": "system",
                     "content": (
@@ -726,7 +737,7 @@ def proactive_scan(
 
             item = AutoSendItem(
                 id=str(uuid.uuid4()),
-                organization_id=current_user.organization_id,
+                organization_id=_org_id(db, current_user),
                 lead_id=row.id,
                 advisor_id=current_user.id,
                 message=ai_message,
@@ -744,7 +755,7 @@ def proactive_scan(
 
     db.commit()
     log_action(
-        db, current_user.organization_id, current_user.id,
+        db, _org_id(db, current_user), current_user.id,
         action="auto_send.proactive_scan",
         target_type="user", target_id=current_user.id,
         details={"queued": queued_count, "days_dormant": req.days_dormant},
