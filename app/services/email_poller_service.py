@@ -111,8 +111,11 @@ def _fetch_recent_emails(access_token: str,
         timeout=20,
     )
     if response.status_code != 200:
+        # NOT an empty inbox. This returned [] and the job reported "checked 0,
+        # errors 0" for every run - a mailbox that could not be read looked
+        # exactly like one with no mail. None tells the caller it failed.
         logger.error("Graph inbox fetch failed: %s %s", response.status_code, response.text)
-        return []
+        return None
     return response.json().get("value", [])
 
 
@@ -169,6 +172,9 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
         return {"checked": 0, "matched": 0, "errors": 1, "error": str(e)}
 
     emails = _fetch_recent_emails(access_token)
+    if emails is None:
+        return {"checked": 0, "matched": 0, "errors": 1,
+                "error": "Could not read the Microsoft 365 inbox (see logs; reconnect may be required)"}
     checked = len(emails)
     matched = 0
     errors = 0
@@ -368,6 +374,22 @@ def poll_all_orgs(db: Session) -> dict:
             db.rollback()
             logger.error("poll_all_orgs: error on advisor %s: %s", advisor_id, e)
             total["errors"] += 1
+
+    # THE SHARED SENDING MAILBOXES (e.g. support@evosyspro.live). Mail sent
+    # through the provider carries that address; replies land there, and
+    # before this nothing read it (app/services/inbound_mailbox_service.py).
+    try:
+        from app.services.inbound_mailbox_service import poll_all_mailboxes
+        mb = poll_all_mailboxes(db)
+        total["mailboxes_polled"] = mb["mailboxes_polled"]
+        total["mailbox_checked"] = mb["mailbox_checked"]
+        total["matched"] += mb["mailbox_matched"]
+        total["mailbox_matched"] = mb["mailbox_matched"]
+        total["errors"] += mb["mailbox_errors"]
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        logger.exception("shared mailbox polling failed: %s", e)
+        total["errors"] += 1
 
     logger.info(
         "Email poll complete — advisors=%d checked=%d matched=%d errors=%d",

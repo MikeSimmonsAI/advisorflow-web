@@ -75,7 +75,8 @@ PROVIDERS = (PROVIDER_GOOGLE, PROVIDER_MICROSOFT)
 # nothing else — it is READ from the transaction, never from the browser.
 FLOW_SETTINGS = "settings"      # a signed-in advisor connecting from /settings
 FLOW_SETUP = "setup"            # an advisor following an admin's setup link
-FLOWS = (FLOW_SETTINGS, FLOW_SETUP)
+FLOW_MAILBOX = "mailbox"        # a platform owner connecting a shared reply mailbox
+FLOWS = (FLOW_SETTINGS, FLOW_SETUP, FLOW_MAILBOX)
 
 # How long a started authorization may sit unfinished. Long enough for a real
 # person to read a consent screen, pick an account and approve; short enough

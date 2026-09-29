@@ -1059,6 +1059,8 @@ from app.routers.wholesale_ops_router import router as wholesale_ops_router  # n
 app.include_router(wholesale_ops_router)   # /wholesale/ops — callbacks, temperature overrides, conversation control, pilot
 from app.routers.skiptrace_cost_router import router as skiptrace_cost_router  # noqa: E402
 app.include_router(skiptrace_cost_router)   # /wholesale/skip-trace — cost catalogue, estimates, compare, approval (never calls a vendor)
+from app.routers.inbound_mailbox_router import router as inbound_mailbox_router  # noqa: E402
+app.include_router(inbound_mailbox_router)   # /god/email/inbound-mailboxes — shared reply mailbox connect/status/poll
 # Files — photos, documents, proof of funds. One upload path and one
 # authenticated serve path for the whole module; see the router's docstring for
 # why no stored object is ever given a public URL.

@@ -8,7 +8,7 @@ import os
 
 from app.deps import get_db, get_current_user
 from app.models.models import User
-from app.models.oauth_models import FLOW_SETUP, PROVIDER_MICROSOFT
+from app.models.oauth_models import FLOW_MAILBOX, FLOW_SETUP, PROVIDER_MICROSOFT
 from app.services import oauth_state_service
 from app.services.oauth_state_service import OAuthStateError
 from app.services.microsoft_email_service import get_microsoft_authorization_url, handle_microsoft_oauth_callback
@@ -78,6 +78,19 @@ def microsoft_oauth_callback(
             "Microsoft OAuth callback refused an authorization state: %s", e)
         return RedirectResponse(
             url=f"{FRONTEND_SETTINGS_URL}?microsoft_error=invalid_state")
+
+    if txn.flow == FLOW_MAILBOX:
+        # A platform owner connecting a SHARED reply mailbox, not their own.
+        god_page = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/god/diagnostics/email"
+        if error or not code:
+            return RedirectResponse(url=f"{god_page}?mailbox_error={quote(str(error or 'missing_code'))}")
+        try:
+            from app.services.inbound_mailbox_service import connect_from_code
+            box = connect_from_code(db, code=code, connected_by_user_id=txn.user_id)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Shared mailbox connect failed (txn user %s): %s", txn.user_id, e)
+            return RedirectResponse(url=f"{god_page}?mailbox_error=connection_failed")
+        return RedirectResponse(url=f"{god_page}?mailbox_connected={quote(box.address)}")
 
     is_setup_flow = (txn.flow == FLOW_SETUP)
     real_user_id = txn.user_id

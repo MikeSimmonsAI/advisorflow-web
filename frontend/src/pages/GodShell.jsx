@@ -248,6 +248,8 @@ const NAV = [
     hint: 'Who may be contacted on each channel, and why not — read-only' },
   { label: 'Twilio Diagnostics', path: '/god/diagnostics/twilio',   icon: 'monitor',
     hint: 'Delivery receipt config and message delivery breakdown' },
+  { label: 'Email Diagnostics',  path: '/god/diagnostics/email',    icon: 'monitor',
+    hint: 'Reply mailboxes, inbound reply log, sender status' },
   { label: 'Voice Configuration', path: '/god/voice',               icon: 'settings',
     hint: 'Agent mappings, version pins, attempt policy, test calls' },
   { label: 'Maintenance Ops',    path: '/god/maintenance',           icon: 'tool',

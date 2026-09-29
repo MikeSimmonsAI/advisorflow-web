@@ -204,6 +204,7 @@ import Workspaces from './pages/god/Workspaces'
 import UserAccessDiagnostic from './pages/god/UserAccessDiagnostic'
 import QualificationDiagnostic from './pages/god/QualificationDiagnostic'
 import GodTwilioDiagnostics from './pages/god/GodTwilioDiagnostics'
+import GodEmailDiagnostics from './pages/god/GodEmailDiagnostics'
 import GodJobRuns from './pages/god/GodJobRuns'
 import GodLeadBrowser from './pages/god/GodLeadBrowser'
 import LeadIntelligence from './pages/god/LeadIntelligence'
@@ -1259,6 +1260,7 @@ export default function App() {
         <Route path="/god/diagnostics/qualification" element={<GodRoute><GodModeLayout><QualificationDiagnostic /></GodModeLayout></GodRoute>} />
         {/* GOD-07 / VOICE-03: diagnostics + voice config — registered BEFORE /god/* catch-all */}
         <Route path="/god/diagnostics/twilio"    element={<GodRoute><GodModeLayout><GodTwilioDiagnostics /></GodModeLayout></GodRoute>} />
+        <Route path="/god/diagnostics/email"     element={<GodRoute><GodModeLayout><GodEmailDiagnostics /></GodModeLayout></GodRoute>} />
         <Route path="/god/diagnostics/job-runs"  element={<GodRoute><GodModeLayout><GodJobRuns /></GodModeLayout></GodRoute>} />
         <Route path="/god/voice"                 element={<GodRoute><GodModeLayout><GodVoiceConfig /></GodModeLayout></GodRoute>} />
         {/* REPORT-02: platform revenue history — registered BEFORE /god/* catch-all */}

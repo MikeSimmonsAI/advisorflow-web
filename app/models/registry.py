@@ -278,6 +278,7 @@ import app.models.wholesale_ops_models  # noqa: F401  (imported for side effects
 import app.models.lead_intel_models  # noqa: F401  (imported for side effects)
 import app.models.telephony_models  # noqa: F401  (imported for side effects)
 import app.models.skiptrace_cost_models  # noqa: F401  (imported for side effects)
+import app.models.inbound_mailbox_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -544,3 +545,4 @@ import app.models.wholesale_ops_models  # noqa: F401  (imported for side effects
 import app.models.lead_intel_models  # noqa: F401  (imported for side effects)
 import app.models.telephony_models  # noqa: F401  (imported for side effects)
 import app.models.skiptrace_cost_models  # noqa: F401  (imported for side effects)
+import app.models.inbound_mailbox_models  # noqa: F401  (imported for side effects)
