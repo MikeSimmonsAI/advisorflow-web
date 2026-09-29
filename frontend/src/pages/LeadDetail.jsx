@@ -514,6 +514,14 @@ export default function LeadDetail() {
   // This organization's own name, for the default email subject.
   const terminology = useTerminology()
   const orgName = terminology.orgName
+  // Funeral-only panels and examples stay with funeral workspaces. An energy
+  // workspace was shown "Funeral arrangement / Cemetery property / Marker".
+  const isFuneral = terminology.industry === 'funeral'
+  const aiDirectionHint = isFuneral
+    ? 'AI direction: e.g. file check — ask if they still need planning'
+    : terminology.industry === 'energy'
+      ? 'AI direction: e.g. ask when their current contract ends and offer a rate review'
+      : 'AI direction: e.g. what this message should focus on'
   const timelineRef = useRef(null)
 
   // Manual flagging
@@ -1597,7 +1605,7 @@ export default function LeadDetail() {
                   <input
                     className="compose-subject"
                     style={{ flex: 1, fontSize: 12 }}
-                    placeholder="AI direction: e.g. file check — ask if they still need planning"
+                    placeholder={aiDirectionHint}
                     value={aiDirection}
                     onChange={(e) => setAiDirection(e.target.value)}
                   />
@@ -1743,7 +1751,7 @@ export default function LeadDetail() {
                   <input
                     className="compose-subject"
                     style={{ flex: 1, fontSize: 12 }}
-                    placeholder="AI direction: e.g. file check — ask if they still need planning"
+                    placeholder={aiDirectionHint}
                     value={aiDirection}
                     onChange={(e) => setAiDirection(e.target.value)}
                   />
@@ -2183,7 +2191,7 @@ export default function LeadDetail() {
             </section>
           )}
 
-          <OutcomeTracker leadId={leadId} />
+          {isFuneral && <OutcomeTracker leadId={leadId} />}
 
           <section className="panel lead-detail-panel">
             <div className="panel-header"><h2 className="panel-title">📋 Details</h2></div>
