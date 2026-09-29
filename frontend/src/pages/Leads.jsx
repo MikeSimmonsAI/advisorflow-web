@@ -802,12 +802,19 @@ function ClassicLeads() {
     try {
       const results = await Promise.allSettled([...selected].map(id => api.delete(`/leads/${id}`).then(() => id)))
       const deletedIds = results.filter(r => r.status === 'fulfilled').map(r => r.value)
+      const failed = results.filter(r => r.status === 'rejected')
       setSelected(prev => {
         const next = new Set(prev)
         deletedIds.forEach(id => next.delete(id))
         return next
       })
       loadLeads()
+      // A partial failure used to be silent: the survivors stayed selected and
+      // nothing said why. Say how many, and the first reason the server gave.
+      if (failed.length) {
+        alert(`Deleted ${deletedIds.length} of ${results.length}. ${failed.length} could not be deleted: ` +
+              `${failed[0].reason?.message || 'unknown error'}`)
+      }
     } catch (err) {
       alert(`Delete failed: ${err.message}`)
     } finally {

@@ -675,8 +675,24 @@ export function clearBranding() {
 }
 
 
+// Every inline property applyBrandingCSS may write. Cleared before each apply
+// so an organization with no colours of its own never keeps the previous
+// workspace's (Fiber Cartel's gold survived into EVO and God Mode).
+export const BRANDING_CSS_PROPS = [
+  '--accent', '--brand-primary', '--signal-blue', '--signal-blue-dim', '--border-subtle',
+  '--border-strong', '--glow-blue-sm', '--glow-blue-md', '--glow-blue-lg', '--brand-accent',
+  '--signal-green', '--signal-green-dim', '--glow-green-sm', '--glow-green-md',
+]
+
+export function clearBrandingCSS() {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement
+  BRANDING_CSS_PROPS.forEach((prop) => root.style.removeProperty(prop))
+}
+
 export function applyBrandingCSS(branding) {
   if (!branding) return
+  clearBrandingCSS()
   const root = document.documentElement
   const primary = branding.brand_color_primary
   const accent = branding.brand_color_accent

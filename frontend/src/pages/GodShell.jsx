@@ -17,7 +17,8 @@ import { useState, useEffect } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 // `api` for the brand list. The rail's BRANDS section is driven by the platform
 // records rather than by a constant in this file — see the BRANDS block below.
-import { api, getCurrentUser, logout } from '../api/client'
+import { api, getCurrentUser, logout, clearBrandingCSS } from '../api/client'
+import { applyTheme, hostTheme, THEMES } from '../theme'
 import { classifyRoute, PLATFORM } from '../auth/routeAuthority'
 import GodStyles from './god/GodStyles'
 
@@ -323,6 +324,16 @@ function initialsOf(user) {
 }
 
 export default function GodShell({ children, orgSession = null, onExitOrgSession }) {
+  // GOD MODE WEARS ITS OWN BRAND. Entering a customer workspace paints the
+  // document with that customer's theme, colours and tab title; returning here
+  // used to keep them (BookaBoost gold on the God workspace picker). Reset on
+  // every God page mount: the host's brand, else AdvisorFlow, and no customer
+  // colours.
+  useEffect(() => {
+    clearBrandingCSS()
+    try { document.documentElement.style.removeProperty('--brand-platform-accent') } catch { /* no DOM */ }
+    applyTheme(hostTheme() || THEMES.ADVISORFLOW)
+  }, [])
   const navigate = useNavigate()
   const location = useLocation()
   const user     = getCurrentUser()
