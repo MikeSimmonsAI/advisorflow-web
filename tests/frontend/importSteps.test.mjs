@@ -1,6 +1,6 @@
 // Step 6 -> Step 7 gating of the guided importer (frontend/src/pages/intake/importSteps.js).
 import assert from 'node:assert/strict'
-import { approveEnabled, commitGate, reachableStep, resolveStep, stepAfterCommit, stepFor }
+import { approveEnabled, approveBlockedReason, commitGate, orgNameMatches, reachableStep, resolveStep, stepAfterCommit, stepFor }
   from '../../frontend/src/pages/intake/importSteps.js'
 
 const wf = (step, extra = {}) => ({ step, analyzed: true, classified: false, ...extra })
@@ -63,5 +63,22 @@ t('still loading: no batch -> URL step or 0', () => {
   assert.equal(resolveStep(null, 6, true), 6)
   assert.equal(resolveStep(null, 0, true), 0)
   assert.equal(resolveStep(null, 0, false), 1)
+})
+t('the confirmation ignores case, spacing and stray punctuation; empty never matches', () => {
+  const org = 'EVO Integrated Solutions LLC'
+  assert.equal(orgNameMatches('evo integrated  solutions llc.', org), true)
+  assert.equal(orgNameMatches(' EVO Integrated Solutions, LLC ', org), true)
+  assert.equal(orgNameMatches('', org), false)
+  assert.equal(orgNameMatches('EVO Integrated', org), false)
+  assert.equal(orgNameMatches('anything', ''), false)
+})
+t('a disabled Import button always says why (empty box, mismatch)', () => {
+  const b = { status: 'ready_for_review', commit_gate: { can_commit: true, reason: null } }
+  const org = 'EVO Integrated Solutions LLC'
+  assert.match(approveBlockedReason(b, 'ready_plus_review', '', org), /Type .*EVO Integrated Solutions LLC/)
+  assert.match(approveBlockedReason(b, 'ready_plus_review', 'EVO', org), /doesn't match/)
+  assert.equal(approveBlockedReason(b, 'ready_plus_review', 'evo integrated solutions llc', org), null)
+  assert.equal(approveEnabled(b, 'ready_plus_review', 'evo integrated solutions llc', org), true)
+  assert.equal(approveBlockedReason(b, 'stage_only', '', org), null)
 })
 console.log(`${n} passed`)

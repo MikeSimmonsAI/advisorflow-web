@@ -147,3 +147,4 @@
   .ic-event { grid-template-columns: 1fr; }
   .ic-event .ic-muted { grid-column: auto; }
 }
+.ic-ok { color: var(--color-success, #0f7b4a); font-weight: 600; }

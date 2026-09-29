@@ -14,8 +14,7 @@ import '../../styles/shared.css'
 import './intake.css'
 import { EMAIL_LABEL, OrgBanner, Pill, RowTable, SMS_LABEL, STATUS_LABEL, STATUS_TONE, Tile,
          errorText, fmt } from './intakeShared'
-import { approveEnabled, commitGate, isAnalyzed, reachableStep, resolveStep, stepAfterCommit
-       } from './importSteps'
+import { approveEnabled, commitGate, isAnalyzed, reachableStep, resolveStep, stepAfterCommit, orgNameMatches, approveBlockedReason } from './importSteps'
 
 const STEPS = ['Upload', 'Map Fields', 'Analyze & Clean', 'Classify', 'Review Problems',
                'Approve Import', 'Import Results']
@@ -765,10 +764,20 @@ function ApproveStep({ batch, ctx, reload, onReview, onCommitted, onCancelled })
       {mode !== 'stage_only' && (
         <div className="ic-confirm">
           <div>This writes into <b>{orgName}</b>. Type the organization name to confirm:</div>
-          <input className="settings-input" value={typed} onChange={e => setTyped(e.target.value)} placeholder={orgName} />
+          {/* The placeholder used to BE the org name, in the same font as typed
+              text, so the box looked filled while it was empty and the Import
+              button stayed disabled with no explanation. */}
+          <input className="settings-input" value={typed} onChange={e => setTyped(e.target.value)}
+                 placeholder="Type the organization name here" aria-label={`Type ${orgName} to confirm`} autoComplete="off" />
+          <div className={`ic-small ${orgNameMatches(typed, orgName) ? 'ic-ok' : 'ic-muted'}`}>
+            {orgNameMatches(typed, orgName) ? '✓ Matches — you can import now.' : <>Required: <b>{orgName}</b> (capitals and spacing don't matter)</>}
+          </div>
         </div>
       )}
       {!gate.ok && <div className="ic-warn" data-testid="commit-blocked">{gate.reason}</div>}
+      {gate.ok && !canPress && approveBlockedReason(batch, mode, typed, orgName, busy) && (
+        <div className="ic-note" data-testid="approve-hint">{approveBlockedReason(batch, mode, typed, orgName, busy)}</div>
+      )}
       {err && <div className="ic-error">{err}</div>}
       <div className="ic-actions">
         <button className="btn btn--danger" onClick={cancel} disabled={busy}>Cancel batch</button>

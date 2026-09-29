@@ -668,8 +668,12 @@ def commit(batch_id: str, body: CommitIn, db: Session = Depends(get_db),
         _ok, why = commit_gate(b, b.status, analyzed)
         raise HTTPException(409, why or f"A '{b.status}' batch cannot be committed.")
     if body.mode != CommitMode.STAGE_ONLY:
-        typed = (body.confirm_organization_name or "").strip().lower()
-        if typed != (ctx.org_name or "").strip().lower():
+        # Same normalization as the page (importSteps.normalizeOrgName): case,
+        # spacing and stray periods/commas do not decide a confirmation.
+        def _norm(v):
+            return " ".join((v or "").lower().replace(".", " ").replace(",", " ").split())
+        typed = _norm(body.confirm_organization_name)
+        if not typed or typed != _norm(ctx.org_name):
             raise HTTPException(400, "Type the organization's name exactly to confirm this "
                                      "import writes into it.")
     if body.mode == CommitMode.STAGE_ONLY:

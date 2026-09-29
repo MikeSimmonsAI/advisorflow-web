@@ -71,11 +71,33 @@ export function stepAfterCommit(/* mode */) {
   return 7
 }
 
+/** The comparison the server makes too: case, spacing and stray punctuation
+ *  do not count ("evo integrated  solutions llc." matches). */
+export function normalizeOrgName(v) {
+  return String(v || '').toLowerCase().replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+export function orgNameMatches(typed, orgName) {
+  const want = normalizeOrgName(orgName)
+  return !!want && normalizeOrgName(typed) === want
+}
+
 /** Is the Approve button pressable right now? */
 export function approveEnabled(batch, mode, typed, orgName, busy = false) {
   if (busy) return false
   if (!commitGate(batch).ok) return false
   if (mode === 'stage_only') return true
-  const want = String(orgName || '').trim().toLowerCase()
-  return !!want && String(typed || '').trim().toLowerCase() === want
+  return orgNameMatches(typed, orgName)
+}
+
+/** Why the Approve button is not pressable, in words (null when it is). */
+export function approveBlockedReason(batch, mode, typed, orgName, busy = false) {
+  if (busy) return null
+  const gate = commitGate(batch)
+  if (!gate.ok) return gate.reason
+  if (mode === 'stage_only') return null
+  if (!normalizeOrgName(orgName)) return 'Loading the organization name…'
+  if (!normalizeOrgName(typed)) return `Type “${orgName}” in the box above to enable the import.`
+  if (!orgNameMatches(typed, orgName)) return `That doesn't match “${orgName}” yet.`
+  return null
 }

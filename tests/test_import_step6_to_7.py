@@ -175,3 +175,18 @@ def test_full_lifecycle_counts_consent_leads_isolation_rollback(client, db_sessi
     active = [c for c in db_session.query(OrgContact).filter(OrgContact.organization_id == a.id).all()
               if getattr(c, "lifecycle", None) not in ("archived",)]
     assert len(active) == 0
+
+
+def test_confirmation_ignores_spacing_and_punctuation_but_refuses_other_names(client, db_session, env):
+    """The page and the server normalise the typed name the same way."""
+    a, h, _b, _hb = env
+    bid, _got = _analyzed_batch(client, h)
+    r = client.post(f"/intake/batches/{bid}/commit", headers=h,
+                    json={"mode": "ready_only", "confirm_organization_name": "Step Six"})
+    assert r.status_code == 400
+    r = client.post(f"/intake/batches/{bid}/commit", headers=h,
+                    json={"mode": "ready_only", "confirm_organization_name": ""})
+    assert r.status_code == 400
+    r = client.post(f"/intake/batches/{bid}/commit", headers=h,
+                    json={"mode": "ready_only", "confirm_organization_name": "step  six energy."})
+    assert r.status_code == 202, r.text
