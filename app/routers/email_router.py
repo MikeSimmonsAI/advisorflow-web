@@ -661,6 +661,7 @@ class EmailDraftRequest(BaseModel):
     tone: str = "warm"
     ai_direction: Optional[str] = None
     sample_message: Optional[str] = None  # User-provided sample to use as AI foundation
+    booking_type: Optional[str] = None  # the appointment type picked in the composer
 
 
 @router.post("/draft/{lead_id}")
@@ -687,7 +688,8 @@ def draft_email(
     sample_message = (req.sample_message if req else None)
 
     return draft_email_options(db, lead, current_user, tone=tone, ai_direction=ai_direction, sample_message=sample_message,
-                               actor=current_user.id)
+                               actor=current_user.id,
+                               booking_type=((req.booking_type or "").strip()[:80] or None) if req else None)
 
 
 @router.get("/sent-log")

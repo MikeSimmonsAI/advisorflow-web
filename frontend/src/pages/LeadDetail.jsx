@@ -752,6 +752,7 @@ export default function LeadDetail() {
       const draft = await api.post(`/sms/draft-reply/${leadId}`, {
         tone: TONES[tone].key,
         ai_direction: aiDirection || null,
+        booking_type: apptLabel || null,
       })
       // Backend strips URLs before returning, but strip here too as a safety net.
       // The "Include booking link" checkbox appends the clean link at send time.
@@ -773,6 +774,7 @@ export default function LeadDetail() {
       const draft = await api.post(`/email/draft/${leadId}`, {
         tone: TONES[tone].key,
         ai_direction: aiDirection || null,
+        booking_type: apptLabel || null,
       })
       // Use first option body; strip any raw booking URLs — button added once by backend
       const option = draft.options?.[0] || {}

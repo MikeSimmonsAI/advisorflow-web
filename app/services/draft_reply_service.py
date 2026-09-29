@@ -80,9 +80,9 @@ TONE_STRATEGY = {
         "goal": (
             "STRATEGY — ONE SPECIFIC ASK, NOW.\n"
             "Time matters. One sentence of context at most, then the ask. Gentle "
-            "urgency, never pressure, and never manufactured scarcity. This is a "
-            "funeral and cemetery context: urgency is about the family's need, not "
-            "about a deadline we invented."
+            "urgency, never pressure, and never manufactured scarcity: urgency is "
+            "about the lead's own need or date (a contract end date, a stated "
+            "deadline), never a deadline we invented."
         ),
         "max_chars": 200,
     },
@@ -120,7 +120,7 @@ RELATIONSHIP_TYPE_CONTEXT = {
     ),
 }
 
-DRAFT_REPLY_PROMPT = """You are drafting a short SMS message from a service business advisor to a lead.
+DRAFT_REPLY_PROMPT = """You are drafting a short SMS message from a business to one of its leads.
 
 ━━━ BINDING CONSTRAINTS — READ THESE FIRST ━━━
 {tone_strategy}
@@ -133,9 +133,10 @@ lead is cold with no connection to the business, that is the truth about them
 regardless of anything else in this prompt:
 {ai_direction}
 {sample_message_section}
+━━━ THE BUSINESS (the lead's own workspace - use exactly this) ━━━
+{business_block}
+
 ━━━ CONTEXT ━━━
-Advisor: {advisor_name}
-Organization: {org_name}
 Tone: {tone_instruction}
 Lead type: {lead_type}
 Booking link: {booking_url}
@@ -144,6 +145,8 @@ Lead:
 - First name: {first_name}
 - Last name: {last_name}
 - Phone: {phone}
+What we know about this lead:
+{lead_facts}
 
 Most recent inbound reply:
 {latest_reply}
@@ -156,8 +159,9 @@ Conversation history, oldest to newest:
 - LENGTH: at most {max_chars} characters. Use the room the strategy needs and no
   more. An introduction to a stranger is allowed to be two segments; a reply to
   someone who already said yes should be one.
-- Sound human and respectful. This is a funeral and cemetery context: never
-  cheerful, never salesy, never a marketing voice.
+- Sound human and respectful. {voice}
+- Say concretely what the business can do for THIS lead (see THE BUSINESS and
+  the appointment type). Never write filler like "any service business needs".
 - Use ONLY "{advisor_name}" and "{org_name}" when signing or introducing.
 - Do not claim anything not shown in conversation or lead data.
 - The strategy above defines WHAT the message must accomplish; the tone defines
@@ -228,7 +232,7 @@ def _ensure_booking_link_in_text(text: str, lead: Lead, advisor: User, booking_u
 
 
 def _fallback_reply(lead: Lead, advisor: User, booking_url: str,
-                    tone: str = "warm", org_name: str = "") -> str:
+                    tone: str = "warm", org_name: str = "", ctx: dict = None) -> str:
     """Used when the model is unavailable. Follows the same strategy.
 
     The cold variant used to introduce the advisor and stop, naming no business
@@ -237,8 +241,22 @@ def _fallback_reply(lead: Lead, advisor: User, booking_url: str,
     the link, which the composer appends.
     """
     name = lead.first_name or "there"
-    advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
-    where = (" with %s" % org_name) if org_name else ""
+    ctx = ctx or {}
+    advisor_name = ctx.get("sender_name") or (
+        advisor.full_name if advisor and advisor.full_name else "your advisor")
+    where = (" with %s" % org_name) if org_name and ctx.get("is_person", True) else ""
+    if ctx and ctx.get("industry") != "funeral":
+        # Every other industry: say what the business actually offers.
+        who = f"this is {advisor_name}{where}" if ctx.get("is_person") else f"this is {advisor_name}"
+        what = ctx.get("booking_type") or ((ctx.get("offers") or [None])[0])
+        offer = f"a quick {what}" if what else "a quick conversation"
+        if tone == "hot":
+            return (f"Hi {name}, thanks for getting back to us. Happy to set up {offer} "
+                    f"- pick whatever time suits you.")
+        if tone == "urgent":
+            return f"Hi {name}, {who}. Could we do {offer} this week? Pick any time that works."
+        return (f"Hi {name}, {who}. We'd be glad to do {offer} with you - no "
+                f"obligation. Pick a time whenever it suits you.")
     # Do NOT include the booking URL here — the frontend's "Include booking link"
     # checkbox appends it at send time. Including it here causes a double-link.
     if tone == "urgent":
@@ -266,6 +284,7 @@ def draft_reply(
     ai_direction: str = None,
     sample_message: str = None,
     actor: str = None,
+    booking_type: str = None,
 ) -> dict[str, Any]:
     # MANUAL when a signed-in user asked (`actor`); BACKGROUND otherwise.
     tone = tone if tone in TONE_INSTRUCTIONS else "warm"
@@ -284,22 +303,14 @@ def draft_reply(
         f"{item['type']}: {item['body']}" for item in history[-12:]
     ) or "No prior conversation."
     latest_reply_text = latest_reply.body if latest_reply else "No inbound reply yet."
-    advisor_name = advisor.full_name if advisor and advisor.full_name else "your advisor"
 
-    # The name the FAMILY knows the business by, resolved through the same
-    # identity the confirmation email and Taffiney's greeting use. `org.name` is
-    # the account name and stays as the fallback; a customer trading under a
-    # different name would otherwise be introduced by a name nobody uses.
-    try:
-        from app.models.models import Organization
-        from app.services.public_identity import identity_for_org
-        org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
-        _ident = identity_for_org(db, str(advisor.organization_id))
-        org_name = (_ident.customer_facing_name
-                    or (org.name if org else None)
-                    or "our organization")
-    except Exception:
-        org_name = "our organization"
+    # The business is the LEAD's organization (never the sender's home org), by
+    # the name its customers know it by; the sender is a person's name or that
+    # business's team (app/services/draft_context.py).
+    from app.services import draft_context
+    ctx = draft_context.build(db, lead, advisor, booking_type=booking_type)
+    advisor_name = ctx["sender_name"]
+    org_name = ctx["org_name"]
 
     # Relationship context is the PRIMARY AI guardrail
     rel_type = getattr(lead, "relationship_type", None) or "cold_lead"
@@ -327,6 +338,9 @@ def draft_reply(
         max_chars=max_chars,
         advisor_name=advisor_name,
         org_name=org_name,
+        business_block=ctx["business_block"],
+        lead_facts=ctx["lead_facts"],
+        voice=ctx["voice"],
         tone_instruction=TONE_INSTRUCTIONS[tone],
         lead_type=lead.message_track or lead.tier or "not specified",
         ai_direction=direction,
@@ -360,11 +374,11 @@ def draft_reply(
         suggested = _re.sub(r'https?://\S+', '', parsed.get("suggested_reply", "")).strip()
         if not suggested:
             suggested = (WSC.fallback_reply(lead, advisor_name, org_name, seller_ctx) if seller_ctx
-                         else _fallback_reply(lead, advisor, booking_url, tone, org_name))
+                         else _fallback_reply(lead, advisor, booking_url, tone, org_name, ctx))
         source = "ai"
     except Exception:
         suggested = (WSC.fallback_reply(lead, advisor_name, org_name, seller_ctx) if seller_ctx
-                     else _fallback_reply(lead, advisor, booking_url, tone, org_name))
+                     else _fallback_reply(lead, advisor, booking_url, tone, org_name, ctx))
         source = "fallback"
 
     # THE CAP FOLLOWS THE STRATEGY.
@@ -398,7 +412,7 @@ def draft_reply(
 
 # ── Email draft with talking points + 3 options ───────────────────────────────
 
-EMAIL_DRAFT_PROMPT = """You are helping a service business advisor write an outreach email to a lead.
+EMAIL_DRAFT_PROMPT = """You are helping a business write an outreach email to one of its leads.
 
 ━━━ #1 MANDATORY — ADVISOR'S SPECIFIC INSTRUCTION ━━━
 The advisor has given you explicit direction. This is your PRIMARY task. Do not write about anything else.
@@ -410,9 +424,10 @@ If it says something else entirely — write about THAT. Do NOT fall back to gen
 ━━━ #2 Relationship context (secondary — tone only, do not override direction) ━━━
 {relationship_context}
 
+━━━ THE BUSINESS (the lead's own workspace - use exactly this) ━━━
+{business_block}
+
 ━━━ CONTEXT ━━━
-Advisor: {advisor_name}
-Organization: {org_name}
 Tone: {tone_desc}
 Lead type / context: {lead_type}
 {offer_hook_line}
@@ -425,15 +440,22 @@ Lead profile:
 - Last contact date: {last_contact}
 - Status reason: {status_reason}
 - Notes: {notes}
+{lead_facts}
 
 ━━━ RULES ━━━
 - The relationship context above defines EXACTLY how familiar you should sound — respect it strictly.
 - Use the lead's history (last action, source year, status reason) to personalize.
 - Keep emails under 150 words.
-- Sound like a real person, not a mass marketing template.
+- Sound like a real person, not a mass marketing template. {voice}
+- Say concretely what the business does for someone like this lead and what the
+  appointment would cover (see THE BUSINESS). NEVER write filler such as "any
+  service business needs you might have" or "I wanted to introduce myself and offer
+  my assistance" with nothing specific behind it.
+- Introduce the business by "{org_name}" only. Never name any other company.
+- Sign off as "{signature}".
 - Each option should have a different angle/hook.
 - Never be pushy or desperate. Always give them an easy out.
-- CRITICAL: Use the EXACT advisor name "{advisor_name}" — NEVER write [Your Name], [Name], or any bracket placeholder.
+- CRITICAL: Use the EXACT sender "{advisor_name}" — NEVER write [Your Name], [Name], or any bracket placeholder, and never invent a person's name.
 - If a sample message is provided above, use it as the FOUNDATION for at least one option — fill in variables (name, etc.). Do NOT rewrite it from scratch.
 
 Respond ONLY with valid JSON, no markdown:
@@ -467,6 +489,7 @@ def draft_email_options(
     ai_direction: str = None,
     sample_message: str = None,
     actor: str = None,
+    booking_type: str = None,
 ) -> dict:
     """
     Generate talking points + 3 email draft options for a lead.
@@ -485,13 +508,10 @@ def draft_email_options(
     }
     tone_desc = tone_map.get(tone, tone_map["warm"])
 
-    # Pull org name
-    try:
-        from app.models.models import Organization
-        org = db.query(Organization).filter(Organization.id == advisor.organization_id).first()
-        org_name = org.name if org else "our organization"
-    except Exception:
-        org_name = "our organization"
+    # The LEAD's business and a real sender (app/services/draft_context.py).
+    from app.services import draft_context
+    ctx = draft_context.build(db, lead, advisor, booking_type=booking_type)
+    org_name = ctx["org_name"]
 
     # Format last contact date
     last_contact = "unknown"
@@ -542,8 +562,12 @@ def draft_email_options(
 
     prompt = EMAIL_DRAFT_PROMPT.format(
         relationship_context=relationship_context,
-        advisor_name=advisor.full_name or "your advisor",
+        advisor_name=ctx["sender_name"],
         org_name=org_name,
+        signature=ctx["signature"],
+        business_block=ctx["business_block"],
+        lead_facts=ctx["lead_facts"],
+        voice=ctx["voice"],
         tone_desc=tone_desc,
         lead_type=lead.message_track or lead.tier or "not specified",
         ai_direction=direction,
@@ -570,11 +594,13 @@ def draft_email_options(
         body = re.sub(r'\[[^\]]*name[^\]]*\]', real_name, body, flags=re.IGNORECASE)
         return body
 
-    advisor_name_str = advisor.full_name or "your advisor"
+    advisor_name_str = ctx["signature"]
 
     try:
         sys_msg = (
-            "You are drafting outreach emails for service business advisors. "
+            "You are drafting outreach emails for a business to its own leads. "
+            "Always write for the business named in THE BUSINESS section and say "
+            "concretely what it does for this lead. "
             "When the advisor provides explicit direction, follow it LITERALLY and specifically — "
             "it overrides all other guidance. If they say 'file review', write about file review. "
             "Never substitute generic content when specific direction is given."
@@ -611,7 +637,12 @@ def draft_email_options(
     except Exception:
         # Fallback — generic options
         first = lead.first_name or "there"
-        advisor_name = advisor.full_name or "your advisor"
+        advisor_name = ctx["signature"]
+        intro = (f"This is {advisor_name} with {org_name}." if ctx["is_person"]
+                 else f"This is the team at {org_name}.")
+        what = (ctx["booking_type"] or (ctx["offers"][0] if ctx["offers"] else None))
+        what_line = (f"We'd be glad to set up a short {what} with you." if what
+                     else "We'd be glad to set up a short conversation with you.")
         return {
             "talking_points": [
                 f"{first} was last contacted in {last_contact}" if last_contact != "unknown" else f"Re-engaging {first} after a gap",
@@ -622,17 +653,17 @@ def draft_email_options(
                 {
                     "label": "Warm & personal",
                     "subject": f"Checking in, {first}",
-                    "body": f"Hi {first},\n\nThis is {advisor_name} with {org_name}. I wanted to personally reach out and see if there's anything I can help you with.\n\nNo pressure at all — just here when you're ready.\n\n{advisor_name}",
+                    "body": f"Hi {first},\n\n{intro} {what_line}\n\nNo pressure at all — just reply here when it suits you.\n\n{advisor_name}",
                 },
                 {
                     "label": "Direct & clear",
                     "subject": f"Quick question, {first}",
-                    "body": f"Hi {first},\n\n{advisor_name} here from {org_name}. I had a chance to look at your file and wanted to connect.\n\nWould you have 10 minutes this week?\n\n{advisor_name}",
+                    "body": f"Hi {first},\n\n{intro} {what_line}\n\nWould you have 10 minutes this week?\n\n{advisor_name}",
                 },
                 {
                     "label": "Value-first",
                     "subject": f"Something I think could help, {first}",
-                    "body": f"Hi {first},\n\nI work with families at {org_name} and I've found that a short conversation can save a lot of stress later.\n\nI'd love to share some options with you — no obligation.\n\n{advisor_name}",
+                    "body": f"Hi {first},\n\n{intro} A short conversation is usually enough to see whether we can help.\n\n{what_line} No obligation.\n\n{advisor_name}",
                 },
             ],
             "lead_context": {

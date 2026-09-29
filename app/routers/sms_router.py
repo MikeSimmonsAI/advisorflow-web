@@ -98,6 +98,7 @@ class DraftReplyRequest(BaseModel):
     tone: str = "warm"  # cold | warm | hot | urgent
     ai_direction: Optional[str] = None  # per-lead context override
     sample_message: Optional[str] = None  # User-provided sample to use as AI foundation
+    booking_type: Optional[str] = None  # the appointment type picked in the composer
 
 
 @router.post("/draft-reply/{lead_id}", response_model=DraftReplyResponse)
@@ -113,7 +114,8 @@ def draft_reply_for_lead(
     ai_direction = (req.ai_direction if req and req.ai_direction else None)
     sample_message = (req.sample_message if req and req.sample_message else None)
     result = draft_reply(db, lead, current_user, tone=tone, ai_direction=ai_direction, sample_message=sample_message,
-                         actor=current_user.id)
+                         actor=current_user.id,
+                         booking_type=((req.booking_type or "").strip()[:80] or None) if req else None)
     return result
 
 
