@@ -1,0 +1,49 @@
+/* EvoSense — next actions panel + inbox next-step chip. Light tokens only. */
+.evo-act { background: var(--evo-surface, #fff); border: 1px solid var(--evo-line, #e3e7ee);
+  border-radius: var(--evo-radius-lg, 14px); padding: 18px 20px; margin: 14px 0; box-shadow: var(--evo-shadow, none);
+  color: var(--evo-text-primary, #172033); scroll-margin-top: 80px; }
+.evo-act__summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0 0 16px; }
+.evo-act__summary > div { background: var(--evo-surface-inset, #f6f8fb); border-radius: var(--evo-radius, 10px); padding: 10px 12px; }
+.evo-act__summary > div.is-next { background: var(--evo-primary-soft, #eaf1ff); }
+.evo-act__summary dt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--evo-text-tertiary, #6b7487); margin-bottom: 4px; }
+.evo-act__summary dd { margin: 0; font-size: 13.5px; line-height: 1.45; }
+.evo-act__summary dd ul { margin: 0; padding-left: 16px; }
+.evo-act__summary dd small { display: block; margin-top: 4px; color: var(--evo-text-secondary, #46506a); font-size: 12px; }
+.evo-act__cols { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 18px; }
+.evo-act__h { font-size: 13px; margin: 0 0 8px; color: var(--evo-text-secondary, #46506a); text-transform: uppercase; letter-spacing: .05em; }
+.evo-act__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.evo-act__item { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 6px 12px; align-items: center;
+  padding: 8px 10px; border: 1px solid var(--evo-line, #e3e7ee); border-radius: var(--evo-radius, 10px); }
+.evo-act__item.is-primary { border-color: var(--evo-primary, #2f6fed); background: var(--evo-primary-soft, #eaf1ff); }
+.evo-act__item.is-disabled { background: var(--evo-surface-inset, #f6f8fb); }
+.evo-act__btn .evo-btn { width: 100%; justify-content: center; text-align: center; }
+.evo-act__why { font-size: 12.5px; color: var(--evo-text-secondary, #46506a); line-height: 1.4; }
+.evo-act__blocked { color: var(--evo-warning-ink, #8a5a00); }
+.evo-act__form { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;
+  padding: 10px; background: var(--evo-surface, #fff); border: 1px dashed var(--evo-line-strong, #c9d0dc); border-radius: var(--evo-radius, 10px); }
+.evo-act__field { display: grid; gap: 3px; font-size: 12px; color: var(--evo-text-secondary, #46506a); }
+.evo-act__field input, .evo-act__field select { font: inherit; font-size: 13px; padding: 6px 8px; min-width: 170px;
+  border: 1px solid var(--evo-line-strong, #c9d0dc); border-radius: 8px; background: #fff; color: var(--evo-text-primary, #172033); }
+.evo-act__fine { font-size: 12px; color: var(--evo-text-tertiary, #6b7487); margin: 6px 0 0; flex-basis: 100%; }
+.evo-act__note { font-size: 13px; background: var(--evo-warning-soft, #fff4dc); padding: 8px 10px; border-radius: 8px; margin: 0 0 8px; }
+.evo-act__check { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.evo-act__check li { display: grid; grid-template-columns: 20px 1fr; gap: 8px; font-size: 13px; }
+.evo-act__check li > span { font-weight: 700; }
+.evo-act__check li.is-met > span { color: var(--evo-success-ink, #1c7a43); }
+.evo-act__check li.is-unmet > span { color: var(--evo-danger-ink, #b42318); }
+.evo-act__check li.is-soft > span { color: var(--evo-warning-ink, #8a5a00); }
+.evo-act__check em { font-style: normal; font-size: 11px; color: var(--evo-text-tertiary, #6b7487); }
+.evo-act__check small { display: block; color: var(--evo-text-secondary, #46506a); font-size: 12px; }
+
+.evo-nextstep { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  text-decoration: none; background: var(--evo-primary-soft, #eaf1ff); color: var(--evo-primary-ink, #1d4fb8); }
+.evo-nextstep--good { background: var(--evo-success-soft, #e6f6ec); color: var(--evo-success-ink, #1c7a43); }
+.evo-nextstep--danger { background: var(--evo-danger-soft, #fde8e7); color: var(--evo-danger-ink, #b42318); }
+.evo-nextstep--quiet { background: var(--evo-neutral-soft, #eef0f4); color: var(--evo-text-secondary, #46506a); }
+
+@media (max-width: 900px) {
+  .evo-act__summary { grid-template-columns: 1fr 1fr; }
+  .evo-act__cols { grid-template-columns: 1fr; }
+  .evo-act__item { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) { .evo-act__summary { grid-template-columns: 1fr; } }

@@ -24,6 +24,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
 import '../styles/shared.css'
+import '../styles/aiWorkforce.css'
 
 function Unknown ({ note }) {
   return <span style={{ color: 'var(--text-secondary)' }} title={note}>—</span>
@@ -103,14 +104,14 @@ export default function AIWorkforceEmployee () {
       eyebrow="AI Workforce"
       title={c?.name || 'AI employee'}
       subtitle={c ? `${c.job_role} · ${c.deployment?.state || 'no deployment'}`
-        : 'Loading…'}
+        : (loading ? 'Loading…' : '')}
       action={
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn--ghost"
                   onClick={() => navigate('/ai-workforce-command?tab=employees')}>
             Back
           </button>
-          {c?.deployment?.live ? (
+          {!c ? null : c.deployment?.live ? (
             <button className="btn btn--ghost" disabled={busy}
                     onClick={() => control('pause')}>Pause</button>
           ) : (
@@ -120,7 +121,11 @@ export default function AIWorkforceEmployee () {
         </div>
       }
     >
-      {err ? <div className="panel panel--error">{err}</div> : null}
+      {err ? (
+        <div className="panel panel--error">
+          {err}{!c ? ' It may have been removed, or it belongs to another workspace.' : ''}
+        </div>
+      ) : null}
       {loading ? <div className="panel">Loading…</div> : null}
 
       {attention.length ? (

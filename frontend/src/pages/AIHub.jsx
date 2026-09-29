@@ -13,15 +13,16 @@ const TABS = [
 ]
 
 const STAGE_COLORS = {
-  outreach_sent: '#2fb6ff',
-  replied: '#1ef0a8',
-  ai_responding: '#a78bfa',
-  booking_sent: '#fb923c',
-  booked: '#ffd700',
-  flagged: '#f87171',
-  stopped: '#64748b',
-  completed: '#64748b',
-  cold: '#94a3b8',
+  // Light-system hues: every one reads at >= 4.5:1 on white.
+  outreach_sent: '#1f5eff',
+  replied: '#0b8a5f',
+  ai_responding: '#6d43cc',
+  booking_sent: '#b45309',
+  booked: '#a8650f',
+  flagged: '#d31f4b',
+  stopped: '#5b6b80',
+  completed: '#5b6b80',
+  cold: '#5b6b80',
 }
 
 export default function AIHub() {
@@ -99,12 +100,12 @@ export default function AIHub() {
         <div className="aihub-content">
           <div className="aihub-stat-grid">
             {[
-              { label: 'Active conversations', value: forecast?.active_conversations ?? '—', color: '#2fb6ff' },
-              { label: 'Reply rate', value: forecast?.reply_rate != null ? `${forecast.reply_rate}%` : '—', color: '#1ef0a8' },
-              { label: 'Awaiting booking click', value: forecast?.booking_sent_count ?? '—', color: '#fb923c' },
-              { label: 'Projected bookings', value: forecast?.projected_bookings_this_week ?? '—', color: '#ffd700' },
-              { label: 'Calls made today', value: calls.filter(c => new Date(c.created_at).toDateString() === new Date().toDateString()).length, color: '#a78bfa' },
-              { label: 'Needs attention', value: flagged.length, color: '#f87171' },
+              { label: 'Active conversations', value: forecast?.active_conversations ?? '—', color: 'var(--color-primary)' },
+              { label: 'Reply rate', value: forecast?.reply_rate != null ? `${forecast.reply_rate}%` : '—', color: 'var(--color-success)' },
+              { label: 'Awaiting booking click', value: forecast?.booking_sent_count ?? '—', color: 'var(--color-warning)' },
+              { label: 'Projected bookings', value: forecast?.projected_bookings_this_week ?? '—', color: 'var(--color-info)' },
+              { label: 'Calls made today', value: calls.filter(c => new Date(c.created_at).toDateString() === new Date().toDateString()).length, color: 'var(--signal-purple)' },
+              { label: 'Needs attention', value: flagged.length, color: 'var(--color-danger)' },
             ].map(item => (
               <div key={item.label} className="aihub-stat-card">
                 <div className="aihub-stat-value" style={{ color: item.color }}>
@@ -136,6 +137,15 @@ export default function AIHub() {
           {stats && (
             <section className="panel" style={{ marginTop: 20 }}>
               <div className="panel-header"><h2 className="panel-title">Pipeline stages</h2></div>
+              {Object.keys(stats.by_stage || {}).length === 0 ? (
+                <div className="empty-state" style={{ textAlign: 'left', padding: '4px 0' }}>
+                  No AI conversations yet, so there is nothing to place in a stage.
+                  Each AI conversation is counted here by stage (outreach sent, replied,
+                  booking sent, booked…) once one starts — open a lead and start an AI
+                  conversation from it.{' '}
+                  <a href="/leads" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Go to Leads →</a>
+                </div>
+              ) : null}
               <div className="aihub-stage-grid">
                 {Object.entries(stats.by_stage || {}).map(([stage, count]) => (
                   <div key={stage} className="aihub-stage-card">

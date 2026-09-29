@@ -239,7 +239,7 @@ export default function Admin() {
           {loading ? (
             <div className="empty-state">Loading advisors…</div>
           ) : advisors.length === 0 ? (
-            <div className="empty-state">No advisor data yet.</div>
+            <div className="empty-state">No advisor activity yet. This table shows each advisor's leads, messages and bookings; it fills in once advisors are added under Users and start working leads.</div>
           ) : (
             <div className="advisor-scorecard-grid">
               {advisors.filter((a) => a.advisor_id !== 'org_total').map((advisor) => (

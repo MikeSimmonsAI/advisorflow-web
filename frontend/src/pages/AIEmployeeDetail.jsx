@@ -28,6 +28,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
 import '../styles/shared.css'
+import '../styles/aiWorkforce.css'
 
 const CUSTOMER_STAGES = [
   { key: 'off', label: 'Switched off', hint: 'Does nothing at all.' },
@@ -103,16 +104,24 @@ export default function AIEmployeeDetail () {
       }
     >
       {err && (
-        <div className="panel" style={{ borderColor: 'rgba(255,77,126,.35)' }}>
+        <div className="panel panel--error">
           <p style={{ margin: 0, color: 'var(--signal-red)', fontSize: 13 }}>{err}</p>
         </div>
       )}
       {msg && (
-        <div className="panel" style={{ borderColor: 'rgba(30,240,168,.35)' }}>
+        <div className="panel" style={{ borderColor: 'var(--pill-success-bd)', background: 'var(--pill-success-bg)' }}>
           <p style={{ margin: 0, color: 'var(--signal-green)', fontSize: 13 }}>{msg}</p>
         </div>
       )}
 
+      {!emp && !loading ? (
+        <div className="panel wf-empty">
+          <strong>This AI employee could not be loaded.</strong>
+          <span>It may have been removed, or it belongs to another workspace. Your AI team lists every employee this workspace has.</span>
+          <button className="btn btn--sm btn--secondary" onClick={() => navigate('/ai-team')}>Open Your AI Team</button>
+        </div>
+      ) : null}
+      {emp ? (<>
       {/* ── STATE AND CONTROLS ────────────────────────────────────────── */}
       <div className="panel">
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -148,7 +157,7 @@ export default function AIEmployeeDetail () {
 
         <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
           How far this employee may go. Live operation is switched on by
-          AdvisorFlow, with you, on an agreed group of records.
+          the platform, with you, on an agreed group of records.
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {CUSTOMER_STAGES.map(stage => (
@@ -170,11 +179,11 @@ export default function AIEmployeeDetail () {
         <div className="panel-header">
           <h2 className="panel-title">Current work</h2>
         </div>
-        <div className="stat-grid">
+        <div className="wf-stat-grid">
           {(emp?.queue || []).map(g => (
-            <div className="stat-card" key={g.key}>
-              <div className="stat-card__label">{g.label}</div>
-              <div className="stat-card__value">{g.count}</div>
+            <div className="wf-stat" key={g.key}>
+              <div className="wf-stat__label">{g.label}</div>
+              <div className="wf-stat__value">{g.count}</div>
             </div>
           ))}
         </div>
@@ -234,38 +243,38 @@ export default function AIEmployeeDetail () {
           <h2 className="panel-title">Performance</h2>
           <span className="panel-count">last 30 days</span>
         </div>
-        <div className="stat-grid">
-          <div className="stat-card">
-            <div className="stat-card__label">Messages sent</div>
-            <div className="stat-card__value">{counts.messages_sent ?? 0}</div>
+        <div className="wf-stat-grid">
+          <div className="wf-stat">
+            <div className="wf-stat__label">Messages sent</div>
+            <div className="wf-stat__value">{counts.messages_sent ?? 0}</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-card__label">Appointments</div>
-            <div className="stat-card__value">{counts.appointments ?? 0}</div>
+          <div className="wf-stat">
+            <div className="wf-stat__label">Appointments</div>
+            <div className="wf-stat__value">{counts.appointments ?? 0}</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-card__label">Qualified</div>
-            <div className="stat-card__value">{counts.qualified ?? 0}</div>
+          <div className="wf-stat">
+            <div className="wf-stat__label">Qualified</div>
+            <div className="wf-stat__value">{counts.qualified ?? 0}</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-card__label">Handed to a person</div>
-            <div className="stat-card__value">{counts.handoffs ?? 0}</div>
+          <div className="wf-stat">
+            <div className="wf-stat__label">Handed to a person</div>
+            <div className="wf-stat__value">{counts.handoffs ?? 0}</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-card__label">Opt-outs</div>
-            <div className="stat-card__value">{counts.opt_outs ?? 0}</div>
+          <div className="wf-stat">
+            <div className="wf-stat__label">Opt-outs</div>
+            <div className="wf-stat__value">{counts.opt_outs ?? 0}</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-card__label">Not contactable</div>
-            <div className="stat-card__value">{counts.records_denied ?? 0}</div>
+          <div className="wf-stat">
+            <div className="wf-stat__label">Not contactable</div>
+            <div className="wf-stat__value">{counts.records_denied ?? 0}</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-card__label">Response rate</div>
-            <div className="stat-card__value"><Rate value={rates.response_rate} /></div>
+          <div className="wf-stat">
+            <div className="wf-stat__label">Response rate</div>
+            <div className="wf-stat__value"><Rate value={rates.response_rate} /></div>
           </div>
-          <div className="stat-card">
-            <div className="stat-card__label">Appointment rate</div>
-            <div className="stat-card__value"><Rate value={rates.appointment_rate} /></div>
+          <div className="wf-stat">
+            <div className="wf-stat__label">Appointment rate</div>
+            <div className="wf-stat__value"><Rate value={rates.appointment_rate} /></div>
           </div>
         </div>
         <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -331,6 +340,7 @@ export default function AIEmployeeDetail () {
           </div>
         </div>
       </div>
+      </>) : null}
     </PageShell>
   )
 }

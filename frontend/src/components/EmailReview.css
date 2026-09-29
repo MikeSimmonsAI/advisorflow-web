@@ -30,11 +30,11 @@
 
 /* ── Per-card state ──────────────────────────────────────────────────────── */
 .email-review-card--flagged {
-  border-color: rgba(255, 200, 0, 0.35);
+  border-color: var(--pill-warning-bd);
 }
 
 .email-review-card--blocked {
-  border-color: rgba(231, 76, 60, 0.35);
+  border-color: var(--pill-danger-bd);
 }
 
 .email-review-card-meta {
@@ -58,15 +58,15 @@
 }
 
 .email-review-badge--flagged {
-  background: rgba(255, 200, 0, 0.14);
+  background: var(--pill-warning-bg);
   color: var(--signal-amber);
-  border: 1px solid rgba(255, 200, 0, 0.35);
+  border: 1px solid var(--pill-warning-bd);
 }
 
 .email-review-badge--blocked {
-  background: rgba(231, 76, 60, 0.14);
+  background: var(--pill-danger-bg);
   color: var(--signal-red);
-  border: 1px solid rgba(231, 76, 60, 0.35);
+  border: 1px solid var(--pill-danger-bd);
 }
 
 .email-review-flags {
@@ -119,27 +119,27 @@
   font-weight: 600;
   border-radius: 4px;
   padding: 3px 9px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-sunken);
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
 }
 
 .email-review-tally--sent {
-  background: rgba(30, 240, 168, 0.12);
-  border-color: rgba(30, 240, 168, 0.3);
+  background: var(--pill-success-bg);
+  border-color: var(--pill-success-bd);
   color: var(--signal-green);
 }
 
 .email-review-tally--failed,
 .email-review-tally--blocked {
-  background: rgba(231, 76, 60, 0.12);
-  border-color: rgba(231, 76, 60, 0.3);
+  background: var(--pill-danger-bg);
+  border-color: var(--pill-danger-bd);
   color: var(--signal-red);
 }
 
 .email-review-tally--skipped {
-  background: rgba(255, 200, 0, 0.12);
-  border-color: rgba(255, 200, 0, 0.3);
+  background: var(--pill-warning-bg);
+  border-color: var(--pill-warning-bd);
   color: var(--signal-amber);
 }
 

@@ -94,7 +94,7 @@ def test_active_workspace_org_id_unchanged_for_real_tenant():
 
 
 
-# â”€â”€ 3. require_tenant_or_observer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── 3. require_tenant_or_observer ────────────────────────────────────────────
 
 def _passes_require_tenant_or_observer(user, request=None) -> bool:
     """Returns True if the gate would pass, False if it would 403."""
@@ -134,7 +134,7 @@ def test_require_tenant_or_observer_blocks_observer_without_request():
 
 
 
-# â”€â”€ 4. require_tenant_user still blocks observers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── 4. require_tenant_user still blocks observers ─────────────────────────────
 
 def test_require_tenant_user_blocks_observer():
     user = StubUser(role="brand_executive", organization_id=None)
@@ -145,7 +145,7 @@ def test_require_tenant_user_blocks_observer():
     )
 
 
-# â”€â”€ 5. Write safety: observation context signals read-only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── 5. Write safety: observation context signals read-only ───────────────────
 
 def test_observation_context_is_read_only():
     from app.deps import ExecutiveObservationContext
@@ -173,7 +173,7 @@ def test_require_not_observation_passes_when_no_context():
     assert not should_block
 
 
-# â”€â”€ 6. God is unaffected â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── 6. God is unaffected ──────────────────────────────────────────────────────
 
 def test_god_observation_path_skipped():
     user = StubUser(role="god_admin", organization_id=None)
@@ -186,7 +186,7 @@ def test_god_passes_require_tenant_or_observer_regardless():
     assert _passes_require_tenant_or_observer(user, MockRequest())
 
 
-# â”€â”€ 7. Cross-user context isolation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── 7. Cross-user context isolation ──────────────────────────────────────────
 
 def test_observation_context_requires_matching_user_id():
     attacker = StubUser(role="brand_executive", organization_id=None, id="user-attacker")

@@ -38,12 +38,12 @@ export default function GodReturnBar({ context }) {
         fontFamily: "'Inter', system-ui, sans-serif",
       }}
     >
-      <span style={{ color: '#ffd968', fontSize: 11 }}>⚡</span>
-      <span style={{ color: '#f5b942', fontWeight: 700, fontSize: 10, letterSpacing: '0.11em' }}>
+      <span style={{ color: '#93601c', fontSize: 11 }}>⚡</span>
+      <span style={{ color: '#7a4f16', fontWeight: 700, fontSize: 10, letterSpacing: '0.11em' }}>
         GOD ADMIN
       </span>
-      <span style={{ color: '#a88030', fontSize: 11 }}>—</span>
-      <span style={{ color: '#c09040', fontSize: 11 }}>
+      <span style={{ color: '#93601c', fontSize: 11 }}>—</span>
+      <span style={{ color: '#7a4f16', fontSize: 11 }}>
         viewing {context || 'the application'}
       </span>
       <div style={{ flex: 1, minWidth: 12 }} />
@@ -54,7 +54,7 @@ export default function GodReturnBar({ context }) {
           display: 'flex', alignItems: 'center', gap: 6,
           background: 'rgba(245,185,66,0.15)',
           border: '1px solid rgba(245,185,66,0.40)',
-          borderRadius: 3, color: '#f5b942', cursor: 'pointer',
+          borderRadius: 3, color: '#7a4f16', cursor: 'pointer',
           fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
           letterSpacing: '0.05em', padding: '4px 11px', whiteSpace: 'nowrap',
         }}

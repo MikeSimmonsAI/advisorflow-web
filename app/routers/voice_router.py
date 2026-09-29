@@ -8,6 +8,15 @@ Handles:
 - POST /voice/recording              — Twilio recording callbacks
 - GET  /voice/calls                  — list calls for current advisor
 - GET  /voice/calls/{call_id}        — get single call detail
+- POST /voice/inbound                — inbound call: routed by the CALLED number's
+                                       organization (telephony_service.handle_inbound)
+
+NO SENDER LITERAL. Every outbound call resolves its number through
+app/services/number_resolution.py (workspace -> organization -> brand ->
+platform, legacy org/user columns as implicit records); a call with no
+resolvable voice number is refused with the reason. Twilio voice webhooks are
+verified per account (telephony_webhook_guard), falling back to the platform
+token validator, and fail closed either way.
 """
 
 import logging
@@ -211,10 +220,25 @@ async def get_twiml(
     """
     Twilio fetches this to get call instructions (TwiML).
     Validates X-Twilio-Signature to prevent spoofed call setups.
+
+    SYNCHRONOUS ANSWERING-MACHINE DETECTION. A campaign call placed without
+    an approved voicemail drop uses machine_detection=DetectMessageEnd, so
+    this request carries AnsweredBy. A machine is hung up on without a word:
+    the AI never talks to a voicemail box, and nothing is left without an
+    approved message (telephony_service.machine_twiml).
     """
-    await validate_twilio_webhook(request)
+    from app.services.telephony_webhook_guard import verify_voice_webhook, assert_org_matches
+    verified = await verify_voice_webhook(request, db)
     call_id = request.query_params.get("call_id", "")
     advisor_id = request.query_params.get("advisor_id", "")
+    answered_by = verified.get("AnsweredBy")
+    if answered_by and answered_by.lower() != "human" and answered_by.lower() != "unknown" and call_id:
+        from app.services import telephony_service
+        _c = db.query(VoiceCall).filter(VoiceCall.id == call_id).first()
+        if _c is not None:
+            assert_org_matches(verified, _c.organization_id)
+            return Response(content=telephony_service.machine_twiml(db, _c, answered_by),
+                            media_type="application/xml")
 
     # Scope lead lookup to the advisor's organization — prevents cross-org
     # data access from any caller who knows a lead_id UUID.
@@ -224,6 +248,14 @@ async def get_twiml(
     if not advisor:
         twiml = build_twilio_twiml_voicemail("Sorry, we were unable to connect this call. Goodbye.")
         return Response(content=twiml, media_type="application/xml")
+    # The signing account must belong to the advisor's organization - a
+    # tenant-signed request cannot open another tenant's lead stream.
+    assert_org_matches(verified, advisor.organization_id)
+    if call_id:
+        _row = db.query(VoiceCall).filter(VoiceCall.id == call_id).first()
+        if _row is not None and _row.organization_id != advisor.organization_id:
+            twiml = build_twilio_twiml_voicemail("Sorry, we were unable to connect this call. Goodbye.")
+            return Response(content=twiml, media_type="application/xml")
 
     lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == advisor.organization_id).first()
 
@@ -434,8 +466,8 @@ async def call_status_callback(request: Request, db: Session = Depends(get_db)):
     Twilio calls this when call status changes.
     Validates X-Twilio-Signature to prevent spoofed status updates.
     """
-    await validate_twilio_webhook(request)
-    form = await request.form()
+    from app.services.telephony_webhook_guard import verify_voice_webhook, assert_org_matches
+    form = await verify_voice_webhook(request, db)
     call_sid = form.get("CallSid", "")
     call_status = form.get("CallStatus", "")
     call_id = request.query_params.get("call_id", "")
@@ -448,13 +480,14 @@ async def call_status_callback(request: Request, db: Session = Depends(get_db)):
     logger.info("Call status: call_id=%s call_sid=%s status=%s", call_id, call_sid, call_status)
 
     if call:
+        assert_org_matches(form, call.organization_id)
         call.twilio_status = call_status
 
         if call_status == "no-answer" or call_status == "busy":
             call.outcome = "no_answer"
             call.status = "completed"
-            # Leave voicemail on next attempt via TwiML redirect
-            # Twilio will retry with the voicemail TwiML
+            # Nothing is left on a no-answer: a voicemail is only ever the
+            # organization's approved message, played by the AMD path.
         elif call_status == "completed":
             if not call.outcome:
                 call.outcome = "completed"
@@ -466,42 +499,25 @@ async def call_status_callback(request: Request, db: Session = Depends(get_db)):
         call.ended_at = datetime.utcnow()
         db.commit()
 
-    # For no-answer, return TwiML to leave voicemail
-    if call_status == "no-answer":
-        lead = db.query(Lead).filter(Lead.id == call.lead_id).first() if call else None
-        advisor = db.query(User).filter(User.id == call.advisor_id).first() if call else None
-
-        if lead and advisor:
-            appt_label = _get_appt_label(lead)
-            create_booking_link(db, lead, advisor)
-
-            _vm_org = db.query(Organization).filter_by(id=advisor.organization_id).first() if advisor else None
-            _vm_org_name = (_vm_org.brand_name or _vm_org.name) if _vm_org else (advisor.full_name if advisor else "our team")
-            voicemail_msg = (
-                f"Hi {lead.first_name or 'there'}, this is an AI assistant calling on behalf of "
-                f"{advisor.full_name or 'your advisor'} at {_vm_org_name}. "
-                f"I'm reaching out regarding a {appt_label}. "
-                f"Please feel free to give us a call back or visit our website to schedule a convenient time. "
-                f"We look forward to connecting with you. Have a wonderful day."
-            )
-            twiml = build_twilio_twiml_voicemail(voicemail_msg)
-            return Response(content=twiml, media_type="application/xml")
-
+    # A status callback's response is ignored by Twilio, and a voicemail is
+    # never left from here: only an APPROVED organization message is ever
+    # played, by the answering-machine path (telephony_service.machine_twiml).
     return Response(content="<?xml version='1.0'?><Response/>", media_type="application/xml")
 
 
 @router.post("/recording")
 async def recording_callback(request: Request, db: Session = Depends(get_db)):
     """Twilio calls this when recording is available. Validates X-Twilio-Signature."""
-    await validate_twilio_webhook(request)
-    form = await request.form()
+    from app.services.telephony_webhook_guard import verify_voice_webhook, assert_org_matches
+    form = await verify_voice_webhook(request, db)
     call_sid = form.get("CallSid", "")
     recording_url = form.get("RecordingUrl", "")
     recording_sid = form.get("RecordingSid", "")
     recording_duration = form.get("RecordingDuration", "0")
 
-    call = db.query(VoiceCall).filter(VoiceCall.call_sid == call_sid).first()
+    call = db.query(VoiceCall).filter(VoiceCall.call_sid == call_sid).first() if call_sid else None
     if call:
+        assert_org_matches(form, call.organization_id)
         call.recording_url = recording_url + ".mp3" if recording_url else None
         call.recording_sid = recording_sid
         if recording_duration:
@@ -586,86 +602,26 @@ def get_call(
 
 # ══════════════════════════════════════════════════════════════════════════════
 # INBOUND CALL HANDLER
-# When a lead calls +14692241155 back, Twilio hits this endpoint.
-# AI looks up caller by phone number and continues the conversation.
+# Twilio posts here when anyone calls a tenant number ("A call comes in" webhook).
+#
+# CALLED NUMBER -> OWNER ORGANIZATION -> caller looked up ONLY inside that org
+# -> call logged inside that org. This used to search every organization's
+# leads with `Lead.phone.contains(caller.lstrip("+1"))` - lstrip strips the
+# CHARACTERS "+" and "1", not the prefix, and `contains` matched across
+# tenants, so a caller could be attached to another organization's record.
 # ══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/inbound")
 async def handle_inbound_call(request: Request, db: Session = Depends(get_db)):
     """
-    Twilio calls this when someone calls our number.
-    Validates X-Twilio-Signature to prevent spoofed inbound call injections.
+    Twilio calls this when someone calls one of our numbers.
+    Validates X-Twilio-Signature (per account, fail closed) before anything else.
     """
-    await validate_twilio_webhook(request)
-    form = await request.form()
-    caller_phone = form.get("From", "").strip()
-    call_sid = form.get("CallSid", "")
-
-    logger.info("Inbound call from %s sid=%s", caller_phone, call_sid)
-
-    # Look up lead by phone number
-    lead = None
-    advisor = None
-
-    if caller_phone:
-        # Try exact match first, then without country code
-        clean_phone = caller_phone.lstrip("+1").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
-        from app.models.models import Lead as LeadModel, User as UserModel
-        lead = db.query(LeadModel).filter(
-            LeadModel.phone.contains(clean_phone)
-        ).first()
-
-        if lead:
-            advisor = db.query(UserModel).filter(UserModel.id == lead.user_id).first()
-            if not advisor:
-                # Try organization's first advisor
-                advisor = db.query(UserModel).filter(
-                    UserModel.organization_id == lead.organization_id,
-                    UserModel.role.in_(["advisor", "org_admin", "super_admin"])
-                ).first()
-
-    if not lead or not advisor:
-        # Unknown caller — greet generically and offer to connect
-        twiml = """<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="Polly.Joanna" rate="95%">
-        Thank you for calling. This is an AI assistant with our scheduling team.
-        We were not able to locate your record.
-        Please hold while we connect you, or call back during business hours.
-    </Say>
-    <Hangup/>
-</Response>"""
-        return Response(content=twiml, media_type="application/xml")
-
-    # Create inbound VoiceCall record
-    call = VoiceCall(
-        id=str(uuid.uuid4()),
-        lead_id=lead.id,
-        advisor_id=advisor.id,
-        organization_id=advisor.organization_id,
-        to_phone=advisor.twilio_phone_number or TWILIO_FROM_NUMBER,
-        from_phone=caller_phone,
-        call_number=1,
-        status="ringing",
-        created_at=datetime.utcnow(),
-    )
-    db.add(call)
-    db.commit()
-
-    # Connect to AI via WebSocket
-    ws_url = f"wss://{BACKEND_URL.replace('https://', '').replace('http://', '')}/voice/stream?call_id={call.id}&lead_id={lead.id}&advisor_id={advisor.id}&direction=inbound"
-
-    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Connect>
-        <Stream url="{ws_url}">
-            <Parameter name="direction" value="inbound"/>
-            <Parameter name="lead_id" value="{lead.id}"/>
-            <Parameter name="advisor_id" value="{advisor.id}"/>
-        </Stream>
-    </Connect>
-</Response>"""
-
+    from app.services.telephony_webhook_guard import verify_voice_webhook
+    from app.services import telephony_service
+    verified = await verify_voice_webhook(request, db)
+    logger.info("Inbound call sid=%s", verified.get("CallSid"))
+    twiml = telephony_service.handle_inbound(db, verified)
     return Response(content=twiml, media_type="application/xml")
 
 
@@ -727,6 +683,12 @@ def create_campaign(
     paused = voice_bulk_gate.org_voice_paused(db, org_id)
     if paused:
         raise HTTPException(status_code=409, detail=paused)
+    # A campaign with no voice number would only ever fail call by call.
+    from app.services import number_resolution
+    _num = number_resolution.resolve_voice_number(db, org_id, purpose=number_resolution.PURPOSE_OUTBOUND,
+                                                  user=current_user)
+    if not _num.ok:
+        raise HTTPException(status_code=409, detail=_num.reason)
     candidates = lead_scope.authorized_lead_query(db, current_user).filter(
         LeadModel.id.in_(req.lead_ids),
         LeadModel.phone != None,
@@ -816,11 +778,28 @@ def _run_campaign_background(campaign_id: str, advisor_id: str, org_id: str):
 
         lead_ids = _json.loads(campaign.lead_ids or "[]")
         concurrency = campaign.concurrent_calls or 5
-        from app.utils.crypto import decrypt_value
         from twilio.rest import Client as TwilioClient
+        from app.services import number_resolution, telephony_service, telephony_twilio
 
-        auth_token = decrypt_value(advisor.twilio_auth_token_encrypted)
-        twilio = TwilioClient(advisor.twilio_account_sid, auth_token)
+        # THE NUMBER THIS ORGANIZATION CALLS FROM, resolved - never a literal.
+        # No number, or no account able to place calls from it: the campaign
+        # fails with the reason instead of dialling from someone else's line.
+        resolved = number_resolution.resolve_voice_number(
+            db, org_id, purpose=number_resolution.PURPOSE_OUTBOUND, user=advisor)
+        creds = (number_resolution.twilio_credentials(db, org_id, resolved, user=advisor)
+                 if resolved.ok else None)
+        if not resolved.ok or not creds:
+            campaign.status = "failed"
+            campaign.completed_at = datetime.utcnow()
+            db.commit()
+            logger.error("Campaign %s refused: %s", campaign_id,
+                         resolved.reason if not resolved.ok else "no provider credentials for the number")
+            return
+        from_number = resolved.e164
+        twilio = TwilioClient(creds[0], creds[1])
+        # Async AMD + the approved message only when one exists; otherwise
+        # synchronous detection and a silent hang-up on machines.
+        drop = telephony_service.approved_drop(db, org_id)
 
         active_calls = {}  # call_sid -> lead_id
 
@@ -886,9 +865,13 @@ def _run_campaign_background(campaign_id: str, advisor_id: str, org_id: str):
                 advisor_id=advisor_id,
                 organization_id=org_id,
                 to_phone=lead.phone,
-                from_phone=TWILIO_FROM_NUMBER,
+                from_phone=from_number,
                 call_number=1,
                 status="initiating",
+                provider="twilio",
+                direction="outbound",
+                phone_number_id=resolved.number_id,
+                campaign_id=campaign.id,
                 created_at=datetime.utcnow(),
             )
             db.add(call_record)
@@ -903,17 +886,15 @@ def _run_campaign_background(campaign_id: str, advisor_id: str, org_id: str):
                 if not phone.startswith("+"):
                     phone = f"+1{phone.lstrip('1')}" if len(phone) == 10 else f"+{phone}"
 
-                call = twilio.calls.create(
+                call = twilio.calls.create(**telephony_twilio.outbound_call_params(
                     to=phone,
-                    from_=TWILIO_FROM_NUMBER,
+                    from_=from_number,
                     url=twiml_url,
                     status_callback=status_url,
-                    status_callback_method="POST",
-                    record=True,
-                    recording_status_callback=f"{BACKEND_URL}/voice/recording",
-                    timeout=30,
-                    machine_detection="DetectMessageEnd",
-                )
+                    recording_callback=f"{BACKEND_URL}/voice/recording",
+                    amd_callback=(f"{BACKEND_URL}/voice/amd?call_id={call_record.id}"
+                                  if drop is not None else None),
+                ))
                 call_record.call_sid = call.sid
                 call_record.status = "ringing"
                 active_calls[call.sid] = lead_id
@@ -1079,5 +1060,3 @@ def cancel_campaign(
     db.commit()
     return {"success": True}
 
-
-TWILIO_FROM_NUMBER = "+14692241155"

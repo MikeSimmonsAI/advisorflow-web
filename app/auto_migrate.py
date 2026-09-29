@@ -157,6 +157,15 @@ def _is_lock_contention(exc) -> bool:
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # ── Telephony (2026-09-28): human dialer, AMD, number record ──
+    ("voice_calls", "is_human_call", "BOOLEAN"),
+    ("voice_calls", "phone_number_id", "VARCHAR"),
+    ("voice_calls", "amd_status", "VARCHAR"),
+    ("voice_calls", "voicemail_drop_id", "VARCHAR"),
+    ("voice_calls", "disposition", "VARCHAR"),
+    ("voice_calls", "disposition_notes", "TEXT"),
+    ("voice_calls", "disposition_at", "TIMESTAMP"),
+    ("voice_calls", "disposition_by_id", "VARCHAR"),
     # ── The brand's outbound-mail audit mailbox (2026-09-14) ───────────────
     #
     # Nullable with no default, and NULL is the whole fleet's current state:

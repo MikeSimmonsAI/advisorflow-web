@@ -27,7 +27,7 @@
 .users-header .page-title { font-size: 26px; font-weight: 700; margin: 0 0 4px; color: var(--text-primary); }
 .users-header .page-subtitle { font-size: 14px; color: var(--text-tertiary); margin: 0; display: flex; align-items: center; gap: 10px; }
 .header-pending-badge {
-  background: rgba(217,119,6,0.15); color: #f59e0b;
+  background: rgba(217,119,6,0.15); color: var(--color-warning);
   border: 1px solid rgba(217,119,6,0.3);
   border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 600;
 }
@@ -55,7 +55,7 @@
   color: var(--signal-blue); font-weight: 600;
 }
 .filter-tab-count {
-  background: rgba(255,255,255,0.08); border-radius: 10px;
+  background: rgba(16, 32, 64, 0.06); border-radius: 10px;
   padding: 1px 7px; font-size: 11px; font-weight: 700;
 }
 .filter-tab--active .filter-tab-count { background: var(--signal-blue); color: #fff; }
@@ -67,7 +67,7 @@
   gap: 16px;
 }
 .users-state { text-align: center; color: var(--text-tertiary); padding: 60px 20px; font-size: 15px; }
-.users-state--error { color: #f87171; }
+.users-state--error { color: var(--pill-danger-fg); }
 
 /* ── Org grouping (super admin view) ── */
 .users-org-group { margin-bottom: 32px; }
@@ -126,11 +126,14 @@
 
 /* ── Badges ── */
 .badge { border-radius: 20px; padding: 3px 10px; font-size: 11px; font-weight: 600; border: 1px solid; white-space: nowrap; }
-.badge--blue    { background: var(--signal-blue-dim);    color: var(--signal-blue);    border-color: rgba(59,130,246,0.3); }
-.badge--purple  { background: rgba(124,58,237,0.12);     color: #a78bfa;               border-color: rgba(124,58,237,0.3); }
-.badge--amber   { background: rgba(217,119,6,0.12);      color: #f59e0b;               border-color: rgba(217,119,6,0.3); }
-.badge--green   { background: var(--signal-green-dim);   color: var(--signal-green);   border-color: rgba(16,185,129,0.3); }
-.badge--neutral { background: rgba(255,255,255,0.05);    color: var(--text-tertiary);  border-color: var(--border-subtle); }
+/* NOTE: these class names are global (every page's .badge--amber lands here
+   too), so they use the light pill tokens - #f59e0b on a pale tint was
+   2.1:1 and unreadable wherever a status badge rendered. */
+.badge--blue    { background: var(--pill-info-bg);    color: var(--pill-info-fg);    border-color: var(--pill-info-bd); }
+.badge--purple  { background: var(--signal-purple-dim); color: var(--signal-purple); border-color: rgba(109,67,204,0.28); }
+.badge--amber   { background: var(--pill-warning-bg); color: var(--pill-warning-fg); border-color: var(--pill-warning-bd); }
+.badge--green   { background: var(--pill-success-bg); color: var(--pill-success-fg); border-color: var(--pill-success-bd); }
+.badge--neutral { background: var(--pill-neutral-bg); color: var(--pill-neutral-fg); border-color: var(--pill-neutral-bd); }
 
 /* ── Buttons ── */
 .btn { border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: all 0.15s; }
@@ -140,7 +143,7 @@
 .btn--primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn--secondary { background: var(--surface-2); color: var(--text-secondary); border-color: var(--border-subtle); }
 .btn--secondary:hover { border-color: var(--signal-blue); color: var(--text-primary); }
-.btn--danger { background: rgba(239,68,68,0.1); color: #f87171; border-color: rgba(239,68,68,0.25); }
+.btn--danger { background: var(--pill-danger-bg); color: var(--pill-danger-fg); border-color: var(--pill-danger-bd); }
 .btn--danger:hover { background: rgba(239,68,68,0.2); }
 
 /* ── Modal ── */
@@ -150,7 +153,7 @@
 }
 .modal-box {
   background: var(--surface-1); border: 1px solid var(--border-subtle);
-  border-radius: 16px; width: 100%; max-width: 440px; box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  border-radius: 16px; width: 100%; max-width: 440px; box-shadow: var(--shadow-lg);
 }
 .modal-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -169,8 +172,8 @@
 }
 .modal-form input:focus, .modal-form select:focus { outline: none; border-color: var(--signal-blue); box-shadow: var(--glow-blue-sm); }
 .modal-form select { cursor: pointer; }
-.req { color: #f87171; }
-.form-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); border-radius: 8px; padding: 10px 14px; color: #f87171; font-size: 13px; }
+.req { color: var(--color-danger); }
+.form-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); border-radius: 8px; padding: 10px 14px; color: var(--pill-danger-fg); font-size: 13px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
 
 /* ── Profile Setup Panel ─────────────────────────────────────────────────── */
@@ -182,7 +185,7 @@
 
 .pp-panel {
   width: min(560px, 100vw);
-  background: var(--bg-panel, #070e20);
+  background: var(--bg-panel);
   border-left: 1px solid var(--border-subtle);
   display: flex; flex-direction: column;
   overflow: hidden;
@@ -270,7 +273,7 @@
 
 .pp-field input,
 .pp-field select {
-  background: var(--bg-field, rgba(7,14,31,0.7));
+  background: var(--bg-field);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 9px 11px;
@@ -333,7 +336,7 @@
   border: 1px solid rgba(239,68,68,0.25);
   border-radius: 8px;
   padding: 10px 14px;
-  color: #f87171;
+  color: var(--pill-danger-fg);
   font-size: 13px;
   flex-shrink: 0;
 }

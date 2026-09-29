@@ -31,6 +31,7 @@ from app.models.evosense_models import (EvoSenseContactPoint, EvoSenseEngagement
 from app.models.models import User
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
+from app.services.evosense import actions as ACT
 from app.services.evosense import common as C
 from app.services.evosense import contacts as CT
 from app.services.evosense import conversation as CV
@@ -121,16 +122,115 @@ def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Op
           county: Optional[str] = None, min_score: Optional[int] = Query(None, ge=0, le=100),
           source: Optional[str] = None, archived: bool = False,
           db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
-    return V.inbox(db, _read_org(db, user), bucket=bucket, strategy_id=strategy_id, q=q,
-                   signal=signal, sort=sort, limit=limit, offset=offset, county=county,
-                   min_score=min_score, source=source, archived=archived)
+    org_id = _read_org(db, user)
+    out = V.inbox(db, org_id, bucket=bucket, strategy_id=strategy_id, q=q,
+                  signal=signal, sort=sort, limit=limit, offset=offset, county=county,
+                  min_score=min_score, source=source, archived=archived)
+    # One server-computed next step per row (read-only; see services/evosense/actions.py).
+    items = out.get("items") if isinstance(out, dict) else None
+    if items:
+        ids = [i.get("id") for i in items if i.get("id")]
+        props = {p.id: p for p in db.query(EvoSenseProperty).filter(
+            EvoSenseProperty.organization_id == org_id, EvoSenseProperty.id.in_(ids or ["-"])).all()}
+        for i in items:
+            p = props.get(i.get("id"))
+            i["next_step"] = ACT.compact(db, org_id, p) if p is not None else None
+    return out
 
 
 @router.get("/properties/{property_id}")
 def property_detail(property_id: str, db: Session = Depends(get_db),
                     user: User = Depends(require_tenant_or_observer)):
     org_id = _read_org(db, user)
-    return V.property_detail(db, org_id, _prop(db, org_id, property_id))
+    prop = _prop(db, org_id, property_id)
+    out = V.property_detail(db, org_id, prop)
+    acts = ACT.actions(db, org_id, prop)
+    out["actions"] = acts["actions"]
+    out["readiness"] = acts["requirements"]
+    out["dismissed"] = acts["dismissed"]
+    out["next"] = acts["next"]
+    out["summary"] = ACT.summary(db, org_id, prop, out, acts)
+    return out
+
+
+class OwnerIn(BaseModel):
+    name: str
+    owner_type: str = "individual"
+    mailing_street: Optional[str] = None
+    mailing_city: Optional[str] = None
+    mailing_state: Optional[str] = None
+    mailing_zip: Optional[str] = None
+
+
+@router.post("/properties/{property_id}/owner")
+def add_owner(property_id: str, payload: OwnerIn, db: Session = Depends(get_db),
+              user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """MANUAL owner of record — for a finding that arrived without one. Only
+    when no current owner exists (a correction of a known owner is a different,
+    evidence-bearing act). Records the name as the person typed it; nothing is
+    looked up, nothing is sent."""
+    from app.models.evosense_models import EvoSenseOwnership
+    from app.services.evosense.ingest import mailing_key, name_key
+    org_id = svc.write_org_id(db, user)
+    prop = _prop(db, org_id, property_id)
+    name = (payload.name or "").strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=422, detail="Enter the owner's name as it appears on the record.")
+    if payload.owner_type not in ("individual", "trust", "llc", "estate", "corporation", "unknown"):
+        raise HTTPException(status_code=422, detail="Unsupported owner type.")
+    if CT.primary_owner(db, prop) is not None:
+        raise HTTPException(status_code=409, detail="This property already has an owner of record.")
+    o = EvoSenseOwner(organization_id=org_id, owner_type=payload.owner_type, display_name=name[:200],
+                      name_key=name_key(name), mailing_street=payload.mailing_street,
+                      mailing_city=payload.mailing_city, mailing_state=payload.mailing_state,
+                      mailing_zip=payload.mailing_zip,
+                      mailing_key=mailing_key(payload.mailing_street, payload.mailing_zip)
+                      if payload.mailing_street else None,
+                      is_test=bool(prop.is_test))
+    db.add(o)
+    db.flush()
+    db.add(EvoSenseOwnership(organization_id=org_id, property_id=prop.id, owner_id=o.id,
+                             source="manual", is_current=True, corrected_by_id=user.id))
+    C.log_event(db, org_id, "owner.manual", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
+                is_test=prop.is_test, summary="Owner of record entered by hand")
+    EV.rescore(db, prop)
+    db.commit()
+    return {"owner_id": o.id, "status": prop.status}
+
+
+class DismissIn(BaseModel):
+    reason: str
+    kind: str = "IGNORE"
+
+
+@router.post("/properties/{property_id}/dismiss")
+def dismiss(property_id: str, payload: DismissIn, db: Session = Depends(get_db),
+            user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A person sets a finding aside, with a recorded reason. Nothing is
+    deleted; the record, evidence and history stay."""
+    org_id = svc.write_org_id(db, user)
+    prop = _prop(db, org_id, property_id)
+    reason = (payload.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail="Say why you are dismissing it.")
+    if payload.kind not in ACT.DISMISS_KINDS:
+        raise HTTPException(status_code=422, detail="kind must be one of %s" % ", ".join(ACT.DISMISS_KINDS))
+    if prop.promoted_deal_id:
+        raise HTTPException(status_code=409, detail="Already in Deal Operations.")
+    db.add(EvoSenseFeedback(organization_id=org_id, property_id=prop.id, kind=payload.kind,
+                            reason=reason[:250], user_id=user.id,
+                            snapshot=C.jdump({"opportunity": prop.opportunity_score,
+                                              "contact": prop.contact_confidence,
+                                              "intent": prop.seller_intent, "status": prop.status,
+                                              "dismissed": True})))
+    for h in db.query(EvoSenseHandoff).filter(EvoSenseHandoff.organization_id == org_id,
+                                              EvoSenseHandoff.property_id == prop.id,
+                                              EvoSenseHandoff.status.in_(("open", "acknowledged"))).all():
+        HO.resolve(db, h, "dismissed", user, "Dismissed: %s" % reason[:200])
+    C.log_event(db, org_id, "dismissed", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
+                is_test=prop.is_test, summary="Dismissed (%s): %s" % (payload.kind, reason[:200]))
+    db.commit()
+    return {"ok": True, "kind": payload.kind, "reason": reason[:250]}
 
 
 @router.get("/properties/{property_id}/observations/{observation_id}/raw")

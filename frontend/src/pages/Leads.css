@@ -39,8 +39,8 @@
   border-radius: var(--radius-md);
   padding: 18px 20px;
   border: 1px solid var(--border-subtle);
-  background: linear-gradient(145deg, rgba(11, 23, 50, 0.92), rgba(4, 9, 22, 0.85));
-  backdrop-filter: blur(18px);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   display: flex;
@@ -57,25 +57,25 @@
   opacity: 0.5;
 }
 
-.leads-kpi-card--blue { border-color: rgba(47, 182, 255, 0.3); }
+.leads-kpi-card--blue { border-color: var(--border-default); border-top: 3px solid var(--signal-blue); }
 .leads-kpi-card--blue::before { background: radial-gradient(circle at 10% 10%, var(--signal-blue-dim), transparent 60%); }
-.leads-kpi-card--blue:hover { border-color: var(--signal-blue); box-shadow: 0 0 28px rgba(47,182,255,0.18); }
+.leads-kpi-card--blue:hover { border-color: var(--signal-blue); box-shadow: var(--shadow-md); }
 
-.leads-kpi-card--green { border-color: rgba(30, 240, 168, 0.3); }
+.leads-kpi-card--green { border-color: var(--border-default); border-top: 3px solid var(--signal-green); }
 .leads-kpi-card--green::before { background: radial-gradient(circle at 10% 10%, var(--signal-green-dim), transparent 60%); }
-.leads-kpi-card--green:hover { border-color: var(--signal-green); box-shadow: 0 0 28px rgba(30,240,168,0.18); }
+.leads-kpi-card--green:hover { border-color: var(--signal-green); box-shadow: var(--shadow-md); }
 
-.leads-kpi-card--amber { border-color: rgba(255, 178, 56, 0.3); }
+.leads-kpi-card--amber { border-color: var(--border-default); border-top: 3px solid var(--signal-amber); }
 .leads-kpi-card--amber::before { background: radial-gradient(circle at 10% 10%, var(--signal-amber-dim), transparent 60%); }
-.leads-kpi-card--amber:hover { border-color: var(--signal-amber); box-shadow: 0 0 28px rgba(255,178,56,0.18); }
+.leads-kpi-card--amber:hover { border-color: var(--signal-amber); box-shadow: var(--shadow-md); }
 
-.leads-kpi-card--red { border-color: rgba(255, 77, 126, 0.3); }
+.leads-kpi-card--red { border-color: var(--border-default); border-top: 3px solid var(--signal-red); }
 .leads-kpi-card--red::before { background: radial-gradient(circle at 10% 10%, var(--signal-red-dim), transparent 60%); }
-.leads-kpi-card--red:hover { border-color: var(--signal-red); box-shadow: 0 0 28px rgba(255,77,126,0.18); }
+.leads-kpi-card--red:hover { border-color: var(--signal-red); box-shadow: var(--shadow-md); }
 
 .leads-kpi-top { display: flex; justify-content: space-between; align-items: center; }
 .leads-kpi-label { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); }
-.leads-kpi-icon { font-size: 18px; opacity: 0.7; }
+.leads-kpi-icon { font-size: 18px; opacity: 0.85; }
 
 .leads-kpi-value {
   font-size: clamp(28px, 3.5vw, 40px);
@@ -84,10 +84,10 @@
   letter-spacing: -0.02em;
 }
 
-.leads-kpi-value--blue { color: var(--signal-blue); text-shadow: 0 0 18px rgba(47,182,255,0.35); }
-.leads-kpi-value--green { color: var(--signal-green); text-shadow: 0 0 18px rgba(30,240,168,0.35); }
-.leads-kpi-value--amber { color: var(--signal-amber); text-shadow: 0 0 18px rgba(255,178,56,0.35); }
-.leads-kpi-value--red { color: var(--signal-red); text-shadow: 0 0 18px rgba(255,77,126,0.35); }
+.leads-kpi-value--blue { color: var(--signal-blue); }
+.leads-kpi-value--green { color: var(--signal-green); }
+.leads-kpi-value--amber { color: var(--signal-amber); }
+.leads-kpi-value--red { color: var(--signal-red); }
 
 .leads-kpi-sub { font-size: 11px; color: var(--text-tertiary); }
 
@@ -152,10 +152,21 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+/* AuditLog.css gives every .filter-select `width: 100%` globally, which
+   stacked the tier/status/source filters here as full-width bars. In this
+   row they are compact controls beside the search box. */
+.leads-filter-row .filter-select {
+  width: auto;
+  flex: 0 1 200px;
+  min-width: 150px;
+}
+@media (max-width: 600px) {
+  .leads-filter-row .filter-select { flex: 1 1 140px; }
+}
 
 .leads-search-wrap {
   position: relative;
-  flex: 1;
+  flex: 1 1 280px;
   min-width: 200px;
 }
 

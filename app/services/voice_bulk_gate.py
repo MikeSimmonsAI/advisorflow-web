@@ -45,6 +45,20 @@ def org_voice_paused(db, org_id: str) -> Optional[str]:
     return None
 
 
+def org_all_paused(db, org_id: str) -> Optional[str]:
+    """Only the organization-wide kill switch (paused_all). Human calls honour
+    this one; they skip the AI voice switch. Read errors fail closed."""
+    try:
+        from app.models.evosense_models import EvoSenseControl
+        ctl = db.query(EvoSenseControl).filter(EvoSenseControl.organization_id == org_id).first()
+    except Exception:                                       # noqa: BLE001
+        log.exception("voice_bulk_gate: kill-switch lookup failed for %s", org_id)
+        return "Outreach state could not be read - treated as paused."
+    if ctl is not None and ctl.paused_all:
+        return "All outreach is paused for this organization."
+    return None
+
+
 def _dnc_by_number(db, org_id: str, phone: str) -> bool:
     from app.models.models import Lead
     from app.services import wholesale_sms
@@ -56,16 +70,30 @@ def _dnc_by_number(db, org_id: str, phone: str) -> bool:
                                      Lead.phone.in_(forms)).first() is not None)
 
 
-def call_refusal(db, lead, org_id: str, *, check_org_pause: bool = True) -> Optional[str]:
+def call_refusal(db, lead, org_id: str, *, check_org_pause: bool = True,
+                 human: bool = False) -> Optional[str]:
     """None when an AI call to this lead is permitted by compliance, else the
-    reason in words a person can act on."""
+    reason in words a person can act on.
+
+    `human=True` is the HUMAN DIALER (a person bridged to the lead by
+    POST /calls/human). Every compliance rule still applies - DNC on any
+    channel and by number, suppression, test/capacity, remove_all, allow_voice
+    and the seller permission basis. Only the two AI controls are skipped,
+    because they stop the AI and a person calling is exactly what they are
+    there to allow: Pause AI / human takeover, and the AI voice switch
+    (paused_voice). The organization-wide kill switch (paused_all) still
+    stops a human call. Nothing else is relaxed."""
     if lead is None:
         return "Lead not found."
     if lead.organization_id != org_id:
         return "Lead belongs to another organization."
     if not lead.phone:
         return "Lead has no phone number."
-    if check_org_pause:
+    if human:
+        paused = org_all_paused(db, org_id)
+        if paused:
+            return paused
+    elif check_org_pause:
         paused = org_voice_paused(db, org_id)
         if paused:
             return paused
@@ -81,7 +109,7 @@ def call_refusal(db, lead, org_id: str, *, check_org_pause: bool = True) -> Opti
     if getattr(lead, "allow_voice", None) is False:
         return "The record says: no calls."
     from app.services import wholesale_ops
-    held = wholesale_ops.ai_send_refusal(db, lead, "voice_ai")
+    held = None if human else wholesale_ops.ai_send_refusal(db, lead, "voice_ai")
     if held:
         return ("A person has taken over this conversation - the AI does not call."
                 if held == "HUMAN_TAKEOVER" else "AI is paused for this conversation.")

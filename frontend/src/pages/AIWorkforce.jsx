@@ -33,6 +33,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
 import '../styles/shared.css'
+import '../styles/aiWorkforce.css'
 
 const STATE_TONE = {
   available: 'neutral',
@@ -332,7 +333,7 @@ export default function AIWorkforce () {
       action={<button className="btn btn--secondary btn--sm" onClick={load} disabled={loading}>Refresh</button>}
     >
       {err && (
-        <div className="panel" style={{ borderColor: 'rgba(255,77,126,.35)' }}>
+        <div className="panel panel--error">
           <p style={{ margin: 0, color: 'var(--signal-red)', fontSize: 13 }}>{err}</p>
         </div>
       )}
@@ -501,7 +502,7 @@ export default function AIWorkforce () {
               Not available on this account
             </h3>
             {notAvailable.map(item => (
-              <div className="glass-card" key={item.template_key} style={{ marginBottom: 10, opacity: .75 }}>
+              <div className="glass-card" key={item.template_key} style={{ marginBottom: 10, background: 'var(--surface-sunken)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div style={{ maxWidth: 620 }}>
                     <div style={{ fontWeight: 600 }}>{item.name}</div>

@@ -130,16 +130,23 @@ def _brand_offers(db, platform_row, feature_key):
         return True
 
 
-def _with_org_offer(platform, features):
+def _with_org_offer(platform, features, withdrawn=()):
     """An organization entitled to Wholesale (its effective feature list names
     it) is offered the product even where the brand default does not - that is
     what an org-level override means. `features is None` is the legacy "all
-    modules" answer and leaves the brand's answer unchanged."""
+    modules" answer and leaves the brand's answer unchanged.
+
+    `withdrawn` names features the WORKSPACE (location) layer switched off for
+    this request. The product is then not offered at all - the nav entry, the
+    product line and the route guard all read `offered`, so a location that
+    turned Wholesale off does not show a door into it."""
     if not platform:
         return platform
     offered = dict(platform.get("offered") or {})
     if features is not None and "wholesale_real_estate" in features:
         offered["wholesale"] = True
+    if "wholesale_real_estate" in (withdrawn or ()):
+        offered["wholesale"] = False
     platform["offered"] = offered
     return platform
 
@@ -179,6 +186,7 @@ def _platform_brand(db, org):
 
 @router.get("/org")
 def get_org_branding(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -241,9 +249,31 @@ def get_org_branding(
     # value above is returned untouched. With one - e.g. a brand-level disable
     # of wholesale_real_estate - the effective list replaces it, so the nav
     # stops offering a module the server now refuses.
+    #
+    # WORKSPACE (LOCATION) CONTEXT — the same resolution require_feature uses
+    # (app/services/workspace_location.py), except that an invalid selection
+    # is ignored and reported (`rejected`) instead of refused: this is the
+    # shell's bootstrap call and a stale selection must not lock anyone out.
+    # The fallback is never wider than a valid selection would have been.
+    loc_ctx = None
+    withdrawn = ()
+    try:
+        from app.services import workspace_location as _wl
+        loc_ctx = _wl.resolve(db, current_user, org.id, request, strict=False)
+    except Exception:  # noqa: BLE001
+        import logging as _logging
+        _logging.getLogger(__name__).exception(
+            "branding/org: workspace location resolution failed for org=%s", org.id)
     try:
         from app.services import entitlements as _ent
-        features = _ent.nav_features(db, org, current_user, features)
+        loc_ids = loc_ctx.location_ids if loc_ctx is not None else ()
+        org_level = _ent.nav_features(db, org, current_user, features)
+        features = (_ent.nav_features(db, org, current_user, features, location_ids=loc_ids)
+                    if loc_ids else org_level)
+        if loc_ids:
+            before = set(_ent.ALL_FEATURE_KEYS if org_level is None else org_level)
+            after = set(_ent.ALL_FEATURE_KEYS if features is None else features)
+            withdrawn = tuple(sorted(before - after))
     except Exception:  # noqa: BLE001 - nav is decoration; require_feature enforces
         import logging as _logging
         _logging.getLogger(__name__).exception(
@@ -293,5 +323,13 @@ def get_org_branding(
         # browser. The frontend uses it ONLY when the hostname is not itself a
         # brand domain, so a brand domain still decides its own chrome exactly
         # as before and no brand can be shown on another brand's host.
-        "platform": _with_org_offer(_platform_brand(db, org), features),
+        "platform": _with_org_offer(_platform_brand(db, org), features, withdrawn),
+        # THE WORKSPACE (LOCATION) THIS ANSWER WAS COMPUTED FOR. The shell
+        # draws a location selector from `available` (only when there is more
+        # than one) and sends the selection back as `header` - which is null
+        # when this deployment's CORS allow-list does not include it yet, so
+        # the browser never sends a header that would fail every preflight.
+        "workspace_location": (loc_ctx.as_payload(
+            header_supported=_wl.header_allowed_by_cors(request))
+            if loc_ctx is not None else None),
     }

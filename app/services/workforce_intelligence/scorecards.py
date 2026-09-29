@@ -272,7 +272,7 @@ def _efficiency(values: Dict[str, Dict], minimum: int) -> Dict[str, Any]:
         "cost_per_outcome": None,
         "cost_per_outcome_note": (
             "No provider cost is available to this platform, so cost per "
-            "outcome is unknown rather than zero. AdvisorFlow's own estimate "
+            "outcome is unknown rather than zero. the platform's own estimate "
             "is shown on the Costs screen and is labelled as an estimate."),
         "minimum_denominator": minimum,
     }

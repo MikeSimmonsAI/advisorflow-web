@@ -147,7 +147,7 @@ export default function Cadence() {
                     fontSize: 11,
                     padding: '3px 10px',
                     borderRadius: 20,
-                    background: touch.channel === 'email' ? 'rgba(47,182,255,0.12)' : 'rgba(30,240,168,0.12)',
+                    background: touch.channel === 'email' ? 'var(--pill-info-bg)' : 'var(--pill-success-bg)',
                     color: touch.channel === 'email' ? 'var(--signal-blue)' : 'var(--signal-green)',
                     border: '1px solid currentColor',
                   }}

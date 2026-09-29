@@ -24,7 +24,7 @@
 .cadence-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .cadence-dot--done { background: var(--signal-green); }
 .cadence-dot--next { background: var(--signal-blue); box-shadow: 0 0 6px var(--signal-blue); }
-.cadence-dot--pending { background: rgba(255,255,255,0.12); }
+.cadence-dot--pending { background: var(--surface-sunken); }
 .cadence-progress-label { font-size: 11px; color: var(--text-secondary); }
 
 .cadence-controls { display: flex; gap: 6px; }

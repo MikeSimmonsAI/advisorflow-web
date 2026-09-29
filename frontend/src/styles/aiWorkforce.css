@@ -1,0 +1,78 @@
+/* AI workforce pages (Workforce Command, My AI Workforce, Your AI Team,
+   employee detail) — light-system helpers. Tokens only: styles/appearance.css. */
+
+.wf-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px;
+  margin-bottom: 12px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm, 10px);
+  box-shadow: var(--shadow-sm);
+}
+@media (max-width: 640px) {
+  .wf-tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .wf-tabs .btn { flex: 0 0 auto; }
+}
+
+.wf-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+@media (max-width: 640px) {
+  .wf-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+.wf-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 16px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm, 10px);
+  box-shadow: var(--shadow-sm);
+}
+.wf-stat__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.wf-stat__value {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+.wf-stat__hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.wf-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px 18px;
+  color: var(--text-body);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.wf-empty strong { color: var(--text-strong); }
+
+.page-shell h3 {
+  /* .page-shell is a flex column with an 18px gap; the heading adds little. */
+  margin: 6px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-strong);
+}

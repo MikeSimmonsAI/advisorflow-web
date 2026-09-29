@@ -27,14 +27,14 @@
 /* ── STATS ROW ─────────────────────────────────────────────────────────────── */
 .av-stats-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 20px;
 }
 
 @media (max-width: 900px) {
   .av-stats-row {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -82,7 +82,7 @@
   font-size: 11px;
   color: var(--text-tertiary);
   font-weight: 500;
-  white-space: nowrap;
+  white-space: normal;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -223,8 +223,8 @@
 }
 
 .availability-success {
-  background: rgba(72, 199, 116, 0.12);
-  border: 1px solid rgba(72, 199, 116, 0.3);
+  background: var(--pill-success-bg);
+  border: 1px solid var(--pill-success-bd);
   border-radius: 6px;
   padding: 10px 14px;
   font-size: 13px;
@@ -292,7 +292,7 @@
   font-size: 10px;
   font-weight: 600;
   color: var(--signal-red, #f87171);
-  background: rgba(248, 113, 113, 0.1);
+  background: var(--pill-danger-bg);
   border-radius: 4px;
   padding: 2px 6px;
   width: fit-content;
@@ -312,7 +312,7 @@
 
 .availability-block-delete:hover {
   color: var(--signal-red, #f87171);
-  background: rgba(248, 113, 113, 0.1);
+  background: var(--pill-danger-bg);
 }
 
 /* ── MAIN TABS (Calendar / Block / Settings) ───────────────────────────────── */
@@ -448,13 +448,13 @@
 }
 
 .mini-cal-day:hover:not(.mini-cal-day--past) {
-  background: rgba(47, 182, 255, 0.08);
-  border-color: rgba(47, 182, 255, 0.25);
+  background: var(--pill-info-bg);
+  border-color: var(--pill-info-bd);
   color: var(--accent);
 }
 
 .mini-cal-day--today {
-  background: rgba(47, 182, 255, 0.15);
+  background: var(--color-primary-soft);
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 800;
@@ -487,11 +487,11 @@
 }
 
 .mini-cal-dot--appt {
-  background: #1ef0a8;
+  background: var(--color-success);
 }
 
 .mini-cal-dot--blocked {
-  background: #f87171;
+  background: var(--color-danger);
 }
 
 .mini-cal-legend {
@@ -582,3 +582,12 @@
   font-weight: 600;
   opacity: 0.8;
 }
+
+/* Reason line under a KPI that has no value in the current view. */
+.av-stat-note {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  white-space: normal;
+}
+.av-stat-body { min-width: 0; }

@@ -25,10 +25,11 @@ import { getCachedBrand } from '../theme'
 // than getting none.
 const BRAND = () => getCachedBrand()?.displayName || 'this platform'
 
-const BG = 'var(--bg-app, #0f1117)'
-const CARD = 'var(--bg-card, #1a1f2e)'
-const BORDER = 'var(--border, #2d3748)'
-const TEXT_SEC = 'var(--text-secondary, #94a3b8)'
+const BG = 'var(--surface-page)'
+const CARD = 'var(--surface-card)'
+const BORDER = 'var(--border-default)'
+const TEXT_STRONG = 'var(--text-strong)'
+const TEXT_SEC = 'var(--text-secondary)'
 const TEXT_TER = 'var(--text-tertiary, #64748b)'
 
 export default function SetupIntegrations() {
@@ -84,7 +85,7 @@ export default function SetupIntegrations() {
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: BG, padding: 24 }}>
         <div style={{ textAlign: 'center', maxWidth: 460 }}>
           <div style={{ fontSize: 64, marginBottom: 20 }}>✅</div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, marginBottom: 10, color: '#fff' }}>{service} connected!</h1>
+          <h1 style={{ fontSize: 26, fontWeight: 800, marginBottom: 10, color: TEXT_STRONG }}>{service} connected!</h1>
           <p style={{ fontSize: 15, color: TEXT_SEC, lineHeight: 1.6 }}>{detail}</p>
           <p style={{ marginTop: 28, fontSize: 13, color: TEXT_TER }}>You can close this window.</p>
         </div>
@@ -98,7 +99,7 @@ export default function SetupIntegrations() {
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: BG, padding: 24 }}>
         <div style={{ textAlign: 'center', maxWidth: 460 }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, color: '#fff' }}>Connection failed</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, color: TEXT_STRONG }}>Connection failed</h1>
           <p style={{ fontSize: 14, color: TEXT_SEC }}>{calendarError || microsoftError}</p>
           <p style={{ marginTop: 16, fontSize: 13, color: TEXT_TER }}>Ask your admin to send you the setup link again and try once more.</p>
         </div>
@@ -121,7 +122,7 @@ export default function SetupIntegrations() {
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: BG, padding: 24 }}>
         <div style={{ textAlign: 'center', maxWidth: 460 }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>🔗</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, color: '#fff' }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, color: TEXT_STRONG }}>
             {error ? 'Link not valid' : 'No setup link found'}
           </h1>
           <p style={{ fontSize: 14, color: TEXT_SEC }}>
@@ -140,15 +141,15 @@ export default function SetupIntegrations() {
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{ fontSize: 44, marginBottom: 14 }}>⚡</div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, color: '#fff', marginBottom: 8 }}>Connect your accounts</h1>
+          <h1 style={{ fontSize: 26, fontWeight: 800, color: TEXT_STRONG, marginBottom: 8 }}>Connect your accounts</h1>
           {advisor && (
             <p style={{ fontSize: 15, color: TEXT_SEC, lineHeight: 1.6 }}>
-              Hi <strong style={{ color: '#fff' }}>{advisor.full_name}</strong> — link your Google Calendar
+              Hi <strong style={{ color: TEXT_STRONG }}>{advisor.full_name}</strong> — link your Google Calendar
               and/or Microsoft 365 so {BRAND()} can schedule appointments and send emails on your behalf.
             </p>
           )}
           {(calendarError || microsoftError) && (
-            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', color: '#f87171', fontSize: 13 }}>
+            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', color: 'var(--pill-danger-fg)', fontSize: 13 }}>
               Connection failed: {calendarError || microsoftError}. Please try again.
             </div>
           )}
@@ -160,9 +161,9 @@ export default function SetupIntegrations() {
             <span style={{ fontSize: 32, flexShrink: 0 }}>📅</span>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 700, fontSize: 16, color: '#fff' }}>Google Calendar</span>
+                <span style={{ fontWeight: 700, fontSize: 16, color: TEXT_STRONG }}>Google Calendar</span>
                 {advisor?.google_calendar_connected && (
-                  <span style={{ background: '#16a34a22', color: '#22c55e', borderRadius: 999, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
+                  <span style={{ background: '#16a34a22', color: 'var(--color-success)', borderRadius: 999, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
                     Connected
                   </span>
                 )}
@@ -192,9 +193,9 @@ export default function SetupIntegrations() {
             <span style={{ fontSize: 32, flexShrink: 0 }}>📧</span>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 700, fontSize: 16, color: '#fff' }}>Microsoft 365</span>
+                <span style={{ fontWeight: 700, fontSize: 16, color: TEXT_STRONG }}>Microsoft 365</span>
                 {advisor?.microsoft_365_connected && (
-                  <span style={{ background: '#16a34a22', color: '#22c55e', borderRadius: 999, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
+                  <span style={{ background: '#16a34a22', color: 'var(--color-success)', borderRadius: 999, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
                     Connected
                   </span>
                 )}

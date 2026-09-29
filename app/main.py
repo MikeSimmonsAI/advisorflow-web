@@ -469,6 +469,7 @@ ALLOWED_ORIGINS = [
 # server reads it with, and Gate 34 asserts that every custom header the
 # frontend client sends appears here.
 from app.services.workspace_access import WORKSPACE_HEADER
+from app.services.workspace_location import LOCATION_HEADER as WORKSPACE_LOCATION_HEADER
 
 from app.services.session_service import CLIENT_HEADERS as _CLIENT_HEADERS
 
@@ -476,6 +477,7 @@ BROWSER_HEADERS = [
     "Authorization", "Content-Type", "Accept", "Origin",
     "X-Org-Override", "X-Brand-Override",
     WORKSPACE_HEADER,
+    WORKSPACE_LOCATION_HEADER,   # X-Workspace-Location (workspace-level entitlements)
     # The device-description headers per-device sessions read. A NATIVE app is
     # not subject to CORS and would work without them being listed — which is
     # exactly why they are listed. The moment the web client adopts one, an
@@ -485,6 +487,48 @@ BROWSER_HEADERS = [
     # the trap in advance.
     *_CLIENT_HEADERS,
 ]
+
+class ServerErrorInsideCORSMiddleware:
+    """Turn an unhandled exception into a JSON 500 INSIDE the CORS layer.
+
+    `@app.exception_handler(Exception)` above is not enough on its own:
+    Starlette hands handlers for `Exception` to ServerErrorMiddleware, which is
+    the OUTERMOST layer - above CORSMiddleware - so its 500 still left without
+    Access-Control-Allow-Origin, the browser refused to show it to the page,
+    and every server crash (e.g. a failed lead delete) reached the user as
+    "Unable to reach the server ... it may be restarting". Registered before
+    CORSMiddleware, this middleware is INSIDE it, so the 500 carries the CORS
+    headers and the page can read the real status. If the response had already
+    started, the exception is re-raised unchanged.
+    """
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def _send(message):
+            nonlocal started
+            if message.get("type") == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, _send)
+        except Exception:  # noqa: BLE001
+            if started:
+                raise
+            logging.getLogger(__name__).exception(
+                "unhandled error on %s %s", scope.get("method"), scope.get("path"))
+            resp = JSONResponse(status_code=500, content={
+                "detail": "Something went wrong on our end. The error has been logged."})
+            await resp(scope, receive, send)
+
+
+app.add_middleware(ServerErrorInsideCORSMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -777,6 +821,8 @@ from app.routers.rate_requests_router import router as rate_requests_router  # n
 app.include_router(rate_requests_router)   # /rate-requests (energy work queue; gated by the `leads` feature)
 from app.routers import work_router  # noqa: E402
 app.include_router(work_router.router)   # /communications/* and /work/* (notes, tasks, reply review)
+from app.routers.telephony_router import router as telephony_router  # noqa: E402
+app.include_router(telephony_router)   # /voicemails, /calls/*, /telephony/*, /god/telephony/*, /voice/inbound/*, /voice/amd, /voice/human/*
 app.include_router(google_contacts_router.router)
 app.include_router(objection_router)
 app.include_router(onboarding_router.router)
@@ -1011,6 +1057,8 @@ app.include_router(wholesale_funding_router)
 app.include_router(wholesale_exceptions_router)
 from app.routers.wholesale_ops_router import router as wholesale_ops_router  # noqa: E402
 app.include_router(wholesale_ops_router)   # /wholesale/ops — callbacks, temperature overrides, conversation control, pilot
+from app.routers.skiptrace_cost_router import router as skiptrace_cost_router  # noqa: E402
+app.include_router(skiptrace_cost_router)   # /wholesale/skip-trace — cost catalogue, estimates, compare, approval (never calls a vendor)
 # Files — photos, documents, proof of funds. One upload path and one
 # authenticated serve path for the whole module; see the router's docstring for
 # why no stored object is ever given a public URL.

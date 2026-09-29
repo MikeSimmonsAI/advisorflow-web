@@ -26,6 +26,7 @@ import {
   Score, ScoreWhy, Status, Tag, ago, cents, humanize, money, shortDate, statusLabel,
 } from '../ds/ds'
 import '../ds/evo-pages.css'
+import EvoActions from './EvoActions'
 
 const FRESHNESS = { current: 'FRESH', aging: 'AGING', stale: 'STALE' }
 
@@ -208,8 +209,11 @@ export default function EvoProperty() {
         <div className="evo-nextcard__actions">{actions}</div>
       </section>
 
+      {/* NEXT ACTIONS — server-computed: what you can do, why not, what happens after */}
+      <EvoActions d={d} propertyId={propertyId} busy={busy} act={act} onPromote={() => setPromoteOpen(true)} />
+
       <nav className="evo-sec-nav" aria-label="Sections">
-        {[['intel', 'Intelligence'], ['conversation', 'Conversation'], ['facts', 'Seller facts'], ['deal', 'Deal intelligence'],
+        {[['actions', 'What you can do'], ['intel', 'Intelligence'], ['conversation', 'Conversation'], ['facts', 'Seller facts'], ['deal', 'Deal intelligence'],
           ['signals', 'Why found'], ['owner', 'Owner & contact'], ['data', 'Data intelligence'], ['timeline', 'Timeline']]
           .map(([id, label]) => <a key={id} href={`#${id}`}>{label}</a>)}
       </nav>

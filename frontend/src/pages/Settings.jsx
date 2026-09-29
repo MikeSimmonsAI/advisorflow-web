@@ -21,7 +21,7 @@ const CAL = {
   activePill: {
     fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em',
     textTransform: 'uppercase', borderRadius: 20, padding: '2px 8px',
-    background: 'rgba(30,240,168,0.14)', color: 'var(--signal-green, #1ef0a8)',
+    background: 'rgba(30,240,168,0.14)', color: 'var(--signal-green)',
     border: '1px solid rgba(30,240,168,0.32)',
   },
   warnPill: {
@@ -32,7 +32,7 @@ const CAL = {
   },
   meta: { fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4, lineHeight: 1.5 },
   detail: { fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 },
-  ok: { color: 'var(--signal-green, #1ef0a8)', fontWeight: 600 },
+  ok: { color: 'var(--signal-green)', fontWeight: 600 },
   warn: { color: 'var(--signal-amber, #ffb41e)', fontWeight: 600 },
   off: { color: 'var(--text-tertiary)', fontWeight: 600 },
   actions: { display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, flexWrap: 'wrap' },
@@ -562,7 +562,8 @@ export default function Settings() {
               value={displayName}
               onChange={e => { setDisplayName(e.target.value); setNameError('') }}
               placeholder="Your full name"
-              style={{ width: '100%' }}
+              className="settings-input"
+              style={{ width: '100%', boxSizing: 'border-box' }}
             />
           </div>
           <button type="submit" className="btn btn--primary" disabled={nameSaving} style={{ whiteSpace: 'nowrap' }}>
@@ -580,15 +581,15 @@ export default function Settings() {
         <form onSubmit={savePassword} style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 400 }}>
           <div>
             <label style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>Current password</label>
-            <input type="password" value={currentPw} onChange={e => { setCurrentPw(e.target.value); setPwError('') }} required placeholder="Your current password" />
+            <input type="password" value={currentPw} onChange={e => { setCurrentPw(e.target.value); setPwError('') }} required placeholder="Your current password" className="settings-input" style={{ width: '100%', boxSizing: 'border-box' }} />
           </div>
           <div>
             <label style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>New password</label>
-            <input type="password" value={newPw} onChange={e => { setNewPw(e.target.value); setPwError('') }} required placeholder="At least 8 characters" />
+            <input type="password" value={newPw} onChange={e => { setNewPw(e.target.value); setPwError('') }} required placeholder="At least 8 characters" className="settings-input" style={{ width: '100%', boxSizing: 'border-box' }} />
           </div>
           <div>
             <label style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>Confirm new password</label>
-            <input type="password" value={confirmPw} onChange={e => { setConfirmPw(e.target.value); setPwError('') }} required placeholder="Repeat new password" />
+            <input type="password" value={confirmPw} onChange={e => { setConfirmPw(e.target.value); setPwError('') }} required placeholder="Repeat new password" className="settings-input" style={{ width: '100%', boxSizing: 'border-box' }} />
           </div>
           {pwError  && <div className="settings-error">{pwError}</div>}
           {pwSaved  && <div style={{ color: 'var(--success)', fontSize: 13 }}>✓ Password changed successfully.</div>}

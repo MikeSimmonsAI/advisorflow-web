@@ -3,14 +3,17 @@
  * and notes. One GET /wholesale/ops/deals/{id}; every write goes to its own
  * endpoint and the panel reloads from the server - nothing is assumed.
  *
- * Nothing here sends a message or places a call. "Call" is a tel: link that
- * opens the operator's own phone, and it is only offered when the platform's
- * voice eligibility says the seller may be called.
+ * Nothing here sends a message. "Call" is the telephony click-to-call bridge
+ * (components/telephony/CallButton): Twilio rings the operator's own phone
+ * first, then the seller, who sees the organization's number. Its readiness
+ * check runs the same compliance gate as the call itself, and it says
+ * "Provider/config required" when no voice number or callback phone is set.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
 import { Alert, Panel, Tag } from '../ds/ds'
 import { errText, fmtWhen } from '../wsShared'
+import CallButton from '../../../components/telephony/CallButton'
 import './ops.css'
 
 const TEMPS = ['HOT', 'WARM', 'COLD']
@@ -156,24 +159,25 @@ function ControlCard({ leadId, control, reload }) {
   )
 }
 
-function CallCard({ calls }) {
+function CallCard({ leadId, calls, reload }) {
   const d = calls.dialer
   return (
     <Panel title="Call the seller">
-      {d.tel ? <a className="btn btn--primary" href={d.tel}>Call from my phone</a> : (
+      {d.eligible ? <CallButton leadId={leadId} label="Call seller" onDone={reload} /> : (
         <p className="wso-muted" style={{ margin: 0 }}>Calling is not available: {d.reasons?.join('; ') || d.state}</p>
       )}
-      <p className="wso-small wso-muted">{d.note}</p>
       <p className="wso-small wso-muted">
-        Voicemail: {calls.voicemail.outbound_voicemails_left} left by the voice agent. {calls.voicemail.note}
+        Voicemail: {calls.voicemail.outbound_voicemails_left} left by an approved voicemail message.
+        Inbound voicemail from this seller appears in Communications.
       </p>
       {calls.calls?.length ? (
         <div className="wso-table-wrap">
           <table className="wso-table">
-            <thead><tr><th>When</th><th>Direction</th><th>Status</th><th>Answered by</th><th>Voicemail</th></tr></thead>
+            <thead><tr><th>When</th><th>Direction</th><th>Status</th><th>Outcome</th><th>Answered by</th><th>Voicemail</th></tr></thead>
             <tbody>
               {calls.calls.map(c => (
                 <tr key={c.id}><td>{fmtWhen(c.created_at)}</td><td>{c.direction}</td><td>{c.status}</td>
+                  <td>{c.outcome ? c.outcome.replace(/_/g, ' ') : '—'}</td>
                   <td>{c.answered_by || '—'}</td><td>{c.voicemail_left ? 'left' : '—'}</td></tr>
               ))}
             </tbody>
@@ -311,7 +315,7 @@ export default function DealOpsPanel({ dealId }) {
           {data.dnc ? <Alert kind="warn">This seller is Do Not Contact. Nothing will be sent or called on any channel.</Alert> : null}
           <TemperatureCard leadId={data.lead_id} temp={data.temperature} reload={load} />
           <ControlCard leadId={data.lead_id} control={data.control} reload={load} />
-          <CallCard calls={data.calls} />
+          <CallCard leadId={data.lead_id} calls={data.calls} reload={load} />
         </>
       ) : <Alert kind="info">No owner is attached to this deal yet — temperature, conversation control and calling appear once one is.</Alert>}
       <CallbacksCard dealId={dealId} callbacks={data.callbacks} reload={load} />

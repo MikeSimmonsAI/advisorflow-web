@@ -1979,6 +1979,21 @@ class VoiceCall(Base):
     answered_by         = Column(String, nullable=True)   # human | voicemail | no_answer | busy | failed | unknown
     is_live_conversation = Column(Boolean, nullable=True) # True only for `human`
 
+    # ── TELEPHONY (stream XC, 2026-09-28) ──────────────────────────────────
+    # Additive and nullable. `is_human_call` marks a person-to-person bridge
+    # placed by the human dialer (POST /calls/human); `phone_number_id` is the
+    # phone_numbers row the call went out on (NULL = a legacy org/user column);
+    # `amd_status` is Twilio's raw AnsweredBy; the disposition fields are what
+    # the caller recorded afterwards.
+    is_human_call     = Column(Boolean, nullable=True)
+    phone_number_id   = Column(String, nullable=True)
+    amd_status        = Column(String, nullable=True)
+    voicemail_drop_id = Column(String, nullable=True)
+    disposition       = Column(String, nullable=True)
+    disposition_notes = Column(Text, nullable=True)
+    disposition_at    = Column(DateTime, nullable=True)
+    disposition_by_id = Column(String, nullable=True)
+
 
 # ── Voice agent configuration ─────────────────────────────────────────────────
 # organization → provider → agent → outbound number.

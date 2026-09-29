@@ -130,6 +130,17 @@ def resolve_account_by_sid(db: Session, account_sid: str
     if not account_sid:
         return None
 
+    # THE PLATFORM ACCOUNT NEVER RESOLVES TO A TENANT. A tenant row carrying
+    # the platform SID (typed in by an org admin, or copied by mistake) would
+    # otherwise let its stored token - chosen by that tenant - authenticate
+    # platform-signed traffic, and attribute platform traffic to that tenant.
+    # The platform SID goes straight to the platform token from the
+    # environment; with no platform token configured it resolves to nothing.
+    platform = platform_account()
+    if platform is not None and account_sid == platform[0]:
+        return ResolvedTwilioAccount(account_sid=account_sid, auth_token=platform[1],
+                                     source="platform")
+
     advisor = db.query(User).filter(
         User.twilio_account_sid == account_sid
     ).first()
@@ -152,6 +163,48 @@ def resolve_account_by_sid(db: Session, account_sid: str
                 source=f"org:{org.id}", organization_id=org.id)
 
     return None
+
+
+def platform_account():
+    """(sid, token) of the platform's own Twilio account from the environment,
+    or None when either half is missing."""
+    import os
+    sid = (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip()
+    tok = (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip()
+    return (sid, tok) if sid and tok else None
+
+
+def assert_sid_assignable(db: Session, account_sid, *, organization_id=None) -> None:
+    """Refuse (409) storing a Twilio Account SID that is not this tenant's to use.
+
+    Because `resolve_account_by_sid` attributes a webhook to whoever holds its
+    AccountSid, storing someone else's SID is a way to have your own token
+    accepted for their traffic. So a SID may not be:
+      * the platform's own SID (TWILIO_ACCOUNT_SID), or
+      * already stored on an organization, or on a user, of a DIFFERENT
+        organization.
+    Sharing one SID inside one organization (org account + its advisors) stays
+    allowed - that is the normal org-credential model.
+    """
+    sid = (account_sid or "").strip()
+    if not sid:
+        return
+    platform = platform_account()
+    env_sid = (__import__("os").environ.get("TWILIO_ACCOUNT_SID") or "").strip()
+    if (platform is not None and sid == platform[0]) or (env_sid and sid == env_sid):
+        raise HTTPException(status_code=409,
+                            detail="That Twilio Account SID is the platform's own account and "
+                                   "cannot be stored on a customer or user.")
+    other_org = db.query(Organization.id).filter(
+        Organization.org_twilio_account_sid == sid,
+        Organization.id != organization_id).first()
+    other_user = db.query(User.id).filter(
+        User.twilio_account_sid == sid,
+        User.organization_id != organization_id).first()
+    if other_org is not None or other_user is not None:
+        raise HTTPException(status_code=409,
+                            detail="That Twilio Account SID is already in use by another "
+                                   "organization.")
 
 
 def account_sids_for_advisor(db: Session, advisor: User) -> set[str]:

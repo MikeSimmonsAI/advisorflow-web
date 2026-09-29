@@ -622,7 +622,27 @@ def communications_thread(lead_id: str, limit: int = Query(300, ge=1, le=1000),
                        "duration_seconds": c.duration_seconds,
                        "voicemail_left": bool(c.voicemail_left),
                        "summary": c.summary or c.voicemail_transcript,
-                       "sender": names.get(c.advisor_id)})
+                       "sender": names.get(c.advisor_id),
+                       "is_human_call": bool(getattr(c, "is_human_call", None)),
+                       "answered_by": getattr(c, "answered_by", None),
+                       "disposition": getattr(c, "disposition", None),
+                       "disposition_notes": getattr(c, "disposition_notes", None)})
+    # Inbound voicemail (stream XC). Same organization, same lead; the audio is
+    # only ever reachable through the authenticated /voicemails/{id}/audio proxy.
+    try:
+        from app.models.telephony_models import Voicemail
+        for vm in (db.query(Voicemail).filter(Voicemail.lead_id == lead.id,
+                                              Voicemail.organization_id == lead.organization_id)
+                   .order_by(Voicemail.received_at.desc()).limit(limit).all()):
+            events.append({"type": "voicemail", "direction": "inbound", "channel": "voice",
+                           "id": vm.id, "at": _iso(vm.received_at), "status": vm.status,
+                           "duration_seconds": vm.duration_seconds, "body": vm.transcript,
+                           "transcript_status": vm.transcript_status,
+                           "audio_path": ("/voicemails/%s/audio" % vm.id)
+                           if (vm.recording_sid or vm.recording_url) else None,
+                           "sender": _lead_name(lead), "actor": "customer"})
+    except Exception:                                        # noqa: BLE001
+        log.exception("voicemails could not be read for lead %s", lead.id)
     for n in notes:
         events.append({"type": "note", "channel": "internal", "id": n.id,
                        "at": _iso(n.created_at), "body": n.body, "kind": n.kind,

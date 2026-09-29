@@ -4,6 +4,11 @@ import { api } from '../api/client'
 import '../styles/shared.css'
 import './ImportBatches.css'
 
+// api.get/post resolve to the parsed JSON body (api/client.js), not an
+// axios-style { data } envelope. Reading `.data` threw, so this page always
+// showed "Failed to load" beside its own empty state. unwrap() accepts both.
+const unwrap = (r) => (r && r.data !== undefined && !Array.isArray(r) && Object.keys(r).length === 1 ? r.data : r)
+
 const STATUS_LABELS = {
   uploading: 'Uploading', processing: 'Processing',
   ready_for_review: 'Ready for Review', reviewing: 'Reviewing',
@@ -40,7 +45,7 @@ function BatchRow({ batch, onRefresh }) {
     if (!window.confirm(`Archive "${batch.display_name}"? This cannot be undone.`)) return
     setArchiving(true); setError(null)
     try { await api.post(`/import-batches/${batch.id}/archive`); onRefresh() }
-    catch (e) { setError(e.response?.data?.detail || 'Archive failed') }
+    catch (e) { setError(e.response?.data?.detail || e.message || 'Archive failed') }
     finally { setArchiving(false) }
   }
 
@@ -48,7 +53,7 @@ function BatchRow({ batch, onRefresh }) {
     if (!window.confirm(`Delete "${batch.display_name}" and all staged rows? Cannot be undone.`)) return
     setDeleting(true); setError(null)
     try { await api.delete(`/import-batches/${batch.id}`); onRefresh() }
-    catch (e) { setError(e.response?.data?.detail || 'Delete failed') }
+    catch (e) { setError(e.response?.data?.detail || e.message || 'Delete failed') }
     finally { setDeleting(false) }
   }
 
@@ -132,8 +137,8 @@ export default function ImportBatches() {
       const params = new URLSearchParams({ page: page + 1, per_page: PAGE_SIZE })
       if (statusFilter) params.set('status', statusFilter)
       const res = await api.get(`/import-batches?${params}`)
-      setBatches(res.data.batches || []); setTotal(res.data.total || 0)
-    } catch (e) { setError(e.response?.data?.detail || 'Failed to load import batches.') }
+      setBatches(unwrap(res).batches || []); setTotal(unwrap(res).total || 0)
+    } catch (e) { setError(e.response?.data?.detail || e.message || 'Failed to load import batches.') }
     finally { setLoading(false) }
   }, [page, statusFilter])
 
@@ -151,9 +156,9 @@ export default function ImportBatches() {
       const res = await api.post('/import-batches', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      navigate(`/import-batches/${res.data.id}`)
+      navigate(`/import-batches/${unwrap(res).id}`)
     } catch (e) {
-      setUploadError(e.response?.data?.detail || 'Upload failed.')
+      setUploadError(e.response?.data?.detail || e.message || 'Upload failed.')
       setUploading(false)
     }
   }

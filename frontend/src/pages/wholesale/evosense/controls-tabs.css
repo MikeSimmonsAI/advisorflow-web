@@ -1,0 +1,3 @@
+/* Providers & Controls tab panels: `.evo-stack { display:flex }` beat the
+   `hidden` attribute, so every tab rendered at once. Keep hidden panels hidden. */
+.evo-stack[hidden] { display: none !important; }

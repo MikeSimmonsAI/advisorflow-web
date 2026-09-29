@@ -38,6 +38,13 @@ So the rule is:
   3. WORKSPACE / ROLE / USER may only NARROW. A "disabled" row there removes
      the feature; an "enabled" row can never grant what the organization does
      not have (it is reported as "capped by organization").
+     All three are ENFORCED at request time. "Workspace" is a customer
+     Location; the request's location is resolved by
+     app/services/workspace_location.py (X-Workspace-Location, validated
+     against UserLocation assignments; implicit when the person has exactly
+     one location; most restrictive across all of them when they have several
+     and select none) and applied by entitlements.require_feature and
+     entitlements.nav_features (GET /branding/org).
   4. DEPENDENCIES (entitlements.REQUIRES). If a prerequisite is effectively
      disabled BY AN EXPLICIT OVERRIDE somewhere in its chain, the dependent
      feature is Blocked by Dependency and is refused. A prerequisite missing

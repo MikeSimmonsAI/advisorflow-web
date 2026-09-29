@@ -47,6 +47,7 @@ import {
   featureEnabled, featuresOf, isManagerRole, isOperator, operatorRouteExempt,
   roleOf, routeFeatureDenied, workspaceFeatures,
   WHOLESALE_FEATURE, productOffered, canEnterProduct,
+  workspaceLocationChoices, activeLocationId,
 } from './workspaceRules'
 
 // Re-exported so every existing import site keeps working and there is still
@@ -55,6 +56,7 @@ export {
   featureEnabled, featuresOf, isManagerRole, isOperator, operatorRouteExempt,
   roleOf, routeFeatureDenied, workspaceFeatures,
   WHOLESALE_FEATURE, productOffered, canEnterProduct,
+  workspaceLocationChoices, activeLocationId,
 }
 
 /* ── the whole answer ─────────────────────────────────────────────────────── */

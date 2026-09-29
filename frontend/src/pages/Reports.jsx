@@ -81,9 +81,9 @@ const STAGE_LABELS = {
   dnc: 'DNC',
 }
 const STAGE_COLORS = {
-  outreach_sent: '#2fb6ff', replied: '#f0c040', ai_responding: '#a78bfa',
-  booking_sent: '#fb923c', booked: '#1ef0a8', confirmed: '#1ef0a8',
-  kept: '#1ef0a8', sale: '#ffd700', stopped: '#6b7280', dnc: '#ff4d4d',
+  outreach_sent: 'var(--color-primary)', replied: 'var(--color-warning)', ai_responding: 'var(--signal-purple)',
+  booking_sent: '#c2560c', booked: 'var(--color-success)', confirmed: 'var(--color-success)',
+  kept: 'var(--color-success)', sale: '#a8650f', stopped: '#6b7280', dnc: 'var(--color-danger)',
 }
 
 function PlatformReports() {
@@ -138,13 +138,13 @@ function PlatformReports() {
       {/* KPI ROW */}
       <div className="rpt-kpi-row">
         <KpiCard icon="👥" label="Total leads"       value={loading ? '—' : num(totals.leads_owned)}       sub="Org-wide"                    color="var(--text-primary)" />
-        <KpiCard icon="📤" label="Messages sent"     value={loading ? '—' : num(totals.messages_sent)}     sub="All time"                   color="#2fb6ff" />
-        <KpiCard icon="💬" label="Replies received"  value={loading ? '—' : num(totals.replies)}           sub={`${num(totals.hot_replies)} hot`}  color="#a78bfa" />
-        <KpiCard icon="📊" label="Reply rate"        value={loading ? '—' : pct(totals.reply_rate)}        sub="Replies / sent"             color="#f0c040" />
-        <KpiCard icon="📅" label="Appointments"      value={loading ? '—' : num(totals.booked_leads)}      sub="Booked all time"            color="#1ef0a8" />
-        <KpiCard icon="🎯" label="Booking rate"      value={loading ? '—' : pct(totals.booking_rate)}      sub="Bookings / sent"            color="#1ef0a8" />
-        <KpiCard icon="🤖" label="AI auto-sent"      value={loading ? '—' : num(pipeline?.ai_auto_sent)}   sub="Pipeline responses"         color="#a78bfa" />
-        <KpiCard icon="💰" label="Sales"             value={loading ? '—' : num(outcomes?.sales_count)}    sub={outcomes?.conversion_rate != null ? `${outcomes.conversion_rate}% close rate` : 'No outcomes yet'} color="#ffd700" />
+        <KpiCard icon="📤" label="Messages sent"     value={loading ? '—' : num(totals.messages_sent)}     sub="All time"                   color="var(--color-primary)" />
+        <KpiCard icon="💬" label="Replies received"  value={loading ? '—' : num(totals.replies)}           sub={`${num(totals.hot_replies)} hot`}  color="var(--signal-purple)" />
+        <KpiCard icon="📊" label="Reply rate"        value={loading ? '—' : pct(totals.reply_rate)}        sub="Replies / sent"             color="var(--color-warning)" />
+        <KpiCard icon="📅" label="Appointments"      value={loading ? '—' : num(totals.booked_leads)}      sub="Booked all time"            color="var(--color-success)" />
+        <KpiCard icon="🎯" label="Booking rate"      value={loading ? '—' : pct(totals.booking_rate)}      sub="Bookings / sent"            color="var(--color-success)" />
+        <KpiCard icon="🤖" label="AI auto-sent"      value={loading ? '—' : num(pipeline?.ai_auto_sent)}   sub="Pipeline responses"         color="var(--signal-purple)" />
+        <KpiCard icon="💰" label="Sales"             value={loading ? '—' : num(outcomes?.sales_count)}    sub={outcomes?.conversion_rate != null ? `${outcomes.conversion_rate}% close rate` : 'No outcomes yet'} color="var(--color-warning)" />
       </div>
 
       {/* TABS */}
@@ -169,7 +169,7 @@ function PlatformReports() {
           {loading ? (
             <div className="empty-state">Loading…</div>
           ) : advisors.length === 0 ? (
-            <div className="empty-state">No advisor data yet. Send messages to see performance here.</div>
+            <div className="empty-state">No advisor data yet. Performance by advisor appears here once your team sends messages to leads; import or add leads to get started.</div>
           ) : (
             <>
               {/* Advisor table */}
@@ -211,23 +211,23 @@ function PlatformReports() {
                         <td className="mono">{num(a.replies)}</td>
                         <td>
                           <div className="rpt-bar-cell">
-                            <Bar value={a.reply_rate} max={maxReply} color="#2fb6ff" />
+                            <Bar value={a.reply_rate} max={maxReply} color="var(--color-primary)" />
                             <span className="mono">{pct(a.reply_rate)}</span>
                           </div>
                         </td>
                         <td>
                           <div className="rpt-bar-cell">
-                            <Bar value={a.hot_reply_rate} max={maxReply} color="#ff4d4d" />
-                            <span className="mono" style={{ color: Number(a.hot_replies) > 0 ? '#ff4d4d' : undefined }}>{pct(a.hot_reply_rate)}</span>
+                            <Bar value={a.hot_reply_rate} max={maxReply} color="var(--color-danger)" />
+                            <span className="mono" style={{ color: Number(a.hot_replies) > 0 ? 'var(--color-danger)' : undefined }}>{pct(a.hot_reply_rate)}</span>
                           </div>
                         </td>
                         <td>
                           <div className="rpt-bar-cell">
-                            <Bar value={a.booking_rate} max={maxBook} color="#1ef0a8" />
-                            <span className="mono" style={{ color: Number(a.booked_leads) > 0 ? '#1ef0a8' : undefined }}>{pct(a.booking_rate)}</span>
+                            <Bar value={a.booking_rate} max={maxBook} color="var(--color-success)" />
+                            <span className="mono" style={{ color: Number(a.booked_leads) > 0 ? 'var(--color-success)' : undefined }}>{pct(a.booking_rate)}</span>
                           </div>
                         </td>
-                        <td className="mono" style={{ color: Number(a.dnc_rate) > 5 ? '#ff4d4d' : 'var(--text-secondary)' }}>
+                        <td className="mono" style={{ color: Number(a.dnc_rate) > 5 ? 'var(--color-danger)' : 'var(--text-secondary)' }}>
                           {pct(a.dnc_rate)}
                         </td>
                       </tr>
@@ -242,10 +242,10 @@ function PlatformReports() {
                   <div className="panel-header"><h2 className="panel-title">🏆 Top performers</h2></div>
                   {[...advisors].sort((a, b) => Number(b.booking_rate) - Number(a.booking_rate)).slice(0, 5).map((a, i) => (
                     <div key={a.advisor_id} className="rpt-top-row">
-                      <span style={{ fontSize: 16, fontWeight: 900, color: i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : 'var(--text-tertiary)', minWidth: 28 }}>#{i + 1}</span>
+                      <span style={{ fontSize: 16, fontWeight: 900, color: i === 0 ? '#a8650f' : i === 1 ? '#6b7d94' : i === 2 ? '#9a5b23' : 'var(--text-tertiary)', minWidth: 28 }}>#{i + 1}</span>
                       <div className="rpt-avatar">{(a.advisor_name || 'A').charAt(0)}</div>
                       <span style={{ flex: 1, fontWeight: 600 }}>{a.advisor_name}</span>
-                      <span style={{ color: '#1ef0a8', fontWeight: 700, fontSize: 14 }}>{pct(a.booking_rate)} booked</span>
+                      <span style={{ color: 'var(--color-success)', fontWeight: 700, fontSize: 14 }}>{pct(a.booking_rate)} booked</span>
                     </div>
                   ))}
                 </section>
@@ -253,12 +253,12 @@ function PlatformReports() {
                 <section className="panel">
                   <div className="panel-header"><h2 className="panel-title">📋 Engagement summary</h2></div>
                   {[
-                    { label: 'Total messages sent',    value: num(totals.messages_sent),              color: '#2fb6ff' },
-                    { label: 'Total replies',          value: num(totals.replies),                    color: '#a78bfa' },
-                    { label: 'Hot / callback replies', value: num(totals.hot_replies),                color: '#ff4d4d' },
-                    { label: 'Appointments booked',   value: num(totals.booked_leads),               color: '#1ef0a8' },
-                    { label: 'DNC leads',              value: num(totals.dnc_leads),                  color: '#f0c040' },
-                    { label: 'Dupes prevented',       value: num(totals.duplicate_leads_prevented),  color: '#1ef0a8' },
+                    { label: 'Total messages sent',    value: num(totals.messages_sent),              color: 'var(--color-primary)' },
+                    { label: 'Total replies',          value: num(totals.replies),                    color: 'var(--signal-purple)' },
+                    { label: 'Hot / callback replies', value: num(totals.hot_replies),                color: 'var(--color-danger)' },
+                    { label: 'Appointments booked',   value: num(totals.booked_leads),               color: 'var(--color-success)' },
+                    { label: 'DNC leads',              value: num(totals.dnc_leads),                  color: 'var(--color-warning)' },
+                    { label: 'Dupes prevented',       value: num(totals.duplicate_leads_prevented),  color: 'var(--color-success)' },
                   ].map(item => (
                     <div key={item.label} className="rpt-summary-row">
                       <span className="rpt-summary-label">{item.label}</span>
@@ -277,10 +277,10 @@ function PlatformReports() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
             {[
-              { label: 'Total in pipeline', value: num(totalPipe),                       color: '#2fb6ff' },
-              { label: 'AI auto-responses', value: num(pipeline?.ai_auto_sent),          color: '#a78bfa' },
-              { label: 'Flagged for review',value: num(pipeline?.flagged_count),         color: '#ff4d4d' },
-              { label: 'Total booked',      value: num(pipeline?.total_booked),          color: '#1ef0a8' },
+              { label: 'Total in pipeline', value: num(totalPipe),                       color: 'var(--color-primary)' },
+              { label: 'AI auto-responses', value: num(pipeline?.ai_auto_sent),          color: 'var(--signal-purple)' },
+              { label: 'Flagged for review',value: num(pipeline?.flagged_count),         color: 'var(--color-danger)' },
+              { label: 'Total booked',      value: num(pipeline?.total_booked),          color: 'var(--color-success)' },
             ].map(item => (
               <div key={item.label} className="panel" style={{ textAlign: 'center', padding: '24px 16px' }}>
                 <strong style={{ fontSize: 36, fontWeight: 900, color: item.color, display: 'block', lineHeight: 1 }}>{loading ? '—' : item.value}</strong>
@@ -299,9 +299,9 @@ function PlatformReports() {
                   <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                     <span style={{ fontSize: 13, color: 'var(--text-secondary)', minWidth: 150 }}>{label}</span>
                     <div style={{ flex: 1, height: 10, background: 'var(--bg-hover)', borderRadius: 5, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${Math.max(2, (count/maxCount)*100)}%`, background: STAGE_COLORS[stage] || '#2fb6ff', borderRadius: 5, transition: 'width 0.4s' }} />
+                      <div style={{ height: '100%', width: `${Math.max(2, (count/maxCount)*100)}%`, background: STAGE_COLORS[stage] || 'var(--color-primary)', borderRadius: 5, transition: 'width 0.4s' }} />
                     </div>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: STAGE_COLORS[stage] || '#2fb6ff', minWidth: 36, textAlign: 'right' }}>{count}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: STAGE_COLORS[stage] || 'var(--color-primary)', minWidth: 36, textAlign: 'right' }}>{count}</span>
                   </div>
                 )
               })}
@@ -316,10 +316,10 @@ function PlatformReports() {
           <section className="panel">
             <div className="panel-header"><h2 className="panel-title">📤 Outreach metrics</h2></div>
             {[
-              { label: 'Messages sent',       value: num(totals.messages_sent),   color: '#2fb6ff' },
-              { label: 'Replies received',    value: num(totals.replies),         color: '#a78bfa' },
-              { label: 'Hot leads',           value: num(totals.hot_replies),     color: '#ff4d4d' },
-              { label: 'Callbacks requested', value: num(totals.callback_count),  color: '#f0c040' },
+              { label: 'Messages sent',       value: num(totals.messages_sent),   color: 'var(--color-primary)' },
+              { label: 'Replies received',    value: num(totals.replies),         color: 'var(--signal-purple)' },
+              { label: 'Hot leads',           value: num(totals.hot_replies),     color: 'var(--color-danger)' },
+              { label: 'Callbacks requested', value: num(totals.callback_count),  color: 'var(--color-warning)' },
               { label: 'DNC',                 value: num(totals.dnc_leads),       color: '#6b7280' },
             ].map(item => (
               <div key={item.label} className="rpt-summary-row">
@@ -332,11 +332,11 @@ function PlatformReports() {
           <section className="panel">
             <div className="panel-header"><h2 className="panel-title">🤖 AI pipeline metrics</h2></div>
             {[
-              { label: 'Total in pipeline',     value: num(totalPipe),                color: '#2fb6ff' },
-              { label: 'AI responses sent',     value: num(pipeline?.ai_auto_sent),   color: '#a78bfa' },
-              { label: 'Flagged for review',    value: num(pipeline?.flagged_count),  color: '#ff4d4d' },
-              { label: 'Total replies received',value: num(pipeline?.total_replies_received), color: '#f0c040' },
-              { label: 'Total booked',          value: num(pipeline?.total_booked),   color: '#1ef0a8' },
+              { label: 'Total in pipeline',     value: num(totalPipe),                color: 'var(--color-primary)' },
+              { label: 'AI responses sent',     value: num(pipeline?.ai_auto_sent),   color: 'var(--signal-purple)' },
+              { label: 'Flagged for review',    value: num(pipeline?.flagged_count),  color: 'var(--color-danger)' },
+              { label: 'Total replies received',value: num(pipeline?.total_replies_received), color: 'var(--color-warning)' },
+              { label: 'Total booked',          value: num(pipeline?.total_booked),   color: 'var(--color-success)' },
             ].map(item => (
               <div key={item.label} className="rpt-summary-row">
                 <span className="rpt-summary-label">{item.label}</span>
@@ -349,11 +349,11 @@ function PlatformReports() {
             <div className="panel-header"><h2 className="panel-title">📊 Conversion funnel</h2></div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 2, marginTop: 8 }}>
               {[
-                { label: 'Leads',        value: totals.leads_owned || 0,    color: '#2fb6ff' },
-                { label: 'Contacted',    value: totals.messages_sent || 0,  color: '#a78bfa' },
-                { label: 'Replied',      value: totals.replies || 0,        color: '#f0c040' },
-                { label: 'Hot',          value: totals.hot_replies || 0,    color: '#ff4d4d' },
-                { label: 'Booked',       value: totals.booked_leads || 0,   color: '#1ef0a8' },
+                { label: 'Leads',        value: totals.leads_owned || 0,    color: 'var(--color-primary)' },
+                { label: 'Contacted',    value: totals.messages_sent || 0,  color: 'var(--signal-purple)' },
+                { label: 'Replied',      value: totals.replies || 0,        color: 'var(--color-warning)' },
+                { label: 'Hot',          value: totals.hot_replies || 0,    color: 'var(--color-danger)' },
+                { label: 'Booked',       value: totals.booked_leads || 0,   color: 'var(--color-success)' },
               ].map((stage, i, arr) => {
                 const maxV = Math.max(...arr.map(s => s.value), 1)
                 const h = Math.max(20, Math.round((stage.value / maxV) * 120))
@@ -379,10 +379,10 @@ function PlatformReports() {
             <>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
                 {[
-                  { label: 'Total appointments', value: num(outcomes.total_appointments), color: '#2fb6ff', icon: '📅' },
-                  { label: 'Sales closed',        value: num(outcomes.sales_count),        color: '#ffd700', icon: '💰' },
-                  { label: 'Close rate',          value: pct(outcomes.conversion_rate),    color: '#1ef0a8', icon: '🎯' },
-                  { label: 'No-shows',            value: num(outcomes.no_show_count),      color: '#ff4d4d', icon: '❌' },
+                  { label: 'Total appointments', value: num(outcomes.total_appointments), color: 'var(--color-primary)', icon: '📅' },
+                  { label: 'Sales closed',        value: num(outcomes.sales_count),        color: '#a8650f', icon: '💰' },
+                  { label: 'Close rate',          value: pct(outcomes.conversion_rate),    color: 'var(--color-success)', icon: '🎯' },
+                  { label: 'No-shows',            value: num(outcomes.no_show_count),      color: 'var(--color-danger)', icon: '❌' },
                 ].map(item => (
                   <div key={item.label} className="panel" style={{ textAlign: 'center', padding: '24px 16px' }}>
                     <div style={{ fontSize: 28, marginBottom: 8 }}>{item.icon}</div>
@@ -395,12 +395,12 @@ function PlatformReports() {
               <section className="panel">
                 <div className="panel-header"><h2 className="panel-title">Outcome breakdown</h2></div>
                 {[
-                  { label: 'Total appointments recorded', value: num(outcomes.total_appointments),   color: '#2fb6ff' },
-                  { label: 'Sales',                       value: num(outcomes.sales_count),           color: '#ffd700' },
+                  { label: 'Total appointments recorded', value: num(outcomes.total_appointments),   color: 'var(--color-primary)' },
+                  { label: 'Sales',                       value: num(outcomes.sales_count),           color: '#a8650f' },
                   { label: 'Not interested',              value: num(outcomes.not_interested_count),  color: '#6b7280' },
-                  { label: 'No-shows',                    value: num(outcomes.no_show_count),         color: '#ff4d4d' },
-                  { label: 'Follow-up needed',            value: num(outcomes.follow_up_count),       color: '#f0c040' },
-                  { label: 'Close rate',                  value: pct(outcomes.conversion_rate),       color: '#1ef0a8' },
+                  { label: 'No-shows',                    value: num(outcomes.no_show_count),         color: 'var(--color-danger)' },
+                  { label: 'Follow-up needed',            value: num(outcomes.follow_up_count),       color: 'var(--color-warning)' },
+                  { label: 'Close rate',                  value: pct(outcomes.conversion_rate),       color: 'var(--color-success)' },
                 ].map(item => (
                   <div key={item.label} className="rpt-summary-row">
                     <span className="rpt-summary-label">{item.label}</span>

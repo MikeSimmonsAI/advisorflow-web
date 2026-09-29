@@ -5,9 +5,9 @@ import '../styles/shared.css'
 import './ReEngagement.css'
 
 const TABS = [
-  { key: 'hot',  label: 'Hot',  color: '#ff4d4d', icon: '&#128293;', desc: 'Replied with interest or urgent tier' },
-  { key: 'warm', label: 'Warm', color: '#f0c040', icon: '&#127777;&#65039;', desc: 'Active in cadence, recently touched' },
-  { key: 'cold', label: 'Cold', color: '#64748b', icon: '&#10052;&#65039;', desc: 'No engagement in a long stretch' },
+  { key: 'hot',  label: 'Hot',  color: 'var(--color-danger)', icon: '&#128293;', desc: 'Replied with interest or urgent tier' },
+  { key: 'warm', label: 'Warm', color: 'var(--color-warning)', icon: '&#127777;&#65039;', desc: 'Active in cadence, recently touched' },
+  { key: 'cold', label: 'Cold', color: 'var(--text-muted)', icon: '&#10052;&#65039;', desc: 'No engagement in a long stretch' },
 ]
 
 export default function ReEngagement() {
@@ -82,7 +82,7 @@ export default function ReEngagement() {
         >
           <span className="re-stat-icon">&#9889;</span>
           <div className="re-stat-body">
-            <strong className="re-stat-count" style={{ color: '#94a3b8' }}>
+            <strong className="re-stat-count" style={{ color: 'var(--text-muted)' }}>
               {loading ? '--' : (leads.hot.length + leads.warm.length + leads.cold.length)}
             </strong>
             <span className="re-stat-label">Total classified</span>
@@ -98,7 +98,7 @@ export default function ReEngagement() {
             style={activeTab === t.key ? { borderBottomColor: t.color, color: t.color } : {}}
             onClick={() => setActiveTab(t.key)}>
             <span dangerouslySetInnerHTML={{ __html: t.icon }} /> {t.label}
-            <span className="re-tab-count" style={{ background: activeTab === t.key ? t.color : 'rgba(255,255,255,0.08)' }}>
+            <span className="re-tab-count" style={activeTab === t.key ? { background: t.color, color: '#fff' } : { background: 'var(--pill-neutral-bg)', color: 'var(--pill-neutral-fg)' }}>
               {loading ? '…' : leads[t.key].length}
             </span>
           </button>
@@ -112,7 +112,7 @@ export default function ReEngagement() {
         </div>
       )}
       {activeTab === 'all' && (
-        <div className="re-tab-desc" style={{ borderLeftColor: '#94a3b8' }}>
+        <div className="re-tab-desc" style={{ borderLeftColor: 'var(--border-default)' }}>
           ⚡ All classified leads — {allLeads.length} total across Hot, Warm, and Cold.
         </div>
       )}
@@ -139,7 +139,7 @@ export default function ReEngagement() {
                   <div className="re-card-name">{name}</div>
                   <div className="re-card-meta">
                     {lead.phone && <span>{lead.phone}</span>}
-                    {activeTab === 'all' && lead.temperature && <span className="re-badge" style={{ background: lead.temperature === 'hot' ? '#ff4d4d33' : lead.temperature === 'warm' ? '#f0c04033' : '#64748b33', color: lead.temperature === 'hot' ? '#ff4d4d' : lead.temperature === 'warm' ? '#f0c040' : '#94a3b8', textTransform: 'capitalize' }}>{lead.temperature}</span>}
+                    {activeTab === 'all' && lead.temperature && <span className="re-badge" style={{ background: lead.temperature === 'hot' ? 'var(--pill-danger-bg)' : lead.temperature === 'warm' ? 'var(--pill-warning-bg)' : 'var(--pill-neutral-bg)', color: lead.temperature === 'hot' ? 'var(--color-danger)' : lead.temperature === 'warm' ? 'var(--color-warning)' : 'var(--text-muted)', textTransform: 'capitalize' }}>{lead.temperature}</span>}
                     {lead.tier && <span className="re-badge re-badge--tier">{lead.tier.replace('_', ' ')}</span>}
                     {lead.status && <span className="re-badge re-badge--status">{lead.status}</span>}
                     <span className="re-card-date">Imported {fmtDate(lead.created_at)}</span>

@@ -7,6 +7,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { CLASSIFICATIONS, ClassTag, StatusTag, Tag, Icon, channelIcon, fmtDateTime, fmtPhone, timeAgo } from './commsShared'
+import CallButton from '../../components/telephony/CallButton'
+import VoicemailPlayer from '../../components/telephony/VoicemailPlayer'
 
 const TABS = [
   { key: 'conversation', label: 'Conversation' },
@@ -209,6 +211,12 @@ export default function CommsWorkspace({ leadId, reply, assignees, canWrite, onC
         </div>
       )}
 
+      {canWrite && lead?.phone && (
+        <div className="cc-actions cc-actions--call">
+          <CallButton leadId={leadId} onDone={() => { loadThread(); setTasks(null); onChanged && onChanged() }} />
+        </div>
+      )}
+
       {taskForm && (
         <form className="cc-taskform" onSubmit={createTask}>
           <input autoFocus placeholder="Task title" value={taskForm.title} maxLength={300}
@@ -297,10 +305,27 @@ function ThreadItem({ ev }) {
   if (ev.type === 'call') {
     return (
       <div className="cc-ev cc-ev--call">
-        <div className="cc-ev-head"><Icon name="phone" size={12} /> {ev.direction === 'inbound' ? 'Inbound call' : 'Call'}
-          {ev.voicemail_left ? ' · voicemail left' : ''} · {ev.status || '—'}
-          {ev.duration_seconds ? ` · ${Math.round(ev.duration_seconds / 60)}m` : ''} · {fmtDateTime(ev.at)}</div>
+        <div className="cc-ev-head"><Icon name="phone" size={12} /> {ev.direction === 'inbound' ? 'Inbound call'
+          : ev.is_human_call ? `Call by ${ev.sender || 'staff'}` : 'AI call'}
+          {ev.voicemail_left ? ' · voicemail left' : ''} · {ev.outcome ? ev.outcome.replace(/_/g, ' ') : (ev.status || '—')}
+          {ev.duration_seconds ? ` · ${Math.max(1, Math.round(ev.duration_seconds / 60))}m` : ''} · {fmtDateTime(ev.at)}</div>
+        {ev.disposition && <div className="cc-ev-body"><strong>Outcome:</strong> {ev.disposition.replace(/_/g, ' ')}
+          {ev.disposition_notes ? ` — ${ev.disposition_notes}` : ''}</div>}
         {ev.summary && <div className="cc-ev-body">{ev.summary}</div>}
+      </div>
+    )
+  }
+  if (ev.type === 'voicemail') {
+    return (
+      <div className="cc-ev cc-ev--call">
+        <div className="cc-ev-head"><Icon name="phone" size={12} /> Voicemail from {ev.sender || 'caller'}
+          {ev.duration_seconds ? ` · ${ev.duration_seconds}s` : ''} · {ev.status === 'reviewed' ? 'reviewed' : 'new'}
+          {' · '}{fmtDateTime(ev.at)}</div>
+        <div className="cc-ev-body">
+          <VoicemailPlayer path={ev.audio_path} />
+          {ev.body ? <div>{ev.body}</div>
+            : <div className="cc-muted cc-small">Transcript not available (transcription is not enabled).</div>}
+        </div>
       </div>
     )
   }

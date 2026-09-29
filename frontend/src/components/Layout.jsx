@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop } from '../api/client'
-import { isManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE } from '../auth/workspaceAuthority'
+import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation } from '../api/client'
+import { isManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
 import { detectTheme, shellTheme, shellThemeSource, productName, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
@@ -467,8 +467,33 @@ export default function Layout({ children }) {
   // well for the moment before the branding answer lands, when the two are
   // briefly the only evidence of a switch. Used by the boundary around
   // `children` at the bottom of this file — the comment there says why.
+  // The resolved LOCATION is part of it too: a location that switches a
+  // module off changes what the page may show, so a location switch remounts.
   const workspaceKey = [branding?.organization_id || '',
-                        orgContext?.orgId || ''].join('|')
+                        orgContext?.orgId || '',
+                        activeLocationId(branding) || ''].join('|')
+
+  // WHICH LOCATION THIS PERSON IS WORKING IN. Workspace (location) feature
+  // overrides are enforced by the server, which resolves the location from
+  // this selection (validated against the person's assignments) or, with no
+  // selection, from their assignments alone. The selector appears only when
+  // the server lists more than one location this person may choose.
+  const locationChoices = workspaceLocationChoices(branding)
+  const storedLocation = getWorkspaceLocation()
+  const selectedLocation = storedLocation && storedLocation.orgId === branding?.organization_id
+    ? storedLocation.locationId : ''
+  const [locationBusy, setLocationBusy] = useState(false)
+  async function handleLocationChange(locationId) {
+    if (!branding?.organization_id) return
+    setLocationBusy(true)
+    setWorkspaceLocation(branding.organization_id, locationId || null)
+    try {
+      const b = await fetchAndStoreBranding({ applyTheme: !isElevated })
+      if (b) setBranding(b)
+    } finally {
+      setLocationBusy(false)
+    }
+  }
 
   // WHO THIS PERSON IS IN THE WORKSPACE THEY ARE STANDING IN.
   //
@@ -956,9 +981,12 @@ export default function Layout({ children }) {
                     <div className="wsx-platform">
                       <button type="button" className="wsx-platform__toggle" aria-expanded={platformOpen}
                               aria-controls="wsx-platform-list" onClick={() => setPlatformOpen((o) => !o)}
-                              title="Every other EvoSys screen: leads, replies, AI team, compliance, settings">
+                              title={'Every other ' + SHELL_BRAND.displayName + ' screen: leads, replies, AI team, compliance, settings'}>
                         {sidebarCollapsed ? '⋯' : (
-                          <span>EvoSys Platform<span className="wsx-platform__hint">Leads, AI team, compliance &amp; more</span></span>
+                          // THE WORKSPACE'S OWN BRAND, not a literal. This said
+                          // "EvoSys Platform" in every workspace, so BookaBoost's
+                          // Fiber Cartel was told it was on EvoSys (XD audit).
+                          <span>{SHELL_BRAND.displayName} Platform<span className="wsx-platform__hint">Leads, AI team, compliance &amp; more</span></span>
                         )}
                         {!sidebarCollapsed && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>}
                       </button>
@@ -1055,11 +1083,24 @@ export default function Layout({ children }) {
               }
             </div>
             {!sidebarCollapsed && (
-              <div style={{ minWidth: 0 }}>
-                {/* The WORKSPACE first, then the person and their role in it. */}
-                {workspaceOrgName && <div className="user-org">{workspaceOrgName}</div>}
-                <div className="user-name">{personName}</div>
-                {workspaceRoleLabel && <div className="user-role">{workspaceRoleLabel}</div>}
+              <div className="user-lines">
+                {/* The WORKSPACE first, then the person and their role in it.
+                    EACH LINE IS LABELLED. A person's own name can look like a
+                    brand ("EvoSys Wholesale" is a real account's full name),
+                    and three unlabelled lines read as org / brand / role. */}
+                {workspaceOrgName && (
+                  <div className="user-org" data-identity="organization" title={'Organization: ' + workspaceOrgName}>
+                    <span className="user-line-label">Org</span>{workspaceOrgName}
+                  </div>
+                )}
+                <div className="user-name" data-identity="person" title={'Signed in as: ' + personName}>
+                  <span className="user-line-label">User</span>{personName}
+                </div>
+                {workspaceRoleLabel && (
+                  <div className="user-role" data-identity="role">
+                    <span className="user-line-label">Role</span>{workspaceRoleLabel}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1103,6 +1144,26 @@ export default function Layout({ children }) {
                 brand-sales access as well.
                 In a vertical workspace this is one of the four actions inside
                 WorkspaceAdminMenu, so it is not also drawn as its own button. */}
+            {locationChoices.length > 0 && (
+              <label className="ws-location-picker" title="Location you are working in">
+                <span className="ws-location-label">Location</span>
+                <select
+                  className="ws-location-select"
+                  value={selectedLocation}
+                  disabled={locationBusy}
+                  onChange={(e) => handleLocationChange(e.target.value)}
+                  aria-label="Location you are working in"
+                >
+                  {/* No selection: an administrator (or the owner) works at
+                      organization level; a person assigned to several
+                      locations gets the most restrictive answer across them. */}
+                  <option value="">{branding?.workspace_location?.mode === 'organization' ? 'All locations' : 'All my locations'}</option>
+                  {locationChoices.map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             {vertical ? <WorkspaceAdminMenu /> : <ContextSwitcher current="workspace" />}
             <NotificationBell />
             {inWholesale && <WholesaleUser user={user} photo={profilePhoto} />}

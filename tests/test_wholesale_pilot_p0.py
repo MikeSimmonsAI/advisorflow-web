@@ -461,9 +461,9 @@ def test_skip_trace_summary_reads_the_real_ledger_only(client, db_session, sampl
 
 def test_deal_ops_payload_is_honest_about_voicemail_and_dialer(client, db_session, admin, deal):
     d = ok(client.get("/wholesale/ops/deals/%s" % deal["deal_id"], headers=_h(db_session, admin)))
-    assert d["calls"]["voicemail"]["inbound_voicemail_capture"] == "not_available"
+    assert d["calls"]["voicemail"]["inbound_voicemail_capture"] == "stored"
     # A cold owner who never contacted us has no call-permission basis: no link.
-    assert d["calls"]["dialer"]["kind"] == "tel_link" and d["calls"]["dialer"]["tel"] is None
+    assert d["calls"]["dialer"]["kind"] == "bridge" and d["calls"]["dialer"]["tel"] is None
     assert d["distribution"]["buyers"]["auto_distribution"] is False
     assert d["temperature"]["effective"] and d["control"]["ai_may_send"] is True
 

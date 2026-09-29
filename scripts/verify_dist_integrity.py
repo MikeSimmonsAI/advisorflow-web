@@ -72,7 +72,7 @@ def verify(repo_root: Path) -> int:
     asset_paths = list(dict.fromkeys(m.group("path") for m in ASSET_PATTERN.finditer(html)))
 
     if not asset_paths:
-        print("ERROR: No /assets/ references found in index.html â€” build may be stale")
+        print("ERROR: No /assets/ references found in index.html — build may be stale")
         return 1
 
     print(f"Found {len(asset_paths)} asset reference(s) in index.html")
@@ -106,11 +106,11 @@ def verify(repo_root: Path) -> int:
             print(f"  OK    {asset_path}")
 
     if failures:
-        print(f"\nINTEGRITY GATE FAILED â€” {len(failures)} asset(s) missing")
+        print(f"\nINTEGRITY GATE FAILED — {len(failures)} asset(s) missing")
         print("Run: git add -f frontend/dist/assets/<file> && git commit")
         return 1
 
-    print(f"\nINTEGRITY GATE PASSED â€” all {len(asset_paths)} asset(s) present and tracked")
+    print(f"\nINTEGRITY GATE PASSED — all {len(asset_paths)} asset(s) present and tracked")
     return 0
 
 

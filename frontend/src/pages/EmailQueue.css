@@ -37,7 +37,7 @@
   font-weight: 700;
   color: var(--signal-blue);
   background: var(--signal-blue-dim);
-  border: 1px solid rgba(47, 182, 255, 0.3);
+  border: 1px solid var(--pill-info-bd);
   border-radius: 20px;
   padding: 3px 10px;
   letter-spacing: 0.04em;
@@ -49,8 +49,8 @@
   gap: 4px;
   font-size: 12px;
   font-weight: 700;
-  background: rgba(47, 182, 255, 0.1);
-  border: 1px solid rgba(47, 182, 255, 0.3);
+  background: var(--pill-info-bg);
+  border: 1px solid var(--pill-info-bd);
   border-radius: 6px;
   padding: 1px 7px;
   color: var(--signal-blue);
@@ -81,7 +81,7 @@
 }
 
 .eq-stat-segment--warn:hover {
-  background: rgba(255, 77, 126, 0.06);
+  background: var(--pill-danger-bg);
 }
 
 .eq-stat-icon {
@@ -242,7 +242,7 @@
 
 .eq-filter-bar { display: flex; align-items: center; gap: 12px; }
 .eq-selected-badge { font-size: 12px; background: var(--signal-blue-dim); color: var(--signal-blue); padding: 3px 10px; border-radius: 12px; font-weight: 600; }
-.eq-row--selected td { background: rgba(47, 182, 255, 0.05) !important; }
+.eq-row--selected td { background: var(--pill-info-bg) !important; }
 .eq-lead-name { cursor: pointer; color: var(--signal-blue); }
 .eq-lead-name:hover { text-decoration: underline; }
 .eq-status-pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 10px; letter-spacing: 0.04em; }
@@ -252,7 +252,7 @@
 
 /* ── AI Draft Panel ───────────────────────────────────────────────── */
 .eq-draft-panel {
-  background: var(--surface-2, rgba(255,255,255,0.04));
+  background: var(--surface-sunken);
   border-top: 1px solid var(--border);
   border-bottom: 2px solid var(--accent, #2fb6ff);
   padding: 20px 24px;
@@ -268,8 +268,8 @@
 .eq-draft-body { display: flex; flex-direction: column; gap: 16px; }
 
 .eq-talking-points {
-  background: rgba(47, 182, 255, 0.06);
-  border: 1px solid rgba(47, 182, 255, 0.2);
+  background: var(--pill-info-bg);
+  border: 1px solid var(--pill-info-bd);
   border-radius: 8px;
   padding: 14px 16px;
 }
@@ -325,11 +325,11 @@
   background: var(--surface-1, transparent);
 }
 
-.eq-option-card:hover { border-color: var(--accent, #2fb6ff); background: rgba(47, 182, 255, 0.04); }
+.eq-option-card:hover { border-color: var(--accent, #2fb6ff); background: var(--pill-info-bg); }
 
 .eq-option-card--selected {
   border-color: var(--accent, #2fb6ff);
-  background: rgba(47, 182, 255, 0.08);
+  background: var(--pill-info-bg);
 }
 
 .eq-option-label {
@@ -372,9 +372,9 @@
   left: 240px; /* sidebar width */
   right: 0;
   z-index: 200;
-  background: var(--surface-1, #12152a);
+  background: var(--surface-card);
   border-top: 2px solid var(--accent, #2fb6ff);
-  box-shadow: 0 -8px 32px rgba(0,0,0,0.4);
+  box-shadow: var(--shadow-lg);
 }
 
 .eq-batch-bar-inner {
@@ -393,7 +393,7 @@
 
 /* ── Compose Drawer ───────────────────────────────────────────────── */
 .eq-compose-drawer {
-  background: var(--surface-2, #181c35);
+  background: var(--surface-sunken);
   border-top: 1px solid var(--border);
   padding: 20px 24px 16px;
   display: flex;

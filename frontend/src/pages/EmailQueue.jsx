@@ -423,11 +423,11 @@ export default function EmailQueue() {
   const currentTone = TONE_OPTIONS.find(t => t.key === tone) || TONE_OPTIONS[1]
 
   const STATS = [
-    { key: 'total',    label: 'In queue',       value: counts.total,    color: 'var(--text-primary)',   dot: 'rgba(255,255,255,0.3)', icon: '📬' },
+    { key: 'total',    label: 'In queue',       value: counts.total,    color: 'var(--text-primary)',   dot: 'var(--border-strong)', icon: '📬' },
     { key: 'cold',     label: 'Cold',            value: counts.cold,     color: 'var(--signal-blue)',   dot: 'var(--signal-blue)',  icon: '❄️' },
     { key: 'warm',     label: 'Warm',            value: counts.warm,     color: 'var(--signal-amber)',  dot: 'var(--signal-amber)', icon: '☀️' },
     { key: 'hot',      label: 'Replied/Booked',  value: counts.hot,      color: 'var(--signal-green)',  dot: 'var(--signal-green)', icon: '🔥' },
-    ...(counts.badEmail > 0 ? [{ key: 'badEmail', label: 'Bad emails', value: counts.badEmail, color: '#e74c3c', dot: '#e74c3c', icon: '🚫' }] : []),
+    ...(counts.badEmail > 0 ? [{ key: 'badEmail', label: 'Bad emails', value: counts.badEmail, color: 'var(--color-danger)', dot: '#e74c3c', icon: '🚫' }] : []),
   ]
 
   return (
@@ -455,12 +455,12 @@ export default function EmailQueue() {
       <div style={{ margin: '0 0 16px 0' }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12,
-          background: diagResult ? (diagResult.all_ok ? 'rgba(30,240,168,0.07)' : 'rgba(231,76,60,0.08)') : 'rgba(255,255,255,0.03)',
-          border: `1px solid ${diagResult ? (diagResult.all_ok ? 'rgba(30,240,168,0.25)' : 'rgba(231,76,60,0.3)') : 'rgba(255,255,255,0.1)'}`,
+          background: diagResult ? (diagResult.all_ok ? 'var(--pill-success-bg)' : 'var(--pill-danger-bg)') : 'var(--surface-sunken)',
+          border: `1px solid ${diagResult ? (diagResult.all_ok ? 'var(--pill-success-bd)' : 'var(--pill-danger-bd)') : 'var(--border-default)'}`,
           borderRadius: diagResult ? '8px 8px 0 0' : 8,
           padding: '10px 16px',
         }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: diagResult ? (diagResult.all_ok ? 'var(--signal-green)' : '#e74c3c') : 'var(--text-secondary)' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: diagResult ? (diagResult.all_ok ? 'var(--signal-green)' : 'var(--color-danger)') : 'var(--text-secondary)' }}>
             {diagResult
               ? diagResult.all_ok ? '✅ Email system is working' : '❌ Email system has issues'
               : '🔧 Email not working?'}
@@ -470,7 +470,7 @@ export default function EmailQueue() {
             disabled={diagRunning}
             style={{
               fontSize: 12, padding: '4px 14px', borderRadius: 6, cursor: diagRunning ? 'default' : 'pointer',
-              background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
+              background: 'transparent', border: '1px solid var(--border-default)',
               color: 'var(--text-secondary)', opacity: diagRunning ? 0.6 : 1,
             }}
           >
@@ -484,20 +484,20 @@ export default function EmailQueue() {
         </div>
 
         {diagResult && (
-          <div style={{ border: `1px solid ${diagResult.all_ok ? 'rgba(30,240,168,0.25)' : 'rgba(231,76,60,0.3)'}`, borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+          <div style={{ border: `1px solid ${diagResult.all_ok ? 'var(--pill-success-bd)' : 'var(--pill-danger-bd)'}`, borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
             {diagResult.checks.map((c, i) => (
               <div key={i} style={{
                 display: 'flex', alignItems: 'flex-start', gap: 12,
                 padding: '10px 16px',
-                borderBottom: i < diagResult.checks.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
-                background: c.ok ? 'transparent' : 'rgba(231,76,60,0.05)',
+                borderBottom: i < diagResult.checks.length - 1 ? '1px solid var(--border-default)' : 'none',
+                background: c.ok ? 'transparent' : 'var(--pill-danger-bg)',
               }}>
                 <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0, marginTop: 1 }}>{c.ok ? '✅' : '❌'}</span>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: c.ok ? 'var(--text-primary)' : '#e74c3c' }}>{c.name}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: c.ok ? 'var(--text-primary)' : 'var(--color-danger)' }}>{c.name}</div>
                   {c.detail && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2, wordBreak: 'break-word' }}>{c.detail}</div>}
                   {!c.ok && c.fix && (
-                    <div style={{ fontSize: 12, color: '#f39c12', marginTop: 4, background: 'rgba(243,156,18,0.1)', border: '1px solid rgba(243,156,18,0.25)', borderRadius: 4, padding: '4px 8px' }}>
+                    <div style={{ fontSize: 12, color: 'var(--color-warning)', marginTop: 4, background: 'var(--pill-warning-bg)', border: '1px solid var(--pill-warning-bd)', borderRadius: 4, padding: '4px 8px' }}>
                       🔧 Fix: {c.fix}
                     </div>
                   )}
@@ -589,8 +589,8 @@ export default function EmailQueue() {
           onClick={() => setSentLogVisible(v => !v)}
           style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-            background: sentLog.length > 0 ? 'rgba(30,240,168,0.08)' : 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(30,240,168,0.2)',
+            background: sentLog.length > 0 ? 'var(--pill-success-bg)' : 'var(--surface-sunken)',
+            border: '1px solid var(--pill-success-bd)',
             borderRadius: sentLogVisible ? '8px 8px 0 0' : 8,
             padding: '10px 16px', cursor: 'pointer',
             color: sentLog.length > 0 ? 'var(--signal-green)' : 'var(--text-secondary)',
@@ -610,18 +610,18 @@ export default function EmailQueue() {
           </span>
         </button>
         {sentLogVisible && (
-          <div style={{ border: '1px solid rgba(30,240,168,0.2)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+          <div style={{ border: '1px solid var(--pill-success-bd)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
             {sentLog.length === 0 ? (
               <div style={{ padding: '20px 16px', fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center' }}>
                 No emails sent yet. Sent emails will appear here immediately after sending.
               </div>
             ) : (
               <>
-                <div style={{ padding: '8px 16px', background: 'rgba(30,240,168,0.05)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid rgba(30,240,168,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ padding: '8px 16px', background: 'var(--pill-success-bg)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid var(--pill-success-bd)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>Showing your {sentLog.length} most recent email sends — newest first.</span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     {sentLogError && (
-                      <span style={{ color: '#e74c3c', fontWeight: 600 }}>⚠️ {sentLogError}</span>
+                      <span style={{ color: 'var(--color-danger)', fontWeight: 600 }}>⚠️ {sentLogError}</span>
                     )}
                     <span
                       style={{ cursor: sentLogLoading ? 'default' : 'pointer', textDecoration: 'underline', color: sentLogLoading ? 'var(--text-secondary)' : 'var(--accent)', opacity: sentLogLoading ? 0.6 : 1 }}
@@ -633,7 +633,7 @@ export default function EmailQueue() {
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ background: 'rgba(255,255,255,0.03)', fontSize: 11, color: 'var(--text-secondary)' }}>
+                    <tr style={{ background: 'var(--surface-sunken)', fontSize: 11, color: 'var(--text-secondary)' }}>
                       <th style={{ padding: '6px 16px', textAlign: 'left', fontWeight: 600 }}>Name</th>
                       <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Email</th>
                       <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Subject</th>
@@ -651,7 +651,7 @@ export default function EmailQueue() {
                           : sentDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + sentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                         : '—'
                       return (
-                        <tr key={entry.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <tr key={entry.id} style={{ borderBottom: '1px solid var(--border-default)' }}>
                           <td style={{ padding: '9px 16px', fontSize: 13, fontWeight: 600 }}>
                             <span
                               style={{ cursor: 'pointer', color: 'var(--accent)', textDecoration: 'underline' }}
@@ -660,7 +660,7 @@ export default function EmailQueue() {
                               {entry.lead_name}
                             </span>
                             {isToday && (
-                              <span style={{ marginLeft: 6, fontSize: 10, background: 'rgba(30,240,168,0.15)', color: 'var(--signal-green)', border: '1px solid rgba(30,240,168,0.3)', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>
+                              <span style={{ marginLeft: 6, fontSize: 10, background: 'var(--pill-success-bg)', color: 'var(--signal-green)', border: '1px solid var(--pill-success-bd)', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>
                                 TODAY
                               </span>
                             )}
@@ -677,9 +677,9 @@ export default function EmailQueue() {
                           <td style={{ padding: '9px 8px' }}>
                             <span style={{
                               fontSize: 11, borderRadius: 4, padding: '2px 6px',
-                              background: entry.status === 'sent' ? 'rgba(30,240,168,0.12)' : 'rgba(255,200,0,0.12)',
+                              background: entry.status === 'sent' ? 'var(--pill-success-bg)' : 'var(--pill-warning-bg)',
                               color: entry.status === 'sent' ? 'var(--signal-green)' : 'var(--signal-amber)',
-                              border: `1px solid ${entry.status === 'sent' ? 'rgba(30,240,168,0.3)' : 'rgba(255,200,0,0.3)'}`,
+                              border: `1px solid ${entry.status === 'sent' ? 'var(--pill-success-bd)' : 'var(--pill-warning-bd)'}`,
                             }}>
                               {entry.status === 'sent' ? '✓ Sent' : entry.status}
                             </span>
@@ -707,7 +707,7 @@ export default function EmailQueue() {
               style={{ width: 280 }}
             />
             {showMismatchOnly && (
-              <span style={{ fontSize: 12, color: '#c0392b', fontWeight: 600 }}>
+              <span style={{ fontSize: 12, color: 'var(--color-danger)', fontWeight: 600 }}>
                 ⚠️ Filtered: mismatches only ·{' '}
                 <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setShowMismatchOnly(false)}>
                   clear
@@ -779,7 +779,7 @@ export default function EmailQueue() {
                         {sentEntry && (
                           <span
                             title={`Already emailed on ${sentDate?.toLocaleString()} — subject: "${sentEntry.subject || '—'}"`}
-                            style={{ marginLeft: 7, fontSize: 10, background: 'rgba(255,200,0,0.15)', color: '#d4a017', border: '1px solid rgba(255,200,0,0.35)', borderRadius: 4, padding: '1px 5px', fontWeight: 700, cursor: 'help', whiteSpace: 'nowrap' }}
+                            style={{ marginLeft: 7, fontSize: 10, background: 'var(--pill-warning-bg)', color: 'var(--color-warning)', border: '1px solid var(--pill-warning-bd)', borderRadius: 4, padding: '1px 5px', fontWeight: 700, cursor: 'help', whiteSpace: 'nowrap' }}
                           >
                             ⚠ emailed {sentIsToday ? `today ${sentTimeStr}` : sentTimeStr}
                           </span>
@@ -790,8 +790,8 @@ export default function EmailQueue() {
                         {isMismatch && (
                           <span
                             title="Email username doesn't match lead name — may belong to a surviving family member."
-                            style={{ marginLeft: 6, fontSize: 11, background: '#fff3cd', color: '#856404',
-                              border: '1px solid #ffc107', borderRadius: 4, padding: '1px 5px', cursor: 'help' }}
+                            style={{ marginLeft: 6, fontSize: 11, background: 'var(--pill-warning-bg)', color: 'var(--color-warning)',
+                              border: '1px solid var(--pill-warning-bd)', borderRadius: 4, padding: '1px 5px', cursor: 'help' }}
                           >
                             ⚠️ mismatch
                           </span>
@@ -799,8 +799,8 @@ export default function EmailQueue() {
                         {badEmail && (
                           <span
                             title={`Bad email detected: ${badEmail}. This address is likely a system notification, wrong domain, or has a typo.`}
-                            style={{ marginLeft: 6, fontSize: 11, background: '#ffe4e4', color: '#c0392b',
-                              border: '1px solid #e74c3c', borderRadius: 4, padding: '1px 5px', cursor: 'help' }}
+                            style={{ marginLeft: 6, fontSize: 11, background: 'var(--pill-danger-bg)', color: 'var(--color-danger)',
+                              border: '1px solid var(--pill-danger-bd)', borderRadius: 4, padding: '1px 5px', cursor: 'help' }}
                           >
                             🚫 {badEmail}
                           </span>
@@ -851,16 +851,16 @@ export default function EmailQueue() {
                             </div>
 
                             {isMismatch && (
-                              <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 6,
-                                padding: '8px 12px', margin: '8px 0', fontSize: 13, color: '#856404' }}>
+                              <div style={{ background: 'var(--pill-warning-bg)', border: '1px solid var(--pill-warning-bd)', borderRadius: 6,
+                                padding: '8px 12px', margin: '8px 0', fontSize: 13, color: 'var(--color-warning)' }}>
                                 ⚠️ <strong>Name/email mismatch:</strong> The email address doesn't match this lead's name.
                                 It may belong to someone else — a relative, an assistant, or a shared mailbox.
                                 Double-check before sending.
                               </div>
                             )}
                             {badEmail && (
-                              <div style={{ background: '#ffe4e4', border: '1px solid #e74c3c', borderRadius: 6,
-                                padding: '8px 12px', margin: '8px 0', fontSize: 13, color: '#c0392b' }}>
+                              <div style={{ background: 'var(--pill-danger-bg)', border: '1px solid var(--pill-danger-bd)', borderRadius: 6,
+                                padding: '8px 12px', margin: '8px 0', fontSize: 13, color: 'var(--color-danger)' }}>
                                 🚫 <strong>Suspicious email ({badEmail}):</strong> {lead.email} looks like a{' '}
                                 {badEmail === 'system address' ? 'system/notification address that will never be read by a real person.' :
                                  badEmail === 'system domain' ? 'tool or platform notification address, not a personal inbox.' :
@@ -952,8 +952,8 @@ export default function EmailQueue() {
             onClick={() => setShowFlagged((v) => !v)}
             style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-              background: 'rgba(231,76,60,0.08)', border: '1px solid rgba(231,76,60,0.25)',
-              borderRadius: 8, padding: '10px 16px', cursor: 'pointer', color: '#e74c3c',
+              background: 'var(--pill-danger-bg)', border: '1px solid var(--pill-danger-bd)',
+              borderRadius: 8, padding: '10px 16px', cursor: 'pointer', color: 'var(--color-danger)',
               fontSize: 13, fontWeight: 600,
             }}
           >
@@ -963,8 +963,8 @@ export default function EmailQueue() {
             </span>
           </button>
           {showFlagged && (
-            <div style={{ border: '1px solid rgba(231,76,60,0.25)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
-              <div style={{ padding: '8px 16px', background: 'rgba(231,76,60,0.05)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid rgba(231,76,60,0.15)' }}>
+            <div style={{ border: '1px solid var(--pill-danger-bd)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+              <div style={{ padding: '8px 16px', background: 'var(--pill-danger-bg)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid var(--pill-danger-bd)' }}>
                 These addresses are system notifications, bulk-mail senders, or have domain typos. Verify before sending — most should be deleted.
               </div>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -974,7 +974,7 @@ export default function EmailQueue() {
                     const isMismatch = detectMismatch(lead)
                     const name = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || '—'
                     return (
-                      <tr key={lead.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', opacity: 0.85 }}>
+                      <tr key={lead.id} style={{ borderBottom: '1px solid var(--border-default)', opacity: 0.85 }}>
                         <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', width: 180 }}>
                           <span style={{ cursor: 'pointer', color: 'var(--accent)', textDecoration: 'underline' }}
                             onClick={() => navigate(`/leads/${lead.id}`)}>
@@ -984,14 +984,14 @@ export default function EmailQueue() {
                         <td className="mono" style={{ padding: '10px 8px', fontSize: 12 }}>
                           {lead.email || '—'}
                           {badEmail && (
-                            <span style={{ marginLeft: 6, fontSize: 11, background: '#ffe4e4', color: '#c0392b',
-                              border: '1px solid #e74c3c', borderRadius: 4, padding: '1px 5px' }}>
+                            <span style={{ marginLeft: 6, fontSize: 11, background: 'var(--pill-danger-bg)', color: 'var(--color-danger)',
+                              border: '1px solid var(--pill-danger-bd)', borderRadius: 4, padding: '1px 5px' }}>
                               🚫 {badEmail}
                             </span>
                           )}
                           {isMismatch && (
-                            <span style={{ marginLeft: 6, fontSize: 11, background: '#fff3cd', color: '#856404',
-                              border: '1px solid #ffc107', borderRadius: 4, padding: '1px 5px' }}>
+                            <span style={{ marginLeft: 6, fontSize: 11, background: 'var(--pill-warning-bg)', color: 'var(--color-warning)',
+                              border: '1px solid var(--pill-warning-bd)', borderRadius: 4, padding: '1px 5px' }}>
                               ⚠️ mismatch
                             </span>
                           )}
@@ -1001,7 +1001,7 @@ export default function EmailQueue() {
                             onClick={() => navigate(`/leads/${lead.id}`)}>
                             Open →
                           </button>
-                          <button className="btn btn--ghost" style={{ fontSize: 11, padding: '3px 10px', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)' }}
+                          <button className="btn btn--ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--color-warning)', border: '1px solid var(--pill-warning-bd)' }}
                             onClick={() => handleFlagLead(lead, 'bad_email')}
                             disabled={flagging === lead.id}
                             title="Confirm — flag this as a bad email address">
@@ -1025,8 +1025,8 @@ export default function EmailQueue() {
             onClick={() => setShowManualFlagged(v => !v)}
             style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-              background: 'rgba(255,100,100,0.08)', border: '1px solid rgba(255,100,100,0.25)',
-              borderRadius: 8, padding: '10px 16px', cursor: 'pointer', color: '#ff6464',
+              background: 'var(--pill-danger-bg)', border: '1px solid var(--pill-danger-bd)',
+              borderRadius: 8, padding: '10px 16px', cursor: 'pointer', color: 'var(--color-danger)',
               fontSize: 13, fontWeight: 600,
             }}
           >
@@ -1036,8 +1036,8 @@ export default function EmailQueue() {
             </span>
           </button>
           {showManualFlagged && (
-            <div style={{ border: '1px solid rgba(255,100,100,0.25)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
-              <div style={{ padding: '8px 16px', background: 'rgba(255,100,100,0.05)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid rgba(255,100,100,0.15)' }}>
+            <div style={{ border: '1px solid var(--pill-danger-bd)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+              <div style={{ padding: '8px 16px', background: 'var(--pill-danger-bg)', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid var(--pill-danger-bd)' }}>
                 These leads were manually flagged by an advisor. Unflag them to restore to all lists and email queue.
               </div>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1045,7 +1045,7 @@ export default function EmailQueue() {
                   {manualFlaggedLeads.map((lead) => {
                     const name = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || '—'
                     return (
-                      <tr key={lead.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <tr key={lead.id} style={{ borderBottom: '1px solid var(--border-default)' }}>
                         <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 600, width: 180 }}>
                           <span style={{ cursor: 'pointer', color: 'var(--accent)', textDecoration: 'underline' }}
                             onClick={() => navigate(`/leads/${lead.id}`)}>
@@ -1055,13 +1055,13 @@ export default function EmailQueue() {
                         <td className="mono" style={{ padding: '10px 8px', fontSize: 12 }}>{lead.email || '—'}</td>
                         <td style={{ padding: '10px 8px' }}>
                           {lead.manual_flag === 'bad_email'
-                            ? <span style={{ fontSize: 11, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 4, padding: '2px 6px' }}>⚠ bad email</span>
-                            : <span style={{ fontSize: 11, background: 'rgba(255,80,80,0.15)', color: '#ff6464', border: '1px solid rgba(255,80,80,0.3)', borderRadius: 4, padding: '2px 6px' }}>⛔ remove all</span>
+                            ? <span style={{ fontSize: 11, background: 'var(--pill-warning-bg)', color: 'var(--color-warning)', border: '1px solid var(--pill-warning-bd)', borderRadius: 4, padding: '2px 6px' }}>⚠ bad email</span>
+                            : <span style={{ fontSize: 11, background: 'var(--pill-danger-bg)', color: 'var(--color-danger)', border: '1px solid var(--pill-danger-bd)', borderRadius: 4, padding: '2px 6px' }}>⛔ remove all</span>
                           }
                         </td>
                         <td style={{ padding: '10px 8px', fontSize: 12, color: 'var(--text-secondary)' }}>{lead.manual_flag_reason || ''}</td>
                         <td style={{ padding: '10px 8px' }}>
-                          <button className="btn btn--ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--signal-green)', border: '1px solid rgba(100,255,150,0.3)' }}
+                          <button className="btn btn--ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--signal-green)', border: '1px solid var(--pill-success-bd)' }}
                             onClick={() => handleFlagLead(lead, null)}
                             disabled={flagging === lead.id}>
                             ✓ Unflag
@@ -1125,7 +1125,7 @@ export default function EmailQueue() {
                   <span className="eq-compose-drawer-sub">
                     Will send to {selected.size} selected lead{selected.size !== 1 ? 's' : ''}
                     {selectedMismatches.length > 0 && (
-                      <span style={{ color: '#c0392b', marginLeft: 8 }}>
+                      <span style={{ color: 'var(--color-danger)', marginLeft: 8 }}>
                         · ⚠️ {selectedMismatches.length} name/email mismatch{selectedMismatches.length !== 1 ? 'es' : ''}
                       </span>
                     )}

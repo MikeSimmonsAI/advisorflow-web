@@ -26,6 +26,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
 import '../styles/shared.css'
+import '../styles/aiWorkforce.css'
 
 const STAGE_TONE = {
   off: 'neutral',
@@ -127,7 +128,7 @@ export default function AITeam () {
       action={<button className="btn btn--secondary btn--sm" onClick={load} disabled={loading}>Refresh</button>}
     >
       {err && (
-        <div className="panel" style={{ borderColor: 'rgba(255,77,126,.35)' }}>
+        <div className="panel panel--error">
           <p style={{ margin: 0, color: 'var(--signal-red)', fontSize: 13 }}>{err}</p>
         </div>
       )}
@@ -146,11 +147,11 @@ export default function AITeam () {
         )}
       </div>
 
-      <div className="stat-grid" style={{ marginBottom: 18 }}>
+      <div className="wf-stat-grid">
         {(team?.queue || []).map(g => (
-          <div className="stat-card" key={g.key}>
-            <div className="stat-card__label">{g.label}</div>
-            <div className="stat-card__value">{g.count}</div>
+          <div className="wf-stat" key={g.key}>
+            <div className="wf-stat__label">{g.label}</div>
+            <div className="wf-stat__value">{g.count}</div>
           </div>
         ))}
       </div>
@@ -167,7 +168,8 @@ export default function AITeam () {
             <p>You have not added any AI employees yet.</p>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
               Every one starts switched off. Nothing is contacted until you and
-              AdvisorFlow agree to switch it on.
+              the platform agree to switch it on. Pick one under
+              “Add an AI employee” below to begin.
             </p>
           </div>
         )}
@@ -240,7 +242,7 @@ export default function AITeam () {
             </p>
             {unavailable.map(item => (
               <div className="glass-card" key={item.template_key}
-                   style={{ marginBottom: 8, opacity: 0.62 }}>
+                   style={{ marginBottom: 8, background: 'var(--surface-sunken)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div style={{ maxWidth: 620 }}>
                     <div style={{ fontWeight: 600 }}>{item.display_name}</div>
@@ -260,11 +262,11 @@ export default function AITeam () {
 
       {/* ── CONFIRM. Adding is not switching on, and it says so. ──────── */}
       {hiring && (
-        <div className="panel" style={{ marginTop: 18, borderColor: 'rgba(47,182,255,.35)' }}>
+        <div className="panel" style={{ marginTop: 18, borderColor: 'var(--color-primary)' }}>
           <h3 style={{ margin: '0 0 8px' }}>Add {hiring.display_name}?</h3>
           <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
             It will be added <strong>switched off</strong>. Nobody is contacted
-            and no records are worked until you set it up and AdvisorFlow
+            and no records are worked until you set it up and the platform
             switches it on with you.
           </p>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>

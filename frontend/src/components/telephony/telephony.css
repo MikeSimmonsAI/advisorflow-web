@@ -1,0 +1,57 @@
+/* Telephony (stream XC): click-to-call bridge, disposition, voicemail player.
+   Light theme tokens from styles/appearance.css, with literal fallbacks. */
+.tel-call { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tel-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tel-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px;
+  border: 1px solid var(--border-default, #d6dbe4); background: var(--surface-card, #fff);
+  color: var(--text-primary, #1a2233); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.tel-btn:hover:not(:disabled) { background: var(--surface-hover, #f3f5f9); }
+.tel-btn:disabled { opacity: .55; cursor: not-allowed; }
+.tel-btn--primary { background: var(--color-primary, #2563eb); border-color: var(--color-primary, #2563eb);
+  color: var(--text-on-primary, #fff); }
+.tel-btn--primary:hover:not(:disabled) { background: var(--color-primary-hover, #1d4ed8); }
+.tel-btn--ghost { background: transparent; }
+.tel-note { font-size: 12px; color: var(--text-muted, #5b6474); line-height: 1.45; margin: 0; }
+.tel-box {
+  border: 1px solid var(--pill-warning-bd, #f3d38a); background: var(--pill-warning-bg, #fff8e6);
+  color: var(--pill-warning-fg, #7a5200); border-radius: 10px; padding: 10px 12px; font-size: 13px;
+}
+.tel-box--info { border-color: var(--pill-info-bd, #bcd3f7); background: var(--pill-info-bg, #eef4ff);
+  color: var(--pill-info-fg, #1e3a8a); }
+.tel-box--error { border-color: var(--pill-danger-bd, #f5b5b5); background: var(--pill-danger-bg, #fff1f1);
+  color: var(--pill-danger-fg, #9b1c1c); }
+.tel-box strong { display: block; margin-bottom: 4px; }
+.tel-box ul { margin: 4px 0 0; padding-left: 18px; }
+.tel-box li { margin: 2px 0; }
+.tel-fix { display: block; font-size: 12px; opacity: .9; }
+.tel-input {
+  padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border-default, #d6dbe4);
+  background: var(--bg-input, #fff); color: var(--text-primary, #1a2233); font: inherit; font-size: 13px;
+  min-width: 0; flex: 1 1 160px; max-width: 240px;
+}
+.tel-status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-primary, #1a2233); }
+.tel-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success, #16a34a); }
+.tel-dot--wait { background: var(--color-warning, #d97706); animation: tel-pulse 1.2s infinite; }
+.tel-dot--bad { background: var(--color-danger, #dc2626); }
+@keyframes tel-pulse { 50% { opacity: .35; } }
+
+.tel-modal-back {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, .35); display: flex; align-items: center;
+  justify-content: center; padding: 16px; z-index: 1000;
+}
+.tel-modal {
+  background: var(--surface-card, #fff); color: var(--text-primary, #1a2233); border-radius: 14px;
+  box-shadow: var(--shadow-lg, 0 20px 40px rgba(15, 23, 42, .18)); width: 100%; max-width: 440px;
+  padding: 18px; display: flex; flex-direction: column; gap: 12px; max-height: calc(100vh - 32px); overflow: auto;
+}
+.tel-modal h3 { margin: 0; font-size: 16px; }
+.tel-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600;
+  color: var(--text-secondary, #3b4556); }
+.tel-field select, .tel-field textarea, .tel-field input {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-default, #d6dbe4);
+  background: var(--bg-input, #fff); color: var(--text-primary, #1a2233); font: inherit; font-size: 13px; font-weight: 400;
+}
+.tel-modal-foot { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.tel-audio { width: 100%; max-width: 360px; height: 36px; }

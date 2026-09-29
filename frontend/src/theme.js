@@ -6,14 +6,14 @@
  * This file is the single place that makes it look different per brand.
  *
  * Brand detection order:
- *   1. evosyspro  â†’ app.evosyspro.live  (dark navy, electric blue, green)
- *   2. harmonyhustle â†’ app.harmonyhustle.com (TBD â€” real estate)
- *   3. default    â†’ app.bookaboost.live + localhost (BookaBoost existing theme)
+ *   1. evosyspro  → app.evosyspro.live  (dark navy, electric blue, green)
+ *   2. harmonyhustle → app.harmonyhustle.com (TBD — real estate)
+ *   3. default    → app.bookaboost.live + localhost (BookaBoost existing theme)
  *
  * How it works:
  *   applyTheme() injects a data-theme attribute on <html>.
  *   CSS in index.css uses [data-theme="evosyspro"] overrides.
- *   No JavaScript theme state to manage â€” pure CSS variable overrides.
+ *   No JavaScript theme state to manage — pure CSS variable overrides.
  */
 
 export const THEMES = {
@@ -179,7 +179,7 @@ export function initTheme() {
  * brand missing from it renders from its row on the first paint after the
  * cache warms, and correctly from then on.
  *
- * Brand config per theme â€” logos, display names, support emails, colors.
+ * Brand config per theme — logos, display names, support emails, colors.
  * Used in Layout.jsx to render the correct sidebar logo and brand name.
  */
 export const BRAND_CONFIG = {

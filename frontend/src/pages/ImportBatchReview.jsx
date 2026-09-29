@@ -4,6 +4,11 @@ import { api } from '../api/client'
 import '../styles/shared.css'
 import './ImportBatchReview.css'
 
+// api.get/post resolve to the parsed JSON body (api/client.js), not an
+// axios-style { data } envelope. Reading `.data` threw, so this page always
+// showed "Failed to load" beside its own empty state. unwrap() accepts both.
+const unwrap = (r) => (r && r.data !== undefined && !Array.isArray(r) && Object.keys(r).length === 1 ? r.data : r)
+
 const ACTION_TO_STATUS = {
   accept_as_new: 'accepted',
   merge_with_existing: 'merged',
@@ -42,7 +47,7 @@ function RowCard({ row, batchStatus, onDecision }) {
   async function act(action) {
     setLoading(true); setErr(null)
     try { await onDecision(row.id, action, note || undefined) }
-    catch (e) { setErr(e.response?.data?.detail || 'Action failed') }
+    catch (e) { setErr(e.response?.data?.detail || e.message || 'Action failed') }
     finally { setLoading(false) }
   }
 
@@ -140,8 +145,8 @@ export default function ImportBatchReview() {
   const [commitResult, setCommitResult] = useState(null)
 
   const fetchBatch = useCallback(async () => {
-    try { const r = await api.get(`/import-batches/${batchId}`); setBatch(r.data) }
-    catch (e) { setError(e.response?.data?.detail || 'Failed to load batch.') }
+    try { const r = await api.get(`/import-batches/${batchId}`); setBatch(unwrap(r)) }
+    catch (e) { setError(e.response?.data?.detail || e.message || 'Failed to load batch.') }
   }, [batchId])
 
   const fetchRows = useCallback(async () => {
@@ -152,8 +157,8 @@ export default function ImportBatchReview() {
       if (dupFilter) p.set('duplicate_status', dupFilter)
       if (search) p.set('search', search)
       const r = await api.get(`/import-batches/${batchId}/rows?${p}`)
-      setRows(r.data.rows || []); setTotalRows(r.data.total || 0)
-    } catch (e) { setError(e.response?.data?.detail || 'Failed to load rows.') }
+      setRows(unwrap(r).rows || []); setTotalRows(unwrap(r).total || 0)
+    } catch (e) { setError(e.response?.data?.detail || e.message || 'Failed to load rows.') }
     finally { setLoading(false) }
   }, [batchId, page, reviewFilter, dupFilter, search])
 
@@ -183,9 +188,9 @@ export default function ImportBatchReview() {
     setCommitting(true); setCommitError(null); setCommitResult(null)
     try {
       const r = await api.post(`/import-batches/${batchId}/commit`)
-      setBatch(r.data)
-      setCommitResult({ committed: r.data.committed_rows, merged: r.data.merged_rows })
-    } catch (e) { setCommitError(e.response?.data?.detail || 'Commit failed.') }
+      setBatch(unwrap(r))
+      setCommitResult({ committed: unwrap(r).committed_rows, merged: unwrap(r).merged_rows })
+    } catch (e) { setCommitError(e.response?.data?.detail || e.message || 'Commit failed.') }
     finally { setCommitting(false) }
   }
 

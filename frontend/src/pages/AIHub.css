@@ -51,7 +51,7 @@
 
 .aihub-stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 14px;
   margin-bottom: 20px;
 }
@@ -90,9 +90,9 @@
   font-size: 14px;
 }
 
-.aihub-alert--urgent { background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.2); }
-.aihub-alert--opportunity { background: rgba(30,240,168,0.08); border: 1px solid rgba(30,240,168,0.2); }
-.aihub-alert--info { background: rgba(47,182,255,0.06); border: 1px solid rgba(47,182,255,0.15); }
+.aihub-alert--urgent { background: var(--pill-danger-bg); border: 1px solid var(--pill-danger-bd); }
+.aihub-alert--opportunity { background: var(--pill-success-bg); border: 1px solid var(--pill-success-bd); }
+.aihub-alert--info { background: var(--pill-info-bg); border: 1px solid var(--pill-info-bd); }
 .aihub-alert-action { font-size: 13px; color: var(--accent); font-weight: 600; }
 
 .aihub-stage-grid {
@@ -102,7 +102,8 @@
 }
 
 .aihub-stage-card {
-  background: var(--bg-field);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-default);
   border-radius: 8px;
   padding: 12px;
   display: flex;
@@ -155,8 +156,8 @@
 .aihub-flagged-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
 .aihub-flagged-name { font-size: 15px; font-weight: 700; display: block; }
 .aihub-flagged-reason { font-size: 12px; color: var(--signal-red, #f87171); display: block; margin-top: 2px; }
-.aihub-flagged-reply { background: var(--bg-field); border-radius: 6px; padding: 10px 12px; font-size: 13px; color: var(--text-secondary); font-style: italic; margin-bottom: 10px; }
-.aihub-flagged-suggestion { background: rgba(47,182,255,0.06); border: 1px solid rgba(47,182,255,0.15); border-radius: 6px; padding: 10px 12px; font-size: 13px; color: var(--text-primary); margin-bottom: 12px; }
+.aihub-flagged-reply { background: var(--surface-sunken); border-radius: 6px; padding: 10px 12px; font-size: 13px; color: var(--text-secondary); font-style: italic; margin-bottom: 10px; }
+.aihub-flagged-suggestion { background: var(--pill-info-bg); border: 1px solid var(--pill-info-bd); border-radius: 6px; padding: 10px 12px; font-size: 13px; color: var(--text-primary); margin-bottom: 12px; }
 .aihub-flagged-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .aihub-calls-list { display: flex; flex-direction: column; gap: 10px; }
@@ -179,3 +180,11 @@
 .aihub-call-name { font-size: 14px; font-weight: 700; color: var(--text-primary); }
 .aihub-call-meta { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
 .aihub-call-right { display: flex; flex-direction: column; align-items: flex-end; }
+
+@media (max-width: 640px) {
+  .aihub-page { padding: 16px 0; }
+  .aihub-tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .aihub-tab { flex: 0 0 auto; padding: 10px 12px; }
+  .aihub-stat-card { padding: 14px 10px; }
+  .aihub-stat-value { font-size: 28px; }
+}

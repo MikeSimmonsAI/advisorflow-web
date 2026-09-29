@@ -1,8 +1,8 @@
 .message-review-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(2, 4, 11, 0.78);
-  backdrop-filter: blur(4px);
+  background: rgba(14, 23, 38, 0.45);
+  backdrop-filter: blur(3px);
   z-index: 100;
   display: flex;
   align-items: center;
@@ -11,7 +11,7 @@
 }
 
 .message-review-modal {
-  background: linear-gradient(150deg, rgba(11, 23, 50, 0.95), rgba(4, 9, 22, 0.95));
+  background: var(--surface-card);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--panel-shadow);

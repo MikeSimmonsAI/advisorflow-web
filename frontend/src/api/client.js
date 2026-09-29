@@ -4,8 +4,8 @@
 // that keeps calling the old host after this one moves.
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflow-backend.onrender.com'
 
-// â”€â”€ Brand-neutral localStorage keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// All keys use the "af_" prefix â€” no white-label brand name ever appears in
+// ── Brand-neutral localStorage keys ──────────────────────────────────────────
+// All keys use the "af_" prefix — no white-label brand name ever appears in
 // storage. Migration helpers read the old "bookaboost_*" / "bb_*" keys once,
 // copy the value to the new key, and delete the old one so existing sessions
 // survive the rename without being logged out.
@@ -51,8 +51,8 @@ export function clearToken() {
  * this surfaces as a hard "Failed to fetch" error on every page.
  *
  * Retry policy:
- *  - Only retries TypeError (network-level failure â€” no response from server)
- *  - Does NOT retry HTTP errors (401, 403, 404, 500, etc.) â€” those are real
+ *  - Only retries TypeError (network-level failure — no response from server)
+ *  - Does NOT retry HTTP errors (401, 403, 404, 500, etc.) — those are real
  *  - Up to MAX_RETRIES attempts with RETRY_DELAY_MS between each
  *  - Auth errors (401) redirect to login immediately, no retry
  */
@@ -181,6 +181,13 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   // never which one you get.
   const wsId = getWorkspaceContext()
   if (wsId) headers['X-Workspace-Id'] = wsId
+  // THE SELECTED LOCATION (the entitlement control plane's "workspace") —
+  // also a REQUEST, never a grant. Sent only when the server advertised the
+  // header on /branding/org (it does so only once its CORS allow-list carries
+  // it) and only for the organization the selection was made in. The server
+  // re-validates it against the person's location assignments every time.
+  const wsLoc = workspaceLocationHeader()
+  if (wsLoc) headers[wsLoc[0]] = wsLoc[1]
   // Executive Observation Mode: inject org context header so the server can
   // pass require_tenant_user while still marking the session read-only.
   // Only sent when observation context is active (ExecObserveShell mounted).
@@ -341,11 +348,12 @@ function _getDedupeKey(path, opts) {
     || (opts.noOrgContext ? '' : (getOrgContext()?.orgId || ''))
   const brand = getBrandContext()?.platformId || ''
   const ws = getWorkspaceContext() || ''
+  const wsLocation = (workspaceLocationHeader() || [])[1] || ''
   const obs = _observationOrgId || ''
   const flags = [opts.noOrgContext ? 1 : 0, opts.skipRedirect ? 1 : 0,
                  opts.asCustomer ? 1 : 0].join('')
   const route = typeof window !== 'undefined' ? window.location.pathname : '/'
-  return [path, org, brand, ws, obs, flags, route].join('\u0000')
+  return [path, org, brand, ws, wsLocation, obs, flags, route].join('\u0000')
 }
 
 export function resetInFlightGets() {
@@ -462,7 +470,7 @@ export async function refreshCurrentUser() {
 
 export async function logout() {
   // Tell the server to invalidate the session immediately (clears session_token).
-  // Best-effort â€” if the network call fails the local state is still cleared.
+  // Best-effort — if the network call fails the local state is still cleared.
   const token = getToken()
   if (token) {
     // Fire and forget — never await. Awaiting caused logout to hang on cold
@@ -498,7 +506,7 @@ export async function logout() {
   resetInFlightGets()
 }
 
-// â”€â”€ Keep-alive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Keep-alive ────────────────────────────────────────────────────────────────
 // Ping the backend every 14 minutes so Render free-tier never sleeps while
 // an advisor has the app open. Call startKeepAlive() after login,
 // stopKeepAlive() after logout.
@@ -511,7 +519,7 @@ export function startKeepAlive() {
     try {
       await fetch(`${API_BASE}/ping`)
     } catch {
-      // Silent â€” this is best-effort, not critical
+      // Silent — this is best-effort, not critical
     }
   }, 14 * 60 * 1000) // 14 minutes
 }
@@ -523,7 +531,7 @@ export function stopKeepAlive() {
   }
 }
 
-// â”€â”€ Token refresh loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Token refresh loop ────────────────────────────────────────────────────────
 // JWT lifetime is 2 hours. While the app is open, silently refresh every 30
 // minutes so an active user is never kicked. If the refresh fails (401 = server
 // kicked the session) the request() handler above will redirect to /login on the
@@ -550,7 +558,7 @@ export function startRefreshLoop() {
       // Non-2xx (401 = session was force-killed server-side): don't redirect here.
       // The next real API call will 401 and the request() handler redirects to /login.
     } catch {
-      // Network error â€” silent. The user is still "using" the app; the 2-hr JWT
+      // Network error — silent. The user is still "using" the app; the 2-hr JWT
       // stays valid until the server rejects it.
     }
   }, REFRESH_INTERVAL_MS)
@@ -563,7 +571,7 @@ export function stopRefreshLoop() {
   }
 }
 
-// â”€â”€ Branding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Branding ─────────────────────────────────────────────────────────────────
 
 /**
  * @param {object}  [opts]
@@ -609,7 +617,13 @@ export async function fetchAndStoreBranding({ applyTheme = true,
       // The white-label platform this workspace belongs to. Used only where
       // the hostname is not a brand domain (see theme.js shellTheme).
       platform: data.platform ?? null,
+      // WHICH LOCATION (workspace) THIS ANSWER WAS COMPUTED FOR, the locations
+      // this person may select, and whether a stored selection was rejected.
+      workspace_location: data.workspace_location ?? null,
     }
+    // A selection the server refused (unassigned, inactive, another tenant's)
+    // is dropped so it is not sent again.
+    if (data.workspace_location && data.workspace_location.rejected) clearWorkspaceLocation()
     localStorage.setItem(KEY_BRANDING, JSON.stringify(branding))
     if (applyTheme) { applyBrandingCSS(branding); applyBrandingDOM(branding) }
     return branding
@@ -718,7 +732,7 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-// â”€â”€ Org Context (super admin only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Org Context (super admin only) ───────────────────────────────────────────
 
 const ORG_CONTEXT_KEY = 'af_org_context'
 const BRAND_CONTEXT_KEY = 'af_brand_context'
@@ -829,7 +843,59 @@ export function clearAllContext() {
   clearOrgContext()
   clearBrandContext()
   clearWorkspaceContext()
+  clearWorkspaceLocation()
   clearObservationContext()
+}
+
+// ── THE SELECTED LOCATION (entitlement "workspace") ─────────────────────────
+//
+// Stored with the organization it was chosen in, so a selection made in one
+// customer is never sent while standing in another. A UI selection only: the
+// server validates it (location of THIS organization, and assigned to this
+// person or they administer it) and refuses gated APIs for anything else.
+// Every storage access is wrapped: a private window or blocked storage must
+// behave as "nothing selected", which the server resolves safely (one
+// assigned location -> that one; several -> most restrictive).
+const WORKSPACE_LOCATION_KEY = 'af_workspace_location'
+export const WORKSPACE_LOCATION_HEADER = 'X-Workspace-Location'
+
+export function setWorkspaceLocation(orgId, locationId) {
+  try {
+    if (orgId && locationId) {
+      localStorage.setItem(WORKSPACE_LOCATION_KEY, JSON.stringify({ orgId, locationId }))
+    } else {
+      localStorage.removeItem(WORKSPACE_LOCATION_KEY)
+    }
+  } catch { /* storage blocked */ }
+  resetInFlightGets()
+}
+
+export function getWorkspaceLocation() {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_LOCATION_KEY)
+    if (!raw) return null
+    const v = JSON.parse(raw)
+    return v && v.orgId && v.locationId ? v : null
+  } catch {
+    return null
+  }
+}
+
+export function clearWorkspaceLocation() {
+  try { localStorage.removeItem(WORKSPACE_LOCATION_KEY) } catch { /* storage blocked */ }
+}
+
+/** [headerName, locationId] to send, or null. Only when the server advertised
+ *  the header (CORS-safe) and the selection belongs to the workspace org the
+ *  cached branding describes. */
+export function workspaceLocationHeader() {
+  let b = null
+  try { b = getBranding() } catch { b = null }
+  const wl = b && b.workspace_location
+  if (!wl || wl.header !== WORKSPACE_LOCATION_HEADER) return null
+  const sel = getWorkspaceLocation()
+  if (!sel || !b.organization_id || sel.orgId !== b.organization_id) return null
+  return [wl.header, sel.locationId]
 }
 
 // ── Executive Observation Context ───────────────────────────────────────────

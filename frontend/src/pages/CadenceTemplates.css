@@ -1,4 +1,4 @@
-.ct-template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; }
+.ct-template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); gap: 14px; }
 .ct-template-card { padding: 20px 22px; }
 .ct-template-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 8px; gap: 10px; }
 .ct-template-name { font-size: 15px; font-weight: 600; color: var(--text-primary); display: block; margin-bottom: 4px; }

@@ -335,6 +335,121 @@
   text-transform: capitalize;
 }
 
+/* Labelled identity lines (org / signed-in person / role). A person's name
+   must never read as a brand, so each line names what it is. */
+.user-lines {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.user-lines .user-org,
+.user-lines .user-name,
+.user-lines .user-role {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-line-label {
+  display: inline-block;
+  min-width: 32px;
+  margin-right: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, var(--text-secondary));
+  vertical-align: 1px;
+}
+
+/* Location selector - shown only when the person may choose between more
+   than one location (workspace-level entitlements are enforced per location). */
+.ws-location-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  max-width: 260px;
+  min-width: 0;
+}
+.ws-location-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.ws-location-select {
+  min-width: 0;
+  max-width: 190px;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-field, #fff);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 8px);
+}
+@media (max-width: 640px) {
+  .ws-location-label { display: none; }
+  .ws-location-select { max-width: 140px; }
+}
+
+/* IDENTITY MUST STAY READABLE ON THE BOOKABOOST WALNUT RAIL.
+   The BookaBoost skin (index.css) paints EVERY .sidebar dark walnut, including
+   the two rails the dark-token block above deliberately excludes (the
+   Wholesale shell and the God rail), whose own styles assume a light rail.
+   Result, seen in the XD identity audit: inside Fiber Cartel's Wholesale and
+   with the owner inside Fiber Cartel, the footer's person and role lines, the
+   "Wholesale" product line and the Sign out button rendered light-on-light or
+   dark-on-dark - the identity lines were unreadable. Scoped to exactly those
+   two rails under that one skin; every other shell is untouched. */
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .user-chip,
+html:root[data-theme="bookaboost"] .sidebar.sidebar--god .user-chip {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(201, 151, 61, 0.28);
+  box-shadow: none;
+}
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .user-org,
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .user-name,
+html:root[data-theme="bookaboost"] .sidebar.sidebar--god .user-org,
+html:root[data-theme="bookaboost"] .sidebar.sidebar--god .user-name {
+  color: #ffffff;
+}
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .user-role,
+html:root[data-theme="bookaboost"] .sidebar.sidebar--god .user-role {
+  color: #e8c98f;
+}
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .user-line-label,
+html:root[data-theme="bookaboost"] .sidebar.sidebar--god .user-line-label {
+  color: rgba(255, 255, 255, 0.58);
+}
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .logout-btn,
+html:root[data-theme="bookaboost"] .sidebar.sidebar--god .logout-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.86);
+}
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .back-to-website-btn,
+html:root[data-theme="bookaboost"] .sidebar.sidebar--god .back-to-website-btn {
+  color: rgba(255, 255, 255, 0.7);
+}
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .wsx-product__name {
+  color: #e8c98f;
+}
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .wsx-product__engine,
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .nav-section-label,
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .wsx-platform__hint {
+  color: rgba(255, 255, 255, 0.62);
+}
+html:root[data-theme="bookaboost"] .layout--wholesale .sidebar .wsx-platform__toggle {
+  color: rgba(255, 255, 255, 0.88);
+}
+html:root[data-theme="bookaboost"] .sidebar.sidebar--god .brand-mark {
+  background: none;
+  -webkit-text-fill-color: #f5b544;
+  color: #f5b544;
+}
+
 .logout-btn {
   background: var(--bg-field);
   border: 1px solid var(--border-subtle);

@@ -430,44 +430,47 @@ export default function Availability() {
       {/* STATS ROW */}
       <div className="av-stats-row">
         <div className="av-stat-card">
-          <div className="av-stat-icon-wrap" style={{ background: 'rgba(47,182,255,0.12)' }}>
+          <div className="av-stat-icon-wrap" style={{ background: 'var(--pill-info-bg)' }}>
             <span style={{ fontSize: 20 }}>🕐</span>
           </div>
           <div className="av-stat-body">
-            <strong className="av-stat-value" style={{ color: '#2fb6ff' }}>
-              {loading ? '--' : (openSlots ?? '--')}
+            <strong className="av-stat-value" style={{ color: 'var(--color-primary)' }}>
+              {loading ? '—' : (openSlots ?? '—')}
             </strong>
             <span className="av-stat-label">Open slots · next 14 days</span>
+            {!loading && openSlots == null ? (
+              <span className="av-stat-note">Counted per advisor — choose one above</span>
+            ) : null}
           </div>
         </div>
         <div className="av-stat-card">
-          <div className="av-stat-icon-wrap" style={{ background: 'rgba(30,240,168,0.12)' }}>
+          <div className="av-stat-icon-wrap" style={{ background: 'var(--pill-success-bg)' }}>
             <span style={{ fontSize: 20 }}>📅</span>
           </div>
           <div className="av-stat-body">
-            <strong className="av-stat-value" style={{ color: '#1ef0a8' }}>
+            <strong className="av-stat-value" style={{ color: 'var(--color-success)' }}>
               {loading ? '--' : upcoming.length}
             </strong>
             <span className="av-stat-label">Upcoming appointments</span>
           </div>
         </div>
         <div className="av-stat-card">
-          <div className="av-stat-icon-wrap" style={{ background: 'rgba(167,139,250,0.12)' }}>
+          <div className="av-stat-icon-wrap" style={{ background: 'var(--signal-purple-dim)' }}>
             <span style={{ fontSize: 20 }}>⏱</span>
           </div>
           <div className="av-stat-body">
-            <strong className="av-stat-value" style={{ color: '#a78bfa', fontSize: 14 }}>
+            <strong className="av-stat-value" style={{ color: 'var(--signal-purple)', fontSize: 14 }}>
               {fmtTime(bsStartTime)} – {fmtTime(bsEndTime)}
             </strong>
             <span className="av-stat-label">Working hours · {bsDays.length}d/wk</span>
           </div>
         </div>
         <div className="av-stat-card">
-          <div className="av-stat-icon-wrap" style={{ background: 'rgba(248,113,113,0.12)' }}>
+          <div className="av-stat-icon-wrap" style={{ background: 'var(--pill-danger-bg)' }}>
             <span style={{ fontSize: 20 }}>🚫</span>
           </div>
           <div className="av-stat-body">
-            <strong className="av-stat-value" style={{ color: '#f87171' }}>
+            <strong className="av-stat-value" style={{ color: 'var(--color-danger)' }}>
               {loading ? '--' : blocks.length}
             </strong>
             <span className="av-stat-label">Active time blocks</span>

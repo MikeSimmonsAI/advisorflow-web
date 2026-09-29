@@ -598,7 +598,7 @@ function Coach ({ collapsed, setCollapsed, scenarios, scenarioKey, setScenarioKe
                                           letterSpacing: '.1em', textTransform: 'uppercase' }}>
                 Step {current.index + 1} of {steps.length}
               </div>
-              <div style={{ color: '#fff', fontSize: 14, margin: '4px 0 10px' }}>
+              <div style={{ color: 'var(--ds-head)', fontSize: 14, margin: '4px 0 10px' }}>
                 {current.label}
               </div>
 

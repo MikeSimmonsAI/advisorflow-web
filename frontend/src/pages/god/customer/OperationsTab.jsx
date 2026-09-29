@@ -2,6 +2,7 @@
    observed them. "Configured" means stored, never "tested against a provider". */
 import { useNavigate } from 'react-router-dom'
 import { Pill } from './ccShared'
+import TelephonySection from './TelephonySection'
 
 const OLD_TONE = { CONFIGURED: 'good', PARTIAL: 'warn', NOT_CONFIGURED: 'bad', NONE: 'neutral' }
 
@@ -65,6 +66,8 @@ export default function OperationsTab({ cc, onEnter }) {
           )}
         </ul>
       </section>
+
+      <TelephonySection orgId={cc.header?.id} />
 
       {sms && (
         <section className="occ-card">

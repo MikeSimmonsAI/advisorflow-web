@@ -14,6 +14,8 @@ import '../../styles/shared.css'
 import './intake.css'
 import { EMAIL_LABEL, OrgBanner, Pill, RowTable, SMS_LABEL, STATUS_LABEL, STATUS_TONE, Tile,
          errorText, fmt } from './intakeShared'
+import { approveEnabled, commitGate, isAnalyzed, reachableStep, resolveStep, stepAfterCommit
+       } from './importSteps'
 
 const STEPS = ['Upload', 'Map Fields', 'Analyze & Clean', 'Classify', 'Review Problems',
                'Approve Import', 'Import Results']
@@ -21,20 +23,6 @@ const PIPELINE = [['parsing', 'Parsing'], ['normalizing', 'Normalizing'],
                   ['deduplicating', 'Deduplicating'], ['matching', 'Matching'],
                   ['classifying', 'Classifying'], ['analyzing', 'Analyzing'],
                   ['ready_for_review', 'Ready for Review']]
-
-function stepFor(batch) {
-  if (!batch) return 1
-  // The server decides from persisted state (analysis done, classification
-  // confirmed, staged, committed) so refresh / Back / the ledger all agree.
-  if (batch.workflow?.step) return batch.workflow.step
-  const s = batch.status
-  if (s === 'mapping' || s === 'failed' && !batch.analysis?.status) return 2
-  if (s === 'processing') return 3
-  if (['committing', 'committed', 'partially_committed', 'rolled_back',
-       'partially_rolled_back'].includes(s)) return 7
-  if (s === 'staged') return 6
-  return 3
-}
 
 export default function ImportWizard() {
   const { batchId } = useParams()
@@ -48,14 +36,8 @@ export default function ImportWizard() {
   const urlStep = Number(params.get('step'))
   // Never show a step the batch cannot be on: a stale ?step=6 on a batch that
   // has since been re-mapped falls back to where the server says it is.
-  const serverStep = batch ? stepFor(batch) : 0
-  const reachable = !batch ? 1
-    : (batch.status === 'staged' || serverStep === 7) ? 7      // a staged batch can show its results
-    : (batch.workflow?.analyzed || batch.analysis?.status) ? 6 : 2
-  const step = !batch ? (urlStep || (batchId ? 0 : 1))    // still loading: steps 2-7 render nothing yet
-    : serverStep === 7 ? 7
-    : (urlStep >= 1 && urlStep <= reachable) ? urlStep
-    : (serverStep || 1)
+  // Step gating lives in ./importSteps (pure, unit-tested).
+  const step = resolveStep(batch, urlStep, !!batchId)
   // While the server is (re)analyzing, whichever of steps 3-5 asked for it
   // shows progress, and the same step renders the result when it finishes.
   const working = batch && ['processing', 'interrupted'].includes(batch.status) && step >= 3 && step <= 5
@@ -138,20 +120,22 @@ export default function ImportWizard() {
                                           onNext={() => goStep(6)} />}
       {step === 6 && batch && <ApproveStep batch={batch} ctx={ctx} reload={load}
                                            onReview={tab => setParams(p => { const q = new URLSearchParams(p); q.set('step', 5); q.set('tab', tab); return q })}
-                                           onCommitted={() => { load(); goStep(7) }}
+                                           onCommitted={mode => { load(); goStep(stepAfterCommit(mode)) }}
                                            onCancelled={() => navigate('/imports')} />}
-      {step === 7 && batch && <ResultsStep batch={batch} onLedger={() => navigate(`/imports?batch=${batch.id}`)} />}
+      {step === 7 && batch && <ResultsStep batch={batch} onLedger={() => navigate(`/imports?batch=${batch.id}`)}
+                                           onApprove={() => goStep(6)} />}
     </div>
   )
 }
 
 function Stepper({ step, batch, onGo }) {
-  const analyzed = !!batch?.analysis?.status
+  const analyzed = isAnalyzed(batch)
+  const reach = reachableStep(batch)
   return (
     <ol className="ic-stepper">
       {STEPS.map((label, i) => {
         const n = i + 1
-        const reachable = batch && (n <= 2 || analyzed)
+        const reachable = batch && (n <= 2 || (analyzed && n <= reach))
         return (
           <li key={label} className={`ic-step ${n === step ? 'ic-step--on' : ''} ${n < step ? 'ic-step--done' : ''}`}>
             <button type="button" disabled={!reachable} onClick={() => onGo(n)}>
@@ -723,16 +707,18 @@ function ApproveStep({ batch, ctx, reload, onReview, onCommitted, onCancelled })
     api.get(`/intake/batches/${batch.id}/commit-preview?mode=${mode}&include_enrichment=${enrich}`)
       .then(setPv).catch(e => setErr(errorText(e)))
   }, [batch.id, mode, enrich])
-  const orgName = ctx?.organization_name || ''
-  const confirmed = mode === 'stage_only' || typed.trim().toLowerCase() === orgName.trim().toLowerCase()
-  const committable = ['ready_for_review', 'staged', 'partially_committed'].includes(batch.status)
+  const orgName = ctx?.organization_name || pv?.organization_name || ''
+  const gate = commitGate(batch)
+  const canPress = approveEnabled(batch, mode, typed, orgName, busy)
 
   async function go() {
     setBusy(true); setErr('')
     try {
       await api.post(`/intake/batches/${batch.id}/commit`, { mode, include_enrichment: enrich,
         confirm_organization_name: mode === 'stage_only' ? null : typed })
-      if (mode === 'stage_only') { reload() } else { onCommitted() }
+      // Every successful decision - including "Keep staged" - moves on to
+      // Step 7, which reports what happened (or that everything is staged).
+      onCommitted(mode)
     } catch (e) { setErr(errorText(e)) }
     finally { setBusy(false) }
   }
@@ -782,11 +768,12 @@ function ApproveStep({ batch, ctx, reload, onReview, onCommitted, onCancelled })
           <input className="settings-input" value={typed} onChange={e => setTyped(e.target.value)} placeholder={orgName} />
         </div>
       )}
+      {!gate.ok && <div className="ic-warn" data-testid="commit-blocked">{gate.reason}</div>}
       {err && <div className="ic-error">{err}</div>}
       <div className="ic-actions">
         <button className="btn btn--danger" onClick={cancel} disabled={busy}>Cancel batch</button>
         <button className={`btn ${mode === 'stage_only' ? 'btn--secondary' : 'btn--primary'} btn--lg`}
-                disabled={busy || !confirmed || !committable} onClick={go}>
+                disabled={!canPress} onClick={go}>
           {busy ? 'Working…' : mode === 'stage_only' ? 'Keep staged (no import)' : `Import into ${orgName}`}
         </button>
       </div>
@@ -796,7 +783,7 @@ function ApproveStep({ batch, ctx, reload, onReview, onCommitted, onCancelled })
 
 // ── 7. Results ──────────────────────────────────────────────────────────────
 
-function ResultsStep({ batch, onLedger }) {
+function ResultsStep({ batch, onLedger, onApprove }) {
   const r = batch.commit_report || {}
   if (batch.status === 'committing') {
     return (
@@ -830,7 +817,15 @@ function ResultsStep({ batch, onLedger }) {
       {(r.errors || []).length > 0 && (
         <div className="ic-error">{r.errors.map(e => <div key={e.row}>Row {e.row}: {e.error}</div>)}</div>
       )}
+      {batch.status === 'staged' && (
+        <div className="ic-note">Everything in this batch is <b>staged</b> — nothing is in the CRM yet. Import it
+          whenever you are ready from Approve Import.</div>
+      )}
       <div className="ic-actions">
+        {['staged', 'partially_committed'].includes(batch.status) && (
+          <button className="btn btn--secondary" onClick={onApprove}>
+            {batch.status === 'staged' ? '← Import staged rows' : '← Import remaining staged rows'}</button>
+        )}
         <button className="btn btn--primary" onClick={onLedger}>Open in Import Ledger</button>
       </div>
     </section>

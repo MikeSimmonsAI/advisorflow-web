@@ -58,7 +58,9 @@ export default function ProfileOnboarding() {
   const user = getCurrentUser()
   const [profile, setProfile] = useState(null)
   // On a phone the full card would cover most of the page; start as the tab.
-  const [minimized, setMinimized] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640)
+  // Starts as the compact pill at every width: expanded by default it sat over
+  // the bottom-right action buttons of full pages (import wizard, drawers).
+  const [minimized, setMinimized] = useState(true)
   const [saving, setSaving] = useState(false)
   const [activeField, setActiveField] = useState(null)
   const [fieldValue, setFieldValue] = useState('')

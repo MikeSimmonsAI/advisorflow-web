@@ -105,6 +105,15 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
                                               EvoSenseFact.property_id == prop.id,
                                               EvoSenseFact.superseded.is_(False)).all())}
     seller = {}
+    if (person is None or not person.lead_id):
+        # NO CONVERSATION YET, BUT A PERSON ENTERED / A LOOKUP FOUND A CONTACT.
+        # The owner contact on file becomes the deal's seller through the same
+        # canonical attach_seller path (which reuses an existing Lead in this
+        # workspace with the same phone/email/name-at-address). Nothing about
+        # consent is written: a found or typed number is not permission.
+        manual = _seller_from_contacts(db, org_id, prop)
+        if manual is not None:
+            WS.attach_seller(db, org_id, user, wprop, manual)
     if person is not None and person.lead_id:
         seller["lead_id"] = person.lead_id
         seller["owner_status"] = {"owner": "owner_of_record", "co_owner": "owner_of_record",
@@ -195,6 +204,38 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
     EV.refresh_status(db, prop)
     return {"already": False, "deal_id": deal.id, "property_id": wprop.id,
             "acquisition_cost_cents": spend}
+
+
+def _seller_from_contacts(db, org_id, prop):
+    """Seller data for attach_seller from the ACTIVE contact points on file
+    (manual or provider), or None when there is nothing to attach. Only the
+    person's name as recorded and the values themselves - nothing inferred."""
+    from app.models.evosense_models import EvoSenseContactPoint
+    owner = CT.primary_owner(db, prop)
+    if owner is None:
+        return None
+    cps = (db.query(EvoSenseContactPoint)
+           .filter(EvoSenseContactPoint.organization_id == org_id,
+                   EvoSenseContactPoint.owner_id == owner.id,
+                   EvoSenseContactPoint.status == "active")
+           .order_by(EvoSenseContactPoint.first_seen_at.asc()).all())
+    if not cps:
+        return None
+    verified = [c for c in cps if getattr(c, "verified_at", None)]
+    lead_cp = (verified or cps)[0]
+    person = db.query(EvoSensePerson).filter(EvoSensePerson.id == lead_cp.person_id).first()
+    same = [c for c in cps if c.person_id == lead_cp.person_id]
+    phone = next((c.raw_value or c.value for c in same if c.kind == "phone"), None)
+    email = next((c.value for c in same if c.kind == "email"), None)
+    name = person.full_name if person is not None else None
+    if not name or name.startswith("Unnamed contact"):
+        name = owner.display_name if owner.owner_type in ("individual", "unknown") else None
+    first, _, last = (name or "").strip().partition(" ")
+    return {"first_name": first or None, "last_name": last or None, "phone": phone, "email": email,
+            "owner_status": {"owner": "owner_of_record", "co_owner": "owner_of_record",
+                             "heir": "heir", "executor": "heir"}.get(getattr(person, "role", None), "unknown"),
+            "relationship_note": "Owner contact from EvoSense (%s) - not verified by conversation"
+                                 % (lead_cp.source or "unknown source")}
 
 
 def _acq(db, prop):

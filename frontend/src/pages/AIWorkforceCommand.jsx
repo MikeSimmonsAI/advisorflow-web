@@ -34,6 +34,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
 import '../styles/shared.css'
+import '../styles/aiWorkforce.css'
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
@@ -76,15 +77,17 @@ function Value ({ entry, suffix = '' }) {
 }
 
 function Stat ({ label, entry, hint }) {
+  const unknown = !entry || entry.value === null || entry.value === undefined
+  // An unknown figure says so in words — a lone dash in an empty box reads as
+  // a broken tile.
+  const note = hint || (unknown ? (entry?.note || 'Not yet available') : '')
   return (
-    <div className="panel" style={{ padding: 14, minWidth: 150 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 600, lineHeight: 1.2 }}>
+    <div className="wf-stat">
+      <div className="wf-stat__label">{label}</div>
+      <div className="wf-stat__value">
         <Value entry={entry} />
       </div>
-      {hint ? (
-        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{hint}</div>
-      ) : null}
+      {note ? <div className="wf-stat__hint">{note}</div> : null}
     </div>
   )
 }
@@ -369,11 +372,11 @@ export default function AIWorkforceCommand () {
       {err ? <div className="panel panel--error">{err}</div> : null}
       {loading ? <div className="panel">Loading…</div> : null}
 
-      <nav className="panel" style={{ display: 'flex', gap: 6, flexWrap: 'wrap',
-                                      padding: 8, marginBottom: 12 }}>
+      <nav className="wf-tabs" aria-label="Workforce Command sections">
         {TABS.map(t => (
           <button key={t.key}
-                  className={`btn ${tab === t.key ? '' : 'btn--ghost'}`}
+                  className={`btn btn--sm ${tab === t.key ? 'btn--primary' : 'btn--ghost'}`}
+                  aria-current={tab === t.key ? 'page' : undefined}
                   onClick={() => setParams({ tab: t.key })}>
             {t.label}
             {t.key === 'attention' && attention?.total
@@ -389,7 +392,7 @@ export default function AIWorkforceCommand () {
               manager should have to click back to. */}
           <div className="panel"
                style={{ padding: 14, marginBottom: 12,
-                        borderLeft: `4px solid var(--${critical ? 'danger' : 'border'}, #ccc)` }}>
+                        borderLeft: `4px solid var(${critical ? '--color-danger' : '--color-primary'})` }}>
             <strong>{overview.headline}</strong>
             {readOnly ? (
               <span className="badge badge--neutral" style={{ marginLeft: 8 }}>
@@ -427,8 +430,7 @@ function Overview ({ data, onAct, busy, readOnly }) {
   const items = (data.attention?.items || []).slice(0, 5)
   return (
     <>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
-                    marginBottom: 12 }}>
+      <div className="wf-stat-grid">
         <Stat label="Working" entry={{ value: data.workforce?.working }} />
         <Stat label="Needs a person"
               entry={{ value: waiting.needs_a_person }} />
@@ -447,8 +449,14 @@ function Overview ({ data, onAct, busy, readOnly }) {
             <AttentionRow key={item.id} item={item} onAct={onAct} busy={busy}
                           readOnly={readOnly} />
           ))
-        : <div className="panel" style={{ padding: 14 }}>
-            Nothing needs you right now.
+        : <div className="panel wf-empty">
+            <strong>No open items.</strong>
+            <span>
+              Hand-offs, exceptions and failed quality checks from your AI
+              employees land here, most urgent first. There are none open
+              right now{data.workforce?.employees === 0 ? ' — and no AI employees are hired yet' : ''}.
+            </span>
+            <a className="btn btn--sm btn--secondary" href="/ai-workforce">Open My AI Workforce</a>
           </div>}
 
       {data.findings?.findings?.length ? (
@@ -492,8 +500,7 @@ function Attention ({ data, onAct, busy, readOnly }) {
   const counts = data.attention?.by_severity || {}
   return (
     <>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
-                    marginBottom: 12 }}>
+      <div className="wf-stat-grid">
         {['critical', 'high', 'normal', 'low'].map(level => (
           <Stat key={level} label={level} entry={{ value: counts[level] || 0 }} />
         ))}
@@ -503,8 +510,14 @@ function Attention ({ data, onAct, busy, readOnly }) {
             <AttentionRow key={item.id} item={item} onAct={onAct} busy={busy}
                           readOnly={readOnly} />
           ))
-        : <div className="panel" style={{ padding: 14 }}>
-            Nothing needs you right now.
+        : <div className="panel wf-empty">
+            <strong>No open items.</strong>
+            <span>
+              Hand-offs, exceptions and failed quality checks from your AI
+              employees land here, most urgent first. There are none open
+              right now{data.workforce?.employees === 0 ? ' — and no AI employees are hired yet' : ''}.
+            </span>
+            <a className="btn btn--sm btn--secondary" href="/ai-workforce">Open My AI Workforce</a>
           </div>}
     </>
   )
@@ -795,7 +808,7 @@ function Exceptions ({ data, onEscalate, busy, readOnly }) {
                 {item.platform_suspected && !readOnly ? (
                   <button className="btn btn--ghost" disabled={busy}
                           onClick={() => onEscalate(item)}>
-                    This looks like AdvisorFlow — escalate
+                    This looks like a platform issue — escalate
                   </button>
                 ) : null}
               </div>
@@ -823,8 +836,7 @@ function Costs ({ data }) {
       </div>
 
       <h3>What was used</h3>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
-                    marginBottom: 12 }}>
+      <div className="wf-stat-grid">
         {['actions', 'messages_sms', 'messages_email', 'calls', 'runs',
           'voice_seconds'].map(k => (
             <Stat key={k} label={k.replace(/_/g, ' ')}
@@ -833,8 +845,7 @@ function Costs ({ data }) {
       </div>
 
       <h3>What it may have cost</h3>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
-                    marginBottom: 12 }}>
+      <div className="wf-stat-grid">
         <Stat label="Estimated (operations)"
               entry={{ value: estimated.operations_usd }} hint="estimate" />
         <Stat label="Estimated (models)"

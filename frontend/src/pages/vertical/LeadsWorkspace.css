@@ -16,16 +16,19 @@
 .lw-hero {
   display: flex; align-items: center; gap: 28px; flex-wrap: wrap;
   padding: 26px 30px; margin-bottom: 18px; border-radius: var(--radius-lg, 14px);
-  background: linear-gradient(120deg, var(--energy-navy, #0f2a4d) 0%, #16345f 60%, #1b4478 100%);
-  color: #fff; overflow: hidden;
+  /* Light card like every other surface (approved Atlantis design); the
+     brand shows in the accent rule and the navy type, not a dark slab. */
+  background: var(--surface-card); border: 1px solid var(--border-default);
+  border-left: 4px solid var(--signal-blue); box-shadow: var(--shadow-sm);
+  color: var(--text-strong); overflow: hidden;
 }
 .lw-hero-brand { display: flex; align-items: center; min-width: 0; }
 .lw-hero-logo { max-height: 64px; max-width: 220px; object-fit: contain; }
-.lw-hero-name { font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
-.lw-hero-title { border-left: 1px solid rgba(255,255,255,0.25); padding-left: 28px; min-width: 0; }
-.lw-hero-title h1 { margin: 0; font-family: var(--font-display); font-size: 30px; font-weight: 700; color: #fff; }
-.lw-hero-title p { margin: 6px 0 0; font-size: 15px; color: rgba(255,255,255,0.85); }
-.lw-hero-tagline { margin-left: auto; font-style: italic; font-size: 17px; color: rgba(255,255,255,0.9); max-width: 260px; text-align: right; }
+.lw-hero-name { font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--energy-navy, var(--text-strong)); }
+.lw-hero-title { border-left: 1px solid var(--border-default); padding-left: 28px; min-width: 0; }
+.lw-hero-title h1 { margin: 0; font-family: var(--font-display); font-size: 30px; font-weight: 700; color: var(--text-strong); }
+.lw-hero-title p { margin: 6px 0 0; font-size: 15px; color: var(--text-body); }
+.lw-hero-tagline { margin-left: auto; font-style: italic; font-size: 17px; color: var(--text-body); max-width: 260px; text-align: right; }
 
 /* ── buttons / links ────────────────────────────────────────────────────── */
 .lw-btn {

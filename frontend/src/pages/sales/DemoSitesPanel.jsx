@@ -1,7 +1,7 @@
 ﻿/**
  * Publish a prospect demo onto our own domain, from the deal it belongs to.
  *
- * The backend for this has existed since demo sites were built â€” publish, list
+ * The backend for this has existed since demo sites were built — publish, list
  * and revoke were all there. What was missing was any way to reach it without
  * an API client, so every demo had to be posted by hand and the link pasted
  * into the deal by hand after that.
@@ -9,7 +9,7 @@
  * TWO SLOTS, NOT TWO VERSIONS. A deal can carry a platform walkthrough and a
  * website concept at the same time; they are different artifacts, so
  * publishing one never touches the other's link. Only the platform slot is
- * "this deal's demo" â€” publishing a website concept deliberately does not mark
+ * "this deal's demo" — publishing a website concept deliberately does not mark
  * the demo build ready, because it would tell the pipeline something untrue.
  *
  * REPUBLISHING MINTS A NEW TOKEN. The old link keeps working unless "retire
@@ -77,7 +77,7 @@ export default function DemoSitesPanel({ opp, onChanged }) {
     if (!f) return
     if (f.size > MAX_HTML_BYTES) {
       setError(`That file is ${(f.size / 1024 / 1024).toFixed(1)}MB. `
-               + 'The limit is 2MB â€” inline images as data URIs sparingly.')
+               + 'The limit is 2MB — inline images as data URIs sparingly.')
       e.target.value = ''
       return
     }
@@ -98,7 +98,7 @@ export default function DemoSitesPanel({ opp, onChanged }) {
   }
 
   async function publish() {
-    if (!title.trim()) { setError('Give it a title â€” the prospect sees it.'); return }
+    if (!title.trim()) { setError('Give it a title — the prospect sees it.'); return }
     if (!html.trim()) { setError('Choose the HTML file first.'); return }
     setBusy(true); setError(null); setSlugError(null)
     try {
@@ -166,7 +166,7 @@ export default function DemoSitesPanel({ opp, onChanged }) {
 
       <ErrorBar error={error} onRetry={load} />
 
-      {demos === null ? <div className="sw-subtle">Loadingâ€¦</div> : null}
+      {demos === null ? <div className="sw-subtle">Loading…</div> : null}
 
       {demos !== null && live.length === 0 && past.length === 0 ? (
         <Empty title="No demo published yet">
@@ -182,12 +182,12 @@ export default function DemoSitesPanel({ opp, onChanged }) {
               <b>{d.title}</b>
               <div className="sw-subtle">
                 {SLOTS.find(s => s[0] === (d.slot || 'platform'))?.[1] || d.slot}
-                {' Â· '}
+                {' · '}
                 {d.view_count
                   ? `${d.view_count} view${d.view_count === 1 ? '' : 's'}`
                   : 'not opened yet'}
-                {d.last_viewed_at ? ` Â· last ${dateTime(d.last_viewed_at)}` : ''}
-                {d.expires_at ? ` Â· expires ${dateTime(d.expires_at)}` : ''}
+                {d.last_viewed_at ? ` · last ${dateTime(d.last_viewed_at)}` : ''}
+                {d.expires_at ? ` · expires ${dateTime(d.expires_at)}` : ''}
               </div>
             </div>
             <div className="sw-flex" style={{ gap: 8, flex: '0 0 auto' }}>
@@ -208,7 +208,7 @@ export default function DemoSitesPanel({ opp, onChanged }) {
 
       {past.length ? (
         <div className="sw-subtle sw-mt">
-          {past.length} retired link{past.length === 1 ? '' : 's'} â€” no longer opens.
+          {past.length} retired link{past.length === 1 ? '' : 's'} — no longer opens.
         </div>
       ) : null}
 
@@ -242,7 +242,7 @@ export default function DemoSitesPanel({ opp, onChanged }) {
                    onChange={pickFile} />
             {fileName ? (
               <div className="sw-subtle">
-                {fileName} Â· {(new Blob([html]).size / 1024).toFixed(0)}KB
+                {fileName} · {(new Blob([html]).size / 1024).toFixed(0)}KB
               </div>
             ) : (
               <div className="sw-subtle">
@@ -275,7 +275,7 @@ export default function DemoSitesPanel({ opp, onChanged }) {
             <span>
               Retire the current link in this slot
               <span className="sw-subtle">
-                {' '}â€” leave off and any link the prospect already has keeps working
+                {' '}— leave off and any link the prospect already has keeps working
               </span>
             </span>
           </label>
@@ -284,7 +284,7 @@ export default function DemoSitesPanel({ opp, onChanged }) {
             <button className="sw-btn" disabled={busy}
                     onClick={() => { setOpen(false); setError(null); setSlugError(null); setSlugTouched(false) }}>Cancel</button>
             <button className="sw-btn sw-primary" disabled={busy} onClick={publish}>
-              {busy ? 'Publishingâ€¦' : 'Publish and copy link'}
+              {busy ? 'Publishing…' : 'Publish and copy link'}
             </button>
           </div>
         </div>

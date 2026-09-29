@@ -145,6 +145,34 @@ export function canEnterProduct(branding, user, orgContext, module, featureKey) 
   return !routeFeatureDenied(featureKey, branding, user, orgContext)
 }
 
+/* ── rule 4: which LOCATION (entitlement "workspace") this answer is for ─── */
+
+/**
+ * Workspace-level overrides are ENFORCED on the server (require_feature and
+ * /branding/org resolve the request's location). The branding answer this
+ * shell renders from is therefore ALREADY the answer for the active location:
+ * `enabled_features` and `platform.offered` exclude anything the location
+ * switched off, so `featureEnabled`, `routeFeatureDenied` and
+ * `canEnterProduct` need no location logic of their own — and must not grow
+ * any, or the browser would start disagreeing with the server again.
+ *
+ * What the shell does need is WHAT TO OFFER IN THE SELECTOR: the locations the
+ * server says this person may select, and only when there is a real choice
+ * (more than one) and the server advertised a header the browser may send.
+ */
+export function workspaceLocationChoices(branding) {
+  const wl = branding && branding.workspace_location
+  if (!wl || !wl.header || !Array.isArray(wl.available)) return []
+  return wl.available.length > 1 ? wl.available : []
+}
+
+/** The location the server resolved for this answer, or null (organization
+ *  level, or several locations evaluated most-restrictively). */
+export function activeLocationId(branding) {
+  const wl = branding && branding.workspace_location
+  return (wl && wl.selected && wl.selected.id) || null
+}
+
 /* ── role ─────────────────────────────────────────────────────────────────── */
 
 /**

@@ -90,19 +90,21 @@ const S = {
     pointerEvents: 'auto',
     display: 'flex', alignItems: 'flex-start', gap: 10,
     padding: '11px 12px', borderRadius: 10,
-    border: '1px solid', boxShadow: '0 6px 24px rgba(8,12,20,0.28)',
+    border: '1px solid', boxShadow: '0 6px 24px rgba(16,32,64,0.16)',
     font: 'inherit', fontSize: 13.5, lineHeight: 1.5,
   },
   kind: {
-    success: { background: '#0f2e21', borderColor: '#1f6b4c', color: '#c8f3de' },
-    error:   { background: '#33161a', borderColor: '#7d2b34', color: '#ffd4d8' },
-    warning: { background: '#33290f', borderColor: '#7d621f', color: '#ffe9bd' },
-    info:    { background: '#152232', borderColor: '#2f4c6e', color: '#d3e4f7' },
+    // Light-system pill tones (styles/appearance.css); the toasts were the
+    // last dark slabs floating over every light page.
+    success: { background: '#e7f6ef', borderColor: '#bfe6d4', color: '#0a6e4c' },
+    error:   { background: '#fdecef', borderColor: '#f3c5d0', color: '#a8173c' },
+    warning: { background: '#fdf3e1', borderColor: '#efd9ad', color: '#8a520a' },
+    info:    { background: '#e8f0ff', borderColor: '#c6d7ff', color: '#1a4fd6' },
   },
   icon: {
     flex: '0 0 auto', width: 18, height: 18, borderRadius: 9,
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: 12, fontWeight: 700, background: 'rgba(255,255,255,0.12)', marginTop: 1,
+    fontSize: 12, fontWeight: 700, background: 'rgba(16,32,64,0.07)', marginTop: 1,
   },
   body: { flex: '1 1 auto', minWidth: 0 },
   title: { fontWeight: 700, marginBottom: 2 },

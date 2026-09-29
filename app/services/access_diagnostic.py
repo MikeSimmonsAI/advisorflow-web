@@ -135,6 +135,7 @@ _GUARDED_SURFACES = (
     ("/cadence", "cadences"),
     ("/audit-log", "audit_log"),
     ("/tier-config", "tier_config"),
+    ("/wholesale", "wholesale_real_estate"),
 )
 
 

@@ -18,6 +18,7 @@ import {
   Skeleton, Status, Tag, moneyK, shortDate, statusLabel,
 } from '../ds/ds'
 import '../ds/evo-pages.css'
+import './evo-actions.css'
 
 const PAGE = 50
 // The order an operator scans the buckets in: what needs them first.
@@ -215,6 +216,15 @@ export default function EvoInbox() {
                           <Status status={p.status} />
                           <span className="evo-next">{p.next_action || '—'}</span>
                         </span>
+                        {p.next_step ? (
+                          <Link className={`evo-nextstep evo-nextstep--${p.next_step.tone || 'default'}`}
+                                data-testid="inbox-next-step"
+                                to={p.next_step.href || `/wholesale/evosense/property/${p.id}#actions`}
+                                title={p.next_step.reason || 'Open the property to do this'}
+                                onClick={(e) => e.stopPropagation()}>
+                            {p.next_step.label} →
+                          </Link>
+                        ) : null}
                       </td>
                       <td data-label="Found" className="evo-nowrap">{shortDate(p.discovered_at)}</td>
                     </tr>

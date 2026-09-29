@@ -24,8 +24,10 @@ import {
   Alert, EvoApp, Hero, Metric, Metrics, PageSkeleton, Panel, SandboxTag, TabBar, Tag, Tile, ago, cents, humanize,
 } from '../ds/ds'
 import '../ds/evo-pages.css'
+import './controls-tabs.css'
 import EvoEvaluation from './EvoEvaluation'
 import EvoLists from './EvoLists'
+import SkipTraceCostPanel from '../ops/SkipTraceCostPanel'
 
 const SWITCHES = [
   ['paused_all', 'Engine', 'Everything: hunting, lookups and outreach. Seller replies are still saved and opt-outs still honoured.'],
@@ -134,7 +136,7 @@ export default function EvoControls() {
   const [tab, setTab] = useState(() => {
     const h = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : ''
     if (h === 'budget') return 'usage'
-    return ['sources', 'providers', 'capabilities', 'evaluation', 'lists', 'controls', 'usage'].includes(h) ? h : 'providers'
+    return ['sources', 'providers', 'capabilities', 'evaluation', 'skipcost', 'lists', 'controls', 'usage'].includes(h) ? h : 'providers'
   })
 
   const load = useCallback(async () => {
@@ -214,6 +216,7 @@ export default function EvoControls() {
                 { key: 'sources', label: 'Source Registry', count: reg ? reg.sources.filter((x) => x.operational).length + ' operational' : null },
                 { key: 'providers', label: 'Service Providers', count: prov.providers.length },
                 { key: 'evaluation', label: 'Provider Evaluation' },
+                { key: 'skipcost', label: 'Skip-trace Costs' },
                 { key: 'lists', label: 'Distress Lists' },
                 { key: 'capabilities', label: 'Capability Registry', count: capReg ? capReg.capabilities.filter((x) => x.state === 'OPERATIONAL').length + ' operational' : null },
                 { key: 'controls', label: 'Controls & Compliance', count: pausedCount ? `${pausedCount} paused` : null },
@@ -350,6 +353,10 @@ export default function EvoControls() {
 
       <div className="evo-stack" role="tabpanel" id="panel-evaluation" aria-labelledby="tab-evaluation" hidden={tab !== 'evaluation'}>
         {tab === 'evaluation' ? <EvoEvaluation /> : null}
+      </div>
+
+      <div className="evo-stack" role="tabpanel" id="panel-skipcost" aria-labelledby="tab-skipcost" hidden={tab !== 'skipcost'}>
+        {tab === 'skipcost' ? <SkipTraceCostPanel /> : null}
       </div>
 
       <div className="evo-stack" role="tabpanel" id="panel-lists" aria-labelledby="tab-lists" hidden={tab !== 'lists'}>

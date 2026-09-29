@@ -137,6 +137,37 @@ html:root {
   --glow-red-md:    0 2px 10px rgba(211, 31, 75, 0.16);
   --glow-amber-md:  0 2px 10px rgba(168, 101, 15, 0.16);
 
+  /* ── Orphan token names ────────────────────────────────────────────────
+     Older pages reference these names, which no layer ever defined, so each
+     use fell through to its hard-coded DARK fallback (`var(--surface-1,
+     #1a1a24)` painted a charcoal modal; `var(--surface-0, #0f1623)` a black
+     CRM drawer) or to nothing at all (a modal with no background). Defining
+     them once here converges every such page on the light system. */
+  --surface:        var(--surface-card);
+  --surface-0:      var(--surface-card);
+  --surface-1:      var(--surface-card);
+  --surface-2:      var(--surface-sunken);
+  --surface-3:      #edf1f7;
+  --surface-base:   var(--surface-card);
+  --surface-glass:  var(--surface-card);
+  --bg-app:         var(--surface-page);
+  --bg-secondary:   var(--surface-sunken);
+  --bg-surface:     var(--surface-sunken);
+  --bg-input:       var(--bg-field);
+  --input-bg:       var(--bg-field);
+  --glass-bg:       var(--surface-sunken);
+  --glass-border:   var(--border-default);
+  --border-color:   var(--border-default);
+  --border-hover:   var(--border-strong);
+  --hover-bg:       var(--surface-hover);
+  --code-bg:        var(--surface-sunken);
+  --text-dim:       var(--text-muted);
+  --accent-blue:    var(--color-primary);
+  --color-warning-bg: var(--pill-warning-bg);
+  --success:        var(--color-success);
+  --warning:        var(--color-warning);
+  --error:          var(--color-danger);
+
   /* Native controls (scrollbars, date pickers, <select> lists) render light. */
   color-scheme: light;
 }

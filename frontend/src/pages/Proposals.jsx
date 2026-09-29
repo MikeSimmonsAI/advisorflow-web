@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 
 const STATUS_COLORS = {
-  draft: { bg: 'rgba(255,255,255,0.06)', text: '#aab' },
-  published: { bg: 'rgba(25,214,124,0.15)', text: '#19d67c' },
-  archived: { bg: 'rgba(255,255,255,0.06)', text: '#666' },
+  draft: { bg: 'var(--surface-sunken)', text: 'var(--text-muted)' },
+  published: { bg: 'var(--pill-success-bg)', text: 'var(--color-success)' },
+  archived: { bg: 'var(--surface-sunken)', text: 'var(--text-muted)' },
 }
 
 export default function Proposals() {
@@ -77,8 +77,8 @@ export default function Proposals() {
             onClick={e => e.stopPropagation()}
             onSubmit={handleCreate}
             style={{
-              background: 'var(--bg-card, #081224)',
-              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'var(--surface-card)',
+              border: '1px solid var(--border-default)',
               borderRadius: 16,
               padding: 32,
               width: 480,
@@ -95,7 +95,7 @@ export default function Proposals() {
               { key: 'client_email', label: 'Client Email', placeholder: 'sarah@acme.com', type: 'email' },
             ].map(f => (
               <div key={f.key} style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#aab', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   {f.label}{f.required ? ' *' : ''}
                 </label>
                 <input
@@ -106,8 +106,8 @@ export default function Proposals() {
                   onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
                   style={{
                     width: '100%', boxSizing: 'border-box',
-                    background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'var(--surface-sunken)',
+                    border: '1px solid var(--border-default)',
                     borderRadius: 8, padding: '10px 12px',
                     color: 'var(--text-primary, #fff)', fontSize: 14,
                     outline: 'none',
@@ -120,8 +120,8 @@ export default function Proposals() {
                 type="button"
                 onClick={() => setShowNew(false)}
                 style={{
-                  flex: 1, background: 'rgba(255,255,255,0.06)', color: '#aab',
-                  border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8,
+                  flex: 1, background: 'var(--surface-sunken)', color: 'var(--text-muted)',
+                  border: '1px solid var(--border-default)', borderRadius: 8,
                   padding: '10px', fontSize: 14, cursor: 'pointer',
                 }}
               >
@@ -146,19 +146,19 @@ export default function Proposals() {
 
       {/* List */}
       {loading ? (
-        <div style={{ color: '#666', textAlign: 'center', padding: 64 }}>Loading…</div>
+        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 64 }}>Loading…</div>
       ) : proposals.length === 0 ? (
         <div style={{
           textAlign: 'center', padding: '80px 32px',
-          background: 'rgba(255,255,255,0.02)',
-          border: '1px dashed rgba(255,255,255,0.1)',
+          background: 'var(--surface-sunken)',
+          border: '1px dashed var(--border-default)',
           borderRadius: 16,
         }}>
           <div style={{ fontSize: 40, marginBottom: 16 }}>📄</div>
           <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary, #fff)', marginBottom: 8 }}>
             No proposals yet
           </div>
-          <div style={{ color: '#666', fontSize: 14, marginBottom: 24 }}>
+          <div style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 24 }}>
             Create your first proposal and send it to a client with a secure magic link.
           </div>
           <button
@@ -181,8 +181,8 @@ export default function Proposals() {
                 key={p.id}
                 onClick={() => navigate(`/proposals/${p.id}`)}
                 style={{
-                  background: 'var(--bg-card, #081224)',
-                  border: '1px solid rgba(255,255,255,0.07)',
+                  background: 'var(--surface-card)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: 12,
                   padding: '20px 24px',
                   cursor: 'pointer',
@@ -192,7 +192,7 @@ export default function Proposals() {
                   transition: 'border-color 0.15s',
                 }}
                 onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(8,124,255,0.4)'}
-                onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'}
+                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-default)'}
               >
                 {/* Status dot */}
                 <div style={{
@@ -206,7 +206,7 @@ export default function Proposals() {
                   <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary, #fff)', marginBottom: 4 }}>
                     {p.title}
                   </div>
-                  <div style={{ fontSize: 13, color: '#667', display: 'flex', gap: 16 }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', display: 'flex', gap: 16 }}>
                     {p.client_name && <span>{p.client_name}</span>}
                     {p.client_company && <span>{p.client_company}</span>}
                     <span>{p.block_count} block{p.block_count !== 1 ? 's' : ''}</span>
@@ -217,7 +217,7 @@ export default function Proposals() {
                 <div style={{ display: 'flex', gap: 24, textAlign: 'right', flexShrink: 0 }}>
                   <div>
                     <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary, #fff)' }}>{p.view_count}</div>
-                    <div style={{ fontSize: 11, color: '#555', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Opens</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-body)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Opens</div>
                   </div>
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: sc.text, background: sc.bg, padding: '3px 10px', borderRadius: 20 }}>

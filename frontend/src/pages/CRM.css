@@ -66,7 +66,7 @@
 }
 .crm-pipeline-col-name { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .crm-pipeline-col-count {
-  background: rgba(255,255,255,0.08); border-radius: 10px;
+  background: rgba(16, 32, 64, 0.06); border-radius: 10px;
   padding: 2px 8px; font-size: 11px; font-weight: 700; color: var(--text-secondary);
 }
 .crm-pipeline-cards { display: flex; flex-direction: column; gap: 8px; padding: 10px; min-height: 80px; }
@@ -82,11 +82,11 @@
 
 /* ── Side Panel ── */
 .crm-panel-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+  position: fixed; inset: 0; background: rgba(14,23,38,0.45); backdrop-filter: blur(3px);
   display: flex; align-items: stretch; justify-content: flex-end; z-index: 9999;
 }
 .crm-panel {
-  background: var(--surface-0, #0f1623); border-left: 1px solid var(--border-subtle);
+  background: var(--surface-card); border-left: 1px solid var(--border-subtle);
   width: 480px; max-width: 100vw; display: flex; flex-direction: column;
   overflow: hidden;
 }
@@ -158,7 +158,7 @@
 /* ── Error ── */
 .crm-error {
   background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25);
-  border-radius: 8px; padding: 10px 14px; color: #f87171; font-size: 13px; margin-top: 8px;
+  border-radius: 8px; padding: 10px 14px; color: var(--pill-danger-fg); font-size: 13px; margin-top: 8px;
 }
 
 /* ── Shared button tweaks ── */

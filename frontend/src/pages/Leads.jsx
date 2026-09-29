@@ -1354,7 +1354,7 @@ function ClassicLeads() {
                         <div style={{ display: 'inline-flex', gap: 4, marginRight: 6 }}>
                           <button
                             className="btn btn--ghost"
-                            style={{ fontSize: 11, padding: '2px 8px', color: 'var(--signal-green, #22c55e)' }}
+                            style={{ fontSize: 11, padding: '2px 8px', color: 'var(--signal-green)' }}
                             onClick={(e) => handleKeepSeparate(e, lead)}
                             disabled={resolvingDupe === lead.id}
                             title="Not a duplicate — keep both records. Nothing is deleted."
@@ -1490,7 +1490,7 @@ function ClassicLeads() {
                     <div key={i} style={{ marginLeft: 10 }}>
                       • last name <span className="mono">{r.registry_last_name || '—'}</span>
                       {r.is_placeholder_from_historical_sent_log &&
-                        <em style={{ color: '#f59e0b' }}> — placeholder from the historical sent log (phone-only match)</em>}
+                        <em style={{ color: 'var(--color-warning)' }}> — placeholder from the historical sent log (phone-only match)</em>}
                       {r.matches_this_lead && <strong> — this is the match</strong>}
                     </div>
                   ))}
@@ -1588,10 +1588,9 @@ function ClassicLeads() {
         <div style={{
           position: 'fixed', bottom: 0, left: 240, right: 0, zIndex: 200,
           display: 'flex', flexDirection: 'column',
-          boxShadow: '0 -4px 24px rgba(0,0,0,0.35)',
-          background: 'linear-gradient(180deg, rgba(10,20,46,0.98) 0%, rgba(5,10,24,0.99) 100%)',
+          boxShadow: '0 -6px 24px rgba(16,32,64,0.12)',
+          background: 'var(--surface-card)',
           borderTop: '2px solid var(--signal-blue)',
-          backdropFilter: 'blur(20px)',
         }}>
           {/* Expanded compose drawer — unified panel (no tabs, mirrors individual lead compose) */}
           {showBulkCompose && (
@@ -1662,7 +1661,7 @@ function ClassicLeads() {
                   style={{
                     flex: 1, fontSize: 13, padding: '7px 10px', borderRadius: 6,
                     border: '1px solid var(--border-default)', fontFamily: 'inherit',
-                    background: 'var(--surface-base, #161929)', color: 'var(--text-primary)',
+                    background: 'var(--bg-field)', color: 'var(--text-primary)',
                   }}
                   placeholder="AI direction (optional) — e.g. follow up and ask if they still need help"
                   value={bulkAiDirection}
@@ -1862,7 +1861,7 @@ function ClassicLeads() {
       {reviewBatchId && (
         <div className="import-review-required-notice" style={{
           background: 'var(--color-warning-bg, #fffbea)',
-          border: '1px solid var(--color-warning, #f59e0b)',
+          border: '1px solid var(--color-warning)',
           borderRadius: 8,
           padding: '12px 16px',
           marginBottom: 16,

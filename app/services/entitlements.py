@@ -327,17 +327,77 @@ def _org_has_feature_with(db: Optional[Session], org: Optional[Organization], ke
 
 
 def _role_in(db: Session, org: Organization, user: User) -> Optional[str]:
-    role = None
-    try:
-        from app.services.workspace_access import workspace_role
-        role = workspace_role(user, db, org.id)
-    except Exception:  # noqa: BLE001
-        role = None
-    return role or getattr(user, "role", None)
+    """Role IN `org`: membership role; users.role only for the home org (or an
+    executive observation of `org`); None in another org the person holds no
+    membership in. One rule, shared with workspace_location."""
+    from app.services.workspace_location import workspace_role_in
+    return workspace_role_in(db, user, org.id)
 
 
 def _has_person_rows(ov) -> bool:
     return ov is not None and any(r.scope in ("role", "user") for r in ov.rows)
+
+
+def _has_workspace_rows(ov) -> bool:
+    return ov is not None and any(r.scope == "workspace" for r in ov.rows)
+
+
+def _workspace_allowed_with(db: Session, org: Organization, key: str, ov,
+                            location_ids=(), cache=None) -> bool:
+    """The WORKSPACE (location) narrowing layer, given already-loaded rows.
+
+    ENFORCED SINCE 2026-09-28 (it was stored but decorative before). The
+    location ids come from `workspace_location.resolve`: the selected location,
+    the one location a person is assigned to, or - for a person assigned to
+    several with none selected - ALL of them, and the feature must then be
+    allowed in EVERY one (most restrictive). No ids = organization level.
+    """
+    if org is None or key not in FEATURES or not location_ids or not _has_workspace_rows(ov):
+        return True
+    from app.services import entitlement_resolver as er
+    c = cache if cache is not None else er.enforcement_cache()
+    for wid in location_ids:
+        res = er.evaluate(db, key, org=org, level="workspace", workspace_id=wid,
+                          overrides=ov, check_setup=False, _cache=c)
+        if not res["enabled"]:
+            return False
+    return True
+
+
+def workspace_has_feature(db: Session, org: Optional[Organization], key: str,
+                          location_ids=()) -> bool:
+    """Organization AND workspace (location) layers for `key`. For callers that
+    hold an org and resolved location ids but no user."""
+    if org is None:
+        return False
+    from app.services import entitlement_resolver as er
+    ov = er.load_overrides(db, org)
+    return (_org_has_feature_with(db, org, key, ov)
+            and _workspace_allowed_with(db, org, key, ov, tuple(location_ids or ())))
+
+
+def feature_allowed_for_request(db: Session, org: Optional[Organization], user: User,
+                                key: str, request: Optional[Request] = None) -> bool:
+    """The full non-raising answer require_feature gives, for code that must
+    DECIDE rather than refuse (e.g. whether to include a module in a payload).
+
+    platform -> brand -> organization -> workspace (location resolved from the
+    request, never widened by an invalid selection) -> role -> user.
+    god_admin is not narrowed, matching require_feature.
+    """
+    if getattr(user, "role", None) == "god_admin":
+        return True
+    if org is None or key not in FEATURES:
+        return org is not None
+    from app.services import entitlement_resolver as er
+    from app.services import workspace_location as wl
+    ov = er.load_overrides(db, org)
+    if not _org_has_feature_with(db, org, key, ov):
+        return False
+    role = _role_in(db, org, user)
+    ctx = wl.resolve(db, user, org.id, request, role=role, strict=False)
+    return (_workspace_allowed_with(db, org, key, ov, ctx.location_ids)
+            and _user_allowed_with(db, org, user, key, ov, role))
 
 
 def _user_allowed_with(db: Session, org: Organization, user: User, key: str, ov,
@@ -356,21 +416,38 @@ def _user_allowed_with(db: Session, org: Organization, user: User, key: str, ov,
 
 
 def user_has_feature(db: Session, org: Optional[Organization], user: User,
-                     key: str) -> bool:
+                     key: str, request: Optional[Request] = None) -> bool:
     """The NARROWING layers (workspace/role/user overrides) for one person.
 
     Only ever removes access. `require_feature` does not call this - it loads
     the override rows ONCE and uses the `_with` helpers - but it is kept as a
-    convenience for callers holding just an org and a user.
+    convenience for callers holding just an org and a user. The WORKSPACE
+    (location) layer is resolved from `request` (or the ambient request) the
+    same way require_feature does, except that an invalid selection falls back
+    to the implicit rule instead of raising (never wider than a valid one).
     """
     if org is None or key not in FEATURES:
         return True
+    if getattr(user, "role", None) == "god_admin":
+        return True
     from app.services import entitlement_resolver as er
-    return _user_allowed_with(db, org, user, key, er.load_overrides(db, org))
+    ov = er.load_overrides(db, org)
+    role = None
+    if _has_workspace_rows(ov):
+        from app.services import workspace_location as wl
+        if request is None:
+            from app.services.lead_scope import _ambient_request
+            request = _ambient_request()
+        role = _role_in(db, org, user)
+        ctx = wl.resolve(db, user, org.id, request, role=role, strict=False)
+        if not _workspace_allowed_with(db, org, key, ov, ctx.location_ids):
+            return False
+    return _user_allowed_with(db, org, user, key, ov, role)
 
 
 def nav_features(db: Session, org: Optional[Organization], user: Optional[User],
-                 legacy_list: Optional[List[str]]) -> Optional[List[str]]:
+                 legacy_list: Optional[List[str]],
+                 location_ids=()) -> Optional[List[str]]:
     """What GET /branding/org tells the customer shell it may draw.
 
     `legacy_list` is what that endpoint computed before hierarchy existed; it is
@@ -379,6 +456,10 @@ def nav_features(db: Session, org: Optional[Organization], user: Optional[User],
     any role/user override for this person - the same evaluation
     `require_feature` enforces, so the sidebar cannot offer what the server
     will refuse. One override query and at most one role lookup per call.
+
+    `location_ids` is the request's resolved WORKSPACE (location) context
+    (app/services/workspace_location.py). A workspace override that switches a
+    feature off removes it here exactly as require_feature refuses it.
     """
     if org is None or db is None:
         return legacy_list
@@ -387,13 +468,19 @@ def nav_features(db: Session, org: Optional[Organization], user: Optional[User],
     if not ov.rows:
         return legacy_list
     base = er.effective_org_list(db, org, ov) if ov.any_org_level() else legacy_list
-    if user is None or not _has_person_rows(ov):
+    location_ids = tuple(location_ids or ())
+    narrow_ws = bool(location_ids) and _has_workspace_rows(ov)
+    narrow_person = user is not None and _has_person_rows(ov)
+    if not narrow_ws and not narrow_person:
         return base
-    role = _role_in(db, org, user)
+    role = _role_in(db, org, user) if narrow_person else None
     cache = er.enforcement_cache()
     keys = list(ALL_FEATURE_KEYS) if base is None else list(base)
     return [k for k in keys
-            if k not in FEATURES or _user_allowed_with(db, org, user, k, ov, role, cache)]
+            if k not in FEATURES
+            or ((not narrow_ws or _workspace_allowed_with(db, org, k, ov, location_ids, cache))
+                and (not narrow_person
+                     or _user_allowed_with(db, org, user, k, ov, role, cache)))]
 
 
 def set_features(db: Session, org: Organization, actor: User,
@@ -491,8 +578,15 @@ def require_feature(key: str):
     if key not in FEATURES:
         raise RuntimeError("require_feature(%r): not a registered feature key" % key)
 
-    def _dep(user: User = Depends(get_current_user),
+    def _dep(request: Request = None,
+             user: User = Depends(get_current_user),
              db: Session = Depends(get_db)) -> User:
+        # FastAPI injects `request` by its annotation. A direct call (the
+        # access diagnostic calls this with user/db only) reads the ambient
+        # request instead - the diagnostic publishes its synthetic one there.
+        if request is None:
+            from app.services.lead_scope import _ambient_request
+            request = _ambient_request()
         if getattr(user, "role", None) == "god_admin":
             return user
 
@@ -537,8 +631,39 @@ def require_feature(key: str):
                 detail="This organization is not enabled for '%s' (%s). An operator can "
                        "enable it in the customer's Features settings."
                        % (key, FEATURES[key]))
-        # Workspace/role/user overrides can only NARROW (entitlement_resolver).
-        if not _user_allowed_with(db, org, user, key, ov):
+        # WORKSPACE (LOCATION) LAYER — enforced, no longer decorative.
+        #
+        # The location comes from X-Workspace-Location, validated against this
+        # organization and the caller's UserLocation assignments (an invalid
+        # selection is refused with 403 inside resolve()). With no header, a
+        # person assigned to one location is evaluated there and a person
+        # assigned to several is evaluated against ALL of them, so leaving the
+        # header off can never step around a workspace that switched the
+        # feature off. Refused with the SAME status as the organization-level
+        # refusal above (402, "not enabled"): to the customer both mean the
+        # module is not switched on where they are working.
+        # See app/services/workspace_location.py.
+        # Cost: nothing extra unless a location was selected or this
+        # organization has workspace rows at all.
+        from app.services import workspace_location as _wl
+        role = None
+        loc_ids = ()
+        if _wl.requested_location(request) or _has_workspace_rows(ov):
+            role = _role_in(db, org, user)
+            loc_ctx = _wl.resolve(db, user, org_id, request, role=role, strict=True)
+            loc_ids = loc_ctx.location_ids
+        else:
+            loc_ctx = None
+        if not _workspace_allowed_with(db, org, key, ov, loc_ids):
+            where = (loc_ctx.selected.name if loc_ctx is not None and loc_ctx.selected is not None
+                     else "one of your assigned locations")
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="'%s' (%s) is switched off for this workspace location (%s). An "
+                       "operator can change it in Feature Entitlements."
+                       % (key, FEATURES[key], where))
+        # Role/user overrides can only NARROW (entitlement_resolver).
+        if not _user_allowed_with(db, org, user, key, ov, role):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="'%s' (%s) is switched off for your role or account in this "

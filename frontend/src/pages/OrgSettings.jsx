@@ -4,6 +4,17 @@ import { api, fetchAndStoreBranding, getCurrentUser, getOrgContext } from '../ap
 import '../styles/shared.css'
 import './OrgSettings.css'
 
+// Text on the live brand-colour preview: dark ink on a light brand colour,
+// white on a dark one, so the preview is readable whatever colour is picked.
+function previewInk(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim())
+  if (!m) return '#fff'
+  const n = parseInt(m[1], 16)
+  const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }
+  const L = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255)
+  return L > 0.179 ? '#0f172a' : '#fff'
+}
+
 const INDUSTRIES = [
   // Field Sales / D2D
   { value: 'fiber', label: '⚡ Fiber Internet', group: 'Field Sales / D2D' },
@@ -504,7 +515,7 @@ export default function OrgSettings() {
               <label className="os-label">
                 Logo
                 <div
-                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--signal-blue, #2fb6ff)' }}
+                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--signal-blue)' }}
                   onDragLeave={(e) => { e.currentTarget.style.borderColor = '' }}
                   onDrop={(e) => {
                     e.preventDefault()
@@ -516,12 +527,12 @@ export default function OrgSettings() {
                     reader.onload = (ev) => setBrandLogoUrl(ev.target.result)
                     reader.readAsDataURL(file)
                   }}
-                  style={{ marginTop: 6, border: '2px dashed rgba(255,255,255,0.15)', borderRadius: 8, padding: '14px 12px', textAlign: 'center', transition: 'border-color .15s', cursor: 'pointer' }}
+                  style={{ marginTop: 6, border: '2px dashed var(--border-strong)', borderRadius: 8, padding: '14px 12px', textAlign: 'center', transition: 'border-color .15s', cursor: 'pointer' }}
                   onClick={() => document.getElementById('os-logo-input').click()}
                 >
                   {brandLogoUrl
                     ? <img src={brandLogoUrl} alt="Logo preview" style={{ maxHeight: 52, maxWidth: 160, objectFit: 'contain', borderRadius: 6 }} onError={(e) => e.target.style.display='none'} />
-                    : <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13 }}>🖼 Drop logo here or <span style={{ color: 'var(--signal-blue, #2fb6ff)' }}>browse</span><div style={{ fontSize: 11, marginTop: 4 }}>PNG · JPG · SVG · WEBP · max 5MB</div></div>
+                    : <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>🖼 Drop logo here or <span style={{ color: 'var(--signal-blue)' }}>browse</span><div style={{ fontSize: 11, marginTop: 4 }}>PNG · JPG · SVG · WEBP · max 5MB</div></div>
                   }
                 </div>
                 <input id="os-logo-input" type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }}
@@ -534,7 +545,7 @@ export default function OrgSettings() {
                     reader.readAsDataURL(file)
                   }} />
                 {brandLogoUrl && (
-                  <button className="btn btn--secondary" style={{ fontSize: 11, padding: '3px 10px', marginTop: 6, color: 'var(--error, #ef4444)' }}
+                  <button className="btn btn--secondary" style={{ fontSize: 11, padding: '3px 10px', marginTop: 6, color: 'var(--error)' }}
                     onClick={(e) => { e.stopPropagation(); setBrandLogoUrl('') }}>✕ Remove logo</button>
                 )}
                 <span className="os-hint">Applies to everyone in your org — no URL needed, upload directly</span>
@@ -590,10 +601,10 @@ export default function OrgSettings() {
                 {/* The organization's own name, never a brand constant. This
                     fell back to one brand's name, so a customer of a different
                     brand previewed somebody else's company. */}
-                <span style={{ color: '#fff', fontWeight: 700 }}>
+                <span style={{ color: previewInk(brandColorPrimary), fontWeight: 700 }}>
                   {brandName || orgName || settings?.name || 'Your organization'}
                 </span>
-                <span style={{ color: brandColorAccent, fontWeight: 600, fontSize: 13 }}>● Live</span>
+                <span style={{ color: previewInk(brandColorPrimary), opacity: 0.85, fontWeight: 600, fontSize: 13 }}>● Live</span>
               </div>
 
               <button className="btn btn--primary" onClick={saveBranding} disabled={saving}>
@@ -666,7 +677,7 @@ export default function OrgSettings() {
               <div style={{ display: 'flex', gap: 8 }}>
                 {isSuperAdmin && (
                   <button className="btn btn--secondary" onClick={() => changeIndustry(industry)}
-                    disabled={changingIndustry} style={{ fontSize: 12, padding: '4px 12px', color: '#f0c040', borderColor: 'rgba(240,192,64,0.4)' }}
+                    disabled={changingIndustry} style={{ fontSize: 12, padding: '4px 12px', color: 'var(--color-warning)', borderColor: 'var(--pill-warning-bd)' }}
                     title="Reset tiers to industry defaults">
                     {changingIndustry ? 'Resetting…' : '↺ Reset to industry defaults'}
                   </button>
@@ -771,7 +782,7 @@ export default function OrgSettings() {
                 autoComplete="new-password"
               />
               {resendApiKeySet && !resendApiKey && (
-                <span style={{ fontSize: 11, color: 'var(--signal-green, #1ef0a8)', marginTop: 3 }}>
+                <span style={{ fontSize: 11, color: 'var(--signal-green)', marginTop: 3 }}>
                   ✓ API key is configured
                 </span>
               )}
@@ -804,7 +815,7 @@ export default function OrgSettings() {
               Outbound SMS uses this organization's Twilio account.
               Carrier/A2P registration status is shown separately.
               {orgTwilioConfigured && (
-                <span style={{ color: 'var(--signal-green, #22c55e)', marginLeft: 6 }}>
+                <span style={{ color: 'var(--signal-green)', marginLeft: 6 }}>
                   ✓ Credentials saved{orgTwilioSidLast4 ? ` (SID ending ${orgTwilioSidLast4})` : ''}
                 </span>
               )}
@@ -923,11 +934,11 @@ export default function OrgSettings() {
         {isSuperAdmin && selectedOrgId && (
           <section className="panel os-section" style={{ marginTop: 16, borderColor: 'rgba(217,119,6,0.3)' }}>
             <div className="panel-header">
-              <h2 className="panel-title" style={{ color: '#f59e0b' }}>🧪 Demo data</h2>
+              <h2 className="panel-title" style={{ color: 'var(--color-warning)' }}>🧪 Demo data</h2>
             </div>
             <p className="os-hint">
               Seed this organization with 120 leads, messages, replies, and booked outcomes so charts and reports show real-looking data.
-              <strong style={{ color: '#f59e0b' }}> This adds data — it does not clear existing records first.</strong>
+              <strong style={{ color: 'var(--color-warning)' }}> This adds data — it does not clear existing records first.</strong>
             </p>
             <SeedDemoButton orgId={selectedOrgId} />
           </section>
@@ -956,7 +967,7 @@ function SeedDemoButton({ orgId }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
-      <button className="btn btn--secondary" onClick={run} disabled={status === 'loading'} style={{ alignSelf: 'flex-start', borderColor: 'rgba(217,119,6,0.4)', color: '#f59e0b' }}>
+      <button className="btn btn--secondary" onClick={run} disabled={status === 'loading'} style={{ alignSelf: 'flex-start', borderColor: 'rgba(217,119,6,0.4)', color: 'var(--color-warning)' }}>
         {status === 'loading' ? 'Seeding…' : '🌱 Seed demo data'}
       </button>
       {status === 'done' && result && (
@@ -964,7 +975,7 @@ function SeedDemoButton({ orgId }) {
           ✓ Seeded <strong>{result.org}</strong> — {result.leads} leads · {result.messages} messages · {result.replies} replies · {result.outcomes} outcomes
         </div>
       )}
-      {status === 'error' && <div style={{ color: '#f87171', fontSize: 13 }}>{err}</div>}
+      {status === 'error' && <div style={{ color: 'var(--pill-danger-fg)', fontSize: 13 }}>{err}</div>}
     </div>
   )
 }
@@ -1046,7 +1057,7 @@ function TwilioNumbersSection({ orgQuery, orgTwilioConfigured, orgSharedNumber, 
     <span style={{
       display: 'inline-block', fontSize: 12, padding: '2px 9px', borderRadius: 999,
       border: '1px solid var(--border, rgba(255,255,255,0.14))',
-      color: value ? 'inherit' : 'var(--text-dim, #94a3b8)',
+      color: value ? 'inherit' : 'var(--text-dim)',
     }}>
       {label}: <strong>{value || 'not registered'}</strong>
     </span>
@@ -1059,7 +1070,7 @@ function TwilioNumbersSection({ orgQuery, orgTwilioConfigured, orgSharedNumber, 
       </div>
 
       {!orgTwilioConfigured && (
-        <p className="os-hint" style={{ color: 'var(--signal-amber, #f59e0b)' }}>
+        <p className="os-hint" style={{ color: 'var(--signal-amber)' }}>
           Add your Twilio Account SID and Auth Token above first. Numbers assigned
           here cannot send until the organization's credentials are saved.
         </p>
@@ -1246,7 +1257,7 @@ function AppointmentTypesSection({ orgQuery }) {
               <button onClick={() => moveDown(i)} disabled={i === types.length - 1} style={{ padding: '3px 7px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 5, cursor: 'pointer', fontSize: 11, opacity: i === types.length - 1 ? 0.3 : 1 }}>↓</button>
             </div>
             <span style={{ flex: 1, fontSize: 13, padding: '5px 10px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border-color)' }}>{t}</span>
-            <button onClick={() => removeType(i)} disabled={types.length <= 1} style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 5, cursor: 'pointer', color: '#ef4444', fontSize: 12, opacity: types.length <= 1 ? 0.3 : 1 }}>✕</button>
+            <button onClick={() => removeType(i)} disabled={types.length <= 1} style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 5, cursor: 'pointer', color: 'var(--color-danger)', fontSize: 12, opacity: types.length <= 1 ? 0.3 : 1 }}>✕</button>
           </div>
         ))}
       </div>
@@ -1369,7 +1380,7 @@ function CRMStagesSection({ orgQuery }) {
             <div style={{ display: 'flex', gap: 4 }}>
               <button onClick={() => moveUp(i)} disabled={i===0} style={{ padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 6, cursor: 'pointer', opacity: i===0?0.3:1 }}>↑</button>
               <button onClick={() => moveDown(i)} disabled={i===stages.length-1} style={{ padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 6, cursor: 'pointer', opacity: i===stages.length-1?0.3:1 }}>↓</button>
-              <button onClick={() => removeStage(i)} disabled={stages.length <= 1} style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#ef4444', opacity: stages.length<=1?0.3:1 }}>✕</button>
+              <button onClick={() => removeStage(i)} disabled={stages.length <= 1} style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: 'var(--color-danger)', opacity: stages.length<=1?0.3:1 }}>✕</button>
             </div>
           </div>
         ))}
@@ -1480,7 +1491,7 @@ function CRMCustomFieldsSection() {
                 onChange={e => update(i, { options: e.target.value })}
               />
             )}
-            <button onClick={() => removeField(i)} style={{ padding: '6px 10px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: '#ef4444', whiteSpace: 'nowrap' }}>Remove</button>
+            <button onClick={() => removeField(i)} style={{ padding: '6px 10px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', color: 'var(--color-danger)', whiteSpace: 'nowrap' }}>Remove</button>
           </div>
         ))}
       </div>

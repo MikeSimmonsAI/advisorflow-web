@@ -1313,7 +1313,7 @@ export default function LeadDetail() {
                       booking_requested: '#1ea8ff',
                       no_answer: '#888',
                       not_interested: '#ff5050',
-                      completed: '#1ef0a8',
+                      completed: 'var(--color-success)',
                       escalated: '#ffb41e',
                       failed: '#ff5050',
                     }[vc.outcome] || '#888'
@@ -1939,7 +1939,7 @@ export default function LeadDetail() {
                 <h2 className="panel-title">📞 AI Voice Call</h2>
               </div>
               {callResult && (
-                <div style={{ background: 'rgba(30,240,168,0.1)', border: '1px solid rgba(30,240,168,0.3)', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: 'var(--signal-green, #1ef0a8)' }}>
+                <div style={{ background: 'rgba(30,240,168,0.1)', border: '1px solid rgba(30,240,168,0.3)', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: 'var(--signal-green)' }}>
                   ✅ Call placed — call #{callResult.call_number} to {callResult.lead_name}
                   {callResult.from_phone ? ` from ${formatPhone(callResult.from_phone)}` : ''}
                 </div>
@@ -2042,7 +2042,7 @@ export default function LeadDetail() {
                   {resendLinkMsg && (
                     <p style={{
                       fontSize: 12,
-                      color: resendLinkMsg.ok ? 'var(--color-success, #22c55e)' : 'var(--color-danger, #ef4444)',
+                      color: resendLinkMsg.ok ? 'var(--color-success)' : 'var(--color-danger)',
                       margin: 0,
                     }}>
                       {resendLinkMsg.ok ? '✓ ' : '✗ '}{resendLinkMsg.text}
@@ -2121,7 +2121,7 @@ export default function LeadDetail() {
               {resendLinkMsg && (
                 <p style={{
                   fontSize: 12,
-                  color: resendLinkMsg.ok ? 'var(--color-success, #22c55e)' : 'var(--color-danger, #ef4444)',
+                  color: resendLinkMsg.ok ? 'var(--color-success)' : 'var(--color-danger)',
                   marginTop: 8, marginBottom: 0,
                 }}>
                   {resendLinkMsg.ok ? '✓ ' : '✗ '}{resendLinkMsg.text}

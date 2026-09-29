@@ -157,6 +157,11 @@ def _batch_payload(db: Session, b: ImportBatch, detail: bool = False) -> dict:
         })
     out["workflow"] = _workflow(status, bool(a.get("status")),
                                 bool(_j(b.classification_json, {}).get("confirmed_at")))
+    # Step 6 -> 7 gate, decided HERE so the Approve button and POST /commit
+    # can never disagree (the wizard used to keep its own list of statuses and
+    # silently disable the button for any batch outside it).
+    ok, why = commit_gate(b, status, bool(a.get("status")))
+    out["commit_gate"] = {"can_commit": ok, "reason": why}
     if detail:
         out["analysis"] = a
         out["commit_report"] = rep or None
@@ -599,6 +604,40 @@ _COMMITTABLE = (ImportBatchStatus.READY_FOR_REVIEW, ImportBatchStatus.STAGED,
                 ImportBatchStatus.PARTIALLY_COMMITTED)
 
 
+def _commit_failed_retryable(b: ImportBatch, analyzed: bool) -> bool:
+    """A batch whose COMMIT (not its analysis) died is retryable: run_commit
+    skips rows already IMPORTED, so a retry finishes the job instead of
+    duplicating it. Before this, a single failed background commit left the
+    batch 'failed' forever - Step 6 showed a permanently disabled button and
+    POST /commit answered 409 "Analyze it first"."""
+    return (b.status == ImportBatchStatus.FAILED and analyzed
+            and bool(b.commit_mode) and b.commit_mode != CommitMode.STAGE_ONLY)
+
+
+def commit_gate(b: ImportBatch, status: str, analyzed: bool):
+    """(can_commit, reason) - the single answer to "may Step 6 commit this?"."""
+    if status in _COMMITTABLE or _commit_failed_retryable(b, analyzed):
+        return True, None
+    if status == ImportBatchStatus.COMMITTING:
+        return False, "This batch is already importing. Its results appear on Step 7."
+    if status == "interrupted" and b.status == ImportBatchStatus.COMMITTING:
+        return True, None                     # stale commit: safe to resume
+    if status in ("processing", "interrupted"):
+        return False, "Analysis is still running (or was interrupted). Finish it on Step 3 first."
+    if status in (ImportBatchStatus.MAPPING, ImportBatchStatus.UPLOADING):
+        return False, ("The field mapping or classification changed since the last analysis. "
+                       "Re-run the analysis (Step 2 or 3) before importing.")
+    if status == ImportBatchStatus.FAILED:
+        return False, "The analysis failed. Fix the mapping and analyze again."
+    if status == ImportBatchStatus.COMMITTED:
+        return False, "Everything selected in this batch is already imported."
+    if status in (ImportBatchStatus.ROLLED_BACK, ImportBatchStatus.PARTIALLY_ROLLED_BACK):
+        return False, "This batch was rolled back. Upload the file again to re-import it."
+    if status == ImportBatchStatus.CANCELLED:
+        return False, "This batch was cancelled."
+    return False, f"A '{status}' batch cannot be imported."
+
+
 def _commit_job(session, batch_id, org_id, ctx, mode, include_enrichment):
     try:
         CM.run_commit(session, batch_id, org_id, ctx, mode, include_enrichment)
@@ -622,10 +661,12 @@ def commit(batch_id: str, body: CommitIn, db: Session = Depends(get_db),
     b = _batch_or_404(db, ctx, batch_id)
     if body.mode not in CommitMode.ALL:
         raise HTTPException(400, "Unknown mode.")
+    analyzed = bool(_j(b.analysis_json, {}).get("status"))
     if b.status not in _COMMITTABLE and not (b.status == ImportBatchStatus.COMMITTING
-                                             and ENG.is_stale(b)):
-        raise HTTPException(409, f"A '{b.status}' batch cannot be committed. "
-                                 "Analyze it first.")
+                                             and ENG.is_stale(b)) \
+            and not _commit_failed_retryable(b, analyzed):
+        _ok, why = commit_gate(b, b.status, analyzed)
+        raise HTTPException(409, why or f"A '{b.status}' batch cannot be committed.")
     if body.mode != CommitMode.STAGE_ONLY:
         typed = (body.confirm_organization_name or "").strip().lower()
         if typed != (ctx.org_name or "").strip().lower():
@@ -635,6 +676,7 @@ def commit(batch_id: str, body: CommitIn, db: Session = Depends(get_db),
         CM.run_commit(db, b.id, ctx.org_id, ctx, body.mode, body.include_enrichment)
         return _batch_payload(db, b, detail=True)
     b.status = ImportBatchStatus.COMMITTING
+    b.error_message = None                    # a retried commit starts clean
     b.heartbeat_at = datetime.utcnow()
     db.commit()
     runner.launch(b.id, _commit_job, b.id, ctx.org_id, ctx, body.mode,

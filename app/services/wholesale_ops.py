@@ -755,6 +755,15 @@ def skip_trace_summary(db, org_id: str) -> Dict[str, Any]:
 
 # ── Voice and voicemail: what is actually stored ────────────────────────────
 
+def _inbound_voicemail_count(db, org_id, lead_id):
+    try:
+        from app.models.telephony_models import Voicemail
+        return (db.query(Voicemail)
+                .filter(Voicemail.organization_id == org_id, Voicemail.lead_id == lead_id).count())
+    except Exception:  # noqa: BLE001 - table absent on an old database: nothing recorded
+        return 0
+
+
 def calls_payload(db, org_id: str, lead) -> Dict[str, Any]:
     from app.models.models import VoiceCall
     from app.services import compliance_service
@@ -775,18 +784,23 @@ def calls_payload(db, org_id: str, lead) -> Dict[str, Any]:
         "calls": calls,
         "voicemail": {
             "outbound_voicemails_left": sum(1 for c in calls if c["voicemail_left"]),
-            "inbound_voicemail_capture": "not_available",
-            "note": ("Inbound calls are answered by the voice agent; the platform does not record "
-                     "inbound voicemail messages, so none can be shown."),
+            # Inbound voicemail is recorded by the telephony layer
+            # (app/models/telephony_models.Voicemail) when the organization has
+            # an inbound voice number routed to /voice/inbound.
+            "inbound_voicemail_capture": "stored",
+            "inbound_voicemails": _inbound_voicemail_count(db, org_id, lead.id),
+            "note": ("Inbound voicemail is recorded when this organization's number sends calls to the "
+                     "platform; playback is in the conversation thread."),
         },
         "dialer": {
-            # The honest human dialer: the operator's own phone. No provider
-            # call is placed by this platform.
-            "kind": "tel_link",
+            # The in-app human dialer is the Twilio click-to-call bridge
+            # (POST /calls/human); `tel` stays as a fallback for the operator's
+            # own phone and is offered only when eligibility passes.
+            "kind": "bridge",
             "tel": ("tel:+%s" % phone) if (phone and verdict.get("eligible")) else None,
             "eligible": bool(verdict.get("eligible")),
             "state": verdict.get("state"),
             "reasons": [c["label"] for c in verdict.get("checks", []) if not c.get("ok")],
-            "note": "Click-to-call opens your own phone app. Log the outcome as a note or callback.",
+            "note": "Click-to-call bridge via the organization's number: your phone rings first, then the seller.",
         },
     }

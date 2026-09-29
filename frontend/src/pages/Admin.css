@@ -33,7 +33,7 @@
 .asc-bars { display: flex; flex-direction: column; gap: 8px; }
 .asc-bar-row { display: flex; align-items: center; gap: 8px; }
 .asc-bar-label { font-size: 11px; color: var(--text-secondary); width: 70px; flex-shrink: 0; }
-.asc-bar-track { flex: 1; height: 5px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; }
+.asc-bar-track { flex: 1; height: 5px; background: rgba(16, 32, 64, 0.06); border-radius: 3px; overflow: hidden; }
 .asc-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
 .asc-bar-pct { font-size: 11px; font-family: var(--font-mono); width: 40px; text-align: right; color: var(--text-secondary); }
 .asc-dupes { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-subtle); }
@@ -48,7 +48,7 @@
 .admin-funnel { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
 .admin-funnel-row { display: flex; align-items: center; gap: 14px; }
 .admin-funnel-label { font-size: 13px; color: var(--text-secondary); width: 120px; flex-shrink: 0; }
-.admin-funnel-track { flex: 1; height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; }
+.admin-funnel-track { flex: 1; height: 8px; background: rgba(16, 32, 64, 0.06); border-radius: 4px; overflow: hidden; }
 .admin-funnel-fill { height: 100%; background: linear-gradient(90deg, var(--signal-blue), var(--signal-purple)); border-radius: 4px; transition: width 0.4s ease; }
 .admin-funnel-count { font-size: 13px; width: 50px; text-align: right; color: var(--text-primary); }
 

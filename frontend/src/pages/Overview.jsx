@@ -420,8 +420,8 @@ function PlatformOverview() {
       {!loading && loadError && (
         <div className="ov-load-error" role="status" style={{
           margin: '0 0 16px', padding: '11px 14px', borderRadius: 10,
-          background: 'rgba(240,180,60,0.10)',
-          border: '1px solid rgba(240,180,60,0.30)', fontSize: 13.5,
+          background: 'var(--pill-warning-bg)',
+          border: '1px solid var(--pill-warning-bd)', fontSize: 13.5,
         }}>
           {loadError}
         </div>

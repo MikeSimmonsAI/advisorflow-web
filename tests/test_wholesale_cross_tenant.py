@@ -246,11 +246,21 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     db_session.add_all([ops_cb, ops_note])
     db_session.commit()
 
+    # Skip-trace cost estimate of A's (written directly; never calls a vendor).
+    from app.models.skiptrace_cost_models import SkipTraceCostEstimate
+    st_est = SkipTraceCostEstimate(organization_id=sample_org.id, product_key="tracerfy_normal",
+                                   provider="tracerfy", property_kind="wholesale",
+                                   property_ids='["%s"]' % prop["id"], records=1,
+                                   billable_requests=1, status="estimated")
+    db_session.add(st_est)
+    db_session.commit()
+
     return {
         **es_ids,
         "ops_lead_id": seller["lead_id"],
         "ops_callback_id": ops_cb.id,
         "ops_note_id": ops_note.id,
+        "skiptrace_estimate_id": st_est.id,
         "funding_partner_id": partner["id"],
         "funding_submission_id": submission["id"],
         "exception_id": exc.id,
@@ -434,6 +444,9 @@ def ops_attacks(ids):
         ("post", "/wholesale/ops/deals/%s/notes" % d, {"body": "planted"}),
         ("patch", "/wholesale/ops/notes/%s" % ids["ops_note_id"], {"body": "stolen"}),
         ("delete", "/wholesale/ops/notes/%s" % ids["ops_note_id"], None),
+        ("get", "/wholesale/skip-trace/estimates/%s" % ids["skiptrace_estimate_id"], None),
+        ("post", "/wholesale/skip-trace/estimates/%s/confirm" % ids["skiptrace_estimate_id"],
+         {"confirm": "APPROVE SKIP TRACE %s" % ids["skiptrace_estimate_id"]}),
     ]
 
 
@@ -470,6 +483,8 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/reply" % (base, ep), {"text": "STOP", "delivery": "manual_entry"}),
         ("post", "%s/properties/%s/nurture" % (base, ep), {"choice": "30_days"}),
         ("post", "%s/properties/%s/promote" % (base, ep), {}),
+        ("post", "%s/properties/%s/owner" % (base, ep), {"name": "Stolen Owner"}),
+        ("post", "%s/properties/%s/dismiss" % (base, ep), {"reason": "planted"}),
         ("post", "%s/properties/%s/feedback" % (base, ep), {"kind": "BAD_FIT"}),
         ("post", "%s/properties/%s/contacts" % (base, ep), {"kind": "phone", "value": "2145559999"}),
         ("post", "%s/properties/%s/contacts/%s/wrong-party" % (base, ep, ids["es_contact_id"]), None),

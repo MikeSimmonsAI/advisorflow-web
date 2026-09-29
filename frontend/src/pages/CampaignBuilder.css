@@ -66,7 +66,7 @@
 .campaign-step--active .campaign-step-num {
   background: var(--accent-blue, #63b3ed);
   border-color: var(--accent-blue, #63b3ed);
-  color: #000;
+  color: #fff;
 }
 
 .campaign-step--active span {
@@ -77,7 +77,7 @@
 .campaign-step--done .campaign-step-num {
   background: var(--signal-green, #68d391);
   border-color: var(--signal-green, #68d391);
-  color: #000;
+  color: #fff;
 }
 
 /* ── Body ── */
@@ -149,7 +149,7 @@
 }
 
 .campaign-review-card {
-  background: rgba(255,255,255,0.03);
+  background: var(--surface-sunken);
   border: 1px solid var(--border, rgba(255,255,255,0.08));
   border-radius: 10px;
   padding: 14px;
@@ -183,7 +183,7 @@
 }
 
 .campaign-message-preview {
-  background: rgba(255,255,255,0.03);
+  background: var(--surface-sunken);
   border: 1px solid var(--border, rgba(255,255,255,0.08));
   border-radius: 10px;
   padding: 16px;
@@ -210,9 +210,9 @@
 
 .campaign-filter-tag {
   font-size: 12px;
-  background: rgba(99,179,237,0.1);
-  border: 1px solid rgba(99,179,237,0.2);
-  color: #63b3ed;
+  background: var(--pill-info-bg);
+  border: 1px solid var(--pill-info-bd);
+  color: var(--color-primary);
   border-radius: 99px;
   padding: 3px 10px;
 }
@@ -231,7 +231,7 @@
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: rgba(104,211,145,0.15);
+  background: var(--pill-success-bg);
   border: 2px solid var(--signal-green, #68d391);
   color: var(--signal-green, #68d391);
   font-size: 28px;

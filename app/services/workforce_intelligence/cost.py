@@ -60,7 +60,7 @@ UNKNOWN = "unknown"
 # changing shape is how a comparison across months becomes nonsense.
 
 COST_NOTE = (
-    "These are AdvisorFlow's own estimates, computed from configured per-unit "
+    "These are the platform's own estimates, computed from configured per-unit "
     "rates. They are not provider invoices, and no provider cost is available "
     "to this platform. Treat them as a size, not as a bill.")
 

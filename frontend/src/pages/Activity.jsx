@@ -4,13 +4,13 @@ import { api } from '../api/client'
 import '../styles/shared.css'
 
 const DELIVERY_CONFIG = {
-  delivered:   { label: '✓ Delivered',   color: 'var(--signal-green)',  bg: 'rgba(30,240,168,0.12)',  border: 'rgba(30,240,168,0.3)' },
-  sent:        { label: '✓ Sent',         color: 'var(--signal-green)',  bg: 'rgba(30,240,168,0.08)',  border: 'rgba(30,240,168,0.2)' },
-  pending:     { label: '⏳ Pending',      color: 'var(--signal-amber)',  bg: 'rgba(255,200,0,0.1)',    border: 'rgba(255,200,0,0.3)' },
-  queued:      { label: '⏳ Queued',       color: 'var(--signal-amber)',  bg: 'rgba(255,200,0,0.1)',    border: 'rgba(255,200,0,0.3)' },
-  sending:     { label: '⏳ Sending',      color: 'var(--signal-amber)',  bg: 'rgba(255,200,0,0.1)',    border: 'rgba(255,200,0,0.3)' },
-  failed:      { label: '✗ Failed',        color: 'var(--signal-red)',    bg: 'rgba(231,76,60,0.1)',    border: 'rgba(231,76,60,0.3)' },
-  undelivered: { label: '✗ Undelivered',  color: 'var(--signal-red)',    bg: 'rgba(231,76,60,0.1)',    border: 'rgba(231,76,60,0.3)' },
+  delivered:   { label: '✓ Delivered',   color: 'var(--signal-green)',  bg: 'var(--pill-success-bg)', border: 'var(--pill-success-bd)' },
+  sent:        { label: '✓ Sent',         color: 'var(--signal-green)',  bg: 'var(--pill-success-bg)', border: 'var(--pill-success-bd)' },
+  pending:     { label: '⏳ Pending',      color: 'var(--signal-amber)',  bg: 'var(--pill-warning-bg)', border: 'var(--pill-warning-bd)' },
+  queued:      { label: '⏳ Queued',       color: 'var(--signal-amber)',  bg: 'var(--pill-warning-bg)', border: 'var(--pill-warning-bd)' },
+  sending:     { label: '⏳ Sending',      color: 'var(--signal-amber)',  bg: 'var(--pill-warning-bg)', border: 'var(--pill-warning-bd)' },
+  failed:      { label: '✗ Failed',        color: 'var(--signal-red)',    bg: 'var(--pill-danger-bg)',  border: 'var(--pill-danger-bd)' },
+  undelivered: { label: '✗ Undelivered',  color: 'var(--signal-red)',    bg: 'var(--pill-danger-bg)',  border: 'var(--pill-danger-bd)' },
 }
 
 function DeliveryBadge({ status }) {
@@ -33,8 +33,8 @@ function AiBadge({ item }) {
       title={item.send_source_label ? `AI-generated · ${item.send_source_label}` : 'AI-generated'}
       style={{
         marginLeft: 6, fontSize: 10, fontWeight: 700,
-        background: 'rgba(30,168,255,0.15)', color: '#1ea8ff',
-        border: '1px solid rgba(30,168,255,0.3)', borderRadius: 3, padding: '1px 5px',
+        background: 'var(--pill-info-bg)', color: 'var(--pill-info-fg)',
+        border: '1px solid var(--pill-info-bd)', borderRadius: 3, padding: '1px 5px',
       }}
     >
       AI
@@ -75,7 +75,7 @@ function TodaySummary({ today, loading, error, onRetry, navigate }) {
           {today.contacted_more_than_once > 0 && ` · ${today.contacted_more_than_once} more than once`}
         </span>
         {aiCount > 0 && (
-          <span style={{ fontSize: 13, color: '#1ea8ff' }}>
+          <span style={{ fontSize: 13, color: 'var(--color-primary)' }}>
             {aiCount} AI{items.length < (today.total || 0) ? ' (shown)' : ''}
           </span>
         )}
@@ -263,7 +263,12 @@ export default function Activity() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="search-input"
-          style={{ width: 320 }}
+          aria-label="Search activity"
+          style={{
+            width: 320, maxWidth: '100%', padding: '8px 12px', fontSize: 13,
+            border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm, 10px)',
+            background: 'var(--surface-card)', color: 'var(--text-strong)',
+          }}
         />
         <div style={{ display: 'flex', gap: 6 }}>
           {['all', 'sms', 'email'].map((ch) => (
@@ -300,7 +305,15 @@ export default function Activity() {
         {loading ? (
           <div className="empty-state">Loading…</div>
         ) : filtered.length === 0 ? (
-          <div className="empty-state">No activity found for the selected filters.</div>
+          <div className="empty-state">
+            No sends found for the selected filters.<br />
+            <span style={{ fontSize: 13 }}>
+              Every SMS and email sent from this workspace is listed here with its delivery status.
+              {items.length === 0 && !search ? ' Nothing has been sent in this window yet — try a longer range, or start from ' : ' Try clearing the search or widening the date range.'}
+              {items.length === 0 && !search ? <a href="/leads" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Leads</a> : null}
+              {items.length === 0 && !search ? '.' : null}
+            </span>
+          </div>
         ) : (
           <table className="data-table">
             <thead>
@@ -332,8 +345,8 @@ export default function Activity() {
                       {isToday && (
                         <span style={{
                           marginLeft: 6, fontSize: 10, fontWeight: 700,
-                          background: 'rgba(30,240,168,0.15)', color: 'var(--signal-green)',
-                          border: '1px solid rgba(30,240,168,0.3)', borderRadius: 3, padding: '1px 5px',
+                          background: 'var(--pill-success-bg)', color: 'var(--pill-success-fg)',
+                          border: '1px solid var(--pill-success-bd)', borderRadius: 3, padding: '1px 5px',
                         }}>
                           TODAY
                         </span>

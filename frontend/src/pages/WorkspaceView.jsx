@@ -104,7 +104,7 @@ export default function WorkspaceView() {
       .catch((err) => {
         setPayload(null)
         setError(err.status === 404
-          ? 'This screen is not switched on for your workspace.'
+          ? 'This screen is not switched on for your workspace. Screens like this are configured per workspace by your administrator - use the menu on the left to open the screens you do have.'
           : (err.message || 'Could not load this screen.'))
       })
       .finally(() => setLoading(false))
@@ -132,25 +132,32 @@ export default function WorkspaceView() {
 
   return (
     <div>
-      <h1 className="page-title">{view?.title || 'Loading…'}</h1>
+      <h1 className="page-title">
+        {view?.title || (loading ? 'Loading…' : 'Screen unavailable')}
+      </h1>
       {view?.subtitle
         ? <p className="page-subtitle">{view.subtitle}</p>
         : null}
 
-      {error ? (
+      {error && !loading ? (
         <div
           className="panel"
           style={{
             borderColor: 'var(--border-danger)',
             background: 'var(--signal-red-dim)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            gap: '16px', marginBottom: '16px',
+            flexWrap: 'wrap', gap: '16px', marginBottom: '16px',
           }}
         >
-          <span style={{ color: 'var(--signal-red)' }}>{error}</span>
-          <button type="button" className="btn btn--secondary" onClick={load}>
-            Try again
-          </button>
+          <span style={{ color: 'var(--pill-danger-fg)', flex: '1 1 280px' }}>{error}</span>
+          <span style={{ display: 'flex', gap: '8px' }}>
+            <button type="button" className="btn btn--secondary" onClick={load}>
+              Try again
+            </button>
+            <button type="button" className="btn btn--secondary" onClick={() => navigate('/')}>
+              Go to Overview
+            </button>
+          </span>
         </div>
       ) : null}
 
@@ -159,7 +166,7 @@ export default function WorkspaceView() {
           className="panel"
           style={{
             display: 'grid',
-            gridTemplateColumns: `repeat(${payload.stats.length}, minmax(0, 1fr))`,
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
             gap: '20px', marginBottom: '16px',
           }}
         >
@@ -176,11 +183,12 @@ export default function WorkspaceView() {
         </div>
       ) : null}
 
+      {error && !loading ? null : (
       <div className="panel">
         <div
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            gap: '16px', marginBottom: '12px',
+            flexWrap: 'wrap', gap: '16px', marginBottom: '12px',
           }}
         >
           <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -205,9 +213,10 @@ export default function WorkspaceView() {
           <div className="empty-state">
             {needle
               ? 'Nothing on this screen matches that search.'
-              : (view?.empty || 'Nothing here yet.')}
+              : (view?.empty || 'Nothing here yet. Records appear on this screen as soon as they match its rules - add or import leads to start filling it.')}
           </div>
         ) : (
+          <div style={{ overflowX: 'auto' }}>
           <table className="data-table">
             <thead>
               <tr>
@@ -232,8 +241,10 @@ export default function WorkspaceView() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
+      )}
     </div>
   )
 }

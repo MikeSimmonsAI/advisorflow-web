@@ -287,7 +287,7 @@ export default function AuditLog() {
                 <tr><td colSpan="5" className="audit-log-empty">Loading audit events...</td></tr>
               ) : entries.length === 0 ? (
                 <tr><td colSpan="5" className="audit-log-empty">
-                  {hasActiveFilter ? 'No events match the current filters.' : 'No audit events found.'}
+                  {hasActiveFilter ? 'No events match the current filters. Clear them to see the full trail.' : 'No audit events yet. Sensitive actions (lead edits, user and role changes, suppression, template changes) are recorded here automatically as they happen.'}
                 </td></tr>
               ) : (
                 entries.map((entry) => (

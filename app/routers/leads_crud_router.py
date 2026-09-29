@@ -356,10 +356,17 @@ def delete_lead(
         raise HTTPException(status_code=403, detail="You can only delete your own leads")
 
     # Audited against the lead's own organization, not the caller's home org.
-    log_action(db, lead.organization_id, current_user.id, action="lead.delete", target_type="lead", target_id=lead_id, commit=False)
-    db.delete(lead)
-    db.commit()
-    return {"deleted": True, "id": lead_id}
+    # Related rows are detached or removed explicitly (app/services/lead_deletion.py):
+    # a reference without a database cascade used to fail the whole delete
+    # with an IntegrityError, which users saw as "Unable to reach the server".
+    from app.services import lead_deletion
+    try:
+        result = lead_deletion.delete_lead(db, lead, current_user.id)
+    except lead_deletion.LeadDeleteRefused as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=exc.detail)
+    # The response contract is unchanged; what was detached or removed is in the audit entry.
+    return {"deleted": True, "id": result["id"]}
 
 
 # ── Update lead type / AI direction ──────────────────────────────────────────

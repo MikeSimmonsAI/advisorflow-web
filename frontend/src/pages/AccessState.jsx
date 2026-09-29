@@ -52,13 +52,15 @@ const ROLE_LABEL = {
 
 export function Unauthorized({ required, role, path }) {
   const need = ROLE_LABEL[required] || 'a higher access level'
+  const isFeature = typeof required === 'string' && required.startsWith('feature:')
   return (
     <div style={WRAP}>
       <div style={{ fontSize: 32, marginBottom: 12 }} aria-hidden="true">🔒</div>
-      <h1 style={TITLE}>You don't have access to this page</h1>
+      <h1 style={TITLE}>{isFeature ? "This module isn't switched on here" : "You don't have access to this page"}</h1>
       <p style={BODY}>
-        This screen is limited to {need}. Your account is signed in as{' '}
-        <strong>{role || 'an advisor'}</strong>.
+        {isFeature
+          ? <>It is not enabled for your organization, or for the location you are working in.</>
+          : <>This screen is limited to {need}. Your account is signed in as{' '}<strong>{role || 'an advisor'}</strong>.</>}
       </p>
       <p style={BODY}>
         If you need it, ask an administrator in your organization to grant

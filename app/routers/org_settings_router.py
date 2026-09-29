@@ -1,5 +1,5 @@
 ﻿"""
-Org Settings Router â€” white labeling, tier config, industry settings.
+Org Settings Router — white labeling, tier config, industry settings.
 Super admin can pass ?org_id= to manage any org's settings.
 """
 import json
@@ -260,9 +260,9 @@ def get_org_settings(
         "instagram_url": getattr(org, "instagram_url", None),
         "linkedin_url": getattr(org, "linkedin_url", None),
         "enabled_features": json.loads(org.enabled_features) if getattr(org, "enabled_features", None) else None,
-        # Org-level email sender â€” each brand sends from its own verified domain.
+        # Org-level email sender — each brand sends from its own verified domain.
         "from_email": getattr(org, "from_email", None),
-        # Never return the raw API key to the UI â€” only signal whether it's set.
+        # Never return the raw API key to the UI — only signal whether it's set.
         "resend_api_key_set": bool(getattr(org, "resend_api_key", None)),
         "reply_to_email": getattr(org, "reply_to_email", None),
         "cc_email": getattr(org, "cc_email", None),
@@ -476,7 +476,7 @@ def update_contact_info(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Update org name, address and phone â€” shown on the booking page header and confirmation emails."""
+    """Update org name, address and phone — shown on the booking page header and confirmation emails."""
     org = _resolve_org(current_user, org_id, db)
     if req.name is not None and req.name.strip():
         org.name = req.name.strip()
@@ -621,20 +621,20 @@ def update_email_sender(
 ):
     """
     Saves the org-level Resend API key and from-address. The key is stored
-    plaintext (it's an outbound service key, not a user secret â€” same
+    plaintext (it's an outbound service key, not a user secret — same
     threat model as an SMTP password stored in env vars). Only updates
     resend_api_key if a non-empty string is provided, so admins can update
     the from_email alone without having to re-enter the key.
     """
     org = _resolve_org(current_user, org_id, db)
     if req.from_email is not None:
-        org.from_email = req.from_email or None  # empty string â†’ clear
+        org.from_email = req.from_email or None  # empty string → clear
     if req.resend_api_key:  # only update when a non-empty value is explicitly provided
         org.resend_api_key = req.resend_api_key
     if req.reply_to_email is not None:
-        org.reply_to_email = req.reply_to_email or None  # empty string â†’ clear
+        org.reply_to_email = req.reply_to_email or None  # empty string → clear
     if req.cc_email is not None:
-        org.cc_email = req.cc_email or None              # empty string â†’ clear
+        org.cc_email = req.cc_email or None              # empty string → clear
     db.commit()
     return {"updated": True, "from_email": org.from_email,
             "reply_to_email": org.reply_to_email, "cc_email": org.cc_email,
@@ -751,11 +751,11 @@ class OrgTwilioRead(BaseModel):
 
 class OrgTwilioUpdate(BaseModel):
     org_twilio_account_sid:    str
-    org_twilio_auth_token:     str                    # plaintext â€” encrypted before storage
+    org_twilio_auth_token:     str                    # plaintext — encrypted before storage
     # OPTIONAL as of the org-credential model. The organization holds the Twilio
     # account and the A2P brand; the numbers underneath it are assigned to
     # individual advisors. A shared org-wide number is a deliberate extra, not a
-    # prerequisite â€” requiring one here is what previously forced every customer
+    # prerequisite — requiring one here is what previously forced every customer
     # to nominate some number as "the org number" before anything would send.
     # Sending an empty string CLEARS it.
     org_twilio_phone_number:   Optional[str] = None   # E.164, e.g. "+18005550100"
@@ -764,7 +764,7 @@ class OrgTwilioUpdate(BaseModel):
 
 
 class OrgTwilioPhoneUpdate(BaseModel):
-    """Lightweight update â€” change phone/caller-id without re-entering the auth token."""
+    """Lightweight update — change phone/caller-id without re-entering the auth token."""
     org_twilio_phone_number:   Optional[str] = None   # "" or null clears the shared number
     org_twilio_caller_id_name: Optional[str] = None
     org_twilio_number_type:    Optional[str] = None
@@ -777,13 +777,13 @@ class OrgTwilioSharedTransfer(BaseModel):
     org_twilio_caller_id_name: Optional[str] = None
 
 
-# â”€â”€ Sending-number assignment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Sending-number assignment ────────────────────────────────────────────────
 #
 # A sending number identifies exactly one mailbox in the inbound webhook
 # (app/routers/sms_router.py looks the inbound `To` up against
 # users.twilio_phone_number, then organizations.org_twilio_phone_number). Two
 # rows holding the same number would make that lookup pick whichever the
-# database returned first, and a family's reply â€” a STOP included â€” would land
+# database returned first, and a family's reply — a STOP included — would land
 # in the wrong advisor's thread or the wrong tenant entirely. So assignment is
 # checked for collisions across ALL users and ALL organizations, not just this
 # one. That check is a correctness requirement of inbound routing, not a
@@ -913,6 +913,13 @@ def update_org_twilio(
     if shared:
         _assert_number_unused(db, shared, allow_org_id=org.id)
 
+    # A SID that is not this tenant's to use (the platform's own, or another
+    # organization's) would let this tenant's token be accepted for someone
+    # else's webhooks. Re-saving the SID the organization already holds is
+    # left alone so existing configurations stay editable.
+    if sid != (org.org_twilio_account_sid or "").strip():
+        from app.utils.twilio_webhook_guard import assert_sid_assignable
+        assert_sid_assignable(db, sid, organization_id=org.id)
     org.org_twilio_account_sid          = sid
     org.org_twilio_auth_token_encrypted = encrypt_value(token)
     org.org_twilio_phone_number         = shared
@@ -930,7 +937,7 @@ def update_org_twilio_phone(
     current_user: User = Depends(require_admin),
     _cap: User = Depends(require_capability("twilio_numbers")),
 ):
-    """Update the shared phone number / caller ID only â€” no auth token re-entry.
+    """Update the shared phone number / caller ID only — no auth token re-entry.
 
     An empty phone number CLEARS the shared sender, which is a supported state:
     the organization keeps its credentials and A2P registration, and every send
@@ -1014,7 +1021,7 @@ def transfer_user_number_to_shared_org_number(
 
 
 # ---------------------------------------------------------------------------
-# Per-advisor sending numbers â€” the org holds the credentials, each advisor
+# Per-advisor sending numbers — the org holds the credentials, each advisor
 # holds only the local number assigned to them.
 # ---------------------------------------------------------------------------
 
@@ -1067,7 +1074,7 @@ def assign_org_sending_number(
     """Assign (or clear) one advisor's sending number.
 
     This writes a NUMBER ONLY. It never writes an Account SID or Auth Token to
-    a user row â€” the credentials stay on the organization, which is the whole
+    a user row — the credentials stay on the organization, which is the whole
     point of the model: one Twilio account and one A2P registration per
     customer, with the numbers underneath it handed out to staff.
 
@@ -1105,7 +1112,7 @@ def assign_org_sending_number(
         "full_name": target.full_name,
         "twilio_phone_number": target.twilio_phone_number,
         # Echo the resolved sender so the UI reports exactly what a send would
-        # do, rather than assuming the assignment is sufficient on its own â€”
+        # do, rather than assuming the assignment is sufficient on its own —
         # it is not, if the organization has no credentials yet.
         "sender": describe_sms_sender(target, db),
     }

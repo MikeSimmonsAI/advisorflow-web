@@ -70,7 +70,10 @@ class Target:
             self.platform = db.query(Platform).filter(Platform.id == self.platform_id).first()
             if self.platform is None and self.scope == "brand":
                 raise HTTPException(404, "Brand not found")
-        if self.scope == "workspace":
+        if self.scope == "workspace" or (workspace_id and self.scope in ("role", "user")):
+            # Role/user targets may name a workspace too: the answer is then
+            # what that person gets WHILE WORKING IN that location, which is
+            # what require_feature enforces (app/services/workspace_location.py).
             if not workspace_id:
                 raise HTTPException(400, "workspace_id is required for scope workspace")
             self.workspace = db.query(Location).filter(
@@ -276,10 +279,20 @@ def matrix(scope: str = "org", platform_id: Optional[str] = None,
         "blocked": sum(1 for r in rows if r["effective_state"] == "blocked_by_dependency"),
     }
     return {"target": t.describe(), "kpis": kpis, "features": rows,
-            "enforced_at_request_time": t.scope in ("platform", "brand", "org", "role", "user"),
-            "note": (None if t.scope != "workspace" else
-                     "Workspace (location) overrides are stored and shown here, but requests "
-                     "carry no location context, so require_feature does not yet apply them.")}
+            "enforced_at_request_time": True,
+            "note": (None if t.scope != "workspace" else WORKSPACE_ENFORCEMENT_NOTE)}
+
+
+# Every layer is enforced at request time. Workspace (location) overrides reach
+# require_feature and the customer nav through the request's resolved location
+# (app/services/workspace_location.py). Stated here so God Mode says exactly
+# what the server does.
+WORKSPACE_ENFORCEMENT_NOTE = (
+    "Workspace (location) overrides are enforced. Each request resolves its location "
+    "from the shell's location selection (validated against the person's location "
+    "assignments); with no selection, a person assigned to one location is evaluated "
+    "there, and a person assigned to several is evaluated against all of them (most "
+    "restrictive). A location can only narrow what the organization has.")
 
 
 # ── Writes ──────────────────────────────────────────────────────────────────
@@ -439,6 +452,14 @@ def explain(feature_key: str, scope: str = "org", platform_id: Optional[str] = N
     # Would the server actually let a customer in? The same call require_feature makes.
     if t.org is not None and t.scope == "org":
         res["server_enforcement"] = {"org_has_feature": ent.org_has_feature(t.org, feature_key)}
+    elif t.org is not None and t.workspace is not None:
+        res["server_enforcement"] = {
+            "org_has_feature": ent.org_has_feature(t.org, feature_key),
+            "workspace_has_feature": ent.workspace_has_feature(
+                db, t.org, feature_key, (t.workspace.id,)),
+            "enforced": True,
+            "note": WORKSPACE_ENFORCEMENT_NOTE,
+        }
     res["target"] = t.describe()
     return res
 

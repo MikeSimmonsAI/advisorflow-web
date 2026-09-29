@@ -2,7 +2,8 @@
  *
  * GET/PUT /wholesale/ops/pilot and GET /wholesale/ops/skip-trace. Every number
  * is read from the server: the batch cap, the kill switches, and the skip-trace
- * ledger (count, cost, hits, no-result, errors, duplicate-billing protection).
+ * ledger (count, cost, hits, no-result, errors, duplicate-billing protection),
+ * and the skip-trace cost panel (ESTIMATED TOTAL COST before any paid run).
  * The page says what ENFORCES each control, so a recorded setting is never
  * presented as an enforced one.
  */
@@ -14,6 +15,7 @@ import { Alert, EvoApp, Hero, Metric, Metrics, Panel, Tag } from '../ds/ds'
 import '../ds/evo-pages.css'
 import { errText, fmtWhen } from '../wsShared'
 import { DistributionNotice } from './DealOpsPanel'
+import SkipTraceCostPanel from './SkipTraceCostPanel'
 import './ops.css'
 
 const cents = (c) => (c === null || c === undefined ? '—' : `$${(c / 100).toFixed(2)}`)
@@ -154,6 +156,8 @@ export default function PilotControls() {
           </>
         )}
       </Panel>
+
+      <SkipTraceCostPanel />
     </EvoApp>
   )
 }
