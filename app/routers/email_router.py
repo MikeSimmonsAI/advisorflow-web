@@ -77,6 +77,77 @@ class SingleEmailRequest(BaseModel):
     appt_label: Optional[str] = None  # appointment type label for booking button text
 
 
+_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MB, well inside the provider's limit
+
+
+def _send_custom_email(db: Session, current_user: User, lead: Lead, *, subject: Optional[str],
+                       body: str, include_booking_link: bool, appt_label: Optional[str],
+                       attachments: Optional[list] = None) -> dict:
+    """THE one send path for a person-written email, with or without a file.
+
+    Everything that can fail is resolved BEFORE the provider is called. The
+    attachment route used to call the provider first and then crash on a
+    missing import while recording the send: the lead got the email, the page
+    said "Something went wrong", nothing was logged, and a retry would have
+    mailed the lead twice.
+    """
+    from app.routers.compose_router import acting_advisor
+    from app.services.email_service import send_email_via_provider
+    from app.services.public_identity import sending_identity_for_org
+    advisor = acting_advisor(db, lead, current_user)
+    identity = sending_identity_for_org(db, lead.organization_id)
+
+    # Strip any raw booking URLs that may have been included in the AI body text.
+    # The booking button is appended exactly once below as an HTML element.
+    clean_body = re.sub(r'https?://advisorflow-booking\.vercel\.app\S*', '', body or '').strip()
+    body_html = clean_body.replace('\n', '<br>')
+
+    if include_booking_link:
+        # THE LINK NAMES A CALENDAR, so it must name the lead's ADVISOR -
+        # not whoever happens to be sending (acting_advisor).
+        from app.services.sms_service import create_booking_link
+        from app.services.public_identity import booking_url as public_booking_url
+        booking_link = create_booking_link(db, lead, advisor)
+        booking_url = public_booking_url(db, lead.organization_id, booking_link.token)
+        btn_label = appt_label or "Schedule Your Appointment"
+        body_html += f"""<br><br>
+<table width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr><td align="center" style="padding:20px 0;">
+    <a href="{booking_url}" style="background-color:#1a5fa8;color:#ffffff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:bold;font-size:15px;display:inline-block;">
+      {btn_label}
+    </a>
+  </td></tr>
+</table>"""
+
+    subject = subject or f"Following up, {lead.first_name or 'there'}"
+
+    # THE RESOLVED IDENTITY, NOT THE RAW ORGANIZATION ROW (sending_identity_for_org
+    # walks organization -> platform -> verified registry).
+    result = send_email_via_provider(lead.email, subject, body_html,
+                                     attachments=attachments or None, org=identity)
+    if not result["success"]:
+        raise HTTPException(status_code=502, detail=result.get("error") or "The email provider refused the send.")
+
+    msg = EmailMessage(
+        lead_id=lead.id,
+        # The message is FROM the lead's advisor, so the record says so.
+        sender_id=advisor.id,
+        subject=subject,
+        body_html=body_html,
+        status="sent",
+        provider_message_id=result.get("provider_message_id"),
+        sent_at=datetime.utcnow(),
+    )
+    db.add(msg)
+    lead.status = "sent"
+    lead.last_messaged_at = datetime.utcnow()
+    db.commit()
+    out = {"email_id": msg.id, "status": "sent"}
+    if attachments is not None:
+        out["has_attachment"] = bool(attachments)
+    return out
+
+
 @router.post("/send/{lead_id}")
 def send_single_email(
     lead_id: str,
@@ -98,73 +169,9 @@ def send_single_email(
 
     # If custom body provided, use it directly
     if req and req.body:
-        # Strip any raw booking URLs that may have been included in the AI body text.
-        # The booking button is appended exactly once below as an HTML element.
-        clean_body = re.sub(r'https?://advisorflow-booking\.vercel\.app\S*', '', req.body).strip()
-        body_html = clean_body.replace('\n', '<br>')
-
-        # Append a single HTML booking button when requested
-        if req.include_booking_link:
-            # THE LINK NAMES A CALENDAR, so it must name the lead's ADVISOR -
-            # not whoever happens to be sending. This is the same defect that
-            # was fixed in the composer: a link minted while the platform owner
-            # had a tenant's lead open pointed the family at the OWNER's
-            # calendar. One helper, so the two paths cannot drift apart again.
-            from app.routers.compose_router import acting_advisor
-            from app.services.sms_service import create_booking_link
-            booking_link = create_booking_link(db, lead,
-                                               acting_advisor(db, lead, current_user))
-            from app.services.public_identity import booking_url as public_booking_url
-            booking_url = public_booking_url(db, lead.organization_id,
-                                             booking_link.token)
-            btn_label = req.appt_label or "Schedule Your Appointment"
-            body_html += f"""<br><br>
-<table width="100%" cellpadding="0" cellspacing="0" border="0">
-  <tr><td align="center" style="padding:20px 0;">
-    <a href="{booking_url}" style="background-color:#1a5fa8;color:#ffffff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:bold;font-size:15px;display:inline-block;">
-      {btn_label}
-    </a>
-  </td></tr>
-</table>"""
-
-        subject = req.subject or f"Following up, {lead.first_name or 'there'}"
-
-        # THE RESOLVED IDENTITY, NOT THE RAW ORGANIZATION ROW.
-        #
-        # This passed the bare Organization. Restland has no `from_email` of its
-        # own, so `send_email_via_provider` fell through to the deployment-wide
-        # EMAIL_FROM_ADDRESS - and a Restland family received mail From
-        # noreply@bookaboost.live, a company they have never heard of, which
-        # their employer's gateway then dropped in Junk behind an "arrived from
-        # outside" warning.
-        #
-        # `sending_identity_for_org` walks organization -> platform -> verified
-        # registry and carries reply-to and cc with it. It is the same resolver
-        # the template path already used; only this branch was missed.
-        from app.services.email_service import send_email_via_provider
-        from app.services.public_identity import sending_identity_for_org
-        result = send_email_via_provider(
-            lead.email, subject, body_html,
-            org=sending_identity_for_org(db, lead.organization_id))
-
-        if not result["success"]:
-            raise HTTPException(status_code=500, detail=result.get("error", "Email send failed. Check your Microsoft 365 connection in Settings."))
-
-        msg = EmailMessage(
-            lead_id=lead.id,
-            # The message is FROM the lead's advisor, so the record says so.
-            sender_id=acting_advisor(db, lead, current_user).id,
-            subject=subject,
-            body_html=body_html,
-            status="sent",
-            provider_message_id=result.get("provider_message_id"),
-            sent_at=datetime.utcnow(),
-        )
-        db.add(msg)
-        lead.status = "sent"
-        lead.last_messaged_at = datetime.utcnow()
-        db.commit()
-        return {"email_id": msg.id, "status": "sent"}
+        return _send_custom_email(db, current_user, lead, subject=req.subject, body=req.body,
+                                  include_booking_link=req.include_booking_link,
+                                  appt_label=req.appt_label)
 
     # Fallback to template-based send.
     #
@@ -597,16 +604,14 @@ async def send_email_with_attachment(
     request: Request,
     subject: str = Form(...),
     body_html: str = Form(...),
+    include_booking_link: str = Form("false"),
+    appt_label: Optional[str] = Form(None),
     file: UploadFile = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    """
-    Send an email to a lead with an optional flyer/image attachment.
-    Accepts multipart form: subject, body_html, and optional file upload.
-    """
-    from app.services.email_service import send_email_via_provider
-
+    """The same send as /email/send (same checks, booking button, identity and
+    record), plus one file. `body_html` is the composer's text."""
     lead = authorized_lead_query(db, current_user, request=request).filter(
         Lead.id == lead_id).first()
     if not lead:
@@ -615,44 +620,22 @@ async def send_email_with_attachment(
         raise HTTPException(status_code=400, detail='Lead is on the Do Not Contact list')
     if not lead.email:
         raise HTTPException(status_code=400, detail="Lead has no email address")
-    # Same door as the other two send paths. An attachment is not a reason for
-    # a lead to be qualified differently, and this route being the one that
-    # forgot is exactly how the single-send path came to be the only one that
-    # would cheerfully mail a flagged address.
     _assert_not_excluded(db, current_user, lead, request)
 
     attachments = []
     if file and file.filename:
         file_bytes = await file.read()
+        if len(file_bytes) > _MAX_ATTACHMENT_BYTES:
+            raise HTTPException(status_code=413, detail="The attachment is larger than 10 MB. Use a smaller file.")
         attachments.append({
             "filename": file.filename,
             "content": base64.b64encode(file_bytes).decode(),
             "content_type": file.content_type or "application/octet-stream",
         })
-
-    # Third send path, same rule: the RESOLVED identity, never the raw row.
-    from app.services.public_identity import sending_identity_for_org as _ident
-    result = send_email_via_provider(lead.email, subject, body_html,
-                                     attachments=attachments or None,
-                                     org=_ident(db, lead.organization_id))
-    if not result["success"]:
-        raise HTTPException(status_code=500, detail=result.get("error", "Email send failed"))
-
-    # Log it
-    msg = EmailMessage(
-        lead_id=lead.id,
-        sender_id=acting_advisor(db, lead, current_user).id,
-        subject=subject,
-        body_html=body_html,
-        status="sent",
-        provider_message_id=result.get("provider_message_id"),
-        sent_at=datetime.utcnow(),
-    )
-    db.add(msg)
-    lead.status = "sent"
-    lead.last_messaged_at = datetime.utcnow()
-    db.commit()
-    return {"email_id": msg.id, "status": "sent", "has_attachment": bool(attachments)}
+    return _send_custom_email(
+        db, current_user, lead, subject=subject, body=body_html,
+        include_booking_link=str(include_booking_link).lower() in ("true", "1", "yes", "on"),
+        appt_label=(appt_label or None), attachments=attachments)
 
 
 # ── AI email draft — talking points + 3 options ───────────────────────────────
