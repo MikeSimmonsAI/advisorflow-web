@@ -164,8 +164,17 @@ function smartSubject(firstName, tier, messageTrack, orgName) {
   return `Checking in${name}`
 }
 
+// The API sends UTC timestamps without a zone ("2026-09-29T19:41:34"), which a
+// browser reads as LOCAL time - in Central that put every reply 5 hours in the
+// future and it always read "Just now". A string without Z/offset is UTC.
+function asUtc(dateStr) {
+  if (typeof dateStr !== 'string') return dateStr
+  return /[zZ]|[+-]\d\d:?\d\d$/.test(dateStr) || !/T\d/.test(dateStr) ? dateStr : dateStr + 'Z'
+}
+
 function timeAgo(dateStr) {
   if (!dateStr) return ''
+  dateStr = asUtc(dateStr)
   const diff = Date.now() - new Date(dateStr).getTime()
   const mins = Math.floor(diff / 60000)
   if (mins < 1) return 'Just now'

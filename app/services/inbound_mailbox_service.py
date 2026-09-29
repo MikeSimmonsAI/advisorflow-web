@@ -150,8 +150,10 @@ def _fetch(token: str, since: datetime) -> List[dict]:
               "$orderby": "receivedDateTime asc", "$top": 50}
     out: List[dict] = []
     while url and len(out) < MAX_MESSAGES_PER_RUN:
+        # ImmutableId: a message keeps its id when a rule or a person moves it
+        # between folders (ids changed when Joshua's reply was re-filed).
         r = httpx.get(url, headers={"Authorization": f"Bearer {token}",
-                                    "Prefer": 'outlook.body-content-type="text"'},
+                                    "Prefer": 'outlook.body-content-type="text", IdType="ImmutableId"'},
                       params=params, timeout=20)
         if r.status_code != 200:
             raise RuntimeError(f"Graph inbox read failed {r.status_code}: {r.text[:300]}")
@@ -162,6 +164,7 @@ def _fetch(token: str, since: datetime) -> List[dict]:
 
 
 _QUOTE_SPLITS = [
+    r'\n?-{5,}\s*Forwarded message\s*-{5,}.*',
     r'\n[- ]*On .{5,200}?wrote:.*',
     r'\n[- ]*From:.*?\n.*?(Sent|Date):.*',
     r'\n_{5,}.*', r'\n-{5,}\s*Original Message.*', r'\n>.*',
@@ -174,6 +177,10 @@ def clean_body(content: str) -> str:
         t = re.sub(r'(?i)<br\s*/?>|</p>|</div>', '\n', t)
         t = re.sub(r'<[^>]+>', ' ', t)
     t = _html.unescape(t).replace('\r\n', '\n')
+    # Signature / inline images arrive in the text body as "[https://...]" or
+    # "[image: name]" - never the person's words.
+    t = re.sub(r'\[(?:image:[^\]]*|https?://[^\]\s]+)\]', '', t)
+    t = re.sub(r'<https?://[^>\s]+>', '', t)
     t = re.sub(r'[ \t ]+', ' ', t)
     for pat in _QUOTE_SPLITS:
         t = re.split(pat, t, maxsplit=1, flags=re.DOTALL | re.IGNORECASE)[0]
@@ -312,6 +319,13 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
             newest = received
         if gid in seen and seen[gid] != "error":
             continue
+        imid = m.get("internetMessageId")
+        if imid and db.query(InboundMailboxMessage.id).filter(
+                InboundMailboxMessage.mailbox_id == box.id,
+                InboundMailboxMessage.internet_message_id == imid,
+                InboundMailboxMessage.graph_message_id != gid,
+                InboundMailboxMessage.outcome.in_(("matched", "own_mail"))).first():
+            continue  # the same message under an older id, already handled
         sender = ((m.get("from") or {}).get("emailAddress") or {}).get("address", "").strip().lower()
         row = (db.query(InboundMailboxMessage).filter(InboundMailboxMessage.mailbox_id == box.id,
                                                       InboundMailboxMessage.graph_message_id == gid).first()
@@ -327,7 +341,9 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                 if lead is not None:
                     body = clean_body((m.get("body") or {}).get("content") or m.get("bodyPreview") or "")
                     if not body:
-                        body = (m.get("bodyPreview") or m.get("subject") or "(empty reply)")[:800]
+                        subj = (m.get("subject") or "").strip()
+                        body = ("(Forwarded the email with no message of their own.)"
+                                if re.match(r'(?i)^(fwd?|fw):', subj) else "(Replied with no text.)")
                     reply, created = _store_reply(db, lead, body, received)
                     row.organization_id, row.lead_id, row.reply_id = lead.organization_id, lead.id, reply.id
                     if not created:

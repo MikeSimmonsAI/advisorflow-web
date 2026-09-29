@@ -171,3 +171,20 @@ def test_fetch_reads_every_folder_except_sent_drafts_outbox_deleted(monkeypatch)
     got = S._fetch("tok", datetime.utcnow() - timedelta(days=1))
     assert [m["id"] for m in got] == ["a", "c"]
     assert any(u.endswith("/me/messages") for u in calls)
+
+
+def test_clean_body_drops_signature_images_and_forward_quotes():
+    body = ("This looks great. How do I get started with a quote? "
+            "[https://ci3.googleusercontent.com/mail-sig/AIorK4z6EE]\n"
+            "[image: logo.png]\n\n---------- Forwarded message ---------\nFrom: x")
+    assert S.clean_body(body) == "This looks great. How do I get started with a quote?"
+    assert S.clean_body("[https://ci3.googleusercontent.com/x]\n---------- Forwarded message ---------\nold") == ""
+
+
+def test_a_moved_message_with_a_new_id_is_not_handled_twice(db_session, world):
+    m1 = _msg("old-id", "josh@example.com", "first words")
+    S.poll_mailbox(db_session, world.box, fetch=lambda since: [m1])
+    m2 = dict(m1, id="new-id-after-move")
+    S.poll_mailbox(db_session, world.box, fetch=lambda since: [m2])
+    assert db_session.query(InboundMailboxMessage).count() == 1
+    assert db_session.query(Reply).count() == 1
