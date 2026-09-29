@@ -96,3 +96,25 @@ Owner: "I just can't delete any contact" / "fix that delete lead option as well,
   25,000). Contacts page: lead-stage picker, Promote to leads, "Select all N matching", chunked progress.
   Live: Atlantis select-all = 10,861 (2,799 with phone), matches KPIs; sandbox ZZTEST Keep Sandbox promoted via UI
   (lead fd40a2bd…, status new, consent untouched). Mike's real contacts NOT promoted — his call.
+
+## 2026-09-29 late afternoon — email send hardening + P0 inbound reply sync
+- Send with attachment crashed AFTER the provider accepted (NameError acting_advisor) → mail delivered, nothing
+  recorded, booking button ignored (4db5441). Both one-off paths now share _send_custom_email; e1ebc1e added:
+  15-min duplicate guard (409 duplicate_send; composer confirms), send_record.record_after_send (post-send save
+  retried, never a 500; also send_sms/send_mms), M365 mailbox used when the lead's advisor connected it, text/plain
+  part, truthful composer sender line, POST /email/record-sent (managers; sends nothing; audited). Joshua's 2:29 PM
+  email recorded (send_source=recorded). Funeral "What they have" panel + hint only in funeral workspaces (50afd5e).
+- Deliverability (evosyspro.live): SPF root -all + outlook; Resend return-path send.evosyspro.live (SES);
+  DKIM resend._domainkey d=evosyspro.live; DMARC p=quarantine relaxed → aligned pass. No tracking/unsubscribe on
+  one-off mail. Spam = content/brand mismatch (Atlantis brand from EvoSys support address, image flyer, HTML-only).
+  Long-term: verify an Atlantis sending domain (DNS — owner), or connect M365 per advisor.
+- Inbound (ec1b563 → 986f999): nothing read support@evosyspro.live; the advisor poller only read personal M365
+  inboxes and reported Graph failures as "checked 0". New inbound_mailboxes + inbound_mailbox_messages; owner
+  connected support@evosyspro.live (God → Email Diagnostics, Microsoft sign-in, delegated Mail.Read). Poll every
+  cron run from a cursor, ALL folders except Sent/Drafts/Outbox/Deleted (mailbox rule files mail into "Careers /
+  Indeed Applicants"), ImmutableId + internetMessageId dedupe. Routing: workspaces whose sending identity is the
+  mailbox; sender → lead (most recently emailed if shared; else ambiguous, not attached). Reply + status replied +
+  REPLY_RECEIVED notification; AI only if a conversation/pipeline already runs. Probe endpoint (read-only folders/
+  newest). Joshua's reply attached automatically by the cron at 21:21 UTC.
+- Controlled test: lead "ZZTEST Reply Loop" (Atlantis, c9c0eaa7…, simmonsmj242@gmail.com); email 2f5130c4… sent
+  via provider; awaiting owner reply to confirm the loop. Delete the ZZTEST lead afterwards.
