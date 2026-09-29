@@ -442,15 +442,15 @@ def update_booking_settings(
     """Advisors update their own booking / scheduling preferences."""
     if req.appt_duration_minutes is not None:
         if req.appt_duration_minutes < 5 or req.appt_duration_minutes > 480:
-            raise HTTPException(status_code=400, detail="appt_duration_minutes must be 5â€“480.")
+            raise HTTPException(status_code=400, detail="appt_duration_minutes must be 5–480.")
         current_user.appt_duration_minutes = req.appt_duration_minutes
     if req.buffer_minutes is not None:
         if req.buffer_minutes < 0 or req.buffer_minutes > 120:
-            raise HTTPException(status_code=400, detail="buffer_minutes must be 0â€“120.")
+            raise HTTPException(status_code=400, detail="buffer_minutes must be 0–120.")
         current_user.buffer_minutes = req.buffer_minutes
     if req.max_bookings_per_day is not None:
         if req.max_bookings_per_day < 1 or req.max_bookings_per_day > 50:
-            raise HTTPException(status_code=400, detail="max_bookings_per_day must be 1â€“50.")
+            raise HTTPException(status_code=400, detail="max_bookings_per_day must be 1–50.")
         current_user.max_bookings_per_day = req.max_bookings_per_day
     if req.available_start_time is not None:
         current_user.available_start_time = req.available_start_time

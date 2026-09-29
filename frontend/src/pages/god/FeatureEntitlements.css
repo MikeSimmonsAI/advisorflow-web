@@ -179,4 +179,17 @@ textarea.fe-input { height: auto; padding: 8px 10px; resize: vertical; }
   .fe-dl dd { margin-bottom: 8px; }
   .fe-detail-actions { grid-template-columns: minmax(0, 1fr); }
   .fe-header h1 { font-size: 22px; }
+  /* Phone: the feature table becomes one card per feature (labels come from data-label). */
+  .fe-table-wrap { overflow-x: visible; }
+  .fe-table { min-width: 0; }
+  .fe-table thead { display: none; }
+  .fe-table, .fe-table tbody { display: block; }
+  .fe-table tbody tr { display: block; position: relative; padding: 10px 12px 12px 44px; border-bottom: 1px solid var(--fe-row); }
+  .fe-table td { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 0; min-width: 0; }
+  .fe-table td[data-label]::before { content: attr(data-label); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--fe-dim); flex: 0 0 auto; }
+  .fe-table td[data-label="Feature"] { display: block; padding-bottom: 6px; }
+  .fe-table td[data-label="Feature"]::before { content: none; }
+  .fe-table td.fe-col-check { position: absolute; left: 12px; top: 12px; padding: 0; }
+  .fe-table td.fe-col-actions { justify-content: flex-end; padding-top: 8px; width: auto; }
+  .fe-table .fe-key { overflow-wrap: anywhere; }
 }

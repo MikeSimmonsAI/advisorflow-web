@@ -626,7 +626,9 @@ export default function Layout({ children }) {
   // answer must be the CUSTOMER even when an operator is the one looking —
   // `orgContext.orgName` is the customer an operator entered, and a
   // customer's own staff have no orgContext, so their branding row answers.
-  const workspaceName = orgContext?.orgName || branding?.brand_name || ''
+  // An org user has no orgContext and often no brand_name; fall back to the
+  // workspace identity so the rail's wordmark is never blank.
+  const workspaceName = orgContext?.orgName || branding?.brand_name || identity?.display_name || ''
   const logoUrl = vertical
     // The customer's own mark, operator or not. Falling back to the platform
     // logo here would put the white-label product's badge on the customer's

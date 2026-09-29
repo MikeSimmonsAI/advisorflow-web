@@ -13,6 +13,8 @@
 }
 .wso-textarea { min-height: 64px; resize: vertical; }
 .wso-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
+/* the action row under a form spans the whole grid instead of squeezing into one cell */
+.wso-form > .wso-row { grid-column: 1 / -1; }
 .wso-label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--evo-text-secondary); min-width: 0; }
 
 /* Temperature pill */

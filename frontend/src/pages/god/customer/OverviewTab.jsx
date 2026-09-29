@@ -91,7 +91,7 @@ export default function OverviewTab({ cc, onAction, onActivate, busy }) {
                   <span className="occ-ess-v occ-muted">{primary.timezone || 'No timezone'}</span>
                 </>
               ) : <span className="occ-ess-v occ-muted">No location yet</span>}
-              <button className="go-btn" onClick={() => onAction({ tab: 'locations' })}>
+              <button className="go-btn ghost sm" onClick={() => onAction({ tab: 'locations' })}>
                 Manage Locations
               </button>
             </div>
@@ -101,7 +101,7 @@ export default function OverviewTab({ cc, onAction, onActivate, busy }) {
               <span className="occ-ess-v occ-muted">
                 {e.users.pending} never signed in · {e.users.admins} admin{e.users.admins === 1 ? '' : 's'}
               </span>
-              <button className="go-btn" onClick={() => onAction({ tab: 'people' })}>
+              <button className="go-btn ghost sm" onClick={() => onAction({ tab: 'people' })}>
                 Manage People
               </button>
             </div>
@@ -109,7 +109,7 @@ export default function OverviewTab({ cc, onAction, onActivate, busy }) {
               <span className="occ-ess-t">Calendar &amp; Booking</span>
               <Pill status={e.booking.status} />
               <span className="occ-ess-v occ-muted">{e.booking.reason}</span>
-              <button className="go-btn" onClick={() => onAction({ tab: 'locations' })}>
+              <button className="go-btn ghost sm" onClick={() => onAction({ tab: 'locations' })}>
                 Configure Booking
               </button>
             </div>
@@ -117,7 +117,7 @@ export default function OverviewTab({ cc, onAction, onActivate, busy }) {
               <span className="occ-ess-t">Communication Setup</span>
               <span className="occ-ess-v">SMS <Pill status={e.communications.sms} /></span>
               <span className="occ-ess-v">Email <Pill status={e.communications.email} /></span>
-              <button className="go-btn" onClick={() => onAction({ tab: 'operations' })}>
+              <button className="go-btn ghost sm" onClick={() => onAction({ tab: 'operations' })}>
                 View details
               </button>
             </div>
@@ -153,7 +153,7 @@ export default function OverviewTab({ cc, onAction, onActivate, busy }) {
         <section className="occ-card">
           <div className="occ-card-head">
             <h3>Recent Activity</h3>
-            <button className="go-btn"
+            <button className="go-btn ghost sm"
                     onClick={() => onAction({ href: '/god/audit?organization_id=' + cc.header.id })}>
               View all
             </button>
@@ -222,7 +222,7 @@ export default function OverviewTab({ cc, onAction, onActivate, busy }) {
                 : cc.enabled_tools.enabled_count + ' feature(s) enabled for this organization.'}
             </p>
           </div>
-          <button className="go-btn" onClick={() => onAction({ tab: 'entitlements' })}>View all</button>
+          <button className="go-btn ghost sm" onClick={() => onAction({ tab: 'entitlements' })}>View all</button>
         </div>
         {cc.enabled_tools.tools.filter(t => t.enabled).length === 0
           ? <div className="occ-empty">No tools are enabled yet.</div>

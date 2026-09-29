@@ -102,7 +102,7 @@ export default function PilotControls() {
             ) : null}
             <ul className="wso-list" style={{ marginTop: 12 }}>
               {Object.entries(pilot.enforcement).map(([k, v]) => (
-                <li key={k} className="wso-small wso-muted"><strong>{k.replace(/_/g, ' ')}:</strong> {v}</li>
+                <li key={k} className="wso-small wso-muted"><strong>{(k.charAt(0).toUpperCase() + k.slice(1)).replace(/_/g, ' ').replace(/ cents$/, '').replace(/^Pause stop$/, 'Pause / stop')}:</strong> {v}</li>
               ))}
             </ul>
             {pilot.kill_switches ? (

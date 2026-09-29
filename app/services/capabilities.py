@@ -179,7 +179,7 @@ CAPABILITIES: Dict[str, Capability] = dict([
     _cap("lead_import_manage",
          "Archive and manage import batches",
          requires_feature=None, delegable=True,
-         why="Administrative housekeeping Ã¢â‚¬â€ archive batches, purge old staging "
+         why="Administrative housekeeping — archive batches, purge old staging "
              "data. Separate from commit so batch management does not require "
              "commit authority."),
     # ── Wholesale exception queue (feature capability — role-resolved) ──────
@@ -1064,7 +1064,7 @@ def administration_report(db: Session, org: Organization) -> Dict:
                     # Why the checkbox is disabled, said in words rather than
                     # left for the operator to work out.
                     "blocked_reason": (
-                        "Platform-wide Ã¢â‚¬â€ never delegated to a customer."
+                        "Platform-wide — never delegated to a customer."
                         if not c.delegable else
                         ("Requires the '%s' feature, which is not enabled."
                          % c.requires_feature)

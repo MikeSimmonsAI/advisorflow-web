@@ -83,7 +83,7 @@ export default function PeopleTab({ orgId, cc, reload, openAdd, onOpened }) {
                     <td className="occ-muted">{u.last_login_at ? whenExact(u.last_login_at) : 'Never'}</td>
                     <td><Pill tone={ACC_TONE[u.access.status]} label={u.access.label} /></td>
                     <td>
-                      <button className="go-btn" onClick={() => setResetFor(u)}>Reset password</button>
+                      <button className="go-btn ghost sm" style={{ whiteSpace: 'nowrap' }} onClick={() => setResetFor(u)}>Reset password</button>
                     </td>
                   </tr>
                 ))}

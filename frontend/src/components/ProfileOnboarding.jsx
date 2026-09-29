@@ -57,7 +57,8 @@ function checkItems(profile, user) {
 export default function ProfileOnboarding() {
   const user = getCurrentUser()
   const [profile, setProfile] = useState(null)
-  const [minimized, setMinimized] = useState(false)
+  // On a phone the full card would cover most of the page; start as the tab.
+  const [minimized, setMinimized] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640)
   const [saving, setSaving] = useState(false)
   const [activeField, setActiveField] = useState(null)
   const [fieldValue, setFieldValue] = useState('')
@@ -125,18 +126,18 @@ export default function ProfileOnboarding() {
       <button
         onClick={() => setMinimized(false)}
         style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 9000,
-          background: 'var(--surface-2, #0d1829)', border: '1px solid rgba(47,182,255,0.3)',
-          borderRadius: 12, padding: '10px 16px', cursor: 'pointer', color: 'var(--text, #e8f0ff)',
-          display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+          position: 'fixed', bottom: 16, right: 16, zIndex: 60,
+          background: '#ffffff', border: '1px solid #d6e2f3',
+          borderRadius: 12, padding: '10px 16px', cursor: 'pointer', color: '#0f1b2d',
+          display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 6px 24px rgba(15,27,45,0.14)',
           fontFamily: 'Inter, sans-serif', fontSize: 13,
         }}
       >
         <span style={{ fontSize: 18 }}>📋</span>
         <span>Complete your profile</span>
         <span style={{
-          background: 'rgba(47,182,255,0.15)', border: '1px solid rgba(47,182,255,0.3)',
-          borderRadius: 20, padding: '2px 8px', fontSize: 11, fontWeight: 700, color: '#2fb6ff'
+          background: '#eaf2fe', border: '1px solid #c7dbfa',
+          borderRadius: 20, padding: '2px 8px', fontSize: 11, fontWeight: 700, color: '#1d63d1'
         }}>{doneCount}/{items.length}</span>
       </button>
     )
@@ -145,38 +146,38 @@ export default function ProfileOnboarding() {
   // ── Full card ──────────────────────────────────────────────────────────
   return (
     <div style={{
-      position: 'fixed', bottom: 24, right: 24, zIndex: 9000, width: 360,
-      background: 'var(--surface-2, #0d1829)',
-      border: '1px solid rgba(47,182,255,0.25)',
+      position: 'fixed', bottom: 16, right: 16, zIndex: 60, width: 'min(360px, calc(100vw - 32px))',
+      background: '#ffffff',
+      border: '1px solid #d6e2f3',
       borderRadius: 16, overflow: 'hidden',
-      boxShadow: '0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(47,182,255,0.08)',
+      boxShadow: '0 12px 40px rgba(15,27,45,0.18)', color: '#0f1b2d',
       fontFamily: 'Inter, sans-serif',
     }}>
       {/* Header */}
       <div style={{
-        background: 'linear-gradient(135deg, rgba(47,182,255,0.12), rgba(30,240,168,0.06))',
-        borderBottom: '1px solid rgba(47,182,255,0.15)',
+        background: '#f4f8fe',
+        borderBottom: '1px solid #e4e9f1',
         padding: '14px 16px 12px',
         display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
       }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 14, color: '#e8f0ff', marginBottom: 2 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#0f1b2d', marginBottom: 2 }}>
             Complete your profile
           </div>
-          <div style={{ fontSize: 11, color: 'rgba(180,200,255,0.6)' }}>
+          <div style={{ fontSize: 11, color: '#5b6b82' }}>
             {doneCount} of {items.length} done — required to continue
           </div>
         </div>
         <button
           onClick={() => setMinimized(true)}
           title="Minimize"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(180,200,255,0.5)', fontSize: 18, lineHeight: 1, padding: 2 }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5b6b82', fontSize: 18, lineHeight: 1, padding: 2 }}
         >–</button>
       </div>
 
       {/* Progress bar */}
-      <div style={{ height: 3, background: 'rgba(255,255,255,0.06)' }}>
-        <div style={{ height: '100%', width: pct + '%', background: 'linear-gradient(90deg, #2fb6ff, #1ef0a8)', transition: 'width .4s' }} />
+      <div style={{ height: 3, background: '#e4e9f1' }}>
+        <div style={{ height: '100%', width: pct + '%', background: 'linear-gradient(90deg, #1d63d1, #067a55)', transition: 'width .4s' }} />
       </div>
 
       {/* Checklist */}
@@ -194,31 +195,31 @@ export default function ProfileOnboarding() {
                 display: 'flex', alignItems: 'center', gap: 12,
                 padding: '10px 16px', cursor: item.done || !item.field ? 'default' : 'pointer',
                 transition: 'background .12s',
-                background: activeField === item.field ? 'rgba(47,182,255,0.07)' : 'transparent',
+                background: activeField === item.field ? '#eef4fd' : 'transparent',
               }}
-              onMouseEnter={e => { if (!item.done && item.field) e.currentTarget.style.background = 'rgba(47,182,255,0.05)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = activeField === item.field ? 'rgba(47,182,255,0.07)' : 'transparent' }}
+              onMouseEnter={e => { if (!item.done && item.field) e.currentTarget.style.background = '#f4f8fe' }}
+              onMouseLeave={e => { e.currentTarget.style.background = activeField === item.field ? '#eef4fd' : 'transparent' }}
             >
               {/* Checkbox */}
               <div style={{
                 width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: item.done ? 'rgba(30,240,168,0.15)' : 'rgba(255,255,255,0.05)',
-                border: `2px solid ${item.done ? 'rgba(30,240,168,0.5)' : 'rgba(255,255,255,0.15)'}`,
+                background: item.done ? '#e3f4ec' : '#ffffff',
+                border: `2px solid ${item.done ? '#7cc9a6' : '#c9d3e1'}`,
                 transition: 'all .2s',
               }}>
-                {item.done && <span style={{ color: '#1ef0a8', fontSize: 13, lineHeight: 1 }}>✓</span>}
+                {item.done && <span style={{ color: '#067a55', fontSize: 13, lineHeight: 1 }}>✓</span>}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 500, color: item.done ? 'rgba(180,200,255,0.5)' : '#e8f0ff', textDecoration: item.done ? 'line-through' : 'none' }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: item.done ? '#7a889c' : '#0f1b2d', textDecoration: item.done ? 'line-through' : 'none' }}>
                   {item.label}
                 </div>
                 {!item.done && (
-                  <div style={{ fontSize: 11, color: 'rgba(180,200,255,0.45)', marginTop: 1 }}>{item.hint}</div>
+                  <div style={{ fontSize: 11, color: '#5b6b82', marginTop: 1 }}>{item.hint}</div>
                 )}
               </div>
               {!item.done && item.field && (
-                <span style={{ fontSize: 11, color: '#2fb6ff' }}>Edit →</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#1d63d1' }}>Edit →</span>
               )}
             </div>
 
@@ -234,8 +235,8 @@ export default function ProfileOnboarding() {
                   onKeyDown={e => { if (e.key === 'Enter') saveField(); if (e.key === 'Escape') { setActiveField(null); setFieldValue('') } }}
                   style={{
                     flex: 1, padding: '7px 10px', borderRadius: 8, fontSize: 13,
-                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(47,182,255,0.3)',
-                    color: '#e8f0ff', outline: 'none',
+                    background: '#ffffff', border: '1px solid #c9d3e1',
+                    color: '#0f1b2d', outline: 'none',
                   }}
                 />
                 <button
@@ -243,7 +244,7 @@ export default function ProfileOnboarding() {
                   disabled={saving || !fieldValue.trim()}
                   style={{
                     padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-                    background: saving ? 'rgba(47,182,255,0.2)' : 'rgba(47,182,255,0.85)',
+                    background: saving ? '#9dbbe8' : '#1d63d1',
                     border: 'none', color: '#fff', cursor: saving ? 'default' : 'pointer',
                   }}
                 >{saving ? '…' : 'Save'}</button>
@@ -254,7 +255,7 @@ export default function ProfileOnboarding() {
       </div>
 
       {/* Footer */}
-      <div style={{ padding: '10px 16px', borderTop: '1px solid rgba(47,182,255,0.08)', fontSize: 11, color: 'rgba(180,200,255,0.35)', textAlign: 'center' }}>
+      <div style={{ padding: '10px 16px', borderTop: '1px solid #e4e9f1', fontSize: 11, color: '#5b6b82', textAlign: 'center' }}>
         This checklist stays until your profile is complete
       </div>
 

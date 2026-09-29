@@ -120,14 +120,14 @@ export default function LocationsTab({ orgId, cc, reload, openAdd, onOpened }) {
                             label={l.is_active ? 'Active' : 'Inactive'} />
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      <button className="go-btn" onClick={() => { setFlash(''); setEdit(l) }}>Edit</button>{' '}
+                      <button className="go-btn ghost sm" style={{ whiteSpace: 'nowrap' }} onClick={() => { setFlash(''); setEdit(l) }}>Edit</button>{' '}
                       {!l.is_primary && l.is_active && (
-                        <button className="go-btn" disabled={busy} onClick={() => makePrimary(l)}>
+                        <button className="go-btn ghost sm" style={{ whiteSpace: 'nowrap' }} disabled={busy} onClick={() => makePrimary(l)}>
                           Make primary
                         </button>
                       )}{' '}
                       {!l.is_primary && (
-                        <button className="go-btn" disabled={busy} onClick={() => toggleActive(l)}>
+                        <button className="go-btn ghost sm" style={{ whiteSpace: 'nowrap' }} disabled={busy} onClick={() => toggleActive(l)}>
                           {l.is_active ? 'Deactivate' : 'Reactivate'}
                         </button>
                       )}

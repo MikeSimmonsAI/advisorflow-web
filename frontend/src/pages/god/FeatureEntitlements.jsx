@@ -5,7 +5,7 @@
  * see every registered feature's effective state there, where it was inherited
  * from, and the override (if any) at that scope. The table, KPIs and detail
  * panel are the shared EntitlementsWorkbench; this page only owns the scope
- * selectors. Deep-linkable: ?scope=org&org_id=...
+ * selectors. Deep-linkable: ?scope=org&org_id=... ; no params opens the Platform scope.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -28,7 +28,10 @@ const NEEDS = {
 
 export default function FeatureEntitlements() {
   const [params, setParams] = useSearchParams()
-  const [scope, setScope] = useState(params.get('scope') || 'org')
+  // No params -> the PLATFORM matrix, so the page is useful on arrival. An
+  // org id in the URL (?org= / ?org_id=) still opens that organization.
+  const [scope, setScope] = useState(params.get('scope')
+    || ((params.get('org_id') || params.get('org')) ? 'org' : 'platform'))
   const [platformId, setPlatformId] = useState(params.get('platform_id') || '')
   const [orgId, setOrgId] = useState(params.get('org_id') || params.get('org') || '')
   const [workspaceId, setWorkspaceId] = useState(params.get('workspace_id') || '')
@@ -110,7 +113,10 @@ export default function FeatureEntitlements() {
         <label className="fe-field">
           <span>Brand</span>
           <select className="fe-input" value={platformId}
-            onChange={e => { setPlatformId(e.target.value); setOrgId(''); setWorkspaceId(''); setUserId('') }}>
+            onChange={e => {
+              setPlatformId(e.target.value); setOrgId(''); setWorkspaceId(''); setUserId('')
+              if (e.target.value && scope === 'platform') setScope('brand')
+            }}>
             <option value="">All brands</option>
             {opts.brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
@@ -121,7 +127,10 @@ export default function FeatureEntitlements() {
             <input className="fe-input" placeholder="Filter organizations…" value={orgQuery}
               onChange={e => setOrgQuery(e.target.value)} aria-label="Filter organizations" />
             <select className="fe-input" value={orgId}
-              onChange={e => { setOrgId(e.target.value); setWorkspaceId(''); setUserId('') }}>
+              onChange={e => {
+                setOrgId(e.target.value); setWorkspaceId(''); setUserId('')
+                if (e.target.value && (scope === 'platform' || scope === 'brand')) setScope('org')
+              }}>
               <option value="">{selectedOrg ? selectedOrg.name : 'Select organization'}</option>
               {opts.organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>

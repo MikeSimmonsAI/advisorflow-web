@@ -78,12 +78,12 @@
 /* ── filters ────────────────────────────────────────────────────────────── */
 .cc-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
 .cc-search {
-  display: flex; align-items: center; gap: 8px; flex: 1 1 260px; min-width: 0; height: 38px; padding: 0 10px;
+  display: flex; align-items: center; gap: 8px; flex: 2 1 240px; min-width: 0; height: 38px; padding: 0 10px;
   background: var(--bg-field, #fff); border: 1px solid var(--border-strong, #cfd9e8); border-radius: var(--radius-sm, 8px); color: var(--text-tertiary, #7c8ba5);
 }
 .cc-search input { border: 0; outline: none; background: transparent; flex: 1; min-width: 0; font: inherit; font-size: 13.5px; color: var(--text-primary, #0f2a4d); }
 .cc-filters select, .cc-inline-select select {
-  height: 38px; min-width: 0; max-width: 100%; flex: 0 1 160px; padding: 0 8px; font: inherit; font-size: 13px;
+  height: 38px; min-width: 0; max-width: 100%; flex: 1 1 128px; padding: 0 8px; font: inherit; font-size: 13px;
   color: var(--text-primary, #0f2a4d); background: var(--bg-field, #fff); border: 1px solid var(--border-strong, #cfd9e8); border-radius: var(--radius-sm, 8px);
 }
 .cc-quick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 12px; }
