@@ -22,6 +22,7 @@ each from their own verified Resend domain, no cross-contamination.
 """
 
 import os
+import re
 from sqlalchemy.orm import Session
 from app.models.models import Lead, User, EmailMessage, MessageTrack
 
@@ -149,6 +150,22 @@ def render_email(db, track: MessageTrack, lead: Lead, advisor: User, booking_url
     return {"subject": subject, "body_html": body}
 
 
+def html_to_text(html: str) -> str:
+    """A readable plain-text rendering of an email body (links kept as URLs)."""
+    import html as _h
+    t = html or ""
+    t = re.sub(r'(?is)<(script|style).*?</\1>', '', t)
+    t = re.sub(r'(?is)<a\s[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+               lambda m: f"{re.sub('<[^>]+>', '', m.group(2)).strip()}: {m.group(1)}", t)
+    t = re.sub(r'(?i)<br\s*/?>', '\n', t)
+    t = re.sub(r'(?i)</?(p|div|tr|table|h[1-6]|li)(\s[^>]*)?>', '\n', t)
+    t = re.sub(r'<[^>]+>', '', t)
+    t = _h.unescape(t)
+    t = re.sub(r'[ \t]+', ' ', t)
+    t = re.sub(r'\n\s*\n\s*\n+', '\n\n', t)
+    return "\n".join(line.strip() for line in t.split("\n")).strip()
+
+
 def send_email_via_provider(
     to_email: str,
     subject: str,
@@ -240,6 +257,9 @@ def send_email_via_provider(
             "to": [to_email],
             "subject": subject,
             "html": body_html,
+            # A plain-text part next to the HTML. HTML-only mail is a classic
+            # spam signal and some clients show nothing without it.
+            "text": html_to_text(body_html),
         }
 
         # Reply-To and CC ride on the same `org` duck-type as the from-address.

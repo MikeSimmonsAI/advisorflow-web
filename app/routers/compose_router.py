@@ -129,6 +129,18 @@ def compose_context(lead_id: str,
         email_sender = {"ready": False, "from_email": None,
                         "reply_to_email": None, "source": None,
                         "reason": "The sending address could not be read."}
+    # A one-off email goes from the advisor's own Microsoft 365 mailbox when it
+    # is connected (email_router._send_custom_email) - say so, truthfully.
+    try:
+        if getattr(advisor, "microsoft_365_connected", False):
+            email_sender = {**email_sender, "ready": True, "reason": None,
+                            "from_email": (getattr(advisor, "microsoft_email_address", None)
+                                           or email_sender.get("from_email")),
+                            "channel": "microsoft_365"}
+        else:
+            email_sender = {**email_sender, "channel": "provider"}
+    except Exception:  # noqa: BLE001
+        log.exception("compose: could not read the advisor mailbox state")
 
     # ── voice ────────────────────────────────────────────────────────────────
     voice_ready, voice_reason = False, "Voice is not configured."

@@ -636,11 +636,12 @@ def send_sms(
         error_message=(getattr(twilio_msg, "error_message", None) or None),
         booking_link_id=booking_link.id if booking_link else None,
     )
-    db.add(message)
-    lead.status = "sent"
-    lead.last_messaged_at = datetime.utcnow()
-    db.commit()
-    return message
+    # The provider has ACCEPTED the message: saving our record must never turn
+    # that into an error the user retries (app/services/send_record.py).
+    from app.services.send_record import record_after_send
+    saved = record_after_send(db, lambda: message, lead=lead, channel="sms",
+                              provider_id=getattr(twilio_msg, "sid", None))
+    return saved if saved is not None else message
 
 
 def send_mms(
@@ -731,11 +732,12 @@ def send_mms(
         error_message=(getattr(twilio_msg, "error_message", None) or None),
         booking_link_id=booking_link.id if booking_link else None,
     )
-    db.add(message)
-    lead.status = "sent"
-    lead.last_messaged_at = datetime.utcnow()
-    db.commit()
-    return message
+    # The provider has ACCEPTED the message: saving our record must never turn
+    # that into an error the user retries (app/services/send_record.py).
+    from app.services.send_record import record_after_send
+    saved = record_after_send(db, lambda: message, lead=lead, channel="sms",
+                              provider_id=getattr(twilio_msg, "sid", None))
+    return saved if saved is not None else message
 
 
 def configure_caller_id_name(advisor: User) -> None:

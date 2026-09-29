@@ -75,14 +75,17 @@ class SingleEmailRequest(BaseModel):
     body: Optional[str] = None
     include_booking_link: bool = True
     appt_label: Optional[str] = None  # appointment type label for booking button text
+    allow_duplicate: bool = False  # the person confirmed re-sending an identical email
 
 
 _MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MB, well inside the provider's limit
+_DUPLICATE_WINDOW_MIN = 15
 
 
 def _send_custom_email(db: Session, current_user: User, lead: Lead, *, subject: Optional[str],
                        body: str, include_booking_link: bool, appt_label: Optional[str],
-                       attachments: Optional[list] = None) -> dict:
+                       attachments: Optional[list] = None,
+                       allow_duplicate: bool = False) -> dict:
     """THE one send path for a person-written email, with or without a file.
 
     Everything that can fail is resolved BEFORE the provider is called. The
@@ -96,6 +99,24 @@ def _send_custom_email(db: Session, current_user: User, lead: Lead, *, subject: 
     from app.services.public_identity import sending_identity_for_org
     advisor = acting_advisor(db, lead, current_user)
     identity = sending_identity_for_org(db, lead.organization_id)
+
+    subject = subject or f"Following up, {lead.first_name or 'there'}"
+
+    # A SECOND IDENTICAL SEND IS ALMOST ALWAYS A RETRY, not an intention. The
+    # same subject to the same lead inside the window is refused unless the
+    # person confirms it (the composer asks).
+    if not allow_duplicate:
+        from datetime import timedelta
+        prior = (db.query(EmailMessage)
+                 .filter(EmailMessage.lead_id == lead.id, EmailMessage.subject == subject,
+                         EmailMessage.sent_at >= datetime.utcnow() - timedelta(minutes=_DUPLICATE_WINDOW_MIN))
+                 .order_by(EmailMessage.sent_at.desc()).first())
+        if prior is not None:
+            raise HTTPException(status_code=409, detail={
+                "code": "duplicate_send",
+                "message": (f"This email (\"{subject}\") was already sent to {lead.email} "
+                            f"{max(1, int((datetime.utcnow() - prior.sent_at).total_seconds() // 60))} minute(s) ago. Send it again anyway?"),
+                "sent_at": prior.sent_at.isoformat() + "Z", "email_id": prior.id})
 
     # Strip any raw booking URLs that may have been included in the AI body text.
     # The booking button is appended exactly once below as an HTML element.
@@ -119,30 +140,45 @@ def _send_custom_email(db: Session, current_user: User, lead: Lead, *, subject: 
   </td></tr>
 </table>"""
 
-    subject = subject or f"Following up, {lead.first_name or 'there'}"
-
-    # THE RESOLVED IDENTITY, NOT THE RAW ORGANIZATION ROW (sending_identity_for_org
-    # walks organization -> platform -> verified registry).
-    result = send_email_via_provider(lead.email, subject, body_html,
-                                     attachments=attachments or None, org=identity)
+    # FROM THE ADVISOR'S OWN MAILBOX when they connected Microsoft 365 (the
+    # same rule the reviewed batch send uses): real mailbox, real reputation,
+    # a copy in their Sent Items. Otherwise the organization's verified sending
+    # identity (organization -> platform -> verified registry).
+    if getattr(advisor, "microsoft_365_connected", False):
+        from app.services.microsoft_email_service import send_email_via_microsoft_graph
+        result = send_email_via_microsoft_graph(advisor, lead.email, subject, body_html,
+                                                attachments=attachments or None)
+        channel = "microsoft_365"
+    else:
+        result = send_email_via_provider(lead.email, subject, body_html,
+                                         attachments=attachments or None, org=identity)
+        channel = "provider"
     if not result["success"]:
-        raise HTTPException(status_code=502, detail=result.get("error") or "The email provider refused the send.")
+        raise HTTPException(status_code=502, detail=(
+            (result.get("error") or "The email provider refused the send.")
+            + (" (Microsoft 365 - reconnect your mailbox in Integrations if this persists.)"
+               if channel == "microsoft_365" else "")))
 
-    msg = EmailMessage(
+    # DELIVERED FROM HERE ON: recording can no longer turn this into an error.
+    from app.services.send_record import record_after_send
+    sent_at = datetime.utcnow()
+    msg = record_after_send(db, lambda: EmailMessage(
         lead_id=lead.id,
         # The message is FROM the lead's advisor, so the record says so.
         sender_id=advisor.id,
         subject=subject,
         body_html=body_html,
         status="sent",
+        send_source="manual",
+        sent_by_user_id=getattr(current_user, "id", None),
         provider_message_id=result.get("provider_message_id"),
-        sent_at=datetime.utcnow(),
-    )
-    db.add(msg)
-    lead.status = "sent"
-    lead.last_messaged_at = datetime.utcnow()
-    db.commit()
-    out = {"email_id": msg.id, "status": "sent"}
+        sent_at=sent_at,
+    ), lead=lead, channel="email", provider_id=result.get("provider_message_id"))
+    out = {"email_id": getattr(msg, "id", None), "status": "sent", "recorded": msg is not None,
+           "sent_via": channel}
+    if msg is None:
+        out["warning"] = ("The email was sent, but it could not be saved to this lead's history. "
+                          "Do not send it again.")
     if attachments is not None:
         out["has_attachment"] = bool(attachments)
     return out
@@ -171,7 +207,8 @@ def send_single_email(
     if req and req.body:
         return _send_custom_email(db, current_user, lead, subject=req.subject, body=req.body,
                                   include_booking_link=req.include_booking_link,
-                                  appt_label=req.appt_label)
+                                  appt_label=req.appt_label,
+                                  allow_duplicate=bool(req.allow_duplicate))
 
     # Fallback to template-based send.
     #
@@ -606,6 +643,7 @@ async def send_email_with_attachment(
     body_html: str = Form(...),
     include_booking_link: str = Form("false"),
     appt_label: Optional[str] = Form(None),
+    allow_duplicate: str = Form("false"),
     file: UploadFile = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
@@ -635,7 +673,61 @@ async def send_email_with_attachment(
     return _send_custom_email(
         db, current_user, lead, subject=subject, body=body_html,
         include_booking_link=str(include_booking_link).lower() in ("true", "1", "yes", "on"),
-        appt_label=(appt_label or None), attachments=attachments)
+        appt_label=(appt_label or None), attachments=attachments,
+        allow_duplicate=str(allow_duplicate).lower() in ("true", "1", "yes", "on"))
+
+
+class RecordSentEmail(BaseModel):
+    subject: str
+    body: str
+    sent_at: datetime
+    note: Optional[str] = None
+
+
+@router.post("/record-sent/{lead_id}")
+def record_sent_email(lead_id: str, body: RecordSentEmail, request: Request,
+                      db: Session = Depends(get_db),
+                      current_user: User = Depends(require_tenant_user)):
+    """RECORD an email that was already sent but never saved (e.g. the send
+    crashed after the provider accepted it). SENDS NOTHING. Workspace managers
+    only; audited; marked send_source="recorded" so it is never mistaken for
+    a message this app delivered and tracked."""
+    lead = authorized_lead_query(db, current_user, request=request).filter(
+        Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not (lead_scope.is_god(current_user) or lead_scope.is_manager_here(current_user, db)):
+        raise HTTPException(status_code=403, detail="Only a workspace manager can record a sent email.")
+    subject, text = (body.subject or "").strip(), (body.body or "").strip()
+    if not subject or not text:
+        raise HTTPException(status_code=400, detail="Subject and body are required.")
+    sent_at = body.sent_at.replace(tzinfo=None) if body.sent_at.tzinfo is None else \
+        body.sent_at.astimezone(__import__("datetime").timezone.utc).replace(tzinfo=None)
+    if sent_at > datetime.utcnow():
+        raise HTTPException(status_code=400, detail="sent_at cannot be in the future.")
+    dup = (db.query(EmailMessage).filter(EmailMessage.lead_id == lead.id,
+                                         EmailMessage.subject == subject).first())
+    if dup is not None:
+        raise HTTPException(status_code=409, detail="This lead already has an email with that subject on record.")
+    from app.routers.compose_router import acting_advisor
+    note = (body.note or "").strip()
+    msg = EmailMessage(lead_id=lead.id, sender_id=acting_advisor(db, lead, current_user).id,
+                       subject=subject,
+                       body_html=text.replace("\n", "<br>") + (f"<br><br><i>[{note}]</i>" if note else ""),
+                       status="sent", send_source="recorded",
+                       sent_by_user_id=current_user.id, sent_at=sent_at)
+    db.add(msg)
+    if lead.status in (None, "", "new"):
+        lead.status = "sent"
+    if not lead.last_messaged_at or lead.last_messaged_at < sent_at:
+        lead.last_messaged_at = sent_at
+    from app.routers.audit_log_router import log_action
+    log_action(db, lead.organization_id, current_user.id, action="email.recorded_after_send",
+               target_type="lead", target_id=lead.id,
+               details={"subject": subject, "sent_at": sent_at.isoformat(), "note": note or None},
+               commit=False)
+    db.commit()
+    return {"email_id": msg.id, "status": "recorded"}
 
 
 # ── AI email draft — talking points + 3 options ───────────────────────────────

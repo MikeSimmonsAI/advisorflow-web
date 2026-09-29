@@ -72,3 +72,90 @@ def test_plain_send_still_works(client, db_session, sample_lead, auth_headers, s
                     json={"subject": "s", "body": "Hello\nthere", "include_booking_link": False})
     assert r.status_code == 200, r.text
     assert len(sent) == 1 and sent[0]["body"] == "Hello<br>there" and sent[0]["attachments"] is None
+
+
+def test_an_identical_resend_is_held_until_confirmed(client, db_session, sample_lead, auth_headers, sent):
+    lead = _lead_with_email(db_session, sample_lead)
+    payload = {"subject": "Same subject", "body": "Same body", "include_booking_link": False}
+    assert client.post(f"/email/send/{lead.id}", headers=auth_headers, json=payload).status_code == 200
+    r = client.post(f"/email/send/{lead.id}", headers=auth_headers, json=payload)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "duplicate_send"
+    assert len(sent) == 1
+    r = client.post(f"/email/send-with-attachment/{lead.id}", headers=auth_headers,
+                    data={"subject": "Same subject", "body_html": "x"},
+                    files={"file": ("f.png", b"x", "image/png")})
+    assert r.status_code == 409 and len(sent) == 1
+    r = client.post(f"/email/send/{lead.id}", headers=auth_headers, json={**payload, "allow_duplicate": True})
+    assert r.status_code == 200 and len(sent) == 2
+
+
+def test_a_record_failure_after_sending_is_never_an_error(client, db_session, sample_lead, auth_headers,
+                                                          sent, monkeypatch):
+    lead = _lead_with_email(db_session, sample_lead)
+    from app.services import send_record
+    monkeypatch.setattr(send_record, "record_after_send", lambda *a, **k: None)
+    r = client.post(f"/email/send/{lead.id}", headers=auth_headers,
+                    json={"subject": "s2", "body": "b", "include_booking_link": False})
+    assert r.status_code == 200
+    assert r.json()["recorded"] is False and "Do not send it again" in r.json()["warning"]
+    assert len(sent) == 1
+
+
+def test_record_after_send_retries_then_gives_up_quietly(db_session, sample_lead, sample_advisor):
+    from app.services.send_record import record_after_send
+    calls = []
+
+    def bad():
+        calls.append(1)
+        return EmailMessage(lead_id=sample_lead.id, sender_id=None, subject="s", body_html="b")  # NOT NULL fails
+    assert record_after_send(db_session, bad, lead=sample_lead, channel="email") is None
+    assert len(calls) == 2
+    ok = record_after_send(db_session, lambda: EmailMessage(lead_id=sample_lead.id, sender_id=sample_advisor.id,
+                                                            subject="s", body_html="b", status="sent"),
+                           lead=sample_lead, channel="email")
+    assert ok is not None and ok.id
+
+
+def test_record_sent_email_sends_nothing_and_is_manager_only(client, db_session, sample_lead, sample_advisor,
+                                                             auth_headers, sent):
+    lead = _lead_with_email(db_session, sample_lead)
+    payload = {"subject": "Recorded", "body": "Hi\nthere", "sent_at": "2026-09-29T19:29:00Z", "note": "backfill"}
+    assert client.post(f"/email/record-sent/{lead.id}", headers=auth_headers, json=payload).status_code == 403
+    sample_advisor.role = "org_admin"
+    db_session.commit()
+    from app.services.auth_service import create_access_token
+    h = {"Authorization": "Bearer " + create_access_token(sample_advisor, db_session)}
+    r = client.post(f"/email/record-sent/{lead.id}", headers=h, json=payload)
+    assert r.status_code == 200, r.text
+    row = db_session.query(EmailMessage).get(r.json()["email_id"])
+    assert row.send_source == "recorded" and row.provider_message_id is None and "backfill" in row.body_html
+    assert sent == []
+    assert client.post(f"/email/record-sent/{lead.id}", headers=h, json=payload).status_code == 409
+
+
+def test_a_connected_microsoft_365_mailbox_is_used_for_one_off_sends(client, db_session, sample_lead,
+                                                                      sample_advisor, auth_headers, sent,
+                                                                      monkeypatch):
+    lead = _lead_with_email(db_session, sample_lead)
+    lead.assigned_to_id = sample_advisor.id
+    sample_advisor.microsoft_365_connected = True
+    sample_advisor.microsoft_email_address = "advisor@example.com"
+    db_session.commit()
+    graph = []
+
+    def fake_graph(advisor, to, subject, body_html, attachments=None):
+        graph.append({"to": to, "attachments": attachments})
+        return {"success": True, "provider_message_id": None, "error": None}
+    monkeypatch.setattr("app.services.microsoft_email_service.send_email_via_microsoft_graph", fake_graph)
+    r = client.post(f"/email/send-with-attachment/{lead.id}", headers=auth_headers,
+                    data={"subject": "via graph", "body_html": "b"},
+                    files={"file": ("f.png", b"x", "image/png")})
+    assert r.status_code == 200, r.text
+    assert r.json()["sent_via"] == "microsoft_365"
+    assert len(graph) == 1 and graph[0]["attachments"][0]["filename"] == "f.png" and sent == []
+
+
+def test_provider_mail_carries_a_plain_text_part():
+    from app.services.email_service import html_to_text
+    t = html_to_text('Hi Joshua,<br><br>Line two.<table><tr><td><a href="https://x/book/abc">Energy Rate Review</a></td></tr></table>')
+    assert t == "Hi Joshua,\n\nLine two.\n\nEnergy Rate Review: https://x/book/abc"

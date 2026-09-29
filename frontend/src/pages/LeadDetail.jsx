@@ -865,6 +865,123 @@ export default function LeadDetail() {
     if (!emailBody.trim() || sendingEmail) return   // guards double submit
     setSendingEmail(true)
     setSendError('')
+    const subject = emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track, orgName)
+    const send = (allowDuplicate) => {
+      if (emailAttachment) {
+        // Use multipart endpoint when an attachment is present
+        const formData = new FormData()
+        formData.append('subject', subject)
+        formData.append('body_html', emailBody)
+        formData.append('include_booking_link', includeBookingLink ? 'true' : 'false')
+        if (apptLabel) formData.append('appt_label', apptLabel)
+        if (allowDuplicate) formData.append('allow_duplicate', 'true')
+        formData.append('file', emailAttachment)
+        return api.upload(`/email/send-with-attachment/${leadId}`, formData)
+      }
+      return api.post(`/email/send/${leadId}`, {
+        subject,
+        body: emailBody,
+        include_booking_link: includeBookingLink,
+        appt_label: apptLabel,
+        allow_duplicate: !!allowDuplicate,
+      })
+    }
+    try {
+      let res
+      try {
+        res = await send(false)
+      } catch (err) {
+        // The server refuses an identical email sent minutes ago - almost
+        // always a retry. Only a person's explicit yes sends it again.
+        const d = err && err.detail
+        if (err && err.status === 409 && d && d.code === 'duplicate_send') {
+          if (!window.confirm(d.message || 'This email was already sent. Send it again anyway?')) {
+            setSendError('Not sent again. The earlier email is already on its way.')
+            return
+          }
+          res = await send(true)
+        } else {
+          throw err
+        }
+      }
+      setEmailAttachment(null)
+      if (emailAttachRef.current) emailAttachRef.current.value = ''
+      setEmailSubject('')
+      setEmailBody('')
+      setEmailDraftReady(false)
+      if (res && res.recorded === false) {
+        setSendError(res.warning || 'The email was sent, but it could not be saved to this lead\'s history. Do not send it again.')
+      } else {
+        toast.success('Email sent.')
+      }
+      load()
+    } catch (err) {
+      setSendError(err.message)
+    } finally {
+      setSendingEmail(false)
+    }
+  }
+
+  async function handleMediaUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setMediaUploading(true)
+    setMediaError('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const result = await api.upload('/sms/upload-media', formData)
+      setMediaUrl(result.media_url)
+      setMediaFileName(result.filename)
+    } catch (err) {
+      setMediaError(err.message || 'Upload failed')
+    } finally {
+      setMediaUploading(false)
+      if (mediaInputRef.current) mediaInputRef.current.value = ''
+    }
+  }
+
+  function handleRemoveMedia() {
+    setMediaUrl('')
+    setMediaFileName('')
+    setMediaError('')
+  }
+
+  async function handleSend() {
+    if (!messageText.trim() || sending) return   // guards double submit
+    setSending(true)
+    setSendError('')
+    try {
+      if (mediaUrl) {
+        // Send as MMS with media attachment
+        await api.post('/sms/send-mms', {
+          lead_id: leadId,
+          template: messageText,
+          media_url: mediaUrl,
+          include_booking_link: includeBookingLink,
+        })
+        setMediaUrl('')
+        setMediaFileName('')
+      } else {
+        await api.post('/sms/send', {
+          lead_id: leadId,
+          template: messageText,
+          include_booking_link: includeBookingLink,
+        })
+      }
+      setMessageText('')
+      load()
+    } catch (err) {
+      setSendError(err.message)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  async function handleSendEmail() {
+    if (!emailBody.trim() || sendingEmail) return   // guards double submit
+    setSendingEmail(true)
+    setSendError('')
     try {
       if (emailAttachment) {
         // Use multipart endpoint when an attachment is present
@@ -1760,7 +1877,11 @@ export default function LeadDetail() {
                   <button className="btn btn--secondary" onClick={handleSuggestEmail} disabled={suggestingReply}>
                     {suggestingReply ? '⏳ Drafting…' : `✨ AI draft ${currentTone.label} email`}
                   </button>
-                  <span className="lead-compose-hint">Sends from your connected Microsoft 365 inbox.</span>
+                  <span className="lead-compose-hint">
+                    {emailSender && emailSender.channel === 'microsoft_365'
+                      ? 'Sends from your connected Microsoft 365 inbox.'
+                      : 'Sends from the workspace address below. Connect Microsoft 365 in Integrations to send from your own inbox.'}
+                  </span>
                 </div>
                 {emailDraftReady && (
                   <div style={{
@@ -1829,7 +1950,7 @@ export default function LeadDetail() {
                 )}
                 {emailSender && emailSender.ready && emailSender.from_email && (
                   <div style={SX.senderOk}>
-                    Sending from {emailSender.from_email}
+                    Sending from {emailSender.from_email}{emailSender.channel === 'microsoft_365' ? ' (your Microsoft 365 inbox)' : ''}
                     {emailSender.reply_to_email
                       ? ` · replies go to ${emailSender.reply_to_email}`
                       : ''}
