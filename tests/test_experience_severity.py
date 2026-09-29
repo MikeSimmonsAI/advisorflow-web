@@ -616,40 +616,13 @@ def _stripped(text):
     return re.sub(r"^\s*//.*$", "", text, flags=re.M)
 
 
-#: The dark token block for the Sales Workspace. Matched by SHAPE, not by one
-#: exact selector string, because the selector legitimately grows qualifiers:
-#: the God-Mode-light work narrowed it to `:not(.gm-shell *)` so the workspace
-#: palette stops at the God shell's own border instead of repainting it. These
-#: two tests asserted the literal `[data-appearance="dark"] .sw-scope{` and so
-#: went red on main the day that qualifier landed — guarding a spelling rather
-#: than the invariant. The invariant is the one below: a dark block exists on
-#: .sw-scope, and the palette inside it stacks.
-_SW_DARK_BLOCK = re.compile(
-    r'\[data-appearance="dark"\]\s*\.sw-scope(?::not\([^)]*\)|[^\s{,])*\s*\{([^}]*)\}'
-)
-
-
-def _sw_dark_tokens(css):
-    """The body of the Sales Workspace dark token block."""
-    for body in _SW_DARK_BLOCK.findall(css):
-        if "--sw-surface:" in body:
-            return body
-    raise AssertionError(
-        "no [data-appearance=\"dark\"] .sw-scope block declaring --sw-surface"
-    )
-
-
-def test_the_sales_workspace_palette_follows_the_appearance_axis():
-    """THE ROOT CAUSE OF THE WHITE RECTANGLES.
-
-    The sheet was a hard-coded light theme. Correct while it only rendered on
-    its own page; wrong the moment God Mode embedded the Command Center in a
-    dark shell. Tokens plus a dark block is what fixes it — not a lighter
-    background on one screen.
-    """
+def test_the_sales_workspace_palette_is_tokenised_and_light_only():
+    """Spec section 66: one light theme. The palette stays TOKENISED (the fix
+    for the white rectangles), but there is no dark block to keep in sync."""
     css = _src("pages/sales/SalesStyles.jsx")
-    assert _sw_dark_tokens(css)
     assert "--sw-surface:" in css and "--sw-canvas:" in css
+    assert '[data-appearance="dark"]' not in css
+    assert "color-scheme:dark" not in css
 
 
 def test_no_card_in_the_sales_workspace_is_painted_white_by_a_literal():
@@ -665,22 +638,16 @@ def test_no_card_in_the_sales_workspace_is_painted_white_by_a_literal():
     assert len(bare_white) == 2, css.count("#fff")
 
 
-def test_the_dark_palette_is_designed_rather_than_inverted():
-    """Surfaces must STACK. If the card is not lighter than the canvas the page
-    reads as one flat sheet, which is what "just make it dark" produces."""
+def test_the_light_palette_is_legible():
+    """Dark ink on light surfaces; the canvas sits below the cards."""
     css = _src("pages/sales/SalesStyles.jsx")
-    dark = _sw_dark_tokens(css)
     def val(name):
-        return re.search(r"--sw-%s:(#[0-9a-f]{6})" % name, dark).group(1)
+        return re.search(r"--sw-%s:(#[0-9a-f]{6})" % name, css).group(1)
     def lum(hexcolor):
         r, g, b = (int(hexcolor[i:i + 2], 16) for i in (1, 3, 5))
         return 0.2126 * r + 0.7152 * g + 0.0722 * b
-    assert lum(val("surface")) > lum(val("canvas"))
-    assert lum(val("surface3")) > lum(val("surface"))
-    # a field is RECESSED — below the card it sits on
-    assert lum(val("field")) < lum(val("surface"))
-    # and the ink has to be legible on all of it
-    assert lum(val("ink")) > 200
+    assert lum(val("surface")) >= lum(val("canvas"))
+    assert lum(val("ink")) < 80
 
 
 def test_the_command_centre_separates_the_forecast_from_the_liabilities():

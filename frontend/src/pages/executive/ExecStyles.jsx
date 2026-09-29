@@ -18,6 +18,9 @@
  * match outside this shell. That is a structural guarantee, not a convention
  * somebody has to remember.
  *
+ * UPDATE 2026-09-28: the platform is LIGHT-ONLY (spec §66); the dark block
+ * this paragraph refers to was removed.
+ *
  * APPEARANCE IS THE ORTHOGONAL AXIS. data-appearance on <html> is already
  * resolved to a concrete light or dark by appearance.js before it reaches the
  * DOM, so there are no media queries here and no ambiguity about what a
@@ -69,30 +72,6 @@ const CSS = `
   background:var(--ex-canvas);
 }
 
-/* -- DARK: layered slate-indigo, never black on black ----------------------
-   Surfaces STACK. The canvas is darkest, cards sit above it, hovers above
-   those, and fields sit below the card they are on - the same depth ordering
-   the light palette has, running the other way. An inverted light sheet gives
-   flat grey-on-grey; this does not.
-   The accent lifts rather than dims: #3a5ba0 on white becomes #86a6ea on
-   slate, because the same hue at the same lightness disappears against a dark
-   ground. Signal colours are re-chosen for the same reason. */
-[data-appearance="dark"] [data-surface="executive"]{
-  --ex-canvas:#0c1220;
-  --ex-surface:#141d31; --ex-surface2:#101827; --ex-surface3:#1c2740;
-  --ex-field:#0d1524;
-  --ex-ink:#e8eef9; --ex-ink2:#9db0cf; --ex-ink3:#7d90b0; --ex-ink4:#64789a;
-  --ex-line:#26324b; --ex-line2:#1c2639; --ex-line-strong:#3d5178;
-  --ex-accent:#86a6ea; --ex-accent-ink:#0a1224;
-  --ex-accent-bg:#16203a; --ex-accent-bd:#2f4573;
-  --ex-good:#57ddab; --ex-good-bg:#0b2b23; --ex-good-bd:#1c6a54;
-  --ex-warn:#f2c463; --ex-warn-bg:#2a2009; --ex-warn-bd:#7a5f1f;
-  --ex-bad:#ff8fa6;  --ex-bad-bg:#2c1219;  --ex-bad-bd:#7a3549;
-  --ex-info:#82bbf0; --ex-info-bg:#0e2135; --ex-info-bd:#254c71;
-  --ex-shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.35);
-  --ex-shadow-lift:0 2px 6px rgba(0,0,0,.4),0 14px 34px rgba(0,0,0,.45);
-  color-scheme:dark;
-}
 
 [data-surface="executive"] *{box-sizing:border-box}
 [data-surface="executive"] button,

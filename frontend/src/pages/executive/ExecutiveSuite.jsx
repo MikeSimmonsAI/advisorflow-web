@@ -56,7 +56,6 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   api, clearAllContext, fetchMyContexts, getCurrentUser, logout, setBrandContext,
 } from '../../api/client'
-import AppearanceToggle from '../../components/AppearanceToggle'
 import ExecStyles from './ExecStyles'
 
 function useExecutiveContext(refreshKey) {
@@ -298,8 +297,6 @@ export default function ExecutiveSuite({ children }) {
                 )}
               </div>
             )}
-
-            <AppearanceToggle compact />
 
             {isOwner && (
               <button className="ex-btn ex-small" style={{ width: '100%' }}

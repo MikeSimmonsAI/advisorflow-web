@@ -1,7 +1,7 @@
 """
 Pipeline Router — Full AI conversation pipeline endpoints.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -239,8 +239,15 @@ def approve_flagged(
             raise HTTPException(status_code=404, detail="Lead not found")
         try:
             from app.services.sms_service import send_sms
+            # A person reviewed this reply and pressed Send: a one-to-one
+            # MANUAL send, stamped as such (app/services/send_source.py).
+            # send_sms still runs every one of its own gates - DNC, STOP,
+            # consent, quiet hours, suppression, capacity - unchanged.
+            from app.services import send_source as _send_source
             send_sms(db=db, lead=lead, advisor=current_user,
-                     template=req.message, include_booking_link=False)
+                     template=req.message, include_booking_link=False,
+                     send_source=_send_source.MANUAL,
+                     sent_by_user_id=current_user.id)
             pipeline.messages_sent = (pipeline.messages_sent or 0) + 1
             pipeline.stage = "ai_responding"
             pipeline.last_outbound_at = datetime.utcnow()
@@ -295,10 +302,18 @@ def _authorized_leads_by_id(db: Session, user: User, pipelines) -> dict:
 @router.get("/conversations")
 def get_conversations(
     stage: Optional[str] = None,
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    paged: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_user),
 ):
-    """Get pipeline conversations. Advisors see only their own; admins see org-wide."""
+    """Get pipeline conversations. Advisors see only their own; admins see org-wide.
+
+    Backward compatible: without `paged` this returns the same bare list of the
+    200 most recently updated rows. `paged=true` returns
+    {items, total, limit, offset} for server-side paging.
+    """
     query = db.query(PipelineConversation).filter(
         PipelineConversation.organization_id == _org_id(db, current_user),
     )
@@ -307,7 +322,9 @@ def get_conversations(
     if stage:
         query = query.filter(PipelineConversation.stage == stage)
 
-    pipelines = query.order_by(PipelineConversation.updated_at.desc()).limit(200).all()
+    total = query.count() if paged else None
+    pipelines = (query.order_by(PipelineConversation.updated_at.desc(), PipelineConversation.id)
+                 .offset(offset).limit(limit).all())
 
     leads = _authorized_leads_by_id(db, current_user, pipelines)
     result = []
@@ -334,4 +351,387 @@ def get_conversations(
             "confirmed_at": p.confirmed_at,
             "created_at": p.created_at,
         })
+    if paged:
+        return {"items": result, "total": total, "limit": limit, "offset": offset}
     return result
+
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SALES PIPELINE COMMAND CENTER (WS4)
+#
+# GET /pipeline/summary       KPIs, stage cards, funnel, channel mix, activity
+# GET /pipeline/appointments  booked / confirmed appointments for the workspace
+#
+# THE RULES THESE TWO FOLLOW, because the screen they feed used to show a
+# "Projected bookings" figure no model produced:
+#   * Scope is the ACTING workspace only (lead_scope.active_workspace_org_id);
+#     an advisor sees their own conversations, a manager the workspace's. The
+#     neutral platform owner, standing in no customer, gets 409, not zeros.
+#   * Internal test records never count (app/services/test_records.py).
+#   * A figure the data model cannot state is null - "Not yet available" on
+#     screen - never an estimate. `definitions` says what each one counts.
+#   * A trend is only reported when the SAME definition can be evaluated over
+#     the previous period of equal length. Snapshot counts (a conversation's
+#     current stage) have no history table behind them, so they carry none.
+# ═════════════════════════════════════════════════════════════════════════════
+
+from datetime import timedelta as _td
+from fastapi import Query as _Query
+
+# Stages the platform actually writes to pipeline_conversations.stage, in the
+# order a conversation moves through them (pipeline_service,
+# ai_conversation_service). `confirmed`, `kept` and `sale` are declared on the
+# model but NOTHING writes them - they are reported as untracked below rather
+# than as a confident zero.
+_STAGE_ORDER = [
+    ("outreach_sent", "Outreach Sent"),
+    ("replied", "Replied"),
+    ("ai_responding", "AI Responding"),
+    ("flagged", "Needs Human"),
+    ("booking_sent", "Booking Sent"),
+    ("booked", "Booked"),
+    ("completed", "Sequence Complete"),
+    ("stopped", "Stopped"),
+    ("dnc", "DNC"),
+]
+_UNTRACKED_STAGES = [("confirmed", "Confirmed"), ("kept", "Appointment Kept"),
+                     ("sale", "Sale / Closed")]
+_TERMINAL_STAGES = {"stopped", "dnc", "completed", "sale"}
+
+_ACTIVITY_ACTIONS = {
+    "pipeline.launched": "Pipeline launched",
+    "pipeline.approved": "Flagged reply approved",
+    "lead.stage_moved": "Lead moved to a new stage",
+    "lead.create_manual": "Lead added",
+    "lead.reassign": "Leads reassigned",
+    "rate_request.created": "Rate request created",
+    "rate_request.status_changed": "Rate request status changed",
+    "rate_request.assigned": "Rate request assigned",
+    "rate_request.updated": "Rate request details updated",
+}
+
+
+def _summary_org(db: Session, user: User):
+    from app.services.platform_owner import is_platform_pseudo_org
+    org_id = lead_scope.active_workspace_org_id(user, db)
+    org = (db.query(Organization).filter(Organization.id == org_id).first()
+           if org_id and not is_platform_pseudo_org(org_id) else None)
+    if org is None:
+        raise HTTPException(status_code=409, detail=(
+            "No customer organization is selected. Select a workspace first."))
+    return org
+
+
+def _pct(n, d):
+    return round(100.0 * n / d, 1) if d else None
+
+
+def _trend_count(cur, prev):
+    """Percent change, only when the previous period had something to compare."""
+    if cur is None or prev is None or prev == 0:
+        return None
+    return round(100.0 * (cur - prev) / prev, 1)
+
+
+def _trend_points(cur, prev):
+    if cur is None or prev is None:
+        return None
+    return round(cur - prev, 1)
+
+
+def _age_days(ts, now):
+    if not ts:
+        return None
+    return max(0.0, (now - ts).total_seconds() / 86400.0)
+
+
+@router.get("/summary")
+def pipeline_summary(
+    days: int = _Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_or_observer),
+):
+    """The Sales Pipeline command center, for the acting workspace only."""
+    from app.models.models import BookingLink, Reply, AuditLogEntry
+    from app.services import industry_templates
+
+    org = _summary_org(db, current_user)
+    org_id = str(org.id)
+    is_manager = _is_elevated(current_user, db)
+    now = datetime.utcnow()
+    start = now - _td(days=days)
+    prev_start = start - _td(days=days)
+
+    # EVERYTHING BELOW IS AGGREGATED IN SQL. No conversation row is loaded:
+    # stage cards are GROUP BY stage/channel, the period comparisons are
+    # conditional sums over created_at >= prev_start.
+    from sqlalchemy import case as _case, and_ as _and
+
+    def _scoped(*cols_):
+        q_ = (db.query(*cols_)
+              .join(Lead, Lead.id == PipelineConversation.lead_id)
+              .filter(PipelineConversation.organization_id == org_id,
+                      Lead.organization_id == org_id,
+                      Lead.is_test.isnot(True)))
+        if not is_manager:
+            q_ = q_.filter(PipelineConversation.advisor_id == current_user.id)
+        return q_
+
+    stage_col = func.coalesce(PipelineConversation.stage, "outreach_sent")
+    ts_col = func.coalesce(PipelineConversation.updated_at, PipelineConversation.created_at)
+    if db.bind is not None and db.bind.dialect.name == "sqlite":
+        epoch = func.strftime("%s", ts_col) * 1.0
+    else:
+        epoch = func.extract("epoch", ts_col)
+
+    # ── snapshot: where every conversation is right now ─────────────────────
+    stage_counts, stage_channels, stage_age = {}, {}, {}
+    for st, ch, n in (_scoped(stage_col, PipelineConversation.channel,
+                              func.count(PipelineConversation.id))
+                      .group_by(stage_col, PipelineConversation.channel).all()):
+        n = int(n or 0)
+        stage_counts[st] = stage_counts.get(st, 0) + n
+        chk = ch or "unknown"
+        stage_channels.setdefault(st, {})
+        stage_channels[st][chk] = stage_channels[st].get(chk, 0) + n
+    now_epoch = (now - datetime(1970, 1, 1)).total_seconds()
+    for st, avg_e, min_ts in (_scoped(stage_col, func.avg(epoch), func.min(ts_col))
+                              .group_by(stage_col).all()):
+        avg_age = (max(0.0, (now_epoch - float(avg_e)) / 86400.0)
+                   if avg_e is not None else None)
+        if isinstance(min_ts, str):  # sqlite may hand back text for an expression
+            try:
+                min_ts = datetime.fromisoformat(min_ts)
+            except ValueError:
+                min_ts = None
+        stage_age[st] = (avg_age, _age_days(min_ts, now) if min_ts else None)
+
+    def _stage_card(key, label):
+        avg_age, oldest = stage_age.get(key, (None, None))
+        return {
+            "key": key, "label": label, "count": stage_counts.get(key, 0), "tracked": True,
+            "avg_age_days": round(avg_age, 1) if avg_age is not None else None,
+            "oldest_age_days": round(oldest, 1) if oldest is not None else None,
+            "by_channel": stage_channels.get(key, {}),
+            # No stage-history table exists, so "entered this stage in the
+            # period" cannot be counted and no trend is claimed.
+            "trend_pct": None,
+        }
+
+    stages = [_stage_card(k, l) for k, l in _STAGE_ORDER]
+    known = {k for k, _ in _STAGE_ORDER}
+    for extra in sorted(set(stage_counts) - known - {k for k, _ in _UNTRACKED_STAGES}):
+        stages.append(_stage_card(extra, extra.replace("_", " ").title()))
+    for k, l in _UNTRACKED_STAGES:
+        if stage_counts.get(k):
+            stages.append(_stage_card(k, l))
+        else:
+            stages.append({"key": k, "label": l, "count": None, "tracked": False,
+                           "avg_age_days": None, "oldest_age_days": None,
+                           "by_channel": {}, "trend_pct": None,
+                           "note": "Not recorded by the pipeline yet"})
+
+    total_conversations = sum(stage_counts.values())
+    active_count = sum(n for st, n in stage_counts.items() if st not in _TERMINAL_STAGES)
+    needs_human = int(_scoped(func.count(PipelineConversation.id))
+                      .filter(PipelineConversation.flagged.is_(True),
+                              PipelineConversation.reviewed_at.is_(None)).scalar() or 0)
+    awaiting_booking = stage_counts.get("booking_sent", 0)
+    channels = {}
+    for st, chs in stage_channels.items():
+        if st in _TERMINAL_STAGES:
+            continue
+        for ch, n in chs.items():
+            channels[ch] = channels.get(ch, 0) + n
+
+    # ── cohorts: conversations started in this period vs the one before ────
+    bl_f = [Lead.organization_id == org_id, Lead.is_test.isnot(True)]
+    if not is_manager:
+        bl_f.append(Lead.assigned_to_id == current_user.id)
+    confirmed_lead_ids = (db.query(BookingLink.lead_id)
+                          .filter((BookingLink.status == "confirmed")
+                                  | BookingLink.confirmed_at.isnot(None)))
+    sent_c = func.coalesce(PipelineConversation.messages_sent, 0) > 0
+    replied_c = func.coalesce(PipelineConversation.replies_received, 0) > 0
+    booked_c = (PipelineConversation.booked_at.isnot(None)
+                | (PipelineConversation.stage == "booked"))
+    link_c = (PipelineConversation.booking_link_sent_at.isnot(None) | booked_c
+              | (PipelineConversation.stage == "booking_sent"))
+
+    def _n(cond):
+        return func.sum(_case((cond, 1), else_=0))
+
+    def _cohort(lo, hi):
+        r = (_scoped(func.count(PipelineConversation.id), _n(sent_c),
+                     _n(_and(sent_c, replied_c)), _n(replied_c), _n(link_c), _n(booked_c),
+                     _n(PipelineConversation.lead_id.in_(confirmed_lead_ids)))
+             .filter(PipelineConversation.created_at.isnot(None),
+                     PipelineConversation.created_at >= lo,
+                     PipelineConversation.created_at < hi).one())
+        keys = ("started", "sent", "sent_replied", "replied", "link", "booked", "confirmed")
+        return {k: int(v or 0) for k, v in zip(keys, r)}
+
+    cur = _cohort(start, now + _td(seconds=1))
+    prev = _cohort(prev_start, start)
+    reply_cur, reply_prev = _pct(cur["sent_replied"], cur["sent"]), _pct(prev["sent_replied"], prev["sent"])
+    conv_cur, conv_prev = _pct(cur["booked"], cur["started"]), _pct(prev["booked"], prev["started"])
+
+    # ── appointments: the booking-link records, not a pipeline stage ───────
+    def _confirmed_between(lo, hi):
+        return int(db.query(func.count(BookingLink.id))
+                   .join(Lead, BookingLink.lead_id == Lead.id)
+                   .filter(*bl_f, BookingLink.confirmed_at.isnot(None),
+                           BookingLink.confirmed_at >= lo, BookingLink.confirmed_at < hi)
+                   .scalar() or 0)
+
+    confirmed_cur = _confirmed_between(start, now + _td(seconds=1))
+    confirmed_prev = _confirmed_between(prev_start, start)
+    upcoming = int(db.query(func.count(BookingLink.id))
+                   .join(Lead, BookingLink.lead_id == Lead.id)
+                   .filter(*bl_f, BookingLink.status.in_(["booked", "confirmed"]),
+                           BookingLink.booked_time.isnot(None),
+                           BookingLink.booked_time >= now)
+                   .scalar() or 0)
+
+    # ── funnel: how far the period's conversations actually got ────────────
+    funnel_steps = [
+        ("started", "Conversations Started", cur["started"]),
+        ("outreach_sent", "Outreach Sent", cur["sent"]),
+        ("replied", "Replied", cur["replied"]),
+        ("booking_sent", "Booking Link Sent", cur["link"]),
+        ("booked", "Booked", cur["booked"]),
+        ("confirmed", "Confirmed", cur["confirmed"]),
+        ("kept", "Appointment Kept", None),
+    ]
+    base = funnel_steps[0][2]
+    funnel = [{"key": k, "label": l, "count": n,
+               "pct_of_started": _pct(n, base) if n is not None else None}
+              for k, l, n in funnel_steps]
+
+    # ── recent activity: real rows only ────────────────────────────────────
+    activity = []
+    reply_q = (db.query(Reply.id, Reply.lead_id, Reply.body, Reply.received_at,
+                        Reply.source, Lead.first_name, Lead.last_name)
+               .join(Lead, Reply.lead_id == Lead.id)
+               .filter(Lead.organization_id == org_id, Lead.is_test.isnot(True),
+                       Reply.received_at.isnot(None)))
+    if not is_manager:
+        reply_q = reply_q.filter(Lead.assigned_to_id == current_user.id)
+    for rid, lid, body, at, src, fn, ln in (
+            reply_q.order_by(Reply.received_at.desc()).limit(10).all()):
+        activity.append({
+            "kind": "reply", "at": at.isoformat() + "Z" if at else None,
+            "title": "Lead replied", "lead_id": lid,
+            "lead_name": f"{fn or ''} {ln or ''}".strip() or None,
+            "detail": (body or "")[:140], "channel": src,
+        })
+    audit_q = db.query(AuditLogEntry).filter(
+        AuditLogEntry.organization_id == org_id,
+        AuditLogEntry.action.in_(list(_ACTIVITY_ACTIONS)))
+    if not is_manager:
+        audit_q = audit_q.filter(AuditLogEntry.actor_user_id == current_user.id)
+    audits = audit_q.order_by(AuditLogEntry.created_at.desc()).limit(10).all()
+    lead_ids = [a.target_id for a in audits if a.target_type == "lead" and a.target_id]
+    names = {}
+    if lead_ids:
+        try:
+            names = {l.id: f"{l.first_name or ''} {l.last_name or ''}".strip()
+                     for l in authorized_lead_query(db, current_user)
+                     .filter(Lead.id.in_(lead_ids)).all()}
+        except HTTPException:
+            names = {}  # a read-only observer role: events without names
+    for a in audits:
+        in_scope_lead = a.target_type == "lead" and a.target_id in names
+        activity.append({
+            "kind": "audit", "action": a.action,
+            "at": a.created_at.isoformat() + "Z" if a.created_at else None,
+            "title": _ACTIVITY_ACTIONS.get(a.action, a.action),
+            "lead_id": a.target_id if in_scope_lead else None,
+            "lead_name": names.get(a.target_id) if in_scope_lead else None,
+            "detail": None, "channel": None,
+        })
+    activity.sort(key=lambda e: e["at"] or "", reverse=True)
+
+    return {
+        "organization_id": org_id,
+        "scope": "workspace" if is_manager else "own_conversations",
+        "period_days": days,
+        "kpis": {
+            "active_conversations": {"value": active_count, "trend_pct": None},
+            "reply_rate": {"value": reply_cur, "previous": reply_prev,
+                           "trend_points": _trend_points(reply_cur, reply_prev)},
+            "awaiting_booking": {"value": awaiting_booking, "trend_pct": None},
+            "needs_human": {"value": needs_human, "trend_pct": None},
+            "confirmed_appointments": {"value": confirmed_cur, "previous": confirmed_prev,
+                                       "trend_pct": _trend_count(confirmed_cur, confirmed_prev)},
+            "upcoming_appointments": {"value": upcoming, "trend_pct": None},
+            "conversion_rate": {"value": conv_cur, "previous": conv_prev,
+                                "trend_points": _trend_points(conv_cur, conv_prev)},
+            "conversations_started": {"value": cur["started"], "previous": prev["started"],
+                                      "trend_pct": _trend_count(cur["started"], prev["started"])},
+            # No forecasting model exists; a projection would be invented.
+            "projected_bookings": {"value": None, "trend_pct": None},
+        },
+        "total_conversations": total_conversations,
+        "stages": stages,
+        "channels_active": channels,
+        "funnel": funnel,
+        "recent_activity": activity[:12],
+        "lead_types": industry_templates.pipeline_lead_types(getattr(org, "industry", None)),
+        "definitions": {
+            "active_conversations": "pipeline conversations not stopped, DNC, completed or sold",
+            "reply_rate": ("of conversations started in the period with at least one "
+                           "message sent, the share with at least one reply"),
+            "awaiting_booking": "conversations currently at stage booking_sent",
+            "needs_human": "conversations flagged for review and not yet reviewed",
+            "confirmed_appointments": "booking links confirmed during the period",
+            "upcoming_appointments": "booked or confirmed, appointment time in the future",
+            "conversion_rate": ("of conversations started in the period, the share that "
+                                "reached booked"),
+            "projected_bookings": "not available - no forecasting model",
+            "trend": "same definition over the previous period of equal length",
+            "stage_counts": "current stage of every conversation (snapshot, no history)",
+            "kept": "not recorded - no field is written when an appointment is kept",
+        },
+        "generated_at": now.isoformat() + "Z",
+    }
+
+
+@router.get("/appointments")
+def pipeline_appointments(
+    days: int = _Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_or_observer),
+):
+    """Booked / confirmed appointments (booking links) for the acting workspace:
+    everything upcoming plus the last `days` days. Advisors see their own leads'."""
+    from app.models.models import BookingLink
+
+    org = _summary_org(db, current_user)
+    org_id = str(org.id)
+    now = datetime.utcnow()
+    f = [Lead.organization_id == org_id, Lead.is_test.isnot(True),
+         BookingLink.status.in_(["booked", "confirmed", "cancelled"]),
+         BookingLink.booked_time.isnot(None),
+         BookingLink.booked_time >= now - _td(days=days)]
+    if not _is_elevated(current_user, db):
+        f.append(Lead.assigned_to_id == current_user.id)
+    rows = (db.query(BookingLink, Lead.first_name, Lead.last_name, Lead.phone)
+            .join(Lead, BookingLink.lead_id == Lead.id)
+            .filter(*f).order_by(BookingLink.booked_time.asc()).limit(300).all())
+    advisor_ids = {b.user_id for b, *_ in rows if b.user_id}
+    advisors = ({u.id: u.full_name for u in db.query(User).filter(User.id.in_(advisor_ids)).all()}
+                if advisor_ids else {})
+    return {
+        "items": [{
+            "id": b.id, "lead_id": b.lead_id,
+            "lead_name": f"{fn or ''} {ln or ''}".strip() or None,
+            "lead_phone": ph, "status": b.status,
+            "booked_time": b.booked_time.isoformat() + "Z" if b.booked_time else None,
+            "confirmed_at": b.confirmed_at.isoformat() + "Z" if b.confirmed_at else None,
+            "appointment_type": b.appt_label, "advisor_name": advisors.get(b.user_id),
+            "upcoming": bool(b.booked_time and b.booked_time >= now),
+        } for b, fn, ln, ph in rows],
+        "period_days": days,
+    }

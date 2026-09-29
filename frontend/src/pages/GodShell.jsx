@@ -57,6 +57,10 @@ const ICONS = {
   // here renders `d={undefined}`, i.e. an invisible glyph and a nav row that
   // looks half-drawn. Add the key here rather than reusing an unrelated one.
   cpu:       'M4 4h16v16H4zM9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3',
+  tool:      'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z',
+  toggle:    'M8 5h8a7 7 0 0 1 0 14H8A7 7 0 0 1 8 5zM8 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  target:    'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  filter:    'M22 3H2l8 9.46V19l4 2v-8.54L22 3z',
   package:   'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zM3.27 6.96 12 12.01l8.73-5.05M12 22.08V12',
 }
 
@@ -114,27 +118,32 @@ const JUMP = [
  *
  * If you build one of those, add its <Route> in App.jsx, flip `live` in
  * ProductStatus.MODULES, and add it here. Three edits, no other bookkeeping.
+ *
+ * SEP 28 2026 — regrouped per spec §29 into PLATFORM, SALES & REVENUE, LEAD
+ * INTELLIGENCE, AI WORKFORCE, SECURITY & PLATFORM (BRANDS stays data-driven
+ * below). Every previous target is still here or still routed; see the
+ * comments on each group for what moved. An entry may carry a query string
+ * (?tab=) — isActive compares the tab as well as the path.
  */
 const NAV = [
-  { group: 'COMMAND' },
-  { label: 'Command Center',   path: '/god',                  icon: 'command'  },
-  // Platform overview is where the owner should LAND — with no customer
-  // selected — rather than arriving already inside somebody's tenant.
-  { label: 'Platform',         path: '/god/platform',         icon: 'layers'   },
-
   // ══════════════════════════════════════════════════════════════════════
-  // CUSTOMERS — three nouns the platform deliberately keeps separate.
+  // PLATFORM — Sep 28 2026 reorganization (spec §29).
   // ══════════════════════════════════════════════════════════════════════
   //
-  // They were adjacent in the rail with no explanation, which made them look
-  // like three names for one thing. The backend separates them on purpose and
-  // the hints below say why, because an owner who cannot tell them apart picks
-  // one at random and concludes the product is confused:
+  // COMMAND and CUSTOMERS were merged into PLATFORM. Nothing was removed:
+  // Command Center is now "Dashboard" (same /god route) and every customer
+  // entry kept its path. The three nouns are still explained by their hints:
   //
   //   ORGANIZATIONS  the records and their administration
   //   CUSTOMERS      the commercial relationship — lifecycle and Customer 360
   //   WORKSPACES     the live tenant environments people actually work in
-  { group: 'CUSTOMERS' },
+  { group: 'PLATFORM' },
+  { label: 'Dashboard',        path: '/god',                  icon: 'command',
+    hint: 'Command Center — platform health, status and what needs attention' },
+  // Platform overview is where the owner should LAND — with no customer
+  // selected — rather than arriving already inside somebody's tenant.
+  { label: 'Platform Overview', path: '/god/platform',        icon: 'layers',
+    hint: 'Every brand and customer, with no customer selected' },
   { label: 'Organizations',    path: '/god/organizations',    icon: 'building',
     hint: 'Organization records and administration' },
   { label: 'Customers',        path: '/god/customers',        icon: 'globe',
@@ -145,36 +154,30 @@ const NAV = [
     hint: 'One row per human, every context they hold' },
   { label: 'Manage Access',    path: '/god/access',           icon: 'shield',
     hint: 'Open a person: brands, workspaces, demo, training — corrected in place' },
+  { label: 'Feature Entitlements', path: '/god/entitlements', icon: 'toggle',
+    hint: 'Platform → brand → organization → workspace → role feature access' },
+  // Implementations is the handoff that follows a won customer; Customer
+  // Launches is the same customers seen from the other side (what THEY still
+  // owe us). Two entries, one record — /god/launch reads the Implementation rows.
+  { label: 'Implementations',  path: '/god/implementations',  icon: 'branch',
+    hint: 'Onboarding handoff for sold customers' },
+  { label: 'Customer Launches', path: '/god/launches',        icon: 'branch',
+    hint: 'Onboarding intake — including customers who never started' },
   { label: 'Demo Suite',       path: '/god/demo-suite',       icon: 'monitor',
     hint: "Each brand's demonstration environment, and who has presented" },
   { label: 'Training',         path: '/god/training',         icon: 'flag',
     hint: 'Who has been asked to learn what, and where they stopped' },
-  // Implementations moved here from OPERATIONS: it is the handoff that follows
-  // a won customer, so it belongs beside the customer, not beside a scraper.
-  { label: 'Implementations',  path: '/god/implementations',  icon: 'branch',
-    hint: 'Onboarding handoff for sold customers' },
-  // Customer Launches sits directly beneath Implementations because it is the
-  // same customers seen from the other side: Implementations is what WE owe
-  // them, Launches is what THEY still owe us. Two entries, one record —
-  // /god/launch reads the Implementation rows rather than tracking its own.
-  { label: 'Customer Launches', path: '/god/launches',        icon: 'branch',
-    hint: 'Onboarding intake — including customers who never started' },
 
   // ══════════════════════════════════════════════════════════════════════
   // SALES & REVENUE — money in, and who earned it.
   // ══════════════════════════════════════════════════════════════════════
   //
-  // These four sat under PLATFORM with diagnostics and system health, which
-  // put a payment run in the same group as a log viewer. They are one
-  // operational domain and they now read as one.
+  // Pricing & Compensation DEFINES the rules; Sales Compensation is the money
+  // those rules produced; Billing & Revenue is what CUSTOMERS pay. Three jobs,
+  // three entries.
   { group: 'SALES & REVENUE' },
   { label: 'Sales Operations', path: '/god/sales-operations', icon: 'trending',
     hint: 'Pipeline and sales org operations' },
-  // Pricing & Comp DEFINES the rules — plans, rates, caps, holdbacks, and who
-  // may see or settle them. Sales Compensation is the money those rules
-  // produced. Billing & Revenue is what CUSTOMERS pay. Three jobs, three
-  // entries: merging any two would put one of them behind a screen name where
-  // nobody would think to look for it.
   { label: 'Pricing & Compensation', path: '/god/pricing',    icon: 'dollar',
     hint: 'Discount floors, commission plans, caps' },
   { label: 'Sales Compensation', path: '/god/compensation',   icon: 'briefcase',
@@ -185,48 +188,33 @@ const NAV = [
     hint: 'Payment history, invoice status breakdown, plan breakdown' },
 
   // ══════════════════════════════════════════════════════════════════════
-  // LEADS & AUTOMATION
+  // LEAD INTELLIGENCE — one control center, five tabs (spec §30).
   // ══════════════════════════════════════════════════════════════════════
   //
-  // Only what is actually built and routed. Nothing here is a placeholder —
-  // the unfinished work is stated once in PRODUCT STATUS on the Command
-  // Center, which Roadmap below jumps to.
-  { group: 'LEADS & AUTOMATION' },
-  // Asks, of the population a user may already reach, WHO MAY ACTUALLY BE
-  // CONTACTED on a channel and why not for the rest. A different question from
-  // Access Diagnostic, which is why they are not merged.
-  { label: 'Lead Qualification', path: '/god/diagnostics/qualification', icon: 'shield',
-    hint: 'Who may be contacted on each channel, and why not' },
-  // Back-office acquisition, and it now renders in THIS shell rather than the
-  // tenant one — see the route comment in App.jsx.
-  { label: 'Lead Scraper',     path: '/god/lead-scraper',     icon: 'grid',
-    hint: 'Back-office prospecting — import into a chosen customer' },
-  { label: 'Lead Browser',     path: '/god/lead-browser',     icon: 'users',
-    hint: 'Search and browse all leads across every organization' },
+  // Replaces LEADS & AUTOMATION. The tabs live on ONE route and are selected
+  // by ?tab=, so the rail and the page cannot disagree about what exists.
+  // The standalone screens are NOT removed: /god/lead-scraper and
+  // /god/lead-browser are still routed (and embedded by the tabs), and the
+  // read-only Qualification Diagnostic moved to SECURITY & PLATFORM below.
+  { group: 'LEAD INTELLIGENCE' },
+  { label: 'Overview',          path: '/god/lead-intelligence',                   icon: 'target',
+    hint: 'Pipeline, sources, qualification distribution and recent activity' },
+  { label: 'Qualification Engine', path: '/god/lead-intelligence?tab=qualification', icon: 'filter',
+    hint: 'Thresholds and READY / REVIEW / EXCLUDED, explained' },
+  { label: 'Lead Scraper',      path: '/god/lead-intelligence?tab=scraper',       icon: 'grid',
+    hint: 'Find businesses by industry and geography — staged, never auto-routed' },
+  { label: 'Lead Browser',      path: '/god/lead-intelligence?tab=browser',       icon: 'users',
+    hint: 'Prospect pool and the master lead database, filtered server-side' },
+  { label: 'Rules & Routing',   path: '/god/lead-intelligence?tab=routing',       icon: 'branch',
+    hint: 'Suggest destinations; route only by explicit action into Universal Intake' },
 
   // ══════════════════════════════════════════════════════════════════════
   // AI WORKFORCE
   // ══════════════════════════════════════════════════════════════════════
   //
-  // Its own group, above SECURITY & PLATFORM, because during the dark launch
-  // the question it answers — how many AI employees on this platform could
-  // actually reach a person right now — is the one somebody should be able to
-  // find without hunting.
-  //
-  // TWO ENTRIES, AND THEY ARE NOT THE SAME SCREEN. AI Workforce is the
-  // authority layer: who an employee is, which tools it holds, what stage it
-  // is at, and the kill switch. AI Operations is the reach layer: what was
-  // actually attempted, which provider answered, and what refused. One is a
-  // configuration question and one is an incident question, and a single page
-  // holding both would be a page where nobody trusts either half.
-  //
-  // ONE group, not two. Both landed here within hours of each other and the
-  // merge produced two sections with the same heading — which reads as the
-  // rail being broken rather than as two related screens.
-  //
-  // Neither administers a customer's own business configuration; that stays
-  // on the customer's screen, because a second place to edit one setting is a
-  // second place for it to be wrong.
+  // Three entries and not the same screen: authority (who an employee is and
+  // what it may do), reach (what was actually attempted), and deployment
+  // (what each brand sells and where every hired employee has got to).
   { group: 'AI WORKFORCE' },
   { label: 'AI Workforce',     path: '/god/workforce',         icon: 'cpu',
     hint: 'Job library, tool gateway, activation staging, kill switch, '
@@ -235,62 +223,44 @@ const NAV = [
     hint: 'Dark-launch state, provider resolution per channel, one '
         + 'customer’s supervisor read, unattributable inbound, and the '
         + 'synthetic proofs' },
-  // A THIRD ENTRY, AND AGAIN NOT THE SAME SCREEN. The two above answer what an
-  // employee may be and what it did. This one answers the commercial and
-  // deployment question: what each brand sells, to which packages, and where
-  // every customer's hired employee has got to. It is also the only one of the
-  // three that completes an activation, which is why it lives beside them
-  // rather than inside Billing.
   { label: 'AI Deployment',    path: '/god/ai-deployment',     icon: 'package',
     hint: 'Brand commercial terms, every customer’s deployment state, '
         + 'readiness, activation, reconciliation and the orphan sweep' },
 
   // ══════════════════════════════════════════════════════════════════════
-  // SECURITY & PLATFORM
+  // SECURITY & PLATFORM — access, audit, health, jobs and every diagnostic.
   // ══════════════════════════════════════════════════════════════════════
+  //
+  // DIAGNOSTICS and SUPPORT were folded in here (Sep 28 2026). Same paths.
   { group: 'SECURITY & PLATFORM' },
-  // Asks WHAT MAY THIS PERSON REACH — identity, memberships, workspace
-  // resolution, scope. Owner-only by the endpoint behind it, not by the
-  // absence of this link.
   { label: 'Access & Permissions', path: '/god/diagnostics/user-access', icon: 'shield',
     hint: 'What a given person can actually reach' },
-  // WHICH CUSTOMERS EACH EXECUTIVE OVERSEES. Executive visibility used to be
-  // brand-wide with no way to narrow it and no screen that managed it; this is
-  // where the per-organization assignment is set.
   { label: 'Executive Access', path: '/god/executive-access', icon: 'shield',
     hint: 'Which customers each executive oversees' },
   { label: 'Audit & Security', path: '/god/audit',            icon: 'shield'   },
   { label: 'System Health',    path: '/god#platform-health',  icon: 'monitor'  },
-  { label: 'Roadmap',          path: '/god/roadmap',           icon: 'flag',
-    hint: '93 capability items across 15 systems — what is complete, what needs finishing' },
-
-  // ══════════════════════════════════════════════════════════════════════
-  // DIAGNOSTICS
-  // ══════════════════════════════════════════════════════════════════════
-  { group: 'DIAGNOSTICS' },
-  { label: 'Twilio Diagnostics', path: '/god/diagnostics/twilio',   icon: 'monitor',
-    hint: 'Delivery receipt config and message delivery breakdown' },
   { label: 'Background Jobs',    path: '/god/diagnostics/job-runs', icon: 'activity',
     hint: 'Run history for cadence, AI, and review loops' },
+  // Moved from LEADS & AUTOMATION: it is a read-only diagnostic (who may be
+  // contacted on each channel, and why not). Lead Intelligence links to it.
+  { label: 'Qualification Diagnostic', path: '/god/diagnostics/qualification', icon: 'filter',
+    hint: 'Who may be contacted on each channel, and why not — read-only' },
+  { label: 'Twilio Diagnostics', path: '/god/diagnostics/twilio',   icon: 'monitor',
+    hint: 'Delivery receipt config and message delivery breakdown' },
   { label: 'Voice Configuration', path: '/god/voice',               icon: 'settings',
     hint: 'Agent mappings, version pins, attempt policy, test calls' },
   { label: 'Maintenance Ops',    path: '/god/maintenance',           icon: 'tool',
     hint: 'Booking cleanup (dry-run), phone audit — silent, no SMS/email sent' },
-
-  // ══════════════════════════════════════════════════════════════════════
-  // SUPPORT
-  // ══════════════════════════════════════════════════════════════════════
-  //
-  // Its own group rather than an entry under DIAGNOSTICS, because it is not
-  // a diagnostic: it is the queue, the fixer, the incident view and the
-  // brief. A diagnostic tells you what is wrong with one thing; this is
-  // where a person decides what to do about all of it.
-  { group: 'SUPPORT' },
   { label: 'Support',            path: '/god/support',               icon: 'message',
     hint: 'Every brand’s queue, what the platform repaired by itself, '
         + 'cross-brand incidents, and the daily brief' },
-
+  { label: 'Roadmap',          path: '/god/roadmap',           icon: 'flag',
+    hint: '93 capability items across 15 systems — what is complete, what needs finishing' },
 ]
+
+// Pages whose rail entries are tabs selected by ?tab=.
+const NAV_TABBED = new Set(
+  NAV.filter(n => n.path && n.path.includes('?')).map(n => n.path.split('?')[0]))
 
 function LiveClock() {
   const [now, setNow] = useState(new Date())
@@ -379,9 +349,21 @@ export default function GodShell({ children, orgSession = null, onExitOrgSession
   // A hash entry ("/god#platform-health") is a jump WITHIN the Command Center,
   // so it must never claim the active state — otherwise two rail items light up
   // at once on /god.
+  //
+  // An entry with a query string ("/god/lead-intelligence?tab=scraper") is one
+  // TAB of a page: it is active only when the path matches AND the tab does.
+  // The bare page entry is active only when no tab (or the default one) is set,
+  // so exactly one Lead Intelligence row lights up at a time.
   const isActive = (path) => {
     if (!path || path.includes('#')) return false
-    return path === '/god' ? location.pathname === '/god' : location.pathname.startsWith(path)
+    const [base, qs] = path.split('?')
+    if (qs !== undefined || NAV_TABBED.has(base)) {
+      if (location.pathname !== base) return false
+      const want = new URLSearchParams(qs || '').get('tab') || ''
+      const have = new URLSearchParams(location.search).get('tab') || ''
+      return want === (have === 'overview' ? '' : have)
+    }
+    return base === '/god' ? location.pathname === '/god' : location.pathname.startsWith(base)
   }
   const current = NAV.find(n => n.path && isActive(n.path))
   // 248, not 220. At 220 the label had ~93px left after the icon, the gap and

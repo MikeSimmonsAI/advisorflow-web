@@ -269,7 +269,11 @@ class WholesaleSettings(Base):
     auto_stage_on_enrichment = Column(Boolean, nullable=False, default=True)
     auto_qualify_on_reply = Column(Boolean, nullable=False, default=True)
     auto_analysis_on_qualified = Column(Boolean, nullable=False, default=True)
-    auto_match_on_contract = Column(Boolean, nullable=False, default=True)
+    # Default OFF for NEW settings rows (Wholesale pilot P0, 2026-09-28): buyer
+    # distribution is Deal -> Match -> Review -> Select -> Send, and nothing is
+    # matched until a person asks. A Python-side default only: existing rows
+    # keep whatever they hold, and no column default in the database changes.
+    auto_match_on_contract = Column(Boolean, nullable=False, default=False)
 
     # ── Approval gates ──────────────────────────────────────────────────────
     # NOTHING BINDS THE COMPANY WITHOUT A PERSON. These default to True and the

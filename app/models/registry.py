@@ -270,6 +270,12 @@ import app.models.sms_consent_models  # noqa: F401  (imported for side effects)
 # intake_classifications). Contacts that are NOT leads live here. Added to BOTH
 # blocks in this file, per the merge-artefact note above.
 import app.models.intake_models  # noqa: F401  (imported for side effects)
+# Overnight build 2026-09-28: scoped entitlements, lead notes/tasks, wholesale ops.
+# Added to BOTH blocks in this file, per the merge-artefact note above.
+import app.models.entitlement_models  # noqa: F401  (imported for side effects)
+import app.models.work_models  # noqa: F401  (imported for side effects)
+import app.models.wholesale_ops_models  # noqa: F401  (imported for side effects)
+import app.models.lead_intel_models  # noqa: F401  (imported for side effects)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -528,3 +534,9 @@ import app.models.sms_consent_models  # noqa: F401  (imported for side effects)
 # intake_classifications). Contacts that are NOT leads live here. Added to BOTH
 # blocks in this file, per the merge-artefact note above.
 import app.models.intake_models  # noqa: F401  (imported for side effects)
+# Overnight build 2026-09-28: scoped entitlements, lead notes/tasks, wholesale ops.
+# Added to BOTH blocks in this file, per the merge-artefact note above.
+import app.models.entitlement_models  # noqa: F401  (imported for side effects)
+import app.models.work_models  # noqa: F401  (imported for side effects)
+import app.models.wholesale_ops_models  # noqa: F401  (imported for side effects)
+import app.models.lead_intel_models  # noqa: F401  (imported for side effects)

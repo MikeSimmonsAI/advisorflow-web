@@ -278,6 +278,63 @@ def deal_for_property(db: Session, org_id: str, property_id: str) -> Optional[Wh
 
 # ── Sellers ─────────────────────────────────────────────────────────────────
 
+def existing_seller_lead(db: Session, org_id: str, data: Dict[str, Any],
+                         prop: Optional[WholesaleProperty] = None) -> Optional[Lead]:
+    """An existing Lead of THIS organization for the owner in `data`, or None.
+
+    Matched, most specific first, and always inside `org_id`:
+      1. the same phone number, in any stored form;
+      2. the same email address;
+      3. the same last name at the same street address + ZIP.
+    Where several records match, a Do Not Contact one wins: reusing the DNC
+    record is what keeps a re-imported STOP stopped."""
+    from app.services import wholesale_sms
+    from app.services.dedup_service import normalize_phone
+    from app.services.test_records import exclude_test_records as test_records_exclude
+    from sqlalchemy import case, func
+
+    def pick(q):
+        return (q.order_by(case((Lead.status == "dnc", 0), else_=1), Lead.created_at.asc())
+                .first())
+
+    base = db.query(Lead).filter(Lead.organization_id == org_id)
+    # NEVER ACROSS THE SANDBOX LINE. A sandbox property's owner may only be a
+    # test lead and a real property's owner only a real one - otherwise a
+    # rehearsal could attach (and then text) a real person.
+    if bool(getattr(prop, "is_test", False) or data.get("is_test")):
+        base = base.filter(Lead.is_test.is_(True))
+    else:
+        base = test_records_exclude(base)
+    raw_phone = (data.get("phone") or "").strip()
+    if raw_phone:
+        forms = set()
+        e164 = wholesale_sms.normalize_e164(raw_phone)
+        if e164:
+            forms.update(wholesale_sms._phone_forms(e164))
+        n = normalize_phone(raw_phone)
+        if n:
+            forms.add(n)
+        if forms:
+            hit = pick(base.filter(Lead.phone.in_(sorted(forms))))
+            if hit is not None:
+                return hit
+    email = (data.get("email") or "").strip().lower()
+    if email:
+        hit = pick(base.filter(func.lower(Lead.email) == email))
+        if hit is not None:
+            return hit
+    last = (data.get("last_name") or "").strip().lower()
+    street = (getattr(prop, "street_address", None) or "").strip().lower()
+    zip5 = (getattr(prop, "zip_code", None) or "").strip()[:5]
+    if last and street and zip5:
+        hit = pick(base.filter(func.lower(Lead.last_name) == last,
+                               func.lower(Lead.street_address) == street,
+                               func.substr(Lead.zip_code, 1, 5) == zip5))
+        if hit is not None:
+            return hit
+    return None
+
+
 def attach_seller(db: Session, org_id: str, user: Optional[User],
                   prop: WholesaleProperty, data: Dict[str, Any], *,
                   actor_type: str = ACTOR_USER,
@@ -308,6 +365,17 @@ def attach_seller(db: Session, org_id: str, user: Optional[User],
     Passed nothing, a single attach consults the plan directly.
     """
     from app.services import plan_limits
+
+    # THE SAME PERSON IS THE SAME LEAD - AND KEEPS THEIR DNC STATE.
+    # A re-import (or a second property for the same owner) used to create a
+    # FRESH Lead with status "new" whenever the caller did not pass lead_id,
+    # so a seller who had said STOP came back as a contactable record. An
+    # existing Lead in THIS organization with the same number, email, or
+    # name-at-address is reused instead (see existing_seller_lead).
+    if not data.get("lead_id"):
+        match = existing_seller_lead(db, org_id, data, prop)
+        if match is not None:
+            data = dict(data, lead_id=match.id)
 
     # USER-INITIATED vs EXTERNAL ARRIVAL (app/services/lead_capacity.py).
     # A person at the customer adding an owner is refused at the plan limit.

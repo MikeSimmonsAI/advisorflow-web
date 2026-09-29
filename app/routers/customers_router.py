@@ -214,6 +214,37 @@ def customer_detail(org_id: str, db: Session = Depends(get_db),
     }
 
 
+# ── ORGANIZATION CONTROL CENTER + BLUEPRINTS (read-only) ───────────────────
+
+@router.get("/{org_id}/control-center")
+def control_center(org_id: str, db: Session = Depends(get_db),
+                   user: User = Depends(require_god)):
+    """Everything the Organization Control Center renders, in one read.
+
+    Every figure is a query and every status is org_blueprints' evaluation of a
+    stored row; what the schema cannot answer comes back null with a note.
+    """
+    from app.services import org_control_center as occ
+    return occ.control_center(db, _load(db, org_id))
+
+
+@router.get("/{org_id}/blueprint")
+def get_blueprint(org_id: str, key: Optional[str] = Query(None),
+                  db: Session = Depends(get_db), user: User = Depends(require_god)):
+    """The organization evaluated against its blueprint (or `?key=` another).
+
+    Reads only. Applying the blueprint's features is PUT /{org_id}/features
+    with `features.apply_keys`, which is audited.
+    """
+    from app.services import org_blueprints as ob
+    org = _load(db, org_id)
+    if key is not None and key not in ob.BLUEPRINTS:
+        raise HTTPException(status_code=400,
+                            detail="Unknown blueprint '%s'. Valid: %s"
+                                   % (key, ", ".join(ob.BLUEPRINT_KEYS)))
+    return ob.evaluate_blueprint(db, org, key)
+
+
 # ── STEP 2: locations ───────────────────────────────────────────────────────
 
 @router.get("/{org_id}/locations")

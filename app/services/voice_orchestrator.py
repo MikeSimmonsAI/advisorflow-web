@@ -254,6 +254,13 @@ def start_file_check_call(db: Session, lead: Lead, organization_id: str,
     elig = check_call_eligibility(db, lead, organization_id, use_case)
     if not elig.ok:
         raise PermissionError(elig.reason or "Call not permitted.")
+    # The same compliance gate bulk campaigns and /voice/call use: DNC by
+    # number, suppression list, allow_voice, Pause AI / human takeover, and the
+    # org's paused_all / paused_voice switches.
+    from app.services import voice_bulk_gate
+    why = voice_bulk_gate.call_refusal(db, lead, organization_id)
+    if why:
+        raise PermissionError(why)
 
     config = active_voice_config(db, organization_id, use_case)
     org = db.query(Organization).filter(

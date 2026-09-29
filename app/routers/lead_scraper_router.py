@@ -14,6 +14,15 @@ Endpoints:
   POST /scraper/validate   -- run Twilio Lookup on a batch of phones
   POST /scraper/import     -- create Lead records from validated results
   POST /scraper/exists     -- check which phones already exist in org leads
+  POST /scraper/stage      -- put results into the Lead Intelligence prospect pool
+                              (normalize -> dedupe -> suppression -> qualification);
+                              routed to an organization only by an explicit
+                              POST /god/lead-intelligence/route
+
+Sep 28 2026 (Lead Intelligence): `industry` maps to query terms, an intended
+`destination_org_id` is recorded on a LeadIntelScrapeJob (never auto-routed),
+and /import now runs normalize -> dedupe -> suppression -> qualification
+before it writes, reusing app/services/qualification.py.
 """
 
 import logging
@@ -23,7 +32,7 @@ from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, require_god
@@ -38,12 +47,23 @@ router = APIRouter(prefix="/scraper", tags=["lead-scraper"])
 # -- Request / Response Models ------------------------------------------------
 
 class ScrapeSearchRequest(BaseModel):
-    query: str = Field(..., min_length=2, max_length=200,
-                       description='Full text search, e.g. "funeral homes near Dallas TX"')
+    # Either a query or an industry (or both). The industry maps to search
+    # terms via lead_routing.INDUSTRY_TERMS.
+    query: Optional[str] = Field(None, min_length=2, max_length=200,
+                                 description='Full text search, e.g. "funeral homes near Dallas TX"')
+    industry: Optional[str] = Field(None, max_length=80)
+    # INTENT ONLY - stored on the job, never routed to automatically.
+    destination_org_id: Optional[str] = None
     location: Optional[str] = Field(None, max_length=200,
                                     description="Optional location bias, e.g. 'Dallas, TX'")
     radius_meters: int = Field(default=8000, ge=500, le=50000)
     max_results: int = Field(default=20, ge=1, le=60)
+
+    @model_validator(mode="after")
+    def _needs_query_or_industry(self):
+        if not (self.query and self.query.strip()) and not (self.industry and self.industry.strip()):
+            raise ValueError("Provide a search query or an industry.")
+        return self
 
 
 class ScrapedBusiness(BaseModel):
@@ -85,6 +105,16 @@ class ImportRequest(BaseModel):
     # the god platform org.
     target_org_id: Optional[str] = None
     organization_id: Optional[str] = None  # accepted synonym
+    job_id: Optional[str] = None
+
+
+class StageRequest(BaseModel):
+    """Results into the Lead Intelligence prospect pool - no organization is
+    written to. `destination_org_id` is recorded as intent only."""
+    results: List[ScrapedBusiness] = Field(..., max_length=60)
+    job_id: Optional[str] = None
+    industry: Optional[str] = None
+    destination_org_id: Optional[str] = None
 
 
 # -- Helpers ------------------------------------------------------------------
@@ -245,12 +275,48 @@ def _resolve_target_org(requested_org_id, current_user: User, db: Session) -> st
     return org_id
 
 
+def _check_destination(dest: Optional[str], db: Session) -> Optional[str]:
+    """An intended destination must be a real client org. Validated, never acted on."""
+    if not dest:
+        return None
+    if dest == GOD_PLATFORM_ORG_ID:
+        raise HTTPException(status_code=400,
+                            detail="The destination must be a client organization.")
+    if not db.query(Organization.id).filter(Organization.id == dest).first():
+        raise HTTPException(status_code=404, detail="Organization %s not found." % dest)
+    return dest
+
+
+def _record_job(db: Session, current_user: User, req: "ScrapeSearchRequest",
+                effective_query: str, dest: Optional[str], result_count: int) -> Optional[str]:
+    """Record the search. A failure here (e.g. an unmigrated table) must not
+    cost the operator their results, so it is logged and swallowed."""
+    try:
+        from app.models.lead_intel_models import LeadIntelScrapeJob
+        job = LeadIntelScrapeJob(created_by_id=current_user.id, provider="google_places",
+                                 industry=req.industry or None, query=req.query or None,
+                                 effective_query=effective_query, location=req.location,
+                                 radius_meters=req.radius_meters, max_results=req.max_results,
+                                 destination_org_id=dest, status="searched",
+                                 result_count=result_count)
+        db.add(job)
+        db.commit()
+        return job.id
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        logger.warning("scraper: could not record the search job", exc_info=True)
+        return None
+
+
 @router.post("/search")
 async def scrape_search(
     req: ScrapeSearchRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_god),
 ):
-    """Search Google Places for businesses matching the query + optional location."""
+    """Search Google Places for businesses matching the query/industry + optional location."""
+    from app.services.lead_routing import industry_query
+    dest = _check_destination(req.destination_org_id, db)
     api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
     if not api_key:
         raise HTTPException(
@@ -258,8 +324,9 @@ async def scrape_search(
             detail="Google Places API not configured. Add GOOGLE_PLACES_API_KEY to Render env vars.",
         )
 
+    effective = industry_query(req.industry, req.query)
     places = await _google_places_search(
-        req.query.strip(), req.location, req.radius_meters, req.max_results, api_key
+        effective, req.location, req.radius_meters, req.max_results, api_key
     )
 
     businesses = []
@@ -286,8 +353,44 @@ async def scrape_search(
             "channel": None,
         })
 
-    full_query = f"{req.query.strip()} near {req.location}" if req.location else req.query.strip()
-    return {"results": businesses, "total": len(businesses), "query": full_query}
+    full_query = f"{effective} near {req.location}" if req.location else effective
+    job_id = _record_job(db, current_user, req, full_query, dest, len(businesses))
+    return {"results": businesses, "total": len(businesses), "query": full_query,
+            "industry": req.industry, "destination_org_id": dest, "job_id": job_id}
+
+
+@router.post("/stage", status_code=201)
+def scrape_stage(
+    req: StageRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_god),
+):
+    """Stage results into the Lead Intelligence prospect pool.
+
+    normalize -> dedupe -> suppression -> qualification, via
+    app/services/lead_routing.py. Writes ONLY lead_intel_* tables: no Lead, no
+    contact, no consent, no message. Routing into an organization is a separate
+    explicit action (POST /god/lead-intelligence/route).
+    """
+    from app.models.lead_intel_models import LeadIntelScrapeJob
+    from app.services import lead_routing
+    dest = _check_destination(req.destination_org_id, db)
+    job = None
+    if req.job_id:
+        job = db.query(LeadIntelScrapeJob).filter(LeadIntelScrapeJob.id == req.job_id).first()
+        if job is None:
+            raise HTTPException(status_code=404, detail="Scrape job not found.")
+    out = lead_routing.ingest(db, req.results, job=job, industry=req.industry,
+                              destination_org_id=dest)
+    db.commit()
+    names = {}
+    if dest or (job and job.destination_org_id):
+        oid = dest or job.destination_org_id
+        o = db.query(Organization).filter(Organization.id == oid).first()
+        names = {oid: o.name} if o else {}
+    return {"job_id": job.id if job else None, "counts": out["counts"],
+            "prospects": [lead_routing.prospect_dict(p, names) for p in out["prospects"]],
+            "note": "Staged in the Lead Intelligence pool. Nothing was sent to any organization."}
 
 
 @router.post("/validate")
@@ -360,18 +463,39 @@ def scrape_import(
     _org_row = db.query(Organization).filter(Organization.id == org_id).first()
     over_limit = 0
 
+    # DEDUPE -> SUPPRESSION, before anything is written.
+    #   storage      the phone is stored exactly as before this change (as
+    #                given), so scraped leads look like every other path's
+    #   dedupe       against the org's leads in EVERY stored spelling of the
+    #                number (as typed, 11-digit, E.164) and within this request
+    #   suppression  compliance_service.is_phone_suppressed plus the org's DNC
+    #                records, via lead_routing.suppression_reason - a number the
+    #                customer was told to stop contacting is never re-imported
+    from app.services import lead_routing
+    suppressed = 0
+    seen_in_request = set()
+
     for biz in req.leads:
-        if biz.get("phone") if isinstance(biz, dict) else biz.phone:
-            phone = biz["phone"] if isinstance(biz, dict) else biz.phone
+        raw_phone = biz.get("phone") if isinstance(biz, dict) else biz.phone
+        phone = None
+        if raw_phone:
+            phone = raw_phone
+            forms = lead_routing.phone_forms(raw_phone)
+            key = lead_routing.to_e164(raw_phone) or raw_phone.strip()
+            if key in seen_in_request:
+                skipped += 1
+                continue
             existing = db.query(Lead).filter(
                 Lead.organization_id == org_id,
-                Lead.phone == phone,
+                Lead.phone.in_(list(forms)),
             ).first()
             if existing:
                 skipped += 1
                 continue
-        else:
-            phone = None
+            if lead_routing.suppression_reason(db, org_id, raw_phone, None):
+                suppressed += 1
+                continue
+            seen_in_request.add(key)
 
         name = biz["name"] if isinstance(biz, dict) else biz.name
         address = biz.get("address") if isinstance(biz, dict) else biz.address
@@ -434,6 +558,32 @@ def scrape_import(
 
     db.commit()
 
+    # QUALIFICATION - read-only, the existing engine unchanged. Scraped
+    # businesses are reported on the voice channel (they have a phone and no
+    # consent); nothing here changes a lead or starts anything.
+    from app.services import qualification as _Q
+    _ctx = _Q.QualificationContext(db, created_leads, org_id, _Q.org_rules(db, org_id))
+    qual = {"channel": _Q.CHANNEL_VOICE,
+            "buckets": {b: 0 for b in _Q.BUCKETS},
+            "priorities": {p: 0 for p in _Q.PRIORITIES}}
+    for _l in created_leads:
+        _d = _Q.qualify_one(_l, _Q.CHANNEL_VOICE, _ctx)
+        qual["buckets"][_d["bucket"]] += 1
+        if _d["priority"]:
+            qual["priorities"][_d["priority"]] += 1
+
+    if req.job_id:
+        try:
+            from app.models.lead_intel_models import LeadIntelScrapeJob
+            job = db.query(LeadIntelScrapeJob).filter(LeadIntelScrapeJob.id == req.job_id).first()
+            if job is not None:
+                job.imported_count = (job.imported_count or 0) + imported
+                job.status = "imported"
+                db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.warning("scraper: could not update the job record", exc_info=True)
+
     # Master retention, AFTER the customer's own commit. A scraped import is a
     # batch, so the master writes are a second pass rather than a per-row
     # interruption of the first — and if this pass fails entirely the leads are
@@ -447,10 +597,12 @@ def scrape_import(
     db.commit()
 
     logger.info(
-        "scraper_import: org=%s list='%s' imported=%d skipped=%d held_over_capacity=%d",
-        org_id, list_name, imported, skipped, over_limit,
+        "scraper_import: org=%s list='%s' imported=%d skipped=%d suppressed=%d held_over_capacity=%d",
+        org_id, list_name, imported, skipped, suppressed, over_limit,
     )
     return {"success": True, "imported": imported, "skipped": skipped,
+            "suppressed": suppressed,
+            "qualification": qual,
             "list_name": list_name,
             # Reported apart from `skipped`, which means "already had this
             # phone". A held row is not a duplicate; it is a real prospect the

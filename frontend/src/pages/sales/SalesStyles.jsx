@@ -14,6 +14,8 @@ import { useEffect } from 'react'
 
 const CSS = `
 /* ── THE PALETTE, ON TWO AXES ────────────────────────────────────────────────
+   UPDATE 2026-09-28: the platform is LIGHT-ONLY (spec §66). The dark token
+   blocks described below were removed; the light tokens are the only palette.
    BRAND lives on data-theme and decides whose colours these are.
    APPEARANCE lives on data-appearance and decides whether the room is lit.
    They are independent: Mike wanting a bright interface must not repaint his
@@ -75,44 +77,6 @@ const CSS = `
    The palette sits in the same navy family as God Mode on purpose: the
    Compensation Command Center renders embedded inside that shell, and a
    second blue would look like a screenshot pasted into the page. */
-/* NOT INSIDE THE GOD SHELL. The Compensation Command Center renders embedded at
-   /god/compensation, and God Mode is permanently light as of Sep 11 2026 - so
-   with the owner's tenant preference set to dark, this block was painting a
-   36-element dark island into the middle of a light control plane. Standalone,
-   at /sales/*, the dark workspace is unchanged and still the person's choice.
-   The exclusion says the rule out loud: inside the control plane, follow the
-   control plane. */
-[data-appearance="dark"] .sw-scope:not(.gm-shell *){
-  --sw-nav1:#060e18; --sw-nav2:#08131f; --sw-navline:#18293a;
-  --sw-canvas:#0a1320;
-  --sw-surface:#111e2d; --sw-surface2:#0d1826; --sw-surface3:#18293b;
-  --sw-btn-bg:#1a2b3d; --sw-field:#0c1826;
-  --sw-ink:#e8f1f8; --sw-ink2:#9db3c8; --sw-ink3:#7c93aa; --sw-ink4:#657e96;
-  --sw-line:#24384e; --sw-line2:#1b2c3f; --sw-line-strong:#3a5877;
-  --sw-shadow:0 2px 10px rgba(0,0,0,.4);
-  --sw-shadow-lift:0 6px 20px rgba(0,0,0,.5);
-  --sw-shadow-modal:0 24px 60px rgba(0,0,0,.62);
-  --sw-ok-bg:#0c2b23; --sw-ok-bd:#1e7059; --sw-ok-fg:#54e3b8;
-  --sw-warn-bg:#2b2109; --sw-warn-bd:#7d6220; --sw-warn-fg:#f4c862;
-  --sw-bad-bg:#2d1219; --sw-bad-bd:#7c374d; --sw-bad-fg:#ff90a6;
-  --sw-info-bg:#0d2137; --sw-info-bd:#254d73; --sw-info-fg:#84bcf0;
-  --sw-neu-bg:#152131; --sw-neu-bd:#2c4158; --sw-neu-fg:#9db3c8;
-  --sw-accent-bg:#0b2b28; --sw-accent-bd:#1c6f66;
-  --sw-appr-bg:#1d1708;
-  --sw-teal:#2cc9b8; --sw-teal2:#54e6d4; --sw-teal-deep:#1fa294;
-  --sw-amber:#f0b862; --sw-green:#5fd9a9; --sw-blue:#6ab4f0; --sw-red:#f08292;
-  color-scheme:dark;
-}
-/* A primary button is teal in both appearances, so its LABEL has to stay
-   readable against teal - not against the page. Left as an explicit literal
-   rather than a token for exactly that reason. */
-[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-btn.sw-primary,
-[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-tiny.sw-primary{color:#04201c}
-/* The rail is already dark in light mode, where it is the one dark element on
-   a pale page. In dark mode it must stay distinguishable from the canvas
-   rather than merging into it, which is why nav1/nav2 above go DARKER than
-   the canvas instead of lighter. */
-[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-topbar{background:var(--sw-surface)}
 
 /* Keyboard focus, both appearances. The prototype had none, which is an
    accessibility failure on a screen that settles payments. */
@@ -596,7 +560,6 @@ const CSS = `
 /* PAYABLE NOW is the only figure anybody acts on today, so it is the only one
    that gets extra weight and the accent. */
 .sw-tile.is-lead .sw-tile-value{font-size:34px;color:var(--sw-teal-deep)}
-[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-tile.is-lead .sw-tile-value{color:var(--sw-teal2)}
 /* A FORECAST LOOKS LIKE A FORECAST. Dashed, muted, no shadow: it is not
    sitting on the ledger with the others. */
 .sw-tile.is-forecast{border-style:dashed;background:transparent;box-shadow:none;
@@ -716,7 +679,6 @@ const CSS = `
   color:var(--sw-ink3);font-weight:800}
 .sw-cmd-fact b{display:block;font-size:12px;margin-top:3px;word-break:break-word}
 .sw-cmd-fact.is-strong b{color:var(--sw-teal-deep)}
-[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-cmd-fact.is-strong b{color:var(--sw-teal2)}
 
 /* a stage, as a section that knows where the deal is */
 .sw-sec{background:var(--sw-surface);border:1px solid var(--sw-line);
@@ -790,7 +752,6 @@ const CSS = `
 .sw-opt:hover:not(:disabled){border-color:var(--sw-line-strong);color:var(--sw-ink)}
 .sw-opt.is-on{background:var(--sw-accent-bg);border-color:var(--sw-teal);
   color:var(--sw-teal-deep);font-weight:700}
-[data-appearance="dark"] .sw-scope:not(.gm-shell *) .sw-opt.is-on{color:var(--sw-teal2)}
 .sw-opt:disabled{opacity:.55;cursor:default}
 .sw-mini-input{margin-top:7px;max-width:420px}
 .sw-addnote{margin-top:7px;background:none;border:0;padding:0;cursor:pointer;
@@ -884,24 +845,6 @@ const CSS = `
      sheet deliberately uses a deep green instead of inverting to white, the
      same choice .sw-btn.sw-primary already makes. */
   --cal-on-accent:#ffffff;
-}
-[data-appearance="dark"] .sw-scope:not(.gm-shell *){
-  --cal-cust-bg:#3a1a20;   --cal-cust-fg:#ff9dab;  --cal-cust-ac:#e05260;
-  --cal-intl-bg:#14263d;   --cal-intl-fg:#8fc0f5;  --cal-intl-ac:#3d7dd4;
-  --cal-call-bg:#0e2b22;   --cal-call-fg:#5fd9a9;  --cal-call-ac:#2fa675;
-  --cal-fup-bg:#2e2410;    --cal-fup-fg:#f0c674;   --cal-fup-ac:#e0a13c;
-  --cal-blok-bg:#1b2531;   --cal-blok-fg:#9db3c8;  --cal-blok-ac:#54697d;
-  --cal-pto-bg:#241c3d;    --cal-pto-fg:#b9a6f5;   --cal-pto-ac:#8163d6;
-  --cal-demo-bg:#0b2b28;   --cal-demo-fg:#54e3d0;  --cal-demo-ac:#1A9B8E;
-  --cal-ext-bg:#18222e;    --cal-ext-fg:#8496a5;   --cal-ext-ac:#3f5567;
-  --cal-ext-hatch:rgba(150,170,188,.13);
-  --cal-free-bg:rgba(67,177,132,.14);
-  --cal-free-ac:#43b184;
-  --cal-offhours:#0b1420;
-  --cal-line:#22364b;
-  --cal-line-soft:#182838;
-  --cal-now:#f08292;
-  --cal-on-accent:#04201c;
 }
 
 /* ── the control strip ─────────────────────────────────────────────────── */

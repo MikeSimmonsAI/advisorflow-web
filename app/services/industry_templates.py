@@ -1471,3 +1471,41 @@ def products_for_org(org: Any) -> Dict[str, Any]:
         "industry_matched": is_known(industry),
         "legacy_labels": dict(LEGACY_PRODUCT_LABELS),
     }
+
+
+# ── what a pipeline launch is ABOUT, per industry (WS4) ─────────────────────
+#
+# `PipelineConversation.lead_type` is free text the AI reads as context for the
+# conversation ("Type: {lead_type}" in the prompt). The launch screen used to
+# offer one fixed list to every tenant, and two of its entries (File Check,
+# Code Lead) are a funeral home's words. These lists are the choices a launch
+# screen offers per industry; the org's own tiers are still appended by the
+# client. Nothing here changes what is sent - it only labels the context.
+GENERIC_PIPELINE_LEAD_TYPES: List[Dict[str, str]] = [
+    {"value": "new_inquiry", "label": "New Inquiry"},
+    {"value": "referral", "label": "Referral"},
+    {"value": "web_lead", "label": "Web Lead"},
+    {"value": "general", "label": "General Outreach"},
+]
+
+PIPELINE_LEAD_TYPES: Dict[str, List[Dict[str, str]]] = {
+    "funeral": [
+        {"value": "file_check", "label": "File Check"},
+        {"value": "code_lead", "label": "Code Lead"},
+    ] + GENERIC_PIPELINE_LEAD_TYPES,
+    "energy": [
+        {"value": "residential", "label": "Residential Rate Review"},
+        {"value": "commercial", "label": "Commercial Rate Review"},
+        {"value": "renewal", "label": "Contract Renewal"},
+        {"value": "rate_request_followup", "label": "Rate Request Follow-Up"},
+        {"value": "new_inquiry", "label": "New Inquiry"},
+        {"value": "referral", "label": "Referral"},
+        {"value": "general", "label": "General Outreach"},
+    ],
+}
+
+
+def pipeline_lead_types(industry: Optional[str]) -> List[Dict[str, str]]:
+    """The launch-context choices for this industry; generic when none defined."""
+    key = normalize(industry)
+    return [dict(t) for t in PIPELINE_LEAD_TYPES.get(key, GENERIC_PIPELINE_LEAD_TYPES)]

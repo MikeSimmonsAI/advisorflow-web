@@ -34,32 +34,18 @@ const PLANS = [
   { value: 'enterprise',   label: 'Enterprise' },
 ]
 
-// Features each plan tier includes by default.
+// Features each plan tier includes by default — FETCHED, NOT COPIED.
 //
-// `a2p_10dlc` HAS BEEN REMOVED FROM EVERY TIER. It was in growth, professional
-// and standard, which meant buying the Growth plan silently included the right
-// to register the customer's A2P brand and campaign against their Twilio
-// account. A2P is no longer a feature at all: it is a capability behind the two
-// delegation gates, granted per organization and then per named administrator
-// on that customer's Administration panel. A plan can sell the SMS service; it
-// cannot sell the carrier identity behind it.
-const PLAN_FEATURES = {
-  trial:        ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log'],
-  starter:      ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns'],
-  growth:       ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup'],
-  professional: ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup', 'crm', 'crm_connectors'],
-  enterprise:   null, // null = all features
-  // legacy alias kept so existing orgs on 'standard' still work
-  standard:     ['master_dashboard', 'users', 'reports', 'availability', 'tier_config', 'branding_settings', 'compliance', 'audit_log', 'campaigns', 'lead_cleanup'],
-}
+// This file used to carry its own PLAN_FEATURES map, and it had already drifted
+// from the server's (app/services/entitlements.PLAN_FEATURES): the server added
+// `leads` to every tier after WUPA and Fiber Cartel lost their lead book, and
+// this copy never got it, so "Apply plan defaults" here re-created exactly that
+// incoherent configuration. The presets now come from
+// GET /god/entitlements/catalog (`plan_presets`), the server's own constant.
+// If that fetch fails the button refuses rather than guessing.
 
-function getPlanLabel(plan) {
-  const found = PLANS.find(p => p.value === plan)
-  return found ? found.label.toUpperCase() : (plan || 'TRIAL').toUpperCase()
-}
-
-function getBelowPlanCount(plan, currentFeatures) {
-  const expected = PLAN_FEATURES[plan]
+function getBelowPlanCount(planPresets, plan, currentFeatures) {
+  const expected = planPresets ? planPresets[plan] : null
   if (!expected) return 0  // enterprise = all, never below
   if (currentFeatures === null) return 0  // already has all
   const missing = expected.filter(f => !currentFeatures.includes(f))
@@ -92,6 +78,8 @@ export default function OrgManager() {
   // fetch fails — see FEATURES_FALLBACK at the top of this file.
   const [allFeatures, setAllFeatures] = useState(FEATURES_FALLBACK)
   const [orgFeatures, setOrgFeatures] = useState({})
+  // Server plan presets (entitlements.PLAN_FEATURES). null until fetched.
+  const [planPresets, setPlanPresets] = useState(null)
   const [saving, setSaving] = useState({})
   const [platformSaving, setPlatformSaving] = useState({})
   const [planSaving, setPlanSaving] = useState({})
@@ -116,6 +104,10 @@ export default function OrgManager() {
             ? o.enabled_features : null
         })
         setOrgFeatures(featInit)
+
+        api.get('/god/entitlements/catalog')
+          .then(cat => { if (cat && cat.plan_presets) setPlanPresets(cat.plan_presets) })
+          .catch(() => setPlanPresets(null))
 
         // THE ONE FEATURE VOCABULARY, fetched rather than hardcoded.
         // `available` is built from the server registry, so this screen and
@@ -247,7 +239,11 @@ export default function OrgManager() {
 
   async function applyPlanDefaults(org) {
     const plan = (org.plan || 'trial').toLowerCase()
-    const defaults = PLAN_FEATURES[plan] || PLAN_FEATURES.trial
+    if (!planPresets) {
+      alert('Plan presets could not be loaded from the server, so no defaults were applied.')
+      return
+    }
+    const defaults = planPresets[plan] || planPresets.trial
     setOrgFeatures(prev => ({ ...prev, [org.id]: defaults }))
     setSaving(prev => ({ ...prev, [org.id]: true }))
     try {

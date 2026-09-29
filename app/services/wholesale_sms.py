@@ -411,7 +411,20 @@ def enforce_for_lead(db, lead, *, path: str = "send_sms",
 
     Called from inside `sms_service.send_sms/send_mms`, so no caller - human,
     cadence, AI, workforce or EvoSense - reaches a Wholesale seller any other
-    way. Returns the sender to use when permitted."""
+    way. Returns the sender to use when permitted.
+
+    PAUSE AI / TAKE OVER (wholesale_ops). Checked FIRST and for every lead
+    that has a conversation-control row: while the AI is paused or a person
+    has taken the conversation over, only a send stamped MANUAL goes on to
+    the remaining gates. Every other path - cadence, AI replies, auto-send,
+    workforce, and any path that does not stamp its source - is refused."""
+    from app.services import wholesale_ops
+    held = wholesale_ops.ai_send_refusal(db, lead, path)
+    if held:
+        log.warning("wholesale_sms BLOCKED %s", json.dumps({
+            "path": path, "organization_id": getattr(lead, "organization_id", None),
+            "lead_id": getattr(lead, "id", None), "reasons": [held]}))
+        raise WholesaleSmsBlocked([held])
     if not is_program_lead(db, lead):
         return None
     org_id = getattr(lead, "organization_id", None)

@@ -235,8 +235,22 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     db_session.add(exc)
     db_session.commit()
 
+    # Wholesale pilot ops (WS6): a callback and a note of A's, written
+    # directly so this fixture does not depend on the ops router being wired.
+    from app.models.wholesale_ops_models import WholesaleDealNote, WholesaleSellerCallback
+    from datetime import datetime as _dt
+    ops_cb = WholesaleSellerCallback(organization_id=sample_org.id, lead_id=seller["lead_id"],
+                                     deal_id=deal_id, due_at=_dt.utcnow(), status="due")
+    ops_note = WholesaleDealNote(organization_id=sample_org.id, deal_id=deal_id,
+                                 author_user_id=sample_advisor.id, body="victim note")
+    db_session.add_all([ops_cb, ops_note])
+    db_session.commit()
+
     return {
         **es_ids,
+        "ops_lead_id": seller["lead_id"],
+        "ops_callback_id": ops_cb.id,
+        "ops_note_id": ops_note.id,
         "funding_partner_id": partner["id"],
         "funding_submission_id": submission["id"],
         "exception_id": exc.id,
@@ -397,7 +411,30 @@ def attacks(ids):
          {"status": "approved"}),
         ("post", "/wholesale/documents/%s/signature-request" % ids["document_id"],
          {"parties": [{"name": "attacker", "email": "a@example.com"}]}),
-    ] + evosense_attacks(ids) + funding_and_exception_attacks(ids)
+    ] + evosense_attacks(ids) + funding_and_exception_attacks(ids) + ops_attacks(ids)
+
+
+def ops_attacks(ids):
+    """Wholesale pilot ops (app/routers/wholesale_ops_router.py)."""
+    lead, d = ids["ops_lead_id"], ids["deal_id"]
+    return [
+        ("get", "/wholesale/ops/leads/%s/temperature" % lead, None),
+        ("put", "/wholesale/ops/leads/%s/temperature" % lead, {"temperature": "COLD", "reason": "x"}),
+        ("delete", "/wholesale/ops/leads/%s/temperature" % lead, None),
+        ("get", "/wholesale/ops/leads/%s/control" % lead, None),
+        ("post", "/wholesale/ops/leads/%s/control/pause" % lead, {}),
+        ("post", "/wholesale/ops/leads/%s/control/takeover" % lead, {}),
+        ("post", "/wholesale/ops/leads/%s/control/resume" % lead, {}),
+        ("get", "/wholesale/ops/leads/%s/calls" % lead, None),
+        ("post", "/wholesale/ops/callbacks/%s/complete" % ids["ops_callback_id"], {}),
+        ("post", "/wholesale/ops/callbacks/%s/cancel" % ids["ops_callback_id"], {}),
+        ("post", "/wholesale/ops/callbacks/from-exception/%s" % ids["exception_id"], {}),
+        ("get", "/wholesale/ops/deals/%s" % d, None),
+        ("get", "/wholesale/ops/deals/%s/notes" % d, None),
+        ("post", "/wholesale/ops/deals/%s/notes" % d, {"body": "planted"}),
+        ("patch", "/wholesale/ops/notes/%s" % ids["ops_note_id"], {"body": "stolen"}),
+        ("delete", "/wholesale/ops/notes/%s" % ids["ops_note_id"], None),
+    ]
 
 
 def funding_and_exception_attacks(ids):

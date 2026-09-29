@@ -72,6 +72,11 @@ export default function GodLeadBrowser() {
   const [platformSlug, setPlatformSlug] = useState('')
   const [orgId, setOrgId] = useState('')
   const [status, setStatus] = useState('')
+  // Master-database filters added Sep 28 2026 — all applied SERVER-SIDE by
+  // GET /god/master/contacts (source, tenant status, first-seen window).
+  const [source, setSource] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   // PRODUCTION ONLY IS THE DEFAULT. Demo orgs, acceptance tests and proof
   // scenarios all write real lead rows; a master database where a quarter of
   // the people are props is one nobody trusts.
@@ -108,8 +113,11 @@ export default function GodLeadBrowser() {
     try {
       if (mode === 'master') {
         const params = buildMasterParams({
-          search, platformId, orgId, includeSynthetic, skip: s, limit: PAGE_SIZE,
+          search, platformId, orgId, source, includeSynthetic, skip: s, limit: PAGE_SIZE,
         })
+        if (status) params.status = status
+        if (dateFrom) params.date_from = dateFrom
+        if (dateTo) params.date_to = dateTo
         const r = await api.get('/god/master/contacts', { params })
         setRows(r.rows || [])
         setTotal(r.total || 0)
@@ -127,10 +135,11 @@ export default function GodLeadBrowser() {
     } finally {
       setLoading(false)
     }
-  }, [mode, search, platformSlug, platformId, orgId, status, includeSynthetic, skip])
+  }, [mode, search, platformSlug, platformId, orgId, status, source, dateFrom, dateTo,
+      includeSynthetic, skip])
 
   useEffect(() => { fetch(0) },
-    [mode, search, platformSlug, orgId, status, includeSynthetic])
+    [mode, search, platformSlug, orgId, status, source, dateFrom, dateTo, includeSynthetic])
 
   const page = Math.floor(skip / PAGE_SIZE)
   const totalPages = Math.ceil(total / PAGE_SIZE)
@@ -216,7 +225,44 @@ export default function GodLeadBrowser() {
             </select>
           </div>
 
-          {isMaster ? (
+          <div style={{ flex: '1 1 120px' }}>
+            <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Status</div>
+            <select value={status} onChange={e => setStatus(e.target.value)}
+                    style={{ width: '100%', fontSize: 13, padding: '6px 8px',
+                             border: '1px solid var(--gm-card-line)', borderRadius: 6 }}>
+              <option value="">All statuses</option>
+              {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          {isMaster && (
+            <>
+              <div style={{ flex: '1 1 130px' }}>
+                <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Source</div>
+                <input value={source} onChange={e => setSource(e.target.value)}
+                       placeholder="e.g. import, scraper"
+                       style={{ width: '100%', fontSize: 13, padding: '6px 10px',
+                                border: '1px solid var(--gm-card-line)', borderRadius: 6,
+                                boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ flex: '1 1 130px' }}>
+                <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>First seen from</div>
+                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                       style={{ width: '100%', fontSize: 13, padding: '5px 8px',
+                                border: '1px solid var(--gm-card-line)', borderRadius: 6,
+                                boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ flex: '1 1 130px' }}>
+                <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>First seen to</div>
+                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                       style={{ width: '100%', fontSize: 13, padding: '5px 8px',
+                                border: '1px solid var(--gm-card-line)', borderRadius: 6,
+                                boxSizing: 'border-box' }} />
+              </div>
+            </>
+          )}
+
+          {isMaster && (
             <div style={{ flex: '1 1 190px' }}>
               <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Records</div>
               <select value={includeSynthetic ? 'all' : 'production'}
@@ -225,16 +271,6 @@ export default function GodLeadBrowser() {
                                border: '1px solid var(--gm-card-line)', borderRadius: 6 }}>
                 <option value="production">Production only</option>
                 <option value="all">Include QA / Test</option>
-              </select>
-            </div>
-          ) : (
-            <div style={{ flex: '1 1 120px' }}>
-              <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Status</div>
-              <select value={status} onChange={e => setStatus(e.target.value)}
-                      style={{ width: '100%', fontSize: 13, padding: '6px 8px',
-                               border: '1px solid var(--gm-card-line)', borderRadius: 6 }}>
-                <option value="">All statuses</option>
-                {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
           )}

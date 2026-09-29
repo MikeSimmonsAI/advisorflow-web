@@ -162,6 +162,8 @@ const NAV_GROUPS = [
       { to: '/wholesale/buyers', label: 'Cash Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/funding', label: 'Funding Partners', icon: 'credit-card', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/exceptions', label: 'Exceptions', icon: 'check-square', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/callbacks', label: 'Callback Center', icon: 'phone', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/pilot', label: 'Pilot Controls', icon: 'sliders', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/closing', label: 'Contracts & Closing', icon: 'file-text', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/dispositions', label: 'Dispositions', icon: 'send', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/settings', label: 'Wholesale Settings', icon: 'sliders', adminOnly: true, featureKey: 'wholesale_real_estate' },
@@ -300,6 +302,13 @@ function Icon({ name }) {
   )
 }
 
+// A workspace role as a person would say it: org_admin -> "Org Admin".
+function roleDisplay(role) {
+  if (!role) return ''
+  const known = { org_admin: 'Org Admin', super_admin: 'Super Admin', god_admin: 'Platform Owner' }
+  return known[role] || String(role).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
 function LiveClock() {
   const [now, setNow] = useState(new Date())
   useEffect(() => {
@@ -318,27 +327,10 @@ function LiveClock() {
   )
 }
 
-function ThemeToggle({ branding }) {
-  // A branded shell (brand domain, or a workspace whose platform has its own
-  // theme) owns data-theme; only the BookaBoost default offers light/dark.
-  const isBrandTheme = shellTheme(branding) !== THEMES.BOOKABOOST
-  const [dark, setDark] = useState(() => {
-    if (isBrandTheme) return true
-    const saved = localStorage.getItem('af_theme')
-    return saved !== 'light'
-  })
-  useEffect(() => {
-    if (isBrandTheme) return
-    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
-    localStorage.setItem('af_theme', dark ? 'dark' : 'light')
-  }, [dark, isBrandTheme])
-  if (isBrandTheme) return null
-  return (
-    <button className="theme-toggle" onClick={() => setDark(!dark)} title={dark ? 'Switch to light mode' : 'Switch to dark mode'}>
-      <Icon name={dark ? 'sun' : 'moon'} />
-    </button>
-  )
-}
+// There is no day/night switch: the product ships one light theme
+// (see styles/appearance.css). A value a previous build stored for the old
+// BookaBoost switch is cleared so it can never re-apply a dark shell.
+try { localStorage.removeItem('af_theme') } catch { /* storage unavailable */ }
 
 export default function Layout({ children }) {
   const [user, setUser] = useState(() => getCurrentUser())
@@ -477,6 +469,35 @@ export default function Layout({ children }) {
   // `children` at the bottom of this file — the comment there says why.
   const workspaceKey = [branding?.organization_id || '',
                         orgContext?.orgId || ''].join('|')
+
+  // WHO THIS PERSON IS IN THE WORKSPACE THEY ARE STANDING IN.
+  //
+  // The rail footer used to print users.full_name and users.role — the HOME
+  // account. An account whose own name is "EvoSys Wholesale" therefore read,
+  // inside Atlantis Light & Power, as if the organization were EvoSys
+  // Wholesale, with the home role beside it. GET /work/identity answers from
+  // the acting workspace: its organization, this person's name, and their
+  // role THERE. Until it answers (or if it cannot), the workspace's own
+  // branding answers — never the home account's name as the organization.
+  const [identity, setIdentity] = useState(null)
+  useEffect(() => {
+    let alive = true
+    setIdentity(null)
+    api.get('/work/identity', { skipRedirect: true })
+      .then(d => { if (alive) setIdentity(d) })
+      .catch(() => { if (alive) setIdentity(null) })
+    return () => { alive = false }
+  }, [workspaceKey])
+  const workspaceOrgName = identity?.display_name || orgContext?.orgName || branding?.brand_name || ''
+  const workspaceRoleRaw = identity?.workspace_role || branding?.workspace_role || user?.role || ''
+  const workspaceRoleLabel = roleDisplay(workspaceRoleRaw)
+  const personName = identity?.user_full_name || user?.full_name || 'Unknown'
+  // "Back to website" is the WORKSPACE's website. Organizations store none
+  // today, so inside somebody else's workspace (an operator in a customer, a
+  // member of a second workspace) and inside a configured vertical customer
+  // workspace the link is hidden rather than pointing at the platform's own
+  // site. In a person's home workspace outside a vertical it is unchanged.
+  const inHomeWorkspace = identity ? !!identity.is_home_workspace : !orgContext
 
   // The skin is CSS keyed on an attribute, not a stylesheet swap: one
   // attribute on <html> re-points the design tokens that index.css already
@@ -628,7 +649,7 @@ export default function Layout({ children }) {
       </button>
       <button type="button" className="sidebar-backdrop" onClick={closeSidebar} aria-label="Close navigation menu" />
 
-      <aside className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}`} style={{ width: sidebarCollapsed ? 60 : undefined, minWidth: sidebarCollapsed ? 60 : undefined, transition: 'width 0.2s, min-width 0.2s', ...(isGodAdmin && !vertical ? { borderRight: '1px solid rgba(245,158,11,0.3)', background: 'linear-gradient(180deg, rgba(245,158,11,0.06) 0%, transparent 120px)' } : {}) }}>
+      <aside className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}${isGodAdmin && !vertical ? ' sidebar--god' : ''}`} style={{ width: sidebarCollapsed ? 60 : undefined, minWidth: sidebarCollapsed ? 60 : undefined, transition: 'width 0.2s, min-width 0.2s' }}>
         <div className="sidebar-brand" style={{ position: 'relative', ...(isGodAdmin && !vertical ? { borderBottom: '1px solid rgba(245,158,11,0.25)' } : {}) }}>
           {/* THE WORKSPACE'S OWN WORDMARK COMES FIRST, INCLUDING FOR AN
               OPERATOR. Standing inside a customer of a configured vertical,
@@ -1023,33 +1044,40 @@ export default function Layout({ children }) {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="user-chip" title={sidebarCollapsed ? (user?.full_name || 'Unknown') : undefined}>
+          <div className="user-chip" title={sidebarCollapsed ? [workspaceOrgName, personName].filter(Boolean).join(' · ') : undefined}
+               data-workspace-org={identity?.organization_id || branding?.organization_id || ''}>
             <div className="user-avatar">
               {profilePhoto
-                ? <img src={profilePhoto} alt={user?.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
-                : (user?.full_name || '?')[0]
+                ? <img src={profilePhoto} alt={personName} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                : (personName || '?')[0]
               }
             </div>
             {!sidebarCollapsed && (
-              <div>
-                <div className="user-name">{user?.full_name || 'Unknown'}</div>
-                <div className="user-role">{user?.role?.replace('_', ' ')}</div>
+              <div style={{ minWidth: 0 }}>
+                {/* The WORKSPACE first, then the person and their role in it. */}
+                {workspaceOrgName && <div className="user-org">{workspaceOrgName}</div>}
+                <div className="user-name">{personName}</div>
+                {workspaceRoleLabel && <div className="user-role">{workspaceRoleLabel}</div>}
               </div>
             )}
           </div>
-          {/* The workspace's own brand's website - on a non-brand host (localhost)
-              the hostname default would have linked an EvoSysPro workspace to
-              another brand's site. */}
-          {!sidebarCollapsed && SHELL_BRAND.websiteUrl && (
-            <a
-              href={SHELL_BRAND.websiteUrl}
-              className="back-to-website-btn"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              ↗ Back to website
-            </a>
-          )}
+          {/* The ACTING WORKSPACE's website when one is stored; otherwise the
+              shell brand's site only in the person's own home workspace outside
+              a configured vertical. Never the platform's site inside a
+              customer's workspace. */}
+          {(() => {
+            const href = identity?.website_url || (!vertical && inHomeWorkspace ? SHELL_BRAND.websiteUrl : null)
+            return !sidebarCollapsed && href ? (
+              <a
+                href={href}
+                className="back-to-website-btn"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                ↗ Back to website
+              </a>
+            ) : null
+          })()}
           {!sidebarCollapsed && <button className="logout-btn" onClick={handleLogout}>Sign out</button>}
         </div>
       </aside>
@@ -1074,9 +1102,6 @@ export default function Layout({ children }) {
                 In a vertical workspace this is one of the four actions inside
                 WorkspaceAdminMenu, so it is not also drawn as its own button. */}
             {vertical ? <WorkspaceAdminMenu /> : <ContextSwitcher current="workspace" />}
-            {/* The Wholesale product is one light design (the approved
-                board), so its screens do not offer the dark/light switch. */}
-            {!inWholesale && <ThemeToggle branding={isElevated ? null : branding} />}
             <NotificationBell />
             {inWholesale && <WholesaleUser user={user} photo={profilePhoto} />}
           </div>

@@ -773,6 +773,10 @@ app.include_router(workqueue_router.router)
 app.include_router(campaign_router.router,
                    dependencies=[Depends(require_feature("campaigns"))])
 app.include_router(pipeline_router)
+from app.routers.rate_requests_router import router as rate_requests_router  # noqa: E402
+app.include_router(rate_requests_router)   # /rate-requests (energy work queue; gated by the `leads` feature)
+from app.routers import work_router  # noqa: E402
+app.include_router(work_router.router)   # /communications/* and /work/* (notes, tasks, reply review)
 app.include_router(google_contacts_router.router)
 app.include_router(objection_router)
 app.include_router(onboarding_router.router)
@@ -831,6 +835,8 @@ app.include_router(god_billing_router)   # Customer SaaS plan catalogue + billin
 app.include_router(god_catalog_router)   # Brand catalogue: recurring add-ons + one-time products/services — god_admin only
 app.include_router(god_access_router)    # /god/access — Manage Access: footprint, preview, apply, audit. god_admin only
 app.include_router(god_master_router)    # /god/master — the AdvisorFlow Master Lead Database. CROSS-TENANT BY DESIGN and god_admin only; no customer route reads these tables.
+from app.routers.lead_intelligence_router import router as lead_intelligence_router  # noqa: E402
+app.include_router(lead_intelligence_router)   # /god/lead-intelligence — god_admin only
 app.include_router(god_demo_suite_router)  # /god/demo-suite — build and reset brands' demonstration environments
 app.include_router(god_training_router)  # /god/training — assign training, readiness report. god_admin only
 # The presenter's Demo Suite. Gated by the `demo_suite` capability over the
@@ -843,6 +849,9 @@ app.include_router(customer_360_router)  # Customer 360 + customer lifecycle —
 app.include_router(compensation_router)  # Compensation Command Center + ledger + settlement
 app.include_router(platform_context_router)   # Platform overview + brand/customer context selection
 app.include_router(customers_router)          # Customer provisioning engine
+# Overnight build 2026-09-28
+from app.routers.entitlements_router import router as entitlements_router  # noqa: E402
+app.include_router(entitlements_router)   # /god/entitlements — God-only (require_god on every route)
 # Custom commercial agreements. Mounted beside the launch engine because that
 # is what it serves: a customer whose commercial structure is still being
 # negotiated has to be able to onboard anyway.
@@ -1000,6 +1009,8 @@ app.include_router(wholesale_router)
 app.include_router(wholesale_buyers_router)
 app.include_router(wholesale_funding_router)
 app.include_router(wholesale_exceptions_router)
+from app.routers.wholesale_ops_router import router as wholesale_ops_router  # noqa: E402
+app.include_router(wholesale_ops_router)   # /wholesale/ops — callbacks, temperature overrides, conversation control, pilot
 # Files — photos, documents, proof of funds. One upload path and one
 # authenticated serve path for the whole module; see the router's docstring for
 # why no stored object is ever given a public URL.

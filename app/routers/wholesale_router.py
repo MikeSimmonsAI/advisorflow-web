@@ -1701,8 +1701,12 @@ def start_outreach(deal_id: str, payload: OutreachIn, request: Request,
 
     try:
         from app.services import sms_service
+        # Stamped MANUAL: a person typed and sent this. That is what lets it
+        # through while the AI is paused / the conversation is taken over
+        # (wholesale_ops.ai_send_refusal) - every other gate still applies.
         message = sms_service.send_sms(db, user, lead, payload.message,
-                                       include_booking_link=False)
+                                       include_booking_link=False,
+                                       send_source="manual", sent_by_user_id=user.id)
     except Exception as exc:                                    # noqa: BLE001
         # A provider failure is recorded and reported. It never looks like success.
         svc.log_event(db, org_id, "outreach.failed", actor_type=ACTOR_USER,

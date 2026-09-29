@@ -231,9 +231,11 @@ def test_jump_to_carries_only_genuinely_different_contexts():
             "Jump To duplicates the primary navigation entry %s" % p)
 
 
+# Sep 28 2026: regrouped per the EvoSys Pro spec §29. COMMAND + CUSTOMERS
+# became PLATFORM; LEADS & AUTOMATION became LEAD INTELLIGENCE.
 @pytest.mark.parametrize("group", [
-    "COMMAND", "CUSTOMERS", "SALES & REVENUE",
-    "LEADS & AUTOMATION", "SECURITY & PLATFORM",
+    "PLATFORM", "SALES & REVENUE", "LEAD INTELLIGENCE",
+    "AI WORKFORCE", "SECURITY & PLATFORM",
 ])
 def test_the_rail_is_grouped_by_business_function(group):
     src = _read(GOD_SHELL)

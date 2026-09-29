@@ -373,7 +373,8 @@ button { cursor: pointer; }
  * own .tier-select/.filter-select/etc. individually.
  */
 select {
-  color-scheme: dark;
+  /* Light-only platform since 2026-09-28 (see styles/appearance.css). */
+  color-scheme: light;
 }
 
 select option {

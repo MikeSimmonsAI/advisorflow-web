@@ -48,7 +48,7 @@ export const VERTICAL_ENERGY = 'energy'
  *
  *   Leads & Customers   /leads           the lead + contact list
  *   Contacts            /contacts        the canonical contact database
- *   Rate Requests       /view/<key>      configured workflow screen (leads)
+ *   Rate Requests       /rate-requests   the rate-request work queue (leads)
  *   Sales Pipeline      /pipeline        the existing pipeline board
  *   Move Concierge      /view/<key>      configured workflow screen (leads)
  *   Communications      /replies         the reply inbox and conversation
@@ -73,7 +73,9 @@ const ENERGY = {
         { to: '/', label: 'Overview', icon: 'grid' },
         { to: '/leads', label: 'Leads & Customers', icon: 'users', featureKey: 'leads' },
         { to: '/contacts', label: 'Contacts', icon: 'database', adminOnly: true, featureKey: 'imports' },
-        { view: 'rate-requests', label: 'Rate Requests', icon: 'zap' },
+        // The Rate Requests work queue (pages/vertical/RateRequests.jsx) replaced
+        // the read-only configured view; the route is feature-gated like /leads.
+        { to: '/rate-requests', label: 'Rate Requests', icon: 'zap', featureKey: 'leads' },
         { to: '/pipeline', label: 'Sales Pipeline', icon: 'trending-up' },
         { view: 'move-concierge', label: 'Move Concierge', icon: 'truck' },
       ],

@@ -154,6 +154,13 @@ def initiate_call(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
+    # Pause AI / human takeover and the org voice kill switch come first: the
+    # orchestrator below does not know about either.
+    from app.services import voice_bulk_gate
+    refusal = voice_bulk_gate.call_refusal(db, lead, lead.organization_id)
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
+
     # The lead's organization, not the home column - see voice_readiness.
     elig = check_call_eligibility(db, lead, lead.organization_id)
     if not elig.ok:
@@ -710,14 +717,33 @@ def create_campaign(
     # numbers to 6 would look like a compliance filter, not a refusal.
     from app.models.models import Lead as LeadModel
     lead_scope.assert_leads_in_scope(db, current_user, req.lead_ids)
-    valid_leads = lead_scope.authorized_lead_query(db, current_user).filter(
+
+    # THE SAME COMPLIANCE GATE AS EVERY OTHER AI CALL (voice_bulk_gate): DNC
+    # on any channel and by number, the suppression list, allow_voice, test
+    # records, capacity holds, seller call permission, Pause AI / takeover and
+    # the organization's voice kill switch. This used to be `status != "dnc"`
+    # alone, so a suppressed number was dialled by a bulk campaign.
+    from app.services import voice_bulk_gate
+    paused = voice_bulk_gate.org_voice_paused(db, org_id)
+    if paused:
+        raise HTTPException(status_code=409, detail=paused)
+    candidates = lead_scope.authorized_lead_query(db, current_user).filter(
         LeadModel.id.in_(req.lead_ids),
-        LeadModel.status != "dnc",
         LeadModel.phone != None,
     ).all()
+    valid_leads, refused = [], {}
+    for l in candidates:
+        why = voice_bulk_gate.call_refusal(db, l, org_id, check_org_pause=False)
+        if why:
+            refused[why] = refused.get(why, 0) + 1
+        else:
+            valid_leads.append(l)
 
     if not valid_leads:
-        raise HTTPException(status_code=400, detail="No valid leads with phone numbers found")
+        raise HTTPException(status_code=400,
+                            detail="No leads in this selection may be called: %s" % (
+                                "; ".join("%s (%d)" % (k, v) for k, v in refused.items())
+                                or "none has a phone number"))
 
     valid_ids = [l.id for l in valid_leads]
     skipped = len(req.lead_ids) - len(valid_ids)
@@ -765,6 +791,7 @@ def create_campaign(
         "campaign_id": campaign.id,
         "total_leads": len(valid_ids),
         "skipped": skipped,
+        "skipped_reasons": refused,
         "status": campaign.status,
         "scheduled_at": scheduled.isoformat() if scheduled else None,
         "message": f"Campaign started — {len(valid_ids)} calls queued" if not scheduled else f"Campaign scheduled for {scheduled}",
@@ -832,9 +859,22 @@ def _run_campaign_background(campaign_id: str, advisor_id: str, org_id: str):
                 for sid in completed:
                     active_calls.pop(sid, None)
 
-            # Get lead
-            lead = db.query(LeadModel).filter(LeadModel.id == lead_id).first()
-            if not lead or not lead.phone or lead.status == "dnc":
+            # The organization's voice kill switch stops the campaign mid-run.
+            from app.services import voice_bulk_gate
+            if voice_bulk_gate.org_voice_paused(db, org_id):
+                logger.info("Campaign %s stopped: voice outreach paused for org", campaign_id)
+                campaign.status = "paused"
+                db.commit()
+                return
+
+            # Get lead - and RE-CHECK it immediately before dialling. A STOP,
+            # a suppression entry or a human takeover can arrive after the
+            # campaign was created; the gate at creation is not enough.
+            lead = db.query(LeadModel).filter(LeadModel.id == lead_id,
+                                              LeadModel.organization_id == org_id).first()
+            refusal = voice_bulk_gate.call_refusal(db, lead, org_id, check_org_pause=False)
+            if refusal:
+                logger.info("Campaign %s skipped lead %s: %s", campaign_id, lead_id, refusal)
                 campaign.calls_failed += 1
                 db.commit()
                 continue

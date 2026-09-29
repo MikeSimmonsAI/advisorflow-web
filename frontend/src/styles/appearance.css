@@ -1,175 +1,181 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   APPEARANCE — LIGHT / DARK / SYSTEM
+   EVOSYS PRO DESIGN TOKENS — THE ONE LIGHT THEME
    ═══════════════════════════════════════════════════════════════════════════
 
-   AN ORTHOGONAL AXIS, NOT A SECOND THEME SYSTEM.
+   Since 2026-09-28 (spec §66/§67) the platform ships ONE polished light theme.
+   The manual day/night toggle is gone, and nothing in this file depends on
+   `data-appearance` — the rules are unconditional. appearance.js still writes
+   data-appearance="light" on <html> purely so native widgets and any legacy
+   selector resolve light; nothing here needs it.
 
-   `index.css` already carries 176 semantic tokens and uses `data-theme` for the
-   WHITE-LABEL BRAND — bookaboost / evosyspro / harmonyhustle. Those blocks set
-   brand accents and are the reason a customer sees their own colours. Reusing
-   `data-theme` for light/dark would have forced a combinatorial explosion:
-   three brands times two appearances, six blocks to keep in sync, and a new
-   brand doubling the work.
+   LAYERING (imported by main.jsx right AFTER index.css):
+     index.css         declares the historical token names (dark values) and
+                       the white-label BRAND blocks on [data-theme="..."].
+     THIS FILE         redefines every NEUTRAL + SIGNAL token for light, at
+                       specificity (0,1,1) via `html:root`, which beats the
+                       (0,1,0) brand blocks regardless of bundle order.
+     vertical-*.css    a vertical workspace skin still wins, deliberately:
+                       html:root[data-workspace-vertical] is (0,2,1).
+     godTokens.css     God Mode's own --gm-* set (already light-only).
 
-   So appearance is a SECOND attribute — `data-appearance` on <html> — and it
-   redefines only the NEUTRALS: grounds, surfaces, borders, text, shadows. The
-   brand accents (--signal-blue and friends) are deliberately NOT touched here,
-   which is what keeps white-labelling intact: EvoSys blue stays EvoSys blue in
-   both appearances.
+   ── TOKEN REFERENCE (use these; never raw hex in page CSS) ─────────────────
+   Surfaces   --surface-page  --surface-card  --surface-sunken  --surface-hover
+              (legacy aliases: --bg-base --bg-panel --bg-card --bg-field ...)
+   Borders    --border-default --border-strong   (legacy: --border-subtle, --border)
+   Text       --text-strong   --text-body   --text-muted   --text-on-primary
+              (legacy: --text-primary --text-secondary --text-tertiary)
+   Primary    --color-primary #1f5eff, --color-primary-hover,
+              --color-primary-soft   (legacy: --signal-blue, --accent)
+   Status     --color-success / --color-warning / --color-danger / --color-info
+   Pills      --pill-{success|warning|danger|info|neutral}-{bg|fg|bd}
+              + ready-made classes .ds-pill.ds-pill--success etc. below
+   Radius     --radius-xs 6 · -sm 10 · -md 16 · -lg 22 · --radius-pill (index.css)
+   Shadow     --shadow-sm --shadow-md --shadow-lg (legacy: --elevation-1..4, --panel-shadow)
+   Spacing    --space-1 4px · -2 8 · -3 12 · -4 16 · -5 20 · -6 24 · -8 32 · -10 40
+   Type       --font-body (Inter) · --font-display · --font-mono (from index.css)
 
-   Every rule below is scoped `[data-appearance="light"]`, so the file is inert
-   until an appearance is chosen and DARK REMAINS THE UNTOUCHED DEFAULT. A
-   product that has shipped dark for months should not have its baseline
-   redefined by a stylesheet that was added to give it a choice.
-
-   SYSTEM is resolved in JS (appearance.js) and written as a concrete
-   light/dark value, rather than being a third CSS state. One place decides,
-   the DOM says what was decided, and a screenshot is never ambiguous about
-   which appearance was actually rendered.
+   CONTRAST (measured against --surface-card #ffffff):
+     --text-strong ~15.8:1 · --text-body ~7.4:1 · --text-muted ~4.6:1 (AA)
+     --color-primary #1f5eff ~5.1:1 · success ~4.6:1 · danger ~5.0:1
    ═══════════════════════════════════════════════════════════════════════════ */
 
-:root[data-appearance="light"] {
-  /* ── Grounds and surfaces ────────────────────────────────────────────────
-     NOT pure white. A flat #fff ground under white cards gives nothing to
-     separate them, which is exactly the washed-out admin-template look this
-     has to avoid. The page sits slightly cool and cards sit ABOVE it in pure
-     white, so elevation reads without needing a heavy border. */
-  --bg-base:        #f2f5fa;
-  --bg-panel:       #ffffff;
-  --bg-card:        #ffffff;
-  --bg-card-hover:  #f7f9fd;
-  --bg-elevated:    #ffffff;
-  --bg-glass:       rgba(16, 32, 64, 0.03);
-  --bg-field:       #ffffff;
-  --bg-field-soft:  #f5f8fc;
-  --bg-row:         #ffffff;
-  --bg-row-hover:   #eef3fa;
+html:root {
+  /* ── Surfaces ────────────────────────────────────────────────────────────
+     Not pure white: the page sits slightly cool and cards sit above it in
+     pure white, so elevation reads without heavy borders. */
+  --surface-page:   #f4f6fa;
+  --surface-card:   #ffffff;
+  --surface-sunken: #f5f7fb;
+  --surface-hover:  #eef3fb;
 
-  /* ── Borders ─────────────────────────────────────────────────────────────
-     Solid and slightly blue, not grey. A neutral grey hairline on a cool
-     ground reads as dirt; a border biased toward the accent reads as chosen. */
-  --border-subtle:  #dbe3ee;
-  --border-strong:  #b6c6db;
+  --bg-base:        var(--surface-page);
+  --bg-panel:       var(--surface-card);
+  --bg-card:        var(--surface-card);
+  --bg-card-hover:  #f7f9fd;
+  --bg-elevated:    var(--surface-card);
+  --bg-glass:       rgba(16, 32, 64, 0.03);
+  --bg-glass-mid:   rgba(16, 32, 64, 0.05);
+  --bg-glass-strong:rgba(16, 32, 64, 0.08);
+  --surface-inset:  rgba(16, 32, 64, 0.04);
+  --bg-field:       #ffffff;
+  --bg-field-soft:  var(--surface-sunken);
+  --bg-row:         #ffffff;
+  --bg-row-hover:   var(--surface-hover);
+
+  /* ── Borders ── */
+  --border-default: #dde4ee;
+  --border-strong:  #b9c7da;
+  --border-subtle:  var(--border-default);
   --border-danger:  rgba(200, 30, 70, 0.34);
 
-  /* ── Text ────────────────────────────────────────────────────────────────
-     Mike's complaint about the dark theme was dimness. The opposite failure -
-     light-grey-on-white - is the one light themes usually make, so secondary
-     text here is a real colour with real contrast rather than an opacity.
-       primary    ~15.8:1 on --bg-card
-       secondary  ~7.4:1
-       tertiary   ~4.6:1  (AA for normal text, and only used for labels) */
-  --text-primary:   #0e1726;
-  --text-secondary: #46586f;
-  --text-tertiary:  #6b7d94;
+  /* ── Text ── */
+  --text-strong:    #0e1726;
+  --text-body:      #46586f;
+  --text-muted:     #6b7d94;
+  --text-on-primary:#ffffff;
+  --text-primary:   var(--text-strong);
+  --text-secondary: var(--text-body);
+  --text-tertiary:  var(--text-muted);
   --text-inverse:   #ffffff;
   --text-danger-soft: #8c1030;
 
-  /* ── Signal colours, DARKENED FOR A LIGHT GROUND ─────────────────────────
-     The dark theme's neons are unreadable on white - #1ef0a8 on #fff is about
-     1.6:1. These are the same hues at luminance that actually works, so
-     "green means good" survives the appearance change while staying legible.
-     The `-dim` fills stay translucent so they tint rather than block. */
-  --signal-green:     #0e9f6e;
-  --signal-green-dim: rgba(14, 159, 110, 0.12);
-  --signal-blue:      #1a73c7;
-  --signal-blue-dim:  rgba(26, 115, 199, 0.10);
-  --signal-red:       #d31f4b;
-  --signal-red-dim:   rgba(211, 31, 75, 0.10);
-  --signal-amber:     #b7761b;
-  --signal-amber-dim: rgba(183, 118, 27, 0.13);
-  --signal-purple:    #6d43cc;
+  /* ── Primary (the mockups' blue) ── */
+  --color-primary:       #1f5eff;
+  --color-primary-hover: #1a4fd6;
+  --color-primary-soft:  rgba(31, 94, 255, 0.10);
+
+  /* ── Status colours, tuned for a light ground ── */
+  --color-success: #0b8a5f;
+  --color-warning: #a8650f;
+  --color-danger:  #d31f4b;
+  --color-info:    #1f6fb8;
+
+  /* Legacy signal names used across ~every page → same values. */
+  --signal-blue:       var(--color-primary);
+  --signal-blue-dim:   var(--color-primary-soft);
+  --signal-green:      var(--color-success);
+  --signal-green-dim:  rgba(11, 138, 95, 0.12);
+  --signal-red:        var(--color-danger);
+  --signal-red-dim:    rgba(211, 31, 75, 0.10);
+  --signal-amber:      var(--color-warning);
+  --signal-amber-dim:  rgba(168, 101, 15, 0.13);
+  --signal-purple:     #6d43cc;
   --signal-purple-dim: rgba(109, 67, 204, 0.10);
 
-  /* ── Depth ───────────────────────────────────────────────────────────────
-     Shadow, not glow. Neon bloom is what makes the dark theme feel like a
-     control room; on a light ground the same effect looks like a smudge, so
-     elevation is carried by soft directional shadow instead. */
-  --panel-shadow:        0 1px 2px rgba(16, 32, 64, 0.05), 0 4px 16px rgba(16, 32, 64, 0.07);
-  --panel-shadow-strong: 0 2px 6px rgba(16, 32, 64, 0.07), 0 12px 36px rgba(16, 32, 64, 0.11);
-  --elevation-1: 0 1px 2px rgba(16, 32, 64, 0.06);
+  /* ── Pills / badges ── */
+  --pill-success-bg: #e7f6ef; --pill-success-fg: #0a6e4c; --pill-success-bd: #bfe6d4;
+  --pill-warning-bg: #fdf3e1; --pill-warning-fg: #8a520a; --pill-warning-bd: #efd9ad;
+  --pill-danger-bg:  #fdecef; --pill-danger-fg:  #a8173c; --pill-danger-bd:  #f3c5d0;
+  --pill-info-bg:    #e8f0ff; --pill-info-fg:    #1a4fd6; --pill-info-bd:    #c6d7ff;
+  --pill-neutral-bg: #eef2f7; --pill-neutral-fg: #46586f; --pill-neutral-bd: #d8e0ea;
+
+  /* ── Radius: the scale in index.css is kept as-is (xs 6 · sm 10 · md 16 ·
+     lg 22 · xl 24 · 2xl 32 · pill 999) so no page is reshaped by this layer. */
+
+  /* ── Spacing ── */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+
+  /* ── Depth: soft directional shadow, never neon glow ── */
+  --shadow-sm: 0 1px 2px rgba(16, 32, 64, 0.06);
+  --shadow-md: 0 1px 2px rgba(16, 32, 64, 0.05), 0 4px 16px rgba(16, 32, 64, 0.07);
+  --shadow-lg: 0 2px 6px rgba(16, 32, 64, 0.07), 0 12px 36px rgba(16, 32, 64, 0.11);
+  --panel-shadow:        var(--shadow-md);
+  --panel-shadow-strong: var(--shadow-lg);
+  --elevation-1: var(--shadow-sm);
   --elevation-2: 0 2px 8px rgba(16, 32, 64, 0.08);
   --elevation-3: 0 8px 28px rgba(16, 32, 64, 0.11);
   --elevation-4: 0 20px 56px rgba(16, 32, 64, 0.15);
 
-  --glow-blue-sm:   0 1px 3px rgba(26, 115, 199, 0.16);
-  --glow-blue-md:   0 2px 10px rgba(26, 115, 199, 0.16);
-  --glow-blue-lg:   0 6px 22px rgba(26, 115, 199, 0.18);
+  --glow-blue-sm:   0 1px 3px rgba(31, 94, 255, 0.16);
+  --glow-blue-md:   0 2px 10px rgba(31, 94, 255, 0.16);
+  --glow-blue-lg:   0 6px 22px rgba(31, 94, 255, 0.18);
   --glow-purple-md: 0 2px 10px rgba(109, 67, 204, 0.16);
-  --glow-green-sm:  0 1px 3px rgba(14, 159, 110, 0.16);
-  --glow-green-md:  0 2px 10px rgba(14, 159, 110, 0.16);
+  --glow-green-sm:  0 1px 3px rgba(11, 138, 95, 0.16);
+  --glow-green-md:  0 2px 10px rgba(11, 138, 95, 0.16);
   --glow-red-sm:    0 1px 3px rgba(211, 31, 75, 0.16);
   --glow-red-md:    0 2px 10px rgba(211, 31, 75, 0.16);
-  --glow-amber-md:  0 2px 10px rgba(183, 118, 27, 0.16);
+  --glow-amber-md:  0 2px 10px rgba(168, 101, 15, 0.16);
+
+  /* Native controls (scrollbars, date pickers, <select> lists) render light. */
+  color-scheme: light;
 }
 
-/* The page itself. Set explicitly rather than inherited, so a component that
-   paints no background of its own never lands on the wrong ground. */
-:root[data-appearance="light"] body {
-  background: var(--bg-base);
-  color: var(--text-primary);
+/* The page ground. Explicit, so a component that paints no background of its
+   own never lands on index.css's old dark gradient. */
+html:root,
+html:root body {
+  background: var(--surface-page);
+  color: var(--text-strong);
 }
+/* The decorative dotted "control room" grid belonged to the dark theme. */
+html:root body::before { background-image: none; }
 
-/* ── DARK, IMPROVED ────────────────────────────────────────────────────────
-   Mike's actual words were that it is too dim - dark navy on dark navy, with
-   nothing separating a card from the page behind it. These raise the surfaces
-   away from the ground and make the borders visible, without turning the
-   product into a different one. Scoped to the explicit dark appearance so the
-   untouched default is left exactly as it was. */
-:root[data-appearance="dark"] {
-  --bg-base:       #060b18;
-  --bg-panel:      rgba(15, 25, 48, 0.94);
-  --bg-card:       rgba(19, 31, 58, 0.92);
-  --bg-card-hover: rgba(27, 44, 80, 0.96);
-  --bg-elevated:   rgba(24, 39, 71, 0.96);
-  --bg-row:        rgba(17, 28, 53, 0.72);
-  --bg-row-hover:  rgba(28, 46, 84, 0.86);
-  --bg-field:      rgba(11, 19, 38, 0.86);
-  --bg-field-soft: rgba(14, 24, 46, 0.78);
+/* Every native <select> — index.css used to force `color-scheme: dark` on
+   the bare type, which beat inheritance and opened black lists on white. */
+html:root select { color-scheme: light; }
 
-  /* The single biggest readability win: borders you can actually see. */
-  --border-subtle: rgba(96, 176, 245, 0.26);
-  --border-strong: rgba(120, 205, 255, 0.52);
-
-  /* Secondary text was the dimmest thing on screen. */
-  --text-primary:   #f2f7ff;
-  --text-secondary: #b3c4de;
-  --text-tertiary:  #7e90ad;
-}
-
-:root[data-appearance="dark"] body {
-  background: var(--bg-base);
-  color: var(--text-primary);
-}
-
-/* ── Form controls follow the appearance ──────────────────────────────────
-   Native controls otherwise keep rendering their own dark widgets on a light
-   page, which is the single most obvious way a half-done light theme gives
-   itself away. */
-:root[data-appearance="light"] { color-scheme: light; }
-:root[data-appearance="dark"]  { color-scheme: dark; }
-
-/* ── Focus, in both appearances ───────────────────────────────────────────
-   Keyboard focus must never be invisible, and the accent is the one colour
-   guaranteed to contrast with whichever ground is in force. */
-:root[data-appearance] :is(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--signal-blue);
+/* Keyboard focus must never be invisible. */
+html:root :is(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 
-/* Light-mode fixes for elements that hard-code a dark treatment. Narrow and
-   deliberate: these are the shells, and without them a light page renders a
-   black rail beside white content. */
-:root[data-appearance="light"] .go-scope,
-:root[data-appearance="light"] .gm-shell {
+/* The shells inherit the light ink rather than a hard-coded dark one. */
+html:root .go-scope,
+html:root .gm-shell {
   color: var(--text-primary);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :root[data-appearance] *,
-  :root[data-appearance] *::before,
-  :root[data-appearance] *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
+/* ── Standard pill (opt-in helper; pages may keep their own classes) ── */
+.ds-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 9px; border-radius: var(--radius-pill);
+  font-size: 12px; font-weight: 600; line-height: 18px; white-space: nowrap;
+  border: 1px solid var(--pill-neutral-bd);
+  background: var(--pill-neutral-bg); color: var(--pill-neutral-fg);
 }
+.ds-pill--success { background: var(--pill-success-bg); color: var(--pill-success-fg); border-color: var(--pill-success-bd); }
+.ds-pill--warning { background: var(--pill-warning-bg); color: var(--pill-warning-fg); border-color: var(--pill-warning-bd); }
+.ds-pill--danger  { background: var(--pill-danger-bg);  color: var(--pill-danger-fg);  border-color: var(--pill-danger-bd); }
+.ds-pill--info    { background: var(--pill-info-bg);    color: var(--pill-info-fg);    border-color: var(--pill-info-bd); }

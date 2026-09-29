@@ -141,7 +141,8 @@ def send_single(req: SendRequest, db: Session = Depends(get_db), current_user: U
         raise HTTPException(status_code=404, detail="Lead not found")
     try:
         message = send_sms(db, acting_advisor(db, lead, current_user), lead,
-                           req.template, req.include_booking_link)
+                           req.template, req.include_booking_link,
+                           send_source="manual", sent_by_user_id=current_user.id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"message_id": message.id, "status": message.twilio_status}

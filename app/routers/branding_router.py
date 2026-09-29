@@ -203,6 +203,18 @@ def get_org_branding(
         # thing as "never configured". Preserved, because collapsing the two
         # is how the sidebar came to show everything.
         features = []
+    # HIERARCHICAL ENTITLEMENTS (app/services/entitlement_resolver.py). With no
+    # platform/brand/org/role/user override touching this organization the
+    # value above is returned untouched. With one - e.g. a brand-level disable
+    # of wholesale_real_estate - the effective list replaces it, so the nav
+    # stops offering a module the server now refuses.
+    try:
+        from app.services import entitlements as _ent
+        features = _ent.nav_features(db, org, current_user, features)
+    except Exception:  # noqa: BLE001 - nav is decoration; require_feature enforces
+        import logging as _logging
+        _logging.getLogger(__name__).exception(
+            "branding/org: hierarchical feature resolution failed for org=%s", org.id)
     return {
         "brand_name": org.brand_name,
         "brand_logo_url": org.brand_logo_url,

@@ -127,8 +127,8 @@ def _routes(key):
 
 REQUIRED_ROUTES = {
     # The energy rail is the whole back office, so most of it is required.
-    "energy": ("/", "/leads", "/pipeline", "/replies", "/workqueue",
-               "/reports", "/users", "/launch"),
+    "energy": ("/", "/leads", "/rate-requests", "/pipeline", "/replies",
+               "/workqueue", "/reports", "/users", "/launch"),
     # The cleaning rail is six entries by design. Three of them are configured
     # screens, which are asserted separately; these are the routes.
     "cleaning": ("/", "/activity", "/reports"),
@@ -266,10 +266,14 @@ def test_the_skin_outranks_the_appearance_layer(path):
             ':root[data-appearance="dark"] and the cascade decides by bundle '
             "order" % (path.name, selector))
 
+    # Since 2026-09-28 the appearance layer is the unconditional light token
+    # block `html:root {` at (0,1,1); a skin at (0,2,1) still outranks it.
     appearance = _text(ROOT / "frontend" / "src" / "styles" / "appearance.css")
-    assert ':root[data-appearance="dark"] {' in appearance, (
+    assert "html:root {" in appearance, (
         "appearance.css no longer defines the block this specificity was "
         "measured against — re-measure before trusting the prefix")
+    assert ':root[data-appearance' not in appearance.split("*/", 1)[1], (
+        "an attribute-keyed appearance block is back; re-measure specificity")
 
 
 @pytest.mark.parametrize("key", sorted(VERTICALS))

@@ -41,7 +41,11 @@ INT_FIELDS = ("min_value", "max_value", "min_equity_pct", "min_ownership_years",
               "max_cost_per_property_cents", "approval_over_cents",
               "pilot_max_properties", "pilot_max_spend_cents")
 BOOL_FIELDS = ("pilot_mode", "pilot_allow_paid")
-PILOT_HARD_CAP = 100               # properties per pilot run, whatever the strategy says
+# A pilot is a CAP, never a target. The Wholesale pilot (Building Equity) runs
+# its first controlled batch at 250-500 records; 500 is the most any pilot run
+# may touch, whatever the strategy says.
+PILOT_HARD_CAP = 500               # properties per pilot run, whatever the strategy says
+PILOT_RECOMMENDED_MIN = 250       # first controlled batch: 250-500 (advisory, not enforced)
 PILOT_DEFAULT_CAP = 50
 TEXT_FIELDS = ("name", "description", "owner_geography")
 EDITABLE = LIST_FIELDS + INT_FIELDS + TEXT_FIELDS + BOOL_FIELDS + (

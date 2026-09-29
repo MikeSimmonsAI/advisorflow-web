@@ -174,7 +174,8 @@ def send_single_email(
     # own advisor, and the template's merge fields named him throughout.
     from app.routers.compose_router import acting_advisor as _acting
     try:
-        msg = send_email_to_lead(db, _acting(db, lead, current_user), lead)
+        msg = send_email_to_lead(db, _acting(db, lead, current_user), lead,
+                                 send_source="manual", sent_by_user_id=current_user.id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"email_id": msg.id, "status": msg.status}

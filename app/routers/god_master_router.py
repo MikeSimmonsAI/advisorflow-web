@@ -49,6 +49,35 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/god/master", tags=["AdvisorFlow Master Lead Database"])
 
 
+# ── aggregate, for the Lead Intelligence Control Center ─────────────────────
+
+def master_pool_summary(db: Session) -> dict:
+    """All-time production (non-synthetic) totals of the master database.
+
+    Lives HERE so the only router that references the master tables stays this
+    one (tests/test_master_lead_database.py enforces that); the god-only Lead
+    Intelligence router calls this rather than querying the tables itself.
+    Counts only - no person-level data leaves this function.
+    """
+    contacts = (db.query(func.count(MasterContact.id))
+                .filter(MasterContact.is_synthetic.is_(False)).scalar() or 0)
+    occurrences = (db.query(func.count(LeadOccurrence.id))
+                   .filter(LeadOccurrence.is_synthetic.is_(False)).scalar() or 0)
+    orgs = (db.query(func.count(func.distinct(LeadOccurrence.organization_id)))
+            .filter(LeadOccurrence.is_synthetic.is_(False)).scalar() or 0)
+    needs_review = (db.query(func.count(MasterContact.id))
+                    .filter(MasterContact.is_synthetic.is_(False),
+                            MasterContact.needs_review.is_(True)).scalar() or 0)
+    sources = [{"source": s or "unknown", "count": int(c)} for s, c in
+               db.query(LeadOccurrence.source, func.count(LeadOccurrence.id))
+               .filter(LeadOccurrence.is_synthetic.is_(False))
+               .group_by(LeadOccurrence.source)
+               .order_by(func.count(LeadOccurrence.id).desc()).all()]
+    return {"total_contacts": int(contacts), "total_occurrences": int(occurrences),
+            "organizations_represented": int(orgs), "needs_review": int(needs_review),
+            "sources": sources}
+
+
 # ── search ──────────────────────────────────────────────────────────────────
 
 @router.get("/contacts")
@@ -59,6 +88,11 @@ def master_contacts_search(
     source: Optional[str] = Query(None),
     include_synthetic: bool = Query(False),
     needs_review: bool = Query(False),
+    # Lead Browser filters (Sep 28 2026): the tenant's lead status as last
+    # recorded on the appearance, and a first-seen date window (ISO dates).
+    status: Optional[str] = Query(None, description="tenant lead status on the occurrence"),
+    date_from: Optional[str] = Query(None, description="first seen on/after, YYYY-MM-DD"),
+    date_to: Optional[str] = Query(None, description="first seen on/before, YYYY-MM-DD"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     god: User = Depends(require_god),
@@ -90,6 +124,19 @@ def master_contacts_search(
         q = q.filter(LeadOccurrence.platform_id == platform_id)
     if source:
         q = q.filter(LeadOccurrence.source == source)
+    if status:
+        q = q.filter(LeadOccurrence.tenant_lead_status == status)
+    if date_from or date_to:
+        from datetime import datetime, timedelta
+        try:
+            if date_from:
+                q = q.filter(LeadOccurrence.first_seen_at >=
+                             datetime.strptime(date_from[:10], "%Y-%m-%d"))
+            if date_to:
+                q = q.filter(LeadOccurrence.first_seen_at <
+                             datetime.strptime(date_to[:10], "%Y-%m-%d") + timedelta(days=1))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD.")
 
     if search:
         term = search.strip()
@@ -157,7 +204,8 @@ def master_contacts_search(
             "review_reason": contact.review_reason,
         }
 
-    return {"total": total, "rows": [_row(o, c) for o, c in rows]}
+    return {"total": total, "skip": skip, "limit": limit,
+            "rows": [_row(o, c) for o, c in rows]}
 
 
 @router.get("/contacts/{contact_id}")

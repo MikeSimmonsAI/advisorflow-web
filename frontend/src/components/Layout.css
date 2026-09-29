@@ -313,6 +313,22 @@
   color: var(--text-primary);
 }
 
+.user-org {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-org + .user-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+
 .user-role {
   font-size: 11px;
   color: var(--signal-green);
@@ -514,5 +530,49 @@
 .top-bar-right { display: flex; align-items: center; gap: 12px; }
 
 /* Theme toggle */
-.theme-toggle { background: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 6px 8px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; transition: all 0.15s; }
-.theme-toggle:hover { border-color: var(--signal-blue); color: var(--signal-blue); }
+
+/* ── THE RAIL: the one dark surface in the light shell ──────────────────────
+   .sidebar is deep navy, but its text, fields and borders read the PAGE tokens,
+   which in the light theme are dark ink. Re-pointing the tokens inside the rail
+   fixes every descendant at once. Excluded: the Wholesale shell (white rail,
+   literal colours) and the God-admin rail (.sidebar--god, pale amber wash).
+   Brand/vertical rules that set colours directly still win. (Moved here from
+   styles/appearance.css.) */
+html:root .layout:not(.layout--wholesale) .sidebar:not(.sidebar--god) {
+  --bg-panel:       #0d1b36;
+  --bg-card:        rgba(255, 255, 255, 0.06);
+  --bg-card-hover:  rgba(255, 255, 255, 0.10);
+  --bg-elevated:    #13254a;
+  --bg-field:       rgba(255, 255, 255, 0.07);
+  --bg-field-soft:  rgba(255, 255, 255, 0.05);
+  --bg-glass:       rgba(255, 255, 255, 0.05);
+  --bg-row-hover:   rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-subtle:  rgba(255, 255, 255, 0.10);
+  --border-strong:  rgba(140, 170, 255, 0.40);
+  /* aliases resolve where declared (:root), so restate them for the rail */
+  --border:         rgba(255, 255, 255, 0.10);
+  --bg-hover:       rgba(255, 255, 255, 0.08);
+  --text-strong:    #ffffff;
+  --text-primary:   #ffffff;
+  --text-body:      rgba(226, 235, 247, 0.80);
+  --text-secondary: rgba(226, 235, 247, 0.80);
+  --text-muted:     rgba(200, 214, 235, 0.62);
+  --text-tertiary:  rgba(200, 214, 235, 0.62);
+  --signal-blue:     #5b8cff;
+  --signal-blue-dim: rgba(31, 94, 255, 0.30);
+  color-scheme: dark;
+  color: var(--text-primary);
+  box-shadow: 1px 0 0 rgba(16, 32, 64, 0.10);
+}
+
+.sidebar--god {
+  border-right: 1px solid rgba(245, 158, 11, 0.3);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.06) 0%, transparent 120px);
+}
+
+/* The sticky top bar sits on the light page. */
+html:root .top-bar {
+  background: rgba(255, 255, 255, 0.86);
+  border-bottom-color: var(--border-default);
+}

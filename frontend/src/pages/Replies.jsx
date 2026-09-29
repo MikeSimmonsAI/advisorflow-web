@@ -1,336 +1,370 @@
-import { useEffect, useState } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
-import '../styles/shared.css'
+// COMMUNICATIONS / REPLIES — the response command center (WS5, 2026-09-28).
+//
+// Left: the reply queue, searched, filtered, sorted and paginated ON THE SERVER
+// (GET /communications/replies — no 200-row cap). Right: the selected
+// contact's workspace (conversation, notes, tasks, contact info, composer).
+// KPI cards read GET /communications/summary, which counts the caller's whole
+// scope, not the page on screen. Nothing on this page invents a number.
+//
+// A reply is never turned into a lead here: every reply already belongs to a
+// lead (the inbound webhook drops texts from unknown numbers), so "Convert to
+// Lead" does not apply to anything in this queue and is not offered.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { api, getCurrentUser } from '../api/client'
+import CommsWorkspace from './comms/CommsWorkspace'
+import { CLASSIFICATIONS, STATUSES, ClassTag, StatusTag, Tag, Icon, channelIcon, timeAgo } from './comms/commsShared'
 import './Replies.css'
 
-const CLASSIFICATION_CONFIG = {
-  interested: { label: 'Hot Lead', color: 'green', icon: '🔥' },
-  callback: { label: 'Callback', color: 'blue', icon: '📞' },
-  question: { label: 'Question', color: 'purple', icon: '❓' },
-  not_interested: { label: 'Not Interested', color: 'amber', icon: '👎' },
-  wrong_number: { label: 'Wrong Number', color: 'neutral-dim', icon: '❌' },
-  dnc: { label: 'DNC', color: 'red', icon: '🚫' },
-  neutral: { label: 'Neutral', color: 'neutral', icon: '💬' },
-}
-
-const CLASSIFICATION_OPTIONS = [
-  { value: 'interested', label: 'Hot Lead' },
-  { value: 'callback', label: 'Callback' },
-  { value: 'question', label: 'Question' },
-  { value: 'neutral', label: 'Neutral' },
-  { value: 'not_interested', label: 'Not Interested' },
-  { value: 'wrong_number', label: 'Wrong Number' },
-  { value: 'dnc', label: 'DNC' },
+const TABS = [
+  { key: 'all', label: 'All replies' },
+  { key: 'attention', label: 'Needs attention', count: 'needs_attention' },
+  { key: 'callbacks', label: 'Callbacks', count: 'callbacks' },
+  { key: 'dnc', label: 'DNC / Stop', count: 'dnc_stop' },
+  { key: 'ai', label: 'AI handling', count: 'ai_handling' },
+  { key: 'reviewed', label: 'Reviewed', count: 'reviewed' },
 ]
 
-const TONE_OPTIONS = [
-  { key: 'cold',   label: '❄️ Cold',   desc: 'Soft, low-pressure intro' },
-  { key: 'warm',   label: '☀️ Warm',   desc: 'Friendly, suggest a conversation' },
-  { key: 'hot',    label: '🔥 Hot',    desc: 'Direct, clear call to action' },
-  { key: 'urgent', label: '⚡ Urgent', desc: 'Brief, time-sensitive' },
+const QUICK = [
+  { key: 'unreviewed', label: 'Unreviewed' },
+  { key: 'question', label: 'Questions' },
+  { key: 'interested', label: 'Positive' },
+  { key: 'mine', label: 'Assigned to me' },
 ]
 
-async function pollEmailInbox(setPollResult) {
-  try {
-    const result = await api.post('/email/poll-inbox', {})
-    setPollResult(result)
-  } catch (err) {
-    setPollResult({ error: err.message })
-  }
+const RANGES = [
+  { key: '', label: 'All time' },
+  { key: '1', label: 'Last 24 hours' },
+  { key: '7', label: 'Last 7 days' },
+  { key: '30', label: 'Last 30 days' },
+  { key: '90', label: 'Last 90 days' },
+]
+
+const PAGE_SIZE = 25
+
+function isoDaysAgo(days) {
+  const d = new Date(Date.now() - Number(days) * 86400000)
+  return d.toISOString().slice(0, 10)
 }
 
-function timeAgo(dateStr) {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'Just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
+function useDebounced(value, ms) {
+  const [v, setV] = useState(value)
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t) }, [value, ms])
+  return v
 }
 
 export default function Replies() {
-  const [searchParams] = useSearchParams()
-  const navigate = useNavigate()
-  const [replies, setReplies] = useState([])
-  const [needsAttentionOnly, setNeedsAttentionOnly] = useState(
-    searchParams.get('needs_attention') === 'true' || searchParams.get('hot_only') === 'true'
-  )
+  const [searchParams, setSearchParams] = useSearchParams()
+  const user = getCurrentUser()
+  const [tab, setTab] = useState(() => {
+    const b = searchParams.get('tab')
+    return TABS.some(t => t.key === b) ? b : 'all'
+  })
+  const [attentionOnly, setAttentionOnly] = useState(
+    searchParams.get('needs_attention') === 'true' || searchParams.get('hot_only') === 'true')
+  const [q, setQ] = useState('')
+  const debouncedQ = useDebounced(q, 300)
+  const [classification, setClassification] = useState('')
+  const [status, setStatus] = useState('')
+  const [channel, setChannel] = useState('')
+  const [assigned, setAssigned] = useState('')
+  const [range, setRange] = useState('')
+  const [sort, setSort] = useState('newest')
+  const [quick, setQuick] = useState([])
+  const [page, setPage] = useState(1)
+
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [actionBusyId, setActionBusyId] = useState(null)
   const [error, setError] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [classificationFilter, setClassificationFilter] = useState('')
-  const [objectionData, setObjectionData] = useState({})
-  const [replyTone, setReplyTone] = useState('warm') // reply_id -> objection response
-  const [objectionLoading, setObjectionLoading] = useState(null)
+  const [summary, setSummary] = useState(null)
+  const [assignees, setAssignees] = useState([])
+  const [selected, setSelected] = useState(() => {
+    const lead = searchParams.get('lead')
+    return lead ? { leadId: lead, replyId: searchParams.get('reply') || null, snapshot: null } : null
+  })
+  const [composeOpen, setComposeOpen] = useState(false)
+  const reqSeq = useRef(0)
 
-  async function fetchObjectionReply(replyId) {
-    setObjectionLoading(replyId)
-    try {
-      const result = await api.post(`/ai/objection-reply/${replyId}`, { tone: replyTone })
-      setObjectionData((prev) => ({ ...prev, [replyId]: result }))
-    } catch (err) {
-      setObjectionData((prev) => ({ ...prev, [replyId]: { error: err.message } }))
-    } finally {
-      setObjectionLoading(null)
-    }
-  }
+  const params = useMemo(() => {
+    const p = { page, page_size: PAGE_SIZE, sort }
+    if (debouncedQ.trim()) p.q = debouncedQ.trim()
+    const cls = new Set(classification ? [classification] : [])
+    if (quick.includes('question')) cls.add('question')
+    if (quick.includes('interested')) cls.add('interested')
+    if (cls.size) p.classification = [...cls].join(',')
+    if (status) p.status = status
+    if (channel) p.channel = channel
+    if (assigned) p.assigned_to = assigned
+    if (quick.includes('mine')) p.assigned_to = 'me'
+    if (range) p.date_from = isoDaysAgo(range)
+    if (quick.includes('unreviewed')) p.reviewed = false
+    if (attentionOnly || tab === 'attention') p.needs_attention = true
+    if (tab === 'callbacks') p.callbacks = true
+    if (tab === 'dnc') p.dnc = true
+    if (tab === 'ai') p.ai_handling = true
+    if (tab === 'reviewed') p.reviewed = true
+    return p
+  }, [page, sort, debouncedQ, classification, quick, status, channel, assigned, range, attentionOnly, tab])
 
-  function loadReplies() {
+  // Any filter change returns to page 1.
+  useEffect(() => { setPage(1) }, [debouncedQ, classification, quick, status, channel, assigned, range, attentionOnly, tab, sort])
+
+  const loadList = useCallback(() => {
+    const seq = ++reqSeq.current
     setLoading(true)
     setError('')
-    api.get(`/sms/replies${needsAttentionOnly ? '?needs_attention=true' : ''}`)
-      .then(setReplies)
-      .catch((err) => setError(err.message || 'Could not load replies.'))
-      .finally(() => setLoading(false))
+    api.get('/communications/replies', { params })
+      .then(d => { if (seq === reqSeq.current) setData(d) })
+      .catch(e => { if (seq === reqSeq.current) setError(e.message || 'Could not load replies.') })
+      .finally(() => { if (seq === reqSeq.current) setLoading(false) })
+  }, [params])
+
+  const loadSummary = useCallback(() => {
+    api.get('/communications/summary').then(setSummary).catch(() => setSummary(null))
+  }, [])
+
+  useEffect(() => { loadList() }, [loadList])
+  useEffect(() => { loadSummary() }, [loadSummary])
+  useEffect(() => {
+    api.get('/communications/assignees').then(setAssignees).catch(() => setAssignees([]))
+  }, [])
+
+  // Keep the URL shareable and keep the bell's ?needs_attention=true working.
+  useEffect(() => {
+    const next = new URLSearchParams()
+    if (attentionOnly) next.set('needs_attention', 'true')
+    if (tab !== 'all') next.set('tab', tab)
+    if (selected?.leadId) next.set('lead', selected.leadId)
+    if (selected?.replyId) next.set('reply', selected.replyId)
+    setSearchParams(next, { replace: true })
+  }, [attentionOnly, tab, selected, setSearchParams])
+
+  const items = data?.items || []
+  const selectedReply = selected?.replyId
+    ? (items.find(i => i.id === selected.replyId) || selected.snapshot)
+    : null
+
+  function onChanged() { loadList(); loadSummary() }
+  function toggleQuick(k) { setQuick(qs => qs.includes(k) ? qs.filter(x => x !== k) : [...qs, k]) }
+  function clearFilters() {
+    setQ(''); setClassification(''); setStatus(''); setChannel(''); setAssigned(''); setRange(''); setQuick([]); setSort('newest')
   }
+  const filtersActive = q || classification || status || channel || assigned || range || quick.length || sort !== 'newest'
+  const canWrite = !(user && user._executive_observation)
 
-  useEffect(() => { loadReplies() }, [needsAttentionOnly])
+  const kpis = [
+    { key: 'needs_attention', label: 'Needs attention', icon: 'alert', tone: 'red', tab: 'attention' },
+    { key: 'callbacks', label: 'Open callbacks', icon: 'phone', tone: 'blue', tab: 'callbacks' },
+    { key: 'reviewed', label: 'Reviewed', icon: 'check', tone: 'green', tab: 'reviewed' },
+    { key: 'dnc_stop', label: 'DNC / Stop', icon: 'ban', tone: 'rose', tab: 'dnc' },
+  ]
 
-  function updateReplyInState(updatedReply) {
-    setReplies((current) =>
-      current.map((reply) => (reply.id === updatedReply.id ? { ...reply, ...updatedReply } : reply))
-    )
-  }
-
-  async function markReviewed(replyId) {
-    setActionBusyId(replyId)
-    setError('')
-    try {
-      const updatedReply = await api.patch(`/sms/replies/${replyId}/mark-reviewed`, {})
-      updateReplyInState(updatedReply)
-    } catch (err) {
-      setError(err.message || 'Could not mark reply reviewed.')
-    } finally {
-      setActionBusyId(null)
-    }
-  }
-
-  async function reclassify(replyId, classification) {
-    setActionBusyId(replyId)
-    setError('')
-    try {
-      const updatedReply = await api.patch(`/sms/replies/${replyId}/reclassify`, { classification })
-      updateReplyInState(updatedReply)
-    } catch (err) {
-      setError(err.message || 'Could not reclassify reply.')
-    } finally {
-      setActionBusyId(null)
-    }
-  }
-
-  const filteredReplies = replies.filter((reply) => {
-    const matchesClassification = !classificationFilter || reply.classification === classificationFilter
-    const q = searchQuery.trim().toLowerCase()
-    const matchesSearch = !q || (reply.body || '').toLowerCase().includes(q)
-    return matchesClassification && matchesSearch
-  })
-
-  const stats = {
-    total: replies.length,
-    attention: replies.filter((r) => r.classification === 'interested' || r.classification === 'callback').length,
-    callbacks: replies.filter((r) => r.classification === 'callback').length,
-    reviewed: replies.filter((r) => Boolean(r.reviewed_at)).length,
-    dnc: replies.filter((r) => r.classification === 'dnc').length,
-  }
-
-  const priorityReplies = filteredReplies
-    .filter((r) => r.classification === 'interested' || r.classification === 'callback')
-    .slice(0, 4)
+  const totalPages = data?.pages || 0
+  const from = data && data.total ? (data.page - 1) * data.page_size + 1 : 0
+  const to = data ? Math.min(data.page * data.page_size, data.total) : 0
 
   return (
-    <div className="replies-page">
-
-      {/* ── Header ── */}
-      <header className="replies-header">
-        <div>
-          <p className="replies-eyebrow">Reply command</p>
-          <h1 className="page-title">Replies</h1>
-          <p className="page-subtitle">Triage hot responses, callbacks, DNC requests, and questions.</p>
+    <div className={`cc ${selected ? 'cc--has-selection' : ''}`}>
+      <header className="cc-head">
+        <div className="cc-head-text">
+          <h1>Communications / Replies</h1>
+          <p>Triage replies, callbacks, questions and Do Not Contact requests in one place.</p>
         </div>
-        <label className="replies-attention-toggle">
-          <div className={`replies-toggle-track ${needsAttentionOnly ? 'replies-toggle-track--on' : ''}`}
-            onClick={() => setNeedsAttentionOnly(!needsAttentionOnly)}>
-            <div className="replies-toggle-thumb" />
-          </div>
-          <span>Needs attention only</span>
-        </label>
+        <div className="cc-head-actions">
+          <label className="cc-switch">
+            <input type="checkbox" checked={attentionOnly} onChange={e => setAttentionOnly(e.target.checked)} />
+            <span className="cc-switch-track" aria-hidden="true"><span /></span>
+            Needs attention only
+          </label>
+          {canWrite && (
+            <button type="button" className="cc-btn cc-btn--primary" onClick={() => setComposeOpen(true)}>
+              <Icon name="edit" size={14} /> Compose
+            </button>
+          )}
+        </div>
       </header>
 
-      {/* ── KPI Cards ── */}
-      <div className="replies-kpi-grid">
-        {[
-          { label: 'NEEDS ATTENTION', value: stats.attention, accent: 'red', icon: '🔥', sub: 'Interested + callback' },
-          { label: 'CALLBACKS', value: stats.callbacks, accent: 'blue', icon: '📞', sub: 'Requesting timing' },
-          { label: 'REVIEWED', value: stats.reviewed, accent: 'green', icon: '✅', sub: 'Already acknowledged' },
-          { label: 'DNC / STOP', value: stats.dnc, accent: 'amber', icon: '🚫', sub: 'Handle carefully' },
-        ].map(({ label, value, accent, icon, sub }) => (
-          <div key={label} className={`replies-kpi-card replies-kpi-card--${accent}`}>
-            <div className="replies-kpi-top">
-              <span className="replies-kpi-label">{label}</span>
-              <span className="replies-kpi-icon">{icon}</span>
-            </div>
-            <div className={`replies-kpi-value replies-kpi-value--${accent}`}>{loading ? '—' : value}</div>
-            <div className="replies-kpi-sub">{sub}</div>
-          </div>
+      <nav className="cc-tabs" role="tablist" aria-label="Reply views">
+        {TABS.map(t => (
+          <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
+            className={`cc-tab ${tab === t.key ? 'is-active' : ''}`} onClick={() => setTab(t.key)}>
+            {t.label}
+            {t.count && summary && summary[t.count] > 0 && <span className="cc-tab-count">{summary[t.count]}</span>}
+          </button>
         ))}
-      </div>
+      </nav>
 
-      {/* ── Priority Lane ── */}
-      {priorityReplies.length > 0 && (
-        <section className="panel replies-priority-panel">
-          <div className="panel-header">
-            <h2 className="panel-title">🎯 Book-first priority lane</h2>
-            <span className="panel-count">{priorityReplies.length}</span>
-          </div>
-          <div className="replies-priority-grid">
-            {priorityReplies.map((reply) => {
-              const config = CLASSIFICATION_CONFIG[reply.classification] || CLASSIFICATION_CONFIG.neutral
-              const initials = (reply.lead_name || '??').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-              return (
-                <button
-                  key={reply.id}
-                  className={`replies-priority-card replies-priority-card--${config.color}`}
-                  onClick={() => reply.lead_id && navigate(`/leads/${reply.lead_id}`)}
-                >
-                  <div className="replies-priority-top">
-                    <div className="replies-avatar">{initials}</div>
-                    <div>
-                      <div className="replies-priority-name">{reply.lead_name || 'Unknown lead'}</div>
-                      <span className={`badge badge--${config.color}`}>{config.icon} {config.label}</span>
-                    </div>
-                    <span className="replies-time">{timeAgo(reply.received_at)}</span>
-                  </div>
-                  <p className="replies-priority-body">{reply.body}</p>
-                </button>
-              )
-            })}
-          </div>
-        </section>
-      )}
+      <section className="cc-kpis" aria-label="Reply summary">
+        {kpis.map(k => (
+          <button key={k.key} type="button" className={`cc-kpi ${tab === k.tab ? 'is-active' : ''}`}
+            onClick={() => setTab(tab === k.tab ? 'all' : k.tab)}>
+            <span className={`cc-kpi-icon cc-tone-${k.tone}`}><Icon name={k.icon} size={20} /></span>
+            <span className="cc-kpi-text">
+              <span className="cc-kpi-value">{summary ? summary[k.key] : '—'}</span>
+              <span className="cc-kpi-label">{k.label}</span>
+            </span>
+          </button>
+        ))}
+      </section>
 
-      {/* ── Filter Bar ── */}
-      <div className="replies-filter-bar">
-        <div className="replies-search-wrap">
-          <span className="replies-search-icon">🔍</span>
-          <input
-            className="replies-search-input"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search reply text…"
-          />
-        </div>
-        <select
-          className="filter-select"
-          value={classificationFilter}
-          onChange={(e) => setClassificationFilter(e.target.value)}
-        >
+      <section className="cc-filters" aria-label="Search and filters">
+        <label className="cc-search">
+          <Icon name="search" />
+          <input type="search" value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Search messages, name, phone or email…" aria-label="Search replies" />
+        </label>
+        <select value={classification} onChange={e => setClassification(e.target.value)} aria-label="Classification">
           <option value="">All classifications</option>
-          {CLASSIFICATION_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
+          {Object.entries(CLASSIFICATIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
-        <span className="replies-count-pill">{loading ? '—' : filteredReplies.length} shown</span>
+        <select value={status} onChange={e => setStatus(e.target.value)} aria-label="Status">
+          <option value="">All statuses</option>
+          {Object.entries(STATUSES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <select value={channel} onChange={e => setChannel(e.target.value)} aria-label="Channel">
+          <option value="">All channels</option>
+          <option value="sms">SMS</option>
+          <option value="email">Email</option>
+        </select>
+        <select value={assigned} onChange={e => setAssigned(e.target.value)} aria-label="Assignee">
+          <option value="">Any assignee</option>
+          <option value="unassigned">Unassigned</option>
+          {assignees.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <select value={range} onChange={e => setRange(e.target.value)} aria-label="Date range">
+          {RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+        </select>
+        <select value={sort} onChange={e => setSort(e.target.value)} aria-label="Sort">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="name">Name A–Z</option>
+        </select>
+      </section>
+
+      <div className="cc-quick">
+        {QUICK.map(f => (
+          <button key={f.key} type="button" className={`cc-chip ${quick.includes(f.key) ? 'is-on' : ''}`}
+            aria-pressed={quick.includes(f.key)} onClick={() => toggleQuick(f.key)}>{f.label}</button>
+        ))}
+        {filtersActive ? <button type="button" className="cc-link" onClick={clearFilters}>Clear filters</button> : null}
       </div>
 
-      {error && <div className="panel replies-error">{error}</div>}
+      {error && <div className="cc-flash is-error">{error}</div>}
 
-      {/* ── Reply Feed ── */}
-      <section className="panel replies-feed-panel">
-        {loading ? (
-          <div className="empty-state">Loading replies…</div>
-        ) : filteredReplies.length === 0 ? (
-          <div className="empty-state">
-            {needsAttentionOnly
-              ? 'Nothing needs your attention right now.'
-              : 'No replies yet. Once a lead responds, it\'ll land here.'}
+      <div className="cc-grid">
+        <section className="cc-queue" aria-label="Reply queue">
+          <div className="cc-queue-head">
+            <span>{data ? `${data.total.toLocaleString()} ${data.total === 1 ? 'reply' : 'replies'}` : ' '}</span>
+            {loading && <span className="cc-muted">Loading…</span>}
           </div>
-        ) : (
-          <ul className="replies-feed">
-            {filteredReplies.map((r) => {
-              const config = CLASSIFICATION_CONFIG[r.classification] || CLASSIFICATION_CONFIG.neutral
-              const isBusy = actionBusyId === r.id
-              const reviewed = Boolean(r.reviewed_at)
-              const initials = (r.lead_name || '??').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-
+          <ul className="cc-queue-list">
+            {!loading && items.length === 0 && (
+              <li className="cc-empty">
+                {filtersActive || tab !== 'all' || attentionOnly
+                  ? 'No replies match these filters.'
+                  : 'No replies yet. Customer replies appear here as they arrive.'}
+              </li>
+            )}
+            {items.map(r => {
+              const active = selected?.replyId === r.id
               return (
-                <li
-                  key={r.id}
-                  className={`replies-card ${r.is_hot ? 'replies-card--hot' : ''} ${reviewed ? 'replies-card--reviewed' : ''}`}
-                  onClick={() => r.lead_id && navigate(`/leads/${r.lead_id}`)}
-                  style={{ cursor: r.lead_id ? 'pointer' : 'default' }}
-                >
-                  <div className="replies-card-left">
-                    <div className={`replies-avatar replies-avatar--${config.color}`}>{initials}</div>
-                  </div>
-                  <div className="replies-card-body">
-                    <div className="replies-card-top">
-                      <div className="replies-card-meta">
-                        <span className="replies-card-name">{r.lead_name || 'Unknown lead'}</span>
-                        <span className={`badge badge--${config.color}`}>{config.icon} {config.label}</span>
-                        {reviewed && <span className="badge badge--neutral-dim">✓ Reviewed</span>}
-                      </div>
-                      <span className="replies-time">{timeAgo(r.received_at)}</span>
-                    </div>
-                    <p className="replies-card-text">{r.body}</p>
-                    <div className="replies-card-actions" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className="btn btn--secondary replies-action-btn"
-                        disabled={isBusy || reviewed}
-                        onClick={() => markReviewed(r.id)}
-                      >
-                        {reviewed ? '✓ Reviewed' : 'Mark reviewed'}
-                      </button>
-                      <div className="replies-reclassify">
-                        <span className="replies-reclassify-label">Reclassify</span>
-                        <select
-                          className="filter-select replies-reclassify-select"
-                          value={r.classification || 'neutral'}
-                          disabled={isBusy}
-                          onChange={(e) => reclassify(r.id, e.target.value)}
-                        >
-                          {CLASSIFICATION_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    {objectionData[r.id] && !objectionData[r.id].error && (
-                      <div className="replies-objection-panel">
-                        <div className="replies-objection-type">
-                          🧠 {objectionData[r.id].objection_type?.replace(/_/g, ' ')}
-                        </div>
-                        <p className="replies-objection-response">{objectionData[r.id].suggested_reply}</p>
-                        <span style={{ fontSize: 11, color: r.source === 'email' ? '#2fb6ff' : '#a78bfa', background: r.source === 'email' ? 'rgba(47,182,255,0.1)' : 'rgba(167,139,250,0.1)', padding: '2px 8px', borderRadius: 20, marginTop: 4, display: 'inline-block' }}>
-                          {r.source === 'email' ? '✉️ Email reply' : '💬 SMS reply'}
-                        </span>
-                        <button
-                          className="btn btn--secondary replies-action-btn"
-                          onClick={() => { navigator.clipboard.writeText(objectionData[r.id].suggested_reply) }}
-                        >
-                          Copy response
-                        </button>
-                      </div>
-                    )}
-                    {objectionData[r.id]?.error && (
-                      <div className="replies-objection-error">{objectionData[r.id].error}</div>
-                    )}
-                    <button
-                      className="replies-objection-btn"
-                      onClick={(e) => { e.stopPropagation(); fetchObjectionReply(r.id) }}
-                      disabled={objectionLoading === r.id}
-                    >
-                      {objectionLoading === r.id ? '⏳ Analyzing…' : objectionData[r.id] ? '🧠 Re-analyze objection' : '🧠 AI objection handler'}
-                    </button>
-                  </div>
+                <li key={r.id}>
+                  <button type="button" className={`cc-row ${active ? 'is-active' : ''} ${!r.reviewed_at ? 'is-unread' : ''}`}
+                    onClick={() => setSelected({ leadId: r.lead_id, replyId: r.id, snapshot: r })}>
+                    <span className="cc-row-top">
+                      <span className="cc-row-name">
+                        {!r.reviewed_at && <span className="cc-dot" aria-label="Unreviewed" />}
+                        {r.contact_name}
+                      </span>
+                      <span className="cc-row-time">{timeAgo(r.received_at)}</span>
+                    </span>
+                    <span className="cc-row-body">{r.body}</span>
+                    <span className="cc-row-tags">
+                      <span className="cc-chan"><Icon name={channelIcon(r.channel)} size={12} /> {r.channel?.toUpperCase()}</span>
+                      <ClassTag value={r.classification} />
+                      <StatusTag value={r.status} />
+                      {r.is_dnc && r.classification !== 'dnc' && <Tag tone="red">DNC</Tag>}
+                      {r.assigned_to_name && <span className="cc-owner"><Icon name="user" size={11} /> {r.assigned_to_name}</span>}
+                    </span>
+                  </button>
                 </li>
               )
             })}
           </ul>
-        )}
-      </section>
+          {totalPages > 1 && (
+            <div className="cc-pager">
+              <span className="cc-muted">Showing {from}–{to} of {data.total.toLocaleString()}</span>
+              <span className="cc-pager-btns">
+                <button type="button" className="cc-iconbtn" disabled={page <= 1} onClick={() => setPage(p => p - 1)} aria-label="Previous page">
+                  <Icon name="chevL" />
+                </button>
+                <span className="cc-pager-num">{page} / {totalPages}</span>
+                <button type="button" className="cc-iconbtn" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} aria-label="Next page">
+                  <Icon name="chevR" />
+                </button>
+              </span>
+            </div>
+          )}
+        </section>
+
+        <CommsWorkspace
+          leadId={selected?.leadId || null}
+          reply={selectedReply}
+          assignees={assignees}
+          canWrite={canWrite}
+          onChanged={onChanged}
+          onBack={() => setSelected(null)}
+        />
+      </div>
+
+      {composeOpen && (
+        <ComposePicker onClose={() => setComposeOpen(false)}
+          onPick={lead => { setComposeOpen(false); setSelected({ leadId: lead.id, replyId: null, snapshot: null }) }} />
+      )}
+    </div>
+  )
+}
+
+// New message: choose an existing contact (server-side search over leads in
+// scope), then write in the same workspace — the same gate applies.
+function ComposePicker({ onClose, onPick }) {
+  const [q, setQ] = useState('')
+  const dq = useDebounced(q, 300)
+  const [results, setResults] = useState([])
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    if (dq.trim().length < 2) { setResults([]); return }
+    let alive = true
+    api.get('/leads/', { params: { search: dq.trim(), page_size: 8, page: 1 } })
+      .then(d => { if (alive) setResults(d.items || d || []) })
+      .catch(e => { if (alive) setErr(e.message) })
+    return () => { alive = false }
+  }, [dq])
+  return (
+    <div className="cc-modal" role="dialog" aria-modal="true" aria-label="New message">
+      <div className="cc-modal-card">
+        <div className="cc-modal-head">
+          <strong>New message</strong>
+          <button type="button" className="cc-iconbtn" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+        </div>
+        <label className="cc-search">
+          <Icon name="search" />
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search contacts by name, phone or email…" />
+        </label>
+        {err && <div className="cc-flash is-error">{err}</div>}
+        <ul className="cc-pick">
+          {results.map(l => (
+            <li key={l.id}>
+              <button type="button" onClick={() => onPick(l)}>
+                <strong>{`${l.first_name || ''} ${l.last_name || ''}`.trim() || 'Unnamed'}</strong>
+                <span className="cc-muted">{l.phone || l.email || ''}</span>
+              </button>
+            </li>
+          ))}
+          {dq.trim().length >= 2 && results.length === 0 && !err && <li className="cc-muted cc-pad">No matching contacts.</li>}
+        </ul>
+        <p className="cc-muted cc-small">Messages still go through consent, Do Not Contact, suppression and contact-hours checks.</p>
+      </div>
     </div>
   )
 }

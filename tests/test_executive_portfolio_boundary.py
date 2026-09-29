@@ -682,7 +682,9 @@ def test_the_owner_has_a_screen_for_this_and_it_is_wired_up():
     assert "'/god/executive-access'" in shell
     registered = set(re.findall(r'path="([^"]+)"', app))
     for target in re.findall(r"path: '(/god[^']*)'", shell):
-        base = target.split("#")[0]
+        # A query string selects a tab on a registered page (Lead Intelligence
+        # ?tab=...), the same way a hash jumps within one.
+        base = re.split(r"[?#]", target)[0]
         assert base in registered, "%s is in the God nav and not registered" % base
 
 

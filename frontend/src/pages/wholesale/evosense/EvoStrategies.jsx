@@ -445,7 +445,7 @@ export function EvoStrategyBuilder() {
             </div>
             {form.pilot_mode ? (
               <div className="evo-form-grid" style={{ marginTop: 12 }}>
-                <NumIn id="sb-pcap" label="Most properties per run (max 100)" value={form.pilot_max_properties} onChange={(v) => set('pilot_max_properties', v)} />
+                <NumIn id="sb-pcap" label="Most properties per run (max 500; first pilot batch 250–500)" value={form.pilot_max_properties} onChange={(v) => set('pilot_max_properties', v)} />
                 <Check checked={form.pilot_allow_paid} onChange={(v) => set('pilot_allow_paid', v)}>Allow paid lookups in this pilot</Check>
                 {form.pilot_allow_paid ? <NumIn id="sb-pspend" label="Pilot spend cap" prefix="$" value={form.pilot_max_spend} onChange={(v) => set('pilot_max_spend', v)} /> : null}
               </div>

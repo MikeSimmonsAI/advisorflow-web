@@ -350,56 +350,6 @@ APPEARANCE_JS = os.path.join(FE, "appearance.js")
 APPEARANCE_CSS = os.path.join(FE, "styles", "appearance.css")
 
 
-def test_the_appearance_module_offers_light_dark_and_system():
-    src = _read(APPEARANCE_JS)
-    for token in ("export const LIGHT", "export const DARK", "export const SYSTEM"):
-        assert token in src, "missing %s" % token
-    assert "matchMedia" in src and "prefers-color-scheme" in src, (
-        "System does not consult the operating system")
-
-
-def test_system_is_resolved_to_a_concrete_appearance_in_the_dom():
-    """One place decides; the DOM records what was decided."""
-    src = _read(APPEARANCE_JS)
-    apply_fn = src[src.index("export function applyAppearance"):]
-    apply_fn = apply_fn[:apply_fn.index("\n}")]
-    assert "data-appearance" in apply_fn
-    assert "SYSTEM" not in apply_fn, (
-        "'system' is written to the DOM as a third state, so a rendered page "
-        "cannot say which appearance it actually used")
-
-
-def test_the_preference_persists_and_defaults_to_dark():
-    src = _read(APPEARANCE_JS)
-    assert "localStorage" in src, "the choice is not remembered"
-    assert "'af_appearance'" in src, (
-        "the preference key does not follow the af_ convention every other "
-        "client preference in this codebase uses")
-    pref = src[src.index("export function getAppearancePreference"):]
-    pref = pref[:pref.index("\n}")]
-    assert "return DARK" in pref, (
-        "the default is not DARK - a product that has shipped dark must not "
-        "silently flip on every machine set to light")
-
-
-def test_appearance_is_an_orthogonal_attribute_not_a_second_brand_theme():
-    """data-theme is the BRAND. Reusing it would force brands x appearances."""
-    css = _read(APPEARANCE_CSS)
-    assert "data-appearance" in css
-    assert 'data-theme="light"' not in css and 'data-theme="dark"' not in css, (
-        "appearance was implemented on the brand attribute, which collapses "
-        "white-labelling into the light/dark axis")
-
-
-def test_the_light_appearance_defines_the_neutral_tokens():
-    css = _read(APPEARANCE_CSS)
-    block = css[css.index('[data-appearance="light"]'):]
-    block = block[:block.index("\n}")]
-    for token in ("--bg-base", "--bg-card", "--border-subtle",
-                  "--text-primary", "--text-secondary"):
-        assert token in block, "light appearance does not define %s" % token
-
-
 def _css_no_comments(text):
     """Comments are prose, not declarations.
 
@@ -410,61 +360,76 @@ def _css_no_comments(text):
     return re.sub(r"/\*.*?\*/", "", text, flags=re.S)
 
 
-def test_the_light_appearance_darkens_the_signal_colours():
-    """The dark theme's neons are unreadable on white - #1ef0a8 on #fff is
-    about 1.6:1. Status colour must survive the appearance change."""
-    css = _read(APPEARANCE_CSS)
-    block = css[css.index('[data-appearance="light"]'):]
-    block = _css_no_comments(block[:block.index("\n}")])
-    assert "--signal-green" in block, "light appearance does not restate the signals"
+
+
+def test_the_appearance_module_is_light_only():
+    """Spec section 66: one polished light theme, no day/night toggle."""
+    src = _read(APPEARANCE_JS)
+    pref = src[src.index("export function getAppearancePreference"):]
+    pref = pref[:pref.index("\n}")]
+    assert "return LIGHT" in pref
+    assert "return DARK" not in src and "return SYSTEM" not in src
+    assert "matchMedia" not in src, "the OS dark preference is still consulted"
+    assert "APPEARANCES = [{ value: LIGHT" in src
+
+
+def test_the_stale_preference_key_is_cleared_not_read():
+    src = _read(APPEARANCE_JS)
+    assert "removeItem(KEY)" in src and "'af_appearance'" in src
+    assert "getItem(" not in src, "the old dark preference is still honoured"
+
+
+def test_apply_writes_a_concrete_light_attribute():
+    src = _read(APPEARANCE_JS)
+    apply_fn = src[src.index("export function applyAppearance"):]
+    apply_fn = apply_fn[:apply_fn.index("\n}")]
+    assert "setAttribute('data-appearance', LIGHT)" in apply_fn
+    assert "colorScheme = LIGHT" in apply_fn
+
+
+def test_the_token_layer_does_not_depend_on_the_attribute():
+    """The light tokens are unconditional; nothing keys on data-appearance."""
+    css = _css_no_comments(_read(APPEARANCE_CSS))
+    assert "data-appearance" not in css
+    assert 'data-theme="light"' not in css and 'data-theme="dark"' not in css
+    block = css[css.index("html:root {"):]
+    block = block[:block.index("\n}")]
+    for token in ("--bg-base", "--bg-card", "--border-subtle", "--text-primary",
+                  "--text-secondary", "--color-primary", "--pill-success-bg",
+                  "--space-4", "--shadow-md"):
+        assert token in block, "token layer does not define %s" % token
     for neon in ("#1ef0a8", "#2fb6ff", "#ff4d7e", "#ffb238"):
-        assert neon not in block, (
-            "the light appearance keeps the dark theme's neon %s, which is "
-            "illegible on a light ground" % neon)
+        assert neon not in block, "dark-theme neon %s left in the light layer" % neon
 
 
-def test_both_appearances_set_color_scheme_for_native_controls():
-    css = _read(APPEARANCE_CSS)
-    assert "color-scheme: light" in css and "color-scheme: dark" in css, (
-        "native form controls and scrollbars will keep rendering in the wrong "
-        "appearance, which is the most obvious tell of a half-done theme")
+def test_native_controls_render_light():
+    css = _css_no_comments(_read(APPEARANCE_CSS))
+    assert "color-scheme: light" in css
+    idx = _css_no_comments(_read(os.path.join(FE, "index.css")))
+    select_rule = idx[idx.index("select {"):]
+    select_rule = select_rule[:select_rule.index("}")]
+    assert "color-scheme: dark" not in select_rule
 
 
-def test_focus_is_visible_in_both_appearances():
+def test_focus_is_visible():
     css = _read(APPEARANCE_CSS)
     assert "focus-visible" in css and "outline" in css
 
 
 def test_appearance_is_initialised_before_react_renders():
     src = _read(os.path.join(FE, "main.jsx"))
-    assert "initAppearance()" in src, "the saved appearance is never applied"
+    assert "initAppearance()" in src
     assert src.index("import './styles/appearance.css'") > src.index("import './index.css'"), (
-        "appearance.css is imported BEFORE index.css, so index.css's defaults "
-        "would win and the light theme would never apply")
+        "appearance.css is imported BEFORE index.css, so index.css's dark "
+        "defaults would win")
 
 
-def test_the_appearance_control_is_reachable_where_it_still_means_something():
-    """Mike must be able to switch it without developer tools - WHERE THERE IS
-    STILL SOMETHING TO SWITCH.
-
-    THIS TEST USED TO REQUIRE THE CONTROL IN THE GOD SHELL. It was right until
-    Sep 11 2026, when God Mode became permanently light as a product decision:
-    the near-black control plane was rejected outright rather than kept as an
-    option. A light/dark control inside a surface with one appearance switches
-    between one state and itself, and a control that does nothing is worse than
-    no control - it invites the user to conclude the setting is broken.
-
-    So the assertion inverts for the God shell and is UNCHANGED everywhere else.
-    The preference itself is untouched: the tenant app still has both
-    appearances, appearance.js still stores the choice, and Settings still
-    offers all three. What went away is one mount point.
-    """
-    assert "AppearanceToggle" not in _read(GOD_SHELL), (
-        "the light/dark control is back in the God shell. God Mode is "
-        "permanently light - see frontend/src/pages/god/godTokens.css - so this "
-        "control has nothing to switch between there")
-    assert "AppearanceToggle" in _read(os.path.join(FE, "pages", "Settings.jsx")), (
-        "no appearance control in customer Settings")
+def test_no_appearance_control_is_mounted_anywhere():
+    for rel in (("pages", "GodShell.jsx"), ("pages", "Settings.jsx"),
+                ("pages", "executive", "ExecutiveSuite.jsx"),
+                ("components", "Layout.jsx")):
+        assert "AppearanceToggle" not in _read(os.path.join(FE, *rel)), rel
+    assert not os.path.exists(os.path.join(FE, "components", "AppearanceToggle.jsx"))
 
 
 def test_god_mode_does_not_consult_the_appearance_preference():
@@ -487,8 +452,3 @@ def test_god_mode_does_not_consult_the_appearance_preference():
     assert "color-scheme: dark" not in tokens
 
 
-def test_the_control_offers_all_three_choices_as_radios():
-    src = _read(os.path.join(FE, "components", "AppearanceToggle.jsx"))
-    assert 'role="radiogroup"' in src and 'role="radio"' in src, (
-        "the control is not exposed as a choice to assistive technology")
-    assert "APPEARANCES" in src, "the control does not render all three options"

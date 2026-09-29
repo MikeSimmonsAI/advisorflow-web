@@ -425,6 +425,16 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     check_compliance_preflight(db, lead, channel="email",
                                allow_test=(send_source == _ss.MANUAL))
 
+    # PAUSE AI / TAKE OVER (app/services/wholesale_ops.py). While a person holds
+    # a seller's conversation, only a send stamped MANUAL may go out; cadence,
+    # AI, auto-send and any unstamped path are refused, exactly as for SMS.
+    from app.services import wholesale_ops as _wops
+    _held = _wops.ai_send_refusal(db, lead, send_source)
+    if _held:
+        raise ValueError(
+            f"Lead {lead.id}: {_held} - the AI is paused / a person has taken over "
+            f"this conversation, so only a manual send may go out.")
+
     from app.services.sms_service import create_booking_link
     from app.models.models import Organization
     import os as _os

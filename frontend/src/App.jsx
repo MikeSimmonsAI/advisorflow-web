@@ -82,6 +82,7 @@ import Proposals from './pages/Proposals'
 import ProposalEditor from './pages/ProposalEditor'
 import ProvisionClient from './pages/ProvisionClient'
 import Pipeline from './pages/Pipeline'
+import RateRequests from './pages/vertical/RateRequests'
 // WHOLESALE REAL ESTATE. Five screens behind one feature key. `feature` on the
 // routes below is what stops a workspace without the module walking into the
 // server's 402 — the entitlement itself is enforced on every one of those
@@ -91,6 +92,8 @@ import WholesaleProperties from './pages/wholesale/WholesaleProperties'
 import WholesaleDeal from './pages/wholesale/WholesaleDeal'
 import WholesaleBuyers from './pages/wholesale/WholesaleBuyers'
 import WholesaleExceptions from './pages/wholesale/WholesaleExceptions'
+import CallbackCenter from './pages/wholesale/ops/CallbackCenter'
+import PilotControls from './pages/wholesale/ops/PilotControls'
 import WholesaleFundingPartners from './pages/wholesale/WholesaleFundingPartners'
 import WholesaleSettings from './pages/wholesale/WholesaleSettings'
 // Wholesale Phase 7 — EvoSense acquisition engine. Same feature key.
@@ -203,6 +206,8 @@ import QualificationDiagnostic from './pages/god/QualificationDiagnostic'
 import GodTwilioDiagnostics from './pages/god/GodTwilioDiagnostics'
 import GodJobRuns from './pages/god/GodJobRuns'
 import GodLeadBrowser from './pages/god/GodLeadBrowser'
+import LeadIntelligence from './pages/god/LeadIntelligence'
+import FeatureEntitlements from './pages/god/FeatureEntitlements'
 import GodVoiceConfig from './pages/god/GodVoiceConfig'
 import GodRevenueHistory from './pages/god/GodRevenueHistory'
 import RoadmapBoard from './pages/god/RoadmapBoard'
@@ -1012,6 +1017,8 @@ export default function App() {
             Leads, so gating it would hide a screen from somebody who can see
             the same rows by another door. An unknown key renders the page's
             own "not switched on" state rather than a 404 route. */}
+        <Route path="/rate-requests" element={<ProtectedRoute feature="leads"><RateRequests /></ProtectedRoute>} />
+        <Route path="/view/rate-requests" element={<Navigate to="/rate-requests" replace />} />
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
         <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
@@ -1059,6 +1066,8 @@ export default function App() {
         <Route path="/wholesale/dispositions" element={<ProtectedRoute feature="wholesale_real_estate"><DealOperationsDispositions /></ProtectedRoute>} />
         <Route path="/wholesale/buyers" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleBuyers /></ProtectedRoute>} />
         <Route path="/wholesale/exceptions" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleExceptions /></ProtectedRoute>} />
+        <Route path="/wholesale/callbacks" element={<ProtectedRoute feature="wholesale_real_estate"><CallbackCenter /></ProtectedRoute>} />
+        <Route path="/wholesale/pilot" element={<ProtectedRoute feature="wholesale_real_estate"><PilotControls /></ProtectedRoute>} />
         <Route path="/wholesale/funding" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleFundingPartners /></ProtectedRoute>} />
         <Route path="/wholesale/settings" element={<ProtectedRoute feature="wholesale_real_estate" requireAdmin><WholesaleSettings /></ProtectedRoute>} />
         <Route path="/wholesale/deals/:dealId" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleDeal /></ProtectedRoute>} />
@@ -1164,6 +1173,7 @@ export default function App() {
         {/* ── God Mode routes ── */}
         <Route path="/god" element={<GodRoute><GodModeLayout><GodCommandCenter /></GodModeLayout></GodRoute>} />
         <Route path="/god/organizations" element={<GodRoute><GodModeLayout><GodOrganizations /></GodModeLayout></GodRoute>} />
+        <Route path="/god/entitlements" element={<GodRoute><GodModeLayout><FeatureEntitlements /></GodModeLayout></GodRoute>} />
         <Route path="/god/sales-operations" element={<GodRoute><GodModeLayout><GodSalesOps /></GodModeLayout></GodRoute>} />
         <Route path="/god/brands/:brandId" element={<GodRoute><GodModeLayout><GodBrandDetail /></GodModeLayout></GodRoute>} />
         <Route path="/god/provision/:oppId" element={<GodRoute><GodModeLayout><GodProvision /></GodModeLayout></GodRoute>} />
@@ -1255,6 +1265,7 @@ export default function App() {
         <Route path="/god/revenue-history"       element={<GodRoute><GodModeLayout><GodRevenueHistory /></GodModeLayout></GodRoute>} />
         {/* GOD-09: cross-org lead browser */}
         <Route path="/god/lead-browser"          element={<GodRoute><GodModeLayout><GodLeadBrowser /></GodModeLayout></GodRoute>} />
+        <Route path="/god/lead-intelligence"     element={<GodRoute><GodModeLayout><LeadIntelligence /></GodModeLayout></GodRoute>} />
         {/* GOD-04: platform roadmap board */}
         <Route path="/god/roadmap"               element={<GodRoute><GodModeLayout><RoadmapBoard /></GodModeLayout></GodRoute>} />
         {/* Customer Launches — the staff view of onboarding intake. Sits in

@@ -73,24 +73,12 @@ function EmptyState({ filtered, onNew }) {
   )
 }
 
-// Force browser native form controls to match the current colour scheme
+// Native form controls render light (the platform ships one light theme).
 const EXEC_FORM_STYLES = `
 [data-surface="executive"] input,
 [data-surface="executive"] select,
 [data-surface="executive"] textarea {
   color-scheme: light;
-}
-[data-appearance="dark"] [data-surface="executive"] input,
-[data-appearance="dark"] [data-surface="executive"] select,
-[data-appearance="dark"] [data-surface="executive"] textarea {
-  color-scheme: dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-appearance="light"]) [data-surface="executive"] input,
-  :root:not([data-appearance="light"]) [data-surface="executive"] select,
-  :root:not([data-appearance="light"]) [data-surface="executive"] textarea {
-    color-scheme: dark;
-  }
 }
 `
 

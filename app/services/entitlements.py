@@ -253,8 +253,45 @@ def normalize_keys(keys: Optional[List[str]]) -> List[str]:
     return sorted(cleaned)
 
 
+def _session_of(org: Optional[Organization]) -> Optional[Session]:
+    if org is None:
+        return None
+    try:
+        from sqlalchemy.orm import object_session
+        return object_session(org)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def enabled_for(org: Optional[Organization]) -> Optional[List[str]]:
-    """The org's allow-list, or None meaning 'everything' (legacy orgs)."""
+    """The org's EFFECTIVE feature list, or None meaning 'everything'.
+
+    HIERARCHICAL SINCE 2026-09-28. The stored allow-list is now the ORGANIZATION
+    layer of a chain (platform -> brand -> organization; see
+    app/services/entitlement_resolver.py). When no platform/brand/org override
+    row touches this organization the answer is exactly the legacy one - the
+    same value, the same type, None still meaning "everything". Only when an
+    override exists is the list computed by the resolver, which is how a
+    brand-level disable (e.g. BookaBoost switching off wholesale_real_estate)
+    reaches every organization of that brand without editing their allow-lists.
+    """
+    legacy = legacy_enabled_for(org)
+    db = _session_of(org)
+    if db is None:
+        return legacy
+    from app.services import entitlement_resolver as er
+    ov = er.load_overrides(db, org, include_narrow=False)
+    if not ov.any_org_level():
+        return legacy
+    return er.effective_org_list(db, org, ov)
+
+
+def legacy_enabled_for(org: Optional[Organization]) -> Optional[List[str]]:
+    """The org's stored allow-list, or None meaning 'everything' (legacy orgs).
+
+    This is the ORGANIZATION layer only. Enforcement goes through
+    `enabled_for` / `org_has_feature`, which add the platform and brand layers.
+    """
     if org is None:
         return []
     raw = getattr(org, "enabled_features", None)
@@ -269,10 +306,94 @@ def enabled_for(org: Optional[Organization]) -> Optional[List[str]]:
 
 
 def org_has_feature(org: Optional[Organization], key: str) -> bool:
-    allowed = enabled_for(org)
+    db = _session_of(org)
+    ov = None
+    if db is not None:
+        from app.services import entitlement_resolver as er
+        ov = er.load_overrides(db, org, include_narrow=False)
+    return _org_has_feature_with(db, org, key, ov)
+
+
+def _org_has_feature_with(db: Optional[Session], org: Optional[Organization], key: str,
+                          ov) -> bool:
+    """Organization-level answer given ALREADY-LOADED override rows (or None)."""
+    if ov is not None and ov.any_org_level() and key in FEATURES:
+        from app.services import entitlement_resolver as er
+        return er.org_enabled(db, org, key, ov)
+    allowed = legacy_enabled_for(org)
     if allowed is None:
         return True
     return key in allowed
+
+
+def _role_in(db: Session, org: Organization, user: User) -> Optional[str]:
+    role = None
+    try:
+        from app.services.workspace_access import workspace_role
+        role = workspace_role(user, db, org.id)
+    except Exception:  # noqa: BLE001
+        role = None
+    return role or getattr(user, "role", None)
+
+
+def _has_person_rows(ov) -> bool:
+    return ov is not None and any(r.scope in ("role", "user") for r in ov.rows)
+
+
+def _user_allowed_with(db: Session, org: Organization, user: User, key: str, ov,
+                       role: Optional[str] = None, cache=None) -> bool:
+    """Narrowing layers for one person, given already-loaded rows."""
+    if org is None or key not in FEATURES or not _has_person_rows(ov):
+        return True
+    from app.services import entitlement_resolver as er
+    if role is None:
+        role = _role_in(db, org, user)
+    res = er.evaluate(db, key, org=org, level="user", role=role,
+                      user_id=getattr(user, "id", None), overrides=ov,
+                      check_setup=False,
+                      _cache=cache if cache is not None else er.enforcement_cache())
+    return bool(res["enabled"])
+
+
+def user_has_feature(db: Session, org: Optional[Organization], user: User,
+                     key: str) -> bool:
+    """The NARROWING layers (workspace/role/user overrides) for one person.
+
+    Only ever removes access. `require_feature` does not call this - it loads
+    the override rows ONCE and uses the `_with` helpers - but it is kept as a
+    convenience for callers holding just an org and a user.
+    """
+    if org is None or key not in FEATURES:
+        return True
+    from app.services import entitlement_resolver as er
+    return _user_allowed_with(db, org, user, key, er.load_overrides(db, org))
+
+
+def nav_features(db: Session, org: Optional[Organization], user: Optional[User],
+                 legacy_list: Optional[List[str]]) -> Optional[List[str]]:
+    """What GET /branding/org tells the customer shell it may draw.
+
+    `legacy_list` is what that endpoint computed before hierarchy existed; it is
+    returned UNCHANGED when no override row touches this organization. With
+    overrides, the organization's effective list is used and then narrowed by
+    any role/user override for this person - the same evaluation
+    `require_feature` enforces, so the sidebar cannot offer what the server
+    will refuse. One override query and at most one role lookup per call.
+    """
+    if org is None or db is None:
+        return legacy_list
+    from app.services import entitlement_resolver as er
+    ov = er.load_overrides(db, org)
+    if not ov.rows:
+        return legacy_list
+    base = er.effective_org_list(db, org, ov) if ov.any_org_level() else legacy_list
+    if user is None or not _has_person_rows(ov):
+        return base
+    role = _role_in(db, org, user)
+    cache = er.enforcement_cache()
+    keys = list(ALL_FEATURE_KEYS) if base is None else list(base)
+    return [k for k in keys
+            if k not in FEATURES or _user_allowed_with(db, org, user, k, ov, role, cache)]
 
 
 def set_features(db: Session, org: Organization, actor: User,
@@ -280,7 +401,10 @@ def set_features(db: Session, org: Organization, actor: User,
     """Replace an organization's allow-list. None restores the legacy 'all'."""
     from app.routers.audit_log_router import log_action
 
-    before = enabled_for(org)
+    # THE STORED ALLOW-LIST, never the resolved list. Writing the resolved
+    # list back would bake a brand disable (or an org override) into the
+    # allow-list, and resetting that override would then change nothing.
+    before = legacy_enabled_for(org)
     if keys is None:
         org.enabled_features = None
         after = None
@@ -299,9 +423,42 @@ def set_features(db: Session, org: Organization, actor: User,
 
 
 def feature_report(org: Optional[Organization]) -> Dict:
-    allowed = enabled_for(org)
+    """The STORED allow-list, as it always was - plus, only when a platform /
+    brand / org override touches this organization, an `effective` block.
+
+    Every field outside `effective` describes `organizations.enabled_features`
+    and is what editors (PUT /god/customers/{id}/features, the Control Center
+    switches) read and write back. The resolved answer lives ONLY under
+    `effective` (and `available[].effective_enabled`), so it can never be
+    round-tripped into the allow-list.
+    """
+    allowed = legacy_enabled_for(org)
     plan = getattr(org, "plan", None) if org is not None else None
     preset = plan_features(plan)
+    report = _stored_report(allowed, plan, preset)
+    db = _session_of(org)
+    if db is not None:
+        from app.services import entitlement_resolver as er
+        ov = er.load_overrides(db, org, include_narrow=False)
+        if ov.any_org_level():
+            eff = er.effective_org_list(db, org, ov)
+            eff_set = set(eff)
+            for item in report["available"]:
+                item["effective_enabled"] = item["key"] in eff_set
+            report["effective"] = {
+                "overrides_active": True,
+                "enabled": eff,
+                "enabled_count": len(eff),
+                "differs_from_allow_list": sorted(
+                    k for k in ALL_FEATURE_KEYS
+                    if (k in eff_set) != (allowed is None or k in allowed)),
+                "note": "Platform/brand/organization overrides apply. `enabled` above is "
+                        "the stored allow-list; this block is what is enforced.",
+            }
+    return report
+
+
+def _stored_report(allowed, plan, preset) -> Dict:
     return {
         "mode": "all" if allowed is None else "allow_list",
         "enabled": list(ALL_FEATURE_KEYS) if allowed is None else allowed,
@@ -368,12 +525,24 @@ def require_feature(key: str):
                 detail="This is a customer workspace feature and your account has no "
                        "customer organization.")
         org = db.query(Organization).filter(Organization.id == org_id).first()
-        if not org_has_feature(org, key):
+        # ONE override query for the whole decision (platform + brand + org +
+        # rows scoped inside the org); both checks below reuse it.
+        ov = None
+        if org is not None:
+            from app.services import entitlement_resolver as _er
+            ov = _er.load_overrides(db, org)
+        if not _org_has_feature_with(db, org, key, ov):
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="This organization is not enabled for '%s' (%s). An operator can "
                        "enable it in the customer's Features settings."
                        % (key, FEATURES[key]))
+        # Workspace/role/user overrides can only NARROW (entitlement_resolver).
+        if not _user_allowed_with(db, org, user, key, ov):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="'%s' (%s) is switched off for your role or account in this "
+                       "organization." % (key, FEATURES[key]))
 
         # ── Billing standing ──────────────────────────────────────────────
         # Checked AFTER the feature allow-list, so the message a customer gets

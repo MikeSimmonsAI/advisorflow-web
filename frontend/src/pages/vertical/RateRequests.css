@@ -1,0 +1,83 @@
+/* RATE REQUESTS — layout additions on top of LeadsWorkspace.css (`.lw-*`).
+   Colours are tokens; everything is scoped under `.rr`. */
+
+.rr-header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 20px;
+  flex-wrap: wrap; margin-bottom: 14px;
+}
+.rr-title { min-width: 0; }
+.rr-title h1 { margin: 0; font-family: var(--font-display); font-size: 26px; font-weight: 700; color: var(--text-primary); }
+.rr-title p { margin: 4px 0 0; font-size: 14px; color: var(--text-secondary); }
+
+.rr-tabcount {
+  margin-left: 6px; font-size: 11.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+  background: var(--bg-glass-strong); color: var(--text-secondary);
+}
+
+.rr-kpis { display: grid; gap: 12px; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 12px; }
+.rr-kpi { width: 100%; }
+.rr-kpi.is-active { border-color: var(--signal-blue); box-shadow: 0 0 0 1px var(--signal-blue) inset; }
+
+.rr-filters .lw-search { max-width: 380px; }
+.rr-panel { padding: 8px 12px 12px; }
+.rr-sub { font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+.rr-table td { vertical-align: middle; }
+.rr-actions-h, .rr-actions { text-align: right; width: 56px; }
+.rr-actions { cursor: default; }
+
+.rr-pills { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.rr-pill {
+  display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+  white-space: nowrap; background: var(--bg-glass-mid); color: var(--text-secondary);
+}
+.rr-pill--new { background: var(--signal-blue-dim); color: var(--signal-blue); }
+.rr-pill--in_review { background: rgba(124, 77, 214, 0.10); color: #7c4dd6; }
+.rr-pill--options_sent { background: rgba(230, 126, 34, 0.14); color: #b95f12; }
+.rr-pill--booked, .rr-pill--completed { background: var(--signal-green-dim); color: var(--signal-green); }
+
+.rr-pager-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rr-page { font-size: 13px; color: var(--text-secondary); padding: 0 4px; }
+.rr-pagesize {
+  font: inherit; font-size: 13px; color: var(--text-primary); background: var(--bg-field);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm, 8px); padding: 5px 8px;
+}
+
+.rr-empty { padding: 40px 16px; }
+.rr-empty p { max-width: 460px; }
+
+/* drawer */
+.rr-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 4px 0 8px; }
+.rr-controls label, .rr-owner { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-tertiary); min-width: 0; }
+.rr-controls select {
+  font: inherit; font-size: 14px; color: var(--text-primary); background: var(--bg-field);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm, 8px); padding: 8px; min-width: 0;
+}
+.rr-owner strong { font-size: 14px; color: var(--text-primary); padding: 8px 0; }
+.rr-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rr-section-head h3 { margin: 14px 0 8px; }
+.rr-notes { white-space: pre-wrap; font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+.rr-inline-form { width: 100%; max-height: none; box-shadow: none; padding: 0; background: transparent; }
+.rr-block { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); margin-top: 12px; }
+.rr-form-h { font-size: 14px; margin: 16px 0 8px; }
+
+@media (max-width: 1100px) {
+  .rr-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .rr-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .rr-header .lw-btn--primary { width: 100%; }
+  /* table rows become cards */
+  .rr-table thead { display: none; }
+  .rr-table, .rr-table tbody, .rr-table tr, .rr-table td { display: block; width: 100%; }
+  .rr-table tr {
+    position: relative; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 8px);
+    margin-bottom: 10px; padding: 8px 44px 8px 10px; background: var(--bg-panel);
+  }
+  .rr-table td { border: 0; padding: 4px 0; }
+  .rr-table td[data-label]:not([data-label="Customer"])::before {
+    content: attr(data-label); display: block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--text-tertiary);
+  }
+  .rr-table td.rr-actions { position: absolute; top: 6px; right: 6px; width: auto; padding: 0; }
+  .rr-controls { grid-template-columns: minmax(0, 1fr); }
+}

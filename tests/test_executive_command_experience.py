@@ -497,7 +497,8 @@ def _stripped(text):
 def test_the_executive_surface_declares_itself_and_carries_its_own_palette():
     css = _src("ExecStyles.jsx")
     assert '[data-surface="executive"]{' in css
-    assert '[data-appearance="dark"] [data-surface="executive"]{' in css
+    # Light-only platform (spec section 66): no dark block any more.
+    assert '[data-appearance="dark"]' not in css
     for token in ("--ex-canvas", "--ex-surface", "--ex-ink", "--ex-accent"):
         assert token in css, token
 
@@ -522,30 +523,27 @@ def test_no_executive_rule_can_reach_another_surface():
             if not one:
                 continue
             assert (one.startswith('[data-surface="executive"]')
-                    or one.startswith('[data-appearance="dark"] [data-surface="executive"]')
                     or one.startswith(".ex-")
                     or one.startswith("button.ex-")), (
                 "selector %r is not scoped to the executive surface" % one)
 
 
-def test_the_dark_executive_palette_stacks_rather_than_inverting():
-    """Cards must sit ABOVE the canvas and fields BELOW their card, or the
-    page reads as one flat sheet - which is what 'make it dark' produces."""
+def test_the_executive_palette_is_light_only_and_stacks():
+    """One light palette: cards sit on the canvas, text is dark ink."""
     css = _src("ExecStyles.jsx")
-    dark = css.split('[data-appearance="dark"] [data-surface="executive"]{', 1)[1] \
-              .split("}", 1)[0]
+    assert '[data-appearance="dark"]' not in css
+    assert "color-scheme:dark" not in css
+    light = css.split('[data-surface="executive"]{', 1)[1].split("}", 1)[0]
 
     def val(name):
-        return re.search(r"--ex-%s:(#[0-9a-f]{6})" % name, dark).group(1)
+        return re.search(r"--ex-%s:(#[0-9a-f]{6})" % name, light).group(1)
 
     def lum(h):
         r, g, b = (int(h[i:i + 2], 16) for i in (1, 3, 5))
         return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
-    assert lum(val("surface")) > lum(val("canvas"))
-    assert lum(val("surface3")) > lum(val("surface"))
-    assert lum(val("field")) < lum(val("surface"))
-    assert lum(val("ink")) > 200
+    assert lum(val("ink")) < 80
+    assert lum(val("surface")) >= lum(val("canvas"))
 
 
 def test_the_executive_nav_contains_no_route_that_does_not_exist():
@@ -638,8 +636,6 @@ def test_the_executive_layer_is_its_own_route_authority():
     assert "export const EXECUTIVE" in body
 
 
-def test_the_executive_shell_offers_the_appearance_control():
-    """Executive participates in light / dark / system like every other
-    surface. A layer that cannot follow the setting is a layer that looks
-    broken the first time somebody changes it."""
-    assert "AppearanceToggle" in _src("ExecutiveSuite.jsx")
+def test_the_executive_shell_has_no_appearance_control():
+    """Spec section 66 removed the manual day/night toggle platform-wide."""
+    assert "AppearanceToggle" not in _src("ExecutiveSuite.jsx")

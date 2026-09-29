@@ -31,11 +31,13 @@ import { SellerIntelPanel } from './wsIntel'
 import { ValuationPanel } from './wsValuation'
 import { DocumentDrawer } from './wsDocuments'
 import { SharingWorkspace } from './wsSharing'
+import DealOpsPanel, { DistributionNotice, LeadTemperatureChip, useDistribution } from './ops/DealOpsPanel'
 import { EvoApp, Hero, PageSkeleton, PropertyThumb, Ring, Status, Tag, humanize, money, shortDate } from './ds/ds'
 import './ds/evo-pages.css'
 
 const TABS = [
   ['overview', 'Overview'],
+  ['ops', 'Callbacks, notes & control'],
   ['seller', 'Seller & conversation'],
   ['analysis', 'Analysis & comps'],
   ['offer', 'Offer & approvals'],
@@ -57,6 +59,7 @@ export default function WholesaleDeal() {
   const { dealId } = useParams()
   const [room, setRoom] = useState(null)
   const [tab, setTab] = useState('overview')
+  const distribution = useDistribution()
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -155,6 +158,7 @@ export default function WholesaleDeal() {
           <div className="evo-chips" style={{ marginTop: 'auto', paddingTop: 8 }}>
             <Status status={deal.stage} label={deal.stage_label} />
             {seller?.qualification_band ? <Band band={seller.qualification_band} /> : null}
+            {seller?.lead_id ? <LeadTemperatureChip leadId={seller.lead_id} /> : null}
           </div>
         </div>
       </section>
@@ -181,12 +185,13 @@ export default function WholesaleDeal() {
       </div>
 
       {tab === 'overview' ? <Overview room={room} goTo={setTab} reload={load} /> : null}
+      {tab === 'ops' ? <DealOpsPanel dealId={deal.id} /> : null}
       {tab === 'seller' ? <SellerTab room={room} act={act} busy={busy} /> : null}
       {tab === 'analysis' ? <AnalysisTab room={room} act={act} busy={busy} /> : null}
       {tab === 'offer' ? <OfferTab room={room} act={act} busy={busy} /> : null}
-      {tab === 'funding' ? <FundingWorkspace deal={room.deal} /> : null}
+      {tab === 'funding' ? <><DistributionNotice distribution={distribution} kind="funding" /><FundingWorkspace deal={room.deal} /></> : null}
       {tab === 'documents' ? <DocumentsTab room={room} act={act} busy={busy} /> : null}
-      {tab === 'buyers' ? <BuyersTab room={room} act={act} busy={busy} /> : null}
+      {tab === 'buyers' ? <><DistributionNotice distribution={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={busy} /></> : null}
       {tab === 'closing' ? <ClosingTab room={room} act={act} busy={busy} /> : null}
       {tab === 'sharing'
         ? <SharingWorkspace deal={deal} buyers={room.buyer_matches}

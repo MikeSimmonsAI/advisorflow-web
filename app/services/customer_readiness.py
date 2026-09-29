@@ -258,3 +258,18 @@ def data_state(db: Session, org: Organization) -> Dict[str, Any]:
         st, why = ST_CONFIGURED, "%d record(s), %d of them test data." % (total, test)
     return {"status": st, "reason": why, "total": total,
             "test_records": test, "real_records": real}
+
+
+def activation_readiness(db: Session, org: Organization) -> Dict[str, Any]:
+    """The seven Activation Readiness items (Company, Primary Location, Users,
+    Booking, SMS, Email, AI Automation) evaluated against the organization's
+    blueprint. Additive: `readiness()` above, and the activation gate that
+    reads it, are unchanged.
+    """
+    from app.services import org_blueprints as ob
+    key, why = ob.select_blueprint(org)
+    items = ob.activation_items(db, org, key)
+    done = sum(1 for i in items if i["status"] == ob.CONFIGURED)
+    counted = sum(1 for i in items if i["status"] != ob.NOT_REQUIRED)
+    return {"blueprint": key, "items": items, "complete": done, "total": counted,
+            "percent": int(round(100.0 * done / counted)) if counted else 100}

@@ -92,7 +92,8 @@ export default function LeadScraper() {
       .then(data => {
         const list = Array.isArray(data) ? data : (data?.orgs || [])
         setOrgs(list)
-        if (list.length > 0) setTargetOrgId(String(list[0].id))
+        // NO DEFAULT DESTINATION. Pre-selecting the first org is exactly how a
+        // scrape lands in the wrong customer; the operator must choose.
       })
       .catch(() => {})
       .finally(() => setOrgsLoading(false))
@@ -118,7 +119,7 @@ export default function LeadScraper() {
       })
       const res = data.results || []
       setResults(res)
-      setSearchMeta({ query: data.query, total: data.total })
+      setSearchMeta({ query: data.query, total: data.total, job_id: data.job_id })
       if (!res.length) { setErr('No results found. Try a broader query or different location.'); return }
 
       const phones = res.map(r => r.phone).filter(Boolean)
@@ -159,6 +160,7 @@ export default function LeadScraper() {
         // Org ids are strings (e.g. "org-god-platform"); parseInt turned them into
         // NaN, which serialized to null and lost the target org entirely.
         target_org_id: String(targetOrgId),
+        job_id: searchMeta?.job_id || undefined,
       })
       setImportResult(data)
       setSel(new Set())
@@ -175,6 +177,9 @@ export default function LeadScraper() {
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Lead Scraper</h1>
         <p style={{ color: 'var(--text-muted)', marginTop: 4, fontSize: 14 }}>
           Find local businesses via Google Places → validate phones → import to any org.
+          Imports are normalized, deduplicated and checked against the organization's suppression list first.
+          To stage results for review and routing instead, use{' '}
+          <a href="/god/lead-intelligence?tab=scraper" style={{ color: 'var(--accent,#3b82f6)' }}>Lead Intelligence</a>.
         </p>
       </div>
 
@@ -355,6 +360,13 @@ export default function LeadScraper() {
               <div style={{ background: 'rgba(34,197,94,.1)', border: '1px solid rgba(34,197,94,.3)', borderRadius: 8, padding: '10px 16px', marginBottom: 14, fontSize: 14, color: '#22c55e' }}>
                 ✅ Imported <strong>{importResult.imported}</strong> leads to <em>"{importResult.list_name}"</em>.
                 {importResult.skipped > 0 && <> {importResult.skipped} duplicate{importResult.skipped !== 1 ? 's' : ''} skipped.</>}
+                {importResult.suppressed > 0 && <> {importResult.suppressed} on the organization's suppression / DNC list skipped.</>}
+                {importResult.qualification && (
+                  <div style={{ fontSize: 12, marginTop: 4 }}>
+                    Qualification ({importResult.qualification.channel}):{' '}
+                    {Object.entries(importResult.qualification.buckets || {}).map(([b, c]) => `${b.replace(/_/g, ' ').toLowerCase()} ${c}`).join(' · ')}
+                  </div>
+                )}
                 <a href="/leads" style={{ color: '#22c55e', marginLeft: 10, fontWeight: 600 }}>View Leads →</a>
               </div>
             )}

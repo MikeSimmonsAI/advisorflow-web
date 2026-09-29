@@ -229,12 +229,18 @@ def db_session():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
+    # create_all just made every table, so the entitlement resolver need not
+    # probe for feature_overrides on this engine's first request (the probe is a
+    # once-per-process query in production; per test it would skew query counts).
+    from app.services import entitlement_resolver as _er
+    _er._TABLE_PRESENT[id(engine)] = True
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     session = SessionLocal()
     try:
         yield session
     finally:
         session.close()
+        _er._TABLE_PRESENT.pop(id(engine), None)
         # Releases the StaticPool connection and with it the in-memory database.
         engine.dispose()
 
@@ -289,8 +295,16 @@ def no_real_twilio_calls(monkeypatch):
         )
 
     try:
+        import sys
         import twilio.rest
+        _real_client = twilio.rest.Client
         monkeypatch.setattr(twilio.rest, "Client", _refuse)
+        # `from twilio.rest import Client` binds the class into the importing
+        # module (sms_service does exactly this), so patching twilio.rest alone
+        # does not intercept it. Refuse it in every app module that holds it.
+        for _name, _mod in list(sys.modules.items()):
+            if _name.startswith("app.") and getattr(_mod, "Client", None) is _real_client:
+                monkeypatch.setattr(_mod, "Client", _refuse)
     except ImportError:
         # Twilio not installed in this environment - nothing to guard.
         pass
