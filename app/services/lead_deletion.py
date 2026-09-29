@@ -109,15 +109,47 @@ def _preserve_opt_out(db: Session, lead: Lead) -> Optional[str]:
         return None  # not a usable US number - nothing a suppression could match
 
 
+def _release_or_refuse_seller_deals(db: Session, lead: Lead) -> List[str]:
+    """A lead that is the SELLER on a wholesale deal.
+
+    * Every such deal is sandbox/test, or already finished (stage closed/dead):
+      the seller is detached from those deals and the delete goes ahead - there
+      is no live deal to orphan. Returns the deal ids that were released.
+    * Any ACTIVE real deal: refused, naming the deal so the person can open it,
+      move it to Dead/Closed or change the seller, and then delete.
+    """
+    t = Base.metadata.tables.get("wholesale_deals")
+    if t is None:
+        return []
+    rows = db.execute(t.select().where(t.c.seller_lead_id == lead.id)).fetchall()
+    if not rows:
+        return []
+    lead_is_test = bool(getattr(lead, "is_test", False))
+    blocking = [r for r in rows
+                if not (lead_is_test or bool(getattr(r, "is_test", False))
+                        or (r.stage or "") in ("closed", "dead"))]
+    if blocking:
+        props = Base.metadata.tables.get("wholesale_properties")
+        names = []
+        for r in blocking[:3]:
+            label = None
+            if props is not None:
+                p = db.execute(props.select().where(props.c.id == r.property_id)).first()
+                if p is not None:
+                    label = getattr(p, "street_address", None) or getattr(p, "address", None)
+            names.append("%s (%s)" % (label or "deal", (r.stage or "").replace("_", " ")))
+        raise LeadDeleteRefused(
+            "This lead is the seller on an active wholesale deal: %s. Open the deal in Deal "
+            "Operations and move it to Dead or Closed (or change its seller), then delete the lead."
+            % "; ".join(names))
+    ids = [r.id for r in rows]
+    db.execute(t.update().where(t.c.id.in_(ids)).values(seller_lead_id=None))
+    return ids
+
+
 def delete_lead(db: Session, lead: Lead, actor_user_id: str) -> Dict:
     """Delete one lead safely. Raises LeadDeleteRefused for a business block."""
-    for (tname, cname), why in _REFUSE.items():
-        t = Base.metadata.tables.get(tname)
-        if t is None:
-            continue
-        hit = db.execute(t.select().with_only_columns(t.c[cname]).where(t.c[cname] == lead.id).limit(1)).first()
-        if hit:
-            raise LeadDeleteRefused(why)
+    released = _release_or_refuse_seller_deals(db, lead)
 
     lead_id, org_id = lead.id, lead.organization_id
     suppressed = _preserve_opt_out(db, lead)
@@ -128,7 +160,8 @@ def delete_lead(db: Session, lead: Lead, actor_user_id: str) -> Dict:
     from app.routers.audit_log_router import log_action
     log_action(db, org_id, actor_user_id, action="lead.delete",
                target_type="lead", target_id=lead_id,
-               details={"related": counts, "suppression_preserved": bool(suppressed)},
+               details={"related": counts, "suppression_preserved": bool(suppressed),
+                        "seller_detached_from_deals": released},
                commit=False)
     db.expunge(lead)
     db.execute(leads.delete().where(leads.c.id == lead_id))

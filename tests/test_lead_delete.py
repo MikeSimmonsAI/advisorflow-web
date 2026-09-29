@@ -178,3 +178,31 @@ def test_a_server_error_still_carries_cors_headers(db_session, sample_org):
     assert r.status_code == 500
     assert r.headers.get("access-control-allow-origin") == origin
     assert "boom" not in r.text
+
+
+def test_a_test_lead_or_a_finished_deal_releases_the_seller_and_deletes(client, db_session, sample_org, admin, h):
+    """Owner hit this on a ZZTEST lead: sandbox/finished deals must not block a delete."""
+    db_session.execute(text("PRAGMA foreign_keys=OFF"))
+    t_lead = _lead(db_session, sample_org.id, first_name="ZZTEST", phone="12145550145", is_test=True)
+    d1 = _ins(db_session, "wholesale_deals", organization_id=sample_org.id,
+              property_id=str(uuid.uuid4()), seller_lead_id=t_lead.id)
+    real = _lead(db_session, sample_org.id, first_name="Closed", phone="12145550146")
+    d2 = _ins(db_session, "wholesale_deals", organization_id=sample_org.id,
+              property_id=str(uuid.uuid4()), seller_lead_id=real.id, stage="dead")
+    for lid in (t_lead.id, real.id):
+        r = client.delete("/leads/%s" % lid, headers=h)
+        assert r.status_code == 200, r.text
+    deals = _t("wholesale_deals")
+    for did in (d1, d2):
+        row = db_session.execute(deals.select().where(deals.c.id == did)).first()
+        assert row is not None and row.seller_lead_id is None
+
+
+def test_an_active_real_deal_is_named_in_the_refusal(client, db_session, sample_org, admin, h):
+    db_session.execute(text("PRAGMA foreign_keys=OFF"))
+    lead = _lead(db_session, sample_org.id, phone="12145550147")
+    _ins(db_session, "wholesale_deals", organization_id=sample_org.id,
+         property_id=str(uuid.uuid4()), seller_lead_id=lead.id, stage="negotiating")
+    r = client.delete("/leads/%s" % lead.id, headers=h)
+    assert r.status_code == 409
+    assert "negotiating" in r.json()["detail"] and "Dead or Closed" in r.json()["detail"]
