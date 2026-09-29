@@ -143,3 +143,29 @@ def test_god_endpoints(client, db_session, world, god_headers):
 
 def test_god_endpoints_refuse_others(client, auth_headers):
     assert client.get("/god/email/inbound-mailboxes", headers=auth_headers).status_code in (401, 403)
+
+
+def test_fetch_reads_every_folder_except_sent_drafts_outbox_deleted(monkeypatch):
+    calls = []
+
+    class R:
+        def __init__(self, code, data):
+            self.status_code, self._d, self.text = code, data, ""
+
+        def json(self):
+            return self._d
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        calls.append(url)
+        if "/mailFolders/" in url:
+            return R(200, {"id": "F-" + url.rsplit("/", 1)[1]})
+        return R(200, {"value": [
+            {"id": "a", "parentFolderId": "F-careers"},       # a rule-filed folder
+            {"id": "b", "parentFolderId": "F-sentitems"},
+            {"id": "c", "parentFolderId": "F-junk"},
+            {"id": "d", "parentFolderId": "F-deleteditems"},
+        ]})
+    monkeypatch.setattr(S.httpx, "get", fake_get)
+    got = S._fetch("tok", datetime.utcnow() - timedelta(days=1))
+    assert [m["id"] for m in got] == ["a", "c"]
+    assert any(u.endswith("/me/messages") for u in calls)

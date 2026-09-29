@@ -122,12 +122,31 @@ def _access_token(box: InboundMailbox) -> str:
 
 # ── Graph read ───────────────────────────────────────────────────────────────
 
+# Folders that never hold a reply FROM a lead. Everything else is read -
+# including Junk and any folder a mailbox rule files mail into. (2026-09-29: the
+# support@evosyspro.live rules put Joshua's reply in "Careers / Indeed
+# Applicants"; an Inbox-only read saw nothing.)
+_SKIP_WELL_KNOWN = ("sentitems", "drafts", "outbox", "deleteditems")
+
+
+def _skip_folder_ids(token: str) -> set:
+    out = set()
+    for name in _SKIP_WELL_KNOWN:
+        r = httpx.get(f"{GRAPH}/me/mailFolders/{name}", headers={"Authorization": f"Bearer {token}"},
+                      params={"$select": "id"}, timeout=15)
+        if r.status_code == 200 and r.json().get("id"):
+            out.add(r.json()["id"])
+    return out
+
+
 def _fetch(token: str, since: datetime) -> List[dict]:
-    """Inbox messages received at/after `since`, oldest first. Raises on failure."""
+    """Messages in ANY folder except Sent/Drafts/Outbox/Deleted, received at or
+    after `since`, oldest first. Raises on failure."""
     iso = since.replace(tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    url = f"{GRAPH}/me/mailFolders/inbox/messages"
+    skip = _skip_folder_ids(token)
+    url = f"{GRAPH}/me/messages"
     params = {"$filter": f"receivedDateTime ge {iso}",
-              "$select": "id,internetMessageId,subject,from,receivedDateTime,body,bodyPreview,conversationId",
+              "$select": "id,internetMessageId,subject,from,receivedDateTime,body,bodyPreview,conversationId,parentFolderId",
               "$orderby": "receivedDateTime asc", "$top": 50}
     out: List[dict] = []
     while url and len(out) < MAX_MESSAGES_PER_RUN:
@@ -137,7 +156,7 @@ def _fetch(token: str, since: datetime) -> List[dict]:
         if r.status_code != 200:
             raise RuntimeError(f"Graph inbox read failed {r.status_code}: {r.text[:300]}")
         data = r.json()
-        out.extend(data.get("value", []))
+        out.extend(m for m in data.get("value", []) if m.get("parentFolderId") not in skip)
         url, params = data.get("@odata.nextLink"), None
     return out
 
