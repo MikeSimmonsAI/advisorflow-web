@@ -254,7 +254,7 @@ export default function RateRequests() {
               <span className={`lw-kpi-icon lw-tone-${c.tone === 'slate' ? 'blue' : c.tone}`}><Icon name={c.icon} /></span>
               <span className="lw-kpi-text">
                 <span className="lw-kpi-label">{c.label}</span>
-                <span className={`lw-kpi-value${isNum(n) ? '' : ' is-na'}`}>{isNum(n) ? n.toLocaleString('en-US') : NOT_AVAILABLE}</span>
+                <span className={`lw-kpi-value${isNum(n) ? '' : ' is-na'}`}>{isNum(n) ? n.toLocaleString('en-US') : (summary || summaryErr ? NOT_AVAILABLE : '—')}</span>
               </span>
             </button>
           )
