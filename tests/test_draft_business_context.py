@@ -73,6 +73,7 @@ def test_email_prompt_carries_the_business_and_never_the_home_org(db_session, wo
     assert "Atlantis Test Power" in p and "EVO Home" not in p
     assert "Energy Rate Review" in p and "TXU" in p
     assert "funeral" not in p.lower()
+    assert "complimentary" in p and "hope this message" in p  # banned in the rules
     assert res["options"][0]["body"].endswith("The Atlantis Test Power Team")
 
 

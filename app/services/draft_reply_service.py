@@ -452,6 +452,9 @@ Lead profile:
   service business needs you might have" or "I wanted to introduce myself and offer
   my assistance" with nothing specific behind it.
 - Introduce the business by "{org_name}" only. Never name any other company.
+- Never call anything free, complimentary or no-cost, and never promise savings,
+  unless THE BUSINESS section says so. No stock openers ("I hope this message
+  finds you well", "I wanted to reach out") - open with why you are writing.
 - Sign off as "{signature}".
 - Each option should have a different angle/hook.
 - Never be pushy or desperate. Always give them an easy out.
