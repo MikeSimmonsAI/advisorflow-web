@@ -2,9 +2,9 @@
 //
 // The organization's canonical contact database - every person or company an
 // import brought in - browsable, filterable and inspectable. It is NOT an
-// outreach surface: nothing here sends a message. The writes are the
-// per-contact "Promote to Lead" in the drawer and Delete (one contact from the
-// drawer, or the selected rows here) - each confirmed by a person. Deleting a
+// outreach surface: nothing here sends a message. The writes are Promote to
+// Lead and Delete - one contact from the drawer, or the selected rows here
+// (a page, or "select all N matching") - each confirmed by a person. Deleting a
 // contact keeps any lead it became and keeps a DNC number suppressed.
 //
 // Every number on this page is the server's. A KPI key the API does not
@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
+import { useTerminology } from '../../terminology'
 import PageShell from '../../components/PageShell'
 import '../../components/StatusBadge.css'
 import './Contacts.css'
@@ -119,6 +120,11 @@ export default function Contacts() {
   const [selected, setSelected] = useState(() => new Set())
   const [deleting, setDeleting] = useState(false)
   const [deleteMsg, setDeleteMsg] = useState(null)
+  const [progress, setProgress] = useState(null) // "Promoting 200 of 1,000…"
+  const [selectingAll, setSelectingAll] = useState(false)
+  const terminology = useTerminology()
+  const tiers = (terminology && terminology.tiers) || []
+  const [bulkTier, setBulkTier] = useState('')
 
   // Debounce the search box: 300ms after the last keystroke.
   useEffect(() => {
@@ -204,27 +210,87 @@ export default function Contacts() {
     })
   }
 
+  // Large selections go to the server in chunks, with progress on screen.
+  async function inChunks(ids, size, label, send) {
+    const out = []
+    for (let i = 0; i < ids.length; i += size) {
+      setProgress(`${label} ${fmtNum(Math.min(i + size, ids.length))} of ${fmtNum(ids.length)}…`)
+      out.push(await send(ids.slice(i, i + size)))
+    }
+    setProgress(null)
+    return out
+  }
+
+  async function selectAllMatching() {
+    if (selectingAll) return
+    setSelectingAll(true); setDeleteMsg(null)
+    try {
+      const q = new URLSearchParams(query); q.delete('page'); q.delete('per_page'); q.delete('sort')
+      const r = await api.get(`/intake/contacts/ids?${q.toString()}`)
+      setSelected(new Set((r && r.ids) || []))
+      if (r && r.truncated) setDeleteMsg({ ok: false, text: `Selected the first ${fmtNum(r.max)} matching contacts (the most at once). Run it again for the rest.` })
+    } catch (e) {
+      setDeleteMsg({ ok: false, text: `Could not select all: ${(e && e.message) || 'unknown error'}` })
+    } finally {
+      setSelectingAll(false)
+    }
+  }
+
   async function deleteSelected() {
     const ids = Array.from(selected)
     if (!ids.length || deleting) return
     const noun = ids.length === 1 ? 'contact' : 'contacts'
-    if (!window.confirm(`Delete ${ids.length} ${noun}? This cannot be undone.\n\n`
+    if (!window.confirm(`Delete ${fmtNum(ids.length)} ${noun}? This cannot be undone.\n\n`
       + 'Any lead a contact became is kept. Do-not-contact numbers stay suppressed.')) return
     setDeleting(true); setDeleteMsg(null)
     try {
-      const r = await api.post('/intake/contacts/bulk-delete', { ids })
-      const failed = (r && r.failed) || []
-      const missing = (r && r.not_found) || []
-      const n = (r && r.deleted) || 0
-      let msg = `Deleted ${n} of ${ids.length} ${noun}.`
+      const parts = await inChunks(ids, 200, 'Deleting', chunk => api.post('/intake/contacts/bulk-delete', { ids: chunk }))
+      const n = parts.reduce((a, r) => a + ((r && r.deleted) || 0), 0)
+      const failed = parts.flatMap(r => (r && r.failed) || [])
+      const missing = parts.reduce((a, r) => a + (((r && r.not_found) || []).length), 0)
+      const gone = new Set(parts.flatMap(r => (r && r.deleted_ids) || []))
+      let msg = `Deleted ${fmtNum(n)} of ${fmtNum(ids.length)} ${noun}.`
       if (failed.length) msg += ` ${failed.length} could not be deleted: ${failed[0].reason}`
-      if (missing.length) msg += ` ${missing.length} no longer existed.`
+      if (missing) msg += ` ${missing} no longer existed.`
       setDeleteMsg({ ok: !failed.length, text: msg })
       setSelected(new Set())
-      if (openId && (r.deleted_ids || []).includes(openId)) closeContact()
+      if (openId && gone.has(openId)) closeContact()
       onChanged()
     } catch (e) {
-      setDeleteMsg({ ok: false, text: `Delete failed: ${(e && e.message) || 'unknown error'}` })
+      setProgress(null)
+      setDeleteMsg({ ok: false, text: `Delete stopped: ${(e && e.message) || 'unknown error'}. Anything already deleted stays deleted.` })
+      onChanged()
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  async function promoteSelected() {
+    const ids = Array.from(selected)
+    if (!ids.length || deleting) return
+    const tierLabel = (tiers.find(t => t.value === bulkTier) || tiers[0] || {}).label || 'the first stage'
+    if (!window.confirm(`Promote ${fmtNum(ids.length)} ${ids.length === 1 ? 'contact' : 'contacts'} to leads in "${tierLabel}"?\n\n`
+      + 'This creates leads only. Nothing is sent, nothing is enrolled, and no texting permission is assumed. '
+      + 'Contacts that are already leads, do-not-contact, or have no phone and no working email are skipped.')) return
+    setDeleting(true); setDeleteMsg(null)
+    const body = bulkTier ? { tier: bulkTier } : {}
+    try {
+      const parts = await inChunks(ids, 100, 'Promoting', chunk => api.post('/intake/contacts/bulk-promote', { ...body, ids: chunk }))
+      const n = parts.reduce((a, r) => a + ((r && r.promoted) || 0), 0)
+      const held = parts.reduce((a, r) => a + ((r && r.held_over_capacity) || 0), 0)
+      const reasons = {}
+      parts.forEach(r => Object.entries((r && r.skipped_by_reason) || {}).forEach(([k, v]) => { reasons[k] = (reasons[k] || 0) + v }))
+      const skippedText = Object.entries(reasons).map(([k, v]) => `${fmtNum(v)} ${k.toLowerCase()}`).join(', ')
+      let msg = `Created ${fmtNum(n)} ${n === 1 ? 'lead' : 'leads'}.`
+      if (skippedText) msg += ` Skipped: ${skippedText}.`
+      if (held) msg += ` ${fmtNum(held)} are held over your plan's lead limit until space is available.`
+      setDeleteMsg({ ok: true, text: msg, leads: n > 0 })
+      setSelected(new Set())
+      onChanged()
+    } catch (e) {
+      setProgress(null)
+      setDeleteMsg({ ok: false, text: `Promotion stopped: ${(e && e.message) || 'unknown error'}. Leads already created stay created; run it again to finish (existing leads are skipped).` })
+      onChanged()
     } finally {
       setDeleting(false)
     }
@@ -278,7 +344,7 @@ export default function Contacts() {
       className="cw"
       eyebrow="Customer workspace"
       title="Contacts"
-      subtitle="Every contact your imports brought in. Browse, inspect, promote one at a time to a Lead when it is ready for sales work, or delete the ones you do not want."
+      subtitle="Every contact your imports brought in. Browse and inspect them, select the ones ready for sales work and promote them to Leads, or delete the ones you do not want."
       action={<Link className="cw-btn" to="/imports">Import Center</Link>}
     >
       {noAccess ? (
@@ -354,17 +420,38 @@ export default function Contacts() {
           {selected.size > 0 ? (
             <div className="cw-bulkbar" data-testid="contacts-bulkbar">
               <strong>{fmtNum(selected.size)} selected</strong>
+              {allOnPage && listTotal > selected.size ? (
+                <button className="cw-link" disabled={deleting || selectingAll} onClick={selectAllMatching}
+                        data-testid="contacts-select-all-matching">
+                  {selectingAll ? 'Selecting…' : `Select all ${fmtNum(listTotal)} matching`}
+                </button>
+              ) : null}
+              <span className="cw-bulk-spacer" />
+              {tiers.length ? (
+                <label className="cw-bulk-tier">
+                  <span>Lead stage</span>
+                  <select value={bulkTier} onChange={e => setBulkTier(e.target.value)} disabled={deleting}>
+                    {tiers.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </label>
+              ) : null}
+              <button className="cw-btn cw-btn--primary" disabled={deleting} onClick={promoteSelected}
+                      data-testid="contacts-promote-selected">
+                {`Promote to ${selected.size === 1 ? 'lead' : 'leads'}`}
+              </button>
               <button className="cw-btn cw-btn--danger" disabled={deleting} onClick={deleteSelected}
                       data-testid="contacts-delete-selected">
-                {deleting ? 'Deleting…' : `Delete ${selected.size === 1 ? 'contact' : 'contacts'}`}
+                {`Delete ${selected.size === 1 ? 'contact' : 'contacts'}`}
               </button>
               <button className="cw-link" disabled={deleting} onClick={() => setSelected(new Set())}>Clear selection</button>
+              {progress ? <span className="cw-muted" role="status">{progress}</span> : null}
             </div>
           ) : null}
           {deleteMsg ? (
             <div className={`cw-notice ${deleteMsg.ok ? 'cw-notice--ok' : 'cw-notice--warn'}`} role="status"
                  data-testid="contacts-delete-result">
               {deleteMsg.text}{' '}
+              {deleteMsg.leads ? <><Link to="/leads">Open Leads →</Link>{' '}</> : null}
               <button className="cw-link" onClick={() => setDeleteMsg(null)}>Dismiss</button>
             </div>
           ) : null}

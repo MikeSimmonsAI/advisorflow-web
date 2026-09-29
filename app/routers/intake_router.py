@@ -839,25 +839,14 @@ def _batch_codes(db: Session, org_id: str, ids) -> dict:
 _SORTS = ("recent", "name", "company")
 
 
-@router.get("/contacts")
-def list_contacts(record_class: Optional[str] = Query(None),
-                  classification: Optional[str] = Query(None),
-                  lifecycle: Optional[str] = Query(None),
-                  batch_id: Optional[str] = Query(None), search: Optional[str] = Query(None),
-                  has_email: Optional[bool] = Query(None),
-                  has_phone: Optional[bool] = Query(None),
-                  email_ready: Optional[bool] = Query(None),
-                  needs_enrichment: Optional[bool] = Query(None),
-                  historical_customer: Optional[bool] = Query(None),
-                  promoted: Optional[bool] = Query(None),
-                  sort: str = Query("recent"),
-                  page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
-                  db: Session = Depends(get_db), user=Depends(require_import_review)):
+def _contacts_query(db: Session, ctx, *, record_class=None, classification=None,
+                    lifecycle=None, batch_id=None, search=None, has_email=None,
+                    has_phone=None, email_ready=None, needs_enrichment=None,
+                    historical_customer=None, promoted=None):
+    """The Contacts screen's filter, shared by the list and the bulk selection
+    (so "select all matching" selects exactly what the list shows)."""
     import re
     from sqlalchemy import or_
-    if sort not in _SORTS:
-        raise HTTPException(422, f"sort must be one of: {', '.join(_SORTS)}")
-    ctx = CTX.resolve(db, user)
     q = db.query(OrgContact).filter(OrgContact.organization_id == ctx.org_id)
     if record_class:
         q = q.filter(OrgContact.record_class == record_class)
@@ -905,6 +894,31 @@ def list_contacts(record_class: Optional[str] = Query(None),
             conds.append(OrgContact.phone.contains(digits, autoescape=True))
             conds.append(OrgContact.mobile_phone.contains(digits, autoescape=True))
         q = q.filter(or_(*conds))
+    return q
+
+
+@router.get("/contacts")
+def list_contacts(record_class: Optional[str] = Query(None),
+                  classification: Optional[str] = Query(None),
+                  lifecycle: Optional[str] = Query(None),
+                  batch_id: Optional[str] = Query(None), search: Optional[str] = Query(None),
+                  has_email: Optional[bool] = Query(None),
+                  has_phone: Optional[bool] = Query(None),
+                  email_ready: Optional[bool] = Query(None),
+                  needs_enrichment: Optional[bool] = Query(None),
+                  historical_customer: Optional[bool] = Query(None),
+                  promoted: Optional[bool] = Query(None),
+                  sort: str = Query("recent"),
+                  page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
+                  db: Session = Depends(get_db), user=Depends(require_import_review)):
+    if sort not in _SORTS:
+        raise HTTPException(422, f"sort must be one of: {', '.join(_SORTS)}")
+    ctx = CTX.resolve(db, user)
+    q = _contacts_query(db, ctx, record_class=record_class, classification=classification,
+                        lifecycle=lifecycle, batch_id=batch_id, search=search,
+                        has_email=has_email, has_phone=has_phone, email_ready=email_ready,
+                        needs_enrichment=needs_enrichment,
+                        historical_customer=historical_customer, promoted=promoted)
     total = q.count()
     if sort == "name":
         # Plain column order (NULLS LAST) so ix_org_contacts_org_name
@@ -920,6 +934,35 @@ def list_contacts(record_class: Optional[str] = Query(None),
     codes = _batch_codes(db, ctx.org_id, [c.import_batch_id for c in rows])
     return {"total": total, "page": page, "per_page": per_page, "sort": sort,
             "contacts": [_contact_row(c, codes) for c in rows]}
+
+
+_SELECT_ALL_MAX = 25000
+
+
+@router.get("/contacts/ids")
+def contact_ids(record_class: Optional[str] = Query(None),
+                classification: Optional[str] = Query(None),
+                lifecycle: Optional[str] = Query(None),
+                batch_id: Optional[str] = Query(None), search: Optional[str] = Query(None),
+                has_email: Optional[bool] = Query(None),
+                has_phone: Optional[bool] = Query(None),
+                email_ready: Optional[bool] = Query(None),
+                needs_enrichment: Optional[bool] = Query(None),
+                historical_customer: Optional[bool] = Query(None),
+                promoted: Optional[bool] = Query(None),
+                db: Session = Depends(get_db), user=Depends(require_import_review)):
+    """Every contact id matching the Contacts filter - "select all N matching"."""
+    ctx = CTX.resolve(db, user)
+    q = _contacts_query(db, ctx, record_class=record_class, classification=classification,
+                        lifecycle=lifecycle, batch_id=batch_id, search=search,
+                        has_email=has_email, has_phone=has_phone, email_ready=email_ready,
+                        needs_enrichment=needs_enrichment,
+                        historical_customer=historical_customer, promoted=promoted)
+    ids = [r[0] for r in q.with_entities(OrgContact.id)
+           .order_by(OrgContact.created_at.desc(), OrgContact.id.desc())
+           .limit(_SELECT_ALL_MAX + 1).all()]
+    return {"ids": ids[:_SELECT_ALL_MAX], "total": len(ids[:_SELECT_ALL_MAX]),
+            "truncated": len(ids) > _SELECT_ALL_MAX, "max": _SELECT_ALL_MAX}
 
 
 def _contact_or_404(db: Session, ctx, contact_id: str) -> OrgContact:
@@ -1194,6 +1237,95 @@ def bulk_delete_contacts(body: ContactBulkDelete, db: Session = Depends(get_db),
     not_found = [i for i in ids if i not in have]
     return {"deleted": len(deleted), "deleted_ids": deleted, "failed": failed,
             "not_found": not_found, "requested": len(ids)}
+
+
+class ContactBulkPromote(BaseModel):
+    ids: List[str]
+    tier: Optional[str] = None
+    assigned_to_id: Optional[str] = None
+
+
+_BULK_PROMOTE_MAX = 200
+
+
+@router.post("/contacts/bulk-promote",
+             dependencies=[Depends(require_not_observation), Depends(require_import_review)])
+def bulk_promote_contacts(body: ContactBulkPromote, db: Session = Depends(get_db),
+                          user=Depends(require_tenant_context)):
+    """EXPLICIT HUMAN ACTION on the contacts a person selected: each becomes one
+    lead, by the same rules as the single "Promote to Lead" (app/services/
+    intake/promote.py) - no consent granted, nothing enrolled, nothing sent,
+    plan capacity HOLDS rather than drops. Contacts that cannot become a useful
+    lead are skipped and reported with the reason, never silently."""
+    from app.services import industry_templates, lead_scope
+    from app.services.intake import promote as PR
+    from app.models.models import Organization
+    ids = list(dict.fromkeys(i for i in (body.ids or []) if i))
+    if not ids:
+        raise HTTPException(400, "Select at least one contact.")
+    if len(ids) > _BULK_PROMOTE_MAX:
+        raise HTTPException(400, f"Promote at most {_BULK_PROMOTE_MAX} contacts per request.")
+    ctx = CTX.resolve(db, user)
+    if not _may_create_leads(user, db):
+        lead_scope.log_denial(user, "contact bulk promote: role may not create leads here", None)
+        raise HTTPException(403, "You do not have permission to create leads in this workspace.")
+    org = db.query(Organization).filter(Organization.id == ctx.org_id).first()
+    valid = [t["value"] for t in industry_templates.org_lead_tiers(org) if t.get("value")]
+    tier = (body.tier or "").strip() or (valid[0] if valid else None)
+    if tier is None or tier not in valid:
+        raise HTTPException(400, {"message": f"'{body.tier}' is not a lead tier for this "
+                                             "organization.", "valid_tiers": valid})
+    is_manager = lead_scope.is_manager_here(user, db)
+    assigned = (body.assigned_to_id or "").strip() or None
+    if assigned is not None:
+        if not is_manager and assigned != user.id:
+            raise HTTPException(403, "Only a workspace manager can assign leads to someone else.")
+        if not _user_in_workspace(db, assigned, ctx.org_id):
+            raise HTTPException(400, "assigned_to_id is not a user in this workspace.")
+    elif not lead_scope.is_god(user):
+        assigned = user.id
+
+    from app.services.intake import commit as CM
+    found = {c.id: c for c in db.query(OrgContact).filter(
+        OrgContact.organization_id == ctx.org_id, OrgContact.id.in_(ids)).all()}
+    promoted, held, skipped = [], 0, []
+    reasons = {}
+
+    def skip(cid, why):
+        skipped.append({"id": cid, "reason": why})
+        reasons[why] = reasons.get(why, 0) + 1
+
+    for cid in ids:
+        c = found.get(cid)
+        if c is None:
+            skip(cid, "Not a contact in this workspace")
+            continue
+        if c.archived_at is not None:
+            skip(cid, "Archived")
+            continue
+        if c.sms_status == "dnc":
+            skip(cid, "Do not contact")
+            continue
+        has_phone = bool(CM._lead_phone(c.mobile_phone or c.phone))
+        has_email = bool(c.email) and c.email_status not in CM._BAD_EMAIL
+        if not has_phone and not has_email:
+            skip(cid, "No phone and no working email")
+            continue
+        try:
+            out = PR.promote(db, ctx, c, tier=tier, assigned_to_id=assigned)
+            promoted.append(out["lead_id"])
+            held += 1 if out.get("held_over_capacity") else 0
+        except PR.AlreadyPromoted:
+            skip(cid, "Already a lead")
+        except PR.DoNotContact:
+            skip(cid, "Do not contact")
+        except Exception:  # noqa: BLE001 - one bad row must not sink the batch
+            db.rollback()
+            log.exception("bulk promote failed for contact %s", cid)
+            skip(cid, "Could not be promoted (server error)")
+    return {"requested": len(ids), "promoted": len(promoted), "lead_ids": promoted,
+            "held_over_capacity": held, "skipped": skipped, "skipped_by_reason": reasons,
+            "tier": tier}
 
 def _already_a_lead(db: Session, user, lead_id: Optional[str]):
     """409, naming the lead only if the caller may see it (an advisor is not
