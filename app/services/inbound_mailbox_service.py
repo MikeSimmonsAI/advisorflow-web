@@ -346,6 +346,33 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
     return {"mailbox": box.address, "checked": len(messages), "matched": matched, "errors": errors}
 
 
+def probe(db: Session, box: InboundMailbox) -> Dict:
+    """Read-only look at the mailbox: its folders and the 15 newest messages in
+    ANY folder, so "why was nothing read?" can be answered (moved to another
+    folder, Junk, a different account signed in...)."""
+    token = _access_token(box)
+    db.commit()
+    h = {"Authorization": f"Bearer {token}"}
+    me = httpx.get(f"{GRAPH}/me", headers=h, params={"$select": "mail,userPrincipalName,displayName"}, timeout=15)
+    folders = httpx.get(f"{GRAPH}/me/mailFolders", headers=h,
+                        params={"$select": "id,displayName,totalItemCount,unreadItemCount", "$top": 50}, timeout=15)
+    fmap = {f["id"]: f["displayName"] for f in (folders.json().get("value", []) if folders.status_code == 200 else [])}
+    msgs = httpx.get(f"{GRAPH}/me/messages", headers=h,
+                     params={"$select": "subject,from,receivedDateTime,parentFolderId",
+                             "$orderby": "receivedDateTime desc", "$top": 15}, timeout=20)
+    return {
+        "account": me.json() if me.status_code == 200 else {"error": me.status_code, "body": me.text[:300]},
+        "folders": ([{"name": f["displayName"], "total": f.get("totalItemCount"), "unread": f.get("unreadItemCount")}
+                     for f in folders.json().get("value", [])] if folders.status_code == 200
+                    else {"error": folders.status_code, "body": folders.text[:300]}),
+        "newest": ([{"received": m.get("receivedDateTime"), "subject": m.get("subject"),
+                     "from": ((m.get("from") or {}).get("emailAddress") or {}).get("address"),
+                     "folder": fmap.get(m.get("parentFolderId"), m.get("parentFolderId"))}
+                    for m in msgs.json().get("value", [])] if msgs.status_code == 200
+                   else {"error": msgs.status_code, "body": msgs.text[:300]}),
+    }
+
+
 def poll_all_mailboxes(db: Session) -> Dict:
     totals = {"mailboxes_polled": 0, "mailbox_checked": 0, "mailbox_matched": 0,
               "mailbox_errors": 0, "mailbox_results": []}

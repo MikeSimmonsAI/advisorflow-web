@@ -84,6 +84,17 @@ def poll_now(box_id: str, god: User = Depends(require_god), db: Session = Depend
     return {"result": result, "mailbox": _box_payload(db, box)}
 
 
+@router.get("/inbound-mailboxes/{box_id}/probe")
+def probe_mailbox(box_id: str, god: User = Depends(require_god), db: Session = Depends(get_db)):
+    """Read-only: folders and newest messages (subject/from/folder only)."""
+    from app.services.inbound_mailbox_service import MailboxAuthError, probe
+    box = _box_or_404(db, box_id)
+    try:
+        return probe(db, box)
+    except MailboxAuthError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 @router.post("/inbound-mailboxes/{box_id}/active")
 def set_active(box_id: str, active: bool = Query(...), god: User = Depends(require_god),
                db: Session = Depends(get_db)):
