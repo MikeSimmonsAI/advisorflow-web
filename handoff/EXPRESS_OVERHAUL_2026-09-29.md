@@ -83,3 +83,16 @@ Owner: "I just can't delete any contact" / "fix that delete lead option as well,
   Energy/Atlantis Leads workspace: checkboxes + bulk delete + "Delete lead" in the drawer. Lead detail page: Delete.
   All lead screens share frontend/src/utils/deleteRecords.js (same confirm, same "Deleted X of Y… reason" message).
 - Tests: tests/test_contact_delete.py (7), tests/frontend/deleteRecords.test.mjs.
+
+## 2026-09-29 afternoon — AI drafts + bulk promote
+- AI drafts (cba9860, 2253565): drafts used the SENDER's home org (Atlantis lead introduced as "EVO Integrated
+  Solutions LLC"), an account label as a person, and no business context. app/services/draft_context.py now
+  resolves the LEAD's org, industry, services, tagline, stage label, lead facts and the composer's booking type;
+  non-person accounts sign "The <Business> Team"; funeral wording only for funeral orgs; no invented free
+  offers/savings, no stock openers. Live check on the Guillermo Perez (Atlantis) draft: Atlantis Light & Power,
+  Energy Rate Review, Rio Grande Treats. Nothing sent.
+- Bulk promote (e437922): POST /intake/contacts/bulk-promote (200/request; same rules as single promote; skips DNC,
+  already-a-lead, no phone + no working email, with counts), GET /intake/contacts/ids (select all matching, cap
+  25,000). Contacts page: lead-stage picker, Promote to leads, "Select all N matching", chunked progress.
+  Live: Atlantis select-all = 10,861 (2,799 with phone), matches KPIs; sandbox ZZTEST Keep Sandbox promoted via UI
+  (lead fd40a2bd…, status new, consent untouched). Mike's real contacts NOT promoted — his call.
