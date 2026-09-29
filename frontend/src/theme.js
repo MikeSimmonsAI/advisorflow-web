@@ -157,10 +157,12 @@ export function initTheme() {
   if (cached) applyBrandPayload(cached)
   // The signed-in workspace's platform, from the last /branding/org answer,
   // so a non-brand host (localhost) paints the right brand on the first frame.
-  try {
-    const org = JSON.parse(localStorage.getItem('af_branding') || 'null')
-    applyWorkspaceTheme(org)
-  } catch { /* storage blocked */ }
+  if (!isGodPath()) {
+    try {
+      const org = JSON.parse(localStorage.getItem('af_branding') || 'null')
+      applyWorkspaceTheme(org)
+    } catch { /* storage blocked */ }
+  }
   return theme
 }
 
@@ -264,6 +266,11 @@ export function applyBrandPayload(brand) {
  * load, before this fetch resolves, which is what makes the database the source
  * of truth without reintroducing a flash.
  */
+/** True on a God Mode (/god...) route, where no customer brand applies. */
+export function isGodPath() {
+  try { return /^\/god(\/|$)/.test(window.location.pathname) } catch { return false }
+}
+
 export async function hydrateBrand(apiBase) {
   if (typeof window === 'undefined') return null
   try {
@@ -277,6 +284,9 @@ export async function hydrateBrand(apiBase) {
     } catch {
       /* storage blocked - the fetch still themed this page */
     }
+    // God Mode wears its own brand (GodShell resets it on mount); this async
+    // refresh must not repaint a God page with the last customer workspace.
+    if (isGodPath()) return brand
     applyBrandPayload(brand)
     // On a host that is not a brand domain (localhost), the signed-in
     // workspace's platform outranks whatever this host-level answer said, in
