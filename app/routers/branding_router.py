@@ -119,6 +119,31 @@ def get_branding(request: Request, db: Session = Depends(get_db)):
     return payload
 
 
+def _brand_offers(db, platform_row, feature_key):
+    """True when the brand layer (platform -> brand) leaves `feature_key` on."""
+    try:
+        from app.services import entitlement_resolver as _er
+        res = _er.evaluate(db, feature_key, platform_id=platform_row.id,
+                           level="brand", check_setup=False)
+        return bool(res.get("enabled"))
+    except Exception:  # noqa: BLE001 - presentation only; require_feature enforces
+        return True
+
+
+def _with_org_offer(platform, features):
+    """An organization entitled to Wholesale (its effective feature list names
+    it) is offered the product even where the brand default does not - that is
+    what an org-level override means. `features is None` is the legacy "all
+    modules" answer and leaves the brand's answer unchanged."""
+    if not platform:
+        return platform
+    offered = dict(platform.get("offered") or {})
+    if features is not None and "wholesale_real_estate" in features:
+        offered["wholesale"] = True
+    platform["offered"] = offered
+    return platform
+
+
 def _platform_brand(db, org):
     """The presentation of the platform (white-label brand) an organization
     belongs to, or None. Never raises: branding must not break a login."""
@@ -139,7 +164,15 @@ def _platform_brand(db, org):
                 "theme": cfg.get("theme_slug") or row.slug,
                 # Commercial product names this brand sells (EvoSysPro ->
                 # "EvoSys Wholesale"). None when the brand has not named one.
-                "products": {"wholesale": product_name(row.slug, "wholesale")}}
+                "products": {"wholesale": product_name(row.slug, "wholesale")},
+                # WHETHER the brand offers the module at all - a separate
+                # question from what it calls it. A brand with no commercial
+                # name (BookaBoost) still offers Wholesale unless the brand
+                # layer of the entitlement control plane switches it off; the
+                # shell then shows the neutral name "Wholesale". Refined per
+                # organization in get_org_branding (an org-level override can
+                # grant it under a brand that does not offer it).
+                "offered": {"wholesale": _brand_offers(db, row, "wholesale_real_estate")}}
     except Exception:  # noqa: BLE001
         return None
 
@@ -260,5 +293,5 @@ def get_org_branding(
         # browser. The frontend uses it ONLY when the hostname is not itself a
         # brand domain, so a brand domain still decides its own chrome exactly
         # as before and no brand can be shown on another brand's host.
-        "platform": _platform_brand(db, org),
+        "platform": _with_org_offer(_platform_brand(db, org), features),
     }

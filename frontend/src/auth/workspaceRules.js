@@ -129,7 +129,15 @@ export const WHOLESALE_FEATURE = 'wholesale_real_estate'
 
 export function productOffered(branding, module) {
   const p = branding && branding.platform
-  return !!(p && p.products && p.products[module])
+  if (!p) return false
+  // The server states whether the brand OFFERS the module (entitlement
+  // control plane: platform -> brand, plus an org-level grant) separately
+  // from what the brand CALLS it. BookaBoost offers Wholesale with no
+  // commercial name, so the name alone cannot answer this.
+  if (p.offered && Object.prototype.hasOwnProperty.call(p.offered, module)) {
+    return !!p.offered[module]
+  }
+  return !!(p.products && p.products[module])
 }
 
 export function canEnterProduct(branding, user, orgContext, module, featureKey) {

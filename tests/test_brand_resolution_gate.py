@@ -54,3 +54,34 @@ def test_product_names_are_brand_owned_and_never_guessed():
     assert product_name("bookaboost", "wholesale") is None
     assert product_name(None, "wholesale") is None
     assert product_name("evosyspro", "unknown_module") is None
+
+
+# ── Offering vs naming (express run 2026-09-28) ─────────────────────────────
+# BookaBoost has no commercial name for Wholesale, but the entitlement control
+# plane - not the name table - decides whether the brand OFFERS it. Fiber Cartel
+# (BookaBoost, entitled) could open every Wholesale screen by URL and find none.
+
+def test_bookaboost_offers_wholesale_by_default_without_borrowing_a_name(
+        client, auth_headers, db_session, sample_org):
+    _link(db_session, sample_org, "bookaboost", "BookaBoost")
+    p = client.get("/branding/org", headers=auth_headers).json()["platform"]
+    assert p["products"]["wholesale"] is None
+    assert p["offered"]["wholesale"] is True
+
+
+def test_a_brand_level_disable_withdraws_the_offer_and_an_org_grant_restores_it(
+        client, auth_headers, db_session, sample_org):
+    from app.services import entitlement_resolver as er
+    plat = _link(db_session, sample_org, "bookaboost", "BookaBoost")
+    er.set_override(db_session, scope="brand", scope_id=plat.id,
+                    feature_key="wholesale_real_estate", state="disabled",
+                    actor_user_id=None, reason="test")
+    db_session.commit()
+    p = client.get("/branding/org", headers=auth_headers).json()["platform"]
+    assert p["offered"]["wholesale"] is False
+    er.set_override(db_session, scope="org", scope_id=sample_org.id,
+                    feature_key="wholesale_real_estate", state="enabled",
+                    actor_user_id=None, reason="test")
+    db_session.commit()
+    body = client.get("/branding/org", headers=auth_headers).json()
+    assert body["platform"]["offered"]["wholesale"] is True

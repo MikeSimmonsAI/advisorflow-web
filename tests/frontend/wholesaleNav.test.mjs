@@ -247,6 +247,15 @@ check('God Mode has an EvoSys Wholesale entry', () => {
   if (!/action === 'wholesale'/.test(god)) throw new Error('JUMP entry not rendered')
 })
 
+check('a brand that offers the module without naming it (BookaBoost) shows it to an entitled workspace', () => {
+  const BB = { products: { wholesale: null }, offered: { wholesale: true } }
+  eq(productOffered({ ...ENABLED, platform: BB }, 'wholesale'), true, 'offered')
+  eq(enter({ ...ENABLED, platform: BB }, ADVISOR, null), true, 'entitled advisor')
+  eq(enter({ ...NOT_ENABLED, platform: BB }, ADVISOR, null), false, 'unentitled advisor')
+  const BB_OFF = { products: { wholesale: null }, offered: { wholesale: false } }
+  eq(enter({ ...ENABLED, platform: BB_OFF }, GOD, { orgId: 'x' }), false, 'brand withdrew it')
+})
+
 /* ── report ───────────────────────────────────────────────────────────────── */
 
 if (failures.length) {
