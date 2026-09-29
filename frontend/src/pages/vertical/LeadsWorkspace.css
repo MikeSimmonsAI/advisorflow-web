@@ -292,3 +292,12 @@ button.lw-kpi:hover, a.lw-kpi:hover { background: var(--bg-card-hover); }
   .lw-form-grid { grid-template-columns: minmax(0, 1fr); }
   .lw-dl { grid-template-columns: 96px minmax(0, 1fr); }
 }
+
+/* Selection + delete (2026-09-29) */
+.lw-check { width: 36px; text-align: center; }
+.lw-check input { width: 16px; height: 16px; cursor: pointer; }
+.lw-bulkbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; margin: 0 0 12px;
+  border-radius: 10px; background: var(--signal-blue-dim); color: var(--text-primary); }
+.lw-btn.lw-btn--danger { background: #c62828; border-color: #c62828; color: #ffffff; }
+.lw-btn.lw-btn--danger:hover:not(:disabled) { filter: brightness(1.08); }
+.lw-btn.lw-btn--danger:disabled { opacity: .6; cursor: not-allowed; }

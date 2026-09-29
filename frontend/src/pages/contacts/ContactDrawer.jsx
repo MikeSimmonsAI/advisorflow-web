@@ -1,7 +1,8 @@
 // ONE CONTACT, READ-ONLY, WITH ONE EXPLICIT ACTION.
 //
 // The drawer shows what GET /intake/contacts/{id} says about a contact and
-// offers exactly one write: "Promote to Lead", behind a confirm dialog. It
+// offers two writes, each behind a confirm: "Promote to Lead" and "Delete
+// contact" (a linked lead is kept; a DNC number stays suppressed). It
 // never sends anything, never enrolls anything and never infers consent -
 // SMS consent reads "No" unless the server says true.
 import { useCallback, useEffect, useState } from 'react'
@@ -126,6 +127,8 @@ export default function ContactDrawer({ contactId, onClose, onChanged }) {
   const [tab, setTab] = useState('overview')
   const [confirming, setConfirming] = useState(false)
   const [result, setResult] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteErr, setDeleteErr] = useState(null)
 
   const load = useCallback(() => {
     let live = true
@@ -143,7 +146,7 @@ export default function ContactDrawer({ contactId, onClose, onChanged }) {
   }, [contactId])
 
   useEffect(() => {
-    setTab('overview'); setResult(null); setConfirming(false); setData(null)
+    setTab('overview'); setResult(null); setConfirming(false); setData(null); setDeleteErr(null)
     return load()
   }, [load])
 
@@ -152,6 +155,25 @@ export default function ContactDrawer({ contactId, onClose, onChanged }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose, confirming])
+
+  async function handleDelete() {
+    if (deleting) return
+    const name = displayName((data && data.contact) || {})
+    if (!window.confirm(`Delete ${name}? This cannot be undone.\n\n`
+      + 'If this contact became a lead, the lead is kept. A do-not-contact number stays suppressed.')) return
+    setDeleting(true); setDeleteErr(null)
+    try {
+      await api.delete(`/intake/contacts/${contactId}`)
+      onChanged && onChanged()
+      onClose()
+    } catch (e) {
+      if (e && e.status === 403) setDeleteErr('You do not have permission to delete contacts in this workspace.')
+      else if (e && e.status === 404) setDeleteErr('This contact is not in the current workspace (it may already be deleted).')
+      else setDeleteErr((e && e.message) || 'Could not delete this contact.')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   function handlePromoted(r) {
     setConfirming(false)
@@ -210,7 +232,12 @@ export default function ContactDrawer({ contactId, onClose, onChanged }) {
                   Promote to Lead
                 </button>
               )}
+              <button className="cw-btn cw-btn--danger" onClick={handleDelete} disabled={deleting}
+                      data-testid="contact-delete">
+                {deleting ? 'Deleting…' : 'Delete contact'}
+              </button>
             </div>
+            {deleteErr ? <div className="cw-error" role="alert">{deleteErr}</div> : null}
 
             {result ? (
               <div className={`cw-notice ${result.already ? 'cw-notice--info' : 'cw-notice--ok'}`} role="status">

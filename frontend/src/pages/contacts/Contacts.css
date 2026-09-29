@@ -254,3 +254,15 @@ html:root[data-workspace-vertical="energy"] .cw-modal { background: #ffffff; }
   .cw-banner-cta { margin-left: 0; }
   .cw-kv { grid-template-columns: 110px minmax(0, 1fr); }
 }
+
+/* Selection + delete (2026-09-29) */
+.cw-check { width: 36px; text-align: center; }
+.cw-check input { width: 16px; height: 16px; cursor: pointer; }
+.cw-bulkbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px; margin: 0 0 12px; border-radius: 10px;
+  background: var(--signal-blue-dim); color: var(--text-primary);
+}
+.cw-btn--danger { background: #c62828; border-color: #c62828; color: #ffffff; }
+.cw-btn--danger:hover:not(:disabled) { filter: brightness(1.08); }
+.cw-btn--danger:disabled { opacity: .6; cursor: not-allowed; }

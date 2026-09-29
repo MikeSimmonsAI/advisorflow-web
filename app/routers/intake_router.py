@@ -1140,6 +1140,61 @@ def promote_contact(contact_id: str, body: PromoteBody = PromoteBody(),
     return out
 
 
+
+# ── Delete (explicit human action) ──────────────────────────────────────────
+# Same permission as archiving import batches (org admins by role, others by
+# grant). The contact is removed; a linked lead is KEPT and detached; a DNC /
+# opted-out number is written to suppression first
+# (app/services/contact_deletion.py).
+
+class ContactBulkDelete(BaseModel):
+    ids: List[str]
+
+
+_BULK_DELETE_MAX = 500
+
+
+@router.delete("/contacts/{contact_id}",
+               dependencies=[Depends(require_not_observation), Depends(require_import_manage)])
+def delete_contact(contact_id: str, db: Session = Depends(get_db),
+                   user=Depends(require_tenant_context)):
+    from app.services import contact_deletion
+    ctx = CTX.resolve(db, user)
+    c = _contact_or_404(db, ctx, contact_id)
+    return contact_deletion.delete_contact(db, c, getattr(user, "id", None))
+
+
+@router.post("/contacts/bulk-delete",
+             dependencies=[Depends(require_not_observation), Depends(require_import_manage)])
+def bulk_delete_contacts(body: ContactBulkDelete, db: Session = Depends(get_db),
+                         user=Depends(require_tenant_context)):
+    """Delete up to 500 selected contacts in this workspace. Ids that are not
+    this workspace's contacts are reported as not found - never touched."""
+    from app.services import contact_deletion
+    ids = list(dict.fromkeys(i for i in (body.ids or []) if i))
+    if not ids:
+        raise HTTPException(400, "Select at least one contact.")
+    if len(ids) > _BULK_DELETE_MAX:
+        raise HTTPException(400, f"Delete at most {_BULK_DELETE_MAX} contacts at a time.")
+    ctx = CTX.resolve(db, user)
+    found = (db.query(OrgContact)
+             .filter(OrgContact.organization_id == ctx.org_id, OrgContact.id.in_(ids)).all())
+    deleted, failed = [], []
+    for c in found:
+        cid = c.id
+        try:
+            contact_deletion.delete_contact(db, c, getattr(user, "id", None))
+            deleted.append(cid)
+        except Exception as e:  # noqa: BLE001 - one bad row must not sink the batch
+            db.rollback()
+            log.exception("contact delete failed for %s", cid)
+            failed.append({"id": cid, "reason": "Could not delete this contact (%s)."
+                           % type(e).__name__})
+    have = {c for c in deleted} | {f["id"] for f in failed}
+    not_found = [i for i in ids if i not in have]
+    return {"deleted": len(deleted), "deleted_ids": deleted, "failed": failed,
+            "not_found": not_found, "requested": len(ids)}
+
 def _already_a_lead(db: Session, user, lead_id: Optional[str]):
     """409, naming the lead only if the caller may see it (an advisor is not
     told the id of a colleague's lead)."""

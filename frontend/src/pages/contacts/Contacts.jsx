@@ -2,9 +2,10 @@
 //
 // The organization's canonical contact database - every person or company an
 // import brought in - browsable, filterable and inspectable. It is NOT an
-// outreach surface: there is no bulk action, nothing here sends a message,
-// and the only write is the per-contact "Promote to Lead" in the drawer,
-// which a person has to confirm.
+// outreach surface: nothing here sends a message. The writes are the
+// per-contact "Promote to Lead" in the drawer and Delete (one contact from the
+// drawer, or the selected rows here) - each confirmed by a person. Deleting a
+// contact keeps any lead it became and keeps a DNC number suppressed.
 //
 // Every number on this page is the server's. A KPI key the API does not
 // return reads "Not yet available" rather than a zero someone would believe.
@@ -115,6 +116,9 @@ export default function Contacts() {
   const [listErr, setListErr] = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
   const seq = useRef(0)
+  const [selected, setSelected] = useState(() => new Set())
+  const [deleting, setDeleting] = useState(false)
+  const [deleteMsg, setDeleteMsg] = useState(null)
 
   // Debounce the search box: 300ms after the last keystroke.
   useEffect(() => {
@@ -169,6 +173,9 @@ export default function Contacts() {
       .finally(() => { if (mine === seq.current) setLoading(false) })
   }, [query, reloadKey])
 
+  // A new page / filter / search starts with nothing selected.
+  useEffect(() => { setSelected(new Set()) }, [query])
+
   function setFilter(key, value) {
     setFilters(f => ({ ...f, [key]: value }))
     setPage(1)
@@ -188,6 +195,40 @@ export default function Contacts() {
     next.delete('contact')
     setParams(next, { replace: true })
   }, [params, setParams])
+
+  function toggleOne(id) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  async function deleteSelected() {
+    const ids = Array.from(selected)
+    if (!ids.length || deleting) return
+    const noun = ids.length === 1 ? 'contact' : 'contacts'
+    if (!window.confirm(`Delete ${ids.length} ${noun}? This cannot be undone.\n\n`
+      + 'Any lead a contact became is kept. Do-not-contact numbers stay suppressed.')) return
+    setDeleting(true); setDeleteMsg(null)
+    try {
+      const r = await api.post('/intake/contacts/bulk-delete', { ids })
+      const failed = (r && r.failed) || []
+      const missing = (r && r.not_found) || []
+      const n = (r && r.deleted) || 0
+      let msg = `Deleted ${n} of ${ids.length} ${noun}.`
+      if (failed.length) msg += ` ${failed.length} could not be deleted: ${failed[0].reason}`
+      if (missing.length) msg += ` ${missing.length} no longer existed.`
+      setDeleteMsg({ ok: !failed.length, text: msg })
+      setSelected(new Set())
+      if (openId && (r.deleted_ids || []).includes(openId)) closeContact()
+      onChanged()
+    } catch (e) {
+      setDeleteMsg({ ok: false, text: `Delete failed: ${(e && e.message) || 'unknown error'}` })
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const onChanged = useCallback(() => {
     loadSummary()
@@ -222,13 +263,22 @@ export default function Contacts() {
   const filtersActive = !!search || Object.entries(filters).some(([k, v]) => v !== EMPTY_FILTERS[k])
   const kpiLoading = !summary && !summaryErr
   const noAccess = (listErr && listErr.status === 403) || (summaryErr && summaryErr.status === 403)
+  const pageIds = contacts.map(c => c.id)
+  const allOnPage = pageIds.length > 0 && pageIds.every(id => selected.has(id))
+  function togglePage() {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (allOnPage) pageIds.forEach(id => next.delete(id)); else pageIds.forEach(id => next.add(id))
+      return next
+    })
+  }
 
   return (
     <PageShell
       className="cw"
       eyebrow="Customer workspace"
       title="Contacts"
-      subtitle="Every contact your imports brought in. Browse, inspect, and promote one at a time to a Lead when it is ready for sales work."
+      subtitle="Every contact your imports brought in. Browse, inspect, promote one at a time to a Lead when it is ready for sales work, or delete the ones you do not want."
       action={<Link className="cw-btn" to="/imports">Import Center</Link>}
     >
       {noAccess ? (
@@ -301,6 +351,24 @@ export default function Contacts() {
             {loading && list ? <span className="cw-muted">Updating…</span> : null}
           </div>
 
+          {selected.size > 0 ? (
+            <div className="cw-bulkbar" data-testid="contacts-bulkbar">
+              <strong>{fmtNum(selected.size)} selected</strong>
+              <button className="cw-btn cw-btn--danger" disabled={deleting} onClick={deleteSelected}
+                      data-testid="contacts-delete-selected">
+                {deleting ? 'Deleting…' : `Delete ${selected.size === 1 ? 'contact' : 'contacts'}`}
+              </button>
+              <button className="cw-link" disabled={deleting} onClick={() => setSelected(new Set())}>Clear selection</button>
+            </div>
+          ) : null}
+          {deleteMsg ? (
+            <div className={`cw-notice ${deleteMsg.ok ? 'cw-notice--ok' : 'cw-notice--warn'}`} role="status"
+                 data-testid="contacts-delete-result">
+              {deleteMsg.text}{' '}
+              <button className="cw-link" onClick={() => setDeleteMsg(null)}>Dismiss</button>
+            </div>
+          ) : null}
+
           {listErr && !noAccess ? (
             <div className="cw-error" role="alert">
               Contacts could not be loaded: {listErr.message || 'unknown error'}.{' '}
@@ -332,6 +400,10 @@ export default function Contacts() {
               <table className="cw-table">
                 <thead>
                   <tr>
+                    <th className="cw-check">
+                      <input type="checkbox" checked={allOnPage} onChange={togglePage}
+                             aria-label="Select all contacts on this page" />
+                    </th>
                     <th>Name</th>
                     <th>Company</th>
                     <th>Email</th>
@@ -352,6 +424,10 @@ export default function Contacts() {
                       <tr key={c.id} className={openId === c.id ? 'cw-row--active' : ''}
                           onClick={() => openContact(c.id)} tabIndex={0}
                           onKeyDown={e => { if (e.key === 'Enter') openContact(c.id) }}>
+                        <td className="cw-check" onClick={e => e.stopPropagation()}>
+                          <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleOne(c.id)}
+                                 aria-label={`Select ${displayName(c)}`} />
+                        </td>
                         <td>
                           <div className="cw-name">
                             <span className="cw-avatar">{initials(c)}</span>

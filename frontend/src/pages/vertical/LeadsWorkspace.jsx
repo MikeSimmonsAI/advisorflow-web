@@ -39,6 +39,7 @@ import { useTerminology } from '../../terminology'
 import { StatusBadge } from '../../components/StatusBadge'
 import { formatPhone } from '../../utils/phone'
 import './LeadsWorkspace.css'
+import { confirmLeadDelete, deleteLeadIds, deleteSummary } from '../../utils/deleteRecords'
 
 const BOARD_PAGE = 50
 const TABLE_PAGE = 50
@@ -390,7 +391,8 @@ export default function LeadsWorkspace() {
       ) : (
         <LeadTable mode={tab} filters={serverFilters} me={me} reloadKey={reloadKey}
           tierLabel={tierLabel} userName={userName} summary={summary} noLeadsAtAll={noLeadsAtAll} canContacts={isManager}
-          onOpen={setOpenLeadId} onAdd={() => setAddFor({ tier: '' })} />
+          onOpen={setOpenLeadId} onAdd={() => setAddFor({ tier: '' })}
+          onDeleted={(r) => { setNotice({ kind: r.ok ? 'ok' : 'error', text: r.text }); reload() }} />
       )}
 
       {/* ── lower panels ─────────────────────────────────────────────── */}
@@ -401,7 +403,8 @@ export default function LeadsWorkspace() {
 
       {openLeadId && (
         <LeadDrawer leadId={openLeadId} tiers={tiers} tierLabel={tierLabel} userName={userName}
-          reloadKey={reloadKey} onClose={() => setOpenLeadId(null)} onMove={moveLead} onSaved={reload} />
+          reloadKey={reloadKey} onClose={() => setOpenLeadId(null)} onMove={moveLead} onSaved={reload}
+          onDeleted={(text) => { setOpenLeadId(null); setNotice({ kind: 'ok', text }); reload() }} />
       )}
       {addFor && (
         <AddLeadModal tiers={tiers} initialTier={addFor.tier || tiers[0]?.key || ''}
@@ -602,9 +605,11 @@ function PipelineBoard({ canContacts, tiers, byTier, filters, reloadKey, noLeads
    TABLE — All / Mine / Recently Active / Lost.
    ═════════════════════════════════════════════════════════════════════════ */
 
-function LeadTable({ canContacts, mode, filters, me, reloadKey, tierLabel, userName, summary, noLeadsAtAll, onOpen, onAdd }) {
+function LeadTable({ canContacts, mode, filters, me, reloadKey, tierLabel, userName, summary, noLeadsAtAll, onOpen, onAdd, onDeleted }) {
   const [page, setPage] = useState(1)
   const [state, setState] = useState({ loading: true, rows: [], total: 0, error: null, windowed: false, truncated: false })
+  const [selected, setSelected] = useState(() => new Set())
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => { setPage(1) }, [mode, filters.q, filters.list, filters.status, filters.assigned, filters.tier])
 
@@ -647,6 +652,31 @@ function LeadTable({ canContacts, mode, filters, me, reloadKey, tierLabel, userN
   const pageRows = state.windowed ? state.rows.slice((page - 1) * TABLE_PAGE, page * TABLE_PAGE) : state.rows
   const pages = Math.max(1, Math.ceil((state.total || 0) / TABLE_PAGE))
 
+  // A different page, tab or filter starts with nothing selected.
+  useEffect(() => { setSelected(new Set()) }, [mode, page, filters.q, filters.list, filters.status, filters.assigned, filters.tier, reloadKey])
+  const pageIds = pageRows.map(l => l.id)
+  const allOnPage = pageIds.length > 0 && pageIds.every(id => selected.has(id))
+  function toggleOne(id) {
+    setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  }
+  function togglePage() {
+    setSelected(prev => {
+      const n = new Set(prev)
+      if (allOnPage) pageIds.forEach(id => n.delete(id)); else pageIds.forEach(id => n.add(id))
+      return n
+    })
+  }
+  async function deleteSelected() {
+    if (!selected.size || deleting) return
+    if (!confirmLeadDelete(selected.size)) return
+    setDeleting(true)
+    try {
+      const r = await deleteLeadIds(api, selected)
+      setSelected(new Set())
+      onDeleted && onDeleted(deleteSummary(r))
+    } finally { setDeleting(false) }
+  }
+
   return (
     <div className="lw-panel lw-tablepanel">
       {mode === 'recent' && (
@@ -667,6 +697,16 @@ function LeadTable({ canContacts, mode, filters, me, reloadKey, tierLabel, userN
         <p className="lw-note">Showing the newest {LOST_MERGE} leads per lost status. Choose a single status in the filter to page through all of them.</p>
       )}
       {state.error && <div className="lw-banner lw-banner--error">{state.error}</div>}
+      {selected.size > 0 && (
+        <div className="lw-bulkbar" data-testid="leads-bulkbar">
+          <strong>{selected.size.toLocaleString('en-US')} selected</strong>
+          <button type="button" className="lw-btn lw-btn--danger" disabled={deleting} onClick={deleteSelected}
+            data-testid="leads-delete-selected">
+            {deleting ? 'Deleting…' : `Delete ${selected.size === 1 ? 'lead' : 'leads'}`}
+          </button>
+          <button type="button" className="lw-btn" disabled={deleting} onClick={() => setSelected(new Set())}>Clear selection</button>
+        </div>
+      )}
       {state.loading ? <div className="lw-muted lw-pad">Loading…</div> : !state.error && pageRows.length === 0 ? (
         <div className="lw-empty">
           <span className="lw-col-empty-icon"><Icon name="users" size={28} /></span>
@@ -683,11 +723,14 @@ function LeadTable({ canContacts, mode, filters, me, reloadKey, tierLabel, userN
         <div className="lw-tablewrap">
           <table className="lw-table">
             <thead>
-              <tr><th>Name</th><th>Contact</th><th>Stage</th><th>Status</th><th>Assigned</th><th>Lead list</th><th>{mode === 'recent' ? 'Last activity' : 'Created'}</th></tr>
+              <tr><th className="lw-check"><input type="checkbox" checked={allOnPage} onChange={togglePage} aria-label="Select all leads on this page" /></th><th>Name</th><th>Contact</th><th>Stage</th><th>Status</th><th>Assigned</th><th>Lead list</th><th>{mode === 'recent' ? 'Last activity' : 'Created'}</th></tr>
             </thead>
             <tbody>
               {pageRows.map(l => (
                 <tr key={l.id} tabIndex={0} onClick={() => onOpen(l.id)} onKeyDown={e => { if (e.key === 'Enter') onOpen(l.id) }}>
+                  <td className="lw-check" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={selected.has(l.id)} onChange={() => toggleOne(l.id)} aria-label={`Select ${leadName(l)}`} />
+                  </td>
                   <td className="lw-strong">{leadName(l)}</td>
                   <td>{l.phone ? formatPhone(l.phone) : ''}{l.phone && l.email ? <br /> : null}<span className="lw-muted">{l.email || (!l.phone ? '—' : '')}</span></td>
                   <td>{tierLabel(l.tier)}</td>
@@ -718,7 +761,9 @@ function LeadTable({ canContacts, mode, filters, me, reloadKey, tierLabel, userN
 
 const DRAWER_TABS = ['overview', 'activity', 'notes', 'tasks', 'related']
 
-function LeadDrawer({ leadId, tiers, tierLabel, userName, reloadKey, onClose, onMove, onSaved }) {
+function LeadDrawer({ leadId, tiers, tierLabel, userName, reloadKey, onClose, onMove, onSaved, onDeleted }) {
+  const [deleting, setDeleting] = useState(false)
+  const [delErr, setDelErr] = useState(null)
   const [lead, setLead] = useState(null)
   const [err, setErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -765,6 +810,18 @@ function LeadDrawer({ leadId, tiers, tierLabel, userName, reloadKey, onClose, on
   }
 
   const name = lead ? leadName(lead) : ''
+
+  async function deleteThis() {
+    if (!lead || deleting) return
+    if (!confirmLeadDelete(1, name)) return
+    setDeleting(true); setDelErr(null)
+    try {
+      const r = await deleteLeadIds(api, [lead.id])
+      const out = deleteSummary(r)
+      if (out.ok) onDeleted && onDeleted(`${name || 'Lead'} deleted.`)
+      else setDelErr(out.text)
+    } finally { setDeleting(false) }
+  }
   const address = lead ? [lead.street_address, [lead.city, lead.state].filter(Boolean).join(', '), lead.zip_code].filter(Boolean).join(' ') : ''
   const sms = lead?.sms_consent === true
     ? `Consent on record${lead.sms_consent_timestamp ? ` · ${fmtDateTime(lead.sms_consent_timestamp)}` : ''}${lead.sms_consent_source ? ` · ${lead.sms_consent_source}` : ''}`
@@ -796,7 +853,10 @@ function LeadDrawer({ leadId, tiers, tierLabel, userName, reloadKey, onClose, on
               <Link className="lw-btn lw-btn--primary" to={`/leads/${lead.id}`}>Open full record</Link>
               <MoveMenu lead={lead} tiers={tiers} align="right"
                 onMove={async (l, t) => { const ok = await onMove(l, t); if (ok) setLead(x => ({ ...x, tier: t })); return ok }} />
+              <button type="button" className="lw-btn lw-btn--danger" onClick={deleteThis} disabled={deleting}
+                data-testid="lead-delete">{deleting ? 'Deleting…' : 'Delete lead'}</button>
             </div>
+            {delErr && <div className="lw-banner lw-banner--error" role="alert">{delErr}</div>}
             <nav className="lw-drawer-tabs" role="tablist">
               {DRAWER_TABS.map(t => (
                 <button key={t} type="button" role="tab" aria-selected={tab === t}

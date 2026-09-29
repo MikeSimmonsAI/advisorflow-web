@@ -7,6 +7,7 @@ import OutcomeTracker from '../components/OutcomeTracker'
 import CaseFile from './CaseFile'
 import { useToast } from '../components/Toast'
 import { formatPhone } from '../utils/phone'
+import { confirmLeadDelete, deleteLeadIds, deleteSummary } from '../utils/deleteRecords'
 import { useTerminology } from '../terminology'
 import '../styles/shared.css'
 import './LeadDetail.css'
@@ -443,6 +444,8 @@ export default function LeadDetail() {
   const { leadId } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
+  const [deletingLead, setDeletingLead] = useState(false)
+  const [deleteLeadErr, setDeleteLeadErr] = useState('')
   // What the backend says this composer may actually do with this lead:
   // per-channel capability, the resolved SMS sender, and the exact booking URL
   // that Send would use. See app/routers/compose_router.py.
@@ -1033,11 +1036,31 @@ export default function LeadDetail() {
     ? aiConvChannel
     : (canSendBoth ? 'both' : canSendEmail ? 'email' : canSendSMS ? 'sms' : null)
 
+  async function handleDeleteThisLead() {
+    if (deletingLead) return
+    const nm = [lead.first_name, lead.last_name].filter(Boolean).join(' ')
+    if (!confirmLeadDelete(1, nm)) return
+    setDeletingLead(true); setDeleteLeadErr('')
+    try {
+      const out = deleteSummary(await deleteLeadIds(api, [lead.id]))
+      if (out.ok) navigate('/leads')
+      else setDeleteLeadErr(out.text)
+    } finally {
+      setDeletingLead(false)
+    }
+  }
+
   return (
     <div className="lead-detail-page">
       <button className="lead-detail-back" onClick={() => navigate('/leads')}>
         ← Back to leads
       </button>
+      {deleteLeadErr && (
+        <div role="alert" data-testid="lead-delete-error"
+             style={{ margin: '8px 0', padding: '10px 14px', borderRadius: 8, background: 'var(--signal-red-dim)', color: 'var(--text-primary)', border: '1px solid var(--border-danger)' }}>
+          {deleteLeadErr}
+        </div>
+      )}
 
       <div className="lead-detail-hero">
         <div className="lead-detail-hero-left">
@@ -1080,6 +1103,16 @@ export default function LeadDetail() {
                   <option value="remove_all">⛔ Remove from all outreach</option>
                 </select>
               )}
+              <button
+                className="btn btn--ghost btn--sm"
+                style={{ fontSize: 11, padding: '3px 10px', color: '#c62828', border: '1px solid rgba(198,40,40,0.4)' }}
+                onClick={handleDeleteThisLead}
+                disabled={deletingLead}
+                data-testid="lead-detail-delete"
+                title="Permanently delete this lead"
+              >
+                {deletingLead ? 'Deleting…' : '🗑 Delete'}
+              </button>
               {editSuccess && <span style={{ fontSize: 12, color: 'var(--signal-green)' }}>✓ Saved</span>}
             </div>
             <div className="lead-detail-contact">

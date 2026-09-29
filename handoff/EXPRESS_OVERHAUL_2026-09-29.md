@@ -70,3 +70,16 @@ user remain org-level (listed in /tmp notes; see XD summary in final report).
   customer session in the browser pane (proven via entitlement payload + access diagnostic instead).
 - "Powered by EvoSense" shows in every brand incl. BookaBoost — owner decision.
 - Derrick user invite (real email).
+
+## 2026-09-29 afternoon — system-wide delete
+Owner: "I just can't delete any contact" / "fix that delete lead option as well, system wide".
+- Contacts: `DELETE /intake/contacts/{id}` and `POST /intake/contacts/bulk-delete {ids}` (≤500), acting workspace
+  only (foreign id → 404 / not_found), capability lead_import_manage (org admins by role), observation mode refused.
+  app/services/contact_deletion.py reuses lead_deletion's schema-derived clearing: alt source ids removed, FK refs
+  detached, non-FK refs (leads.org_contact_id, inbound_call_logs, voicemails) nulled; a linked lead is KEPT; DNC /
+  opted-out / suppressed numbers written to suppression first; audit `contact.delete`. Import rollback afterwards
+  treats the contact as "already gone".
+- UI: Contacts page checkboxes + "Delete contacts" bar with a result line; "Delete contact" in the drawer.
+  Energy/Atlantis Leads workspace: checkboxes + bulk delete + "Delete lead" in the drawer. Lead detail page: Delete.
+  All lead screens share frontend/src/utils/deleteRecords.js (same confirm, same "Deleted X of Y… reason" message).
+- Tests: tests/test_contact_delete.py (7), tests/frontend/deleteRecords.test.mjs.
