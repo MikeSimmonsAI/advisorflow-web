@@ -244,7 +244,8 @@ def _store_reply(db: Session, lead, body: str, received_at: datetime):
         lead.status = "replied"
     if lead.assigned_to_id:
         name = " ".join(p for p in (lead.first_name, lead.last_name) if p) or "A lead"
-        db.add(Notification(user_id=lead.assigned_to_id, type="email_reply",
+        from app.models.models import NotificationType
+        db.add(Notification(user_id=lead.assigned_to_id, type=NotificationType.REPLY_RECEIVED,
                             message=f"{name} replied by email: {body[:140]}", lead_id=lead.id))
     return reply, True
 

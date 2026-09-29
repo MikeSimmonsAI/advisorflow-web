@@ -48,7 +48,8 @@ def list_mailboxes(god: User = Depends(require_god), db: Session = Depends(get_d
         "mailboxes": [_box_payload(db, b) for b in boxes],
         "recent": [{"id": r.id, "mailbox_id": r.mailbox_id, "from": r.from_address, "subject": r.subject,
                     "received_at": _iso(r.received_at), "outcome": r.outcome, "detail": r.detail,
-                    "lead_id": r.lead_id, "organization": org_names.get(r.organization_id)}
+                    "lead_id": r.lead_id, "organization": org_names.get(r.organization_id),
+                    "graph_message_id": r.graph_message_id, "logged_at": _iso(r.created_at)}
                    for r in log],
     }
 

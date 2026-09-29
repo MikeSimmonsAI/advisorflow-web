@@ -54,8 +54,10 @@ def test_a_reply_to_the_shared_mailbox_lands_on_the_lead(db_session, world):
     assert reply.body == "Yes, I'm interested. Call me Friday." and reply.source == "email"
     db_session.refresh(world.lead)
     assert world.lead.status == "replied"
-    assert db_session.query(Notification).filter(Notification.lead_id == world.lead.id,
-                                                 Notification.user_id == world.advisor.id).count() == 1
+    notes = db_session.query(Notification).filter(Notification.lead_id == world.lead.id,
+                                                  Notification.user_id == world.advisor.id).all()
+    from app.models.models import NotificationType
+    assert len(notes) == 1 and notes[0].type == NotificationType.REPLY_RECEIVED
     row = db_session.query(InboundMailboxMessage).one()
     assert row.outcome == "matched" and row.organization_id == world.atl.id
     # Running again (overlapping window) changes nothing.
