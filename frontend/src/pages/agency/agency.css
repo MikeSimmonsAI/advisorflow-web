@@ -139,6 +139,10 @@ a.ag-attn__row:hover { background: rgba(255, 255, 255, 0.03); text-decoration: n
 .ag-textarea { resize: vertical; min-height: 110px; }
 .ag-input[type="date"] { color-scheme: dark; }
 select.ag-input { color-scheme: dark; }
+/* The platform theme styles every select ([data-theme] select, more specific than
+   .ag-input) white; the agency's dark fields must win inside its pages. */
+[data-theme] select.ag-input { background: #0f0f10; color: var(--ag-text); }
+[data-theme] select.ag-input option { background: #0f0f10; color: var(--ag-text); }
 .ag-check { display: inline-flex; gap: 6px; align-items: center; color: var(--ag-text-2); font-size: 13px; cursor: pointer; }
 .ag-check input { accent-color: var(--ag-gold); }
 .ag-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
