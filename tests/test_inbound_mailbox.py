@@ -35,6 +35,12 @@ def world(db_session, sample_advisor, monkeypatch):
     box = InboundMailbox(address=BOX, is_active=True)
     db_session.add(box)
     db_session.commit()
+    # The mailbox is SHARED (two workspaces send from it), so a reply is only
+    # attached to a lead a workspace actually emailed.
+    db_session.add(EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id,
+                                subject="Explore Your Energy Options", body_html="b", status="sent",
+                                sent_at=datetime.utcnow() - timedelta(days=1)))
+    db_session.commit()
     return SimpleNamespace(atl=atl, other=other, quiet=quiet, lead=lead, box=box, advisor=sample_advisor)
 
 
@@ -94,10 +100,39 @@ def test_same_address_in_two_workspaces_goes_to_the_one_we_emailed(db_session, w
     assert db_session.query(Reply).filter(Reply.lead_id == twin.id).count() == 0
 
 
-def test_ambiguous_without_an_outbound_is_not_attached(db_session, world):
+def test_shared_mailbox_never_attaches_to_a_lead_nobody_emailed(db_session, world):
+    db_session.query(EmailMessage).delete()
     db_session.add(Lead(organization_id=world.other.id, first_name="J2", email="josh@example.com"))
     db_session.commit()
     S.poll_mailbox(db_session, world.box, fetch=lambda since: [_msg("g4", "josh@example.com", "yes")])
+    assert db_session.query(InboundMailboxMessage).one().outcome == "no_lead"
+    assert db_session.query(Reply).count() == 0
+
+
+def test_shared_mailbox_follows_the_subject_not_recency_across_tenants(db_session, world):
+    """Tenant A (atl) emailed Jane yesterday; tenant B (other) emailed her an hour
+    ago with a different subject. Her reply to A's email belongs to A."""
+    twin = Lead(organization_id=world.other.id, first_name="Joshua", email="josh@example.com", status="sent")
+    db_session.add(twin)
+    db_session.commit()
+    db_session.add(EmailMessage(lead_id=twin.id, sender_id=world.advisor.id, subject="Other company hello",
+                                body_html="b", status="sent", sent_at=datetime.utcnow() - timedelta(hours=1)))
+    db_session.commit()
+    S.poll_mailbox(db_session, world.box, fetch=lambda since: [
+        _msg("g7", "josh@example.com", "yes please", subject="RE: Explore Your Energy Options")])
+    assert db_session.query(Reply).filter(Reply.lead_id == world.lead.id).count() == 1
+    assert db_session.query(Reply).filter(Reply.lead_id == twin.id).count() == 0
+
+
+def test_shared_mailbox_two_tenants_no_subject_match_is_ambiguous(db_session, world):
+    twin = Lead(organization_id=world.other.id, first_name="Joshua", email="josh@example.com", status="sent")
+    db_session.add(twin)
+    db_session.commit()
+    db_session.add(EmailMessage(lead_id=twin.id, sender_id=world.advisor.id, subject="Other company hello",
+                                body_html="b", status="sent", sent_at=datetime.utcnow() - timedelta(hours=1)))
+    db_session.commit()
+    S.poll_mailbox(db_session, world.box, fetch=lambda since: [
+        _msg("g8", "josh@example.com", "who is this?", subject="Quick question")])
     assert db_session.query(InboundMailboxMessage).one().outcome == "ambiguous"
     assert db_session.query(Reply).count() == 0
 

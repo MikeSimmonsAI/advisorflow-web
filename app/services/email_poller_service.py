@@ -97,7 +97,7 @@ def _fetch_recent_emails(access_token: str,
         headers={"Authorization": f"Bearer {access_token}"},
         params={
             "$filter": f"receivedDateTime ge {since}",
-            "$select": "id,subject,from,receivedDateTime,body,bodyPreview,conversationId,categories",
+            "$select": "id,internetMessageId,subject,from,receivedDateTime,body,bodyPreview,conversationId,categories",
             # OLDEST FIRST, DELIBERATELY.
             #
             # This was `desc` with $top 50, so truncation dropped the OLDEST
@@ -243,8 +243,9 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             # Deduplicate the MESSAGE, not the words: same body received within
             # minutes. (lead_id, body) alone dropped a second "Yes" sent days
             # later - a real reply lost. See app/services/reply_dedupe.py.
-            from app.services.reply_dedupe import find_duplicate_email_reply
-            existing = find_duplicate_email_reply(db, lead.id, body_text, received_at)
+            from app.services.reply_dedupe import find_duplicate_email_reply, insert_email_reply
+            imid = (email.get("internetMessageId") or "").strip()[:500] or None
+            existing = find_duplicate_email_reply(db, lead.id, body_text, received_at, imid)
             if existing:
                 _mark_email_processed(access_token, email["id"])
                 continue
@@ -257,9 +258,12 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
                 received_at=received_at,
                 classification="neutral",
                 is_hot=False,
+                source_message_id=imid,
             )
-            db.add(reply)
-            db.flush()
+            if not insert_email_reply(db, reply):
+                # Another reader / overlapping run stored it a moment ago.
+                _mark_email_processed(access_token, email["id"])
+                continue
 
             # Advance lead status
             if lead.status in ("new", "sent"):
@@ -283,11 +287,11 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
                 else:
                     logger.info("AI conversation handled reply: %s action=%s", lead.id, ai_result.get("action"))
             except Exception as pe:
+                # No second hand-off: the AI may already have answered before it
+                # raised, and the pipeline would then answer the family again.
+                # The Reply is saved; the advisor sees it and the alert below.
+                db.rollback()
                 logger.error("Pipeline/AI error for email reply lead=%s: %s", lead.id, pe)
-                try:
-                    process_inbound_reply(db, lead, advisor, reply)
-                except Exception:
-                    pass
 
             # Commit what the AI / pipeline changed, before the alert and before
             # the Graph message is tagged processed. A later email's failure can

@@ -76,10 +76,10 @@ def test_mailbox_a_poison_message_does_not_pin_the_cursor_forever(db_session, ma
     now = datetime.utcnow()
     real_route = S.route
 
-    def route(db, org_ids, sender):
+    def route(db, org_ids, sender, subject=None):
         if sender == "poison@example.com":
             raise RuntimeError("boom")
-        return real_route(db, org_ids, sender)
+        return real_route(db, org_ids, sender, subject)
     monkeypatch.setattr(S, "route", route)
 
     poison_at = now - timedelta(days=2)
@@ -101,10 +101,10 @@ def test_mailbox_a_fresh_failure_holds_the_cursor_at_that_message(db_session, ma
     now = datetime.utcnow()
     real_route = S.route
 
-    def route(db, org_ids, sender):
+    def route(db, org_ids, sender, subject=None):
         if sender == "flaky@example.com":
             raise RuntimeError("transient")
-        return real_route(db, org_ids, sender)
+        return real_route(db, org_ids, sender, subject)
     monkeypatch.setattr(S, "route", route)
     fail_at = (now - timedelta(minutes=30)).replace(microsecond=0)
     msgs = [_gmsg("gf", "flaky@example.com", "x", fail_at),
@@ -270,3 +270,52 @@ def test_reply_dedupe_accepts_timezone_aware_times(db_session, sample_lead):
     db_session.commit()
     assert find_duplicate_email_reply(db_session, sample_lead.id, "Yes",
                                       _dt(2026, 10, 1, 14, 2, 0, tzinfo=_tz.utc)) is not None
+
+
+# ── review fixes (2026-10-01 pm): Message-ID dedupe, no double hand-off ─────
+
+def test_same_message_id_from_the_other_reader_is_one_reply(db_session, mailbox_world):
+    """The advisor's own inbox stored the message (with its Message-ID); the
+    shared mailbox then sees it with differently-cleaned text. One Reply."""
+    now = datetime.utcnow()
+    db_session.add(Reply(lead_id=mailbox_world.lead.id, body="Yes please call me", source="email",
+                         received_at=now - timedelta(hours=1), source_message_id="<g9@x>"))
+    db_session.commit()
+    S.poll_mailbox(db_session, mailbox_world.box,
+                   fetch=lambda s: [_gmsg("g9", "pat@example.com", "Yes please call me.", now - timedelta(hours=1))])
+    assert db_session.query(Reply).filter(Reply.lead_id == mailbox_world.lead.id).count() == 1
+
+
+def test_unique_index_stops_a_concurrent_second_insert(db_session, sample_lead):
+    from app.services.reply_dedupe import insert_email_reply
+    a = Reply(lead_id=sample_lead.id, body="x", source="email", source_message_id="<m@x>")
+    b = Reply(lead_id=sample_lead.id, body="x (other run)", source="email", source_message_id="<m@x>")
+    assert insert_email_reply(db_session, a) is True
+    assert insert_email_reply(db_session, b) is False
+    db_session.commit()
+    assert db_session.query(Reply).filter(Reply.lead_id == sample_lead.id).count() == 1
+    # Replies without a Message-ID (SMS, manual) are never constrained.
+    for _ in range(2):
+        assert insert_email_reply(db_session, Reply(lead_id=sample_lead.id, body="sms", source="sms")) is True
+
+
+def test_advisor_poller_stores_the_message_id(db_session, advisor_poller):
+    now = datetime.utcnow()
+    advisor_poller.inbox[:] = [dict(_amsg("a1", "lee@example.com", "Hi", now), internetMessageId="<a1@x>")]
+    EP.poll_inbox_for_replies(db_session, advisor_poller.advisor.id)
+    r = db_session.query(Reply).filter(Reply.lead_id == advisor_poller.lead.id).one()
+    assert r.source_message_id == "<a1@x>"
+
+
+def test_advisor_poller_ai_failure_is_not_handed_to_the_pipeline_too(db_session, advisor_poller, monkeypatch):
+    """The AI may have answered before raising; the pipeline fallback then
+    answered the family a second time."""
+    piped = []
+    def boom(*a, **k):
+        raise RuntimeError("ai blew up after sending")
+    monkeypatch.setattr("app.services.ai_conversation_service.handle_inbound_reply", boom)
+    monkeypatch.setattr("app.services.pipeline_service.process_inbound_reply", lambda *a, **k: piped.append(1))
+    advisor_poller.inbox[:] = [_amsg("a1", "lee@example.com", "Question", datetime.utcnow())]
+    EP.poll_inbox_for_replies(db_session, advisor_poller.advisor.id)
+    assert piped == []
+    assert db_session.query(Reply).filter(Reply.lead_id == advisor_poller.lead.id).count() == 1

@@ -159,3 +159,24 @@ def test_provider_mail_carries_a_plain_text_part():
     from app.services.email_service import html_to_text
     t = html_to_text('Hi Joshua,<br><br>Line two.<table><tr><td><a href="https://x/book/abc">Energy Rate Review</a></td></tr></table>')
     assert t == "Hi Joshua,\n\nLine two.\n\nEnergy Rate Review: https://x/book/abc"
+
+
+def test_a_send_already_in_flight_is_refused_not_sent_twice(client, db_session, sample_lead, auth_headers, sent):
+    """Double-click: the second request arrives while the first is still at the
+    provider (no EmailMessage row yet). It must not reach the provider."""
+    from app.routers import email_router as ER
+    lead = _lead_with_email(db_session, sample_lead)
+    key = (lead.id, "in flight")
+    assert ER._claim_send(key)          # the first request, still sending
+    try:
+        r = client.post(f"/email/send/{lead.id}", headers=auth_headers,
+                        json={"subject": "In flight", "body": "b", "include_booking_link": False})
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "duplicate_send"
+        assert sent == []
+    finally:
+        ER._release_send(key)
+    # Released (first request finished without recording) -> a send goes through.
+    r = client.post(f"/email/send/{lead.id}", headers=auth_headers,
+                    json={"subject": "In flight", "body": "b", "include_booking_link": False})
+    assert r.status_code == 200 and len(sent) == 1
+    assert ER._SEND_CLAIMS == {} or key not in ER._SEND_CLAIMS

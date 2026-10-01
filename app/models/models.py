@@ -21,6 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.sql import func
+from sqlalchemy import text
 from datetime import datetime
 import enum
 import uuid
@@ -1255,6 +1256,17 @@ class Reply(Base):
 
     received_at = Column(DateTime, server_default=func.now())
     reviewed_at = Column(DateTime, nullable=True)
+    # RFC 5322 Message-ID of an inbound email. Both email readers (and two
+    # overlapping poller runs) can see the same message; a partial UNIQUE index
+    # on (lead_id, source_message_id) makes the second insert fail instead of
+    # creating a second Reply and a second AI answer. NULL for SMS/manual.
+    source_message_id = Column(String, nullable=True)
+
+    __table_args__ = (
+        Index("uq_replies_lead_source_message", "lead_id", "source_message_id", unique=True,
+              postgresql_where=text("source_message_id IS NOT NULL"),
+              sqlite_where=text("source_message_id IS NOT NULL")),
+    )
 
     lead = relationship("Lead", back_populates="replies")
 

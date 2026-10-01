@@ -254,8 +254,23 @@ def candidate_org_ids(db: Session, box: InboundMailbox,
     return out
 
 
-def route(db: Session, org_ids: List[str], sender: str):
-    """(lead, outcome, detail)."""
+_SUBJ_PREFIX = re.compile(r'^\s*((re|fw|fwd|aw|sv)\s*(\[\d+\])?\s*:\s*)+', re.I)
+
+
+def _norm_subject(subject: Optional[str]) -> str:
+    return " ".join(_SUBJ_PREFIX.sub("", subject or "").lower().split())
+
+
+def route(db: Session, org_ids: List[str], sender: str, subject: Optional[str] = None):
+    """(lead, outcome, detail).
+
+    A SHARED mailbox (several workspaces send from it) never attaches a reply to
+    a lead no workspace emailed, and never picks between two TENANTS on recency
+    alone: the reply's subject must point at one of them, or it is logged as
+    ambiguous and attached to nobody. (Review 2026-10-01: tenant A emails Jane on
+    Monday, tenant B on Wednesday; Jane answers A's email on Thursday - recency
+    alone put her reply on B's lead.)
+    """
     from sqlalchemy import func
     from app.models.models import EmailMessage, Lead
     if not org_ids:
@@ -264,34 +279,58 @@ def route(db: Session, org_ids: List[str], sender: str):
                                    func.lower(Lead.email) == sender).all())
     if not leads:
         return None, "no_lead", f"No lead with {sender} in the workspaces that send from this mailbox."
-    if len(leads) == 1:
-        return leads[0], "matched", None
-    last = {}
-    for lead_id, sent_at in (db.query(EmailMessage.lead_id, func.max(EmailMessage.sent_at))
-                             .filter(EmailMessage.lead_id.in_([l.id for l in leads]))
-                             .group_by(EmailMessage.lead_id).all()):
-        if sent_at:
+    shared = len(set(org_ids)) > 1
+    last, subjects = {}, {}
+    for lead_id, sent_at, subj in (db.query(EmailMessage.lead_id, EmailMessage.sent_at, EmailMessage.subject)
+                                   .filter(EmailMessage.lead_id.in_([l.id for l in leads])).all()):
+        if sent_at and (lead_id not in last or sent_at > last[lead_id]):
             last[lead_id] = sent_at
+        subjects.setdefault(lead_id, set()).add(_norm_subject(subj))
+    if not shared:
+        if len(leads) == 1:
+            return leads[0], "matched", None
+        emailed = [l for l in leads if l.id in last]
+        if not emailed:
+            return None, "ambiguous", (f"{len(leads)} leads have {sender} and none was emailed by us; "
+                                       "not attached to any of them.")
+        emailed.sort(key=lambda l: last[l.id], reverse=True)
+        return emailed[0], "matched", f"{len(leads)} leads share this address; attached to the one emailed most recently."
+
     emailed = [l for l in leads if l.id in last]
     if not emailed:
-        return None, "ambiguous", (f"{len(leads)} leads have {sender} and none was emailed by us; "
-                                   "not attached to any of them.")
-    emailed.sort(key=lambda l: last[l.id], reverse=True)
-    return emailed[0], "matched", f"{len(leads)} leads share this address; attached to the one emailed most recently."
+        return None, "no_lead", (f"{sender} is a lead, but no workspace sharing this mailbox ever emailed "
+                                 "them, so the reply was not attached.")
+    want = _norm_subject(subject)
+    by_subject = [l for l in emailed if want and want in subjects.get(l.id, set())]
+    pool = by_subject or emailed
+    orgs = {l.organization_id for l in pool}
+    if len(orgs) > 1:
+        return None, "ambiguous", (f"{len(pool)} leads in {len(orgs)} workspaces were emailed at {sender}"
+                                   + (" with this subject" if by_subject else "")
+                                   + "; not attached to any of them.")
+    pool.sort(key=lambda l: last[l.id], reverse=True)
+    detail = None
+    if len(pool) > 1:
+        detail = f"{len(pool)} leads share this address; attached to the one emailed most recently."
+    elif not by_subject and want:
+        detail = "Subject did not match a sent email; attached to the only lead emailed at this address."
+    return pool[0], "matched", detail
 
 
-def _store_reply(db: Session, lead, body: str, received_at: datetime):
+def _store_reply(db: Session, lead, body: str, received_at: datetime, message_id: Optional[str] = None):
     from app.models.models import Notification, Reply
     # Same message (same body, received within minutes), not merely the same
     # words: a second "Yes" days later is a second reply. See reply_dedupe.
-    from app.services.reply_dedupe import find_duplicate_email_reply
-    existing = find_duplicate_email_reply(db, lead.id, body, received_at)
+    from app.services.reply_dedupe import find_duplicate_email_reply, insert_email_reply
+    message_id = (message_id or "").strip()[:500] or None
+    existing = find_duplicate_email_reply(db, lead.id, body, received_at, message_id)
     if existing:
         return existing, False
     reply = Reply(lead_id=lead.id, body=body, source="email", received_at=received_at,
-                  classification="neutral", is_hot=False)
-    db.add(reply)
-    db.flush()
+                  classification="neutral", is_hot=False, source_message_id=message_id)
+    if not insert_email_reply(db, reply):
+        # A concurrent reader / run stored this Message-ID first.
+        return find_duplicate_email_reply(db, lead.id, body, received_at, message_id), False
     if lead.status in (None, "", "new", "sent"):
         lead.status = "replied"
     if lead.assigned_to_id:
@@ -387,7 +426,7 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
             if not sender or sender == box.address:
                 row.outcome, row.detail = "own_mail", "Sent by the mailbox itself."
             else:
-                lead, outcome, detail = route(db, org_ids, sender)
+                lead, outcome, detail = route(db, org_ids, sender, m.get("subject"))
                 row.outcome, row.detail = outcome, detail
                 if lead is not None:
                     body = clean_body((m.get("body") or {}).get("content") or m.get("bodyPreview") or "")
@@ -395,7 +434,7 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                         subj = (m.get("subject") or "").strip()
                         body = ("(Forwarded the email with no message of their own.)"
                                 if re.match(r'(?i)^(fwd?|fw):', subj) else "(Replied with no text.)")
-                    reply, created = _store_reply(db, lead, body, received)
+                    reply, created = _store_reply(db, lead, body, received, m.get("internetMessageId"))
                     row.organization_id, row.lead_id, row.reply_id = lead.organization_id, lead.id, reply.id
                     if not created:
                         row.detail = ((row.detail + " ") if row.detail else "") + "Already on the lead."

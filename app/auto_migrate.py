@@ -1004,6 +1004,8 @@ COLUMNS_TO_ADD = [
     ("leads", "ai_lead_quality_note", "TEXT"),
     # Reply review tracking — when a reply was reviewed/actioned by an advisor
     ("replies", "reviewed_at", "TIMESTAMP"),
+    # Inbound email Message-ID (2026-10-01): cross-reader / concurrent-run dedupe.
+    ("replies", "source_message_id", "VARCHAR"),
     # CRM contacts — new master-record schema columns (first_name/last_name split,
     # address fields, funeral-appropriate stages, lead link, etc.)
     ("crm_contacts", "first_name", "VARCHAR"),
@@ -1572,6 +1574,8 @@ ENUM_COLUMNS_TO_CONVERT_TO_STRING = [
 # table scans on messages and email_messages (potentially millions of rows)
 # because neither table had any indexes on lead_id, sent_at, or sender_id.
 INDEXES_TO_CREATE = [
+    # One Reply per inbound email per lead, whichever reader or run saw it.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_replies_lead_source_message ON replies(lead_id, source_message_id) WHERE source_message_id IS NOT NULL",
     # ── perf (2026-10-01): hot filter columns with no index ─────────────
     "CREATE INDEX IF NOT EXISTS ix_pipeline_conversations_lead_id ON pipeline_conversations(lead_id)",
     "CREATE INDEX IF NOT EXISTS ix_pipeline_conversations_org_stage ON pipeline_conversations(organization_id, stage)",

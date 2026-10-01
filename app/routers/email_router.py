@@ -141,6 +141,48 @@ def _send_custom_email(db: Session, current_user: User, lead: Lead, *, subject: 
   </td></tr>
 </table>"""
 
+    # IN-FLIGHT CLAIM. The duplicate check above reads EmailMessage rows, which
+    # only exist AFTER the provider answers; a double-click sends two requests
+    # that both pass it and both reach the provider. Claim (lead, subject)
+    # before the provider call; the loser gets the same 409 the composer
+    # already handles. Released when this request finishes, success or not.
+    _claim = (lead.id, (subject or "").strip().lower())
+    if not allow_duplicate and not _claim_send(_claim):
+        raise HTTPException(status_code=409, detail={
+            "code": "duplicate_send",
+            "message": f"This email (\"{subject}\") is already being sent to {lead.email}. Send it again anyway?"})
+    try:
+        return _deliver_custom_email(db, current_user, lead, advisor, identity, subject, body_html,
+                                     attachments)
+    finally:
+        if not allow_duplicate:
+            _release_send(_claim)
+
+
+_SEND_CLAIMS: dict = {}
+_SEND_CLAIMS_LOCK = __import__("threading").Lock()
+_SEND_CLAIM_TTL_S = 120
+
+
+def _claim_send(key) -> bool:
+    import time as _t
+    now = _t.monotonic()
+    with _SEND_CLAIMS_LOCK:
+        for k in [k for k, at in _SEND_CLAIMS.items() if now - at > _SEND_CLAIM_TTL_S]:
+            _SEND_CLAIMS.pop(k, None)
+        if key in _SEND_CLAIMS:
+            return False
+        _SEND_CLAIMS[key] = now
+        return True
+
+
+def _release_send(key) -> None:
+    with _SEND_CLAIMS_LOCK:
+        _SEND_CLAIMS.pop(key, None)
+
+
+def _deliver_custom_email(db, current_user, lead, advisor, identity, subject, body_html, attachments):
+    from app.services.email_service import send_email_via_provider
     # FROM THE ADVISOR'S OWN MAILBOX when they connected Microsoft 365 (the
     # same rule the reviewed batch send uses): real mailbox, real reputation,
     # a copy in their Sent Items. Otherwise the organization's verified sending

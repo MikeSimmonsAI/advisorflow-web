@@ -163,3 +163,25 @@ def test_agent_profile_put_and_workload(client, world):
     assert a["avg_response_minutes"] is None
     assert client.put("/agency/agents/%s/profile" % world["fadv"].id, headers=h(db, world["mgr"]),
                       json={"max_active": 4}).status_code == 404
+
+
+def test_accept_and_sweep_race_only_one_wins(client, world):
+    """The agent accepts while the sweep is timing the same offer out (both read
+    state=offered). The conditional claim lets exactly one settle it."""
+    from app.services.agency import distribution as dist
+    db = world["db"]
+    l = lead(db, world["org"], "Race", needs=["family_protection"])
+    a = client.post("/agency/prospects/%s/assign" % l.id, headers=h(db, world["mgr"]),
+                    json={"agent_id": world["maya"].id}).json()
+    row = db.query(AgencyAssignment).get(a["id"])
+    stale = AgencyAssignment(id=row.id, state="offered")     # the sweep's stale copy
+    assert dist._claim(db, row, "accepted") is True
+    assert dist._claim(db, stale, "timed_out") is False
+    db.commit()
+    db.expire_all()
+    assert db.query(AgencyAssignment).get(a["id"]).state == "accepted"
+    # A second accept / a decline after acceptance is a clean 409, not a re-offer.
+    hm = h(db, world["maya"])
+    assert client.post("/agency/assignments/%s/accept" % a["id"], headers=hm).status_code == 409
+    assert client.post("/agency/assignments/%s/decline" % a["id"], headers=hm, json={}).status_code == 409
+    assert db.query(AgencyAssignment).filter(AgencyAssignment.lead_id == l.id).count() == 1

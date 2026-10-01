@@ -24,8 +24,14 @@ SAME_MESSAGE_WINDOW = timedelta(minutes=5)
 
 
 def find_duplicate_email_reply(db: Session, lead_id: str, body: str,
-                               received_at: Optional[datetime]):
+                               received_at: Optional[datetime],
+                               source_message_id: Optional[str] = None):
     from app.models.models import Reply
+    if source_message_id:
+        hit = db.query(Reply).filter(Reply.lead_id == lead_id,
+                                     Reply.source_message_id == source_message_id).first()
+        if hit is not None:
+            return hit
     q = db.query(Reply).filter(Reply.lead_id == lead_id, Reply.body == body,
                                Reply.source == "email")
     if received_at is None:
@@ -40,3 +46,18 @@ def find_duplicate_email_reply(db: Session, lead_id: str, body: str,
         if r.received_at is None or lo <= r.received_at <= hi:
             return r
     return None
+
+
+def insert_email_reply(db: Session, reply) -> bool:
+    """Insert under a SAVEPOINT. False = a concurrent reader/run already stored
+    this Message-ID for the lead (unique index); nothing else is rolled back."""
+    from sqlalchemy.exc import IntegrityError
+    sp = db.begin_nested()
+    try:
+        db.add(reply)
+        db.flush()
+    except IntegrityError:
+        sp.rollback()
+        return False
+    sp.commit()
+    return True

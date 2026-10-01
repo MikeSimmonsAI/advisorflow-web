@@ -345,7 +345,11 @@ def accept(aid: str, ctx: Q.Ctx = Depends(ctx_dep)):
     a = _assignment(ctx, aid)
     if a.expires_at and a.expires_at < now():
         raise HTTPException(409, "Offer expired")
-    dist.accept(ctx.db, ctx.org_id, a, ctx.user.id)
+    try:
+        dist.accept(ctx.db, ctx.org_id, a, ctx.user.id)
+    except dist.AssignmentTaken:
+        ctx.db.rollback()
+        raise HTTPException(409, "This offer was already settled (accepted, declined or timed out).")
     ctx.db.commit()
     return dist.assignment_row(a, user_names(ctx.db, [a.agent_user_id]))
 
@@ -357,7 +361,11 @@ class DeclineIn(BaseModel):
 @router.post("/assignments/{aid}/decline", dependencies=_WRITE)
 def decline(aid: str, body: DeclineIn = Body(default=DeclineIn()), ctx: Q.Ctx = Depends(ctx_dep)):
     a = _assignment(ctx, aid)
-    nxt = dist.decline(ctx.db, ctx.org_id, a, ctx.user.id, body.reason)
+    try:
+        nxt = dist.decline(ctx.db, ctx.org_id, a, ctx.user.id, body.reason)
+    except dist.AssignmentTaken:
+        ctx.db.rollback()
+        raise HTTPException(409, "This offer was already settled (accepted, declined or timed out).")
     ctx.db.commit()
     names = user_names(ctx.db, [a.agent_user_id, nxt.agent_user_id if nxt else None])
     return {"declined": dist.assignment_row(a, names),

@@ -168,8 +168,26 @@ def offer(db: Session, org_id: str, lead: Lead, agent: User, actor_id: Optional[
     return a
 
 
+class AssignmentTaken(Exception):
+    """Another request (accept/decline/sweep) settled this offer first."""
+
+
+def _claim(db: Session, a: AgencyAssignment, new_state: str) -> bool:
+    """Atomic offered -> new_state. An agent accepting while the sweep times
+    the offer out (or a double-click) used to both 'win': accepted AND
+    reassigned. One conditional UPDATE decides; the loser changes nothing."""
+    n = (db.query(AgencyAssignment)
+         .filter(AgencyAssignment.id == a.id, AgencyAssignment.state == "offered")
+         .update({"state": new_state}, synchronize_session=False))
+    if n != 1:
+        return False
+    a.state = new_state
+    return True
+
+
 def accept(db: Session, org_id: str, a: AgencyAssignment, actor_id: str) -> AgencyAssignment:
-    a.state = "accepted"
+    if not _claim(db, a, "accepted"):
+        raise AssignmentTaken()
     a.responded_at = now()
     _hist(a, "accepted", actor_id)
     lead = db.query(Lead).filter(Lead.organization_id == org_id, Lead.id == a.lead_id).first()
@@ -206,7 +224,8 @@ def _next_or_escalate(db: Session, org_id: str, a: AgencyAssignment, actor_id: O
 
 
 def decline(db: Session, org_id: str, a: AgencyAssignment, actor_id: str, reason: Optional[str]):
-    a.state = "declined"
+    if not _claim(db, a, "declined"):
+        raise AssignmentTaken()
     a.responded_at = now()
     a.decline_reason = reason
     _hist(a, "declined", actor_id, reason)
@@ -224,7 +243,8 @@ def sweep(db: Session, org_id: str, actor_id: Optional[str], at=None) -> Dict[st
                        AgencyAssignment.expires_at < t).all())
     out = []
     for a in expired:
-        a.state = "timed_out"
+        if not _claim(db, a, "timed_out"):
+            continue  # accepted/declined by the agent a moment ago
         a.responded_at = t
         _hist(a, "timed_out", actor_id or "system")
         _audit(db, org_id, actor_id, "agency.assignment.timed_out", a)
