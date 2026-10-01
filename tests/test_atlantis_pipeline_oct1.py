@@ -214,6 +214,9 @@ def test_enroll_sets_enrolled_at_and_overview_counts_it(client, w):
     e = client.get("/energy-ops/queues", headers=h).json()["enrollments"]
     assert e["this_month"] == 1
     assert e["date_not_recorded"] == 1          # the legacy customer is NOT invented a date
+    # The drawer reads enrollment from the rate request itself (no extra call).
+    got = client.get(f"/rate-requests/{l.id}", headers=_h(db, adv)).json()
+    assert got["enrolled_at"] and got["relationship_type"] == "customer"
     assert [x["id"] for x in e["recent"]] == [l.id]
     db.refresh(legacy)
     assert legacy.enrolled_at is None

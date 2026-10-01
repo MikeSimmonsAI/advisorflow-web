@@ -211,6 +211,9 @@ def _row(lead: Lead, names, bookings, now) -> Dict[str, Any]:
         "last_activity_at": _iso(last),
         "age_days": int((now - lead.created_at).total_seconds() // 86400) if lead.created_at else None,
         "is_test": bool(lead.is_test),
+        # Enrollment is its own deliberate step (POST /{id}/enroll), not a status.
+        "enrolled_at": _iso(getattr(lead, "enrolled_at", None)),
+        "relationship_type": getattr(lead, "relationship_type", None),
     }
 
 

@@ -517,6 +517,15 @@ function RequestDrawer({ id, users, isManager, me, onClose, onChanged }) {
                 <div className="rr-owner"><span>Assigned to</span><strong>{d.assigned_to_name || 'Unassigned'}</strong></div>
               )}
             </div>
+            <EnrollPanel d={d} busy={busy} onEnroll={async (body) => {
+              setBusy(true)
+              try {
+                await api.post(`/rate-requests/${id}/enroll`, body)
+                setKey(k => k + 1)
+                onChanged(`${d.name || 'Customer'} enrolled.`)
+                return true
+              } catch (e) { setErr(errText(e)); return false } finally { setBusy(false) }
+            }} />
             {d.booked && d.booking && (
               <p className="lw-note">Appointment {d.booking.status}: {fmtDateTime(d.booking.booked_time)}{d.booking.appointment_type ? ` · ${d.booking.appointment_type}` : ''}</p>
             )}
@@ -592,6 +601,45 @@ function RequestDrawer({ id, users, isManager, me, onClose, onChanged }) {
         )}
       </aside>
     </div>
+  )
+}
+
+// ENROLL: the deliberate "this customer signed" step. It records the
+// supplier / contract end date the PERSON enters (never estimated), marks the
+// lead a customer and sets the enrollment date the Overview counts. Nothing is
+// sent. Setting the status to Completed alone does none of that.
+function EnrollPanel({ d, busy, onEnroll }) {
+  const [form, setForm] = useState(null)
+  if (d.enrolled_at) {
+    return <p className="lw-note rr-enrolled" data-testid="enrolled">Enrolled customer since {fmtDate(d.enrolled_at)}.</p>
+  }
+  if (!form) {
+    return (
+      <div className="lw-row-actions">
+        <button type="button" className="lw-btn lw-btn--primary" disabled={busy} data-testid="enroll-open"
+          onClick={() => setForm({ current_supplier: d.current_supplier || '', contract_end_date: d.contract_end_date || '',
+                                   rate_type: d.rate_type || '', note: '' })}>Enroll customer…</button>
+      </div>
+    )
+  }
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+  return (
+    <form className="lw-modal rr-inline-form" data-testid="enroll-form" onSubmit={async (e) => {
+      e.preventDefault()
+      const body = {}
+      for (const k of ['current_supplier', 'contract_end_date', 'rate_type', 'note']) if (form[k]) body[k] = form[k]
+      if (await onEnroll(body)) setForm(null)
+    }}>
+      <p className="lw-note">Records this customer as enrolled (Completed). Enter only what the customer signed — nothing is estimated and nothing is sent.</p>
+      <label className="rr-block">Supplier signed with<input value={form.current_supplier} onChange={set('current_supplier')} maxLength={200} /></label>
+      <label className="rr-block">Contract end date<input type="date" value={form.contract_end_date} onChange={set('contract_end_date')} /></label>
+      <label className="rr-block">Rate type<input value={form.rate_type} onChange={set('rate_type')} maxLength={100} placeholder="e.g. Fixed 12 months" /></label>
+      <label className="rr-block">Note<textarea rows={2} value={form.note} onChange={set('note')} maxLength={2000} /></label>
+      <div className="lw-row-actions lw-row-actions--end">
+        <button type="button" className="lw-btn" onClick={() => setForm(null)}>Cancel</button>
+        <button type="submit" className="lw-btn lw-btn--primary" disabled={busy}>Enroll</button>
+      </div>
+    </form>
   )
 }
 
