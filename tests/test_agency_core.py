@@ -185,3 +185,34 @@ def test_accept_and_sweep_race_only_one_wins(client, world):
     assert client.post("/agency/assignments/%s/accept" % a["id"], headers=hm).status_code == 409
     assert client.post("/agency/assignments/%s/decline" % a["id"], headers=hm, json={}).status_code == 409
     assert db.query(AgencyAssignment).filter(AgencyAssignment.lead_id == l.id).count() == 1
+
+
+def test_agent_can_open_a_prospect_offered_to_them_and_accept_it(client, world):
+    """Click-through bug: the Accept button lives on the prospect page, but the
+    lead is assigned only on accept, so the offered agent got 404 there and no
+    advisor could ever accept an offer in the app."""
+    db = world["db"]
+    l = lead(db, world["org"], "Offered", needs=["family_protection"])
+    a = client.post("/agency/prospects/%s/assign" % l.id, headers=h(db, world["mgr"]),
+                    json={"agent_id": world["maya"].id}).json()
+    hm, hb = h(db, world["maya"]), h(db, world["ben"])
+    for path in ("", "/brief", "/copilot"):
+        assert client.get("/agency/prospects/%s%s" % (l.id, path), headers=hm).status_code == 200, path
+        assert client.get("/agency/prospects/%s%s" % (l.id, path), headers=hb).status_code == 404, path
+    got = client.get("/agency/prospects/%s" % l.id, headers=hm).json()
+    assert got["assignment_state"] == "offered" and got["status"] and "email" in got
+    # The open offer opens READ only - not writes.
+    assert client.patch("/agency/prospects/%s/profile" % l.id, headers=hm,
+                        json={"preferred_contact": "email"}).status_code == 404
+    assert client.post("/agency/assignments/%s/accept" % a["id"], headers=hm).status_code == 200
+    assert client.get("/agency/prospects/%s" % l.id, headers=hm).status_code == 200
+
+
+def test_a_declined_offer_no_longer_opens_the_prospect(client, world):
+    db = world["db"]
+    l = lead(db, world["org"], "Gone", needs=["family_protection"])
+    a = client.post("/agency/prospects/%s/assign" % l.id, headers=h(db, world["mgr"]),
+                    json={"agent_id": world["maya"].id}).json()
+    hm = h(db, world["maya"])
+    assert client.post("/agency/assignments/%s/decline" % a["id"], headers=hm, json={"reason": "full"}).status_code == 200
+    assert client.get("/agency/prospects/%s" % l.id, headers=hm).status_code == 404

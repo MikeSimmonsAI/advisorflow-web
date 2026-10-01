@@ -70,6 +70,29 @@ def _lead(ctx: Q.Ctx, lead_id: str) -> Lead:
     return lead
 
 
+def _lead_readable(ctx: Q.Ctx, lead_id: str) -> Lead:
+    """READ access for the prospect page. An agent with an OPEN OFFER on a
+    prospect must be able to open it - that page is where they accept or
+    decline - but the lead is only assigned to them on accept, so normal lead
+    scope answered 404 and every offer to an advisor was a dead end. Only an
+    offer currently in state "offered" to THIS user in THIS workspace opens
+    it, and only for the GET views; writes still require normal scope."""
+    try:
+        return _lead(ctx, lead_id)
+    except HTTPException as e:
+        if e.status_code != 404:
+            raise
+        open_offer = ctx.db.query(AgencyAssignment.id).filter(
+            AgencyAssignment.organization_id == ctx.org_id, AgencyAssignment.lead_id == lead_id,
+            AgencyAssignment.agent_user_id == ctx.user.id, AgencyAssignment.state == "offered").first()
+        if open_offer is None:
+            raise
+        lead = ctx.db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == ctx.org_id).first()
+        if lead is None:
+            raise
+        return lead
+
+
 def _org_user(ctx: Q.Ctx, user_id: str) -> User:
     u = ctx.db.query(User).filter(User.id == user_id, User.organization_id == ctx.org_id).first()
     if u is None:
@@ -181,11 +204,15 @@ def _profile_dict(p: Optional[AgencyProspectProfile]) -> Dict[str, Any]:
 
 @router.get("/prospects/{lead_id}")
 def get_prospect(lead_id: str, ctx: Q.Ctx = Depends(ctx_dep)):
-    lead = _lead(ctx, lead_id)
+    lead = _lead_readable(ctx, lead_id)
     db = ctx.db
     p = profile_for(db, ctx.org_id, lead.id)
     base = [r for r in Q.list_prospects(ctx, lead_id=lead.id) if r["id"] == lead.id]
-    out = dict(base[0]) if base else {"id": lead.id, "name": lead_name(lead)}
+    if not base:
+        # Opened through an open offer (_lead_readable): the scoped list does not
+        # include it yet, so build the same row from the lead itself.
+        base = Q._prospect_rows(ctx, [(lead, p)])
+    out = dict(base[0])
     out["profile"] = _profile_dict(p)
     consent = []
     if lead.sms_consent_timestamp or lead.sms_consent:
@@ -248,7 +275,7 @@ def prospect_brief(lead_id: str, assist: Optional[str] = Query(None, pattern="^(
     """Rules always compute the brief. `assist=ai` (a person asked) lets the
     model REPHRASE the narrative from these facts only; the verifier rejects
     anything new and the rules text stands (generated_by stays "rules")."""
-    lead = _lead(ctx, lead_id)
+    lead = _lead_readable(ctx, lead_id)
     p = profile_for(ctx.db, ctx.org_id, lead.id)
     rec = dist.recommend(ctx.db, ctx.org_id, lead) if not lead.assigned_to_id else None
     out = build_brief(lead, p, _conversation(ctx, lead.id), rec)
@@ -436,7 +463,7 @@ def put_agent_profile(user_id: str, body: AgentProfileIn, ctx: Q.Ctx = Depends(c
 @router.get("/prospects/{lead_id}/copilot")
 def copilot(lead_id: str, assist: Optional[str] = Query(None, pattern="^(ai|rules)$"),
             ctx: Q.Ctx = Depends(ctx_dep)):
-    lead = _lead(ctx, lead_id)
+    lead = _lead_readable(ctx, lead_id)
     p = profile_for(ctx.db, ctx.org_id, lead.id)
     out = analyze(_conversation(ctx, lead.id), lead_name(lead))
     out = grounding.enhance_copilot(out, assist == "ai", ctx.user.id, ctx.org_id, lead_name(lead))

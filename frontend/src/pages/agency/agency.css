@@ -265,7 +265,7 @@ select.ag-input { color-scheme: dark; }
 .ag-brief__narrative { margin: 8px 0 10px; font-size: 14px; line-height: 1.5; }
 
 /* ── boards ────────────────────────────────────────────────────────────── */
-.ag-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 16px; }
+.ag-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(168px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 16px; }
 .ag-board--stages { grid-auto-columns: minmax(136px, 1fr); }
 .ag-board__col { background: rgba(255, 255, 255, 0.02); border: 1px solid var(--ag-line-soft); border-radius: 10px; padding: 10px; min-height: 120px; }
 .ag-board__head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; letter-spacing: 0.12em;

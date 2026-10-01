@@ -249,7 +249,8 @@ export default function ProspectDetail() {
         </div>
         <div className="ag-col">
           <Section title="Assignment">
-            {p.assigned_agent && p.assignment_state === 'accepted' ? <p>Accepted by <strong>{p.assigned_agent.name}</strong>.</p> : <Recommendation id={prospectId} isManager={isManager} onChanged={reloadAll} />}
+            {p.assigned_agent && p.assignment_state === 'accepted' ? <p>Accepted by <strong>{p.assigned_agent.name}</strong>.</p> : isManager ? <Recommendation id={prospectId} isManager={isManager} onChanged={reloadAll} />
+              : <p className="ag-muted">Your manager assigns prospects. An offer to you appears below — accept or decline it there.</p>}
             <h3 className="ag-h3">History</h3>
             <AssignmentHistory rows={p.assignment_history} onChanged={reloadAll} />
           </Section>
