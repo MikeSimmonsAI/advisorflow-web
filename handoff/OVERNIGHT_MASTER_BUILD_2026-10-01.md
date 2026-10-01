@@ -33,6 +33,31 @@ communications/calling, mobile/PWA, security/reliability. Budget 8h. Prior hando
   - Max Life offers: accept / decline / timeout-sweep settle an offer with one conditional UPDATE (offered → X);
     the loser gets 409 / is skipped. Previously accept + sweep could both win (accepted AND reassigned).
   - Noted only: a pydantic model nested inside a dict response skips the UTC "Z" marking (no live case found).
+- 12:45 owner away; browser-pane and Chrome sessions both signed out. Passwords are never typed and no production
+  token is minted, so live verification = the SAME CODE run locally (container) with the Max Life demo seed + QA
+  energy/wholesale workspaces, signed in through the real login form, driven by Playwright like a customer.
+  Production /version + /health + frontend bundle checked after every deploy.
+- 12:50 42 page loads (3 workspaces × desktop 1440 + phone 390): 0 JS errors, 0 backend 4xx/5xx, 0 login bounces.
+- 12:55–13:50 customer workflows clicked end to end; every bug found was fixed, tested and deployed:
+  - 74a48e7 Phone (/m) in a Max Life workspace said "0 needs attention" (Command Center: 9) and "Hi, DEMO" → agency
+    attention list + summary on the phone, rows drill to the record; greeting skips DEMO/QA/role labels.
+  - 7710f18 Max Life offer → accept was impossible for an advisor: Accept lives on the prospect page, the lead is
+    assigned only on accept, so the offered agent got 404. Open offer now grants READ of that prospect (GET
+    prospect/brief/copilot only; writes keep scope; declined/expired closes it). Advisors don't load the manager-only
+    recommendation. Assignment board fits five columns. The offered
+    agent sees the prospect read-only (no edit / copilot actions) until they accept.
+  - c413754 Atlantis "Enroll" had no screen (POST /rate-requests/{id}/enroll unused; "Completed" was only a
+    status, so Enrollments This Month never moved). Rate request drawer → Enroll customer (supplier, contract end,
+    rate type, note; nothing sent) → "Enrolled customer since …"; Overview Enrollments This Month = 1, Recent
+    Enrollments lists it.
+  - 5bd2cd1 Move Concierge asked staff to paste an internal Lead ID → customer search (name/phone/email, scoped).
+  - 8d4ac40 Wholesale "As of 5:54 PM" at 12:54 CT (naive utcnow().isoformat() string) → local time; 5 more
+    response stamps fixed the same way. "This morning: nothing needs you" while Needs attention listed a deal step →
+    "No decisions waiting — 1 deal has a next step".
+  - Verified working with no change: Sales Board move (age "Entered stage today"), mark lost (reason required) →
+    Lost (1) → reopen; Universal Intake 7 steps (4 rows → 3 contacts, 1 duplicate merged, 0 leads, type-the-
+    workspace-name gate); Max Life application prepared → submitted → underwriting → approved → issued → policy
+    (Pending without an effective date); Move Concierge create → checklist from services.
 - Browser-pane login expired ~10:15 → live click-verification and Max Life demo creation wait on the owner signing in.
 
 ## What shipped (by area)
@@ -95,14 +120,26 @@ communications/calling, mobile/PWA, security/reliability. Budget 8h. Prior hando
 - Cadence cron reported success when an org failed; one org's DB error broke later orgs.
 - Import commit claim was not atomic across instances → conditional UPDATE claim (409 for the loser).
 
-## Owner decisions / Mike-only
-- Same phone + different name: currently a NEW contact flagged "shares_phone_with_other_record" (household /
-  switchboard rule); spec 43 asks for duplicate review. Changing it would push every shared household/office line in
-  imports into review. Left as is pending your call.
-- Max Life site hosting/domain + platform config + legal pages + logo.
-- Twilio voice number / webhooks, Tracerfy (paid) — unchanged.
+## Owner decisions / Mike-only (nothing else is waiting)
+1. Create the production Max Life demo workspace: sign in as platform owner → POST /god/demo/maxlife (one click/call;
+   refuses non-demo orgs). Then the same click-through runs on production data.
+2. Same phone + different name: today a NEW contact flagged "shares_phone_with_other_record" (household/switchboard
+   rule); spec 43 asks for duplicate review. Changing it pushes every shared household/office line in imports into
+   review. Decision needed; one-line change in app/services/intake/matching.py (~line 99) + 2 tests.
+3. Max Life public site go-live: hosting/domain, platform slug `maxlife` + public intake destination
+   (PUT /god/platform/public-intake/{id}), site origin in ALLOWED_ORIGINS, legal review of DRAFT legal pages, logo.
+4. Web push: VAPID keys (env VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT) + pywebpush in requirements.
+   Until then /push/config reports configured:false and nothing is sent.
+5. Twilio voice number + webhooks (spend) and Tracerfy (paid) — unchanged, still PLANNED.
+6. Email: connect Microsoft 365 for the Atlantis sender or verify an Atlantis sending domain (DNS).
+7. Calendar connection for the EvoSys Wholesale login (bookings currently land on the advisor's calendar only when
+   connected).
 
 ## Not done / known
-- Ask EvoAI is a supported-intent parser (no free-form RAG). Brief/copilot are rules-based (no LLM enhancement).
-- Push notification server side; in-browser calling.
-- Dead appointment_reminder_cron.py (unused, broken) — recommend deletion. Voice /status sets ended_at on every callback.
+- Ask EvoAI is a supported-intent parser (no free-form RAG). Brief/copilot are rules-based; optional AI rephrase is
+  verified against the facts.
+- Push server side is built but dormant until VAPID keys; in-browser calling not built (tel: fallback + call log).
+- Email send in-flight claim is per process (Render web runs one instance); a second instance would need a DB claim.
+- A pydantic model nested inside a dict response skips the UTC "Z" marking (no live case found).
+- Wholesale "This morning" (decisions) and deal "Needs attention" (next steps) are different lists by design; the
+  empty state now says which.

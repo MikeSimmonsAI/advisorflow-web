@@ -141,7 +141,7 @@ function AssignmentHistory({ rows, onChanged }) {
   )
 }
 
-function Copilot({ id, prospect, onChanged }) {
+function Copilot({ id, prospect, onChanged, readOnly = false }) {
   const [assist, setAssist] = useState(false)
   const cp = useAgency(`/agency/prospects/${id}/copilot${assist ? '?assist=ai' : ''}`)
   const [draft, setDraft] = useState('')
@@ -177,6 +177,7 @@ function Copilot({ id, prospect, onChanged }) {
           : <p className="ag-draft__body">{draft || <span className="ag-muted">No reply suggested.</span>}</p>}
       </div>
       {c.next_best_question ? <div className="ag-small"><span className="ag-k">Next best question</span> {c.next_best_question}</div> : null}
+      {readOnly ? <p className="ag-muted ag-small">Accept the offer to work this conversation.</p> : (
       <div className="ag-copilot__actions">
         <button className="ag-btn ag-btn--sm" disabled={busy || !draft} onClick={() => { setApproved(true); setEditing(false) }}>Approve</button>
         <button className="ag-btn ag-btn--sm ag-btn--ghost" disabled={busy} onClick={() => setEditing(e => !e)}>{editing ? 'Done editing' : 'Edit'}</button>
@@ -185,7 +186,7 @@ function Copilot({ id, prospect, onChanged }) {
         <button className="ag-btn ag-btn--sm ag-btn--ghost" disabled={busy} onClick={task}>Create Task</button>
         <button className="ag-btn ag-btn--sm ag-btn--ghost" disabled={busy} onClick={pause}>{c.automation_paused ? 'Resume Automation' : 'Pause Automation'}</button>
         <button className="ag-btn ag-btn--sm ag-btn--ghost" disabled={busy || c.human_takeover} onClick={takeover}>{c.human_takeover ? 'Human in control' : 'Human Takeover'}</button>
-      </div>
+      </div>)}
       {!approved && draft ? <p className="ag-muted ag-small">Approve the reply before simulating a send.</p> : null}
       {flash ? <p className="ag-ok" role="status">{flash}</p> : null}
       {error ? <ErrorState error={error} /> : null}
@@ -221,6 +222,8 @@ export default function ProspectDetail() {
   if (q.loading && !q.data) return <AgencyPage title="Prospect"><Loading /></AgencyPage>
   if (q.error) return <AgencyPage title="Prospect"><ErrorState error={q.error} onRetry={q.reload} /><Link to="/agency/prospects" className="ag-link">← Prospects</Link></AgencyPage>
   const p = q.data
+  // Opened through an open offer (not yet accepted): read only until accepted.
+  const readOnly = !isManager && p && p.assignment_state === 'offered' && !p.assigned_agent
   const pr = p.profile || {}
   const prov = p.provenance || {}
   return (
@@ -237,9 +240,9 @@ export default function ProspectDetail() {
           </Section>
           <Section title="Conversation & Copilot" className="ag-anchor" aside={<span id="copilot" />}>
             <Conversation rows={p.conversation} />
-            <Copilot id={prospectId} prospect={p} onChanged={q.reload} />
+            <Copilot id={prospectId} prospect={p} onChanged={q.reload} readOnly={readOnly} />
           </Section>
-          <Section title="Applications" aside={<button type="button" className="ag-btn ag-btn--sm ag-btn--ghost" onClick={() => toggle('application')} data-testid="open-new-application">{open === 'application' ? 'Close' : '+ Start application'}</button>}>
+          <Section title="Applications" aside={readOnly ? null : <button type="button" className="ag-btn ag-btn--sm ag-btn--ghost" onClick={() => toggle('application')} data-testid="open-new-application">{open === 'application' ? 'Close' : '+ Start application'}</button>}>
             {open === 'application' ? <NewApplicationForm prospect={{ id: p.id, name: p.name, agentId: p.assigned_agent?.id }} onCancel={() => setOpen(null)} onCreated={() => created('Application started as a draft.')} /> : null}
             {p.applications?.length ? <ul className="ag-linklist">{p.applications.map(a => <li key={a.id}><Link to={`/agency/applications/${a.id}`}>{humanize(a.product_category) || 'Application'} · {a.carrier || 'carrier not recorded'}</Link> <Pill value={a.status} />{a.stalled ? <Pill value="stalled" label="Stalled" /> : null}</li>)}</ul> : <p className="ag-muted">No applications.</p>}
           </Section>
@@ -254,7 +257,7 @@ export default function ProspectDetail() {
             <h3 className="ag-h3">History</h3>
             <AssignmentHistory rows={p.assignment_history} onChanged={reloadAll} />
           </Section>
-          <Section title="Family profile" aside={<button type="button" className="ag-btn ag-btn--sm ag-btn--ghost" onClick={() => toggle('profile')} data-testid="edit-profile">{open === 'profile' ? 'Close' : 'Edit stated facts'}</button>}>
+          <Section title="Family profile" aside={readOnly ? null : <button type="button" className="ag-btn ag-btn--sm ag-btn--ghost" onClick={() => toggle('profile')} data-testid="edit-profile">{open === 'profile' ? 'Close' : 'Edit stated facts'}</button>}>
             {open === 'profile' ? <ProfileEditor prospectId={p.id} profile={pr} onCancel={() => setOpen(null)} onSaved={() => created('Profile updated with the prospect\'s stated facts.')} /> : <>
             <p className="ag-muted ag-small">As stated by the prospect — not verified.</p>
             <dl className="ag-facts ag-facts--plain">
@@ -280,7 +283,7 @@ export default function ProspectDetail() {
               <ul className="ag-linklist">{prov.consent_events.map((c, i) => <li key={i}><Pill value={c.granted ? 'granted' : 'declined'} label={`${c.type.toUpperCase()} ${c.granted ? 'granted' : 'not granted'}`} tone={c.granted ? 'green' : 'muted'} /> {fmtDateTime(c.at)} {c.source ? `· ${c.source}` : ''}{c.text ? <div className="ag-small ag-muted">“{c.text}”</div> : null}</li>)}</ul>
             ) : <p className="ag-muted ag-small">No consent events recorded. Consent is never inferred.</p>}
           </Section>
-          <Section title="Appointments" aside={<button type="button" className="ag-btn ag-btn--sm ag-btn--ghost" onClick={() => toggle('appointment')} data-testid="open-new-appointment">{open === 'appointment' ? 'Close' : '+ New appointment'}</button>}>
+          <Section title="Appointments" aside={readOnly ? null : <button type="button" className="ag-btn ag-btn--sm ag-btn--ghost" onClick={() => toggle('appointment')} data-testid="open-new-appointment">{open === 'appointment' ? 'Close' : '+ New appointment'}</button>}>
             {open === 'appointment' ? <NewAppointmentForm prospect={{ id: p.id, name: p.name, agentId: p.assigned_agent?.id }} onCancel={() => setOpen(null)} onCreated={() => created('Appointment recorded as pending.')} /> : null}
             {p.appointments?.length ? <ul className="ag-linklist">{p.appointments.map(a => <li key={a.id}><Link to={`/agency/appointments/${a.id}`}>{humanize(a.type)} · {humanize(a.medium)} · {fmtDateTime(a.starts_at)}</Link> <Pill value={a.status} /></li>)}</ul> : <p className="ag-muted">None scheduled.</p>}
           </Section>
