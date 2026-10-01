@@ -373,11 +373,20 @@ def record_reply(property_id: str, payload: ReplyIn, db: Session = Depends(get_d
         raise HTTPException(status_code=422, detail="delivery must be manual_entry or sandbox_simulated")
     if payload.delivery == "sandbox_simulated" and not prop.is_test:
         raise HTTPException(status_code=409, detail="Simulated replies exist only for SANDBOX properties.")
+    open_states = ("active", "responded", "handed_off", "nurture")
+    if payload.delivery == "manual_entry":
+        # A person writing down what the seller said on a call they made by
+        # hand. Platform outreach being BLOCKED (e.g. low contact confidence,
+        # no consent) must not make that conversation unrecordable - nothing
+        # is sent here, the words are only kept and read. (S5 dead-end fix.)
+        open_states = open_states + ("pending", "blocked")
     eng = (db.query(EvoSenseEngagement)
            .filter(EvoSenseEngagement.organization_id == org_id,
                    EvoSenseEngagement.property_id == prop.id,
-                   EvoSenseEngagement.status.in_(("active", "responded", "handed_off", "nurture")))
+                   EvoSenseEngagement.status.in_(open_states))
            .order_by(EvoSenseEngagement.updated_at.desc()).first())
+    if eng is None and payload.delivery == "manual_entry" and CT.primary_owner(db, prop) is not None:
+        eng = OU._engagement(db, prop, EV.strategy_for(db, prop), CT.best_contact(db, prop)[0])
     if eng is None:
         raise HTTPException(status_code=409, detail="No conversation is open for this property.")
     if payload.delivery == "sandbox_simulated":

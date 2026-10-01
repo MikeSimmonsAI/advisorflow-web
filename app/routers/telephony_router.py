@@ -22,6 +22,10 @@ USER (tenant workspace)
   POST /voicemails/{id}/review
   GET  /voicemails/{id}/audio               authenticated proxy - the provider URL never leaves
   GET  /telephony/numbers                   org admin: read the org's number configuration
+  GET  /dialer/identity                     public contact vs outreach numbers ("Not configured")
+  GET  /dialer/queue                        next-call queue (same compliance gate as dialing)
+  GET  /dialer/leads/{lead_id}/history      calls + voicemails for one lead
+  POST /dialer/calls/manual                 log a tel: (own-phone) call so it can be dispositioned
 
 GOD (platform owner only)
   GET   /god/telephony/orgs/{org_id}
@@ -290,6 +294,9 @@ class DispositionIn(BaseModel):
     outcome: str
     notes: Optional[str] = Field(None, max_length=5000)
     callback_at: Optional[str] = None
+    # A follow-up task without a callback time (or with its own title).
+    follow_up: Optional[bool] = False
+    follow_up_title: Optional[str] = Field(None, max_length=300)
 
 
 @router.post("/calls/{call_id}/disposition")
@@ -300,6 +307,7 @@ def disposition(call_id: str, req: DispositionIn, db: Session = Depends(get_db),
     if req.outcome not in TS.DISPOSITIONS:
         raise HTTPException(status_code=422, detail="Unknown outcome. Use one of: %s"
                             % ", ".join(TS.DISPOSITIONS))
+    before = {"disposition": call.disposition, "notes": call.disposition_notes}
     call.disposition = req.outcome
     call.disposition_notes = (req.notes or "").strip() or None
     call.disposition_at = datetime.utcnow()
@@ -326,8 +334,84 @@ def disposition(call_id: str, req: DispositionIn, db: Session = Depends(get_db),
             db.add(t)
             db.flush()
             callback = {"kind": "task", "id": t.id, "due_at": _iso(t.due_at)}
+    if req.follow_up and callback is None:
+        lead = db.query(Lead).filter(Lead.id == call.lead_id,
+                                     Lead.organization_id == call.organization_id).first()
+        if lead is None:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        from app.models.work_models import LeadTask
+        title = (req.follow_up_title or "").strip() or (
+            "Follow up with %s" % (TS.lead_label(lead) or "contact"))
+        t = LeadTask(organization_id=call.organization_id, lead_id=lead.id, title=title[:300],
+                     details=call.disposition_notes, due_at=None, status="open",
+                     assigned_to_id=user.id, created_by_id=user.id, source="call_follow_up")
+        db.add(t)
+        db.flush()
+        callback = {"kind": "task", "id": t.id, "due_at": None}
     db.commit()
+    try:
+        from app.routers.audit_log_router import log_action
+        log_action(db, call.organization_id, user.id, action="voice.call_disposition",
+                   target_type="voice_call", target_id=call.id,
+                   details={"lead_id": call.lead_id, "outcome": call.disposition,
+                            "has_notes": bool(call.disposition_notes),
+                            "task_id": (callback or {}).get("id")},
+                   before=before,
+                   after={"disposition": call.disposition, "notes": call.disposition_notes})
+    except Exception:                                        # noqa: BLE001
+        log.exception("audit log failed for disposition on %s", call.id)
     return {"call": TS.call_json(call), "callback": callback}
+
+
+# ══ human dialer screen (2026-10-01) ══════════════════════════════════════════
+
+@router.get("/dialer/identity")
+def dialer_identity(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Who a call/text from this workspace comes from - public contact number
+    and outreach numbers kept separate; "Not configured" when missing."""
+    org_id = _org_id(db, user)
+    ident = NR.communication_identity(db, org_id, user=user)
+    ident["calling_mode"] = ("provider_bridge" if ident["voice_outbound"]["configured"]
+                             and ident["voice_outbound"]["provider_ready"] else "device_tel_fallback")
+    return ident
+
+
+@router.get("/dialer/queue")
+def dialer_queue(limit: int = Query(25, ge=1, le=100), scope: str = Query("mine"),
+                 db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    org_id = _org_id(db, user)
+    return TS.dialer_queue(db, user, org_id, limit=limit, everyone=(scope == "team"))
+
+
+@router.get("/dialer/leads/{lead_id}/history")
+def dialer_lead_history(lead_id: str, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user)):
+    lead = _lead_in_scope(db, user, lead_id)
+    return TS.lead_call_history(db, lead)
+
+
+class ManualCallIn(BaseModel):
+    lead_id: str
+
+
+@router.post("/dialer/calls/manual", status_code=201)
+def dialer_manual_call(req: ManualCallIn, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user),
+                       _w: User = Depends(require_not_observation)):
+    """Record a call the user placed from their own phone (tel: fallback) so
+    notes and a disposition can be saved. No provider call is made."""
+    lead = _lead_in_scope(db, user, req.lead_id)
+    try:
+        call = TS.start_manual_call_log(db, lead, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    try:
+        from app.routers.audit_log_router import log_action
+        log_action(db, lead.organization_id, user.id, action="voice.manual_call_logged",
+                   target_type="lead", target_id=lead.id, details={"call_id": call.id})
+    except Exception:                                        # noqa: BLE001
+        log.exception("audit log failed for manual call %s", call.id)
+    return TS.call_json(call)
 
 
 # ══ voicemails ═══════════════════════════════════════════════════════════════

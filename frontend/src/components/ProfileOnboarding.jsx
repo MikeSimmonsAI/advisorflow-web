@@ -124,19 +124,26 @@ export default function ProfileOnboarding() {
 
   // ── Minimized tab ──────────────────────────────────────────────────────
   if (minimized) {
+    // On a phone the full pill sat over page content (filters, card titles) on
+    // every screen, and on /m over the bottom tab bar. Narrow screens get a
+    // compact icon + count chip, lifted above the /m tab bar.
+    const narrow = typeof window !== 'undefined' && window.innerWidth <= 640
+    const onMobileShell = typeof window !== 'undefined' && /^\/m(\/|$)/.test(window.location.pathname)
     return (
       <button
         onClick={() => setMinimized(false)}
+        aria-label={`Complete your profile (${doneCount} of ${items.length} done)`}
+        title="Complete your profile"
         style={{
-          position: 'fixed', bottom: 16, right: 16, zIndex: 60,
+          position: 'fixed', bottom: onMobileShell ? 84 : 16, right: narrow ? 12 : 16, zIndex: 60,
           background: '#ffffff', border: '1px solid #d6e2f3',
-          borderRadius: 12, padding: '10px 16px', cursor: 'pointer', color: '#0f1b2d',
-          display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 6px 24px rgba(15,27,45,0.14)',
+          borderRadius: narrow ? 999 : 12, padding: narrow ? '6px 10px' : '10px 16px', cursor: 'pointer', color: '#0f1b2d',
+          display: 'flex', alignItems: 'center', gap: narrow ? 6 : 10, boxShadow: '0 6px 24px rgba(15,27,45,0.14)',
           fontFamily: 'Inter, sans-serif', fontSize: 13,
         }}
       >
-        <span style={{ fontSize: 18 }}>📋</span>
-        <span>Complete your profile</span>
+        <span style={{ fontSize: narrow ? 16 : 18 }}>📋</span>
+        {!narrow && <span>Complete your profile</span>}
         <span style={{
           background: '#eaf2fe', border: '1px solid #c7dbfa',
           borderRadius: 20, padding: '2px 8px', fontSize: 11, fontWeight: 700, color: '#1d63d1'

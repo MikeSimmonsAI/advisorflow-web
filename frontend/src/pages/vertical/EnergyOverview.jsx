@@ -15,7 +15,7 @@
  *                                      Sent / Unassigned counters, and the
  *                                      most recent rate-request rows
  *   GET /workspace-views/renewals      total + Renewal Due / Under Contract
- *   GET /workspace-views/move-concierge total + Active / Unassigned
+ *   GET /energy-ops/moves?per_page=1  Move Concierge open count (summary.open)
  *   GET /leads/sparklines?days=7       daily new leads and daily bookings
  *   GET /leads/?page=1&page_size=8     the recent-leads list
  *   GET /leads/workspace-summary       lead sources over the last 30 days
@@ -40,7 +40,6 @@ import './EnergyOverview.css'
 
 const VIEW_RATE_REQUESTS = 'rate-requests'
 const VIEW_RENEWALS = 'renewals'
-const VIEW_CONCIERGE = 'move-concierge'
 
 // A refused call (the module or permission is absent) is marked, not
 // swallowed, so a card can tell "you may not see this" from "nothing yet".
@@ -125,24 +124,8 @@ function Icon({ name, size = 18 }) {
   )
 }
 
-// The live clock re-renders itself only, not the whole dashboard.
-function Clock() {
-  const [now, setNow] = useState(new Date())
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000)
-    return () => clearInterval(t)
-  }, [])
-  return (
-    <div className="eo-clock">
-      <span className="eo-clock-time">
-        {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-      </span>
-      <span className="eo-clock-date">
-        {now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-      </span>
-    </div>
-  )
-}
+// No clock here: the app shell's top bar (components/Layout.jsx LiveClock)
+// already shows the time, and a second one in the page header duplicated it.
 
 function sourceIcon(source) {
   const s = String(source || '').toLowerCase()
@@ -183,6 +166,9 @@ export default function EnergyOverview() {
   const [rateRequests, setRateRequests] = useState(null)
   const [renewals, setRenewals] = useState(null)
   const [concierge, setConcierge] = useState(null)
+  // Real operating queues + move requests (app/routers/energy_ops_router.py).
+  const [opsQueues, setOpsQueues] = useState(null)
+  const [moves, setMoves] = useState(null)
   const [spark, setSpark] = useState(null)
   const [recent, setRecent] = useState([])
   const [leadSummary, setLeadSummary] = useState(null)
@@ -226,13 +212,17 @@ export default function EnergyOverview() {
       hasLeads ? attempt('briefing', api.get('/leads/daily-briefing'), null) : skip(null),
       view(VIEW_RATE_REQUESTS),
       view(VIEW_RENEWALS),
-      view(VIEW_CONCIERGE),
+      // Move Concierge counts come from /energy-ops/moves below; there is no
+      // move-concierge workspace view, so asking for one only produced a 404.
+      skip(null),
       hasLeads ? attempt('sparklines', api.get('/leads/sparklines?days=7'), null) : skip(null),
       hasLeads ? attempt('recent leads', api.get('/leads/?page=1&page_size=8'), null) : skip(null),
       hasLeads ? attempt('lead summary', api.get('/leads/workspace-summary'), null) : skip(null),
       attempt('contact summary', api.get('/intake/contacts/summary', { skipRedirect: true }), null, FORBIDDEN),
       attempt('launch', api.get('/launch/me', { skipRedirect: true }), null),
-    ]).then(([v, b, rr, rn, mc, sp, rl, ls, cs, lc]) => {
+      hasLeads ? attempt('ops queues', api.get('/energy-ops/queues'), null) : skip(null),
+      hasLeads ? attempt('moves', api.get('/energy-ops/moves?per_page=1'), null) : skip(null),
+    ]).then(([v, b, rr, rn, mc, sp, rl, ls, cs, lc, oq, mv]) => {
       if (!live) return
       setViews(Array.isArray(v?.views) ? v.views : [])
       setBriefing(b)
@@ -243,7 +233,9 @@ export default function EnergyOverview() {
       setRecent(Array.isArray(rl?.items) ? rl.items : [])
       setLeadSummary(ls)
       setContactSummary(cs)
-      setLaunch(lc)
+      setLaunch(lc?.implementation ? lc : null)
+      setOpsQueues(oq)
+      setMoves(mv)
       setLoadError(unexpected > 0 ? 'Some workspace data is unavailable.' : '')
       setLoading(false)
     })
@@ -251,6 +243,11 @@ export default function EnergyOverview() {
   }, [identityKey, workspaceKey, hasLeads])
 
   const hasView = (key) => views.some(v => v.key === key)
+  const enrollStats = opsQueues?.enrollments || null
+  const queueCount = (key) => {
+    const q = opsQueues?.queues?.find(x => x.key === key)
+    return q && q.available ? q.count : null
+  }
   const go = (path) => navigate(path)
   function runSearch(e) {
     e.preventDefault()
@@ -264,8 +261,6 @@ export default function EnergyOverview() {
   // records WHEN an account reached a signed contract, only that it is at
   // that tier now, so a month-to-date figure would have to be guessed. It
   // renders as the design's card with an honest body instead.
-  const renewalDue = statValue(renewals, 'Renewal Due')
-  const underContract = statValue(renewals, 'Under Contract')
 
   // "NOT CONFIGURED" IS A CLAIM, AND IT IS FALSE WHILE THE ANSWER IS STILL IN
   // FLIGHT. Each card reads its own payload, which is null both before the
@@ -295,29 +290,36 @@ export default function EnergyOverview() {
       value: num(rateRequests?.total ?? null),
       sub: missing(rateRequests, 'This screen is not configured for this workspace.')
         || `${num(statValue(rateRequests, 'Options Sent') ?? 0)} waiting on the customer · ${num(statValue(rateRequests, 'Unassigned') ?? 0)} unassigned`,
-      to: hasView(VIEW_RATE_REQUESTS) ? `/view/${VIEW_RATE_REQUESTS}` : null,
+      to: hasLeads ? '/rate-requests' : null,
       tone: 'violet',
     },
     {
+      // Counted from Lead.enrolled_at, which the Enroll action records
+      // (GET /energy-ops/queues -> enrollments). Customers enrolled before
+      // that date was recorded are reported as "date not recorded", never
+      // counted into a month.
       key: 'enrollments',
       label: 'Enrollments This Month',
-      tag: 'Not yet tracked',
+      tag: enrollStats ? 'Enroll action' : 'Not available',
       icon: 'calendar',
-      value: null,
-      sub: 'Contracts record the tier an account is at, not the date it got '
-         + 'there, so a month-to-date figure cannot be counted yet.',
-      to: null,
-      tone: 'muted',
+      value: enrollStats ? num(enrollStats.this_month) : null,
+      sub: enrollStats
+        ? (enrollStats.date_not_recorded
+            ? `${num(enrollStats.date_not_recorded)} earlier customer${enrollStats.date_not_recorded === 1 ? '' : 's'}: enrollment date not recorded.`
+            : 'Recorded when a rate request is enrolled.')
+        : 'Enrollment counts are not available for this workspace.',
+      to: enrollStats ? '/energy/renewals?queue=customers' : null,
+      tone: enrollStats ? 'green' : 'muted',
     },
     {
       key: 'renewals',
       label: 'Renewal Watch',
-      tag: hasView(VIEW_RENEWALS) ? 'Renewal window' : null,
+      tag: opsQueues ? 'Contract end date' : null,
       icon: 'refresh',
-      value: num(renewalDue ?? null),
-      sub: missing(renewals, 'This screen is not configured for this workspace.')
-        || `${num(underContract ?? 0)} under contract in total.`,
-      to: hasView(VIEW_RENEWALS) ? `/view/${VIEW_RENEWALS}` : null,
+      value: num(queueCount('renewal_window')),
+      sub: missing(opsQueues, 'Renewals are not available for this workspace.')
+        || `${num(queueCount('customers') ?? 0)} enrolled · ${num(opsQueues.renewal_date_missing ?? 0)} with no end date on file.`,
+      to: opsQueues ? '/energy/renewals?queue=renewal_window' : null,
       tone: 'green',
     },
   ]
@@ -332,35 +334,35 @@ export default function EnergyOverview() {
   const incompleteRates = rateRequests
     ? (newRates ?? 0) + (reviewRates ?? 0)
     : null
-  const followUpsDue = briefing ? (briefing.cadence_touches_due_today ?? 0) : null
+  const followUpsDue = opsQueues ? ((queueCount('follow_up_due') ?? 0) + (queueCount('overdue') ?? 0)) : null
   const repliesWaiting = briefing ? (briefing.replies_needing_attention ?? 0) : null
-  const conciergeActive = concierge ? (statValue(concierge, 'Active') ?? 0) : null
-  const renewalsUpcoming = renewals ? (renewalDue ?? 0) : null
+  const conciergeActive = moves ? (moves.summary?.open ?? 0) : null
+  const renewalsUpcoming = opsQueues ? queueCount('renewal_window') : null
 
   const attention = [
     {
       key: 'rates', tone: 'red', icon: 'file',
       title: 'Incomplete rate requests',
       sub: rateRequests ? 'New or in review — options not yet sent.' : 'Rate requests are not configured here.',
-      count: incompleteRates, to: `/view/${VIEW_RATE_REQUESTS}`,
+      count: incompleteRates, to: '/rate-requests',
     },
     {
       key: 'followups', tone: 'amber', icon: 'user',
       title: 'Customers needing follow-up',
-      sub: briefing ? 'Scheduled follow-ups due today.' : 'Follow-ups are not available here.',
-      count: followUpsDue, to: '/workqueue',
+      sub: opsQueues ? 'Follow-up tasks due today or overdue.' : 'Follow-ups are not available here.',
+      count: followUpsDue, to: '/energy/follow-up?queue=overdue',
     },
     {
       key: 'concierge', tone: 'blue', icon: 'truck',
       title: 'Move Concierge pending',
-      sub: concierge ? 'Handoffs still open.' : 'Move Concierge is not configured here.',
-      count: conciergeActive, to: `/view/${VIEW_CONCIERGE}`,
+      sub: moves ? 'Move requests still open.' : 'Move Concierge is not available here.',
+      count: conciergeActive, to: '/energy/move-concierge?status=open',
     },
     {
       key: 'renewals', tone: 'violet', icon: 'refresh',
       title: 'Renewals coming up',
-      sub: renewals ? 'Accounts inside the renewal window.' : 'Renewals are not configured here.',
-      count: renewalsUpcoming, to: `/view/${VIEW_RENEWALS}`,
+      sub: opsQueues ? 'Contract end date within the renewal window.' : 'Renewals are not available here.',
+      count: renewalsUpcoming, to: '/energy/renewals?queue=renewal_window',
     },
     {
       key: 'other', tone: 'muted', icon: 'more',
@@ -469,10 +471,9 @@ export default function EnergyOverview() {
   const rateItems = Array.isArray(rateRequests?.items) ? rateRequests.items : []
 
   return (
-    <div className="eo">
+    <div className="eo eo-ov">
       {/* ── TOP BAR ────────────────────────────────────────────────────── */}
       <header className="eo-header">
-        <Clock />
         <div className="eo-header-actions">
           <form className="eo-search" onSubmit={runSearch}>
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
@@ -745,15 +746,39 @@ export default function EnergyOverview() {
         <section className="eo-card">
           <div className="eo-card-head">
             <h3>Recent Enrollments</h3>
-            <span className="eo-card-note">Not yet tracked</span>
+            <span className="eo-card-note">{enrollStats ? 'Recorded by Enroll' : 'Not available'}</span>
           </div>
-          <div className="eo-empty">
-            <span className="eo-empty-icon"><Icon name="calendar" size={30} /></span>
-            <strong>Not yet available.</strong>
-            <span>Enrollments are not recorded as their own records yet, so
-                  there is nothing truthful to list here. Accounts under
-                  contract are counted in Renewal Watch.</span>
-          </div>
+          {!enrollStats ? (
+            <div className="eo-empty">
+              <span className="eo-empty-icon"><Icon name="calendar" size={30} /></span>
+              <strong>Not yet available.</strong>
+              <span>Enrollment records are not available for this workspace.</span>
+            </div>
+          ) : (enrollStats.recent || []).length === 0 ? (
+            <div className="eo-empty">
+              <span className="eo-empty-icon"><Icon name="calendar" size={30} /></span>
+              <strong>No dated enrollments yet.</strong>
+              <span>Enrolling a rate request records its date here.
+                    {enrollStats.date_not_recorded ? ` ${num(enrollStats.date_not_recorded)} earlier customer(s) have no enrollment date on file.` : ''}</span>
+            </div>
+          ) : (
+            <ul className="eo-list">
+              {enrollStats.recent.map(r => (
+                <li key={r.id} className="eo-list-row" role="button" tabIndex={0}
+                    onClick={() => go(r.link)}
+                    onKeyDown={e => { if (e.key === 'Enter') go(r.link) }}>
+                  <div className="eo-list-main">
+                    <strong>{r.name}</strong>
+                    <span>{r.current_supplier || (r.owner ? `Owner: ${r.owner}` : 'Unassigned')}</span>
+                  </div>
+                  <div className="eo-list-side">
+                    <span className="eo-pill">Enrolled</span>
+                    {r.enrolled_at && <span className="eo-list-when">{ago(r.enrolled_at)}</span>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       </div>
 

@@ -309,7 +309,11 @@ def test_email_poller_one_bad_email_does_not_lose_the_others(
     assert out["matched"] == 1 and out["errors"] == 1
     assert tagged == ["m2"], "only the committed email is tagged processed"
     db_session.expire_all()
-    assert [r.lead_id for r in db_session.query(Reply).all()] == [l2.id]
+    # S11 2026-10-01: the Reply is committed BEFORE the AI hand-off (which can
+    # send), so the AI's failure no longer rolls l1's inbound reply away - it
+    # is kept, left untagged, and the next run's dedupe tags it without a
+    # second hand-off. See tests/test_reliability_oct1.py.
+    assert sorted(r.lead_id for r in db_session.query(Reply).all()) == sorted([l1.id, l2.id])
 
 
 def test_email_poller_one_bad_advisor_does_not_stop_the_others(

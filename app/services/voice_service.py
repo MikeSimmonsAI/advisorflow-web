@@ -39,8 +39,9 @@ def build_voice_system_prompt(lead_info: dict, advisor_info: dict, call_number: 
     first_name = lead_info.get("first_name", "there")
     tier = (lead_info.get("tier") or "").lower()
     appt_label = lead_info.get("appt_label", "Family Services Appointment")
-    advisor_name = advisor_info.get("name", "Mike Simmons")
-    org_name = advisor_info.get("org", "Greenland Cemetery and Funeral Home")
+    # No person or business is a default: a missing name is said generically.
+    advisor_name = advisor_info.get("name") or "your advisor"
+    org_name = advisor_info.get("org") or "our team"
     booking_url = lead_info.get("booking_url", "")
 
     is_urgent = tier in URGENT_TIERS

@@ -677,6 +677,9 @@ async def send_email_with_attachment(
         allow_duplicate=str(allow_duplicate).lower() in ("true", "1", "yes", "on"))
 
 
+import html as _html  # noqa: E402  (record-sent escapes person-typed text)
+
+
 class RecordSentEmail(BaseModel):
     subject: str
     body: str
@@ -713,7 +716,10 @@ def record_sent_email(lead_id: str, body: RecordSentEmail, request: Request,
     note = (body.note or "").strip()
     msg = EmailMessage(lead_id=lead.id, sender_id=acting_advisor(db, lead, current_user).id,
                        subject=subject,
-                       body_html=text.replace("\n", "<br>") + (f"<br><br><i>[{note}]</i>" if note else ""),
+                       # Typed as PLAIN TEXT, stored as HTML: escape it, so a
+                       # pasted "<script>" is kept as words, never as markup.
+                       body_html=_html.escape(text).replace("\n", "<br>")
+                       + (f"<br><br><i>[{_html.escape(note)}]</i>" if note else ""),
                        status="sent", send_source="recorded",
                        sent_by_user_id=current_user.id, sent_at=sent_at)
     db.add(msg)

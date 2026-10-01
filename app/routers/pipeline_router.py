@@ -403,6 +403,9 @@ _ACTIVITY_ACTIONS = {
     "pipeline.launched": "Pipeline launched",
     "pipeline.approved": "Flagged reply approved",
     "lead.stage_moved": "Lead moved to a new stage",
+    "lead.marked_lost": "Lead marked lost",
+    "lead.reopened": "Lost lead reopened",
+    "rate_request.enrolled": "Customer enrolled",
     "lead.create_manual": "Lead added",
     "lead.reassign": "Leads reassigned",
     "rate_request.created": "Rate request created",
@@ -735,3 +738,296 @@ def pipeline_appointments(
         } for b, fn, ln, ph in rows],
         "period_days": days,
     }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# SALES BOARD — the lead book by configurable stage (2026-10-01)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# GET  /pipeline/board                     columns = THIS org's lead tiers
+#                                          (industry_templates.org_lead_tiers);
+#                                          cards = leads in the caller's scope
+# POST /pipeline/board/{lead_id}/stage     move to another configured stage
+# POST /pipeline/board/{lead_id}/lost      mark lost; a reason is required
+# POST /pipeline/board/{lead_id}/reopen    clear the loss
+#
+# Every card field is read from a record, never estimated:
+#   owner          users.full_name of leads.assigned_to_id
+#   age_in_stage   leads.stage_entered_at (stamped on every ORM tier change by
+#                  app/services/pipeline_stage.py). NULL for leads that have
+#                  not changed stage since that shipped: the card then says
+#                  "since <created_at>" with age_basis="created".
+#   next_task      earliest open lead_tasks row for the lead (due first)
+#   appointment    the next booked/confirmed booking_links row with a time
+#                  (else the most recent past one, marked past=True)
+#   rate_request   link to the Rate Requests drawer when the lead's tier is a
+#                  rate-request status (rate_requests_router.STATUSES)
+#   customer       relationship_type == "customer"; enrolled_at or
+#                  "date not recorded"
+#   loss           pipeline_lost_at / pipeline_lost_reason
+#   activity       the lead record (/leads/{id}, Full History tab) plus the
+#                  latest real timestamp the lead carries
+# Scope: lead_scope.authorized_lead_query - acting workspace only, an advisor
+# only their own book. Another tenant's lead id is a 404.
+
+from fastapi import Request as _Request
+from sqlalchemy import or_
+from pydantic import Field as _Field
+from app.deps import require_not_observation as _require_not_observation
+from app.services import pipeline_stage as _pipeline_stage  # noqa: F401  (installs the stage clock)
+
+BOARD_CARD_LIMIT = 50
+LOSS_REASONS = [
+    ("price", "Price / rate not competitive"),
+    ("competitor", "Chose another provider"),
+    ("no_response", "Stopped responding"),
+    ("not_eligible", "Not a fit / not eligible"),
+    ("timing", "Bad timing / not now"),
+    ("stayed_current", "Stayed with current provider"),
+    ("other", "Other"),
+]
+_LOSS_KEYS = {k for k, _ in LOSS_REASONS}
+_LOSS_LABEL = dict(LOSS_REASONS)
+_CLOSED_STATUS = "dead"   # the platform's existing "closed / lost" lead status
+
+
+def _bnow():
+    return datetime.utcnow()
+
+
+def _biso(ts):
+    return ts.isoformat() + "Z" if ts else None
+
+
+def _board_tiers(org):
+    from app.services.industry_templates import org_lead_tiers
+    return [t for t in org_lead_tiers(org) if t.get("value")]
+
+
+def _board_card(l, names, tasks, appts, rr_tiers, now):
+    created = l.created_at
+    if l.stage_entered_at:
+        age_basis, since = "stage_entered", l.stage_entered_at
+    else:
+        age_basis, since = "created", created
+    age = None if since is None else max(0, (now - since).days)
+    t = tasks.get(l.id)
+    a = appts.get(l.id)
+    last = max([x for x in (l.updated_at, l.last_messaged_at, l.last_contact_date) if x], default=None)
+    is_customer = (l.relationship_type == "customer")
+    return {
+        "id": l.id,
+        "name": " ".join(p for p in (l.first_name, l.last_name) if p) or "Unnamed",
+        "link": f"/leads/{l.id}",
+        "stage": l.tier,
+        "status": l.status,
+        "dnc": l.status == "dnc",
+        "owner": names.get(l.assigned_to_id),
+        "assigned_to_id": l.assigned_to_id,
+        "age_in_stage_days": age,
+        "age_basis": age_basis,
+        "stage_entered_at": _biso(l.stage_entered_at),
+        "created_at": _biso(created),
+        "next_task": ({"id": t.id, "title": t.title, "due_at": _biso(t.due_at),
+                       "overdue": bool(t.due_at and t.due_at < now),
+                       "link": f"/leads/{l.id}"} if t else None),
+        "appointment": ({"id": a.id, "at": _biso(a.booked_time), "status": a.status,
+                         "label": getattr(a, "appt_label", None),
+                         "past": bool(a.booked_time and a.booked_time < now)} if a else None),
+        "rate_request": ({"status_tier": l.tier, "link": f"/rate-requests?open={l.id}"}
+                         if l.tier in rr_tiers else None),
+        "customer": ({"enrolled_at": _biso(l.enrolled_at),
+                      "label": ("Customer · enrolled " + l.enrolled_at.strftime("%b %d, %Y"))
+                               if l.enrolled_at else "Customer · enrollment date not recorded"}
+                     if is_customer else None),
+        "lost": ({"at": _biso(l.pipeline_lost_at), "reason": l.pipeline_lost_reason,
+                  "reason_label": _LOSS_LABEL.get((l.pipeline_lost_reason or "").split(":", 1)[0],
+                                                  l.pipeline_lost_reason)}
+                 if l.pipeline_lost_at else None),
+        "notes_preview": (l.notes or "").strip()[:160] or None,
+        "activity": {"last_at": _biso(last), "link": f"/leads/{l.id}?tab=timeline"},
+    }
+
+
+def _board_enrich(db, leads, now):
+    from app.models.models import BookingLink
+    from app.models.work_models import LeadTask
+    ids = [l.id for l in leads]
+    tasks, appts = {}, {}
+    if ids:
+        for t in (db.query(LeadTask).filter(LeadTask.lead_id.in_(ids), LeadTask.status == "open")
+                  .order_by(LeadTask.due_at.is_(None), LeadTask.due_at.asc(), LeadTask.created_at.asc()).all()):
+            tasks.setdefault(t.lead_id, t)
+        rows = (db.query(BookingLink).filter(BookingLink.lead_id.in_(ids),
+                                             BookingLink.status.in_(["booked", "confirmed"]),
+                                             BookingLink.booked_time.isnot(None))
+                .order_by(BookingLink.booked_time.asc()).all())
+        for b in rows:          # next upcoming wins
+            if b.booked_time >= now:
+                appts.setdefault(b.lead_id, b)
+        for b in reversed(rows):  # else most recent past
+            appts.setdefault(b.lead_id, b)
+    owner_ids = list({l.assigned_to_id for l in leads if l.assigned_to_id})
+    names = ({u.id: (u.full_name or u.email) for u in db.query(User).filter(User.id.in_(owner_ids)).all()}
+             if owner_ids else {})
+    return names, tasks, appts
+
+
+def _rr_tiers():
+    from app.routers.rate_requests_router import STATUSES as _RR
+    return {t for _, _, t in _RR}
+
+
+@router.get("/board")
+def pipeline_board(
+    request: _Request,
+    owner: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_or_observer),
+):
+    org = _summary_org(db, current_user)
+    now = _bnow()
+    tiers = _board_tiers(org)
+    values = [t["value"] for t in tiers]
+    base = lead_scope.authorized_lead_query(db, current_user, request=request)
+    if owner == "me":
+        base = base.filter(Lead.assigned_to_id == current_user.id)
+    elif owner == "unassigned":
+        base = base.filter(Lead.assigned_to_id.is_(None))
+    elif owner:
+        base = base.filter(Lead.assigned_to_id == owner)
+    open_q = base.filter(Lead.pipeline_lost_at.is_(None))
+    counts = dict(open_q.filter(Lead.tier.in_(values)).with_entities(Lead.tier, func.count(Lead.id))
+                  .group_by(Lead.tier).all()) if values else {}
+    picked = {}
+    for v in values:
+        picked[v] = (open_q.filter(Lead.tier == v)
+                     .order_by(Lead.stage_entered_at.is_(None), Lead.stage_entered_at.asc(),
+                               Lead.created_at.asc(), Lead.id.asc())
+                     .limit(BOARD_CARD_LIMIT).all())
+    lost_q = base.filter(Lead.pipeline_lost_at.isnot(None))
+    lost_total = lost_q.count()
+    lost_rows = lost_q.order_by(Lead.pipeline_lost_at.desc(), Lead.id.asc()).limit(BOARD_CARD_LIMIT).all()
+    everything = [l for rows in picked.values() for l in rows] + lost_rows
+    names, tasks, appts = _board_enrich(db, everything, now)
+    rr = _rr_tiers()
+    columns = [{"key": t["value"], "label": t.get("label") or t["value"], "color": t.get("color"),
+                "description": t.get("description"),
+                "count": counts.get(t["value"], 0),
+                "cards": [_board_card(l, names, tasks, appts, rr, now) for l in picked[t["value"]]]}
+               for t in tiers]
+    unstaged = (open_q.filter(or_(Lead.tier.is_(None), ~Lead.tier.in_(values))).count()
+                if values else open_q.count())
+    return {
+        "organization_id": str(org.id),
+        "columns": columns,
+        "lost": {"count": lost_total,
+                 "cards": [_board_card(l, names, tasks, appts, rr, now) for l in lost_rows]},
+        "unstaged_count": unstaged,
+        "card_limit": BOARD_CARD_LIMIT,
+        "loss_reasons": [{"key": k, "label": v} for k, v in LOSS_REASONS],
+        "is_manager": _is_elevated(current_user, db),
+        "as_of": _biso(now),
+        "rules": {
+            "stages": "this organization's configured lead tiers (Settings), in order",
+            "age_in_stage": "from leads.stage_entered_at, recorded on every stage change; "
+                            "older leads show 'since created' until their next move",
+            "lost": "marked by a person on this board with a reason; status becomes 'dead'",
+        },
+    }
+
+
+def _board_lead(db, user, request, lead_id):
+    lead = (lead_scope.authorized_lead_query(db, user, request=request)
+            .filter(Lead.id == lead_id).first())
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return lead
+
+
+class BoardStageMove(BaseModel):
+    stage: str = _Field(..., min_length=1, max_length=100)
+
+
+class BoardLost(BaseModel):
+    reason: str = _Field(..., min_length=1, max_length=40)
+    detail: Optional[str] = _Field(None, max_length=500)
+
+
+def _card_after(db, lead):
+    now = _bnow()
+    names, tasks, appts = _board_enrich(db, [lead], now)
+    return _board_card(lead, names, tasks, appts, _rr_tiers(), now)
+
+
+@router.post("/board/{lead_id}/stage", dependencies=[Depends(_require_not_observation)])
+def board_move_stage(lead_id: str, payload: BoardStageMove, request: _Request,
+                     db: Session = Depends(get_db),
+                     current_user: User = Depends(require_tenant_user)):
+    lead = _board_lead(db, current_user, request, lead_id)
+    org = db.query(Organization).filter(Organization.id == lead.organization_id).first()
+    values = [t["value"] for t in _board_tiers(org)] if org else []
+    if payload.stage not in values:
+        raise HTTPException(status_code=400, detail={"message": "Not a stage this organization has configured.",
+                                                     "valid_stages": values})
+    if lead.pipeline_lost_at:
+        raise HTTPException(status_code=409, detail="This lead is marked lost. Reopen it first.")
+    prev = lead.tier
+    if prev != payload.stage:
+        lead.tier = payload.stage          # pipeline_stage listener stamps stage_entered_at
+        lead.updated_at = datetime.utcnow()
+        log_action(db, lead.organization_id, current_user.id, action="lead.stage_moved",
+                   target_type="lead", target_id=lead.id,
+                   details={"from": prev, "to": payload.stage, "via": "pipeline_board"}, commit=False)
+        db.commit()
+        db.refresh(lead)
+    return _card_after(db, lead)
+
+
+@router.post("/board/{lead_id}/lost", dependencies=[Depends(_require_not_observation)])
+def board_mark_lost(lead_id: str, payload: BoardLost, request: _Request,
+                    db: Session = Depends(get_db),
+                    current_user: User = Depends(require_tenant_user)):
+    lead = _board_lead(db, current_user, request, lead_id)
+    if payload.reason not in _LOSS_KEYS:
+        raise HTTPException(status_code=400, detail={"message": "Unknown loss reason.",
+                                                     "valid_reasons": sorted(_LOSS_KEYS)})
+    detail = (payload.detail or "").strip()
+    if payload.reason == "other" and not detail:
+        raise HTTPException(status_code=400, detail="Describe the reason when choosing Other.")
+    prev_status = lead.status
+    lead.pipeline_lost_at = datetime.utcnow()
+    lead.pipeline_lost_reason = payload.reason + (f": {detail}" if detail else "")
+    if lead.status != "dnc":           # DNC is a compliance state; never overwrite it
+        lead.status = _CLOSED_STATUS
+    stamp = lead.pipeline_lost_at.strftime("%Y-%m-%d")
+    lead.notes = ((lead.notes + "\n") if lead.notes else "") + \
+        f"[Lost {stamp}] {_LOSS_LABEL[payload.reason]}" + (f" - {detail}" if detail else "")
+    lead.updated_at = datetime.utcnow()
+    log_action(db, lead.organization_id, current_user.id, action="lead.marked_lost",
+               target_type="lead", target_id=lead.id,
+               details={"reason": payload.reason, "detail": detail or None,
+                        "stage": lead.tier, "prev_status": prev_status}, commit=False)
+    db.commit()
+    db.refresh(lead)
+    return _card_after(db, lead)
+
+
+@router.post("/board/{lead_id}/reopen", dependencies=[Depends(_require_not_observation)])
+def board_reopen(lead_id: str, request: _Request, db: Session = Depends(get_db),
+                 current_user: User = Depends(require_tenant_user)):
+    lead = _board_lead(db, current_user, request, lead_id)
+    if not lead.pipeline_lost_at:
+        raise HTTPException(status_code=409, detail="This lead is not marked lost.")
+    prev_reason = lead.pipeline_lost_reason
+    lead.pipeline_lost_at = None
+    lead.pipeline_lost_reason = None
+    if lead.status == _CLOSED_STATUS:
+        lead.status = "new"
+    lead.updated_at = datetime.utcnow()
+    log_action(db, lead.organization_id, current_user.id, action="lead.reopened",
+               target_type="lead", target_id=lead.id,
+               details={"previous_loss_reason": prev_reason}, commit=False)
+    db.commit()
+    db.refresh(lead)
+    return _card_after(db, lead)

@@ -127,8 +127,11 @@ def _routes(key):
 
 REQUIRED_ROUTES = {
     # The energy rail is the whole back office, so most of it is required.
+    # 2026-10-01: Tasks & Follow-Up, Renewals and Move Concierge became real
+    # screens (/energy/*); the follow-up page links on to /workqueue.
     "energy": ("/", "/leads", "/rate-requests", "/pipeline", "/replies",
-               "/workqueue", "/reports", "/users", "/launch"),
+               "/energy/follow-up", "/energy/renewals", "/energy/move-concierge",
+               "/reports", "/users", "/launch"),
     # The cleaning rail is six entries by design. Three of them are configured
     # screens, which are asserted separately; these are the routes.
     "cleaning": ("/", "/activity", "/reports"),
@@ -192,7 +195,8 @@ def test_the_view_keys_the_rail_names_exist_in_a_shipped_configuration(key):
     can never render. It is dropped at runtime rather than drawn dead, which
     is right — and silent, which is why this says so at build time instead."""
     keys = set(_view_keys(key))
-    assert keys, "the %s rail names no configured screens at all" % key
+    # A rail made only of real routes (energy since 2026-10-01) names no
+    # configured screen, and there is nothing that can render dead.
     missing = keys - _shipped_view_keys()
     assert not missing, (
         "the %s rail names %s, which no shipped configuration provides"

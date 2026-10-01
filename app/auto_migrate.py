@@ -1452,6 +1452,11 @@ COLUMNS_TO_ADD = [
     ("wholesale_deals", "fee_payment_reference", "VARCHAR"),
     ("wholesale_deals", "fee_recorded_by_id", "VARCHAR"),
     ("wholesale_deals", "fee_variance_note", "TEXT"),
+    # ── Sales pipeline truth (2026-10-01): stage clock, loss, enrollment date ──
+    ("leads", "stage_entered_at", "TIMESTAMP"),
+    ("leads", "pipeline_lost_at", "TIMESTAMP"),
+    ("leads", "pipeline_lost_reason", "VARCHAR"),
+    ("leads", "enrolled_at", "TIMESTAMP"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

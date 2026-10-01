@@ -213,7 +213,7 @@ export default function CommsWorkspace({ leadId, reply, assignees, canWrite, onC
 
       {canWrite && lead?.phone && (
         <div className="cc-actions cc-actions--call">
-          <CallButton leadId={leadId} onDone={() => { loadThread(); setTasks(null); onChanged && onChanged() }} />
+          <CallButton leadId={leadId} phone={lead.phone} onDone={() => { loadThread(); setTasks(null); onChanged && onChanged() }} />
         </div>
       )}
 

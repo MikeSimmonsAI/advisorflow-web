@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import SignalPulse from '../components/SignalPulse'
@@ -7,8 +7,10 @@ import OutcomeTracker from '../components/OutcomeTracker'
 import CaseFile from './CaseFile'
 import { useToast } from '../components/Toast'
 import { formatPhone } from '../utils/phone'
+import { leadDetailTabFromSearch } from '../utils/leadDetailTabs'
 import { confirmLeadDelete, deleteLeadIds, deleteSummary } from '../utils/deleteRecords'
 import { useTerminology } from '../terminology'
+import HumanDialerPanel from '../components/telephony/HumanDialerPanel'
 import '../styles/shared.css'
 import './LeadDetail.css'
 
@@ -504,7 +506,12 @@ export default function LeadDetail() {
   const [activity, setActivity] = useState(null)
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
-  const [activeTab, setActiveTab] = useState('conversation') // 'conversation' | 'calls' | 'timeline'
+  const location = useLocation()
+  // ?tab=timeline|calls|conversation opens that tab (the Sales Board links to ?tab=timeline).
+  const [activeTab, setActiveTab] = useState(() => leadDetailTabFromSearch(location.search)) // 'conversation' | 'calls' | 'timeline'
+  useEffect(() => {
+    setActiveTab(leadDetailTabFromSearch(location.search))
+  }, [location.search, leadId])
   // SS5: older timeline pages, kept apart from `data` so the 30s refresh of the
   // newest page never discards what the advisor has scrolled back through.
   const [olderEvents, setOlderEvents] = useState([])
@@ -1202,7 +1209,7 @@ export default function LeadDetail() {
         <div className="lead-detail-hero-left">
           <div className="lead-detail-avatar">{initials}</div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <h1 className="lead-detail-name">{lead.first_name} {lead.last_name}</h1>
               <button
                 className="btn btn--secondary btn--sm"
@@ -2104,6 +2111,16 @@ export default function LeadDetail() {
             </div>
             <CadencePanel cadence={cadenceHistory} loading={cadenceLoading} />
           </section>
+
+          {/* ── Human dialer: caller ID, call, outcome + notes, history, next call ── */}
+          {lead.phone && (
+            <section className="panel lead-detail-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">☎️ Call</h2>
+              </div>
+              <HumanDialerPanel leadId={leadId} phone={lead.phone} />
+            </section>
+          )}
 
           {/* ── Voice Call ── */}
           {lead.phone && (

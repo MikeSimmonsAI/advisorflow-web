@@ -679,10 +679,24 @@ def commit(batch_id: str, body: CommitIn, db: Session = Depends(get_db),
     if body.mode == CommitMode.STAGE_ONLY:
         CM.run_commit(db, b.id, ctx.org_id, ctx, body.mode, body.include_enrichment)
         return _batch_payload(db, b, detail=True)
-    b.status = ImportBatchStatus.COMMITTING
-    b.error_message = None                    # a retried commit starts clean
-    b.heartbeat_at = datetime.utcnow()
+    # CLAIM THE BATCH ATOMICALLY. The status check above and this write used to
+    # be two steps, and runner's lock is per process: two web instances (or a
+    # double-click landing on both) could each see a committable batch and
+    # both start a commit - duplicate leads. Only the request whose
+    # conditional UPDATE still matches the state it observed proceeds.
+    observed_status, observed_heartbeat = b.status, b.heartbeat_at
+    claim = db.query(ImportBatch).filter(ImportBatch.id == b.id,
+                                         ImportBatch.status == observed_status)
+    claim = (claim.filter(ImportBatch.heartbeat_at.is_(None)) if observed_heartbeat is None
+             else claim.filter(ImportBatch.heartbeat_at == observed_heartbeat))
+    claimed = claim.update({ImportBatch.status: ImportBatchStatus.COMMITTING,
+                            ImportBatch.error_message: None,  # a retried commit starts clean
+                            ImportBatch.heartbeat_at: datetime.utcnow()},
+                           synchronize_session=False)
     db.commit()
+    if not claimed:
+        raise HTTPException(409, "This import is already being committed.")
+    db.refresh(b)
     runner.launch(b.id, _commit_job, b.id, ctx.org_id, ctx, body.mode,
                   body.include_enrichment, db=db)
     db.refresh(b)

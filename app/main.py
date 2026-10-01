@@ -766,6 +766,11 @@ app.include_router(concierge_router.router)
 # shares the one public-intake rate ceiling. See site_intake_router.py.
 from app.routers import site_intake_router  # noqa: E402
 app.include_router(site_intake_router.router)
+# Two-journey brand inquiry (Max Life site: families vs agents/builders). Thin
+# adapter over site_intake_router + public_capture; same rate ceiling, same
+# configured-destination rule. See brand_site_inquiry_router.py.
+from app.routers import brand_site_inquiry_router  # noqa: E402
+app.include_router(brand_site_inquiry_router.router)
 # PUBLIC SELLER INQUIRY (Wholesale) + the operator's seller SMS consent view.
 # The destination organization comes only from a configured intake key. See
 # wholesale_seller_intake_router.py and app/services/wholesale_sms.py.
@@ -819,6 +824,14 @@ app.include_router(campaign_router.router,
 app.include_router(pipeline_router)
 from app.routers.rate_requests_router import router as rate_requests_router  # noqa: E402
 app.include_router(rate_requests_router)   # /rate-requests (energy work queue; gated by the `leads` feature)
+from app.routers import energy_ops_router  # noqa: E402
+app.include_router(energy_ops_router.router)   # /energy-ops/* follow-up & renewal queues, move concierge
+from app.routers.agency_router import router as agency_router  # noqa: E402
+app.include_router(agency_router)   # /agency (Max Life Command; gated by `insurance_agency`)
+from app.routers.push_router import router as push_router  # noqa: E402
+app.include_router(push_router)   # /push/* web push subscriptions (configured:false until VAPID keys + pywebpush)
+from app.routers.god_demo_router import router as god_demo_router  # noqa: E402
+app.include_router(god_demo_router)   # /god/demo/maxlife — provision the Max Life DEMO workspace (god only, sends nothing)
 from app.routers import work_router  # noqa: E402
 app.include_router(work_router.router)   # /communications/* and /work/* (notes, tasks, reply review)
 from app.routers.telephony_router import router as telephony_router  # noqa: E402

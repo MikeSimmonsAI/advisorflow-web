@@ -54,6 +54,7 @@ from app.services import lead_scope
 from app.services.lead_scope import authorized_lead_query
 from app.services.entitlements import require_feature
 from app.services.platform_owner import require_tenant_context
+from app.services import pipeline_stage  # noqa: F401  (stage clock listener)
 
 router = APIRouter(prefix="/rate-requests", tags=["rate-requests"],
                    dependencies=[Depends(require_feature("leads"))])
@@ -623,4 +624,75 @@ def update_rate_request(
     names = _user_names(db, [lead.assigned_to_id])
     out = _row(lead, names, _bookings_for(db, [lead.id]), _now())
     out["changed"] = sorted(changed)
+    return out
+
+
+# ── ENROLLMENT: rate request -> customer (explicit) ─────────────────────────
+# The one transition from "shopping for a rate" to "enrolled customer". It is a
+# deliberate human action: it moves the lead to the Completed status
+# (contract_signed), marks the lead's relationship as customer, records the
+# supplier / contract end date the PERSON entered (never estimated), and - only
+# when the lead came from a canonical contact - reclassifies that contact as a
+# customer. It sends nothing and records no consent.
+
+class EnrollPayload(BaseModel):
+    current_supplier: Optional[str] = Field(None, max_length=200)
+    contract_end_date: Optional[str] = Field(None, max_length=10)
+    rate_type: Optional[str] = Field(None, max_length=100)
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+@router.post("/{lead_id}/enroll", dependencies=[Depends(require_not_observation)])
+def enroll_rate_request(
+    lead_id: str,
+    payload: EnrollPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_tenant_user),
+):
+    lead = authorized_lead_query(db, current_user, request=request).filter(Lead.id == lead_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Rate request not found")
+    if lead.status in _EXCLUDED_STATUSES:
+        raise HTTPException(status_code=409, detail="A DNC or closed lead cannot be enrolled.")
+    org = db.query(Organization).filter(Organization.id == lead.organization_id).first()
+    tier = _TIER_BY_STATUS["completed"]
+    if tier not in (_org_tier_values(org) if org else []):
+        raise HTTPException(status_code=400, detail=(
+            "This workspace has no Completed (contract_signed) stage configured."))
+    prev_tier = lead.tier
+    cf = _parse_custom(lead.custom_fields)
+    cf.update(_clean_custom(payload.model_dump(exclude={"note"}, exclude_none=True)))
+    lead.custom_fields = json.dumps(cf) if cf else None
+    lead.tier = tier
+    lead.relationship_type = "customer"
+    # The enrollment DATE (Overview "Enrollments This Month"). Set here and only
+    # here; customers enrolled before this column existed stay NULL.
+    lead.enrolled_at = datetime.utcnow()
+    if payload.note:
+        stamp = _now().strftime("%Y-%m-%d")
+        lead.notes = ((lead.notes + "\n") if lead.notes else "") + f"[Enrolled {stamp}] {payload.note}"
+    contact_reclassified = None
+    if lead.org_contact_id:
+        from app.models.intake_models import OrgContact, RecordClass
+        c = db.query(OrgContact).filter(OrgContact.id == lead.org_contact_id,
+                                        OrgContact.organization_id == lead.organization_id).first()
+        if c is not None and c.record_class in (RecordClass.CONTACT, RecordClass.LEAD,
+                                                RecordClass.PREVIOUS_CUSTOMER, None):
+            contact_reclassified = {"from": c.record_class, "to": RecordClass.CUSTOMER}
+            c.record_class = RecordClass.CUSTOMER
+    lead.updated_at = datetime.utcnow()
+    log_action(db, lead.organization_id, current_user.id, action="rate_request.enrolled",
+               target_type="lead", target_id=lead.id,
+               details={"from": prev_tier, "to": tier,
+                        "fields": sorted(k for k in ("current_supplier", "contract_end_date",
+                                                     "rate_type") if getattr(payload, k)),
+                        "contact": contact_reclassified}, commit=False)
+    db.commit()
+    db.refresh(lead)
+    out = _row(lead, _user_names(db, [lead.assigned_to_id]), _bookings_for(db, [lead.id]), _now())
+    out["enrolled"] = True
+    out["enrolled_at"] = _iso(lead.enrolled_at)
+    out["relationship_type"] = lead.relationship_type
+    out["contact_reclassified"] = contact_reclassified
     return out

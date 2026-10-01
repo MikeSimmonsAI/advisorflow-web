@@ -25,7 +25,15 @@ const LIVE = { initiating: 'Starting…', ringing_user: 'Ringing your phone', in
 const DONE = new Set(['completed', 'failed'])
 const CONFIG_KEYS = new Set(['org_number', 'provider', 'callback_url'])
 
-export default function CallButton({ leadId, onDone, label = 'Call' }) {
+// Digits for a tel: link. The device dials it; nothing goes through the provider.
+function telHref(v) {
+  const d = String(v || '').replace(/\D/g, '')
+  if (d.length === 10) return `tel:+1${d}`
+  if (d.length === 11 && d.startsWith('1')) return `tel:+${d}`
+  return d ? `tel:${d}` : null
+}
+
+export default function CallButton({ leadId, onDone, label = 'Call', phone: leadPhone }) {
   const [ready, setReady] = useState(null)
   const [err, setErr] = useState('')
   const [phone, setPhone] = useState('')
@@ -87,6 +95,18 @@ export default function CallButton({ leadId, onDone, label = 'Call' }) {
     finally { setSaving(false) }
   }
 
+  // PROVIDER NOT CONFIGURED: the honest fallback is the user's own phone.
+  // The customer sees the USER's number, not the business number, and the
+  // page says so. The call is logged (POST /dialer/calls/manual - no provider
+  // call) only so an outcome and notes can be saved against it.
+  async function logDeviceCall() {
+    setErr('')
+    try {
+      const c = await api.post('/dialer/calls/manual', { lead_id: leadId })
+      setCall(c); setLogged(false); setDispo(true)
+    } catch (e) { setErr(e.message || 'The call could not be logged.') }
+  }
+
   if (!leadId) return null
   if (!ready && !err) return <span className="tel-note">Checking call setup…</span>
 
@@ -139,6 +159,19 @@ export default function CallButton({ leadId, onDone, label = 'Call' }) {
               <li key={c.key}>{c.label}: {c.detail}{c.fix && <span className="tel-fix">{c.fix}</span>}</li>
             ))}
           </ul>
+        </div>
+      )}
+      {configMissing.length > 0 && !compliance && telHref(leadPhone) && (
+        <div className="tel-box tel-box--info" data-testid="tel-fallback">
+          <strong>Call from your own phone instead</strong>
+          <span className="tel-fix">Calling through the business number is not set up yet, so this dials
+            from the device you are on. The customer will see YOUR number, not the business number.
+            We log the call so you can save notes and an outcome.</span>
+          <div className="tel-row" style={{ marginTop: 6 }}>
+            <a className="tel-btn" href={telHref(leadPhone)} onClick={logDeviceCall}>
+              Dial {fmt(leadPhone)} on this device
+            </a>
+          </div>
         </div>
       )}
       {needsPhone && ready?.callback_pending && (

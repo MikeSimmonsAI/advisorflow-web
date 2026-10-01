@@ -341,8 +341,9 @@ export default function Layout({ children }) {
   // DOES THIS ORGANIZATION HAVE AN OPEN LAUNCH? One cheap call, once per
   // mount, answered by the server's implementation status rather than guessed
   // from a percentage, role or plan name. `null` = not yet known and the nav
-  // item stays hidden; a 404 is the normal answer for many orgs and is not an
-  // error. `live` is the authoritative completed state.
+  // item stays hidden; `implementation: null` (a 200 - no 404, no console
+  // error) is the normal answer for many orgs. `live` is the authoritative
+  // completed state.
   const [launchNavState, setLaunchNavState] = useState(null)
   useEffect(() => {
     let alive = true
@@ -350,7 +351,7 @@ export default function Layout({ children }) {
       .then(d => {
         if (!alive) return
         const status = d?.implementation?.status
-        setLaunchNavState({ exists: true, completed: status === 'live' })
+        setLaunchNavState({ exists: !!d?.implementation, completed: status === 'live' })
       })
       .catch(() => { if (alive) setLaunchNavState({ exists: false, completed: false }) })
     return () => { alive = false }
@@ -430,8 +431,8 @@ export default function Layout({ children }) {
   //
   // `[]` while unknown, not a spinner: an item that appears a moment late is
   // better than one that flashes and vanishes, which is the same rule the
-  // Launch item above follows. A failure is silent for the same reason a 404
-  // on /launch/me is - most organizations legitimately have none.
+  // Launch item above follows. A failure is silent for the same reason an
+  // empty /launch/me is - most organizations legitimately have none.
   const [configuredViews, setConfiguredViews] = useState([])
   useEffect(() => {
     let alive = true

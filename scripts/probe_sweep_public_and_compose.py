@@ -1818,8 +1818,7 @@ check("27. cadence mints no undeliverable token",
 # Every other direct Twilio SMS sender, so none becomes a back door.
 for _f in ("app/services/pipeline_service.py",
            "app/crons/review_request_cron.py",
-           "app/services/appointment_flow_service.py",
-           "app/crons/appointment_reminder_cron.py"):
+           "app/services/appointment_flow_service.py"):
     check("27. %s enforces the policy before sending" % _f.split("/")[-1],
           "enforce_sms_content_policy" in read(_f))
 

@@ -228,11 +228,20 @@ def launch_config(_user: User = Depends(get_current_user)) -> dict:
 def my_launch(request: Request,
               db: Session = Depends(get_db),
               user: User = Depends(get_current_user)) -> dict:
+    """The caller's own launch. An organization with no launch is the NORMAL
+    case for most customers, so it is a 200 with `launch: null` (and
+    `implementation: null`) rather than a 404 that every page logs as a
+    console error. The /launch/me/* sub-routes still 404 without a launch:
+    they act on one. No workspace selected is still a 409."""
     org_id = _caller_org_id(user, db, request)
-    impl = _impl_for_org(db, org_id)
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if org is None:
         raise _NO_LAUNCH
+    impl = (db.query(Implementation)
+            .filter(Implementation.organization_id == org_id).first())
+    if impl is None:
+        return {"launch": None, "implementation": None,
+                "detail": _NO_LAUNCH.detail}
     return _payload(db, impl, org, user)
 
 

@@ -57,10 +57,15 @@ def list_leads(
     sort: str = Query("recent", pattern="^(recent|activity|name)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(500, ge=1, le=2000),
+    exclude_test: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_or_observer),
 ):
     """
+    `exclude_test=true` drops internal test records (app/services/test_records.py).
+    The Leads list keeps them by default (testers need to see them); dashboard
+    COUNTS pass it so "Total leads" uses the same rule as the status funnel.
+
     Advisors see only their own leads. org_admin/super_admin see all org leads.
     Returns a lean payload — only columns needed by the list view, no large
     text blobs (notes, ai_quality_note, custom_fields). This keeps the Leads
@@ -140,6 +145,9 @@ def list_leads(
     query = query.filter(
         (Lead.manual_flag == None) | (Lead.manual_flag == "bad_email")
     )
+    if exclude_test:
+        from app.services.test_records import exclude_test_records
+        query = exclude_test_records(query)
 
     total = query.count()
     if sort == "activity":

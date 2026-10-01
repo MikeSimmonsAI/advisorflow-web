@@ -16,6 +16,8 @@
  *   POST /god/demo-suite/environments/{platform}/build
  *   POST /god/demo-suite/environments/{platform}/reset
  *   GET  /god/demo-suite/events
+ *   GET  /god/demo/maxlife            prospect demo (Max Life insurance agency) status
+ *   POST /god/demo/maxlife            create / refresh it (idempotent, sends nothing)
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -24,6 +26,7 @@ import GodStyles from './GodStyles'
 import { T } from './godTheme'
 import { StatusBadge, SectionLabel, NoSource } from './StatusBadge'
 import ConfirmDialog from './ConfirmDialog'
+import { enterCustomer } from './enterCustomer'
 
 const STATUS_TONE = { ready: 'ok', empty: 'off', building: 'pend', error: 'bad' }
 
@@ -42,6 +45,7 @@ export default function GodDemoSuite () {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [confirm, setConfirm] = useState(null)
+  const [maxlife, setMaxlife] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true); setErr('')
@@ -51,6 +55,9 @@ export default function GodDemoSuite () {
         api.get('/god/demo-suite/events?limit=40'),
       ])
       setData(a); setEvents(b.events || [])
+      // Prospect demos are a separate, optional panel: its failure must not
+      // blank the brand environments above it.
+      try { setMaxlife(await api.get('/god/demo/maxlife')) } catch (_) { setMaxlife(null) }
     } catch (e) { setErr(e?.message || 'Could not load demonstration environments.') }
     finally { setLoading(false) }
   }, [])
@@ -69,6 +76,29 @@ export default function GodDemoSuite () {
       await load()
     } catch (e) { setErr(e?.message || 'That did not work.') }
     finally { setBusy(''); setConfirm(null) }
+  }
+
+  async function provisionMaxlife () {
+    setBusy('maxlife'); setErr(''); setNotice('')
+    try {
+      const out = await api.post('/god/demo/maxlife', maxlife?.organization_id
+        ? { organization_id: maxlife.organization_id } : {})
+      const added = Object.values(out.added || {}).reduce((n, v) => n + (v || 0), 0)
+      setNotice(`${out.organization_name}: ${out.organization_created ? 'created and seeded' : 'refreshed'} — ` +
+        `${added} record(s) added, ${out.counts.prospects} prospects, ${out.counts.agents} agents. ` +
+        'Nothing was sent.')
+      setMaxlife(out.status || null)
+    } catch (e) { setErr(e?.message || 'Could not provision the Max Life demo.') }
+    finally { setBusy('') }
+  }
+
+  async function enterMaxlife () {
+    if (!maxlife?.organization_id) return
+    setBusy('maxlife-enter'); setErr('')
+    try {
+      await enterCustomer(maxlife.organization_id, maxlife.organization_name)
+      navigate('/agency')
+    } catch (e) { setErr(e?.message || 'Could not enter the demo workspace.'); setBusy('') }
   }
 
   return (
@@ -184,6 +214,67 @@ export default function GodDemoSuite () {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <SectionLabel note="one demo workspace per prospect, running their own workflow">
+          PROSPECT DEMOS
+        </SectionLabel>
+        <div className="gm-card" style={{ padding: 0, marginBottom: 18 }}>
+          <div className="gm-tablewrap">
+            <table className="gm-table">
+              <thead><tr>
+                <th>PROSPECT</th><th>STATE</th><th>WHAT IS IN IT</th><th>ACTIONS</th>
+              </tr></thead>
+              <tbody>
+                <tr data-testid="maxlife-demo-row">
+                  <td>
+                    <div className="gm-orgname">Max Life — insurance agency</div>
+                    <div className="gm-orgsub">
+                      {maxlife?.organization_name || 'Max Life Demo Agency (DEMO)'}
+                    </div>
+                  </td>
+                  <td>
+                    <StatusBadge tone={maxlife?.exists ? 'ok' : 'off'}>
+                      {maxlife?.exists ? 'READY' : 'NOT BUILT'}
+                    </StatusBadge>
+                    {maxlife?.exists && !maxlife.insurance_agency_enabled &&
+                      <div style={{ color: T.amber, fontSize: 10.5, marginTop: 4 }}>
+                        insurance_agency is not enabled
+                      </div>}
+                  </td>
+                  <td>
+                    {maxlife?.exists && maxlife.counts ? (
+                      <>
+                        <div className="gm-orgsub">
+                          {maxlife.counts.prospects} prospects · {maxlife.counts.agents} agents ·
+                          {' '}{maxlife.counts.applications} applications
+                        </div>
+                        <div className="gm-orgsub">
+                          {maxlife.counts.policies} policies · {maxlife.counts.recruits} recruits ·
+                          {' '}all DEMO, nothing sent
+                        </div>
+                      </>
+                    ) : <NoSource>nothing seeded</NoSource>}
+                  </td>
+                  <td>
+                    <div className="gm-acts">
+                      <button className="gm-act gm-primary" disabled={busy === 'maxlife'}
+                              onClick={provisionMaxlife}>
+                        {busy === 'maxlife' ? 'WORKING…'
+                          : maxlife?.exists ? 'REFRESH MAX LIFE DEMO' : 'CREATE MAX LIFE DEMO'}
+                      </button>
+                      {maxlife?.exists && (
+                        <button className="gm-act" disabled={busy === 'maxlife-enter'}
+                                onClick={enterMaxlife}>
+                          ENTER WORKSPACE
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>

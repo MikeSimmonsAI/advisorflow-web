@@ -38,6 +38,8 @@
  *    lookup below returns null and every call site falls through.
  */
 
+import { agencyVerticalFor } from './agencyVertical'
+
 export const VERTICAL_ENERGY = 'energy'
 
 /**
@@ -77,15 +79,15 @@ const ENERGY = {
         // the read-only configured view; the route is feature-gated like /leads.
         { to: '/rate-requests', label: 'Rate Requests', icon: 'zap', featureKey: 'leads' },
         { to: '/pipeline', label: 'Sales Pipeline', icon: 'trending-up' },
-        { view: 'move-concierge', label: 'Move Concierge', icon: 'truck' },
+        { to: '/energy/move-concierge', label: 'Move Concierge', icon: 'truck', featureKey: 'leads' },
       ],
     },
     {
       label: 'Work',
       items: [
         { to: '/replies', label: 'Communications', icon: 'message' },
-        { to: '/workqueue', label: 'Tasks & Follow-Up', icon: 'check-square' },
-        { view: 'renewals', label: 'Renewals', icon: 'refresh' },
+        { to: '/energy/follow-up', label: 'Tasks & Follow-Up', icon: 'check-square', featureKey: 'leads' },
+        { to: '/energy/renewals', label: 'Renewals', icon: 'refresh', featureKey: 'leads' },
         { to: '/reports', label: 'Reports', icon: 'activity', adminOnly: true, featureKey: 'reports' },
       ],
     },
@@ -194,6 +196,10 @@ const BY_INDUSTRY = {
  * vertical, and stepping back out returns the platform rail.
  */
 export function verticalFor(branding) {
+  // INSURANCE AGENCY is selected by ENTITLEMENT (an explicit `insurance_agency`
+  // in enabled_features), not by industry — see agencyVertical.js.
+  const agency = agencyVerticalFor(branding)
+  if (agency) return agency
   const industry = branding && branding.industry
   if (!industry) return null
   return BY_INDUSTRY[String(industry).trim().toLowerCase()] || null

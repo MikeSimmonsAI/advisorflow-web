@@ -67,20 +67,28 @@ def run_for_all_organizations():
             "total_errors": 0,
             "per_org": {},
         }
+        failed_orgs = 0
 
         for org in orgs:
+            # Read before anything can fail: a rolled-back session expires the
+            # org and the slug would be a fresh query on a broken connection.
+            org_id, org_slug = org.id, org.slug
             try:
-                result = run_due_cadences(db, organization_id=org.id)
-                overall_summary["per_org"][org.slug] = result
+                result = run_due_cadences(db, organization_id=org_id)
+                overall_summary["per_org"][org_slug] = result
                 overall_summary["total_sent"] += result["sent"]
                 overall_summary["total_completed"] += result["completed"]
                 overall_summary["total_errors"] += result["errors"]
                 overall_summary["organizations_processed"] += 1
             except Exception as e:
                 # One organization's failure should never stop the others
-                # from running - log it and keep going.
-                overall_summary["per_org"][org.slug] = {"error": str(e)}
+                # from running - log it and keep going. ROLL BACK first: a
+                # database error leaves the shared session needing a rollback,
+                # and without one every LATER organization failed as well.
+                db.rollback()
+                overall_summary["per_org"][org_slug] = {"error": str(e)}
                 overall_summary["total_errors"] += 1
+                failed_orgs += 1
 
             # Engagement temperature recompute - catches the time-based
             # COLD transition (30+ days no reply) that no single event
@@ -89,10 +97,11 @@ def run_for_all_organizations():
             # or blocks other organizations.
             try:
                 from app.services.engagement_service import recompute_for_organization
-                temp_counts = recompute_for_organization(db, org.id)
-                overall_summary["per_org"][org.slug]["engagement_temperature"] = temp_counts
+                temp_counts = recompute_for_organization(db, org_id)
+                overall_summary["per_org"][org_slug]["engagement_temperature"] = temp_counts
             except Exception as e:
-                overall_summary["per_org"].setdefault(org.slug, {})["engagement_temperature_error"] = str(e)
+                db.rollback()
+                overall_summary["per_org"].setdefault(org_slug, {})["engagement_temperature_error"] = str(e)
 
         finished_at = datetime.now(timezone.utc)
         overall_summary["finished_at"] = finished_at.isoformat()
@@ -104,6 +113,11 @@ def run_for_all_organizations():
         _m["sent"] = overall_summary["total_sent"]
         _m["completed"] = overall_summary["total_completed"]
         _m["errors"] = overall_summary["total_errors"]
+        if failed_orgs:
+            # The job did not do its job for these tenants; the ledger must
+            # say so (System Health reads status, not the metrics blob).
+            from app.services.job_run_service import FAILED_KEY
+            _m[FAILED_KEY] = f"{failed_orgs} organization(s) failed their cadence pass"
 
         print(json.dumps(overall_summary, indent=2))
         return overall_summary

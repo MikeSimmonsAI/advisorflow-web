@@ -240,11 +240,11 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             if len(body_text) > 800:
                 body_text = body_text[:800] + "..."
 
-            # Deduplicate by body content
-            existing = db.query(Reply).filter(
-                Reply.lead_id == lead.id,
-                Reply.body == body_text,
-            ).first()
+            # Deduplicate the MESSAGE, not the words: same body received within
+            # minutes. (lead_id, body) alone dropped a second "Yes" sent days
+            # later - a real reply lost. See app/services/reply_dedupe.py.
+            from app.services.reply_dedupe import find_duplicate_email_reply
+            existing = find_duplicate_email_reply(db, lead.id, body_text, received_at)
             if existing:
                 _mark_email_processed(access_token, email["id"])
                 continue
@@ -265,6 +265,14 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             if lead.status in ("new", "sent"):
                 lead.status = "replied"
 
+            # Commit THIS email's Reply BEFORE anything that can send. The AI
+            # handler / pipeline may text or email the lead; they used to run
+            # first, so a commit failure after them rolled the Reply back, the
+            # message stayed untagged, and the next run created the Reply again
+            # and the AI replied to the family a second time. Committed first,
+            # a re-read finds the Reply above and stops: at most one hand-off.
+            db.commit()
+
             # Trigger AI conversation handler if active, else fall back to pipeline
             try:
                 from app.services.ai_conversation_service import handle_inbound_reply as ai_handle
@@ -281,8 +289,8 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
                 except Exception:
                     pass
 
-            # Commit THIS email's Reply now, before the alert and before the
-            # Graph message is tagged processed. A later email's failure can
+            # Commit what the AI / pipeline changed, before the alert and before
+            # the Graph message is tagged processed. A later email's failure can
             # no longer roll this one back, and a message is never tagged
             # processed while its Reply exists only in an open transaction.
             db.commit()

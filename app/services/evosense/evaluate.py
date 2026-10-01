@@ -125,7 +125,8 @@ def status_for(db, prop, strategy) -> Tuple[str, str, Optional[str], Optional[st
     if score is None:
         return C.S_NEW, "Waiting for more evidence", "Insufficient evidence to score.", None
     if score < threshold:
-        return C.S_LOW, "Nothing", "Scored %s; this strategy acts at %s." % (score, threshold), None
+        return C.S_LOW, "No automatic outreach — a person can still review or promote it", \
+            "Scored %s; this strategy only acts on its own at %s." % (score, threshold), None
 
     cps = (db.query(EvoSenseContactPoint)
            .filter(EvoSenseContactPoint.organization_id == prop.organization_id,

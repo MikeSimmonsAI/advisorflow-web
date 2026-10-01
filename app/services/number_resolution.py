@@ -287,3 +287,73 @@ _E164_RE = re.compile(r"^\+1\d{10}$")
 
 def is_e164(value) -> bool:
     return bool(value and _E164_RE.match(str(value)))
+
+
+# ── PUBLIC CONTACT NUMBER vs OUTREACH NUMBER (2026-10-01) ────────────────────
+#
+# Two different numbers that were easy to conflate:
+#
+#   PUBLIC CONTACT   the business's own published phone - what a customer is
+#                    told to call, printed on booking pages and said by an AI
+#                    agent ("call us back at ..."). organizations.org_phone.
+#                    Display only; nothing is ever SENT or DIALLED from it.
+#
+#   OUTREACH         the provider number a call or text goes OUT on. Voice:
+#                    resolve_voice_number above. SMS: the advisor/org sender
+#                    ladder in sms_service.describe_sms_sender (unchanged, the
+#                    same function the send path uses).
+#
+# Neither falls back to the other, and neither falls back to a literal: a
+# missing number is reported as "Not configured".
+
+NOT_CONFIGURED = "Not configured"
+
+
+def resolve_public_contact_number(db, org) -> dict:
+    """The organization's published contact number. Never an outreach number."""
+    org = _load_org(db, org)
+    if org is None:
+        return {"ok": False, "e164": None, "display": NOT_CONFIGURED, "source": None,
+                "reason": "Organization not found."}
+    raw = getattr(org, "org_phone", None)
+    e164 = normalize_e164(raw)
+    if not e164:
+        return {"ok": False, "e164": None, "display": NOT_CONFIGURED, "source": None,
+                "reason": ("No public contact phone is set for this organization "
+                           "(Org Settings > business phone).")}
+    return {"ok": True, "e164": e164, "display": e164, "source": "organization.org_phone",
+            "reason": None}
+
+
+def communication_identity(db, org, user=None, workspace_id: Optional[str] = None) -> dict:
+    """Everything a screen needs to say WHO a call or text comes from, per
+    tenant, with no secret and no cross-tenant fallback. Read only."""
+    org = _load_org(db, org)
+    # Voice: resolved exactly as the human dialer resolves it (no legacy USER
+    # number), so the screen can never show a caller ID the call won't use.
+    voice = resolve_voice_number(db, org, workspace_id=workspace_id,
+                                 purpose=PURPOSE_OUTBOUND) if org is not None \
+        else ResolvedNumber(ok=False, reason="Organization not found.")
+    creds = twilio_credentials(db, org, voice) if voice.ok else None
+    sms = {"ready": False, "from_number": None, "reason": NOT_CONFIGURED}
+    if user is not None and org is not None and getattr(user, "organization_id", None) == org.id:
+        try:
+            from app.services.sms_service import describe_sms_sender
+            d = describe_sms_sender(user, db) or {}
+            sms = {"ready": bool(d.get("ready")), "from_number": d.get("from_number"),
+                   "source": d.get("source"), "reason": d.get("reason")}
+        except Exception as exc:                              # noqa: BLE001
+            log.warning("communication_identity: sms sender lookup failed: %s", exc)
+    return {
+        "organization_id": getattr(org, "id", None),
+        "public_contact": resolve_public_contact_number(db, org),
+        "voice_outbound": {
+            "configured": voice.ok,
+            "e164": voice.e164 if voice.ok else None,
+            "display": voice.e164 if voice.ok else NOT_CONFIGURED,
+            "level": voice.level if voice.ok else None,
+            "reason": None if voice.ok else voice.reason,
+            "provider_ready": bool(creds),
+        },
+        "sms_outbound": sms,
+    }

@@ -238,7 +238,7 @@ export default function OrgSettings() {
     if (isSuperAdmin && !selectedOrgId) return
     let alive = true
     api.get('/launch/me', { skipRedirect: true })
-      .then(d => { if (alive) setLaunchInfo(d) })
+      .then(d => { if (alive) setLaunchInfo(d?.implementation ? d : null) })
       .catch(() => { if (alive) setLaunchInfo(null) })
     return () => { alive = false }
   }, [isSuperAdmin, selectedOrgId])

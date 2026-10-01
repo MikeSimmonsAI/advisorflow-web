@@ -46,6 +46,13 @@ MAILBOX_SCOPES = "offline_access Mail.Read User.Read"
 FIRST_RUN_LOOKBACK = timedelta(days=3)
 CURSOR_OVERLAP = timedelta(minutes=10)
 MAX_MESSAGES_PER_RUN = 500
+# A message that fails holds the cursor at itself so the next run reads it
+# again - but only for this long after its first failure. A message that fails
+# on EVERY run otherwise pins the cursor forever, and with the per-run cap
+# (oldest first) a busy mailbox never reads anything newer again. After the
+# window it stays in the inbound log as outcome "error" (the dead letter) and
+# the cursor moves on.
+ERROR_RETRY_WINDOW = timedelta(hours=24)
 GRAPH = "https://graph.microsoft.com/v1.0"
 
 
@@ -240,7 +247,10 @@ def route(db: Session, org_ids: List[str], sender: str):
 
 def _store_reply(db: Session, lead, body: str, received_at: datetime):
     from app.models.models import Notification, Reply
-    existing = db.query(Reply).filter(Reply.lead_id == lead.id, Reply.body == body).first()
+    # Same message (same body, received within minutes), not merely the same
+    # words: a second "Yes" days later is a second reply. See reply_dedupe.
+    from app.services.reply_dedupe import find_duplicate_email_reply
+    existing = find_duplicate_email_reply(db, lead.id, body, received_at)
     if existing:
         return existing, False
     reply = Reply(lead_id=lead.id, body=body, source="email", received_at=received_at,
@@ -252,8 +262,12 @@ def _store_reply(db: Session, lead, body: str, received_at: datetime):
     if lead.assigned_to_id:
         name = " ".join(p for p in (lead.first_name, lead.last_name) if p) or "A lead"
         from app.models.models import NotificationType
-        db.add(Notification(user_id=lead.assigned_to_id, type=NotificationType.REPLY_RECEIVED,
-                            message=f"{name} replied by email: {body[:140]}", lead_id=lead.id))
+        notif = Notification(user_id=lead.assigned_to_id, type=NotificationType.REPLY_RECEIVED,
+                             message=f"{name} replied by email: {body[:140]}", lead_id=lead.id)
+        db.add(notif)
+        # Web push outbox row (generic title, no content); never raises.
+        from app.services.web_push_service import enqueue_for_notification
+        enqueue_for_notification(db, notif, organization_id=lead.organization_id)
     return reply, True
 
 
@@ -307,6 +321,7 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
             .all()}
     matched = errors = 0
     newest = box.cursor_received_at
+    hold = None   # oldest received time of a failed message still being retried
     for m in messages:
         gid = m.get("id")
         if not gid:
@@ -369,12 +384,17 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                 fail.from_address, fail.received_at = sender or None, received
                 db.add(fail)
                 db.commit()
+                first_failed = fail.created_at or now
             except Exception:  # noqa: BLE001
                 db.rollback()
-    # Advance the cursor only past messages that did not error, so a failed one
-    # is read again next run.
-    if errors == 0 and newest is not None:
-        box.cursor_received_at = newest
+                first_failed = now
+            if now - first_failed < ERROR_RETRY_WINDOW:
+                hold = received if hold is None else min(hold, received)
+    # Advance the cursor, but never past a failed message that is still inside
+    # its retry window, so it is read again next run (the fetch is `ge`, and the
+    # next run starts CURSOR_OVERLAP earlier still).
+    if newest is not None:
+        box.cursor_received_at = newest if hold is None else min(newest, hold)
     box.last_status = "ok" if errors == 0 else "error"
     box.last_error = None if errors == 0 else f"{errors} message(s) failed; see the inbound log."
     box.last_checked, box.last_matched = len(messages), matched

@@ -1058,6 +1058,20 @@ class Lead(Base):
     # Values: open, pending_outcome, sold, lost, follow_up, closed
     case_status = Column(String, default="open", nullable=True)
 
+    # ---- SALES PIPELINE TRUTH (2026-10-01, additive, all nullable) -------
+    # stage_entered_at: when `tier` (the configurable pipeline stage) last
+    #   changed. Recorded from the day this column shipped forward by the
+    #   attribute listener in app/services/pipeline_stage.py; older leads are
+    #   NULL and the board says "since <created>" for them, never a guess.
+    # pipeline_lost_at / pipeline_lost_reason: set when a person marks the
+    #   lead lost on the board (reason required); cleared on reopen.
+    # enrolled_at: set by POST /rate-requests/{id}/enroll. Customers enrolled
+    #   before it existed stay NULL ("date not recorded").
+    stage_entered_at = Column(DateTime, nullable=True)
+    pipeline_lost_at = Column(DateTime, nullable=True)
+    pipeline_lost_reason = Column(String, nullable=True)
+    enrolled_at = Column(DateTime, nullable=True)
+
     # ---- INTERNAL TEST RECORD --------------------------------------------
     # True = a staff member or QA fixture, NOT a real prospect.
     #

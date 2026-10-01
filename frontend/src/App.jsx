@@ -83,6 +83,9 @@ import ProposalEditor from './pages/ProposalEditor'
 import ProvisionClient from './pages/ProvisionClient'
 import Pipeline from './pages/Pipeline'
 import RateRequests from './pages/vertical/RateRequests'
+import FollowUpQueues, { RenewalsQueues } from './pages/energy/FollowUpQueues'
+import MoveConcierge from './pages/energy/MoveConcierge'
+import MobileApp from './mobile/routes'
 // WHOLESALE REAL ESTATE. Five screens behind one feature key. `feature` on the
 // routes below is what stops a workspace without the module walking into the
 // server's 402 — the entitlement itself is enforced on every one of those
@@ -96,6 +99,13 @@ import CallbackCenter from './pages/wholesale/ops/CallbackCenter'
 import PilotControls from './pages/wholesale/ops/PilotControls'
 import WholesaleFundingPartners from './pages/wholesale/WholesaleFundingPartners'
 import WholesaleSettings from './pages/wholesale/WholesaleSettings'
+// MAX LIFE COMMAND (insurance agency). Every screen behind `insurance_agency`.
+import {
+  AgencyCommandCenter, AgencyOpportunityCenter, AgencyProspects, AgencyProspectDetail,
+  AgencyDistribution, AgencyAppointments, AgencyApplications, AgencyApplicationDetail,
+  AgencyPolicies, AgencyRecruiting, AgencyAgents, AgencyIntelligence,
+  AgencyConversations, AgencyHomeGate,
+} from './pages/agency'
 // Wholesale Phase 7 — EvoSense acquisition engine. Same feature key.
 import EvoCommand from './pages/wholesale/evosense/EvoCommand'
 import EvoInbox from './pages/wholesale/evosense/EvoInbox'
@@ -470,12 +480,12 @@ function HomeRedirect() {
         user?.role !== 'god_admin') {
       return <Navigate to="/sales" replace />
     }
-    return <ProtectedRoute><Overview /></ProtectedRoute>
+    return <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>
   }
   if (user && user.role !== 'god_admin' && !user.organization_id) {
     return <Navigate to="/sales" replace />
   }
-  return <ProtectedRoute><Overview /></ProtectedRoute>
+  return <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>
 }
 
 /**
@@ -606,7 +616,7 @@ function WorkspaceRoute() {
     if (getWorkspaceContext() !== organizationId) setWorkspaceContext(organizationId)
     // ProtectedRoute already wraps its children in Layout + ContextBanner; the
     // second banner this used to add was the same banner drawn twice.
-    return <ProtectedRoute><Overview /></ProtectedRoute>
+    return <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>
   }
 
   if (decision.state === DENIED) {
@@ -821,6 +831,8 @@ export default function App() {
       <DemoBanner />
       <Routes>
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
+        {/* MOBILE / PWA SHELL. Own auth gate (/m/login), own chrome; every call is an existing, server-enforced endpoint. */}
+        <Route path="/m/*" element={<MobileApp />} />
         {/* ── CUSTOMER WORKSPACE ENTRY ──
             Membership answers "may this person enter"; P0's lead_scope still
             answers "what may they see once inside". Two questions, two
@@ -1019,6 +1031,9 @@ export default function App() {
             the same rows by another door. An unknown key renders the page's
             own "not switched on" state rather than a 404 route. */}
         <Route path="/rate-requests" element={<ProtectedRoute feature="leads"><RateRequests /></ProtectedRoute>} />
+        <Route path="/energy/follow-up" element={<ProtectedRoute feature="leads"><FollowUpQueues /></ProtectedRoute>} />
+        <Route path="/energy/renewals" element={<ProtectedRoute feature="leads"><RenewalsQueues /></ProtectedRoute>} />
+        <Route path="/energy/move-concierge" element={<ProtectedRoute feature="leads"><MoveConcierge /></ProtectedRoute>} />
         <Route path="/view/rate-requests" element={<Navigate to="/rate-requests" replace />} />
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
@@ -1060,6 +1075,24 @@ export default function App() {
             requireAdmin: an acquisitions person who is not an org admin is
             exactly who works these screens all day, and every endpoint behind
             them resolves the workspace from the caller's own context. */}
+        {/* MAX LIFE COMMAND — /agency/* (feature `insurance_agency`; server answers 402 without it). */}
+        <Route path="/agency" element={<ProtectedRoute feature="insurance_agency"><AgencyCommandCenter /></ProtectedRoute>} />
+        <Route path="/agency/opportunities" element={<ProtectedRoute feature="insurance_agency"><AgencyOpportunityCenter /></ProtectedRoute>} />
+        <Route path="/agency/prospects" element={<ProtectedRoute feature="insurance_agency"><AgencyProspects /></ProtectedRoute>} />
+        <Route path="/agency/prospects/:prospectId" element={<ProtectedRoute feature="insurance_agency"><AgencyProspectDetail /></ProtectedRoute>} />
+        <Route path="/agency/distribution" element={<ProtectedRoute feature="insurance_agency"><AgencyDistribution /></ProtectedRoute>} />
+        <Route path="/agency/conversations" element={<ProtectedRoute feature="insurance_agency"><AgencyConversations /></ProtectedRoute>} />
+        <Route path="/agency/appointments" element={<ProtectedRoute feature="insurance_agency"><AgencyAppointments /></ProtectedRoute>} />
+        <Route path="/agency/appointments/:appointmentId" element={<ProtectedRoute feature="insurance_agency"><AgencyAppointments /></ProtectedRoute>} />
+        <Route path="/agency/applications" element={<ProtectedRoute feature="insurance_agency"><AgencyApplications /></ProtectedRoute>} />
+        <Route path="/agency/applications/:applicationId" element={<ProtectedRoute feature="insurance_agency"><AgencyApplicationDetail /></ProtectedRoute>} />
+        <Route path="/agency/policies" element={<ProtectedRoute feature="insurance_agency"><AgencyPolicies /></ProtectedRoute>} />
+        <Route path="/agency/policies/:policyId" element={<ProtectedRoute feature="insurance_agency"><AgencyPolicies /></ProtectedRoute>} />
+        <Route path="/agency/recruits" element={<ProtectedRoute feature="insurance_agency"><AgencyRecruiting /></ProtectedRoute>} />
+        <Route path="/agency/recruits/:recruitId" element={<ProtectedRoute feature="insurance_agency"><AgencyRecruiting /></ProtectedRoute>} />
+        <Route path="/agency/agents" element={<ProtectedRoute feature="insurance_agency"><AgencyAgents /></ProtectedRoute>} />
+        <Route path="/agency/agents/:agentId" element={<ProtectedRoute feature="insurance_agency"><AgencyAgents /></ProtectedRoute>} />
+        <Route path="/agency/intelligence" element={<ProtectedRoute feature="insurance_agency"><AgencyIntelligence /></ProtectedRoute>} />
         <Route path="/wholesale" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleCommand /></ProtectedRoute>} />
         <Route path="/wholesale/properties" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleProperties /></ProtectedRoute>} />
         {/* Phase 7.2: focused views of Deal Operations - the same real deals, filtered to where they are. */}

@@ -36,6 +36,23 @@ log = logging.getLogger("job_run_service")
 _MAX_ERR = 512  # truncation ceiling for error_summary
 
 
+# A body that isolates failures (one tenant's error must not stop the others)
+# never raises, so the row closed 'success' however many tenants failed. Such a
+# body sets metrics[FAILED_KEY] = "<what failed>" and the run closes 'error'
+# with that summary - isolation, not suppression. The key never reaches the
+# stored metrics.
+FAILED_KEY = "_failed"
+
+
+def _close_status(caught_exc, metrics):
+    failed = metrics.pop(FAILED_KEY, None) if isinstance(metrics, dict) else None
+    if caught_exc:
+        return "error", _safe_err(caught_exc)
+    if failed:
+        return "error", str(failed)[:500]
+    return "success", None
+
+
 def _safe_err(exc: Exception) -> str:
     """Convert an exception to a safe, truncated string — no secrets."""
     raw = f"{type(exc).__name__}: {exc}"
@@ -97,8 +114,7 @@ async def record_job_run(
     finally:
         # --- close row --------------------------------------------------
         duration_ms = int((time.monotonic() - t0) * 1000)
-        status = "error" if caught_exc else "success"
-        err_str = _safe_err(caught_exc) if caught_exc else None
+        status, err_str = _close_status(caught_exc, metrics)
 
         try:
             db2: Session = db_factory()
@@ -178,8 +194,7 @@ def record_job_run_sync(
         raise
     finally:
         duration_ms = int((time.monotonic() - t0) * 1000)
-        status = "error" if caught_exc else "success"
-        err_str = _safe_err(caught_exc) if caught_exc else None
+        status, err_str = _close_status(caught_exc, metrics)
 
         try:
             db2: Session = db_factory()

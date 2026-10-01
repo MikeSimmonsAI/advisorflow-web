@@ -20,7 +20,7 @@
  * count renders "Not yet available".
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, getCurrentUser } from '../../api/client'
 import { useWorkspaceAuthority } from '../../auth/workspaceAuthority'
 import { formatPhone } from '../../utils/phone'
@@ -138,7 +138,9 @@ export default function RateRequests() {
   const [listErr, setListErr] = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [users, setUsers] = useState([])
-  const [openId, setOpenId] = useState(null)
+  // ?open=<lead id> opens that request's drawer (Sales Board card link).
+  const [searchParams] = useSearchParams()
+  const [openId, setOpenId] = useState(() => searchParams.get('open') || null)
   const [creating, setCreating] = useState(false)
   const [notice, setNotice] = useState(null)
   const debouncedQ = useDebounced(q)

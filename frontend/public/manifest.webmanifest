@@ -1,0 +1,16 @@
+{
+  "name": "Mobile Workspace",
+  "short_name": "Workspace",
+  "description": "Your work, conversations, tasks and appointments on the go.",
+  "id": "/m",
+  "start_url": "/m",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

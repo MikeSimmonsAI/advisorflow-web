@@ -3,10 +3,11 @@ Reminders for a SalesAppointment, as a first-class lifecycle.
 
 WHY THIS IS NOT `appointment_reminder_cron`
 -------------------------------------------
-That module exists and it operates on `BookingLink` - the customer-tenant
+That module existed and it operated on `BookingLink` - the customer-tenant
 model a funeral-home advisor books a family into. It has nothing to do with
-SalesAppointment, it was never wired to one, and it is currently an orphan: no
-Render service runs it and nothing imports it. Extending it would mean teaching
+SalesAppointment, it was never wired to one, and it was an orphan: no Render
+service ran it and nothing imported it (it was deleted on 2026-10-01; THIS
+module is the live reminder path). Extending it would mean teaching
 one module two unrelated domains, on the customer-tenant side of a boundary the
 sales models are explicit about not crossing.
 

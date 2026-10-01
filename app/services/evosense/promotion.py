@@ -105,6 +105,7 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
                                               EvoSenseFact.property_id == prop.id,
                                               EvoSenseFact.superseded.is_(False)).all())}
     seller = {}
+    seller_lead_id = person.lead_id if person is not None and person.lead_id else None
     if (person is None or not person.lead_id):
         # NO CONVERSATION YET, BUT A PERSON ENTERED / A LOOKUP FOUND A CONTACT.
         # The owner contact on file becomes the deal's seller through the same
@@ -113,11 +114,18 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
         # consent is written: a found or typed number is not permission.
         manual = _seller_from_contacts(db, org_id, prop)
         if manual is not None:
-            WS.attach_seller(db, org_id, user, wprop, manual)
-    if person is not None and person.lead_id:
-        seller["lead_id"] = person.lead_id
-        seller["owner_status"] = {"owner": "owner_of_record", "co_owner": "owner_of_record",
-                                  "heir": "heir", "executor": "heir"}.get(person.role, "unknown")
+            manual_profile = WS.attach_seller(db, org_id, user, wprop, manual)
+            # A conversation a person recorded by hand (a call - outreach was
+            # never started, so EvoSense has no Lead for it) still produced
+            # SELLER STATED facts. They travel too, onto the seller just
+            # attached, instead of being dropped at promotion. (S5 fix.)
+            if facts and manual_profile is not None and manual_profile.lead_id:
+                seller_lead_id = manual_profile.lead_id
+    if seller_lead_id:
+        seller["lead_id"] = seller_lead_id
+        seller["owner_status"] = ({"owner": "owner_of_record", "co_owner": "owner_of_record",
+                                   "heir": "heir", "executor": "heir"}.get(person.role, "unknown")
+                                  if person is not None and person.lead_id else "owner_of_record")
         if "willing_to_sell" in facts:
             seller["considering_selling"] = True
         if "asking_price" in facts:
@@ -150,12 +158,12 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
             from app.models.models import Lead
             from app.services import wholesale_seller_intel as SI
             for f in facts.values():
-                SI._add(db, profile, getattr(deal, "id", None), person.lead_id, f.fact_type,
+                SI._add(db, profile, getattr(deal, "id", None), seller_lead_id, f.fact_type,
                         f.value, f.quote, message_ref="evosense:%s" % (f.message_id or f.id),
                         channel="evosense", extracted_by=f.extracted_by or "rules",
                         confidence=f.confidence, truth_state=f.truth_state)
             SI.refresh(db, profile, deal, WS.resolve_settings(db, org_id, commit=False),
-                       db.query(Lead).filter(Lead.id == person.lead_id).first(),
+                       db.query(Lead).filter(Lead.id == seller_lead_id).first(),
                        outcome=getattr(eng, "last_outcome", None))
         except Exception:                                   # noqa: BLE001
             import logging

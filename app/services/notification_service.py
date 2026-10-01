@@ -93,6 +93,9 @@ def notify_hot_reply(db: Session, advisor: User, lead: Lead, reply: Reply) -> No
         message=message_text,
     )
     db.add(notification)
+    # Web push outbox row (generic title, no content); never raises.
+    from app.services.web_push_service import enqueue_for_notification
+    enqueue_for_notification(db, notification, organization_id=lead.organization_id)
     db.commit()
 
     target_email = advisor.notification_email or advisor.email

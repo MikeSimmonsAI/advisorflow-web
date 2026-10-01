@@ -6,7 +6,8 @@
  * WHAT NEEDS TO HAPPEN NEXT — and to be one click from doing it.
  *
  * ── Sources. Every number on this page names one. ──────────────────────────
- *   GET /leads/?page=1&page_size=1            total lead count (envelope.total)
+ *   GET /leads/?page=1&page_size=1&exclude_test=true  total lead count (envelope.total),
+ *       test records excluded - the same rule as /leads/status-funnel
  *   GET /leads/?status=dnc&page_size=1        suppression count
  *   GET /leads/status-funnel                  new · sent · replied · hot · booked
  *   GET /leads/daily-briefing                 callbacks, imports, bookings
@@ -228,9 +229,9 @@ function PlatformOverview() {
     const skip = (fallback) => Promise.resolve(fallback)
 
     const calls = [
-      hasLeads ? attempt('leads', api.get('/leads/?page=1&page_size=1'), null) : skip(null),
+      hasLeads ? attempt('leads', api.get('/leads/?page=1&page_size=1&exclude_test=true'), null) : skip(null),
       hasLeads && hasCompliance
-        ? attempt('suppression', api.get('/leads/?status=dnc&page=1&page_size=1'), null)
+        ? attempt('suppression', api.get('/leads/?status=dnc&page=1&page_size=1&exclude_test=true'), null)
         : skip(null),
       hasLeads ? attempt('status funnel', api.get('/leads/status-funnel'), []) : skip([]),
       hasLeads ? attempt('daily briefing', api.get('/leads/daily-briefing'), null) : skip(null),

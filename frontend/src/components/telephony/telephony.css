@@ -6,6 +6,7 @@
   display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px;
   border: 1px solid var(--border-default, #d6dbe4); background: var(--surface-card, #fff);
   color: var(--text-primary, #1a2233); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  text-decoration: none;
 }
 .tel-btn:hover:not(:disabled) { background: var(--surface-hover, #f3f5f9); }
 .tel-btn:disabled { opacity: .55; cursor: not-allowed; }
@@ -55,3 +56,21 @@
 }
 .tel-modal-foot { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .tel-audio { width: 100%; max-width: 360px; height: 36px; }
+
+/* Human dialer panel (S10, 2026-10-01) */
+.tel-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary, #3b4556); }
+.tel-panel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tel-ident { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+.tel-ident dt { color: var(--text-muted, #5b6474); }
+.tel-ident dd { margin: 0; font-weight: 600; color: var(--text-primary, #1a2233); overflow-wrap: anywhere; }
+.tel-ident dd.tel-missing { color: var(--pill-warning-fg, #7a5200); font-weight: 500; }
+.tel-subhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 0;
+  font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted, #5b6474); }
+.tel-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tel-list li { border: 1px solid var(--border-default, #d6dbe4); border-radius: 8px; padding: 8px 10px;
+  font-size: 13px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tel-list .tel-meta { font-size: 12px; color: var(--text-muted, #5b6474); }
+.tel-list button.tel-linkrow { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.tel-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  background: var(--pill-info-bg, #eef4ff); color: var(--pill-info-fg, #1e3a8a); border: 1px solid var(--pill-info-bd, #bcd3f7); }
+.tel-pill--vm { background: var(--pill-warning-bg, #fff8e6); color: var(--pill-warning-fg, #7a5200); border-color: var(--pill-warning-bd, #f3d38a); }

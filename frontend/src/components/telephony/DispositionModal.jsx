@@ -22,6 +22,8 @@ export default function DispositionModal({ callId, initialOutcome, onClose, onSa
   const [outcome, setOutcome] = useState(initialOutcome || 'connected')
   const [notes, setNotes] = useState('')
   const [when, setWhen] = useState('')
+  const [followUp, setFollowUp] = useState(false)
+  const [followTitle, setFollowTitle] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -32,6 +34,8 @@ export default function DispositionModal({ callId, initialOutcome, onClose, onSa
       const res = await api.post(`/calls/${callId}/disposition`, {
         outcome, notes: notes.trim() || null,
         callback_at: when ? new Date(when).toISOString() : null,
+        follow_up: followUp && !when,
+        follow_up_title: followUp && !when ? (followTitle.trim() || null) : null,
       })
       onSaved && onSaved(res)
       onClose && onClose()
@@ -57,6 +61,18 @@ export default function DispositionModal({ callId, initialOutcome, onClose, onSa
         <label className="tel-field">Schedule a callback (optional)
           <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} />
         </label>
+        {!when && (
+          <label className="tel-check">
+            <input type="checkbox" checked={followUp} onChange={e => setFollowUp(e.target.checked)} />
+            Create a follow-up task
+          </label>
+        )}
+        {!when && followUp && (
+          <label className="tel-field">Task title (optional)
+            <input type="text" maxLength={300} value={followTitle} onChange={e => setFollowTitle(e.target.value)}
+                   placeholder="Follow up with this contact" />
+          </label>
+        )}
         {err && <div className="tel-box tel-box--error">{err}</div>}
         <div className="tel-modal-foot">
           <button type="button" className="tel-btn tel-btn--ghost" disabled={busy} onClick={onClose}>Later</button>

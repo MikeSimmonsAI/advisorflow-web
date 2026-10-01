@@ -2,6 +2,8 @@
  * SALES PIPELINE — command center for the acting workspace.
  *
  * ── Sources. Every figure on this page is one of these responses. ─────────
+ *   GET  /pipeline/board                  Sales Board tab (pages/pipeline/SalesBoard.jsx):
+ *                                     leads by the org's configured stages
  *   GET  /pipeline/summary?days=      KPIs, stage cards, funnel, activity,
  *                                     launch context choices (lead_types)
  *   GET  /pipeline/conversations?paged&limit&offset&stage=   All Conversations
@@ -17,12 +19,13 @@
  * server computed one from the previous period; no trend is ever invented.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useTerminology } from '../terminology'
 import { useWorkspaceAuthority } from '../auth/workspaceAuthority'
 import '../styles/shared.css'
 import './Pipeline.css'
+import SalesBoard from './pipeline/SalesBoard'
 
 const NOT_AVAILABLE = 'Not yet available'
 
@@ -124,7 +127,8 @@ export default function Pipeline() {
   const navigate = useNavigate()
   const terminology = useTerminology()
   const { isManager } = useWorkspaceAuthority()
-  const [tab, setTab] = useState('overview')
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState(() => searchParams.get('tab') || 'board')
   const [days, setDays] = useState(30)
   const [summary, setSummary] = useState(null)
   const [summaryErr, setSummaryErr] = useState(null)
@@ -159,7 +163,8 @@ export default function Pipeline() {
   const openStage = key => { setStageFilter(key); setTab('conversations') }
 
   const TABS = [
-    { key: 'overview', label: 'Overview' },
+    { key: 'board', label: 'Sales Board' },
+    { key: 'overview', label: 'Conversations Overview' },
     { key: 'conversations', label: 'All Conversations' },
     { key: 'appointments', label: 'Appointments' },
     { key: 'flagged', label: `Flagged${flagged.length ? ` (${flagged.length})` : ''}` },
@@ -171,7 +176,7 @@ export default function Pipeline() {
       <header className="pl-header">
         <div className="pl-title">
           <h1>Sales Pipeline</h1>
-          <p>Full conversation pipeline — from first outreach to confirmed appointment.</p>
+          <p>Every lead by stage — owner, time in stage, next task, appointment and outcome — plus the AI conversation pipeline.</p>
         </div>
         <div className="pl-header-actions">
           <label className="pl-range">
@@ -193,6 +198,7 @@ export default function Pipeline() {
         ))}
       </nav>
 
+      {tab === 'board' && <SalesBoard />}
       {tab === 'overview' && (
         <Overview summary={summary} err={summaryErr} days={days} flaggedCount={flagged.length}
           onStage={openStage} onTab={setTab} navigate={navigate} isManager={isManager} />

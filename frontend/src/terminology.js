@@ -86,12 +86,15 @@ function singular(plural) {
   return word
 }
 
-function lower(word) {
-  // Only the first letter: "Rate Reviews" must not become "rate reviews" in
-  // the middle of a sentence if the business capitalises its own term, but a
-  // plain "Appointments" should read as "appointments this week".
-  const text = String(word || '')
-  return text.charAt(0).toLowerCase() + text.slice(1)
+export function lower(word) {
+  // Mid-sentence form of a Title Case noun phrase. Lowering only the first
+  // letter turned "Service Calls" into "service Calls this week". Every
+  // Title Case word is lowered ("Service Calls" -> "service calls",
+  // "Rate Reviews" -> "rate reviews"); an acronym or any other mixed-case word
+  // ("HVAC Visits" -> "HVAC visits", "iPhone Repairs") keeps its casing.
+  return String(word || '').split(/(\s+)/).map(w =>
+    /^[A-Z][a-z'’-]*$/.test(w) ? w.toLowerCase() : w
+  ).join('')
 }
 
 /**

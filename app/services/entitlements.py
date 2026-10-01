@@ -70,6 +70,9 @@ FEATURES: Dict[str, str] = {
     # them. An organization with this key and no `leads` is the incoherent
     # configuration the WUPA note below records, in a new shape.
     "wholesale_real_estate": "Wholesale real estate acquisition and disposition",
+    # Insurance-agency vertical (Max Life Command). A prospect IS a Lead, so it
+    # REQUIRES `leads`. Max Life values are data (config/fixtures), not code.
+    "insurance_agency": "Insurance agency command: prospects, distribution, applications, policies, recruiting",
 
     # ── Admin features: sellable, and still only FEATURES ───────────────────
     #
@@ -134,6 +137,7 @@ REQUIRES = {
     "crm_connectors": ("crm",),
     "case_files":     ("leads",),
     "wholesale_real_estate": ("leads",),
+    "insurance_agency": ("leads",),
 }
 
 

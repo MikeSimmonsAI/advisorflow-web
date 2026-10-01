@@ -102,14 +102,23 @@ class TestAccess:
         assert body["customer"]["id"] == world["org_a"].id
         assert body["implementation"]["id"] == world["impl_a"].id
 
-    def test_customer_with_no_implementation_gets_a_clear_404(
+    def test_customer_with_no_implementation_gets_launch_null(
             self, client, db_session, world):
+        # 200 + launch: null, not a 404 every page logs as a console error.
         plat = world["plat"]
         lonely = _org(db_session, plat, "No Impl Co")
         u = _user(db_session, lonely, "org_admin", "lonely")
         r = client.get("/launch/me", headers=_h(db_session, u))
-        assert r.status_code == 404
-        assert "launch" in r.json()["detail"].lower()
+        assert r.status_code == 200
+        body = r.json()
+        assert body["launch"] is None and body["implementation"] is None
+        assert "launch" in body["detail"].lower()
+        # Nothing of another customer's launch leaks into the empty answer.
+        assert world["org_a"].id not in r.text
+        assert world["impl_a"].id not in r.text
+        # Sub-routes act on a launch, so they still 404 without one.
+        assert client.get("/launch/me/summary",
+                          headers=_h(db_session, u)).status_code == 404
 
     def test_customer_cannot_reach_the_staff_surface(self, client, db_session, world):
         r = client.get("/god/launch", headers=_h(db_session, world["admin_a"]))

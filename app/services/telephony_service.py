@@ -765,4 +765,132 @@ def call_json(c: VoiceCall) -> dict:
             "answered_by": c.answered_by, "duration_seconds": c.duration_seconds,
             "disposition": c.disposition, "disposition_notes": c.disposition_notes,
             "disposition_at": iso(c.disposition_at), "error": c.error_message,
-            "created_at": iso(c.created_at), "ended_at": iso(c.ended_at)}
+            "created_at": iso(c.created_at), "ended_at": iso(c.ended_at),
+            "advisor_id": c.advisor_id, "disposition_by_id": c.disposition_by_id,
+            "provider": c.provider, "voicemail_state": voicemail_state(c),
+            "answered_at": iso(c.answered_at), "started_at": iso(c.started_at)}
+
+
+# ══ human dialer: state, history, next-call queue (2026-10-01) ═══════════════
+
+def voicemail_state(c: VoiceCall) -> Optional[str]:
+    """What we KNOW about a voicemail on this call, from recorded facts only:
+    left (a drop played / the caller recorded it), machine (AMD heard one,
+    nothing recorded as left), or None."""
+    if c.voicemail_left or c.voicemail_drop_id or c.disposition == "left_voicemail":
+        return "left"
+    if c.answered_by == "voicemail" or (c.amd_status or "").startswith("machine"):
+        return "machine"
+    return None
+
+
+# Dispositions that take a number out of the human queue until someone acts.
+QUEUE_EXCLUDE_DISPOSITIONS = ("wrong_number", "not_interested", "appointment_set")
+MANUAL_PROVIDER = "manual"
+
+
+def start_manual_call_log(db, lead: Lead, user: User) -> VoiceCall:
+    """The provider is not configured, so the user dials from their own phone
+    (tel: link). This records THAT a call was made from the user's device so
+    notes + disposition have a home. No provider call, no caller-ID claim:
+    from_phone stays NULL because the number shown was the user's own."""
+    from app.services import voice_bulk_gate
+    refusal = voice_bulk_gate.call_refusal(db, lead, lead.organization_id, human=True)
+    if refusal:
+        raise PermissionError(refusal)
+    prior = db.query(VoiceCall).filter(VoiceCall.lead_id == lead.id).count()
+    now = datetime.utcnow()
+    call = VoiceCall(lead_id=lead.id, advisor_id=user.id, organization_id=lead.organization_id,
+                     to_phone=NR.normalize_e164(lead.phone) or (lead.phone or "")[:40],
+                     from_phone=None, call_number=prior + 1, status="completed",
+                     provider=MANUAL_PROVIDER, direction="outbound", is_human_call=True,
+                     started_at=now, ended_at=now, created_at=now)
+    db.add(call)
+    db.commit()
+    db.refresh(call)
+    return call
+
+
+def lead_call_history(db, lead: Lead, limit: int = 50) -> dict:
+    """Calls (both directions) and voicemails for one lead, newest first.
+    The caller has already authorized the lead; every query is also pinned to
+    the lead's organization."""
+    org_id = lead.organization_id
+    calls = (db.query(VoiceCall)
+             .filter(VoiceCall.organization_id == org_id, VoiceCall.lead_id == lead.id)
+             .order_by(VoiceCall.created_at.desc()).limit(limit).all())
+    vms = (db.query(Voicemail)
+           .filter(Voicemail.organization_id == org_id, Voicemail.lead_id == lead.id)
+           .order_by(Voicemail.received_at.desc()).limit(limit).all())
+    iso = (lambda d: d.isoformat() if d else None)
+    return {
+        "lead_id": lead.id,
+        "calls": [call_json(c) for c in calls],
+        "voicemails": [{"id": v.id, "status": v.status, "from_phone": v.from_e164,
+                        "duration_seconds": v.duration_seconds,
+                        "received_at": iso(v.received_at),
+                        "audio_url": "/voicemails/%s/audio" % v.id} for v in vms],
+        "unreviewed_voicemails": sum(1 for v in vms if v.status == "new"),
+    }
+
+
+def dialer_queue(db, user: User, org_id: str, *, limit: int = 25, everyone: bool = False,
+                 scan: int = 300) -> dict:
+    """The user's callable leads, best next call first.
+
+    Every candidate passes the SAME gate as the dial button
+    (voice_bulk_gate.call_refusal, human=True): DNC by number, suppression,
+    consent/compliance preflight, test records, manual remove_all,
+    allow_voice False, wholesale seller voice permission, org pause-all.
+    Excluded leads are counted by reason, never silently dropped.
+
+    Order: an open callback/follow-up task that is due -> never called ->
+    longest since last call."""
+    from sqlalchemy import func
+    from app.models.work_models import LeadTask
+    from app.services import lead_scope, voice_bulk_gate
+    q = (lead_scope.authorized_lead_query(db, user)
+         .filter(Lead.organization_id == org_id, Lead.phone.isnot(None), Lead.phone != ""))
+    if not (everyone and lead_scope.is_manager_here(user, db)):
+        q = q.filter(Lead.assigned_to_id == user.id)
+    leads = q.order_by(Lead.created_at.asc()).limit(scan).all()
+    ids = [l.id for l in leads]
+    last_call, last_dispo = {}, {}
+    due = {}
+    if ids:
+        for lid, ts in (db.query(VoiceCall.lead_id, func.max(VoiceCall.created_at))
+                        .filter(VoiceCall.organization_id == org_id, VoiceCall.lead_id.in_(ids))
+                        .group_by(VoiceCall.lead_id).all()):
+            last_call[lid] = ts
+        for c in (db.query(VoiceCall.lead_id, VoiceCall.disposition, VoiceCall.created_at)
+                  .filter(VoiceCall.organization_id == org_id, VoiceCall.lead_id.in_(ids),
+                          VoiceCall.disposition.isnot(None))
+                  .order_by(VoiceCall.created_at.asc()).all()):
+            last_dispo[c.lead_id] = c.disposition
+        now = datetime.utcnow()
+        for t in (db.query(LeadTask.lead_id, func.min(LeadTask.due_at))
+                  .filter(LeadTask.organization_id == org_id, LeadTask.lead_id.in_(ids),
+                          LeadTask.status == "open", LeadTask.due_at.isnot(None),
+                          LeadTask.due_at <= now)
+                  .group_by(LeadTask.lead_id).all()):
+            due[t[0]] = t[1]
+    items, excluded = [], {}
+    for l in leads:
+        why = voice_bulk_gate.call_refusal(db, l, org_id, human=True)
+        if not why and last_dispo.get(l.id) in QUEUE_EXCLUDE_DISPOSITIONS:
+            why = "Last call outcome: %s" % last_dispo[l.id].replace("_", " ")
+        if why:
+            excluded[why] = excluded.get(why, 0) + 1
+            continue
+        items.append({"lead_id": l.id, "name": lead_label(l) or None, "phone": l.phone,
+                      "status": l.status, "last_called_at": (last_call[l.id].isoformat()
+                                                             if l.id in last_call else None),
+                      "last_disposition": last_dispo.get(l.id),
+                      "follow_up_due_at": due[l.id].isoformat() if l.id in due else None,
+                      "reason": ("Follow-up due" if l.id in due else
+                                 "Never called" if l.id not in last_call else "Oldest last call")})
+    items.sort(key=lambda i: (0 if i["follow_up_due_at"] else 1 if not i["last_called_at"] else 2,
+                              i["follow_up_due_at"] or i["last_called_at"] or ""))
+    return {"items": items[:limit], "total_callable": len(items),
+            "excluded": [{"reason": k, "count": v} for k, v in sorted(excluded.items())],
+            "scanned": len(leads), "scope": "team" if (everyone and lead_scope.is_manager_here(user, db)) else "mine"}

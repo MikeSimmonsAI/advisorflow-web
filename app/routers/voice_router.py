@@ -322,10 +322,14 @@ async def voice_stream(
     _org = db.query(Organization).filter_by(id=advisor.organization_id).first() if advisor else None
     _org_name = (_org.brand_name or _org.name) if _org else (advisor.full_name if advisor else "our team")
 
+    from app.services import number_resolution
     advisor_info = {
         "name": advisor.full_name or "your advisor",
         "org": _org_name,
-        "phone": advisor.twilio_phone_number or "",
+        # The number a family is told to call back: the business's PUBLIC
+        # contact number, never an outreach/sender number read off a user row.
+        "phone": (number_resolution.resolve_public_contact_number(
+            db, advisor.organization_id if advisor else None).get("e164") or ""),
     }
 
     call_number = call.call_number if call else 1
@@ -460,6 +464,45 @@ async def voice_stream(
             db.commit()
 
 
+# Twilio call-status progression. Callbacks can arrive late, be retried or be
+# replayed out of order, so the stored status only ever moves FORWARD, and only
+# a terminal status ends the call. All terminal statuses share one rank: the
+# first terminal status received is the one that stands.
+_TWILIO_TERMINAL = ("completed", "busy", "no-answer", "failed", "canceled")
+_TWILIO_RANK = {"queued": 0, "initiated": 1, "ringing": 2, "in-progress": 3,
+                **{s: 4 for s in _TWILIO_TERMINAL}}
+
+
+def apply_twilio_call_status(call, call_status: str, now=None) -> bool:
+    """Apply one Twilio status callback to a VoiceCall. Returns True when it
+    changed the call. Unknown statuses and regressions are ignored."""
+    new_rank = _TWILIO_RANK.get((call_status or "").strip().lower())
+    if new_rank is None:
+        return False
+    current_rank = _TWILIO_RANK.get((call.twilio_status or "").strip().lower(), -1)
+    if new_rank <= current_rank:
+        return False  # replayed, duplicate or out-of-order: never move backwards
+    call_status = call_status.strip().lower()
+    call.twilio_status = call_status
+    if call_status not in _TWILIO_TERMINAL:
+        return True
+    if call_status in ("no-answer", "busy"):
+        call.outcome = "no_answer"
+        call.status = "completed"
+        # Nothing is left on a no-answer: a voicemail is only ever the
+        # organization's approved message, played by the AMD path.
+    elif call_status == "completed":
+        if not call.outcome:
+            call.outcome = "completed"
+        call.status = "completed"
+    else:  # failed / canceled
+        call.outcome = "failed"
+        call.status = "failed"
+    if call.ended_at is None:
+        call.ended_at = now or datetime.utcnow()
+    return True
+
+
 @router.post("/status")
 async def call_status_callback(request: Request, db: Session = Depends(get_db)):
     """
@@ -481,22 +524,7 @@ async def call_status_callback(request: Request, db: Session = Depends(get_db)):
 
     if call:
         assert_org_matches(form, call.organization_id)
-        call.twilio_status = call_status
-
-        if call_status == "no-answer" or call_status == "busy":
-            call.outcome = "no_answer"
-            call.status = "completed"
-            # Nothing is left on a no-answer: a voicemail is only ever the
-            # organization's approved message, played by the AMD path.
-        elif call_status == "completed":
-            if not call.outcome:
-                call.outcome = "completed"
-            call.status = "completed"
-        elif call_status == "failed" or call_status == "canceled":
-            call.outcome = "failed"
-            call.status = "failed"
-
-        call.ended_at = datetime.utcnow()
+        apply_twilio_call_status(call, call_status)
         db.commit()
 
     # A status callback's response is ignored by Twilio, and a voicemail is
