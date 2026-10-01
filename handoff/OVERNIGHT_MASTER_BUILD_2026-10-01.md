@@ -69,12 +69,21 @@ communications/calling, mobile/PWA, security/reliability. Budget 8h. Prior hando
   its targeted tests first (agency 79, atlantis 37, wholesale/workforce/case-file 872 in the container, frontend
   unit suites all green). Command Center sheet: Completed row 34 added.
 
-## Commits today (all on main, auto-deployed; production /version 8f26bee, /health ok)
+- 14:45 Final sweep of 23 more screens (Leads, Contacts, Communications, Work queue, Reports, Integrations,
+  Imports, Wholesale buyers/callbacks/closing/exceptions/strategies/funding/pilot/dispositions, Max Life
+  opportunities, /m tabs) × desktop + phone found: the LEADS PAGE CRASHED ("asUtc is not defined") since 3154c9b
+  (10:15) — the shared helper was used in LeadsWorkspace, Pipeline (conversation tabs) and CleaningOverview with
+  no import; Vite builds that silently. Fixed in 57ed6e8 (live ~14:55) + tests/frontend/missingImports.test.mjs
+  (Babel scope analysis: a project export used without import/declaration fails; proven to catch this case).
+  Reports tabs no longer widen a phone page. Re-sweep: 46/46 page loads clean.
+
+## Commits today (all on main, auto-deployed; production /version 8f26bee (backend), frontend 57ed6e8, /health ok)
 a9ac4b1 build · 3154c9b UTC ago + PWA headers · 5920c74 platform UTC + perf · 7c4dda4 review fixes ·
 74a48e7 phone agency home · 7710f18 offered agent can accept · c413754 Atlantis Enroll screen ·
 5bd2cd1 Move Concierge customer search · 8d4ac40 Wholesale As-of + morning panel · b3db22c offer read-only ·
 84abb1a energy drawers on phone · e0c8979 dark dropdowns · e819c26 conversations phone width ·
-8f26bee licensing milestone progress. Rollback point: tag pre-overnight-20261001.
+8f26bee licensing milestone progress · b9c7d9b handoff · 57ed6e8 Leads crash fix + missing-import guard.
+Rollback point: tag pre-overnight-20261001.
 
 
 ## What shipped (by area)
