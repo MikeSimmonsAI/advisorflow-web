@@ -39,7 +39,9 @@ function RecruitPanel({ id, onChanged }) {
       </ol>
       <h3 className="ag-h3">Licensing milestones</h3>
       {r.milestones?.length ? (
-        <ul className="ag-linklist">{r.milestones.map(x => <li key={x.id}>{x.label} <Pill value={x.status} /> <span className="ag-muted ag-small">{x.due ? `due ${fmtDate(x.due)}` : ''}{x.completed_at ? ` · done ${fmtDate(x.completed_at)}` : ''}</span></li>)}</ul>
+        <ul className="ag-linklist">{r.milestones.map(x => <li key={x.id}>{x.label} <select className="ag-input ag-input--sm" value={x.status} disabled={busy}
+          aria-label={`Status of ${x.label}`} onChange={e => act(() => api.patch(`/agency/recruits/${r.id}/milestones/${x.id}`, { status: e.target.value }))}>
+          <option value="pending">Pending</option><option value="in_progress">In progress</option><option value="done">Done</option></select> <span className="ag-muted ag-small">{x.due ? `due ${fmtDate(x.due)}` : ''}{x.completed_at ? ` · done ${fmtDate(x.completed_at)}` : ''}</span></li>)}</ul>
       ) : <p className="ag-muted">No milestones entered.</p>}
       <div className="ag-row">
         <input className="ag-input" value={m.label} onChange={e => setM({ ...m, label: e.target.value })} placeholder="Milestone (e.g. Pre-licensing course)" aria-label="Milestone" />

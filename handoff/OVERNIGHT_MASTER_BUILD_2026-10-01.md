@@ -54,6 +54,12 @@ communications/calling, mobile/PWA, security/reliability. Budget 8h. Prior hando
   - 8d4ac40 Wholesale "As of 5:54 PM" at 12:54 CT (naive utcnow().isoformat() string) → local time; 5 more
     response stamps fixed the same way. "This morning: nothing needs you" while Needs attention listed a deal step →
     "No decisions waiting — 1 deal has a next step".
+  - 84abb1a / e0c8979 / (phone sweep) Energy drawers sat under the phone menu button; Max Life dropdowns were
+    white on the dark theme (platform [data-theme] select rule won); Max Life Conversations was 518px wide on a
+    390px phone. All 21 phone pages now fit.
+  - Max Life licensing milestones could be added but never progressed, so an overdue milestone stayed on the
+    Command Center forever → PATCH /agency/recruits/{id}/milestones/{mid} {status} (audited) + status select on the
+    recruit; alert clears (Command Center 8 → 7 in the click-through).
   - Verified working with no change: Sales Board move (age "Entered stage today"), mark lost (reason required) →
     Lost (1) → reopen; Universal Intake 7 steps (4 rows → 3 contacts, 1 duplicate merged, 0 leads, type-the-
     workspace-name gate); Max Life application prepared → submitted → underwriting → approved → issued → policy

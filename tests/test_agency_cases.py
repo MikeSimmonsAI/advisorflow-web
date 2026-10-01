@@ -134,3 +134,34 @@ def test_appointments_create_list_patch(client, world):
     assert client.get("/agency/appointments?needs_confirmation=true", headers=hm).json()["total"] == 0
     assert client.patch("/agency/appointments/%s" % ap["id"], headers=h(db, world["fmgr"]),
                         json={"status": "missed"}).status_code == 404
+
+
+def test_an_overdue_milestone_can_be_completed_and_leaves_attention(client, world):
+    """Milestones could be added but never progressed: an overdue licensing
+    milestone stayed on the Command Center for good."""
+    db = world["db"]
+    hm = h(db, world["mgr"])
+    rec = client.post("/agency/recruits", headers=hm, json={"name": "Mo Milestone", "jurisdiction": "TX"}).json()
+    body = client.post("/agency/recruits/%s/milestones" % rec["id"], headers=hm,
+                       json={"label": "State exam", "status": "pending",
+                             "due": (date.today() - timedelta(days=3)).isoformat()}).json()
+    mid = body["milestones"][0]["id"]
+    assert body["milestones_overdue"] == 1
+    kinds = [i["kind"] for i in client.get("/agency/attention", headers=hm).json()["items"]
+             if "Mo Milestone" in i["title"]]
+    assert kinds
+    assert client.patch("/agency/recruits/%s/milestones/%s" % (rec["id"], mid), headers=hm,
+                        json={"status": "finished"}).status_code == 422
+    r = client.patch("/agency/recruits/%s/milestones/%s" % (rec["id"], mid), headers=hm, json={"status": "done"})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["milestones_overdue"] == 0 and b["milestones_done"] == 1
+    assert b["milestones"][0]["completed_at"]
+    assert not [i for i in client.get("/agency/attention", headers=hm).json()["items"] if "Mo Milestone" in i["title"]]
+    # Other workspace: not found.
+    assert client.patch("/agency/recruits/%s/milestones/%s" % (rec["id"], mid), headers=h(db, world["fmgr"]),
+                        json={"status": "pending"}).status_code == 404
+    # Re-opening clears the completion date.
+    b = client.patch("/agency/recruits/%s/milestones/%s" % (rec["id"], mid), headers=hm, json={"status": "pending"}).json()
+    assert b["milestones"][0]["completed_at"] is None
+    assert db.query(AuditLogEntry).filter(AuditLogEntry.action == "agency.recruit.milestone_status").count() == 2

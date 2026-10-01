@@ -945,6 +945,32 @@ def recruit_milestone(rid: str, body: MilestoneIn, ctx: Q.Ctx = Depends(ctx_dep)
     return _recruit_detail(ctx, r)
 
 
+class MilestoneUpdate(BaseModel):
+    status: str
+
+
+@router.patch("/recruits/{rid}/milestones/{mid}", dependencies=_WRITE)
+def update_recruit_milestone(rid: str, mid: str, body: MilestoneUpdate, ctx: Q.Ctx = Depends(ctx_dep)):
+    """Milestones could be added but never progressed, so an overdue licensing
+    milestone stayed on the Command Center forever. Status as ENTERED by a
+    person (no licensing-authority integration)."""
+    r = _get(ctx, AgencyRecruit, rid, AgencyRecruit.recruiter_user_id, "Recruit")
+    if body.status not in ("pending", "in_progress", "done"):
+        raise HTTPException(422, "status must be pending, in_progress or done")
+    m = ctx.db.query(AgencyRecruitMilestone).filter(
+        AgencyRecruitMilestone.id == mid, AgencyRecruitMilestone.recruit_id == r.id,
+        AgencyRecruitMilestone.organization_id == ctx.org_id).first()
+    if m is None:
+        raise HTTPException(404, "Milestone not found")
+    frm = m.status
+    m.status = body.status
+    m.completed_at = (m.completed_at or now()) if body.status == "done" else None
+    _audit(ctx, "agency.recruit.milestone_status", "agency_recruit", r.id,
+           {"milestone_id": m.id, "label": m.label, "from": frm, "to": body.status})
+    ctx.db.commit()
+    return _recruit_detail(ctx, r)
+
+
 # ── intelligence ────────────────────────────────────────────────────────────
 
 @router.get("/attention")
