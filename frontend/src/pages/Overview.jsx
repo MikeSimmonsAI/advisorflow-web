@@ -63,6 +63,7 @@ import { metricLabels, useTerminology } from '../terminology'
 import { verticalFor, VERTICAL_ENERGY, VERTICAL_CLEANING } from '../verticals/workspaceVertical'
 import EnergyOverview from './vertical/EnergyOverview'
 import CleaningOverview from './vertical/CleaningOverview'
+import { asUtc } from './sales/calendarTime'
 
 const STAGE_TONE = {
   new: 'var(--signal-amber)', sent: 'var(--signal-blue)', replied: 'var(--signal-blue)',
@@ -82,7 +83,8 @@ function initials(name) {
 
 function ago(iso) {
   if (!iso) return null
-  const ms = Date.now() - new Date(iso).getTime()
+  // API timestamps are naive UTC; read as local they land hours in the future.
+  const ms = Date.now() - (asUtc(iso) || new Date(NaN)).getTime()
   if (Number.isNaN(ms)) return null
   const m = Math.floor(ms / 60000)
   if (m < 1) return 'just now'
@@ -435,14 +437,12 @@ function PlatformOverview() {
           <div className="ov-sub">
             {loading ? 'Loading your workspace…'
               : attention.length
-                ? `${attention.length} thing${attention.length === 1 ? '' : 's'} need your attention right now.`
+                ? `${attention.length} ${attention.length === 1 ? 'thing needs' : 'things need'} your attention right now.`
                 : 'Nothing is waiting on you. Here is what moved.'}
           </div>
         </div>
         <div className="ov-datebox">
-          <div className="ov-clock">
-            {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </div>
+          {/* The time lives in the top bar; the page repeats only the date. */}
           <div className="ov-date">
             {now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
           </div>

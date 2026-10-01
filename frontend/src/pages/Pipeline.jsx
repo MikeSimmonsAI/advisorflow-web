@@ -84,7 +84,8 @@ function humanize(v) {
 }
 function ago(iso) {
   if (!iso) return ''
-  const ms = Date.now() - new Date(iso).getTime()
+  // API timestamps are naive UTC; read as local they land hours in the future.
+  const ms = Date.now() - (asUtc(iso) || new Date(NaN)).getTime()
   if (Number.isNaN(ms)) return ''
   const m = Math.floor(ms / 60000)
   if (m < 1) return 'just now'
