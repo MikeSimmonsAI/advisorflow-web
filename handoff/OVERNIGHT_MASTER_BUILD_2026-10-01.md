@@ -33,6 +33,7 @@ communications/calling, mobile/PWA, security/reliability. Budget 8h. Prior hando
   - Max Life offers: accept / decline / timeout-sweep settle an offer with one conditional UPDATE (offered → X);
     the loser gets 409 / is skipped. Previously accept + sweep could both win (accepted AND reassigned).
   - Noted only: a pydantic model nested inside a dict response skips the UTC "Z" marking (no live case found).
+- ~10:15 browser-pane login expired.
 - 12:45 owner away; browser-pane and Chrome sessions both signed out. Passwords are never typed and no production
   token is minted, so live verification = the SAME CODE run locally (container) with the Max Life demo seed + QA
   energy/wholesale workspaces, signed in through the real login form, driven by Playwright like a customer.
@@ -64,7 +65,17 @@ communications/calling, mobile/PWA, security/reliability. Budget 8h. Prior hando
     Lost (1) → reopen; Universal Intake 7 steps (4 rows → 3 contacts, 1 duplicate merged, 0 leads, type-the-
     workspace-name gate); Max Life application prepared → submitted → underwriting → approved → issued → policy
     (Pending without an effective date); Move Concierge create → checklist from services.
-- Browser-pane login expired ~10:15 → live click-verification and Max Life demo creation wait on the owner signing in.
+- 14:32 Full suite (Windows, tree at 74a48e7+): 6,987 passed, 27 skipped, 0 failed (76 min). Every later commit ran
+  its targeted tests first (agency 79, atlantis 37, wholesale/workforce/case-file 872 in the container, frontend
+  unit suites all green). Command Center sheet: Completed row 34 added.
+
+## Commits today (all on main, auto-deployed; production /version 8f26bee, /health ok)
+a9ac4b1 build · 3154c9b UTC ago + PWA headers · 5920c74 platform UTC + perf · 7c4dda4 review fixes ·
+74a48e7 phone agency home · 7710f18 offered agent can accept · c413754 Atlantis Enroll screen ·
+5bd2cd1 Move Concierge customer search · 8d4ac40 Wholesale As-of + morning panel · b3db22c offer read-only ·
+84abb1a energy drawers on phone · e0c8979 dark dropdowns · e819c26 conversations phone width ·
+8f26bee licensing milestone progress. Rollback point: tag pre-overnight-20261001.
+
 
 ## What shipped (by area)
 ### Max Life Command (feature `insurance_agency`, prefix /agency)
@@ -149,3 +160,12 @@ communications/calling, mobile/PWA, security/reliability. Budget 8h. Prior hando
 - A pydantic model nested inside a dict response skips the UTC "Z" marking (no live case found).
 - Wholesale "This morning" (decisions) and deal "Needs attention" (next steps) are different lists by design; the
   empty state now says which.
+
+## Next recommended operational test (owner, ~15 minutes)
+1. Sign in as platform owner → create the Max Life demo (POST /god/demo/maxlife) → open the Max Life workspace.
+2. Command Center → click "Unassigned prospect: Marcus Lee" → Assign to Maya. Sign in as Maya (demo password from
+   the create response) → Command Center "Offers awaiting acceptance" / Lead Distribution → open Marcus → Accept.
+3. On your phone open /m in the same workspace → the same attention items as the Command Center.
+4. Atlantis → Rate Requests → open a request → Enroll customer… → Overview "Enrollments This Month" +1.
+5. Atlantis → Move Concierge → New Move Request → search a customer by name → create → work the checklist.
+6. Wholesale → Deal Operations → "As of" shows your local time; This morning agrees with Needs attention.
