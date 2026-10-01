@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from app.models.wholesale_models import (WholesaleComp, WholesaleDocument,
                                          WholesaleFile, WholesaleProperty)
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def _num(value) -> Optional[float]:
 
 
 def _date(value) -> Optional[str]:
-    return value.isoformat() if value else None
+    return iso_utc(value)
 
 
 def branding(db: Session, deal) -> Dict[str, Any]:
@@ -268,7 +269,7 @@ def _published_documents(db: Session, deal, field: str) -> List[Dict[str, Any]]:
             # A document row can exist with no file behind it. Say which, so
             # nobody is offered a download that cannot happen.
             "has_file": bool(d.file_id),
-            "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
+            "uploaded_at": iso_utc(d.uploaded_at),
         })
     return out
 
@@ -347,8 +348,7 @@ def buyer_room_payload(db: Session, deal, link=None,
         payload["you"] = {
             "status": outreach.status,
             "your_offer": _money(outreach.offer_amount),
-            "responded_at": (outreach.replied_at.isoformat()
-                             if outreach.replied_at else None),
+            "responded_at": (iso_utc(outreach.replied_at)),
             "note": outreach.response_note,
         }
     if link is not None:

@@ -50,6 +50,7 @@ from app.models.models import User
 from app.services.commercial import audit as caudit
 from app.services.commercial import revenue_share as rs
 from app.services.commercial import terms as t
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 # There is no payout rail. Stated once, read everywhere, so that turning this
 # on is a deliberate change to a named constant and not an accident.
@@ -505,7 +506,7 @@ def _data_source(cov: Dict[str, Any]) -> Dict[str, Any]:
              "gross_cents": r.gross_cents, "adjustments_cents": r.adjustments_cents,
              "attribution_state": r.attribution_state,
              "approved_by_user_id": r.approved_by_user_id,
-             "approved_at": (r.approved_at.isoformat() if r.approved_at else None)}
+             "approved_at": (iso_utc(r.approved_at))}
             for r in cov["approved_records"]
         ],
     }

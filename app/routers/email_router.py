@@ -15,6 +15,7 @@ from app.models.models import User, Lead, EmailMessage
 from app.services.email_service import send_email_to_lead, send_email_batch
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 from app.services import lead_scope, qualification
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 router = APIRouter(prefix="/email", tags=["email"])
 
@@ -810,7 +811,7 @@ def email_sent_log(
             "lead_name": f"{lead.first_name or ''} {lead.last_name or ''}".strip() or lead.email or "—",
             "lead_email": lead.email,
             "subject": msg.subject,
-            "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
+            "sent_at": iso_utc(msg.sent_at),
             "status": msg.status,
         }
         for msg, lead in rows

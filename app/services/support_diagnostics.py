@@ -50,6 +50,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import Organization, User
 from app.services import severity as sev
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -297,8 +298,8 @@ def _check_calendar(ctx: DiagnosticContext) -> CheckResult:
                 {"provider": c.provider, "is_connected": bool(c.is_connected),
                  "failure_count": int(c.failure_count or 0),
                  "calendar_scope_ok": bool(c.calendar_scope_ok),
-                 "last_sync_at": c.last_sync_at.isoformat() if c.last_sync_at else None,
-                 "last_error_at": c.last_error_at.isoformat() if c.last_error_at else None,
+                 "last_sync_at": iso_utc(c.last_sync_at),
+                 "last_error_at": iso_utc(c.last_error_at),
                  # Truncated: `last_error` is a provider message, which is
                  # operator evidence and never customer-facing.
                  "last_error": (c.last_error or "")[:200] or None}
@@ -533,7 +534,7 @@ def _check_background_jobs(ctx: DiagnosticContext) -> CheckResult:
         jobs.append({"job": name, "severity": state,
                      "last_status": getattr(last, "status", None),
                      "last_started_at": last.started_at.isoformat() if last else None,
-                     "last_success_at": ok_at.isoformat() if ok_at else None,
+                     "last_success_at": iso_utc(ok_at),
                      "error_summary": getattr(last, "error_summary", None)})
 
     overall = sev.worst(worst)

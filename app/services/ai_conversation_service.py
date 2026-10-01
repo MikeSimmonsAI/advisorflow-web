@@ -24,6 +24,7 @@ from app.services import ai_gateway
 from app.services.ai_gateway import BACKGROUND, MANUAL
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 from app.services.platform_utils import get_brand_name
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -914,7 +915,7 @@ def start_ai_conversation(db: Session, lead: Lead, advisor: User, channel: str =
     return {
         "success": True,
         "message": f"AI conversation started. Touch 1 sent to {lead.email}.",
-        "next_touch_at": next_time.isoformat() if next_time else None,
+        "next_touch_at": iso_utc(next_time),
         "conversation_id": conv.id,
     }
 
@@ -963,8 +964,8 @@ def get_conversation_status(db: Session, lead_id: str, advisor_id: str) -> dict:
         "stage": conv.stage,
         "touch_number": conv.touch_number,
         "messages_sent": conv.messages_sent or 0,
-        "next_send_at": conv.next_send_at.isoformat() if conv.next_send_at else None,
-        "started_at": conv.started_at.isoformat() if conv.started_at else None,
+        "next_send_at": iso_utc(conv.next_send_at),
+        "started_at": iso_utc(conv.started_at),
         "conversation_id": conv.id,
         "paused_reason": conv.paused_reason,
     }

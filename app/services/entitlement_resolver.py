@@ -72,6 +72,7 @@ from app.models.entitlement_models import (
     PLATFORM_SCOPE_ID, SCOPES, STATES, FeatureOverride, FeatureOverrideEvent,
 )
 from app.models.models import Organization, Platform
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 # ── Catalog metadata (presentation only; the registry is entitlements.FEATURES)
 CATEGORIES: Dict[str, str] = {
@@ -240,8 +241,8 @@ def _row_info(row: Optional[FeatureOverride]) -> Optional[Dict[str, Any]]:
         return None
     return {"id": row.id, "state": row.state, "reason": row.reason,
             "actor_user_id": row.actor_user_id,
-            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-            "created_at": row.created_at.isoformat() if row.created_at else None}
+            "updated_at": iso_utc(row.updated_at),
+            "created_at": iso_utc(row.created_at)}
 
 
 def _brand_label(db: Optional[Session], platform_id: Optional[str],

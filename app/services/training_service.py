@@ -39,6 +39,7 @@ from app.models.training_models import (TRAINING_COMPLETE, TRAINING_IN_PROGRESS,
                                         TrainingAssignment,
                                         TrainingStepProgress)
 from app.services import training_catalog as catalog
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -279,16 +280,14 @@ def _assignment_payload(assignment: TrainingAssignment, path: Dict[str, Any],
         "status": assignment.status,
         "completed_steps": len(done),
         "total_steps": total,
-        "assigned_at": (assignment.assigned_at.isoformat()
-                        if assignment.assigned_at else None),
-        "due_at": assignment.due_at.isoformat() if assignment.due_at else None,
+        "assigned_at": (iso_utc(assignment.assigned_at)),
+        "due_at": iso_utc(assignment.due_at),
         # DERIVED, NEVER STORED. A stored overdue flag is a flag somebody has
         # to remember to set, and it is wrong from the first midnight onwards.
         "overdue": bool(assignment.due_at
                         and assignment.status != TRAINING_COMPLETE
                         and assignment.due_at < now),
-        "completed_at": (assignment.completed_at.isoformat()
-                         if assignment.completed_at else None),
+        "completed_at": (iso_utc(assignment.completed_at)),
         "note": assignment.note,
     }
 
@@ -351,11 +350,9 @@ def for_user(db: Session, user: User) -> List[Dict[str, Any]]:
             "is_active": bool(r.is_active),
             "completed_steps": len(done),
             "total_steps": len(path["steps"]),
-            "assigned_at": (r.assigned_at.isoformat()
-                            if r.assigned_at else None),
-            "due_at": r.due_at.isoformat() if r.due_at else None,
-            "completed_at": (r.completed_at.isoformat()
-                             if r.completed_at else None),
+            "assigned_at": (iso_utc(r.assigned_at)),
+            "due_at": iso_utc(r.due_at),
+            "completed_at": (iso_utc(r.completed_at)),
         })
     out.sort(key=lambda a: a["name"])
     return out
@@ -398,7 +395,7 @@ def readiness_report(db: Session, path_key: Optional[str] = None
             "status": r.status,
             "completed_steps": len(done), "total_steps": len(path["steps"]),
             "next_step": next_step["title"] if next_step else None,
-            "due_at": r.due_at.isoformat() if r.due_at else None,
+            "due_at": iso_utc(r.due_at),
             "overdue": bool(r.due_at and r.status != TRAINING_COMPLETE
                             and r.due_at < _now()),
         })

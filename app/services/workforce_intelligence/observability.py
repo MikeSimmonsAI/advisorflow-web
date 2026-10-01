@@ -33,6 +33,7 @@ from app.models.workforce_intelligence_models import (AIIntelligenceReadModel,
                                                       AIIntelligenceRun)
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ def health(db: Session, scope: Scope, *,
         slot["scope_refusals"] += int(row.scope_refusals or 0)
         if slot["last_run_at"] is None:
             slot["last_status"] = row.status
-            slot["last_run_at"] = (row.started_at.isoformat()
+            slot["last_run_at"] = (iso_utc(row.started_at)
                                    if row.started_at else None)
             slot["last_error"] = row.error
 
@@ -128,7 +129,7 @@ def health(db: Session, scope: Scope, *,
     refusals = sum(slot["scope_refusals"] for slot in by_pass.values())
 
     return {
-        "generated_at": now.isoformat(),
+        "generated_at": iso_utc(now),
         "scope": scope.as_dict(),
         "passes": by_pass,
         "passes_never_run_in_24h": never_ran,
@@ -172,7 +173,7 @@ def _stale_read_models(db: Session, scope: Scope, *,
                     AIIntelligenceReadModel.computed_at < cutoff)
             .limit(50).all())
     return [{"view": r.view_key, "window": r.window_key,
-             "computed_at": (r.computed_at.isoformat()
+             "computed_at": (iso_utc(r.computed_at)
                              if r.computed_at else None),
              "last_error": r.last_error}
             for r in rows]
@@ -185,7 +186,7 @@ def recent_runs(db: Session, *, limit: int = 100) -> List[Dict[str, Any]]:
     return [{
         "id": r.id, "pass": r.pass_key, "scope_type": r.scope_type,
         "scope_id": r.scope_id, "status": r.status,
-        "started_at": r.started_at.isoformat() if r.started_at else None,
+        "started_at": iso_utc(r.started_at) if r.started_at else None,
         "duration_ms": r.duration_ms,
         "organizations": r.organizations_scanned,
         "written": r.items_written, "cleared": r.items_cleared,

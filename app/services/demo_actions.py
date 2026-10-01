@@ -53,6 +53,7 @@ from app.models.sales_models import (ALL_STAGES, OPPORTUNITY_STAGES,
                                      SCOPE_BRAND_SALES_ORG)
 from app.services import demo_environment as denv
 from app.services import demo_guard
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -366,7 +367,7 @@ def send_sms(db, env, org, brand, user, params, scenario_key, step_key):
     _event(db, env, user, "send_sms", scenario_key, step_key, "lead", lead.id,
            "sms", body[:200])
     return {"simulated": True, "channel": "sms", "lead": lead.id,
-            "body": body, "sent_at": msg.sent_at.isoformat(),
+            "body": body, "sent_at": iso_utc(msg.sent_at),
             "narration": ("The first response is on the thread and %s is now "
                           "Contacted. No carrier was called."
                           % lead.first_name)}
@@ -508,7 +509,7 @@ def book_appointment(db, env, org, brand, user, params, scenario_key, step_key):
            lead.id, "calendar",
            "%s at %s" % (lead.first_name, when.isoformat()))
     return {"lead": lead.id, "appointment_id": link.id,
-            "when": when.isoformat(), "advisor": advisor.full_name,
+            "when": iso_utc(when), "advisor": advisor.full_name,
             "narration": ("Consultation booked with %s for %s. That is the "
                           "outcome the whole path exists for."
                           % (advisor.full_name, when.strftime("%A at %I:%M %p")))}

@@ -56,6 +56,7 @@ from app.services import executive_portfolio as portfolio_service
 from app.services import executive_authority as exec_auth
 # Portfolio assignment is a privileged access change, so it leaves a record.
 from app.routers.audit_log_router import log_action
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 # TEST RECORDS NEVER INFLATE EXECUTIVE KPIs. Internal staff / QA leads
 # (Lead.is_test) are excluded from every aggregate below, using the same
@@ -84,7 +85,7 @@ def get_executive_context(
         "platform_name": platform.name,
         "platform_slug": platform.slug,
         "role": mem.role,
-        "granted_since": mem.created_at.isoformat() if mem.created_at else None,
+        "granted_since": iso_utc(mem.created_at),
     }
 
 # ── Command Center ─────────────────────────────────────────────────────────────
@@ -200,7 +201,7 @@ def get_executive_team(
                 "role": m.role,
                 "brand_sales_org_id": bso.id,
                 "brand_sales_org_name": bso.name,
-                "joined": m.created_at.isoformat() if m.created_at else None,
+                "joined": iso_utc(m.created_at),
             })
 
     return {"platform_id": platform_id, "team": members}
@@ -240,7 +241,7 @@ def get_executive_organizations(
             {
                 "id": org.id,
                 "name": org.name,
-                "created_at": org.created_at.isoformat()
+                "created_at": iso_utc(org.created_at)
                     if hasattr(org, "created_at") and org.created_at else None,
             }
             for org in orgs
@@ -278,7 +279,7 @@ def get_executive_org_detail(
         "id": org.id,
         "name": org.name,
         "platform_id": org.platform_id,
-        "created_at": org.created_at.isoformat() if org.created_at else None,
+        "created_at": iso_utc(org.created_at),
     }
 
 
@@ -386,10 +387,10 @@ def get_org_observation_overview(
             "is_hot": r.Reply.is_hot,
             "source": r.Reply.source,
             "reviewed_at": (
-                r.Reply.reviewed_at.isoformat() if r.Reply.reviewed_at else None
+                iso_utc(r.Reply.reviewed_at)
             ),
             "received_at": (
-                r.Reply.received_at.isoformat() if r.Reply.received_at else None
+                iso_utc(r.Reply.received_at)
             ),
         }
         for r in reply_rows
@@ -460,7 +461,7 @@ def get_org_observation_overview(
             "import_list_name": l.import_list_name,
             "assigned_to_id": l.assigned_to_id,
             "last_messaged_at": (
-                l.last_messaged_at.isoformat() if l.last_messaged_at else None
+                iso_utc(l.last_messaged_at)
             ),
         }
         for l in action_leads_raw
@@ -484,7 +485,7 @@ def get_org_observation_overview(
                 f"{lead.first_name or ''} {lead.last_name or ''}".strip()
                 or lead.phone or "—"
             ),
-            "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
+            "sent_at": iso_utc(msg.sent_at),
             "delivery_status": (
                 msg.delivery_status or msg.twilio_status or "pending"
             ),
@@ -508,7 +509,7 @@ def get_org_observation_overview(
                 or lead.email or "—"
             ),
             "subject": msg.subject,
-            "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
+            "sent_at": iso_utc(msg.sent_at),
             "delivery_status": msg.status or "sent",
         }
         for msg, lead in email_rows
@@ -736,8 +737,8 @@ def get_customer_health(
             "total_leads":              total_lead_counts.get(org.id, 0),
             "hot_leads":               hot_lead_counts.get(org.id, 0),
             "booked_count":             booked_counts.get(org.id, 0),
-            "last_operational_activity": loa.isoformat() if loa else None,
-            "provisioned_at":           org.created_at.isoformat() if org.created_at else None,
+            "last_operational_activity": iso_utc(loa),
+            "provisioned_at":           iso_utc(org.created_at),
             "plan":                     org.plan,
         })
         summary["total"] += 1
@@ -1224,7 +1225,7 @@ def list_executives(
             "platform_id": p.id,
             "platform_name": p.name,
             "assigned_organizations": len(allowed),
-            "granted_at": g.created_at.isoformat() if g.created_at else None,
+            "granted_at": iso_utc(g.created_at),
         })
     out.sort(key=lambda r: (r["platform_name"], r["name"].lower()))
     return {"executives": out, "total": len(out)}

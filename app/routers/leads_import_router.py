@@ -32,6 +32,7 @@ from app.routers.audit_log_router import log_action
 # stated once instead of re-derived per route.
 from app.services import lead_scope
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -382,7 +383,7 @@ def list_import_batches(
             "import_list_name": r.import_list_name,
             "imported_by_name": r.imported_by_name,
             "lead_count": r.lead_count,
-            "imported_at": r.imported_at.isoformat() if r.imported_at else None,
+            "imported_at": iso_utc(r.imported_at),
         }
         for r in rows
     ]

@@ -41,6 +41,7 @@ from app.services.workforce import performance as wf_performance
 from app.services.workforce import queue as wf_queue
 from app.services.workforce import registry as wf_registry
 from app.services.workforce import service as wf_service
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 _log = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ def _recent_activity(db: Session, emp: AIEmployee, limit: int = 25
     for r in rows:
         spec = wf_registry.tool(r.tool_key)
         out.append({
-            "at": r.created_at.isoformat() if r.created_at else None,
+            "at": iso_utc(r.created_at),
             "what": spec.label if spec else r.tool_key,
             "outcome": ("Done" if r.decision == "allowed" and r.status != "error"
                         else ("Not allowed" if r.decision == "denied"
@@ -220,9 +221,8 @@ def _item_out(item: AIWorkItem, names: Dict[str, str]) -> Dict[str, Any]:
         "why": item.state_reason,
         "touches": item.touches,
         "outcome": item.outcome,
-        "next_action_at": (item.next_action_at.isoformat()
-                           if item.next_action_at else None),
-        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "next_action_at": (iso_utc(item.next_action_at)),
+        "updated_at": iso_utc(item.updated_at),
     }
 
 
@@ -268,7 +268,7 @@ def get_work_item(item_id: str, request: Request,
                                   ).strip() or "Contact"}),
         "eligibility": {"result": item.eligibility_state, "reasons": reasons},
         "timeline": [
-            {"at": e.created_at.isoformat() if e.created_at else None,
+            {"at": iso_utc(e.created_at),
              "from": _state_label(e.from_state) if e.from_state else None,
              "to": _state_label(e.to_state), "why": e.reason,
              "by": e.actor_kind}

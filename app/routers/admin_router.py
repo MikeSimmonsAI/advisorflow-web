@@ -35,6 +35,7 @@ from app.routers.audit_log_router import log_action
 # create_user comment below.
 from app.services.platform_owner import tenant_write_org_id as _tenant_write_org_id
 from app.services import lead_scope
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 
 def _revoke_every_session(db: Session, user_id: str) -> int:
@@ -1998,7 +1999,7 @@ def flagged_duplicate_leads(
             "source_year": l.source_year,
             "import_list_name": l.import_list_name,
             "imported_by_name": getattr(l, "imported_by_name", None),
-            "created_at": l.created_at.isoformat() if l.created_at else None,
+            "created_at": iso_utc(l.created_at),
         }
         for l in dupes
     ]
@@ -2445,7 +2446,7 @@ def list_organizations(
             "brand_logo_url": getattr(o, "brand_logo_url", None),
             "brand_color_primary": getattr(o, "brand_color_primary", None),
             "brand_color_accent": getattr(o, "brand_color_accent", None),
-            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "created_at": iso_utc(o.created_at),
         }
         for o in orgs
     ]

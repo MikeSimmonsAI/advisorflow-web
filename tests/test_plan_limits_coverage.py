@@ -41,6 +41,7 @@ EXEMPT = {
     # Demo scenario builders - fixtures, same category as sample_data.
     "services/demo_scenarios/brand_sales.py": "demo fixture builder; creates platform-scope users with organization_id=None",
     "services/demo_scenarios/customer_reactivation.py": "demo fixture builder",
+    "services/agency/demo_seed.py": "Max Life DEMO seeder; refuses any org that is not the is_demo org it created",
 
     # THE DEMO SUITE'S SEEDER. Same category as the two fixture builders above,
     # and the reason is worth stating rather than inheriting: the tenants it

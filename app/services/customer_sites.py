@@ -41,6 +41,7 @@ from app.models.customer_site_models import (FORM_KIND_INQUIRY, FORM_KINDS,
 from app.models.models import Organization
 from app.services import public_capture as pc
 from app.services.dedup_service import normalize_phone
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -227,9 +228,9 @@ def out(site: CustomerSite, *, base_url: Optional[str] = None) -> Dict[str, Any]
         "consent_version": site.consent_version,
         "view_count": site.view_count or 0,
         "inquiry_count": site.inquiry_count or 0,
-        "last_viewed_at": site.last_viewed_at.isoformat() if site.last_viewed_at else None,
-        "last_inquiry_at": site.last_inquiry_at.isoformat() if site.last_inquiry_at else None,
-        "published_at": site.published_at.isoformat() if site.published_at else None,
+        "last_viewed_at": iso_utc(site.last_viewed_at),
+        "last_inquiry_at": iso_utc(site.last_inquiry_at),
+        "published_at": iso_utc(site.published_at),
         "url": public_url(base_url, site.slug) if base_url else None,
     }
 

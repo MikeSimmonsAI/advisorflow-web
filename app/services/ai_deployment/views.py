@@ -23,6 +23,7 @@ from app.services.ai_deployment import commerce
 from app.services.ai_deployment import configuration as cfg_mod
 from app.services.ai_deployment import constants as D
 from app.services.ai_deployment import readiness as t8_readiness
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 _log = logging.getLogger(__name__)
 
@@ -55,10 +56,8 @@ def describe(db: Session, deployment: AIEmployeeDeployment, *,
         "state": deployment.state,
         "state_label": D.STATE_LABELS.get(deployment.state, deployment.state),
         "why": deployment.state_reason,
-        "created_at": (deployment.created_at.isoformat()
-                       if deployment.created_at else None),
-        "activated_at": (deployment.activated_at.isoformat()
-                         if deployment.activated_at else None),
+        "created_at": (iso_utc(deployment.created_at)),
+        "activated_at": (iso_utc(deployment.activated_at)),
         "configuration": config,
         "configuration_version": deployment.config_version,
         "readiness": ready,
@@ -141,7 +140,7 @@ def recent_activity(db: Session, deployment: AIEmployeeDeployment,
                 .order_by(AIDeploymentEvent.created_at.desc())
                 .limit(limit).all()):
         out.append({
-            "at": row.created_at.isoformat() if row.created_at else None,
+            "at": iso_utc(row.created_at),
             "kind": "deployment",
             "what": "%s -> %s" % (D.STATE_LABELS.get(row.from_state,
                                                      row.from_state or "new"),
@@ -163,8 +162,7 @@ def recent_activity(db: Session, deployment: AIEmployeeDeployment,
                         .limit(limit).all()):
                 spec = wf_registry.tool(row.tool_key)
                 out.append({
-                    "at": (row.created_at.isoformat() if row.created_at
-                           else None),
+                    "at": (iso_utc(row.created_at)),
                     "kind": "work",
                     "what": spec.label if spec else row.tool_key,
                     "why": row.denial_reason,
@@ -196,8 +194,7 @@ def workforce_summary(db: Session, organization_id: str) -> Dict[str, Any]:
         "status_line": _status_line(mine, live),
         "workforce": [describe(db, r) for r in mine],
         "retired": [{"id": r.id, "name": r.display_name,
-                     "retired_at": (r.retired_at.isoformat()
-                                    if r.retired_at else None),
+                     "retired_at": (iso_utc(r.retired_at)),
                      "reason": r.retire_reason}
                     for r in rows if r.state == D.RETIRED],
         "available": catalog.customer_catalog(db, organization_id),

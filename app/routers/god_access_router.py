@@ -41,6 +41,7 @@ from app.deps import get_db, require_god
 from app.limiter import limiter
 from app.models.models import AuditLogEntry, User
 from app.services import access_management as am
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -213,8 +214,7 @@ def user_audit(user_id: str, limit: int = Query(50, ge=1, le=200),
         out.append({
             "id": r.id,
             "action": r.action,
-            "at": r.created_at.isoformat() if getattr(r, "created_at", None)
-            else None,
+            "at": iso_utc(getattr(r, "created_at", None)),
             "actor": actor.full_name if actor else None,
             "actor_email": actor.email if actor else None,
             "note": getattr(r, "note", None),

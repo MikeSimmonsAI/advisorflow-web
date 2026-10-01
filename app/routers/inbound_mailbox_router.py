@@ -20,10 +20,12 @@ def _iso(dt):
     return dt.isoformat() + "Z" if dt else None
 
 
-def _box_payload(db: Session, box: InboundMailbox) -> dict:
+def _box_payload(db: Session, box: InboundMailbox, addresses=None, names=None) -> dict:
     from app.services.inbound_mailbox_service import candidate_org_ids
-    ids = candidate_org_ids(db, box)
-    names = dict(db.query(Organization.id, Organization.name).filter(Organization.id.in_(ids or ["-"])).all())
+    ids = candidate_org_ids(db, box, addresses)
+    if names is None:
+        names = dict(db.query(Organization.id, Organization.name)
+                     .filter(Organization.id.in_(ids or ["-"])).all())
     return {
         "id": box.id, "address": box.address, "is_active": box.is_active,
         "organization_id": box.organization_id,
@@ -44,8 +46,15 @@ def list_mailboxes(god: User = Depends(require_god), db: Session = Depends(get_d
     org_names = dict(db.query(Organization.id, Organization.name)
                      .filter(Organization.id.in_({r.organization_id for r in log if r.organization_id} or {"-"}))
                      .all())
+    # Every mailbox routes against the same org address map; resolve it and
+    # the org names once for the list, not once per mailbox.
+    from app.services.inbound_mailbox_service import candidate_org_ids, org_sending_addresses
+    addresses = org_sending_addresses(db) if boxes else {}
+    routed = {i for b in boxes for i in candidate_org_ids(db, b, addresses)}
+    names = dict(db.query(Organization.id, Organization.name)
+                 .filter(Organization.id.in_(routed or {"-"})).all()) if routed else {}
     return {
-        "mailboxes": [_box_payload(db, b) for b in boxes],
+        "mailboxes": [_box_payload(db, b, addresses, names) for b in boxes],
         "recent": [{"id": r.id, "mailbox_id": r.mailbox_id, "from": r.from_address, "subject": r.subject,
                     "received_at": _iso(r.received_at), "outcome": r.outcome, "detail": r.detail,
                     "lead_id": r.lead_id, "organization": org_names.get(r.organization_id),

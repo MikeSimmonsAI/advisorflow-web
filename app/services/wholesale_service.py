@@ -49,6 +49,7 @@ from app.services import lead_scope, platform_owner
 from app.services import wholesale_analysis as analysis
 from app.services import wholesale_matching as matching
 from app.services import wholesale_pipeline as pipeline
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -991,11 +992,11 @@ def cadence_status(db: Session, org_id: str, deal: WholesaleDeal) -> Dict[str, A
     out = {
         "state": (state.status if state else "not_started"),
         "current_touch": getattr(state, "current_touch_number", 0) or 0,
-        "next_touch_due_at": (state.next_touch_due_at.isoformat()
+        "next_touch_due_at": (iso_utc(state.next_touch_due_at)
                               if state and state.next_touch_due_at else None),
-        "last_touch_sent_at": (state.last_touch_sent_at.isoformat()
+        "last_touch_sent_at": (iso_utc(state.last_touch_sent_at)
                                if state and state.last_touch_sent_at else None),
-        "started_at": (state.cadence_started_at.isoformat()
+        "started_at": (iso_utc(state.cadence_started_at)
                        if state and state.cadence_started_at else None),
         "can_start": not blockers and (state is None or state.status != "active"),
         "can_pause": bool(state and state.status == "active"),
@@ -1740,7 +1741,7 @@ def dashboard(db: Session, org_id: str, filters: Optional[Dict[str, Any]] = None
     enriched_props = {e.property_id for e in enrich_ok if e.property_id}
 
     return {
-        "as_of": datetime.utcnow().isoformat(),
+        "as_of": iso_utc(datetime.utcnow()),
         "include_test": include_test,
         "properties_imported": prop_q().count(),
         "sellers_identified": len(profiles),
@@ -2202,7 +2203,7 @@ def _assemble_board(db, org_id, deals, props, covers, profiles, leads, limit,
             "contract_price": _f(analysis.money(deal.contract_price)),
             "buyer_price": _f(analysis.money(deal.buyer_price)),
             "expected_fee": _f(expected),
-            "closing_date": deal.closing_date.isoformat() if deal.closing_date else None,
+            "closing_date": iso_utc(deal.closing_date),
             "next_action": action,
             "risk": _deal_risk(deal, last_event.get(deal.id), today),
             "is_test": bool(deal.is_test),
@@ -2349,5 +2350,5 @@ def recent_activity(db: Session, org_id: str, *, limit: int = 12,
         "summary": e.summary,
         "deal_id": e.deal_id,
         "property_id": e.property_id,
-        "created_at": e.created_at.isoformat() if e.created_at else None,
+        "created_at": iso_utc(e.created_at),
     } for e in rows]

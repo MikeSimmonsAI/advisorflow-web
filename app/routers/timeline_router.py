@@ -24,6 +24,7 @@ from app.models.models import (
     CadenceState, EmailMessage, User, VoiceCall
 )
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/leads", tags=["timeline"])
 
@@ -31,7 +32,7 @@ router = APIRouter(prefix="/leads", tags=["timeline"])
 def _fmt(dt: Optional[datetime]) -> Optional[str]:
     if dt is None:
         return None
-    return dt.isoformat()
+    return iso_utc(dt)
 
 
 @router.get("/{lead_id}/activity")

@@ -24,6 +24,7 @@ from app.services.platform_owner import require_tenant_context
 from app.models.models import Lead, gen_uuid
 from app.services import lead_scope
 from app.services import master_contacts
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/fiber-leads", tags=["fiber-leads"])
@@ -180,7 +181,7 @@ def list_fiber_leads(
             "service_address": l.service_address,
             "tier": l.tier,
             "status": l.status,
-            "created_at": l.created_at.isoformat() if l.created_at else None,
+            "created_at": iso_utc(l.created_at),
         }
         for l in leads
     ]

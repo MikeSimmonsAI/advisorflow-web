@@ -46,6 +46,7 @@ from app.models.sales_models import (
     Membership, BrandSalesOrg, SCOPE_CUSTOMER_ORG, SCOPE_BRAND_SALES_ORG,
     SCOPE_PLATFORM,
 )
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 
 class _Timer:
@@ -258,7 +259,7 @@ def run(db: Session, target: User) -> Dict[str, Any]:
             "role": m.role,
             "is_active": bool(m.is_active),
             "state": "active" if m.is_active else "REVOKED",
-            "created_at": m.created_at.isoformat() if m.created_at else None,
+            "created_at": iso_utc(m.created_at),
         }
         if m.scope_type == SCOPE_BRAND_SALES_ORG:
             bso = (db.query(BrandSalesOrg)

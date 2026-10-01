@@ -38,6 +38,7 @@ from app.models.launch_intake_models import (
     STEP_COMPLETE, STEP_IN_PROGRESS, STEP_NOT_STARTED,
     LaunchIntakeFile, LaunchIntakeStep, LaunchIntakeSubmission,
 )
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger("launch_intake")
 
@@ -422,7 +423,7 @@ def overview(db: Session, impl_id: str, org_id: str) -> Dict[str, Any]:
             "key": key, "n": schema["n"], "label": schema["label"],
             "title": schema["title"], "blurb": schema["blurb"],
             "pct": c["pct"], "status": c["status"], "missing": c["missing"],
-            "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+            "updated_at": iso_utc(row.updated_at) if row and row.updated_at else None,
         })
 
     return {
@@ -453,7 +454,7 @@ def read_step(db: Session, impl_id: str, org_id: str,
         # Presence only. The value has no read path anywhere in this app.
         "secrets_set": sorted(stored_secrets),
         "status": c["status"], "pct": c["pct"], "missing": c["missing"],
-        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+        "updated_at": iso_utc(row.updated_at) if row and row.updated_at else None,
     }
 
 

@@ -23,6 +23,7 @@ from app.models.models import Organization, Platform, User
 from app.routers.audit_log_router import log_action
 from app.services import entitlement_resolver as er
 from app.services import entitlements as ent
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/god/entitlements", tags=["god-entitlements"])
 
@@ -185,7 +186,7 @@ def _row(db: Session, t: Target, key: str, ov, cache, legacy, names) -> Dict[str
         "effective_state": res["state"], "enabled": res["enabled"],
         "inherited_from": res["inherited_from"],
         "override": ({"state": here.state, "reason": here.reason,
-                      "updated_at": here.updated_at.isoformat() if here.updated_at else None,
+                      "updated_at": iso_utc(here.updated_at),
                       "actor": names.get(here.actor_user_id)} if here else None),
         "is_inherited": here is None,
         "layers": {name: _layer_state(res, name) for name in SCOPES},
@@ -499,4 +500,4 @@ def history(feature_key: Optional[str] = None, scope: Optional[str] = None,
         "previous_state": r.previous_state or "inherited",
         "new_state": r.new_state or "inherited", "reason": r.reason,
         "actor_user_id": r.actor_user_id, "actor": names.get(r.actor_user_id),
-        "at": r.at.isoformat() if r.at else None} for r in rows]}
+        "at": iso_utc(r.at)} for r in rows]}

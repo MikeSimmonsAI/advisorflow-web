@@ -48,6 +48,7 @@ from app.services.workforce_intelligence import cost as t9_cost
 from app.services.workforce_intelligence import stalled
 from app.services.workforce_intelligence.scope import Scope
 from app.services.workforce_intelligence.stalled import Signal
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -210,7 +211,7 @@ def refresh(db: Session, scope: Scope, *, thresholds: Optional[Dict] = None,
     cleared = _clear_absent(db, scope, seen_keys, now=now)
     db.flush()
     return {"detected": len(signals), "written": written, "cleared": cleared,
-            "generated_at": now.isoformat()}
+            "generated_at": iso_utc(now)}
 
 
 def _upsert(db: Session, sig: Signal, *, platform_id: Optional[str],
@@ -320,9 +321,9 @@ def _render(row: AIAttentionItem, now: datetime, *,
         "subject_type": row.subject_type,
         "subject_id": row.subject_id,
         "age_seconds": _age_seconds(row, now),
-        "first_seen_at": (row.first_seen_at.isoformat()
+        "first_seen_at": (iso_utc(row.first_seen_at)
                           if row.first_seen_at else None),
-        "last_seen_at": (row.last_seen_at.isoformat()
+        "last_seen_at": (iso_utc(row.last_seen_at)
                          if row.last_seen_at else None),
         "severity": row.severity,
         "severity_label": C.SEVERITY_LABELS.get(row.severity, row.severity),
@@ -336,7 +337,7 @@ def _render(row: AIAttentionItem, now: datetime, *,
         "evidence_class": C.EV_FACT,
         "drilldown": drilldown,
         "state": row.state,
-        "acknowledged_at": (row.acknowledged_at.isoformat()
+        "acknowledged_at": (iso_utc(row.acknowledged_at)
                             if row.acknowledged_at else None),
         "acknowledged_by": row.acknowledged_by,
         "resolution_note": row.resolution_note,
@@ -378,7 +379,7 @@ def queue(db: Session, scope: Scope, *,
         by_kind[item["kind"]] = by_kind.get(item["kind"], 0) + 1
 
     return {
-        "generated_at": now.isoformat(),
+        "generated_at": iso_utc(now),
         "items": items,
         "total": len(items),
         "by_severity": by_severity,

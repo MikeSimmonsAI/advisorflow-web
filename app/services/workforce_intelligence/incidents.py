@@ -45,6 +45,7 @@ from app.models.workforce_models import AIEmployee, AIWorkItemEvent
 from app.services.workforce_intelligence import attention as t9_attention
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ def _remediation_state(db: Session, scope: Scope,
             "refusal_code": r.refusal_code,
             "performed_by": r.authority_path,
             "requested_by": r.requested_by,
-            "at": r.requested_at.isoformat() if r.requested_at else None,
+            "at": iso_utc(r.requested_at) if r.requested_at else None,
         } for r in rows],
         "owned": bool(rows),
     }
@@ -183,40 +184,40 @@ def detail(db: Session, scope: Scope, item_id: str, *,
                       if thread is not None else None),
         "contact": {"type": row.subject_type, "id": row.subject_id},
         "timeline": [{
-            "at": e.created_at.isoformat() if e.created_at else None,
+            "at": iso_utc(e.created_at) if e.created_at else None,
             "from": e.from_state, "to": e.to_state, "reason": e.reason,
             "actor_kind": e.actor_kind,
         } for e in transitions],
         "policy_decisions": [{
-            "at": a.created_at.isoformat() if a.created_at else None,
+            "at": iso_utc(a.created_at) if a.created_at else None,
             "operation": a.operation, "decision": a.decision,
             "denial_code": a.denial_code, "denial_reason": a.denial_reason,
             "eligibility_result": a.eligibility_result,
             "activation_state": a.activation_state,
         } for a in actions if a.decision == "denied"][:30],
         "actions": [{
-            "at": a.created_at.isoformat() if a.created_at else None,
+            "at": iso_utc(a.created_at) if a.created_at else None,
             "operation": a.operation, "tool_key": a.tool_key,
             "channel": a.channel, "decision": a.decision,
             "status": a.status, "provider": a.provider,
             "simulated": bool(a.simulated), "error": a.error,
         } for a in actions][:40],
         "provider_results": [{
-            "at": c.created_at.isoformat() if c.created_at else None,
+            "at": iso_utc(c.created_at) if c.created_at else None,
             "channel": c.channel, "state": c.state,
             "provider": c.provider, "provider_outcome": c.provider_outcome,
             "provider_error": c.provider_error,
             "simulated": bool(c.simulated), "attempts": int(c.attempts or 0),
         } for c in comms],
         "audit": [{
-            "at": e.created_at.isoformat() if e.created_at else None,
+            "at": iso_utc(e.created_at) if e.created_at else None,
             "event": e.event_code, "severity": e.severity,
             "actor_kind": e.actor_kind, "decision": e.decision,
             "denial_code": e.denial_code, "authority": e.authority,
             "message": e.message,
         } for e in audit],
         "human_ownership": ({"user_id": thread.human_owner_user_id,
-                             "since": (thread.human_owned_at.isoformat()
+                             "since": (iso_utc(thread.human_owned_at)
                                        if thread.human_owned_at else None),
                              "reason": thread.human_owner_reason}
                             if thread is not None else None),
@@ -264,7 +265,7 @@ def escalate(db: Session, scope: Scope, item_id: str, *, user,
         "",
         "Raised from AI Workforce Command.",
         "Exception: %s" % C.ATTENTION_LABELS.get(row.kind, row.kind),
-        "First seen: %s" % (row.first_seen_at.isoformat()
+        "First seen: %s" % (iso_utc(row.first_seen_at)
                             if row.first_seen_at else "unknown"),
         "Affects: %d record(s)" % int(row.rolled_up_count or 1),
         "Authoritative source: %s %s" % (row.source_kind or "-",

@@ -47,6 +47,7 @@ from app.services.workforce_intelligence import reconciliation as t9_rec
 from app.services.workforce_intelligence import review as t9_review
 from app.services.workforce_intelligence import scorecards as t9_scorecards
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ def snapshot(db: Session, scope: Scope, *,
 
     return {
         "contract_version": CONTRACT_VERSION,
-        "generated_at": now.isoformat(),
+        "generated_at": iso_utc(now),
         "scope": scope.as_dict(),
         "window": window_key,
 
@@ -202,8 +203,8 @@ def snapshot(db: Session, scope: Scope, *,
         "critical_exceptions": [i for i in attention["items"]
                                 if i["severity"] == C.SEV_CRITICAL][:25],
         "last_updated": {
-            "computed_at": now.isoformat(),
-            "newest_source_event": mark.isoformat() if mark else None,
+            "computed_at": iso_utc(now),
+            "newest_source_event": iso_utc(mark) if mark else None,
             "note": ("`newest_source_event` is the most recent authoritative "
                      "record this scope can see. When it is older than "
                      "`computed_at`, nothing has happened since these numbers "

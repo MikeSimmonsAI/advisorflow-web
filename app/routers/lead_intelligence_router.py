@@ -34,6 +34,7 @@ from app.models.models import Organization, User
 from app.routers.god_master_router import master_pool_summary
 from app.services import lead_routing as LR
 from app.services import qualification as Q
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/god/lead-intelligence", tags=["Lead Intelligence"])
 
@@ -57,7 +58,7 @@ def _prospect_q(db: Session, since: Optional[datetime]):
 
 
 def _iso(d):
-    return d.isoformat() if d else None
+    return iso_utc(d)
 
 
 # ── summary ─────────────────────────────────────────────────────────────────

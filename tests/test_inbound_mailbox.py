@@ -19,16 +19,16 @@ BOX = "support@evosyspro.live"
 
 @pytest.fixture()
 def world(db_session, sample_advisor, monkeypatch):
-    atl = Organization(name="Atlantis Test", slug="a-%s" % uuid.uuid4().hex[:6], is_active=True)
-    other = Organization(name="Other Test", slug="o-%s" % uuid.uuid4().hex[:6], is_active=True)
-    quiet = Organization(name="Own Domain Co", slug="q-%s" % uuid.uuid4().hex[:6], is_active=True)
+    # Real sending identities (organization.from_email), not a patched
+    # resolver: routing reads the org address map in one pass (S18 perf).
+    atl = Organization(name="Atlantis Test", slug="a-%s" % uuid.uuid4().hex[:6], is_active=True,
+                       from_email=BOX)
+    other = Organization(name="Other Test", slug="o-%s" % uuid.uuid4().hex[:6], is_active=True,
+                         from_email=BOX)
+    quiet = Organization(name="Own Domain Co", slug="q-%s" % uuid.uuid4().hex[:6], is_active=True,
+                         from_email="hello@own.test")
     db_session.add_all([atl, other, quiet])
     db_session.commit()
-
-    def ident(db, org_id):
-        return SimpleNamespace(from_email=BOX if org_id in (atl.id, other.id) else "hello@own.test",
-                               reply_to_email=None)
-    monkeypatch.setattr("app.services.public_identity.sending_identity_for_org", ident)
     lead = Lead(organization_id=atl.id, first_name="Joshua", last_name="S", email="Josh@Example.com",
                 status="sent", assigned_to_id=sample_advisor.id)
     db_session.add(lead)

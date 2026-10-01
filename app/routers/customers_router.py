@@ -34,6 +34,7 @@ from app.services import industry_templates
 from app.services import platform_owner as po
 from app.services import staff_activation as _activation
 from app.models.staff_models import PURPOSE_SETUP as _PURPOSE_SETUP
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/god/customers", tags=["customers"])
 
@@ -109,7 +110,7 @@ def _brief(db: Session, org: Organization,
         "brand": None if platform is None else platform.name,
         "user_count": counts["total"], "active_users": counts["active"],
         "location_count": location_count,
-        "created_at": org.created_at.isoformat() if org.created_at else None,
+        "created_at": iso_utc(org.created_at),
     }
 
 

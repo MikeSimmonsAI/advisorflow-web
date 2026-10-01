@@ -41,14 +41,14 @@ function qs(obj) {
 
 function fmtDate(iso) {
   if (!iso) return null
-  const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z')
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z')
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: 'numeric' })
 }
 
 function fmtDateTime(iso) {
   if (!iso) return null
-  const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z')
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z')
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }

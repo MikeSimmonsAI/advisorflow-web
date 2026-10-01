@@ -216,7 +216,7 @@ class TestCustomerHealthResponseShape:
         db = make_db([org])
 
         result = self._call(exec_tuple, db)
-        assert result["organizations"][0]["provisioned_at"] == created.isoformat()
+        assert result["organizations"][0]["provisioned_at"] == created.isoformat() + "Z"  # S19: naive UTC is marked Z
 
     def test_no_activity_sets_last_operational_activity_to_none(self):
         platform = make_platform()
@@ -327,7 +327,7 @@ class TestHealthClassification:
         row = result["organizations"][0]
         # reply_ts is latest → healthy
         assert row["health"] == "healthy"
-        assert row["last_operational_activity"] == reply_ts.isoformat()
+        assert row["last_operational_activity"] == reply_ts.isoformat() + "Z"  # S19: naive UTC is marked Z
 
     def test_summary_counts_match_org_classifications(self):
         from app.routers.executive_router import get_customer_health

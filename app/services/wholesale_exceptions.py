@@ -27,6 +27,7 @@ from app.models.wholesale_models import (ACTOR_SYSTEM, ACTOR_USER, EXCEPTION_KIN
                                          WholesaleDeal, WholesaleProperty, WholesaleSellerProfile,
                                          WholesaleWorkException)
 from app.services import wholesale_service as svc
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 KIND_LABELS = {
     "verify_owner": "Verify owner", "verify_contact": "Verify phone / email",
@@ -385,7 +386,7 @@ def exception_json(db: Session, org_id: str, ex: WholesaleWorkException, names=N
                    subjects: Optional[Dict[Any, Dict[str, Any]]] = None) -> Dict[str, Any]:
     """`subjects` is an optional preloaded map from `load_subjects()` keyed by
     (subject_type, subject_id); when absent the subject is looked up per row."""
-    iso = lambda d: d.isoformat() if d else None  # noqa: E731
+    iso = lambda d: iso_utc(d)  # noqa: E731
     if subjects is not None:
         subject = subjects.get((ex.subject_type, ex.subject_id)) or {"type": ex.subject_type, "label": None}
     else:

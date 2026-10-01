@@ -43,6 +43,7 @@ from app.services.dedup_service import normalize_phone
 # The SAME normalizer the writer used. A search that normalizes differently
 # from the write is a search that cannot find what it stored.
 from app.services.master_contacts import normalize_email
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -196,8 +197,8 @@ def master_contacts_search(
             "source_detail": occ.source_detail,
             "import_batch_id": occ.import_batch_id,
             "tenant_lead_status": occ.tenant_lead_status,
-            "first_seen_at": occ.first_seen_at.isoformat() if occ.first_seen_at else None,
-            "last_seen_at": occ.last_seen_at.isoformat() if occ.last_seen_at else None,
+            "first_seen_at": iso_utc(occ.first_seen_at),
+            "last_seen_at": iso_utc(occ.last_seen_at),
             "occurrence_count": contact.occurrence_count,
             "is_synthetic": bool(occ.is_synthetic or contact.is_synthetic),
             "needs_review": bool(contact.needs_review),
@@ -234,8 +235,8 @@ def master_contact_detail(
                                      contact.display_last_name] if x).strip() or None,
         "email": contact.normalized_email,
         "phone": contact.normalized_phone,
-        "first_seen_at": contact.first_seen_at.isoformat() if contact.first_seen_at else None,
-        "last_seen_at": contact.last_seen_at.isoformat() if contact.last_seen_at else None,
+        "first_seen_at": iso_utc(contact.first_seen_at),
+        "last_seen_at": iso_utc(contact.last_seen_at),
         "occurrence_count": contact.occurrence_count,
         "is_synthetic": contact.is_synthetic,
         "synthetic_reason": contact.synthetic_reason,
@@ -251,8 +252,8 @@ def master_contact_detail(
             "source_detail": o.source_detail,
             "import_batch_id": o.import_batch_id,
             "tenant_lead_status": o.tenant_lead_status,
-            "first_seen_at": o.first_seen_at.isoformat() if o.first_seen_at else None,
-            "last_seen_at": o.last_seen_at.isoformat() if o.last_seen_at else None,
+            "first_seen_at": iso_utc(o.first_seen_at),
+            "last_seen_at": iso_utc(o.last_seen_at),
             "is_synthetic": o.is_synthetic,
         } for o in occurrences],
     }

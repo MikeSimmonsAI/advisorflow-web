@@ -29,7 +29,7 @@ function fmt(v) {
 
 function when(iso) {
   if (!iso) return ''
-  const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : `${iso}Z`)
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`)
   return isNaN(d) ? '' : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 

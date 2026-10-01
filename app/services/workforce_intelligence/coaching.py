@@ -31,6 +31,7 @@ from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence import findings as t9_findings
 from app.services.workforce_intelligence import quality as t9_quality
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ def recommendations(db: Session, scope: Scope, *,
                            "dimension": key}))
 
     return {
-        "generated_at": now.isoformat(),
+        "generated_at": iso_utc(now),
         "recommendations": out,
         "total": len(out),
         "allowed_consequences": list(C.QUALITY_ALLOWED_CONSEQUENCES),

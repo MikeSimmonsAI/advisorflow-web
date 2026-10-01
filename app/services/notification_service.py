@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.models import User, Lead, Reply, Notification, NotificationType
 from app.services.email_service import send_email_via_provider
 from app.services.platform_utils import get_brand_name
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 # NO CUSTOMER NAME IN A PLATFORM DEFAULT. This named a real cemetery
 # customer in an address every brand on the platform would have sent from.
@@ -203,7 +204,7 @@ def get_unread_notifications(
             "lead_id": r.lead_id,
             "type": r.type.value if hasattr(r.type, "value") else r.type,
             "message": r.message,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "created_at": iso_utc(r.created_at),
             "link": r.link,
             "is_read": False,
         }

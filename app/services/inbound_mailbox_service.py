@@ -197,25 +197,60 @@ def clean_body(content: str) -> str:
 
 # ── routing ─────────────────────────────────────────────────────────────────
 
-def candidate_org_ids(db: Session, box: InboundMailbox) -> List[str]:
-    """Workspaces whose replies can land in this mailbox."""
+def org_sending_addresses(db: Session) -> Dict[str, set]:
+    """org id -> the lower-cased From / Reply-To addresses it sends under, for
+    every active org, in the organizations query order.
+
+    PERFORMANCE (S18, 2026-10-01). candidate_org_ids used to call
+    sending_identity_for_org() for EVERY active org, for EVERY mailbox, every
+    five minutes - ~8 queries per org (org, platform, brand-config, then the
+    org and platform again for the audit BCC and platform id, neither of which
+    routing reads). Only From and Reply-To matter here, and they resolve as
+    public_identity.identity_for_org documents:
+      * Reply-To: the organization's own column, no inheritance;
+      * From: the organization's own from_email, else a value that depends
+        ONLY on its platform (platform support_email, then the brand registry
+        for the platform slug, else unresolved).
+    So the orgs are read in one query and identity_for_org runs once per
+    distinct platform (for an org with no from_email of its own) instead of
+    once per org. tests/test_perf_oct1.py pins this map against
+    sending_identity_for_org for every org shape. Callers that route several
+    mailboxes in one run compute it once and pass it in.
+    """
     from app.models.models import Organization
-    from app.services.public_identity import sending_identity_for_org
+    from app.services.public_identity import identity_for_org
+    rows = (db.query(Organization.id, Organization.from_email, Organization.reply_to_email,
+                     Organization.platform_id)
+            .filter(Organization.is_active.isnot(False)).all())
+    inherited: Dict[Optional[str], Optional[str]] = {}
+    out: Dict[str, set] = {}
+    for oid, from_email, reply_to, platform_id in rows:
+        if from_email:
+            frm = from_email
+        else:
+            if platform_id not in inherited:
+                try:
+                    inherited[platform_id] = identity_for_org(db, oid).from_email
+                except Exception:  # noqa: BLE001
+                    inherited[platform_id] = None
+            frm = inherited[platform_id]
+        out[oid] = {v.strip().lower() for v in (frm, reply_to) if v and v.strip()}
+    return out
+
+
+def candidate_org_ids(db: Session, box: InboundMailbox,
+                      addresses: Optional[Dict[str, set]] = None) -> List[str]:
+    """Workspaces whose replies can land in this mailbox. `addresses` is
+    org_sending_addresses(db), passed by callers that route several mailboxes."""
     out = []
     if box.organization_id:
         out.append(box.organization_id)
     addr = box.address.lower()
-    for (oid,) in db.query(Organization.id).filter(Organization.is_active.isnot(False)).all():
-        if oid in out:
-            continue
-        try:
-            ident = sending_identity_for_org(db, oid)
-        except Exception:  # noqa: BLE001
-            continue
-        for v in (getattr(ident, "from_email", None), getattr(ident, "reply_to_email", None)):
-            if v and v.strip().lower() == addr:
-                out.append(oid)
-                break
+    if addresses is None:
+        addresses = org_sending_addresses(db)
+    for oid, sends_as in addresses.items():
+        if oid not in out and addr in sends_as:
+            out.append(oid)
     return out
 
 
@@ -296,7 +331,8 @@ def _maybe_hand_to_ai(db: Session, lead, reply) -> None:
             log.exception("pipeline failed for lead %s", lead.id)
 
 
-def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[datetime] = None) -> Dict:
+def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[datetime] = None,
+                 addresses: Optional[Dict[str, set]] = None) -> Dict:
     now = now or datetime.utcnow()
     box.last_polled_at = now
     try:
@@ -314,7 +350,7 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
         log.exception("inbound mailbox %s read failed", box.address)
         return {"mailbox": box.address, "checked": 0, "matched": 0, "errors": 1}
 
-    org_ids = candidate_org_ids(db, box)
+    org_ids = candidate_org_ids(db, box, addresses)
     seen = {r[0]: r[1] for r in db.query(InboundMailboxMessage.graph_message_id, InboundMailboxMessage.outcome)
             .filter(InboundMailboxMessage.mailbox_id == box.id,
                     InboundMailboxMessage.graph_message_id.in_([m.get("id") for m in messages if m.get("id")] or ["-"]))
@@ -432,8 +468,11 @@ def probe(db: Session, box: InboundMailbox) -> Dict:
 def poll_all_mailboxes(db: Session) -> Dict:
     totals = {"mailboxes_polled": 0, "mailbox_checked": 0, "mailbox_matched": 0,
               "mailbox_errors": 0, "mailbox_results": []}
-    for box in db.query(InboundMailbox).filter(InboundMailbox.is_active.is_(True)).all():
-        res = poll_mailbox(db, box)
+    boxes = db.query(InboundMailbox).filter(InboundMailbox.is_active.is_(True)).all()
+    # Resolved once per run, not once per mailbox (see org_sending_addresses).
+    addresses = org_sending_addresses(db) if boxes else None
+    for box in boxes:
+        res = poll_mailbox(db, box, addresses=addresses)
         totals["mailboxes_polled"] += 1
         totals["mailbox_checked"] += res.get("checked", 0)
         totals["mailbox_matched"] += res.get("matched", 0)

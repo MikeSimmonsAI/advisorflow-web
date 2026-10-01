@@ -47,6 +47,7 @@ from app.services.workforce import constants as W
 from app.services.workforce_intelligence import collect
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ def queue(db: Session, scope: Scope, *, limit: int = 200,
             "subject_id": item.subject_id,
             "why_review_is_required": (item.state_reason
                                        or "The engine could not decide this."),
-            "waiting_since": (item.updated_at.isoformat()
+            "waiting_since": (iso_utc(item.updated_at)
                               if item.updated_at else None),
             "age_seconds": _age(item.updated_at, now),
             "allowed_actions": list(
@@ -115,7 +116,7 @@ def queue(db: Session, scope: Scope, *, limit: int = 200,
             "subject_id": thread.subject_id,
             "why_review_is_required": (thread.state_reason
                                        or "Held for review."),
-            "waiting_since": (thread.updated_at.isoformat()
+            "waiting_since": (iso_utc(thread.updated_at)
                               if thread.updated_at else None),
             "age_seconds": _age(thread.updated_at, now),
             "allowed_actions": list(ALLOWED_ACTIONS[C.REVIEW_SOURCE_THREAD]),
@@ -136,7 +137,7 @@ def queue(db: Session, scope: Scope, *, limit: int = 200,
             "subject_type": row.subject_type,
             "subject_id": row.subject_id,
             "why_review_is_required": _reasons(row.reasons),
-            "waiting_since": (row.created_at.isoformat()
+            "waiting_since": (iso_utc(row.created_at)
                               if row.created_at else None),
             "age_seconds": _age(row.created_at, now),
             "allowed_actions": list(
@@ -154,7 +155,7 @@ def queue(db: Session, scope: Scope, *, limit: int = 200,
             "subject_id": h.subject_id,
             "why_review_is_required": (h.reason_code
                                        or "A person was asked for."),
-            "waiting_since": (h.created_at.isoformat()
+            "waiting_since": (iso_utc(h.created_at)
                               if h.created_at else None),
             "age_seconds": _age(h.created_at, now),
             "allowed_actions": list(ALLOWED_ACTIONS[C.REVIEW_SOURCE_HANDOFF]),
@@ -166,7 +167,7 @@ def queue(db: Session, scope: Scope, *, limit: int = 200,
 
     items.sort(key=lambda i: -(i["age_seconds"] or 0))
     return {
-        "generated_at": now.isoformat(),
+        "generated_at": iso_utc(now),
         "items": items[:limit],
         "total": len(items),
         "undecided": sum(1 for i in items if not i["already_decided"]),
@@ -366,7 +367,7 @@ def detail(db: Session, scope: Scope, source_kind: str,
         "previous_decisions": [{
             "decision": d.decision, "note": d.note,
             "decided_by": d.decided_by,
-            "decided_at": d.decided_at.isoformat() if d.decided_at else None,
+            "decided_at": iso_utc(d.decided_at) if d.decided_at else None,
             "effect": d.effect,
         } for d in decisions],
         # NAMED SO THE ABSENCE IS DELIBERATE RATHER THAN OVERLOOKED.
@@ -382,7 +383,7 @@ def _pick(row, fields) -> Dict[str, Any]:
     for name in fields:
         value = getattr(row, name, None)
         if isinstance(value, datetime):
-            value = value.isoformat()
+            value = iso_utc(value)
         out[name] = value
     return out
 

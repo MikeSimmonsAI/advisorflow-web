@@ -32,6 +32,7 @@ from app.routers.audit_log_router import log_action
 # stated once instead of re-derived per route.
 from app.services import lead_scope
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 router = APIRouter()
 
@@ -191,8 +192,7 @@ def get_lead_timeline(lead_id: str,
             "timestamp": m.sent_at,
             "status": m.twilio_status,
             "delivery": _describe_delivery(m),
-            "delivery_status_at": (m.delivery_status_at.isoformat()
-                                   if getattr(m, "delivery_status_at", None) else None),
+            "delivery_status_at": iso_utc(getattr(m, "delivery_status_at", None)),
         })
     for r in replies:
         events.append({
@@ -277,8 +277,8 @@ def get_lead_timeline(lead_id: str,
             "voicemail_left": vc.voicemail_left,
             "call_number": vc.call_number,
             "recording_url": vc.recording_url,
-            "started_at": vc.started_at.isoformat() if vc.started_at else None,
-            "created_at": vc.created_at.isoformat() if vc.created_at else None,
+            "started_at": iso_utc(vc.started_at),
+            "created_at": iso_utc(vc.created_at),
         })
 
     # THE CURSOR. `has_more` is true when any channel returned a full page, so

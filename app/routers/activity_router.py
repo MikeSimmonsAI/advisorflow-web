@@ -19,6 +19,7 @@ from app.deps import get_db, get_current_user
 from app.models.models import User, Lead, Message, EmailMessage
 from app.services import lead_scope
 from app.services import send_source as _src
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
@@ -132,9 +133,9 @@ def sent_activity(
             "lead_phone": lead.phone,
             "lead_email": lead.email,
             "body_preview": (msg.body[:120] + "…") if msg.body and len(msg.body) > 120 else (msg.body or ""),
-            "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
+            "sent_at": iso_utc(msg.sent_at),
             "delivery_status": msg.delivery_status or msg.twilio_status or "pending",
-            "delivery_status_at": msg.delivery_status_at.isoformat() if getattr(msg, "delivery_status_at", None) else None,
+            "delivery_status_at": iso_utc(getattr(msg, "delivery_status_at", None)),
             **_source_fields(getattr(msg, "send_source", None)),
         }
         for msg, lead in sms_rows
@@ -162,7 +163,7 @@ def sent_activity(
             "lead_email": lead.email,
             "subject": msg.subject,
             "body_preview": None,
-            "sent_at": msg.sent_at.isoformat() if msg.sent_at else None,
+            "sent_at": iso_utc(msg.sent_at),
             "delivery_status": msg.status or "sent",
             "delivery_status_at": None,
             **_source_fields(getattr(msg, "send_source", None)),

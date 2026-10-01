@@ -39,6 +39,7 @@ from app.models.sales_models import (OPPORTUNITY_STAGES, STAGE_LABELS,
                                      DiscoveryRecord, Membership, Opportunity,
                                      OpportunityEvent, ROLE_SALES_MANAGER)
 from app.services import demo_actions
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 # Weighted-pipeline stage probabilities. DECLARED, not hidden inside a sum:
 # a projection whose weights nobody can see is a number nobody should trust,
@@ -55,7 +56,7 @@ def _money(v: Optional[Decimal]) -> float:
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
-    return dt.isoformat() if dt else None
+    return iso_utc(dt)
 
 
 def _lead_key(lead: Lead) -> str:

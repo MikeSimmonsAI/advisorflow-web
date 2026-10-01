@@ -34,6 +34,7 @@ from app.models.lead_intel_models import (LeadIntelProspect, LeadIntelRoutingRul
                                           LeadIntelScrapeJob)
 from app.services import qualification as Q
 from app.services.dedup_service import normalize_phone as _digits11
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -354,8 +355,8 @@ def prospect_dict(p: LeadIntelProspect, org_names: Optional[Dict[str, str]] = No
         "destination_org_name": org_names.get(p.destination_org_id),
         "routed_org_id": p.routed_org_id, "routed_org_name": org_names.get(p.routed_org_id),
         "routed_batch_id": p.routed_batch_id,
-        "routed_at": p.routed_at.isoformat() if p.routed_at else None,
-        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "routed_at": iso_utc(p.routed_at),
+        "created_at": iso_utc(p.created_at),
         "routable": routable_reason(p) is None,
         "not_routable_reason": routable_reason(p),
     }

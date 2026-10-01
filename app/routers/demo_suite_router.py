@@ -41,6 +41,7 @@ from app.models.models import Platform, User
 from app.services import demo_access, demo_actions, demo_content
 from app.services import demo_environment as denv
 from app.services import demo_world
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ def world(platform_id: str, lead: Optional[str] = Query(None),
         "brand": {"platform_id": plat.id, "name": plat.name, "slug": plat.slug},
         "environment": {
             "id": env.id, "status": env.status,
-            "seeded_at": env.seeded_at.isoformat() if env.seeded_at else None,
+            "seeded_at": iso_utc(env.seeded_at),
             "workspace": org.name, "sales_org": brand.name,
             "stale": bool(env.seed_version != denv.SEED_VERSION),
         },
@@ -355,7 +356,7 @@ def events(platform_id: Optional[str] = Query(None),
         q = q.filter(DemoActionEvent.platform_id == platform_id)
     rows = q.order_by(DemoActionEvent.occurred_at.desc()).limit(limit).all()
     return {"events": [{
-        "id": r.id, "at": r.occurred_at.isoformat() if r.occurred_at else None,
+        "id": r.id, "at": iso_utc(r.occurred_at),
         "who": r.user_email, "action": r.action,
         "scenario": r.scenario_key, "step": r.step_key,
         "target_type": r.target_type, "target_id": r.target_id,

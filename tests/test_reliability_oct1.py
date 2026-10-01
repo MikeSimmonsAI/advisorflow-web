@@ -25,12 +25,12 @@ def _iso(dt):
 
 @pytest.fixture()
 def mailbox_world(db_session, sample_advisor, monkeypatch):
-    org = Organization(name="Rel Test", slug="r-%s" % uuid.uuid4().hex[:6], is_active=True)
+    # The org's real sending identity (S18: routing reads organization
+    # from/reply-to in one pass instead of a per-org resolver call).
+    org = Organization(name="Rel Test", slug="r-%s" % uuid.uuid4().hex[:6], is_active=True,
+                       from_email=BOX)
     db_session.add(org)
     db_session.commit()
-    monkeypatch.setattr("app.services.public_identity.sending_identity_for_org",
-                        lambda db, oid: SimpleNamespace(from_email=BOX if oid == org.id else None,
-                                                        reply_to_email=None))
     lead = Lead(organization_id=org.id, first_name="Pat", email="pat@example.com", status="sent",
                 assigned_to_id=sample_advisor.id)
     box = InboundMailbox(address=BOX, is_active=True)

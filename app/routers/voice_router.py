@@ -44,6 +44,7 @@ from app.routers.audit_log_router import log_action
 from app.services import outbound_email_gate
 from app.services import send_source
 from app.services.email_service import plain_text_to_html
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 logger = logging.getLogger(__name__)
@@ -585,7 +586,7 @@ def list_calls(
             "duration_seconds": call.duration_seconds,
             "recording_url": call.recording_url,
             "transcript": call.transcript,
-            "created_at": call.created_at.isoformat() if call.created_at else None,
+            "created_at": iso_utc(call.created_at),
         })
 
     return result
@@ -622,9 +623,9 @@ def get_call(
         "transcript": call.transcript,
         "escalation_reason": call.escalation_reason,
         "booking_url_sent": call.booking_url_sent,
-        "started_at": call.started_at.isoformat() if call.started_at else None,
-        "ended_at": call.ended_at.isoformat() if call.ended_at else None,
-        "created_at": call.created_at.isoformat() if call.created_at else None,
+        "started_at": iso_utc(call.started_at),
+        "ended_at": iso_utc(call.ended_at),
+        "created_at": iso_utc(call.created_at),
     }
 
 
@@ -783,7 +784,7 @@ def create_campaign(
         "skipped": skipped,
         "skipped_reasons": refused,
         "status": campaign.status,
-        "scheduled_at": scheduled.isoformat() if scheduled else None,
+        "scheduled_at": iso_utc(scheduled),
         "message": f"Campaign started — {len(valid_ids)} calls queued" if not scheduled else f"Campaign scheduled for {scheduled}",
     }
 
@@ -998,10 +999,10 @@ def list_campaigns(
         "calls_failed": c.calls_failed,
         "bookings_detected": c.bookings_detected,
         "concurrent_calls": c.concurrent_calls,
-        "scheduled_at": c.scheduled_at.isoformat() if c.scheduled_at else None,
-        "started_at": c.started_at.isoformat() if c.started_at else None,
-        "completed_at": c.completed_at.isoformat() if c.completed_at else None,
-        "created_at": c.created_at.isoformat() if c.created_at else None,
+        "scheduled_at": iso_utc(c.scheduled_at),
+        "started_at": iso_utc(c.started_at),
+        "completed_at": iso_utc(c.completed_at),
+        "created_at": iso_utc(c.created_at),
     } for c in campaigns]
 
 
@@ -1040,9 +1041,9 @@ def get_campaign(
         "concurrent_calls": c.concurrent_calls,
         "call_window_start": c.call_window_start,
         "call_window_end": c.call_window_end,
-        "scheduled_at": c.scheduled_at.isoformat() if c.scheduled_at else None,
-        "started_at": c.started_at.isoformat() if c.started_at else None,
-        "completed_at": c.completed_at.isoformat() if c.completed_at else None,
+        "scheduled_at": iso_utc(c.scheduled_at),
+        "started_at": iso_utc(c.started_at),
+        "completed_at": iso_utc(c.completed_at),
     }
 
 

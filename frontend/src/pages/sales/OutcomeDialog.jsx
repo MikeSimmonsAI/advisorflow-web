@@ -30,7 +30,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import { Chip, ErrorBar } from './parts'
-import { wallTime, dayFromYmd } from './calendarTime'
+import { wallTime, dayFromYmd, asUtc } from './calendarTime'
 
 /** Local YYYY-MM-DD `n` days out, for the follow-up date input. */
 function inDays(n) {
@@ -99,7 +99,7 @@ export default function OutcomeDialog({ appt, onClose, onRecorded }) {
     }
   }
 
-  const isFuture = appt?.starts_at && new Date(appt.starts_at + 'Z') > new Date()
+  const isFuture = appt?.starts_at && (asUtc(appt.starts_at) || 0) > new Date()
 
   return (
     <div className="sw-modal-back"

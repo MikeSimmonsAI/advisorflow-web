@@ -62,6 +62,7 @@ from app.services import wholesale_files as files
 from app.services import wholesale_publication as pub
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -109,16 +110,14 @@ def link_json(link: WholesaleShareLink, base_path: str) -> Dict[str, Any]:
         "recipient_email": link.recipient_email,
         "url_path": "%s/%s" % (base_path, link.token),
         "token": link.token,
-        "expires_at": link.expires_at.isoformat() if link.expires_at else None,
-        "revoked_at": link.revoked_at.isoformat() if link.revoked_at else None,
-        "first_viewed_at": (link.first_viewed_at.isoformat()
-                            if link.first_viewed_at else None),
-        "last_viewed_at": (link.last_viewed_at.isoformat()
-                           if link.last_viewed_at else None),
+        "expires_at": iso_utc(link.expires_at),
+        "revoked_at": iso_utc(link.revoked_at),
+        "first_viewed_at": iso_utc(link.first_viewed_at),
+        "last_viewed_at": iso_utc(link.last_viewed_at),
         "view_count": link.view_count or 0,
         "active": link.revoked_at is None and (
             link.expires_at is None or link.expires_at > datetime.utcnow()),
-        "created_at": link.created_at.isoformat() if link.created_at else None,
+        "created_at": iso_utc(link.created_at),
     }
 
 
@@ -214,8 +213,7 @@ def _publication_json(db: Session, deal: WholesaleDeal) -> Dict[str, Any]:
     return {
         "buyer": {
             "published": bool(deal.buyer_room_published),
-            "published_at": (deal.buyer_room_published_at.isoformat()
-                             if deal.buyer_room_published_at else None),
+            "published_at": iso_utc(deal.buyer_room_published_at),
             "summary": deal.buyer_room_summary,
             "condition": deal.buyer_room_condition,
             "asking_price": (float(deal.buyer_room_asking_price)
@@ -228,8 +226,7 @@ def _publication_json(db: Session, deal: WholesaleDeal) -> Dict[str, Any]:
         },
         "seller": {
             "published": bool(deal.seller_room_published),
-            "published_at": (deal.seller_room_published_at.isoformat()
-                             if deal.seller_room_published_at else None),
+            "published_at": iso_utc(deal.seller_room_published_at),
             "message": deal.seller_room_message,
             "contact_name": deal.seller_room_contact_name,
             "contact_phone": deal.seller_room_contact_phone,
@@ -429,7 +426,7 @@ def share_activity(deal_id: str, db: Session = Depends(get_db),
         "action": r.action,
         "detail": r.detail,
         "amount": float(r.amount) if r.amount is not None else None,
-        "at": r.created_at.isoformat() if r.created_at else None,
+        "at": iso_utc(r.created_at),
     } for r in rows]}
 
 

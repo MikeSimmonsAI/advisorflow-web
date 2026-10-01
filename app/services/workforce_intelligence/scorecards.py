@@ -42,6 +42,7 @@ from app.services.workforce_intelligence import collect
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence import metrics as M
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -149,11 +150,11 @@ def build(db: Session, scope: Scope, *, window_key: str = C.DEFAULT_WINDOW,
 
     return {
         "window": window_key,
-        "generated_at": now.isoformat(),
-        "period": {"current_from": current_from.isoformat(),
-                   "current_to": current_to.isoformat(),
-                   "previous_from": previous_from.isoformat(),
-                   "previous_to": previous_to.isoformat(),
+        "generated_at": iso_utc(now),
+        "period": {"current_from": iso_utc(current_from),
+                   "current_to": iso_utc(current_to),
+                   "previous_from": iso_utc(previous_from),
+                   "previous_to": iso_utc(previous_to),
                    "days": days},
         "metric_labels": M.ledger_vocabulary(),
         "cards": cards,

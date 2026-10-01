@@ -38,6 +38,7 @@ from app.models.wholesale_models import (
 from app.services import wholesale_files as files
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ def file_json(row: WholesaleFile) -> Dict[str, Any]:
         "seller_visible": bool(row.seller_visible),
         "is_image": (row.content_type or "").startswith("image/"),
         "uploaded_by_id": row.uploaded_by_id,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "created_at": iso_utc(row.created_at),
     }
 
 

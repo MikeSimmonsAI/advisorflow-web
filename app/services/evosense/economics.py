@@ -24,6 +24,7 @@ from app.models.evosense_models import EvoSenseFact
 from app.services import wholesale_analysis
 from app.services.evosense import common as C
 from app.services.evosense import valuation as VAL
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 REPAIR_PER_SQFT = {"excellent": 0, "good": 5, "fair": 12, "poor": 25, "distressed": 45}
 
@@ -176,7 +177,7 @@ def acquisition_cost(db, prop) -> Dict[str, Any]:
         "by_capability": by_cap,
         "by_provider": by_provider,
         "decisions": len(decisions),
-        "paid_decisions": [{"at": d.created_at.isoformat() if d.created_at else None,
+        "paid_decisions": [{"at": iso_utc(d.created_at),
                             "policy": d.policy, "provider": d.provider_key,
                             "estimated_cents": d.estimated_cost_cents, "outcome": d.outcome,
                             "opportunity_score": d.opportunity_score,

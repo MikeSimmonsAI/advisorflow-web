@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from app.models.models import Organization
 from app.services.ai_deployment import capacity, commerce
 from app.services.ai_deployment import constants as D
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 _log = logging.getLogger(__name__)
 
@@ -238,8 +239,7 @@ def terms_out(terms) -> Optional[Dict[str, Any]]:
         "allowed_channels": commerce.json_list(terms.allowed_channels, []) or [],
         "is_available": bool(terms.is_available),
         "notes": terms.notes,
-        "updated_at": (terms.updated_at.isoformat() if terms.updated_at
-                       else None),
+        "updated_at": (iso_utc(terms.updated_at)),
     }
 
 

@@ -45,6 +45,7 @@ from app.services.workforce import registry as wf_registry
 from app.services.workforce import service as wf_service
 from app.services.workforce import simulator as wf_simulator
 from app.services.workforce import supervisor as wf_supervisor
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 _log = logging.getLogger(__name__)
 
@@ -419,8 +420,7 @@ def health(db: Session = Depends(get_db),
         "stalled_work_items": len(stalled),
         "stalled_sample": [{"id": i.id, "employee_id": i.employee_id,
                             "state": i.state,
-                            "updated_at": (i.updated_at.isoformat()
-                                           if i.updated_at else None)}
+                            "updated_at": (iso_utc(i.updated_at))}
                            for i in stalled[:20]],
         "tool_errors": errors,
         "denials": sorted([{"code": c or "unknown", "count": int(n)}
@@ -430,7 +430,7 @@ def health(db: Session = Depends(get_db),
             {"id": e.id, "severity": e.severity, "code": e.event_code,
              "message": e.message, "recommended_action": e.recommended_action,
              "employee_id": e.employee_id,
-             "created_at": e.created_at.isoformat() if e.created_at else None}
+             "created_at": iso_utc(e.created_at)}
             for e in events
         ],
     }

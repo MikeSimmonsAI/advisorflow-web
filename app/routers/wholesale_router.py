@@ -51,6 +51,7 @@ from app.services import wholesale_ai
 from app.services import wholesale_pipeline as pipeline
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -103,8 +104,8 @@ def property_json(p: WholesaleProperty) -> Dict[str, Any]:
         "tags": _jsonl(p.tags), "notes": p.notes,
         "assigned_to_id": p.assigned_to_id,
         "is_test": bool(p.is_test), "test_note": p.test_note,
-        "created_at": p.created_at.isoformat() if p.created_at else None,
-        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        "created_at": iso_utc(p.created_at),
+        "updated_at": iso_utc(p.updated_at),
     }
 
 
@@ -150,8 +151,7 @@ def seller_json(profile: Optional[WholesaleSellerProfile],
         "qualification_reasons": _jsonl(profile.qualification_reasons),
         "completeness": profile.completeness,
         "ai_summary": profile.ai_summary, "ai_intent": profile.ai_intent,
-        "ai_last_run_at": (profile.ai_last_run_at.isoformat()
-                           if profile.ai_last_run_at else None),
+        "ai_last_run_at": iso_utc(profile.ai_last_run_at),
         "needs_human": bool(profile.needs_human),
         "needs_human_reason": profile.needs_human_reason,
     }
@@ -215,8 +215,7 @@ def deal_json(d: WholesaleDeal, settings: WholesaleSettings) -> Dict[str, Any]:
         "id": d.id, "property_id": d.property_id,
         "seller_lead_id": d.seller_lead_id, "assigned_to_id": d.assigned_to_id,
         "stage": d.stage, "stage_label": pipeline.stage_label(settings, d.stage),
-        "stage_changed_at": (d.stage_changed_at.isoformat()
-                             if d.stage_changed_at else None),
+        "stage_changed_at": iso_utc(d.stage_changed_at),
         "previous_stage": d.previous_stage, "lost_reason": d.lost_reason,
         "arv": _num(d.arv), "arv_source": d.arv_source, "arv_method": d.arv_method,
         "repair_estimate": _num(d.repair_estimate),
@@ -230,20 +229,17 @@ def deal_json(d: WholesaleDeal, settings: WholesaleSettings) -> Dict[str, Any]:
         "analysis_notes": d.analysis_notes,
         "contract_price": _num(d.contract_price),
         "contract_status": d.contract_status,
-        "contract_signed_at": (d.contract_signed_at.isoformat()
-                               if d.contract_signed_at else None),
-        "inspection_deadline": (d.inspection_deadline.isoformat()
-                                if d.inspection_deadline else None),
-        "close_of_escrow_target": (d.close_of_escrow_target.isoformat()
-                                   if d.close_of_escrow_target else None),
+        "contract_signed_at": iso_utc(d.contract_signed_at),
+        "inspection_deadline": iso_utc(d.inspection_deadline),
+        "close_of_escrow_target": iso_utc(d.close_of_escrow_target),
         "assigned_buyer_id": d.assigned_buyer_id,
         "buyer_price": _num(d.buyer_price),
         "assignment_fee": _num(d.assignment_fee),
         "assignment_status": d.assignment_status,
         "title_company": d.title_company, "title_contact": d.title_contact,
         "title_status": d.title_status,
-        "closing_date": d.closing_date.isoformat() if d.closing_date else None,
-        "closed_at": d.closed_at.isoformat() if d.closed_at else None,
+        "closing_date": iso_utc(d.closing_date),
+        "closed_at": iso_utc(d.closed_at),
         "wholesale_fee_collected": _num(d.wholesale_fee_collected),
         "deal_result": d.deal_result,
         "lost_reason": d.lost_reason,
@@ -252,35 +248,32 @@ def deal_json(d: WholesaleDeal, settings: WholesaleSettings) -> Dict[str, Any]:
         # economics lock. The deal summary header reads every one of these,
         # so a payload that omitted them would send the header back for a
         # second request to render its own first screen.
-        "contract_date": d.contract_date.isoformat() if d.contract_date else None,
-        "seller_signed_at": d.seller_signed_at.isoformat() if d.seller_signed_at else None,
-        "buyer_signed_at": d.buyer_signed_at.isoformat() if d.buyer_signed_at else None,
-        "effective_date": d.effective_date.isoformat() if d.effective_date else None,
+        "contract_date": iso_utc(d.contract_date),
+        "seller_signed_at": iso_utc(d.seller_signed_at),
+        "buyer_signed_at": iso_utc(d.buyer_signed_at),
+        "effective_date": iso_utc(d.effective_date),
         "earnest_money": _num(d.earnest_money),
-        "earnest_money_due": d.earnest_money_due.isoformat() if d.earnest_money_due else None,
-        "earnest_money_received_at": (d.earnest_money_received_at.isoformat()
-                                      if d.earnest_money_received_at else None),
+        "earnest_money_due": iso_utc(d.earnest_money_due),
+        "earnest_money_received_at": iso_utc(d.earnest_money_received_at),
         "option_fee": _num(d.option_fee),
-        "closing_deadline": d.closing_deadline.isoformat() if d.closing_deadline else None,
+        "closing_deadline": iso_utc(d.closing_deadline),
         "title_escrow_officer": d.title_escrow_officer,
         "title_phone": d.title_phone,
         "title_email": d.title_email,
-        "title_commitment_received_at": (d.title_commitment_received_at.isoformat()
-                                         if d.title_commitment_received_at else None),
+        "title_commitment_received_at": iso_utc(d.title_commitment_received_at),
         "title_issues": d.title_issues,
         "closing_time": d.closing_time,
         "closing_location": d.closing_location,
         "closing_status": d.closing_status,
         "other_costs": _num(d.other_costs),
-        "buyer_selected_at": d.buyer_selected_at.isoformat() if d.buyer_selected_at else None,
+        "buyer_selected_at": iso_utc(d.buyer_selected_at),
         "buyer_selected_by_id": d.buyer_selected_by_id,
         "economics_locked": bool(d.economics_locked),
         # ── Phase 5. Closed and paid are two different facts. ───────────────
         "title_file_number": d.title_file_number,
         "funding_status": d.funding_status,
-        "funded_at": d.funded_at.isoformat() if d.funded_at else None,
-        "fee_collected_at": (d.fee_collected_at.isoformat()
-                             if d.fee_collected_at else None),
+        "funded_at": iso_utc(d.funded_at),
+        "fee_collected_at": iso_utc(d.fee_collected_at),
         "fee_payment_method": d.fee_payment_method,
         "fee_payment_reference": d.fee_payment_reference,
         "fee_recorded_by_id": d.fee_recorded_by_id,
@@ -288,7 +281,7 @@ def deal_json(d: WholesaleDeal, settings: WholesaleSettings) -> Dict[str, Any]:
         "payment_state": payment_state(d),
         "closing_checklist": closing_checklist(d),
         "is_test": bool(d.is_test),
-        "created_at": d.created_at.isoformat() if d.created_at else None,
+        "created_at": iso_utc(d.created_at),
     }
 
 
@@ -328,7 +321,7 @@ def comp_json(c: WholesaleComp, photo: Any = None) -> Dict[str, Any]:
         "id": c.id, "street_address": c.street_address, "city": c.city,
         "state": c.state, "zip_code": c.zip_code,
         "sale_price": _num(c.sale_price),
-        "sale_date": c.sale_date.isoformat() if c.sale_date else None,
+        "sale_date": iso_utc(c.sale_date),
         "square_feet": c.square_feet, "bedrooms": _num(c.bedrooms),
         "bathrooms": _num(c.bathrooms), "distance_miles": _num(c.distance_miles),
         "year_built": c.year_built,
@@ -359,9 +352,9 @@ def approval_json(a: WholesaleApproval) -> Dict[str, Any]:
         "recommendation": a.recommendation, "reasoning": a.reasoning,
         "inputs": _jsonl(a.inputs), "requested_by_id": a.requested_by_id,
         "requested_by_actor": a.requested_by_actor, "approver_id": a.approver_id,
-        "decided_at": a.decided_at.isoformat() if a.decided_at else None,
+        "decided_at": iso_utc(a.decided_at),
         "comments": a.comments,
-        "created_at": a.created_at.isoformat() if a.created_at else None,
+        "created_at": iso_utc(a.created_at),
     }
 
 
@@ -399,21 +392,19 @@ def document_json(d: WholesaleDocument, stored: Any = None) -> Dict[str, Any]:
             "original_filename": stored.original_filename,
             "content_type": stored.content_type,
             "byte_size": stored.byte_size,
-            "uploaded_at": (stored.created_at.isoformat()
-                            if stored.created_at else None),
+            "uploaded_at": iso_utc(stored.created_at),
         } if stored is not None else None),
         # Phase 5. Who this document has been published to. Absent from the
         # buyer and seller payloads entirely — this is the operator's view of
         # the boundary, not a hint to an outside reader.
         "buyer_visible": bool(getattr(d, "buyer_visible", False)),
         "seller_visible": bool(getattr(d, "seller_visible", False)),
-        "viewed_at": (d.viewed_at.isoformat()
-                      if getattr(d, "viewed_at", None) else None),
+        "viewed_at": iso_utc(getattr(d, "viewed_at", None)),
         "file_url": d.file_url, "uploaded_by_id": d.uploaded_by_id,
-        "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
-        "executed_at": d.executed_at.isoformat() if d.executed_at else None,
+        "uploaded_at": iso_utc(d.uploaded_at),
+        "executed_at": iso_utc(d.executed_at),
         "notes": d.notes,
-        "created_at": d.created_at.isoformat() if d.created_at else None,
+        "created_at": iso_utc(d.created_at),
     }
 
 
@@ -423,7 +414,7 @@ def event_json(e: WholesaleEvent) -> Dict[str, Any]:
         "actor_user_id": e.actor_user_id, "actor_label": e.actor_label,
         "summary": e.summary, "before": _jsonl(e.before_state),
         "after": _jsonl(e.after_state), "details": _jsonl(e.details),
-        "created_at": e.created_at.isoformat() if e.created_at else None,
+        "created_at": iso_utc(e.created_at),
     }
 
 
@@ -434,8 +425,8 @@ def enrichment_json(e: WholesaleEnrichmentRequest) -> Dict[str, Any]:
         "inputs": _jsonl(e.inputs), "result": _jsonl(e.result),
         "confidence": e.confidence, "billable": bool(e.billable),
         "requested_by_actor": e.requested_by_actor,
-        "created_at": e.created_at.isoformat() if e.created_at else None,
-        "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+        "created_at": iso_utc(e.created_at),
+        "completed_at": iso_utc(e.completed_at),
     }
 
 
@@ -1002,7 +993,7 @@ def list_properties(db: Session = Depends(get_db),
             profile = profiles.get(deal.seller_profile_id)
             item["seller"] = seller_json(profile, leads.get(deal.seller_lead_id))
             when = last_seen.get(deal.id)
-            item["last_activity_at"] = when.isoformat() if when else None
+            item["last_activity_at"] = iso_utc(when)
             # The same function the deal room header and the Command Center
             # read, so three screens cannot disagree about one deal.
             item["next_action"] = (
@@ -2135,7 +2126,7 @@ def list_deals(db: Session = Depends(get_db),
         item["seller"] = seller_json(profile, lead)
         item["photo_url"] = covers.get(d.property_id)
         when = last_seen.get(d.id)
-        item["last_activity_at"] = when.isoformat() if when else None
+        item["last_activity_at"] = iso_utc(when)
         # Computed by the same function the deal room header and the Command
         # Center use, so three screens cannot disagree about one deal.
         item["next_action"] = (svc.next_action(db, org_id, d, profile, lead)
@@ -2280,7 +2271,7 @@ def deal_room(deal_id: str, db: Session = Depends(get_db),
                                            "do_not_contact", False)),
             "activity": match_activity.get(m.buyer_id),
             "standing": buyer_standing(match_activity.get(m.buyer_id), buyers.get(m.buyer_id)),
-            "computed_at": m.computed_at.isoformat() if m.computed_at else None,
+            "computed_at": iso_utc(m.computed_at),
         } for m in matches],
         "buyer_outreach": [{
             "id": o.id, "buyer_id": o.buyer_id,
@@ -2290,13 +2281,13 @@ def deal_room(deal_id: str, db: Session = Depends(get_db),
             "body": o.body, "asking_price": _num(o.asking_price),
             "offer_amount": _num(o.offer_amount),
             "response_note": o.response_note, "blocked_reason": o.blocked_reason,
-            "sent_at": o.sent_at.isoformat() if o.sent_at else None,
-            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "sent_at": iso_utc(o.sent_at),
+            "created_at": iso_utc(o.created_at),
         } for o in outreach],
         "communications": {
             "outbound": [{"id": m.id, "body": getattr(m, "body", None),
                           "status": getattr(m, "delivery_status", None),
-                          "sent_at": m.sent_at.isoformat() if m.sent_at else None}
+                          "sent_at": iso_utc(m.sent_at)}
                          for m in messages],
             "inbound": [{"id": r.id, "body": getattr(r, "body", None),
                          "classification": _enum_text(
@@ -2305,8 +2296,7 @@ def deal_room(deal_id: str, db: Session = Depends(get_db),
                          # The thread says so rather than letting it read as a
                          # message that arrived on its own.
                          "source": getattr(r, "source", None),
-                         "received_at": (r.received_at.isoformat()
-                                         if r.received_at else None)}
+                         "received_at": iso_utc(r.received_at)}
                         for r in replies],
         },
         "events": [event_json(e) for e in events],
@@ -2354,7 +2344,7 @@ def _photo_json(row: WholesaleFile) -> Dict[str, Any]:
             "caption": row.caption, "is_primary": bool(row.is_primary),
             "content_type": row.content_type, "byte_size": row.byte_size,
             "original_filename": row.original_filename,
-            "created_at": row.created_at.isoformat() if row.created_at else None}
+            "created_at": iso_utc(row.created_at)}
 
 
 def _buy_box_geography(boxes: List[Any]) -> Optional[str]:
@@ -3257,9 +3247,9 @@ def offer_json(row) -> Dict[str, Any]:
         "approval_id": row.approval_id,
         "created_by_id": row.created_by_id,
         "created_by_actor": row.created_by_actor,
-        "presented_at": row.presented_at.isoformat() if row.presented_at else None,
-        "responded_at": row.responded_at.isoformat() if row.responded_at else None,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "presented_at": iso_utc(row.presented_at),
+        "responded_at": iso_utc(row.responded_at),
+        "created_at": iso_utc(row.created_at),
     }
 
 

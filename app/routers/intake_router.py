@@ -794,27 +794,48 @@ def contacts_summary(db: Session = Depends(get_db), user=Depends(require_import_
                                        OrgContact.archived_at.is_(None))
     by_class = dict(base.with_entities(OrgContact.record_class, func.count())
                     .group_by(OrgContact.record_class).all())
+    # PERFORMANCE (S18): every figure below used to be its own COUNT over the
+    # org's contacts (ten scans of ~11k rows on Atlantis). One pass now; each
+    # COUNT(CASE WHEN cond THEN 1 END) counts exactly the rows the old
+    # base.filter(cond).count() did (a NULL condition counts in neither).
+    from sqlalchemy import case
+
+    def _n(cond):
+        return func.count(case((cond, 1)))
+
+    agg = base.with_entities(
+        func.count(OrgContact.id),
+        _n(OrgContact.sms_status == "ready"),
+        _n(OrgContact.email_status == "ready"),
+        _n(OrgContact.lifecycle == ContactLifecycle.NEEDS_ENRICHMENT),
+        _n(OrgContact.historical_customer.is_(True)),
+        _n(_has_text(OrgContact.email)),
+        _n(_phone_present()),
+        _n(_phone_present() & ((OrgContact.sms_status.is_(None))
+                               | (OrgContact.sms_status != "invalid"))),
+        _n(_is_mobile()),
+        _n(OrgContact.lead_id.isnot(None)),
+    ).one()
+    (total, sms_ready, email_ready, needs_enrichment, historical, with_email,
+     with_phone, valid_phones, mobile, promoted) = (int(v or 0) for v in agg)
     return {
         "organization": ctx.payload(),
-        "contacts": base.count(),
+        "contacts": total,
         "active_leads": db.query(Lead).filter(Lead.organization_id == ctx.org_id).count(),
         "customers": by_class.get(RecordClass.CUSTOMER, 0),
         "previous_customers": by_class.get(RecordClass.PREVIOUS_CUSTOMER, 0),
         "renewals": by_class.get(RecordClass.RENEWAL, 0),
         "by_record_class": by_class,
-        "sms_ready": base.filter(OrgContact.sms_status == "ready").count(),
-        "email_ready": base.filter(OrgContact.email_status == "ready").count(),
-        "needs_enrichment": base.filter(
-            OrgContact.lifecycle == ContactLifecycle.NEEDS_ENRICHMENT).count(),
-        "historical_customers": base.filter(OrgContact.historical_customer.is_(True)).count(),
+        "sms_ready": sms_ready,
+        "email_ready": email_ready,
+        "needs_enrichment": needs_enrichment,
+        "historical_customers": historical,
         # ── added for the workspace contacts screen ──
-        "with_email": base.filter(_has_text(OrgContact.email)).count(),
-        "with_phone": base.filter(_phone_present()).count(),
-        "valid_phones": base.filter(
-            _phone_present(),
-            (OrgContact.sms_status.is_(None)) | (OrgContact.sms_status != "invalid")).count(),
-        "mobile": base.filter(_is_mobile()).count(),
-        "promoted": base.filter(OrgContact.lead_id.isnot(None)).count(),
+        "with_email": with_email,
+        "with_phone": with_phone,
+        "valid_phones": valid_phones,
+        "mobile": mobile,
+        "promoted": promoted,
     }
 
 

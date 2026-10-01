@@ -56,6 +56,7 @@ from app.services import external_busy as extbusy
 from app.services import appointment_outcome as apoutcome
 from app.services import appointment_reconcile as apreconcile
 from app.services.meeting_providers import get_provider, PROVIDER_ZOOM
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/sales", tags=["sales-scheduling"])
 
@@ -2396,7 +2397,7 @@ def video_status(verify: bool = Query(False),
                        MeetingProviderConfig.is_active.is_(True)).first())
     credential_source = "brand_config" if cfg_row else "environment"
     last_verified_at = (
-        cfg_row.last_verified_at.isoformat()
+        iso_utc(cfg_row.last_verified_at)
         if cfg_row and cfg_row.last_verified_at else None
     )
 
@@ -2406,7 +2407,7 @@ def video_status(verify: bool = Query(False),
             if cfg_row:
                 cfg_row.last_verified_at = datetime.utcnow()
                 db.commit()
-                last_verified_at = cfg_row.last_verified_at.isoformat()
+                last_verified_at = iso_utc(cfg_row.last_verified_at)
             return {
                 "brand_sales_org_id": org.id,
                 "provider": PROVIDER_ZOOM,

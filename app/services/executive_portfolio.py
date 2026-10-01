@@ -76,6 +76,7 @@ from sqlalchemy.orm import Session
 from app.models.models import (BookingLink, Lead, Message, Organization,
                                Reply, User)
 from app.services.test_records import exclude_test_records
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 # ── the health vocabulary, unchanged from what has shipped ──────────────────
 # These five words and their day windows are what /executive/customer-health
@@ -113,7 +114,7 @@ LOW_ACTIVITY_LEAD_THRESHOLD = 1  # fewer than this worked in RECENT_DAYS
 
 
 def _iso(v):
-    return v.isoformat() if v else None
+    return iso_utc(v)
 
 
 def _rate(numerator: int, denominator: int) -> Optional[float]:

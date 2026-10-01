@@ -32,6 +32,7 @@ from app.models.telephony_models import (InboundCallLog, OrgVoicemailDrop, Phone
                                          TelephonyUserSetting, Voicemail)
 from app.services import number_resolution as NR
 from app.services import telephony_twilio as TT
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -758,7 +759,7 @@ DISPOSITIONS = ("connected", "no_answer", "left_voicemail", "busy", "wrong_numbe
 
 
 def call_json(c: VoiceCall) -> dict:
-    iso = (lambda d: d.isoformat() if d else None)
+    iso = (lambda d: iso_utc(d))
     return {"id": c.id, "lead_id": c.lead_id, "status": c.status, "outcome": c.outcome,
             "direction": c.direction, "is_human_call": bool(c.is_human_call),
             "from_phone": c.from_phone, "to_phone": c.to_phone,
@@ -822,7 +823,7 @@ def lead_call_history(db, lead: Lead, limit: int = 50) -> dict:
     vms = (db.query(Voicemail)
            .filter(Voicemail.organization_id == org_id, Voicemail.lead_id == lead.id)
            .order_by(Voicemail.received_at.desc()).limit(limit).all())
-    iso = (lambda d: d.isoformat() if d else None)
+    iso = (lambda d: iso_utc(d))
     return {
         "lead_id": lead.id,
         "calls": [call_json(c) for c in calls],
@@ -883,10 +884,10 @@ def dialer_queue(db, user: User, org_id: str, *, limit: int = 25, everyone: bool
             excluded[why] = excluded.get(why, 0) + 1
             continue
         items.append({"lead_id": l.id, "name": lead_label(l) or None, "phone": l.phone,
-                      "status": l.status, "last_called_at": (last_call[l.id].isoformat()
+                      "status": l.status, "last_called_at": (iso_utc(last_call[l.id])
                                                              if l.id in last_call else None),
                       "last_disposition": last_dispo.get(l.id),
-                      "follow_up_due_at": due[l.id].isoformat() if l.id in due else None,
+                      "follow_up_due_at": iso_utc(due[l.id]) if l.id in due else None,
                       "reason": ("Follow-up due" if l.id in due else
                                  "Never called" if l.id not in last_call else "Oldest last call")})
     items.sort(key=lambda i: (0 if i["follow_up_due_at"] else 1 if not i["last_called_at"] else 2,

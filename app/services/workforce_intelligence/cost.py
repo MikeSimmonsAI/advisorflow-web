@@ -46,6 +46,7 @@ from app.services.workforce import constants as W
 from app.services.workforce_intelligence import collect
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ def usage(db: Session, scope: Scope, *, window_key: str = C.DEFAULT_WINDOW,
 
     return {
         "window": window_key,
-        "generated_at": now.isoformat(),
+        "generated_at": iso_utc(now),
         "rates": _rates(),
         "note": COST_NOTE,
         "measured": {

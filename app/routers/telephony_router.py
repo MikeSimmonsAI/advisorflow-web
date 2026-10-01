@@ -58,6 +58,7 @@ from app.services import number_resolution as NR
 from app.services import telephony_service as TS
 from app.services import telephony_twilio as TT
 from app.services.telephony_webhook_guard import assert_org_matches, verify_voice_webhook
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 router = APIRouter(tags=["telephony"])
 log = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def _xml(body: str) -> Response:
 
 
 def _iso(dt) -> Optional[str]:
-    return dt.isoformat() if dt else None
+    return iso_utc(dt)
 
 
 def _org_id(db: Session, user: User) -> str:

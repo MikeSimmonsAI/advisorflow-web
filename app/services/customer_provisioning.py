@@ -48,6 +48,7 @@ from app.models.location_models import Location, UserLocation
 from app.routers.audit_log_router import log_action
 from app.services.sales_staff import normalize_email, assert_email, _unknowable_password
 from app.services.auth_service import hash_password
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 # Roles a customer-side person may hold. Deliberately excludes every
 # control-plane role: provisioning a customer must never be a way to mint a
@@ -326,7 +327,7 @@ def lookup_identity(db: Session, email: str, org_id: str) -> Dict[str, Any]:
         "id": user.id, "email": user.email, "full_name": user.full_name,
         "role": user.role, "is_active": bool(user.is_active),
         "organization_id": user.organization_id,
-        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+        "last_login_at": iso_utc(user.last_login_at),
         "has_usable_login": not bool(user.must_change_password),
         "memberships": [
             {"scope_type": m.scope_type, "scope_id": m.scope_id, "role": m.role,
@@ -608,7 +609,7 @@ def customer_users(db: Session, org_id: str) -> List[Dict[str, Any]]:
             "is_active": bool(u.is_active),
             "must_change_password": bool(u.must_change_password),
             "has_signed_in": u.last_login_at is not None,
-            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+            "last_login_at": iso_utc(u.last_login_at),
             "location_ids": links.get(u.id, []),
             "locations": [names.get(x, x) for x in links.get(u.id, [])],
         }

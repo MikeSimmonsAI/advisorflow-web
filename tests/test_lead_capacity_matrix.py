@@ -67,6 +67,7 @@ FIXTURE_PATHS = {
     "services/workforce/profiles.py": "synthetic profile for the harness",
     "services/workforce/simulator.py": "the workforce simulator's own world",
     "services/workforce_intelligence/proof.py": "proof harness, synthetic org",
+    "services/agency/demo_seed.py": "Max Life DEMO seeder; writes only into the is_demo org /god/demo/maxlife created",
 }
 
 

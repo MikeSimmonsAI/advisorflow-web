@@ -13,6 +13,7 @@ from datetime import date, timedelta
 from app.deps import get_db, get_current_user
 from app.models.models import User, AdvisorAvailabilityBlock, BlockType, BookingLink, Lead
 from app.services import lead_scope
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/availability", tags=["availability"])
 
@@ -478,7 +479,7 @@ def get_upcoming_appointments(
                 "lead_id": b.lead_id,
                 "lead_name": lead_name,
                 "lead_phone": lead_phone,
-                "booked_time": b.booked_time.isoformat() if b.booked_time else None,
+                "booked_time": iso_utc(b.booked_time),
                 "advisor_name": get_advisor_name(b.user_id),
                 "advisor_id": b.user_id,
             })
@@ -509,7 +510,7 @@ def get_upcoming_appointments(
             "lead_id": b.lead_id,
             "lead_name": lead_name,
             "lead_phone": lead_phone,
-            "booked_time": b.booked_time.isoformat() if b.booked_time else None,
+            "booked_time": iso_utc(b.booked_time),
         })
     return result
 

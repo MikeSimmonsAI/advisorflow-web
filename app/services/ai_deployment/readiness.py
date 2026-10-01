@@ -37,6 +37,7 @@ from app.models.models import Organization, User
 from app.services.ai_deployment import capacity, catalog, commerce
 from app.services.ai_deployment import configuration as cfg_mod
 from app.services.ai_deployment import constants as D
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 _log = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class Readiness:
                 D.READY_NO: "Not ready",
                 D.READY_REVIEW: "Needs a person to look",
             }.get(self.verdict, self.verdict),
-            "checked_at": self.checked_at.isoformat(),
+            "checked_at": iso_utc(self.checked_at),
             "checks": [c.as_dict() for c in self.checks],
             "blocking": [c.as_dict() for c in self.blocking],
             "review": [c.as_dict() for c in self.review],

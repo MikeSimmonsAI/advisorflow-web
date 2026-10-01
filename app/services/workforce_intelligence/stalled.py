@@ -39,6 +39,7 @@ from app.services.workforce import constants as W
 from app.services.workforce_intelligence import collect
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -791,7 +792,7 @@ def _unrouted_inbound(db, scope, th, now, limit) -> List[Signal]:
 
 
 def _iso(value: Optional[datetime]) -> Optional[str]:
-    return value.isoformat() if value is not None else None
+    return iso_utc(value) if value is not None else None
 
 
 _DETECTORS = (

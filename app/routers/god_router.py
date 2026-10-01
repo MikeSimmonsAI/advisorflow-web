@@ -39,6 +39,7 @@ from app.models.models import User, Organization, Lead, Platform, Message
 from app.services.auth_service import hash_password
 from app.services import staff_activation
 from app.models.staff_models import PURPOSE_SETUP
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -213,9 +214,9 @@ def _enrich_org(db: Session, org: Organization) -> dict:
         "platform_id": getattr(org, "platform_id", None),
         "lead_count": lead_count, "user_count": user_count, "advisor_count": advisor_count,
         "messages_30d": int(messages_30d),
-        "last_activity": last_activity.isoformat() if last_activity else None,
+        "last_activity": iso_utc(last_activity),
         "health_score": health_score,
-        "created_at": org.created_at.isoformat() if getattr(org, "created_at", None) else None,
+        "created_at": iso_utc(getattr(org, "created_at", None)),
         "brand_name": getattr(org, "brand_name", None),
         "org_phone": getattr(org, "org_phone", None),
         "org_address": getattr(org, "org_address", None),
@@ -254,7 +255,7 @@ def god_create_org(body: OrgCreate, god: User = Depends(require_god), db: Sessio
     log.info("AUDIT: god_admin %s created org %s (%s) on %s", god.email, org.name, org.id, body.platform_slug)
     return {"id": org.id, "name": org.name, "slug": org.slug, "plan": org.plan,
             "platform_id": org.platform_id, "lead_count": 0, "user_count": 0,
-            "created_at": org.created_at.isoformat() if org.created_at else None}
+            "created_at": iso_utc(org.created_at)}
 
 
 @router.post("/users", status_code=201)
@@ -369,7 +370,7 @@ def god_stats(god: User = Depends(require_god), db: Session = Depends(get_db)):
             "active_orgs": active_org_count, "total_leads": total_leads,
             "new_leads_30d": new_leads_30d, "total_users": total_users,
             "total_admins": total_admins, "platforms": platforms,
-            "as_of": datetime.utcnow().isoformat()}
+            "as_of": iso_utc(datetime.utcnow())}
 
 
 @router.get("/platform-health")
@@ -754,7 +755,7 @@ def god_platform_health(god: User = Depends(require_god), db: Session = Depends(
     # THE PAGE'S OWN HEADLINE, rolled up the same way the Compensation Command
     # Center rolls up its attention list — one vocabulary, one function.
     # `worst` deliberately does NOT treat "can't check" as fine.
-    return {"as_of": now.isoformat(), "sections": out,
+    return {"as_of": iso_utc(now), "sections": out,
             "overall": sev.summarize(out),
             "legend": [{"key": s, "label": sev.LABELS[s],
                         "meaning": sev.MEANINGS[s]} for s in sev.ALL]}
@@ -835,7 +836,7 @@ def god_twilio_diagnostics(god: User = Depends(require_god), db: Session = Depen
         # assuming either one crashes in exactly the environment not being
         # looked at when the assumption was written.
         "newest_receipt_at": (
-            newest_settled.isoformat() if hasattr(newest_settled, "isoformat")
+            iso_utc(newest_settled) if hasattr(newest_settled, "isoformat")
             else (str(newest_settled) if newest_settled else None)
         ),
         "verdict": (
@@ -992,7 +993,7 @@ def god_leads(
                 "email": getattr(l,"email",None), "phone": getattr(l,"phone",None),
                 "status": getattr(l,"status",None), "tier": getattr(l,"tier",None),
                 "source": getattr(l,"source_file",None), "organization_id": l.organization_id,
-                "created_at": l.created_at.isoformat() if getattr(l,"created_at",None) else None}
+                "created_at": iso_utc(getattr(l, "created_at", None))}
     return {"total": total, "leads": [_ld(l) for l in leads]}
 
 
@@ -1082,7 +1083,7 @@ def god_users(
             "id": u.id, "email": u.email, "name": getattr(u, "full_name", None),
             "role": u.role, "is_active": getattr(u, "is_active", True),
             "organization_id": getattr(u, "organization_id", None),
-            "created_at": u.created_at.isoformat() if getattr(u, "created_at", None) else None,
+            "created_at": iso_utc(getattr(u, "created_at", None)),
             # ── added: the contexts this one identity holds ──
             "full_name": getattr(u, "full_name", None),
             "organization_name": org.name if org else None,
@@ -1092,8 +1093,7 @@ def god_users(
             # that somebody belongs to the control plane and to no tenant.
             "is_internal": u.organization_id is None,
             "must_change_password": bool(getattr(u, "must_change_password", False)),
-            "last_login_at": (u.last_login_at.isoformat()
-                              if getattr(u, "last_login_at", None) else None),
+            "last_login_at": (iso_utc(getattr(u, "last_login_at", None))),
             "memberships": [
                 {"id": m.id, "scope_type": m.scope_type, "scope_id": m.scope_id,
                  "scope_name": scope_names.get(m.scope_id),
@@ -1143,7 +1143,7 @@ def god_impersonate_org(org_id: str, god: User = Depends(require_god), db: Sessi
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org: raise HTTPException(status_code=404, detail="Organization not found")
     session_id = secrets.token_urlsafe(16)
-    entered_at = datetime.utcnow().isoformat()
+    entered_at = iso_utc(datetime.utcnow())
     log.info("AUDIT: GOD_ENTER_ORG | admin=%s | org_id=%s | org_name=%s | session=%s | entered_at=%s",
              god.email, org_id, org.name, session_id, entered_at)
     return {"org_id": org_id, "org_name": org.name, "org_slug": getattr(org,"slug",None),
@@ -1217,7 +1217,7 @@ def _voice_agent_row(cfg, org_name=None, ready=None, why=None):
         "org_api_key_override": bool(cfg.api_key_encrypted),
         "provider_ready": ready,
         "provider_not_ready_reason": why,
-        "created_at": cfg.created_at.isoformat() if cfg.created_at else None,
+        "created_at": iso_utc(cfg.created_at),
     }
 
 
@@ -1545,16 +1545,16 @@ def god_get_voice_call(call_id: str, god: User = Depends(require_god),
         "from_phone": c.from_phone, "to_phone": c.to_phone,
         "status": c.status, "outcome": c.outcome,
         "disconnect_reason": c.disconnect_reason,
-        "started_at": c.started_at.isoformat() if c.started_at else None,
-        "answered_at": c.answered_at.isoformat() if c.answered_at else None,
-        "ended_at": c.ended_at.isoformat() if c.ended_at else None,
+        "started_at": iso_utc(c.started_at),
+        "answered_at": iso_utc(c.answered_at),
+        "ended_at": iso_utc(c.ended_at),
         "duration_seconds": c.duration_seconds,
         "transcript": c.transcript,
         "transcript_chars": len(c.transcript or ""),
         "summary": c.summary,
         "analysis_json": c.analysis_json,
         "booking_link_id": c.booking_link_id,
-        "callback_at": c.callback_at.isoformat() if c.callback_at else None,
+        "callback_at": iso_utc(c.callback_at),
         "transfer_requested": bool(c.transfer_requested),
         "transfer_status": c.transfer_status,
         "error_message": c.error_message,
@@ -1683,7 +1683,7 @@ def get_job_runs_latest(
             n for (n,) in db.query(JobRun.job_name).distinct().all() if n
         )
         newest = db.query(_func.max(JobRun.started_at)).scalar()
-        ledger["newest_started_at"] = newest.isoformat() if newest else None
+        ledger["newest_started_at"] = iso_utc(newest)
     except Exception as exc:  # noqa: BLE001 — a diagnostic must not 500
         db.rollback()
         ledger["table_present"] = False
@@ -1713,8 +1713,8 @@ def get_job_runs_latest(
     for r in rows:
         result[r.job_name] = {
             "id": r.id,
-            "started_at": r.started_at.isoformat() if r.started_at else None,
-            "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            "started_at": iso_utc(r.started_at),
+            "finished_at": iso_utc(r.finished_at),
             "status": r.status,
             "duration_ms": r.duration_ms,
             "metrics": r.metrics,
@@ -1830,7 +1830,7 @@ def get_revenue_history(
             .with_entities(BillingPayment.collected_at)
             .first()
         )
-        data_since = oldest[0].isoformat() if oldest and oldest[0] else None
+        data_since = iso_utc(oldest[0]) if oldest and oldest[0] else None
 
         # Payments by month (last 24 months, newest first)
         raw_months = (
@@ -1988,7 +1988,7 @@ def get_revenue_history(
 
     payments_by_month = [{"month": k, **v} for k, v in sorted(by_month.items())]
 
-    data_since = payments[0].paid_at.isoformat() if payments else None
+    data_since = iso_utc(payments[0].paid_at) if payments else None
     total_collected_cents = sum(p.amount_cents or 0 for p in payments)
     total_payment_count = len(payments)
 
@@ -2615,8 +2615,8 @@ def list_job_runs(
             {
                 "id": r.id,
                 "job_name": r.job_name,
-                "started_at": r.started_at.isoformat() if r.started_at else None,
-                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                "started_at": iso_utc(r.started_at),
+                "finished_at": iso_utc(r.finished_at),
                 "status": r.status,
                 "error_summary": r.error_summary,
                 "duration_ms": r.duration_ms,
@@ -2660,8 +2660,8 @@ def _get_job_runs_latest_superseded(
         else:
             jobs[name] = {
                 "status": row.status,
-                "started_at": row.started_at.isoformat() if row.started_at else None,
-                "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+                "started_at": iso_utc(row.started_at),
+                "finished_at": iso_utc(row.finished_at),
                 "duration_ms": row.duration_ms,
                 "error_summary": row.error_summary,
                 "metrics": row.metrics,

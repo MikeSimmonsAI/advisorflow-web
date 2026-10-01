@@ -48,6 +48,7 @@ from app.models.models import Organization, Platform, User
 from app.models.sales_models import BrandSalesOrg
 from app.services import capabilities, demo_content
 from app.services import demo_environment as denv
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -237,10 +238,8 @@ def session_payload(db: Session, env: DemoEnvironment, user: User,
             "current_step": session.current_step,
             "total_steps": session.total_steps,
             "completed": sorted(done),
-            "started_at": (session.started_at.isoformat()
-                           if session.started_at else None),
-            "completed_at": (session.completed_at.isoformat()
-                             if session.completed_at else None),
+            "started_at": (iso_utc(session.started_at)),
+            "completed_at": (iso_utc(session.completed_at)),
         },
     }
 

@@ -65,6 +65,7 @@ from app.models.sales_models import (BRAND_SALES_ROLES, ROLE_BRAND_EXECUTIVE,
 from app.services import capabilities, executive_authority, training_service
 from app.services import training_catalog
 from app.services import workspace_access
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -177,7 +178,7 @@ def footprint(db: Session, target: User) -> Dict[str, Any]:
             # diagnoses with different fixes, and a list of active rows alone
             # cannot tell them apart.
             "state": "active" if m.is_active else "revoked",
-            "granted_at": m.created_at.isoformat() if m.created_at else None,
+            "granted_at": iso_utc(m.created_at),
         }
         if m.scope_type == SCOPE_PLATFORM:
             plat = platforms.get(m.scope_id)
@@ -281,11 +282,8 @@ def footprint(db: Session, target: User) -> Dict[str, Any]:
             "is_platform_owner": is_god,
             "must_change_password": bool(
                 getattr(target, "must_change_password", False)),
-            "last_login_at": (target.last_login_at.isoformat()
-                              if getattr(target, "last_login_at", None)
-                              else None),
-            "created_at": (target.created_at.isoformat()
-                           if getattr(target, "created_at", None) else None),
+            "last_login_at": (iso_utc(getattr(target, "last_login_at", None))),
+            "created_at": (iso_utc(getattr(target, "created_at", None))),
             "home_organization_id": target.organization_id,
             "home_organization_name": home_org.name if home_org else None,
             # NULL organization_id is this architecture's positive assertion
@@ -1311,7 +1309,7 @@ def invite(db: Session, target: User, actor: User,
     return {
         "setup_url": url,
         "purpose": resolved,
-        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+        "expires_at": iso_utc(row.expires_at),
         "prefix": row.token_prefix,
         "warning": ("The link is shown once and is not recoverable. No password "
                     "was created, changed or returned."),

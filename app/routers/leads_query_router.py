@@ -32,6 +32,7 @@ from app.routers.audit_log_router import log_action
 # stated once instead of re-derived per route.
 from app.services import lead_scope
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 router = APIRouter()
 
@@ -168,7 +169,7 @@ def list_leads(
     for row in rows:
         d = dict(zip(COL_NAMES, row))
         if d.get("created_at"):
-            d["created_at"] = d["created_at"].isoformat()
+            d["created_at"] = iso_utc(d["created_at"])
         items.append(d)
 
     return {"items": items, "total": total, "page": page, "page_size": page_size}
@@ -244,7 +245,7 @@ def leads_needing_tier_review(
     for row in rows:
         d = dict(zip(COL_NAMES, row))
         if d.get("created_at"):
-            d["created_at"] = d["created_at"].isoformat()
+            d["created_at"] = iso_utc(d["created_at"])
         items.append(d)
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 

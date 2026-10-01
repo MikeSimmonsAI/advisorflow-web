@@ -49,6 +49,7 @@ from sqlalchemy.orm import Session
 from app.models.models import (BookingLink, Lead, Organization,
                                PipelineConversation, User)
 from app.services import industry_templates, lead_scope
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -428,9 +429,9 @@ def _lead_row(lead: Lead, columns, owners) -> Dict[str, Any]:
             raw = getattr(lead, "engagement_temperature", None)
             values[column] = getattr(raw, "value", raw)
         elif column == "created_at":
-            values[column] = lead.created_at.isoformat() if lead.created_at else None
+            values[column] = iso_utc(lead.created_at)
         elif column == "updated_at":
-            values[column] = lead.updated_at.isoformat() if lead.updated_at else None
+            values[column] = iso_utc(lead.updated_at)
         elif column == "last_contact_date":
             raw = lead.last_contact_date
             values[column] = raw.isoformat() if hasattr(raw, "isoformat") else raw
@@ -493,7 +494,7 @@ def _appointment_row(booking: BookingLink, lead: Lead, columns, owners,
         elif column == "contact":
             values[column] = {"phone": lead.phone, "email": lead.email}
         elif column == "booked_time":
-            values[column] = booking.booked_time.isoformat() if booking.booked_time else None
+            values[column] = iso_utc(booking.booked_time)
         elif column == "appt_label":
             values[column] = booking.appt_label
         elif column == "status":
@@ -505,7 +506,7 @@ def _appointment_row(booking: BookingLink, lead: Lead, columns, owners,
         elif column == "tier":
             values[column] = lead.tier
         elif column == "created_at":
-            values[column] = booking.created_at.isoformat() if booking.created_at else None
+            values[column] = iso_utc(booking.created_at)
     return {"id": booking.id, "lead_id": lead.id, "values": values}
 
 

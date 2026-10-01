@@ -44,6 +44,7 @@ from app.services.workforce_intelligence import reconciliation as t9_rec
 from app.services.workforce_intelligence import review as t9_review
 from app.services.workforce_intelligence import scorecards as t9_scorecards
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def refresh(db: Session, scope: Scope, *,
     # place would mean a manager who pressed refresh still saw the previous
     # numbers, which is worse than not offering the button.
     t9_readmodel.invalidate(db, scope)
-    return {"refreshed_at": now.isoformat(), "passes": results,
+    return {"refreshed_at": iso_utc(now), "passes": results,
             "failed_passes": failures,
             "complete": not failures}
 
@@ -124,7 +125,7 @@ def overview(db: Session, scope: Scope, *,
                                          now=now, thresholds=th)
 
     return {
-        "generated_at": now.isoformat(),
+        "generated_at": iso_utc(now),
         "scope": scope.as_dict(),
         "window": window_key,
         # FIRST, ON PURPOSE.

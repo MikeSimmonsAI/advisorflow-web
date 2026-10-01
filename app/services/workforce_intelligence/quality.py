@@ -49,6 +49,7 @@ from app.services.workforce import constants as W
 from app.services.workforce_intelligence import collect
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -184,7 +185,7 @@ def _gather(db: Session, scope: Scope, since: datetime) -> Dict[str, Any]:
         violations.append({"communication_id": row[0], "employee_id": row[1],
                            "thread_id": row[2], "channel": row[3],
                            "eligibility": row[4], "state": row[5],
-                           "at": row[6].isoformat() if row[6] else None})
+                           "at": iso_utc(row[6]) if row[6] else None})
 
     # Outbound sends per employee, the denominator for policy compliance.
     sends = {}
@@ -230,8 +231,8 @@ def _gather(db: Session, scope: Scope, since: datetime) -> Dict[str, Any]:
                 stop_violations.append({
                     "communication_id": comm_id, "thread_id": thread_id,
                     "employee_id": emp_id,
-                    "stopped_at": row[2].isoformat(),
-                    "sent_at": created.isoformat(),
+                    "stopped_at": iso_utc(row[2]),
+                    "sent_at": iso_utc(created),
                     "stop_reason": row[3]})
 
     # OPT-OUT VIOLATIONS. Somebody said stop, and something went out after.
@@ -265,8 +266,8 @@ def _gather(db: Session, scope: Scope, since: datetime) -> Dict[str, Any]:
                 opt_out_violations.append({
                     "communication_id": comm_id, "thread_id": thread_id,
                     "employee_id": emp_id,
-                    "opted_out_at": row[2].isoformat(),
-                    "sent_at": created.isoformat()})
+                    "opted_out_at": iso_utc(row[2]),
+                    "sent_at": iso_utc(created)})
 
     handoffs = (scope.apply(db.query(AIHandoff), AIHandoff.organization_id)
                 .filter(AIHandoff.created_at >= since).limit(1000).all())
@@ -606,7 +607,7 @@ def evaluate(db: Session, scope: Scope, *,
                       + gathered["opt_out_violations"])
     return {
         "window": window_key,
-        "generated_at": now.isoformat(),
+        "generated_at": iso_utc(now),
         "weights": dict(WEIGHTS),
         "score_explanation": SCORE_EXPLANATION,
         "dimension_labels": dict(C.QUALITY_LABELS),

@@ -42,6 +42,7 @@ from app.models.workforce_intelligence_models import AIIntelligenceReadModel
 from app.services.workforce_intelligence import collect
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ def freshness(row: Optional[AIIntelligenceReadModel],
             "state": C.FRESH_ABSENT,
             "label": C.FRESHNESS_LABELS[C.FRESH_ABSENT],
             "computed_at": None, "age_seconds": None,
-            "source_watermark": (watermark.isoformat() if watermark else None),
+            "source_watermark": (iso_utc(watermark) if watermark else None),
             "statement": ("This has not been computed yet. What is shown is "
                           "missing, not empty."),
         }
@@ -89,12 +90,12 @@ def freshness(row: Optional[AIIntelligenceReadModel],
     return {
         "state": state,
         "label": C.FRESHNESS_LABELS[state],
-        "computed_at": row.computed_at.isoformat() if row.computed_at else None,
+        "computed_at": iso_utc(row.computed_at) if row.computed_at else None,
         "age_seconds": age,
         "compute_ms": row.compute_ms,
-        "source_watermark": (row.source_watermark.isoformat()
+        "source_watermark": (iso_utc(row.source_watermark)
                              if row.source_watermark else None),
-        "newest_event": watermark.isoformat() if watermark else None,
+        "newest_event": iso_utc(watermark) if watermark else None,
         "window": row.window_key,
         "last_error": row.last_error,
         "statement": _statement(state, age, row),

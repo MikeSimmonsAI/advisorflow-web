@@ -49,6 +49,7 @@ from app.services.workforce_intelligence import collect
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence import scorecards as t9_scorecards
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -706,7 +707,7 @@ def refresh(db: Session, scope: Scope, *,
         cleared += 1
     db.flush()
     return {"generated": len(generated), "written": written,
-            "cleared": cleared, "generated_at": now.isoformat()}
+            "cleared": cleared, "generated_at": iso_utc(now)}
 
 
 def _platforms(db: Session, org_ids) -> Dict[str, Optional[str]]:
@@ -797,10 +798,10 @@ def _render(row: AISupervisorFinding) -> Dict[str, Any]:
         "affected_scope": row.affected_scope,
         "drilldown": _load(row.drilldown, {}),
         "window": row.window_key,
-        "computed_at": (row.computed_at.isoformat()
+        "computed_at": (iso_utc(row.computed_at)
                         if row.computed_at else None),
         "state": row.state,
-        "acknowledged_at": (row.acknowledged_at.isoformat()
+        "acknowledged_at": (iso_utc(row.acknowledged_at)
                             if row.acknowledged_at else None),
     }
 

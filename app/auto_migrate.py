@@ -1572,6 +1572,11 @@ ENUM_COLUMNS_TO_CONVERT_TO_STRING = [
 # table scans on messages and email_messages (potentially millions of rows)
 # because neither table had any indexes on lead_id, sent_at, or sender_id.
 INDEXES_TO_CREATE = [
+    # ── perf (2026-10-01): hot filter columns with no index ─────────────
+    "CREATE INDEX IF NOT EXISTS ix_pipeline_conversations_lead_id ON pipeline_conversations(lead_id)",
+    "CREATE INDEX IF NOT EXISTS ix_pipeline_conversations_org_stage ON pipeline_conversations(organization_id, stage)",
+    "CREATE INDEX IF NOT EXISTS ix_leads_org_created ON leads(organization_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_leads_org_tier ON leads(organization_id, tier)",
     # Universal intake: category drill-down and the lead provenance links.
     "CREATE INDEX IF NOT EXISTS ix_isr_batch_intake ON import_staged_rows(batch_id, intake_status)",
     # Self-FK lookup on every staged-row delete (re-analysis of a large batch).

@@ -73,6 +73,7 @@ from app.models.sales_models import (ROLE_SALES_MANAGER, ROLE_SALES_REP,
                                      Membership, Opportunity,
                                      OpportunityEvent)
 from app.services import demo_guard
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -880,9 +881,8 @@ def overview(db: Session, platform: Platform) -> Dict[str, Any]:
         # the guided scenarios describe. Say so rather than letting a presenter
         # discover it live.
         "stale": bool(env.is_ready() and env.seed_version != SEED_VERSION),
-        "seeded_at": env.seeded_at.isoformat() if env.seeded_at else None,
-        "last_reset_at": (env.last_reset_at.isoformat()
-                          if env.last_reset_at else None),
+        "seeded_at": iso_utc(env.seeded_at),
+        "last_reset_at": (iso_utc(env.last_reset_at)),
         "workspace_name": org.name if org else None,
         "workspace_id": org.id if org else None,
         "sales_org_name": brand.name if brand else None,

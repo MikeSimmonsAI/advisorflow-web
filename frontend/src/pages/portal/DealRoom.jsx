@@ -264,7 +264,7 @@ export default function DealRoom() {
         {brand.support_email ? ' · ' + brand.support_email : ''}
         {p.expires_at && !decided && (
           <div style={{ marginTop: 6 }}>
-            This proposal is valid until {new Date(p.expires_at + 'Z').toLocaleDateString()}.
+            This proposal is valid until {new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(p.expires_at) ? p.expires_at : p.expires_at + 'Z').toLocaleDateString()}.
           </div>
         )}
       </div>

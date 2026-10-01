@@ -63,6 +63,7 @@ from app.models.launch_delivery_models import (
 )
 from app.routers.audit_log_router import log_action
 from app.services import launch_intake, launch_template
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger("launch_delivery")
 
@@ -250,7 +251,7 @@ def _approvals(db: Session, impl: Implementation) -> Dict[str, ImplementationApp
 
 
 def _iso(value) -> Optional[str]:
-    return value.isoformat() if value else None
+    return iso_utc(value)
 
 
 def integration_public(r: ImplementationIntegration) -> Dict[str, Any]:

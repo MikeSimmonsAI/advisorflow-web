@@ -32,6 +32,7 @@ from app.routers.audit_log_router import log_action
 # stated once instead of re-derived per route.
 from app.services import lead_scope
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter()
 
@@ -112,7 +113,7 @@ def keep_lead_separate(
         "is_duplicate": False,
         "status": lead.status,
         "restored_status": restored_status,
-        "resolved_at": lead.duplicate_resolved_at.isoformat(),
+        "resolved_at": iso_utc(lead.duplicate_resolved_at),
         "message": "Kept as a separate record. Nothing was deleted.",
     }
 
@@ -188,8 +189,7 @@ def explain_duplicate(
         "match_field": getattr(lead, "duplicate_match_field", None),
         "match_value": getattr(lead, "duplicate_match_value", None),
         "duplicate_of_lead_id": getattr(lead, "duplicate_of_lead_id", None),
-        "resolved_at": (lead.duplicate_resolved_at.isoformat()
-                        if getattr(lead, "duplicate_resolved_at", None) else None),
+        "resolved_at": (iso_utc(getattr(lead, "duplicate_resolved_at", None))),
     }
 
     # What the registry holds for this phone, and which rule it would fire.

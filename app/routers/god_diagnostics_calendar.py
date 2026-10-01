@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_god
 from app.models.models import Organization, User
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -47,11 +48,11 @@ def _connection_rows(db: Session, user_id: str):
             # "connected" to the wrong Google account and look perfect.
             "account_email": r.account_email,
             "calendar_id": r.calendar_id,
-            "connected_at": r.connected_at.isoformat() if r.connected_at else None,
-            "last_sync_at": r.last_sync_at.isoformat() if r.last_sync_at else None,
-            "last_attempt_at": r.last_attempt_at.isoformat() if r.last_attempt_at else None,
+            "connected_at": iso_utc(r.connected_at),
+            "last_sync_at": iso_utc(r.last_sync_at),
+            "last_attempt_at": iso_utc(r.last_attempt_at),
             "last_error": r.last_error,
-            "last_error_at": r.last_error_at.isoformat() if r.last_error_at else None,
+            "last_error_at": iso_utc(r.last_error_at),
             "failure_count": r.failure_count,
         })
     return out

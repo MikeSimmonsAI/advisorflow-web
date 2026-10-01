@@ -39,6 +39,7 @@ from app.services import wholesale_service as svc
 from app.services.wholesale_matching import buyer_standing
 from app.services import wholesale_buyer_contacts as BC
 from app.services.entitlements import require_feature
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -183,8 +184,7 @@ def buyer_json(b: WholesaleBuyer, boxes: Optional[List[WholesaleBuyBox]] = None,
         "preferred_channel": b.preferred_channel,
         "cash_verified": bool(b.cash_verified),
         "proof_of_funds_on_file": bool(b.proof_of_funds_on_file),
-        "proof_of_funds_expires": (b.proof_of_funds_expires.isoformat()
-                                   if b.proof_of_funds_expires else None),
+        "proof_of_funds_expires": iso_utc(b.proof_of_funds_expires),
         "typical_close_days": b.typical_close_days,
         "past_deals_count": b.past_deals_count,
         "reliability_rating": b.reliability_rating,
@@ -195,7 +195,7 @@ def buyer_json(b: WholesaleBuyer, boxes: Optional[List[WholesaleBuyBox]] = None,
         "is_test": bool(b.is_test),
         # Identity in the shared contact database (PARTNER, never a Lead).
         "org_contact_id": getattr(b, "org_contact_id", None),
-        "created_at": b.created_at.isoformat() if b.created_at else None,
+        "created_at": iso_utc(b.created_at),
         "buy_boxes": [buy_box_json(x) for x in (boxes if boxes is not None
                                                 else (b.buy_boxes or []))],
         # The track record, when the caller asked for it. Computed from what
@@ -742,7 +742,7 @@ def list_matches(deal_id: str, db: Session = Depends(get_db),
         "score": m.score, "factors": _jsonl(m.factors),
         "disqualified": bool(m.disqualified),
         "disqualified_reason": m.disqualified_reason,
-        "computed_at": m.computed_at.isoformat() if m.computed_at else None,
+        "computed_at": iso_utc(m.computed_at),
     } for m in rows]}
 
 
@@ -1114,9 +1114,9 @@ def buyer_board(deal_id: str, db: Session = Depends(get_db),
             "channel": r.channel,
             "status": r.status,
             "blocked_reason": r.blocked_reason,
-            "sent_at": r.sent_at.isoformat() if r.sent_at else None,
-            "delivered_at": r.delivered_at.isoformat() if r.delivered_at else None,
-            "replied_at": r.replied_at.isoformat() if r.replied_at else None,
+            "sent_at": iso_utc(r.sent_at),
+            "delivered_at": iso_utc(r.delivered_at),
+            "replied_at": iso_utc(r.replied_at),
             "response_note": r.response_note,
             "offer_amount": analysis.money(r.offer_amount) and float(offer),
             "spread": float(spread) if spread is not None else None,

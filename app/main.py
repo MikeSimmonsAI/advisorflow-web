@@ -272,6 +272,11 @@ from app.routers.workforce_intelligence_router import (
 
 _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
+# Every naive (UTC) datetime leaving the API is marked UTC ("...Z"); browsers
+# otherwise read it as local time (5h wrong in Central). app/utils/time_fmt.py.
+from app.utils.time_fmt import install_utc_json as _install_utc_json  # noqa: E402
+_install_utc_json()
+
 app = FastAPI(
     title="BookaBoost",
     version="0.1.0-phase1",

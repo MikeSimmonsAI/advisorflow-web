@@ -55,6 +55,7 @@ router = APIRouter(prefix="/crm-native", tags=["crm-native"])
 # the tiers, appointment types and vocabulary it belongs with. The names below
 # are kept so nothing that imported them breaks.
 from app.services import industry_templates as _industry
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 INDUSTRY_STAGES = _industry.CRM_STAGE_OBJECTS
 GENERIC_STAGES = _industry.GENERIC_CRM_STAGE_OBJECTS
@@ -191,9 +192,9 @@ def _contact_dict(c: CRMContact) -> dict:
         "tags": c.tags,
         "lead_id": c.lead_id,
         "assigned_to_id": c.assigned_to_id,
-        "created_at": c.created_at.isoformat() if c.created_at else None,
-        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-        "last_contacted_at": c.last_contacted_at.isoformat() if c.last_contacted_at else None,
+        "created_at": iso_utc(c.created_at),
+        "updated_at": iso_utc(c.updated_at),
+        "last_contacted_at": iso_utc(c.last_contacted_at),
         "is_archived": c.is_archived,
         "custom_data": custom,
     }
@@ -554,7 +555,7 @@ def get_notes(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     notes = db.query(CRMNote).filter(CRMNote.contact_id == contact_id).order_by(CRMNote.created_at.desc()).all()
-    return [{"id": n.id, "content": n.content, "created_at": n.created_at.isoformat() if n.created_at else None, "author_id": n.author_id} for n in notes]
+    return [{"id": n.id, "content": n.content, "created_at": iso_utc(n.created_at), "author_id": n.author_id} for n in notes]
 
 
 class NoteCreate(BaseModel):
@@ -577,7 +578,7 @@ def add_note(
     contact.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(note)
-    return {"id": note.id, "content": note.content, "created_at": note.created_at.isoformat() if note.created_at else None, "author_id": note.author_id}
+    return {"id": note.id, "content": note.content, "created_at": iso_utc(note.created_at), "author_id": note.author_id}
 
 
 # ── Lead sync ─────────────────────────────────────────────────────────────

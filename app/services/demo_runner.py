@@ -34,6 +34,7 @@ from app.models.demo_models import (
 )
 from app.services import environment as env
 from app.services import demo_scenarios as registry
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -374,9 +375,8 @@ def state_out(db: Session, scenario) -> dict:
         "status": row.status,
         "current_step": done,
         "total_steps": len(steps),
-        "seeded_at": row.seeded_at.isoformat() if row.seeded_at else None,
-        "last_advanced_at": (row.last_advanced_at.isoformat()
-                             if row.last_advanced_at else None),
+        "seeded_at": iso_utc(row.seeded_at),
+        "last_advanced_at": (iso_utc(row.last_advanced_at)),
         "next_step": next_step,
         "steps": [s.to_dict(i, i < done) for i, s in enumerate(steps)],
     }
@@ -406,6 +406,6 @@ def overview(db: Session) -> dict:
             "scenario": e.scenario_key, "action": e.action,
             "step": e.step_label, "provider": e.simulated_provider,
             "success": e.success, "detail": (e.detail or "")[:200],
-            "at": e.occurred_at.isoformat(),
+            "at": iso_utc(e.occurred_at),
         } for e in recent],
     }

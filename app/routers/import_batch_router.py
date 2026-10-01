@@ -27,6 +27,7 @@ from app.services.import_permissions import (
 )
 from app.services.import_staging_service import stage_batch
 from app.services.import_commit_service import commit_batch as _commit_batch
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/import-batches", tags=["import-batches"])
 log = logging.getLogger(__name__)
@@ -49,8 +50,8 @@ def _batch_dict(b: ImportBatch) -> dict:
         "merged_rows": b.merged_rows,
         "pending_rows": b.pending_rows,
         "error_message": b.error_message,
-        "created_at": b.created_at.isoformat() if b.created_at else None,
-        "committed_at": b.committed_at.isoformat() if b.committed_at else None,
+        "created_at": iso_utc(b.created_at),
+        "committed_at": iso_utc(b.committed_at),
         "created_by_id": b.created_by_id,
         "committed_by_id": b.committed_by_id,
     }
@@ -72,8 +73,8 @@ def _row_dict(r: ImportStagedRow) -> dict:
         "duplicate_status": r.duplicate_status, "match_confidence": r.match_confidence,
         "matched_lead_id": r.matched_lead_id,
         "review_status": r.review_status, "review_note": r.review_note,
-        "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
-        "committed_at": r.committed_at.isoformat() if r.committed_at else None,
+        "reviewed_at": iso_utc(r.reviewed_at),
+        "committed_at": iso_utc(r.committed_at),
     }
 
 # ── Routes ─────────────────────────────────────────────────────────────────────

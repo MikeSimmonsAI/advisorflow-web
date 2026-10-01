@@ -50,6 +50,7 @@ from app.services.workforce import constants as W
 from app.services.workforce_intelligence import collect
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence.scope import Scope
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 
@@ -483,7 +484,7 @@ def refresh(db: Session, scope: Scope, *,
         cleared += 1
     db.flush()
     return {"found": len(found), "cleared": cleared,
-            "generated_at": now.isoformat()}
+            "generated_at": iso_utc(now)}
 
 
 def listing(db: Session, scope: Scope, *, limit: int = 200) -> Dict[str, Any]:
@@ -504,7 +505,7 @@ def listing(db: Session, scope: Scope, *, limit: int = 200) -> Dict[str, Any]:
                       "value": r.right_value},
             "remediation_owner": r.remediation_owner,
             "remediation_hint": r.remediation_hint,
-            "first_seen_at": (r.first_seen_at.isoformat()
+            "first_seen_at": (iso_utc(r.first_seen_at)
                               if r.first_seen_at else None),
             "state": r.state,
             "evidence_class": C.EV_FACT,

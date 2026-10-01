@@ -36,6 +36,7 @@ from app.services.message_state import (
     describe as describe_delivery,
     normalize_provider_status,
 )
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/god/sms-trace", tags=["god-diagnostics"])
 
@@ -77,14 +78,13 @@ def trace_lead_sms(
     for m in rows:
         entry = {
             "message_id": m.id,
-            "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+            "sent_at": iso_utc(m.sent_at),
             "body_preview": (m.body or "")[:160],
             "twilio_sid": m.twilio_sid,
             "stored": {
                 "twilio_status": m.twilio_status,
                 "delivery_status": m.delivery_status,
-                "delivery_status_at": (m.delivery_status_at.isoformat()
-                                       if m.delivery_status_at else None),
+                "delivery_status_at": (iso_utc(m.delivery_status_at)),
                 "send_state": getattr(m, "send_state", None),
                 "error_code": getattr(m, "error_code", None),
                 "error_message": getattr(m, "error_message", None),
@@ -146,8 +146,7 @@ def trace_lead_sms(
             "error_message": getattr(rec, "error_message", None),
             "num_segments": getattr(rec, "num_segments", None),
             "direction": getattr(rec, "direction", None),
-            "date_sent": (rec.date_sent.isoformat()
-                          if getattr(rec, "date_sent", None) else None),
+            "date_sent": (iso_utc(getattr(rec, "date_sent", None))),
         }
         entry["provider"] = provider
 
@@ -400,7 +399,7 @@ def trace_inbound(
                 "body": m.body,
                 "status": m.status,
                 "error_code": str(m.error_code) if m.error_code else None,
-                "date_sent": m.date_sent.isoformat() if m.date_sent else None,
+                "date_sent": iso_utc(m.date_sent),
             })
     except Exception as exc:                                # noqa: BLE001
         inbound = {"queried": True, "error": str(exc)[:300], "messages": []}
@@ -577,8 +576,7 @@ def trace_webhook_alerts(
 
             entry = {
                 "sid": a.sid,
-                "date_generated": (a.date_generated.isoformat()
-                                   if a.date_generated else None),
+                "date_generated": (iso_utc(a.date_generated)),
                 "error_code": str(a.error_code) if a.error_code else None,
                 "log_level": a.log_level,
                 "request_method": a.request_method,

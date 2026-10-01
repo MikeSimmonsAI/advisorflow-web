@@ -47,6 +47,7 @@ from app.models.models import (EmailMessage, Lead, Message, Organization, Reply,
 from app.models.work_models import (LeadNote, LeadTask, ReplyState, NOTE_KINDS,
                                     REPLY_STATUSES, TASK_STATUSES)
 from app.services import lead_scope
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(tags=["communications"])
 log = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ def _names(db: Session, ids) -> Dict[str, str]:
 
 
 def _iso(dt) -> Optional[str]:
-    return dt.isoformat() if dt else None
+    return iso_utc(dt)
 
 
 def _cls(value) -> Optional[str]:

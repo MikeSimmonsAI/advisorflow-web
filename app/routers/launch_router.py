@@ -52,6 +52,7 @@ from app.models.launch_intake_models import LaunchIntakeFile
 from app.models.models import Organization, Platform, User
 from app.services import launch_intake
 from app.routers.audit_log_router import log_action
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 log = logging.getLogger("launch_router")
 
@@ -185,10 +186,9 @@ def _payload(db: Session, impl: Implementation, org: Organization,
         "implementation": {
             "id": impl.id,
             "status": impl.status,
-            "target_launch_date": impl.target_launch_date.isoformat()
-                                  if impl.target_launch_date else None,
+            "target_launch_date": iso_utc(impl.target_launch_date),
             "owner_user_id": impl.owner_user_id,
-            "kickoff_at": impl.kickoff_at.isoformat() if impl.kickoff_at else None,
+            "kickoff_at": iso_utc(impl.kickoff_at),
         },
         "brand": _brand_of(db, impl),
         "customer": _customer_of(db, org, user),
@@ -198,9 +198,9 @@ def _payload(db: Session, impl: Implementation, org: Organization,
         "overview": ov,
         "submission": None if sub is None else {
             "id": sub.id,
-            "submitted_at": sub.submitted_at.isoformat() if sub.submitted_at else None,
+            "submitted_at": iso_utc(sub.submitted_at),
             "signed_name": sub.signed_name,
-            "reviewed_at": sub.reviewed_at.isoformat() if sub.reviewed_at else None,
+            "reviewed_at": iso_utc(sub.reviewed_at),
         },
         "blockers": launch_intake.submission_blockers(db, impl.id, org.id),
     }
@@ -344,7 +344,7 @@ def submit_my_launch(request: Request,
                            "signed_name": sub.signed_name})
     db.commit()
 
-    return {"submitted_at": sub.submitted_at.isoformat() if sub.submitted_at else None,
+    return {"submitted_at": iso_utc(sub.submitted_at),
             "id": sub.id, "implementation_status": impl.status}
 
 
@@ -383,7 +383,7 @@ def list_my_files(request: Request,
 def _file_public(r: LaunchIntakeFile) -> dict:
     return {"id": r.id, "filename": r.filename, "content_type": r.content_type,
             "file_size": r.file_size, "label": r.label, "step_key": r.step_key,
-            "created_at": r.created_at.isoformat() if r.created_at else None}
+            "created_at": iso_utc(r.created_at)}
 
 
 @router.post("/me/files")
@@ -577,11 +577,10 @@ def staff_list(db: Session = Depends(get_db),
             "implementation_required_open": c["required_open"],
 
             "file_count": ov["file_count"],
-            "target_launch_date": impl.target_launch_date.isoformat()
-                                  if impl.target_launch_date else None,
-            "submitted_at": sub.submitted_at.isoformat()
+            "target_launch_date": iso_utc(impl.target_launch_date),
+            "submitted_at": iso_utc(sub.submitted_at)
                             if sub and sub.submitted_at else None,
-            "reviewed_at": sub.reviewed_at.isoformat()
+            "reviewed_at": iso_utc(sub.reviewed_at)
                            if sub and sub.reviewed_at else None,
             "blockers": blockers,
             "warnings": warnings,
@@ -840,7 +839,7 @@ def staff_review(organization_id: str, body: ReviewBody,
     _intake_audit(db, impl, actor.id, "launch_intake_reopened",
                   details={"submission_id": sub.id})
     db.commit()
-    return {"reviewed_at": sub.reviewed_at.isoformat(), "id": sub.id}
+    return {"reviewed_at": iso_utc(sub.reviewed_at), "id": sub.id}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -901,7 +900,7 @@ def approve_my_check(check_id: str, request: Request,
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"id": row.id, "label": row.label,
-            "customer_approved_at": row.customer_approved_at.isoformat()}
+            "customer_approved_at": iso_utc(row.customer_approved_at)}
 
 
 @router.post("/me/training/{training_id}/acknowledge")
@@ -916,7 +915,7 @@ def acknowledge_my_training(training_id: str, request: Request,
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"id": row.id, "title": row.title,
-            "customer_acknowledged_at": row.customer_acknowledged_at.isoformat()}
+            "customer_acknowledged_at": iso_utc(row.customer_acknowledged_at)}
 
 
 # ── staff delivery ──────────────────────────────────────────────────────────
@@ -954,9 +953,9 @@ def _access_state(db: Session, impl: Implementation, org: Organization) -> dict:
         "active_users": active_users,
         "invitations": [{
             "id": a.id, "status": a.status, "send_count": a.send_count,
-            "last_sent_at": a.last_sent_at.isoformat() if a.last_sent_at else None,
-            "expires_at": a.expires_at.isoformat() if a.expires_at else None,
-            "accepted_at": a.accepted_at.isoformat() if a.accepted_at else None,
+            "last_sent_at": iso_utc(a.last_sent_at),
+            "expires_at": iso_utc(a.expires_at),
+            "accepted_at": iso_utc(a.accepted_at),
         } for a in acts],
     }
 
@@ -1001,9 +1000,8 @@ def staff_delivery(organization_id: str,
     out["implementation"] = {
         "id": impl.id, "status": impl.status,
         "owner_user_id": impl.owner_user_id,
-        "target_launch_date": impl.target_launch_date.isoformat()
-                              if impl.target_launch_date else None,
-        "launched_at": impl.launched_at.isoformat() if impl.launched_at else None,
+        "target_launch_date": iso_utc(impl.target_launch_date),
+        "launched_at": iso_utc(impl.launched_at),
     }
     out["organization_id"] = org.id
     out["can_manage"] = _impls.can_manage(actor, impl, db)
@@ -1235,7 +1233,7 @@ def get_template(platform_id: str,
         "resolved": launch_template.resolve(db, platform_id),
         "golive_keys": list(launch_template.GOLIVE_KEYS),
         "golive_labels": launch_template.GOLIVE_LABELS,
-        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+        "updated_at": iso_utc(row.updated_at) if row and row.updated_at else None,
     }
 
 

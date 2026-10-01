@@ -47,6 +47,7 @@ from app.models.models import (
 )
 from app.services.email_service import send_email
 from app.services.platform_owner import tenant_write_org_id as _tenant_write_org_id
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/proposals", tags=["proposals"])
@@ -111,9 +112,9 @@ def _proposal_to_dict(p: Proposal) -> dict:
         "client_company": p.client_company,
         "status": p.status,
         "branding_override": json.loads(p.branding_override) if p.branding_override else None,
-        "expires_at": p.expires_at.isoformat() if p.expires_at else None,
-        "created_at": p.created_at.isoformat() if p.created_at else None,
-        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        "expires_at": iso_utc(p.expires_at),
+        "created_at": iso_utc(p.created_at),
+        "updated_at": iso_utc(p.updated_at),
         "block_count": len(p.blocks),
     }
 
@@ -247,7 +248,7 @@ def list_proposals(
             max((v.opened_at for v in p.views), default=None)
         )
         if d["last_viewed_at"]:
-            d["last_viewed_at"] = d["last_viewed_at"].isoformat()
+            d["last_viewed_at"] = iso_utc(d["last_viewed_at"])
         results.append(d)
     return results
 
@@ -267,10 +268,10 @@ def get_proposal(
             "token": t.token,
             "recipient_email": t.recipient_email,
             "recipient_name": t.recipient_name,
-            "expires_at": t.expires_at.isoformat() if t.expires_at else None,
-            "first_redeemed_at": t.first_redeemed_at.isoformat() if t.first_redeemed_at else None,
-            "revoked_at": t.revoked_at.isoformat() if t.revoked_at else None,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "expires_at": iso_utc(t.expires_at),
+            "first_redeemed_at": iso_utc(t.first_redeemed_at),
+            "revoked_at": iso_utc(t.revoked_at),
+            "created_at": iso_utc(t.created_at),
         }
         for t in p.tokens
     ]
@@ -531,7 +532,7 @@ This link is private and intended only for you. It expires in {req.expires_hours
         "token": token_str,
         "portal_url": portal_url,
         "recipient_email": req.recipient_email,
-        "expires_at": expires_at.isoformat(),
+        "expires_at": iso_utc(expires_at),
         "message": f"Invite sent to {req.recipient_email}",
     }
 
@@ -581,8 +582,8 @@ def get_analytics(
             "token_id": tok.id,
             "recipient_email": tok.recipient_email,
             "recipient_name": tok.recipient_name,
-            "sent_at": tok.created_at.isoformat() if tok.created_at else None,
-            "first_opened": tok.first_redeemed_at.isoformat() if tok.first_redeemed_at else None,
+            "sent_at": iso_utc(tok.created_at),
+            "first_opened": iso_utc(tok.first_redeemed_at),
             "open_count": len(tok_views),
             "downloaded": any(v.downloaded for v in tok_views),
             "last_scroll_pct": max((v.max_scroll_pct for v in tok_views), default=0),
@@ -592,7 +593,7 @@ def get_analytics(
     view_timeline = [
         {
             "id": v.id,
-            "opened_at": v.opened_at.isoformat() if v.opened_at else None,
+            "opened_at": iso_utc(v.opened_at),
             "duration_seconds": v.duration_seconds,
             "max_scroll_pct": v.max_scroll_pct,
             "downloaded": v.downloaded,
@@ -801,8 +802,8 @@ def resolve_portal_token(
             # instead of inventing one at render time.
             "proposal_number": getattr(p, "proposal_number", None),
             "version": getattr(p, "version", None),
-            "created_at": p.created_at.isoformat() if p.created_at else None,
-            "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+            "created_at": iso_utc(p.created_at),
+            "updated_at": iso_utc(p.updated_at),
             "blocks": [_block_to_dict(b) for b in p.blocks],
         },
         "branding": branding,

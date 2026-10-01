@@ -49,6 +49,7 @@ from app.models.workforce_intelligence_models import AIManagementAction
 from app.models.workforce_models import AIHandoff
 from app.services.workforce_intelligence import constants as C
 from app.services.workforce_intelligence.scope import Scope, ScopeRefused
+from app.utils.time_fmt import iso_utc
 
 _log = logging.getLogger(__name__)
 _audit = logging.getLogger("security.authz")
@@ -482,5 +483,5 @@ def history(db: Session, scope: Scope, *, limit: int = 100):
         "target_kind": r.target_kind, "target_id": r.target_id,
         "employee_id": r.employee_id, "reason": r.reason,
         "requested_by": r.requested_by,
-        "at": r.requested_at.isoformat() if r.requested_at else None,
+        "at": iso_utc(r.requested_at) if r.requested_at else None,
     } for r in rows]

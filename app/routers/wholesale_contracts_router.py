@@ -58,6 +58,7 @@ from app.services import wholesale_esign as esign
 from app.services import wholesale_files as files
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
+from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
 log = logging.getLogger(__name__)
 
@@ -86,8 +87,8 @@ def template_json(row: WholesaleContractTemplate) -> Dict[str, Any]:
         "file_name": row.file_name,
         "file_url": ("/wholesale/files/%s" % row.file_id) if row.file_id else None,
         "is_active": bool(row.is_active),
-        "archived_at": row.archived_at.isoformat() if row.archived_at else None,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "archived_at": iso_utc(row.archived_at),
+        "created_at": iso_utc(row.created_at),
     }
 
 
@@ -246,7 +247,7 @@ def _money(value) -> Optional[str]:
 
 
 def _date(value) -> Optional[str]:
-    return value.isoformat() if value else None
+    return iso_utc(value)
 
 
 def _fill_sheet(db: Session, org_id: str, deal: WholesaleDeal) -> List[Dict[str, Any]]:

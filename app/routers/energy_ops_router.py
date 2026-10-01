@@ -55,6 +55,7 @@ from app.routers.audit_log_router import log_action
 from app.services import lead_scope
 from app.services.entitlements import require_feature
 from app.services import pipeline_stage  # noqa: F401  (stage clock listener)
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/energy-ops", tags=["energy-ops"],
                    dependencies=[Depends(require_feature("leads"))])
@@ -203,6 +204,26 @@ def _renewal_rows(db, user, request, now):
     return inside, missing
 
 
+def _renewal_counts(db, user, request, now):
+    """(in_window_count, missing_count) - exactly what len(_renewal_rows()[0])
+    and _renewal_rows()[1] report, for the /queues summary. PERFORMANCE (S18):
+    the summary used to run _renewal_rows TWICE per request, each time loading
+    every renewal-tier lead as a full ORM object; the counts need only the
+    custom_fields column, read once."""
+    rows = (lead_scope.authorized_lead_query(db, user, Lead.custom_fields, request=request)
+            .filter(Lead.tier.in_(RENEWAL_TIERS),
+                    or_(Lead.status.is_(None), ~Lead.status.in_(("dnc", "dead")))).all())
+    today = now.date()
+    inside = missing = 0
+    for (raw,) in rows:
+        d = _parse_date(_cf(raw).get("contract_end_date"))
+        if d is None:
+            missing += 1
+        elif -RENEWAL_BEHIND_DAYS <= (d - today).days <= RENEWAL_AHEAD_DAYS:
+            inside += 1
+    return inside, missing
+
+
 # ── contact-backed queues ───────────────────────────────────────────────────
 
 def _prev_customers_q(db, org_id):
@@ -266,11 +287,12 @@ def queue_summary(request: Request, db: Session = Depends(get_db),
     org_id = _org_id(db, user, request)
     now = _now()
     out = []
+    in_window, missing = _renewal_counts(db, user, request, now)
     for key, label, kind in QUEUES:
-        n = _queue_count(db, user, request, org_id, key, now)
+        n = (in_window if key == "renewal_window"
+             else _queue_count(db, user, request, org_id, key, now))
         out.append({"key": key, "label": label, "kind": kind, "count": n,
                     "available": n is not None})
-    _, missing = _renewal_rows(db, user, request, now)
     return {"queues": out, "renewal_date_missing": missing,
             "enrollments": _enrollment_stats(db, user, request, now),
             "rules": {"no_response_days": NO_RESPONSE_DAYS,
@@ -508,7 +530,7 @@ def _move_row(m: EnergyMoveRequest, names, now=None):
     done = sum(1 for i in checklist if i.get("done"))
     return {"id": m.id, "lead_id": m.lead_id, "org_contact_id": m.org_contact_id,
             "contact_name": m.contact_name,
-            "move_date": m.move_date.isoformat() if m.move_date else None,
+            "move_date": iso_utc(m.move_date),
             "from_address": m.from_address, "to_address": m.to_address,
             "services": [{"key": s, "label": SERVICES.get(s, s)} for s in services],
             "checklist": checklist, "checklist_done": done, "checklist_total": len(checklist),

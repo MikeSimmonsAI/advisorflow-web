@@ -25,6 +25,7 @@ from app.models.models import (
     BookingFollowup, Lead, Organization, SurveyResponse, User, gen_uuid
 )
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/survey", tags=["survey"])
@@ -133,7 +134,7 @@ def get_survey_results(
                 "id": r.id,
                 "rating": r.rating,
                 "feedback": r.feedback,
-                "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+                "submitted_at": iso_utc(r.submitted_at),
             }
             for r in responses
         ],

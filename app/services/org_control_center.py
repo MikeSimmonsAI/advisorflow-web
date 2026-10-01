@@ -24,10 +24,11 @@ from app.models.location_models import Location, UserLocation
 from app.services import customer_provisioning as cp
 from app.services import customer_readiness as cr
 from app.services import org_blueprints as ob
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 
 def _iso(dt) -> Optional[str]:
-    return dt.isoformat() if dt else None
+    return iso_utc(dt)
 
 
 # ── header ──────────────────────────────────────────────────────────────────

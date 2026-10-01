@@ -28,6 +28,7 @@ from app.models.wholesale_models import (ACTOR_USER, FUNDING_PRODUCTS,
                                          FUNDING_SUBMISSION_STATUSES, WholesaleFundingPartner,
                                          WholesaleFundingSubmission)
 from app.services import wholesale_service as svc
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 PRODUCT_LABELS = {
     "dscr": "DSCR rental loan", "fix_flip": "Fix & flip", "hard_money": "Hard money",
@@ -192,9 +193,9 @@ def partner_json(p: WholesaleFundingPartner, stats: Optional[Dict[str, Any]] = N
         "max_ltv_pct": _num(p.max_ltv_pct), "max_ltc_pct": _num(p.max_ltc_pct),
         "min_credit_score": p.min_credit_score, "typical_close_days": p.typical_close_days,
         "referral_relationship": p.referral_relationship,
-        "verified": bool(p.verified), "verified_at": p.verified_at.isoformat() if p.verified_at else None,
+        "verified": bool(p.verified), "verified_at": iso_utc(p.verified_at),
         "criteria_basis": "verified by a person" if p.verified else "stated by the partner, not verified",
-        "last_contact_at": p.last_contact_at.isoformat() if p.last_contact_at else None,
+        "last_contact_at": iso_utc(p.last_contact_at),
         "notes": p.notes, "is_active": bool(p.is_active), "is_test": bool(p.is_test),
         "track_record": stats,
     }
@@ -291,7 +292,7 @@ def record_response(db: Session, org_id: str, s: WholesaleFundingSubmission, use
 
 
 def submission_json(s: WholesaleFundingSubmission, partner_name: Optional[str] = None) -> Dict[str, Any]:
-    iso = lambda d: d.isoformat() if d else None  # noqa: E731
+    iso = lambda d: iso_utc(d)  # noqa: E731
     return {"id": s.id, "deal_id": s.deal_id, "partner_id": s.partner_id, "partner_name": partner_name,
             "product": s.product, "product_label": PRODUCT_LABELS.get(s.product or "", s.product),
             "amount_requested": _num(s.amount_requested), "status": s.status,

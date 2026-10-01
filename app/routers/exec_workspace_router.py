@@ -44,6 +44,7 @@ from app.models.exec_workspace_models import (
 )
 from app.routers.audit_log_router import log_action
 from app.services import executive_authority as exec_auth
+from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/executive/workspace", tags=["executive-workspace"])
 
@@ -91,8 +92,8 @@ def _serialize_item(item: ExecWorkspaceItem) -> dict:
         "working_notes": item.working_notes,
         "created_by": item.created_by,
         "updated_by": item.updated_by,
-        "created_at": item.created_at.isoformat() if item.created_at else None,
-        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "created_at": iso_utc(item.created_at),
+        "updated_at": iso_utc(item.updated_at),
     }
 
 
@@ -106,7 +107,7 @@ def _serialize_file_meta(f: ExecWorkspaceFile) -> dict:
         "is_current": f.is_current,
         "replaces_file_id": f.replaces_file_id,
         "uploaded_by": f.uploaded_by,
-        "uploaded_at": f.uploaded_at.isoformat() if f.uploaded_at else None,
+        "uploaded_at": iso_utc(f.uploaded_at),
     }
 
 
@@ -119,7 +120,7 @@ def _serialize_version(v: ExecWorkspaceVersion) -> dict:
         "snapshot_status": v.snapshot_status,
         "trigger": v.trigger,
         "saved_by": v.saved_by,
-        "saved_at": v.saved_at.isoformat() if v.saved_at else None,
+        "saved_at": iso_utc(v.saved_at),
     }
 
 
