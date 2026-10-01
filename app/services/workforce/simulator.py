@@ -28,6 +28,7 @@ contaminate the next one.
 
 import logging
 from datetime import datetime, timedelta
+from app.utils.time_fmt import iso_utc as _iso_utc
 from typing import Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -1969,7 +1970,7 @@ def run_all(db: Session, *, keys: Optional[List[str]] = None,
         "by_dimension": by_dimension,
         "failures": [r for r in results if not r["passed"]],
         "results": results,
-        "ran_at": datetime.utcnow().isoformat(),
+        "ran_at": _iso_utc(datetime.utcnow()),
     }
 
 

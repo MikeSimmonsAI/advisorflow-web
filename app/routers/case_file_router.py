@@ -26,6 +26,7 @@ from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+from app.utils.time_fmt import iso_utc as _iso_utc
 import uuid, json, logging
 
 from app.deps import get_db, get_current_user, require_tenant_user
@@ -481,7 +482,7 @@ async def crm_push(
         "lead_phone": lead.phone if lead else None,
         "lead_email": lead.email if lead else None,
         "lead_tier": lead.tier if lead else None,
-        "pushed_at": datetime.utcnow().isoformat(),
+        "pushed_at": _iso_utc(datetime.utcnow()),
     }
 
     results = await _push_to_crm(db, current_user.organization_id, payload)

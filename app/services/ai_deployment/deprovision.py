@@ -40,6 +40,7 @@ WHAT RETIREMENT NEVER DOES
 
 import logging
 from datetime import datetime
+from app.utils.time_fmt import iso_utc as _iso_utc
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -233,7 +234,7 @@ def orphan_scan(db: Session, *, organization_id: Optional[str] = None
         "clean": total == 0,
         "findings": findings,
         "total": total,
-        "checked_at": datetime.utcnow().isoformat(),
+        "checked_at": _iso_utc(datetime.utcnow()),
     }
 
 

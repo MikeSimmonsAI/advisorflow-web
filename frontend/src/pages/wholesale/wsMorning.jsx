@@ -51,7 +51,7 @@ function EvidenceDepth({ dd, cents }) {
   )
 }
 
-export default function MorningCommand({ includeTest }) {
+export default function MorningCommand({ includeTest, dealSteps = 0 }) {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
@@ -74,9 +74,17 @@ export default function MorningCommand({ includeTest }) {
   return (
     <Panel title="This morning" count={ny.count} hint="Only what needs a person. Everything else is running.">
       {!ny.items.length ? (
+        dealSteps > 0 ? (
+          // Not "nothing needs you" while the deal board below lists work for a
+          // person (e.g. "Add comparable sales") - the two panels must agree.
+          <Empty title="No decisions waiting" icon="✓">
+            {dealSteps} deal{dealSteps === 1 ? ' has' : 's have'} a next step for a person - see Needs attention below.
+          </Empty>
+        ) : (
         <Empty title="Nothing needs you right now" icon="✓">
           Routine work - lookups, scoring, nurture timers - is handled. Anything that needs a decision will appear here.
         </Empty>
+        )
       ) : (
         <ul className="evo-needlist" aria-label="Needs you">
           {ny.items.map((i, n) => (

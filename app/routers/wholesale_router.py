@@ -25,6 +25,7 @@ import json
 import logging
 import re
 from datetime import datetime, date
+from app.utils.time_fmt import iso_utc as _iso_utc
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
@@ -3495,7 +3496,7 @@ def operating_board(db: Session = Depends(get_db),
                                                     include_test=include_test)
     board["recent_activity"] = svc.recent_activity(db, org_id)
     board["include_test"] = include_test
-    board["as_of"] = datetime.utcnow().isoformat()
+    board["as_of"] = _iso_utc(datetime.utcnow())
     return board
 
 

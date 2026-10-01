@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from app.utils.time_fmt import iso_utc as _iso_utc
 from typing import Any, Dict, List, Optional
 
 from app.services import communication_eligibility as CE
@@ -67,7 +68,7 @@ SELF_PROVIDED = ("SMS_CONSENT_OF_RECORD", "SELLER_INITIATED")
 def _result(state: str, reasons: List[str], *, channels=None, best=None, extra=None) -> Dict[str, Any]:
     out = {"state": state, "label": LABELS[state], "version": VERSION,
            "reasons": [r for r in reasons if r], "channels": channels or {},
-           "best_contact": best, "evaluated_at": datetime.utcnow().isoformat()}
+           "best_contact": best, "evaluated_at": _iso_utc(datetime.utcnow())}
     if extra:
         out.update(extra)
     return out

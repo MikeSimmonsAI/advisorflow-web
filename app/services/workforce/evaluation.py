@@ -25,6 +25,7 @@ that genuinely tries to do the wrong thing.
 import json
 import logging
 from datetime import datetime
+from app.utils.time_fmt import iso_utc as _iso_utc
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -103,7 +104,7 @@ def run(db: Session, *, suite_key: str = "full",
         "suite_label": suite["label"],
         "why": suite["why"],
         "started_at": started.isoformat(),
-        "ended_at": datetime.utcnow().isoformat(),
+        "ended_at": _iso_utc(datetime.utcnow()),
         "total": report["total"],
         "passed": report["passed"],
         "failed": report["failed"],

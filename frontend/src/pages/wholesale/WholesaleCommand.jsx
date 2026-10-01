@@ -153,7 +153,7 @@ export default function WholesaleCommand({ focus }) {
     <EvoApp world={world}>
       {head}
       <Alert>{error}</Alert>
-      <MorningCommand includeTest={!!includeTest} />
+      <MorningCommand includeTest={!!includeTest} dealSteps={ops ? ops.attention_total : 0} />
       <Metrics label="Deal operations">
         <Metric label="Active deals" value={h.active_deals} tone="primary" />
         <Metric label="Under contract" value={h.under_contract} tone="success" />
