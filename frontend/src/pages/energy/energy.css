@@ -30,7 +30,7 @@
 .eo-btn--primary { background: var(--signal-blue); border-color: var(--signal-blue); color: #fff; }
 .eo-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .eo-toolbar input, .eo-toolbar select, .eo-form input, .eo-form select, .eo-form textarea { border: 1px solid var(--border-strong); background: var(--bg-panel); color: var(--text-primary); border-radius: var(--radius-sm, 6px); padding: 6px 10px; font: inherit; font-size: 13px; }
-.eo-layer { position: fixed; inset: 0; background: rgba(15, 23, 42, .35); display: flex; justify-content: flex-end; z-index: 60; }
+.eo-layer { position: fixed; inset: 0; background: rgba(15, 23, 42, .35); display: flex; justify-content: flex-end; z-index: 400; } /* above the phone menu button (70) and sidebar (80) */
 .eo-drawer { width: min(560px, 100vw); height: 100%; overflow-y: auto; background: var(--bg-panel); border-left: 1px solid var(--border-subtle); padding: 18px 20px 40px; box-sizing: border-box; }
 .eo-drawer h2 { margin: 0 0 4px; font-size: 18px; }
 .eo-sec { margin-top: 18px; }
