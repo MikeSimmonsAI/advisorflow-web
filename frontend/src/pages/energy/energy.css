@@ -53,3 +53,13 @@
   .eo-form { grid-template-columns: 1fr; }
   .eo-table .eo-hide-sm { display: none; }
 }
+
+/* Move request: customer search picker */
+.eo-picker { position: relative; }
+.eo-picker-list { position: absolute; z-index: 5; left: 0; right: 0; top: 100%; margin: 4px 0 0; padding: 4px; list-style: none; background: #fff; border: 1px solid #d6dbe4; border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12); }
+.eo-picker-list button { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; background: none; border-radius: 6px; cursor: pointer; font: inherit; }
+.eo-picker-list button:hover, .eo-picker-list button:focus { background: #eef3fb; }
+.eo-picked { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border: 1px solid #d6dbe4; border-radius: 8px; font-weight: 600; }
+.eo-btn--sm { padding: 3px 10px; font-size: 12px; }
+.eo-picker-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+.eo-picker-field .eo-picked { color: var(--text-primary, #0f172a); font-size: 13px; }

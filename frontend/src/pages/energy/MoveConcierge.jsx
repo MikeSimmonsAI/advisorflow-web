@@ -149,7 +149,8 @@ function NewMove({ meta, onClose, onCreated }) {
         {err && <div className="eo-banner eo-banner--error">{err}</div>}
         <div className="eo-form" style={{ marginTop: 12 }}>
           <label>Customer name<input value={form.contact_name} onChange={set('contact_name')} placeholder="Required unless a lead is linked" /></label>
-          <label>Lead ID (optional)<input value={form.lead_id} onChange={set('lead_id')} placeholder="Links tasks and activity" /></label>
+          <LeadPicker value={form.lead_id} onPick={(l) => setForm(f => ({ ...f, lead_id: l ? l.id : '',
+            contact_name: l && !f.contact_name.trim() ? [l.first_name, l.last_name].filter(Boolean).join(' ') : f.contact_name }))} />
           <label>Move date (if given)<input type="date" value={form.move_date} onChange={set('move_date')} /></label>
           <span />
           <label className="eo-span">Current address<input value={form.from_address} onChange={set('from_address')} /></label>
@@ -162,6 +163,52 @@ function NewMove({ meta, onClose, onCreated }) {
           <button type="button" className="eo-btn" onClick={onClose}>Cancel</button>
         </div>
       </form>
+    </div>
+  )
+}
+
+// Link the move to an existing customer by SEARCHING (name, phone, email) -
+// staff never know an internal record id. Uses the same /leads/ search the
+// composer uses, so it is scoped to what this person may see.
+function LeadPicker({ value, onPick }) {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState([])
+  const [picked, setPicked] = useState(null)
+  useEffect(() => {
+    const term = q.trim()
+    if (term.length < 2 || picked) { setResults([]); return }
+    let alive = true
+    const t = setTimeout(() => {
+      api.get('/leads/', { params: { search: term, page_size: 6, page: 1 } })
+        .then(d => { if (alive) setResults(d.items || d || []) })
+        .catch(() => { if (alive) setResults([]) })
+    }, 250)
+    return () => { alive = false; clearTimeout(t) }
+  }, [q, picked])
+  const name = l => [l.first_name, l.last_name].filter(Boolean).join(' ') || l.email || l.phone || 'Unnamed'
+  if (picked || (value && !q)) {
+    return (
+      <div className="eo-picker-field">
+        <span className="eo-picker-label">Linked customer</span>
+        <span className="eo-picked" data-testid="lead-picked">
+          {picked ? name(picked) : 'Linked record'}
+          <button type="button" className="eo-btn eo-btn--sm" onClick={() => { setPicked(null); setQ(''); onPick(null) }}>Change</button>
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div className="eo-picker eo-picker-field">
+      {/* Not a <label>: a click on a result would be forwarded to the control. */}
+      <span className="eo-picker-label">Link to customer (optional)</span>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, phone or email" aria-label="Search customer" />
+      {results.length > 0 && (
+        <ul className="eo-picker-list" role="listbox">
+          {results.map(l => (
+            <li key={l.id}><button type="button" role="option" onClick={() => { setPicked(l); onPick(l) }}>
+              <strong>{name(l)}</strong> <span className="eo-sub">{[l.phone, l.email].filter(Boolean).join(' · ')}</span>
+            </button></li>))}
+        </ul>)}
     </div>
   )
 }
