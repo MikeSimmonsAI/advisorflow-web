@@ -6,7 +6,8 @@
 .rpt-kpi-label { font-size: 11px; color: var(--text-secondary); font-weight: 500; line-height: 1.4; }
 .rpt-kpi-sub { font-size: 10px; color: var(--text-tertiary); }
 
-.rpt-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.rpt-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); overflow-x: auto; max-width: 100%; scrollbar-width: none; }
+.rpt-tabs > * { flex: 0 0 auto; }
 .rpt-tab { padding: 10px 20px; border: none; background: transparent; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--text-secondary); border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s; }
 .rpt-tab--active { color: var(--accent); border-bottom-color: var(--accent); }
 .rpt-tab:hover:not(.rpt-tab--active) { color: var(--text-primary); }
