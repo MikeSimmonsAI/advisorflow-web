@@ -356,7 +356,7 @@ html:root[data-workspace-vertical="agency"] .top-bar-date { color: #8a8478 !impo
 .ag-convrow--await { box-shadow: inset 3px 0 0 var(--ag-amber, #d99a2b); }
 .ag-convrow__body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60ch; }
 .ag-convrow__meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-@media (max-width: 760px) { .ag-convrow { grid-template-columns: 1fr; } .ag-convrow__meta { justify-content: flex-start; } }
+@media (max-width: 760px) { .ag-convrow { grid-template-columns: minmax(0, 1fr); } .ag-convrow__body { max-width: 100%; } .ag-convrow__meta { justify-content: flex-start; } }
 
 /* Narrow screens: a wide table scrolls sideways inside its card - make that
    visible (edge shadows) and keep cells from being clipped mid-word. */
