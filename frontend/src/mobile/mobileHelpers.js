@@ -290,3 +290,12 @@ export function badgeCount(n) {
   if (typeof n !== 'number' || !isFinite(n) || n <= 0) return ''
   return n > 99 ? '99+' : String(n)
 }
+
+// First name for the greeting. Seeded / sandbox accounts are named
+// "DEMO Owner Morgan Hale" or "Erin Admin (QA)"; the label is not a name.
+const NAME_LABELS = new Set(['demo', 'test', 'qa', 'sandbox', '(qa)', '(demo)', '(test)', 'owner', 'admin'])
+export function greetingName(full) {
+  const words = String(full || '').split(/\s+/).filter(w => w && !NAME_LABELS.has(w.toLowerCase()))
+  return words[0] || null
+}
+

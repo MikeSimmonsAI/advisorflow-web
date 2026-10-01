@@ -21,7 +21,10 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { api, login, fetchMyContexts, setWorkspaceContext, clearWorkspaceContext, logout } from '../api/client'
 import { useMobile, useApi, ScreenHead, Loading, ErrorState, Empty, Icon, isAuthenticated } from './MobileShell'
 import { needsAttention, refusalReasons, canCompose, relTime, humanize, groupByDay,
-         workspaceChoices, parseTs, NOT_AVAILABLE } from './mobileHelpers'
+         workspaceChoices, parseTs, NOT_AVAILABLE, greetingName } from './mobileHelpers'
+import { hasAgencyFeature } from '../verticals/agencyVertical'
+import { readableTimestamps, replaceKeys } from '../utils/humanize'
+import { APP_STATUS_LABELS } from '../pages/agency/agencyFormat'
 import { readPushStatus, subscribePush, unsubscribePush, pushApi, pushRowState, PUSH_STATUS } from './push'
 
 // ── Login ────────────────────────────────────────────────────────────────────
@@ -64,6 +67,47 @@ export function MobileLogin() {
 
 // ── Home: Needs Attention / My Work ──────────────────────────────────────────
 export function MobileHome() {
+  const { branding } = useMobile()
+  // An insurance-agency workspace's "needs attention" is the agency attention
+  // list (the same one the desktop Command Center shows), not just replies.
+  return hasAgencyFeature(branding) ? <AgencyMobileHome /> : <CrmMobileHome />
+}
+
+function AgencyMobileHome() {
+  const { identity } = useMobile()
+  const att = useApi('/agency/attention')
+  const sum = useApi('/agency/summary')
+  const items = att.data?.items || []
+  const card = (k) => (sum.data && sum.data.counts && sum.data.counts[k]) || {}
+  const first = greetingName(identity?.user_full_name)
+  return (
+    <div className="mscreen">
+      <ScreenHead title={first ? 'Hi, ' + first : 'My Work'} sub={identity?.workspace_role ? humanize(identity.workspace_role) : null} />
+      <div className="mstats">
+        <Stat label="Needs attention" value={att.data ? (att.data.total ?? items.length) : undefined} to="/agency" />
+        <Stat label="Unassigned" value={card('unassigned').count} to={card('unassigned').link || '/agency/prospects'} />
+        <Stat label="Stalled apps" value={card('applications_stalled').count} to={card('applications_stalled').link || '/agency/applications'} />
+      </div>
+      <div className="msection-title">Needs attention</div>
+      {att.loading && <Loading />}
+      {!att.loading && att.error && <ErrorState error={att.error} onRetry={att.reload} />}
+      {!att.loading && !att.error && items.length === 0 && <Empty>Nothing needs you right now.</Empty>}
+      <ul className="mlist">
+        {items.map((it, i) => (
+          <li key={(it.link && it.link.id) || i}>
+            <Link to={(it.link && it.link.path) || '/agency'} className="mrow">
+              <span className={'mpill mpill--' + (it.severity === 'high' ? 'reply mpill--hot' : 'task')}>{humanize((it.link && it.link.type) || 'item')}</span>
+              <span className="mrow-main"><span className="mrow-title">{it.title}</span>
+                <span className="mrow-detail">{readableTimestamps(replaceKeys(it.detail, APP_STATUS_LABELS))}</span></span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function CrmMobileHome() {
   const { summary, identity } = useMobile()
   const att = useApi('/communications/replies?needs_attention=true&page_size=25&sort=oldest')
   const recent = useApi('/communications/replies?reviewed=false&page_size=25')
@@ -73,7 +117,8 @@ export function MobileHome() {
   const replies = mergeById([...(att.data?.items || []), ...((recent.data?.items || []).filter(r => r.is_hot))])
   const items = needsAttention({ replies, tasks: tasks.data?.items || [], appointments: appts.data?.items || [] })
   const hot = replies.filter(r => r.is_hot)
-  const greeting = identity?.user_full_name ? 'Hi, ' + identity.user_full_name.split(' ')[0] : 'My Work'
+  const first = greetingName(identity?.user_full_name)
+  const greeting = first ? 'Hi, ' + first : 'My Work'
   return (
     <div className="mscreen">
       <ScreenHead title={greeting} sub={identity?.workspace_role ? humanize(identity.workspace_role) : null} />

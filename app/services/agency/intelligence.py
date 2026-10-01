@@ -42,7 +42,8 @@ def attention(ctx: Q.Ctx) -> List[Dict[str, Any]]:
     for a in Q.list_applications(ctx, stalled=True):
         items.append({"kind": "stalled_application", "severity": "high",
                       "title": "Stalled application: %s" % (a["prospect"]["name"] or a["id"]),
-                      "detail": "%s for %d days (threshold %d)." % (a["status"], a["days_in_status"],
+                      "detail": "%s for %d days (threshold %d)." % ((a["status"] or "").replace("_", " ").capitalize(),
+                                                                   a["days_in_status"],
                                                                    ctx.cfg["stalled_days"]),
                       "link": link("application", a["id"]), "is_demo": a["is_demo"]})
     for ap in Q.list_appointments(ctx, needs_confirmation=True):

@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import vm from 'node:vm'
 import { mobileSkin, brandVars, SKINS, luminance, needsAttention, refusalReasons, canCompose,
-         groupByDay, workspaceChoices, parseTs, badgeCount, relTime, NOT_AVAILABLE } from '../../frontend/src/mobile/mobileHelpers.js'
+         groupByDay, workspaceChoices, parseTs, badgeCount, relTime, NOT_AVAILABLE, greetingName } from '../../frontend/src/mobile/mobileHelpers.js'
 import { WHOLESALE_FEATURE as RULES_WHOLESALE } from '../../frontend/src/auth/workspaceRules.js'
 import { WHOLESALE_FEATURE } from '../../frontend/src/mobile/mobileHelpers.js'
 import { pushStatus, PUSH_STATUS, subscriptionBody, urlBase64ToUint8Array } from '../../frontend/src/mobile/push.js'
@@ -186,6 +186,13 @@ check('manifest is valid, brand-neutral, starts at /m', () => {
   eq(m.start_url, '/m'); eq(m.display, 'standalone')
   if (!m.icons || !m.icons.length) throw new Error('no icons')
   if (/bookaboost|evosys|advisorflow|max life|atlantis/i.test(JSON.stringify(m))) throw new Error('manifest names a brand')
+})
+
+check('greeting skips DEMO/QA labels and never invents a name', () => {
+  eq(greetingName('DEMO Owner Morgan Hale'), 'Morgan')
+  eq(greetingName('Erin Admin (QA)'), 'Erin')
+  eq(greetingName('Maya Thompson'), 'Maya')
+  eq(greetingName('DEMO'), null); eq(greetingName(''), null); eq(greetingName(null), null)
 })
 
 if (failures.length) {

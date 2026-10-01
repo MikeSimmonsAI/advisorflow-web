@@ -11,6 +11,29 @@ communications/calling, mobile/PWA, security/reliability. Budget 8h. Prior hando
 - 08:45–09:15 wave 3: Max Life gaps (forms, landing, conversations, SQL paging, browser click-proof), Atlantis
   Sales Board + enrollment truth, human dialer/calling hardening.
 - 09:15–09:40 wave 4: background-job reliability audit; cross-vertical UX QA.
+- 09:40–10:05 wave 5: polish (voice status order, dead cron, overview counts, launch/me 200, energy overview grid),
+  Ask EvoAI 19 intents + verified optional AI rephrase, web push server side (configured:false), God Max Life demo.
+- 09:50 Windows full suite on the integrated tree: 6,871 passed, 0 failed, 27 skipped (71 min).
+- 10:05 466 targeted tests on the final delta → commit a9ac4b1 (tag pre-overnight-20261001 = previous HEAD), deployed.
+- 10:15 3154c9b: UTC-correct "ago" helpers, single clock, PWA headers.
+- 10:15–11:00 platform UTC fix (install_utc_json hook + iso_utc in ~280 hand-built sites), perf (mailbox routing
+  332→14 queries/poll, god mailbox page 671→20, contacts summary 1 pass, 4 indexes).
+- 11:00 5920c74: UTC + perf deployed. Live checks: /version 5920c74, health ok, /push/config configured:false,
+  /m + manifest + sw.js served, /agency + /god/demo 401 unauthenticated.
+- 11:00–12:25 independent review of the day's work (fresh reviewer). No critical findings; 8 items, fixed below.
+- 12:25–13:00 review fixes (commit after 5920c74):
+  - Shared reply mailbox across tenants: a reply attaches only to a lead some workspace actually emailed; it
+    follows the reply SUBJECT (normalized Re:/Fw:) rather than "most recently emailed"; still ambiguous across
+    workspaces → not attached and logged (never guessed into the wrong tenant).
+  - replies.source_message_id (RFC 5322 Message-ID) + partial UNIQUE index (lead_id, source_message_id): the same
+    email seen by both readers or two overlapping poller runs is one Reply and one AI hand-off.
+  - Advisor poller: an AI-handler exception no longer falls through to the pipeline (which could answer twice).
+  - Manual email send: in-flight claim on (lead, subject) before the provider call → a double-click gets the
+    existing "already sent / send again?" 409 instead of two emails. (Per-process; Render runs one web instance.)
+  - Max Life offers: accept / decline / timeout-sweep settle an offer with one conditional UPDATE (offered → X);
+    the loser gets 409 / is skipped. Previously accept + sweep could both win (accepted AND reassigned).
+  - Noted only: a pydantic model nested inside a dict response skips the UTC "Z" marking (no live case found).
+- Browser-pane login expired ~10:15 → live click-verification and Max Life demo creation wait on the owner signing in.
 
 ## What shipped (by area)
 ### Max Life Command (feature `insurance_agency`, prefix /agency)
