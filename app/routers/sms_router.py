@@ -174,6 +174,19 @@ def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), cu
     """
     leads = authorized_lead_query(db, current_user).filter(Lead.id.in_(req.lead_ids)).all()
 
+    # A double-click on a batch texted every lead in it twice. Same lease as
+    # the one-message doors (lead + exact template); a lead already claimed is
+    # reported skipped, and claims for leads that did not send are released.
+    from app.services import send_guard
+    tokens, duplicate_ids = {}, []
+    for lead in list(leads):
+        t = send_guard.claim(db, lead.id, req.template)
+        if t:
+            tokens[lead.id] = t
+        else:
+            duplicate_ids.append(lead.id)
+    leads = [lead for lead in leads if lead.id in tokens]
+
     groups: dict[str, tuple[User, list[Lead]]] = {}
     for lead in leads:
         who = acting_advisor(db, lead, current_user)
@@ -186,6 +199,14 @@ def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), cu
         merged["skipped_count"] += part.get("skipped_count", 0)
         merged["sent_ids"].extend(part.get("sent_ids", []))
         merged["skipped_ids"].extend(part.get("skipped_ids", []))
+    not_sent = set(merged["skipped_ids"])      # lead ids (sent_ids are message ids)
+    for lead_id, t in tokens.items():
+        if lead_id in not_sent:
+            send_guard.release_after_failure(db, lead_id, req.template, t)
+    if duplicate_ids:
+        merged["skipped_count"] += len(duplicate_ids)
+        merged["skipped_ids"].extend(duplicate_ids)
+        merged["duplicate_ids"] = duplicate_ids
     return merged
 
 
