@@ -60,6 +60,7 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
   const [draft, setDraft] = useState(null)
   const [draftText, setDraftText] = useState('')
   const [note, setNote] = useState('')
+  const [actionNote, setActionNote] = useState('')
 
   const load = useCallback(async () => {
     setError(null)
@@ -75,8 +76,8 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
 
   async function setMode(mode) {
     setBusy(true)
-    try { setCtx(await api.post(`/conversation-intel/leads/${leadId}/mode`, { mode })); setNote('') }
-    catch (e) { setNote(e?.message || 'Could not change who is handling this conversation.') }
+    try { setCtx(await api.post(`/conversation-intel/leads/${leadId}/mode`, { mode })); setActionNote('') }
+    catch (e) { setActionNote(e?.message || 'Could not change who is handling this conversation.') }
     finally { setBusy(false) }
   }
   async function compose(style = 'default') {
@@ -98,7 +99,7 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
   async function resolveItem(id) {
     setBusy(true)
     try { setCtx(await api.post(`/conversation-intel/leads/${leadId}/memory/${id}/resolve`, {})) }
-    catch (e) { setNote(e?.message || 'Could not update that item.') }
+    catch (e) { setActionNote(e?.message || 'Could not update that item.') }
     finally { setBusy(false) }
   }
   async function createTask() {
@@ -109,8 +110,8 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
       const due = ctx.follow_up?.date ? new Date(ctx.follow_up.date + 'T15:00:00Z').toISOString() : null
       await api.post('/work/tasks', { title: `${ACTION_LABEL[nba.action] || 'Follow up'}: ${ctx.lead?.name || 'customer'}`,
         lead_id: leadId, details: nba.reason || null, due_at: due, source: 'manual' })
-      setNote('Task created.')
-    } catch (e) { setNote(e?.message || 'Could not create the task.') }
+      setActionNote('Task created - it is in My Work.')
+    } catch (e) { setActionNote(e?.message || 'Could not create the task.') }
     finally { setBusy(false) }
   }
 
@@ -161,6 +162,9 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
               <button type="button" className="btn btn--secondary cb-btn" disabled={busy} onClick={() => setMode('ai_paused')}>Pause AI</button>}
             <button type="button" className="btn btn--secondary cb-btn" disabled={busy} onClick={createTask}>Create task</button>
           </div>
+          {/* Said next to the buttons that caused it. It rendered at the foot
+              of the panel, below the composer - "Task created" was off screen. */}
+          {actionNote && <div className="cb-small cb-muted" role="status">{actionNote}</div>}
           {st.mode_reason && st.mode === 'human_active' && <div className="cb-muted cb-small">{st.mode_reason}</div>}
 
           {ctx.summary?.what_they_want && (
