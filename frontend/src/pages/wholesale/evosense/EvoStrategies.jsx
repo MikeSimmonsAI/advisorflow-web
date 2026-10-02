@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../api/client'
+import { readAuthority } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
 import {
   Alert, Drawer, Empty, EvoApp, Hero, PageSkeleton, Panel, Status, TabBar, Tag, ago, cents, humanize, moneyK, when,
@@ -273,13 +274,13 @@ function Picks({ options, value, onChange, label }) {
   )
 }
 
-function NumIn({ id, label, value, onChange, hint, prefix, suffix }) {
+function NumIn({ id, label, value, onChange, hint, prefix, suffix, disabled }) {
   return (
     <label className="evo-field" htmlFor={id}>
       <span className="evo-field__label">{label}</span>
       <span style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
         {prefix ? <span className="evo-muted" style={{ position: 'absolute', left: 12 }}>{prefix}</span> : null}
-        <input id={id} className="evo-input" inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)}
+        <input id={id} className="evo-input" inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}
                placeholder={hint} style={{ paddingLeft: prefix ? 26 : 12, paddingRight: suffix ? 64 : 12 }} />
         {suffix ? <span className="evo-muted" style={{ position: 'absolute', right: 12, fontSize: 12.5 }}>{suffix}</span> : null}
       </span>
@@ -409,12 +410,14 @@ export function EvoStrategyBuilder() {
           <Step n={4} q="What should EvoSense avoid?" hint="Properties showing any of these are skipped entirely.">
             <Picks options={signals} value={form.excluded_signals} onChange={(v) => set('excluded_signals', v)} label="Excluded signals" />
           </Step>
-          <Step n={5} q="How much may EvoSense spend?" hint="Enforced atomically on the server. $0 per day means EvoSense buys nothing.">
+          <Step n={5} q="How much may EvoSense spend?" hint={readAuthority().isManager
+            ? 'Enforced atomically on the server. $0 per day means EvoSense buys nothing.'
+            : 'Only an administrator of this workspace can set or change spending. Without a budget, EvoSense buys nothing.'}>
             <div className="evo-form-grid">
-              <NumIn id="sb-day" label="Per day" prefix="$" value={form.daily_budget} onChange={(v) => set('daily_budget', v)} />
-              <NumIn id="sb-mon" label="Per month" prefix="$" value={form.monthly_budget} onChange={(v) => set('monthly_budget', v)} />
-              <NumIn id="sb-pp" label="Most on one property" prefix="$" value={form.max_cost_per_property} onChange={(v) => set('max_cost_per_property', v)} />
-              <NumIn id="sb-ap" label="Ask me before spending above" prefix="$" value={form.approval_over} onChange={(v) => set('approval_over', v)} />
+              <NumIn id="sb-day" label="Per day" prefix="$" disabled={!readAuthority().isManager} value={form.daily_budget} onChange={(v) => set('daily_budget', v)} />
+              <NumIn id="sb-mon" label="Per month" prefix="$" disabled={!readAuthority().isManager} value={form.monthly_budget} onChange={(v) => set('monthly_budget', v)} />
+              <NumIn id="sb-pp" disabled={!readAuthority().isManager} label="Most on one property" prefix="$" value={form.max_cost_per_property} onChange={(v) => set('max_cost_per_property', v)} />
+              <NumIn id="sb-ap" disabled={!readAuthority().isManager} label="Ask me before spending above" prefix="$" value={form.approval_over} onChange={(v) => set('approval_over', v)} />
             </div>
           </Step>
           <Step n={6} q="When should EvoSense bring you in?">

@@ -49,7 +49,8 @@ acceptance matrix are added at closeout.
 | d6503b2 | Duplicate sends | Auto-send approve / approve-all now claim the row atomically (two clicks could both send); campaign sends refuse an identical repeat within 2 min. Corrects b8e5026's message, which said these were already guarded. |
 | 45f81f1 · 17a7561 · fcf10a4 | Duplicate sends | Same protection on the lead page's AI voice call (two clicks rang the person twice), SMS send-batch, and both bulk email sends ("Send reviewed" and the email-only batch). Released on failure so a retry works. |
 | e0442f6 | Dead code | Unreachable duplicate `/sales/video/status` removed; route-reachability test added. |
-| (oct2rr) · (oct2ss) | Honest dead ends | `/onboarding` no longer shows a three-step signup form that ends in "retired" — it says accounts are set up by the team. Campaign Builder Send explains it is not switched on yet (Decision 8) instead of "Admin access required". |
+| ece4e13 · fed94db | Honest dead ends | `/onboarding` no longer shows a three-step signup form that ends in "retired" — it says accounts are set up by the team. Campaign Builder Send explains it is not switched on yet (Decision 8) instead of "Admin access required". |
+| a978b71 · 88f0bd5 · 3fcea2b · (oct2ww) | Buttons that end in "Admin access required" | Two sweeps of every page a person can reach, against the role each route requires. Admin-only actions are now disabled or replaced with who can do them: AI Team add; AI employee pause/resume/stage; Wholesale pilot controls and paid skip-trace approval; EvoSense providers, resume, scoring, budgets (workspace and per-strategy), evaluations; Sales "release holdbacks", team-pipeline person filter, deal-value override. Admin buttons on Cadence, Lead, Leads, Compliance and Settings now follow the role in the current workspace (they used the account's role). |
 
 ## Checked and clean (no change needed)
 
