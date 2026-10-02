@@ -321,6 +321,14 @@ select.ag-input { color-scheme: dark; }
    THE AGENCY SKIN — the rail, when <html data-workspace-vertical="agency">.
    ========================================================================== */
 html:root[data-workspace-vertical="agency"] body { background: #0b0b0c; }
+/* SHARED SCREENS UNDER THE AGENCY SKIN (Leads, Replies, Conversation Queue,
+   Settings ...) are built for the light theme: their headings, subtitles and
+   tabs sit directly on the page, in dark text. On this skin's black body that
+   was 1.1:1 - the page title was effectively invisible. Those screens get a
+   light sheet; the agency's own screens (.ag) keep the dark surface. */
+html:root[data-workspace-vertical="agency"] .main-content:not(:has(.ag)) {
+  background: #f6f4ef; min-height: calc(100vh - 56px);
+}
 html:root[data-workspace-vertical="agency"] .sidebar {
   background: linear-gradient(180deg, #121112, #0a0a0b) !important;
   border-right: 1px solid rgba(212, 174, 100, 0.14) !important;
