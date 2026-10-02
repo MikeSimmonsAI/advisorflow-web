@@ -96,7 +96,7 @@
 /* ── tags ───────────────────────────────────────────────────────────────── */
 .cc-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; line-height: 1; padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
 .cc-tag--green { background: rgba(15, 138, 95, .12); color: #0b7a53; }
-.cc-tag--amber { background: rgba(217, 115, 28, .13); color: #b25e12; }
+.cc-tag--amber { background: rgba(217, 115, 28, .13); color: #9a4f0c; }
 .cc-tag--violet { background: rgba(124, 77, 214, .12); color: #6a3fc4; }
 .cc-tag--red { background: rgba(198, 40, 57, .12); color: #b22234; }
 .cc-tag--blue { background: rgba(22, 104, 214, .11); color: #1459b8; }
