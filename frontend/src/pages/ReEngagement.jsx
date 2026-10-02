@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser, getBranding } from '../api/client'
 import '../styles/shared.css'
+
+// Newest PAGE per temperature are listed; the counts are the server's.
+const PAGE = 500
 import './ReEngagement.css'
 
 const TABS = [
@@ -20,15 +23,18 @@ export default function ReEngagement() {
 
   const [activeTab, setActiveTab] = useState('hot') // 'hot' | 'warm' | 'cold' | 'all'
   const [leads, setLeads] = useState({ hot: [], warm: [], cold: [] })
+  // The server's counts. The lists hold at most PAGE each; the chips used to
+  // count the lists, so every temperature topped out at 200.
+  const [totals, setTotals] = useState({ hot: 0, warm: 0, cold: 0 })
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(null) // lead_id being actioned
 
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      api.get('/leads/?temperature=hot&page_size=200').catch(() => null),
-      api.get('/leads/?temperature=warm&page_size=200').catch(() => null),
-      api.get('/leads/?temperature=cold&page_size=200').catch(() => null),
+      api.get(`/leads/?temperature=hot&page_size=${PAGE}`).catch(() => null),
+      api.get(`/leads/?temperature=warm&page_size=${PAGE}`).catch(() => null),
+      api.get(`/leads/?temperature=cold&page_size=${PAGE}`).catch(() => null),
     ]).then(([hot, warm, cold]) => {
       // API returns paginated envelope {items:[...], total:N} — extract items
       setLeads({
@@ -36,6 +42,8 @@ export default function ReEngagement() {
         warm: Array.isArray(warm) ? warm : (warm?.items || []),
         cold: Array.isArray(cold) ? cold : (cold?.items || []),
       })
+      const tot = (d) => (Array.isArray(d) ? d.length : (d?.total ?? (d?.items || []).length))
+      setTotals({ hot: tot(hot), warm: tot(warm), cold: tot(cold) })
       setLoading(false)
     })
   }, [])
@@ -69,7 +77,7 @@ export default function ReEngagement() {
             <span className="re-stat-icon" dangerouslySetInnerHTML={{ __html: t.icon }} />
             <div className="re-stat-body">
               <strong className="re-stat-count" style={{ color: t.color }}>
-                {loading ? '--' : leads[t.key].length}
+                {loading ? '--' : totals[t.key]}
               </strong>
               <span className="re-stat-label">{t.label}</span>
             </div>
@@ -83,7 +91,7 @@ export default function ReEngagement() {
           <span className="re-stat-icon">&#9889;</span>
           <div className="re-stat-body">
             <strong className="re-stat-count" style={{ color: 'var(--text-muted)' }}>
-              {loading ? '--' : (leads.hot.length + leads.warm.length + leads.cold.length)}
+              {loading ? '--' : (totals.hot + totals.warm + totals.cold)}
             </strong>
             <span className="re-stat-label">Total classified</span>
           </div>
@@ -113,8 +121,14 @@ export default function ReEngagement() {
       )}
       {activeTab === 'all' && (
         <div className="re-tab-desc" style={{ borderLeftColor: 'var(--border-default)' }}>
-          ⚡ All classified leads — {allLeads.length} total across Hot, Warm, and Cold.
+          ⚡ All classified leads — {totals.hot + totals.warm + totals.cold} total across Hot, Warm, and Cold.
         </div>
+      )}
+
+      {!loading && activeTab !== 'all' && totals[activeTab] > current.length && (
+        <p className="re-tab-desc" style={{ borderLeftColor: 'var(--border-default)' }}>
+          Showing the newest {current.length} of {totals[activeTab]}. The Leads page searches all of them.
+        </p>
       )}
 
       {/* LEAD LIST */}

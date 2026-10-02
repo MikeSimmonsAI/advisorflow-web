@@ -353,8 +353,16 @@ function ClassicLeads() {
     // arrive are the 500 the filter is about. The client-side pass below is
     // kept: it still narrows by tier and free text.
     const statusParam = statusFilter ? `&status=${encodeURIComponent(statusFilter)}` : ''
+    // SEARCH AND TIER GO TO THE SERVER TOO, for the same reason. They filtered
+    // only the 500 rows that had arrived, so in a workspace with more leads a
+    // search for somebody outside the newest 500 found nothing - which reads
+    // as "not in the system". The server searches name, email and phone
+    // digits inside the caller's own scope.
+    const q = (searchRef.current || '').trim()
+    const searchParam = q ? `&search=${encodeURIComponent(q.slice(0, 120))}` : ''
+    const tierParam = tierRef.current ? `&tier=${encodeURIComponent(tierRef.current)}` : ''
     Promise.all([
-      api.get(`/leads/?page=1&page_size=500${batchParam}${statusParam}`),
+      api.get(`/leads/?page=1&page_size=500${batchParam}${statusParam}${searchParam}${tierParam}`),
       api.get('/leads/needs-review?page=1&page_size=500'),
     ]).then(([leadsData, reviewData]) => {
       // Both endpoints return a paginated envelope {items, total, page, page_size}.
@@ -384,6 +392,18 @@ function ClassicLeads() {
   // a "/leads?status=new" link arrives already narrowed.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadLeads() }, [statusFilter])
+  // Search (debounced) and tier re-query the server; see loadLeads.
+  const searchRef = useRef(searchQuery)
+  const tierRef = useRef(tierFilter)
+  const firstQuery = useRef(true)
+  useEffect(() => {
+    searchRef.current = searchQuery
+    tierRef.current = tierFilter
+    if (firstQuery.current) { firstQuery.current = false; return }
+    const t = setTimeout(() => loadLeads(), 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, tierFilter])
 
   async function handleGoogleContactsImport() {
     setGoogleImporting(true)
@@ -1168,10 +1188,10 @@ function ClassicLeads() {
       <div className="leads-controls">
         <div className="leads-tabs">
           <button className={`tab ${view === 'all' ? 'tab--active' : ''}`} onClick={() => { setView('all'); setSelected(new Set()); }}>
-            All leads <span className="mono">{leads.filter(l => !l.is_duplicate).length}</span>
+            All leads <span className="mono">{leadsTotal > leads.length ? leadsTotal : leads.filter(l => !l.is_duplicate).length}</span>
           </button>
           <button className={`tab ${view === 'review' ? 'tab--active' : ''}`} onClick={() => setView('review')}>
-            Needs tier review <span className="mono">{needsReview.length}</span>
+            Needs tier review <span className="mono">{Math.max(needsReviewTotal || 0, needsReview.length)}</span>
           </button>
           <button className={`tab ${view === 'duplicates' ? 'tab--active' : ''}`} onClick={() => setView('duplicates')}
             style={{ color: view === 'duplicates' ? 'var(--signal-amber)' : undefined }}>
@@ -1217,7 +1237,9 @@ function ClassicLeads() {
               ))}
             </select>
           )}
-          <span className="leads-count-pill">{filteredLeads.length} shown</span>
+          <span className="leads-count-pill">
+            {filteredLeads.length} shown{leadsTotal > leads.length && view !== 'review' ? ` of ${leadsTotal} — narrow with search or filters` : ''}
+          </span>
         </div>
       </div>
 

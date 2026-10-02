@@ -103,9 +103,20 @@ export default function Compliance() {
     setError('')
     setLoading(true)
     try {
-      const data = await api.get('/compliance/suppression-list')
-      setEntries(data.entries || [])
-      setStats(data.stats || emptyStats)
+      // EVERY ENTRY, NOT THE FIRST 500. The search below runs over what is
+      // loaded, and this loaded one page (limit 500): looking up a number
+      // that was suppressed after the first 500 showed nothing - which reads
+      // as "not suppressed". Pages of 1,000 until the list is complete.
+      const all = []
+      let data = null
+      for (let offset = 0; offset < 50000; offset += 1000) {
+        data = await api.get(`/compliance/suppression-list?limit=1000&offset=${offset}`)
+        const page = data.entries || []
+        all.push(...page)
+        if (page.length < 1000) break
+      }
+      setEntries(all)
+      setStats((data && data.stats) || emptyStats)
     } catch (err) {
       setError(err.message || 'Something went wrong loading compliance data.')
     } finally {

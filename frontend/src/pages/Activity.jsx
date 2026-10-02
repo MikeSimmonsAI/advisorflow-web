@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+
+const FEED_LIMIT = 300
 import '../styles/shared.css'
 
 const DELIVERY_CONFIG = {
@@ -165,7 +167,7 @@ export default function Activity() {
   function load() {
     setLoading(true)
     setError('')
-    api.get(`/activity/sent?limit=300&days=${days}`)
+    api.get(`/activity/sent?limit=${FEED_LIMIT}&days=${days}`)
       .then(data => { setItems(Array.isArray(data) ? data : []); setError('') })
       .catch(err => { setError(err.message || 'Failed to load activity feed. Check your connection and try again.'); setItems([]) })
       .finally(() => setLoading(false))
@@ -196,6 +198,10 @@ export default function Activity() {
   // the old browser-side count if /activity/today is unavailable.
   const todayCount = typeof today?.total === 'number' ? today.total : browserTodayCount
 
+  // The feed holds at most FEED_LIMIT rows. When it is full, the counts
+  // below are of the most recent FEED_LIMIT, and the labels say so - they
+  // read as the whole period's totals before.
+  const capped = items.length >= FEED_LIMIT
   const deliveredCount = items.filter((i) => i.delivery_status === 'delivered').length
   const failedCount    = items.filter((i) => ['failed', 'undelivered'].includes(i.delivery_status)).length
 
@@ -204,7 +210,7 @@ export default function Activity() {
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 6 }}>
           <h1 className="page-title" style={{ margin: 0 }}>Activity</h1>
-          {!loading && <span className="eq-queue-badge">{items.length} sends</span>}
+          {!loading && <span className="eq-queue-badge">{capped ? `latest ${items.length}` : items.length} sends</span>}
         </div>
         <p className="page-subtitle" style={{ marginTop: 4 }}>
           Every SMS and email you've sent — with delivery confirmation for SMS.
@@ -238,8 +244,8 @@ export default function Activity() {
       <div className="panel" style={{ display: 'flex', gap: 0, padding: 0, overflow: 'hidden', marginBottom: 16 }}>
         {[
           { label: 'Sent today',   value: todayCount,      color: 'var(--accent)',        icon: '📤' },
-          { label: 'Total sends',  value: items.length,    color: 'var(--text-primary)',  icon: '📬' },
-          { label: 'Delivered',    value: deliveredCount,  color: 'var(--signal-green)',  icon: '✓'  },
+          { label: capped ? `Latest ${FEED_LIMIT} sends` : 'Total sends', value: items.length, color: 'var(--text-primary)', icon: '📬' },
+          { label: capped ? 'Delivered (of those)' : 'Delivered', value: deliveredCount, color: 'var(--signal-green)', icon: '✓' },
           { label: 'Failed',       value: failedCount,     color: failedCount > 0 ? 'var(--signal-red)' : 'var(--text-secondary)', icon: '✗' },
         ].map((s, i, arr) => (
           <div key={s.label} style={{
