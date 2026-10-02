@@ -430,6 +430,11 @@ def confirm_send_batch(
         if not lead:
             skipped.append({"lead_id": item.lead_id, "reason": "not_found"})
             continue
+        from app.services import send_guard
+        token = send_guard.claim(db, lead.id, item.message)
+        if token is None:
+            skipped.append({"lead_id": item.lead_id, "reason": "duplicate_send"})
+            continue
         try:
             msg = send_sms(db, current_user, lead, item.message, include_booking_link=req.include_booking_link)
             sent_ids.append(msg.id)
@@ -440,6 +445,7 @@ def confirm_send_batch(
             from app.services.cadence_service import start_cadence
             start_cadence(db, lead)
         except Exception as e:
+            send_guard.release_after_failure(db, lead.id, item.message, token)
             skipped.append({"lead_id": item.lead_id, "reason": str(e)})
 
     return {"sent_count": len(sent_ids), "skipped_count": len(skipped), "sent_ids": sent_ids, "skipped": skipped}

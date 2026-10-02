@@ -373,6 +373,14 @@ def send_approved_reply(
     if lead.status == "dnc":
         raise HTTPException(status_code=400, detail="Lead is DNC")
     from app.services.sms_service import send_sms
-    send_sms(db=db, lead=lead, advisor=current_user, template=req.message, include_booking_link=req.include_booking_link)
+    from app.services import send_guard
+    token = send_guard.claim(db, lead.id, req.message)
+    if token is None:
+        raise HTTPException(status_code=409, detail=send_guard.DUPLICATE_DETAIL)
+    try:
+        send_sms(db=db, lead=lead, advisor=current_user, template=req.message, include_booking_link=req.include_booking_link)
+    except Exception:
+        send_guard.release_after_failure(db, lead.id, req.message, token)
+        raise
     log_action(db, lead.organization_id, current_user.id, action="ai_conversation.approved_sent", target_type="lead", target_id=req.lead_id)
     return {"sent": True, "lead_id": lead.id}

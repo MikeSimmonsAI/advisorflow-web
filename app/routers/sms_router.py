@@ -919,12 +919,21 @@ def send_mms_endpoint(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
+    from app.services import send_guard
+    guard_text = "%s|%s" % (req.template, req.media_url)
+    token = send_guard.claim(db, lead.id, guard_text)
+    if token is None:
+        raise HTTPException(status_code=409, detail=send_guard.DUPLICATE_DETAIL)
     try:
         message = send_mms(db, acting_advisor(db, lead, current_user), lead,
                            req.template, req.media_url, req.include_booking_link)
         return {"message_id": message.id, "status": message.twilio_status}
     except ValueError as e:
+        send_guard.release_after_failure(db, lead.id, guard_text, token)
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        send_guard.release_after_failure(db, lead.id, guard_text, token)
+        raise
 
 
 # ── Media upload (flyers/images for MMS or email attachments) ────────────────
