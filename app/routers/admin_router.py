@@ -1233,6 +1233,14 @@ def reactivate_user(user_id: str, db: Session = Depends(get_db), current_user: U
     """Re-enables a previously deactivated account."""
     target = _get_target_user_for_admin(user_id, current_user, db)
 
+    # A REACTIVATED PERSON IS A SEAT AGAIN. Usage counts active users, so
+    # without this an admin on a 2-seat plan could deactivate A, add B, then
+    # reactivate A and hold three.
+    if not target.is_active:
+        from app.services import plan_limits
+        plan_limits.require_capacity_for_org_id(
+            db, target.organization_id, plan_limits.LIMIT_USERS, adding=1)
+
     target.is_active = True
     db.commit()
 

@@ -607,6 +607,13 @@ def grant_workspace_membership(db: Session, user_id: str, organization_id: str,
         .first()
     )
     if existing is not None:
+        # A REVOKED membership coming back is a person regaining access, i.e.
+        # a seat again - the guard below would never see them, because this
+        # branch returns first. An already-active one (a re-role) adds nobody.
+        if not existing.is_active and check_capacity:
+            from app.services import plan_limits
+            plan_limits.require_capacity_for_org_id(
+                db, organization_id, plan_limits.LIMIT_USERS, adding=1)
         existing.is_active = True
         existing.role = role
         if granted_by and not existing.granted_by:

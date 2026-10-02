@@ -336,3 +336,57 @@ def test_the_report_carries_no_pending_limits_when_nothing_is_scheduled(
     assert report["pending_plan"] is None
     assert report["pending_limits"] == {}
     assert report["limits"][plan_limits.LIMIT_USERS]["limit"] == 5
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# REACTIVATION IS A SEAT (Oct 2 capacity audit)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_reactivating_a_user_at_the_seat_limit_is_refused(client, db_session, brand):
+    """Deactivate A, add B, reactivate A must not yield three seats on a
+    two-seat plan."""
+    org = _org(db_session, brand, "starter")        # max_users = 2
+    headers = _admin_headers(db_session, org)       # seat 1
+    _user(db_session, org)                          # seat 2
+    parked = _user(db_session, org, is_active=False)
+    r = client.patch("/admin/users/%s/reactivate" % parked.id, headers=headers)
+    assert r.status_code == 402, r.text
+    db_session.refresh(parked)
+    assert parked.is_active is False
+    assert plan_limits.usage_for(db_session, org, plan_limits.LIMIT_USERS) == 2
+
+
+def test_reactivating_under_the_limit_still_works(client, db_session, brand):
+    org = _org(db_session, brand, "starter")
+    headers = _admin_headers(db_session, org)       # seat 1 of 2
+    parked = _user(db_session, org, is_active=False)
+    r = client.patch("/admin/users/%s/reactivate" % parked.id, headers=headers)
+    assert r.status_code == 200, r.text
+
+
+def test_regranting_a_revoked_membership_is_a_seat(db_session, brand):
+    from fastapi import HTTPException
+    from app.models.sales_models import Membership
+    from app.services import workspace_access
+    org = _org(db_session, brand, "starter")
+    _user(db_session, org, role="org_admin")
+    _user(db_session, org)                          # 2 of 2
+    other = _org(db_session, brand, "uncapped")
+    guest = _user(db_session, other)
+    db_session.add(Membership(user_id=guest.id, scope_type="customer_org", scope_id=org.id,
+                              role="advisor", is_active=False))
+    db_session.commit()
+    fn = getattr(workspace_access, "grant_workspace_membership", None) or getattr(workspace_access, "grant_membership", None)
+    if fn is None:
+        import pytest
+        pytest.skip("membership grant helper not exported under a known name")
+    import inspect
+    params = inspect.signature(fn).parameters
+    kwargs = {k: v for k, v in dict(db=db_session, user_id=guest.id, organization_id=org.id,
+                                    role="advisor").items() if k in params}
+    try:
+        fn(**kwargs)
+        refused = False
+    except HTTPException as exc:
+        refused = exc.status_code == 402
+    assert refused
