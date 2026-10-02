@@ -15,6 +15,7 @@ export default function AutoSendQueue() {
   const [queue, setQueue] = useState([])
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [tab, setTab] = useState('queue')
   const [actioning, setActioning] = useState(null)
   const [approvingAll, setApprovingAll] = useState(false)
@@ -35,9 +36,12 @@ export default function AutoSendQueue() {
   function load() {
     setLoading(true)
     Promise.all([
-      api.get('/auto-send/queue').catch(() => []),
-      api.get('/auto-send/history').catch(() => []),
+      api.get('/auto-send/queue').catch(() => undefined),
+      api.get('/auto-send/history').catch(() => undefined),
     ]).then(([q, h]) => {
+      // A failed read is not "Queue is clear" with zero counts: messages
+      // waiting for review could be sitting there unseen.
+      setLoadFailed(q === undefined || h === undefined)
       setQueue(q || [])
       setHistory(h || [])
       setLoading(false)
@@ -228,19 +232,19 @@ export default function AutoSendQueue() {
         <div className="panel asq-kpi-card">
           <span className="asq-kpi-label">Pending review</span>
           <strong className="asq-kpi-value" style={{ color: queue.length > 0 ? 'var(--signal-amber)' : 'var(--signal-green)' }}>
-            {loading ? '—' : queue.length}
+            {loading || loadFailed ? '—' : queue.length}
           </strong>
         </div>
         <div className="panel asq-kpi-card">
           <span className="asq-kpi-label">Sent today</span>
           <strong className="asq-kpi-value" style={{ color: 'var(--signal-green)' }}>
-            {loading ? '—' : history.filter(h => h.status === 'sent' && new Date(h.actioned_at) > new Date(Date.now() - 86400000)).length}
+            {loading || loadFailed ? '—' : history.filter(h => h.status === 'sent' && new Date(h.actioned_at) > new Date(Date.now() - 86400000)).length}
           </strong>
         </div>
         <div className="panel asq-kpi-card">
           <span className="asq-kpi-label">Skipped</span>
           <strong className="asq-kpi-value" style={{ color: 'var(--text-secondary)' }}>
-            {loading ? '—' : history.filter(h => h.status === 'skipped').length}
+            {loading || loadFailed ? '—' : history.filter(h => h.status === 'skipped').length}
           </strong>
         </div>
       </div>
@@ -257,6 +261,9 @@ export default function AutoSendQueue() {
       {tab === 'queue' && (
         loading ? (
           <div className="empty-state">Loading queue…</div>
+        ) : loadFailed ? (
+          <div className="empty-state" role="alert">The review queue could not be loaded - messages may be waiting.{' '}
+            <button type="button" className="btn btn-secondary" onClick={load}>Try again</button></div>
         ) : queue.length === 0 ? (
           <div className="panel asq-empty">
             <div className="asq-empty-icon">✓</div>

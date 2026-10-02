@@ -35,6 +35,7 @@ function trackLabel(track) {
 export default function Templates() {
   const [templates, setTemplates] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [editing, setEditing] = useState(null) // { message_track, channel }
   const [draftBody, setDraftBody] = useState('')
   const [draftSubject, setDraftSubject] = useState('')
@@ -48,7 +49,12 @@ export default function Templates() {
 
   function load() {
     setLoading(true)
-    api.get('/templates/').then(setTemplates).finally(() => setLoading(false))
+    setLoadError('')
+    api.get('/templates/').then(setTemplates)
+      // A failed read is not "no templates yet" - that empty state invites
+      // someone to regenerate templates that exist.
+      .catch((e) => setLoadError(e?.message || 'Templates could not be loaded.'))
+      .finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])
@@ -149,6 +155,8 @@ export default function Templates() {
 
       {loading ? (
         <div className="empty-state">Loading templates…</div>
+      ) : loadError ? (
+        <div className="empty-state" role="alert">{loadError} <button type="button" className="btn btn-secondary" onClick={load}>Try again</button></div>
       ) : Object.keys(grouped).length === 0 ? (
         <div className="empty-state">
           <strong>No message templates yet.</strong>

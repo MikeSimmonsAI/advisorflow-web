@@ -180,6 +180,10 @@ export default function Availability() {
   const [bsTimezone, setBsTimezone] = useState('America/Chicago')
   const [bsConfirmMsg, setBsConfirmMsg] = useState('')
   const [bsSaving, setBsSaving] = useState(false)
+  // null = not read yet, false = the read FAILED. The form shows defaults
+  // (9-5, 30 min) until it has the real values, and saving those would
+  // overwrite the advisor's actual booking settings - so it can't.
+  const [bsLoaded, setBsLoaded] = useState(null)
   const [bsSuccess, setBsSuccess] = useState('')
   const [bsError, setBsError] = useState('')
 
@@ -234,7 +238,8 @@ export default function Availability() {
       setBsDays(days)
       setBsTimezone(p.booking_timezone ?? 'America/Chicago')
       setBsConfirmMsg(p.booking_confirmation_message ?? '')
-    }).catch(() => {})
+      setBsLoaded(true)
+    }).catch(() => setBsLoaded(false))
   }, [])
 
   // ── Load availability data when selected advisor changes ─────────────────
@@ -335,6 +340,10 @@ export default function Availability() {
   }
 
   async function handleSaveBookingSettings() {
+    if (bsLoaded !== true) {
+      setBsError('Your current booking settings could not be loaded, so nothing was saved. Refresh and try again.')
+      return
+    }
     setBsSaving(true); setBsSuccess(''); setBsError('')
     try {
       await api.patch('/settings/booking-settings', {
@@ -757,6 +766,11 @@ export default function Availability() {
             </p>
           </div>
 
+          {bsLoaded === false && !bsError && (
+            <div className="compose-error" role="alert" style={{ marginBottom: 16 }}>
+              Your current booking settings could not be loaded. The values below are defaults, not yours - saving is disabled until they load.
+            </div>
+          )}
           {bsError && <div className="compose-error" style={{ marginBottom: 16 }}>{bsError}</div>}
           {bsSuccess && <div className="availability-success">{bsSuccess}</div>}
 
@@ -845,7 +859,7 @@ export default function Availability() {
           </div>
 
           <div style={{ marginTop: 20 }}>
-            <button className="btn btn--primary" onClick={handleSaveBookingSettings} disabled={bsSaving}>
+            <button className="btn btn--primary" onClick={handleSaveBookingSettings} disabled={bsSaving || bsLoaded !== true}>
               {bsSaving ? 'Saving...' : 'Save booking settings'}
             </button>
           </div>

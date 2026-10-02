@@ -68,6 +68,7 @@ export default function CRMIntegration() {
 
   const [connections, setConnections] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState(null)
   const [form, setForm] = useState(defaultForm())
@@ -85,6 +86,7 @@ export default function CRMIntegration() {
       setConnections(data)
     } catch (e) {
       setError('Failed to load CRM connections.')
+      setLoadFailed(true)
     } finally {
       setLoading(false)
     }
@@ -213,6 +215,11 @@ export default function CRMIntegration() {
       {/* Connections list */}
       {loading ? (
         <div className="crm-empty">Loading connections…</div>
+      ) : loadFailed ? (
+        <div className="crm-empty" role="alert">
+          <p>CRM connections could not be loaded. Existing connections are unchanged.</p>
+          <p><button type="button" className="btn btn-secondary" onClick={() => { setLoadFailed(false); loadConnections() }}>Try again</button></p>
+        </div>
       ) : connections.length === 0 && !showForm ? (
         <div className="crm-empty">
           <p>No CRM connections yet.</p>

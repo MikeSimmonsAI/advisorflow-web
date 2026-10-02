@@ -76,10 +76,16 @@ export default function CadenceTemplates() {
   const [editing, setEditing] = useState(null) // null | 'new' | template object
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
 
   function load() {
     setLoading(true)
-    api.get('/cadence-templates/').then(setTemplates).catch(() => {}).finally(() => setLoading(false))
+    setLoadError('')
+    api.get('/cadence-templates/').then(setTemplates)
+      // NOT "no templates yet": that state offers "Load default templates",
+      // which on a failed read would seed duplicates over the real ones.
+      .catch((e) => setLoadError(e?.message || 'Cadence templates could not be loaded.'))
+      .finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])
@@ -243,6 +249,8 @@ export default function CadenceTemplates() {
 
       {loading ? (
         <div className="empty-state">Loading templates…</div>
+      ) : loadError ? (
+        <div className="empty-state" role="alert">{loadError} <button type="button" className="btn btn-secondary" onClick={load}>Try again</button></div>
       ) : templates.length === 0 ? (
         <div className="panel" style={{ padding: 32, textAlign: 'center' }}>
           <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>No cadence templates yet. Load the defaults to get started.</p>
