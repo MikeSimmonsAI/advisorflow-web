@@ -249,7 +249,8 @@ export default function Templates() {
                           {channel === 'email' && t.email_subject_template && (
                             <p className="template-subject-preview">{t.email_subject_template}</p>
                           )}
-                          <p className="template-body-preview">{t.body_template}</p>
+                          {/* Scrolls when long: focusable so a keyboard user can scroll it (axe). */}
+                          <div className="template-body-preview" tabIndex={0} role="region" aria-label={`${channel === 'email' ? 'Email' : 'Text'} template body`}>{t.body_template}</div>
                           <div className="template-card-actions">
                             <button className="btn btn--secondary" onClick={() => startEditing(t)}>Edit</button>
                             {t.is_customized && (
