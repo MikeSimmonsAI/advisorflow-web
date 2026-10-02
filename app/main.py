@@ -553,6 +553,52 @@ app.add_middleware(
     allow_headers=BROWSER_HEADERS,
 )
 
+
+class ClientIPFromEdgeMiddleware:
+    """THE CALLER'S REAL ADDRESS, from the edge that saw it.
+
+    Production traffic reaches uvicorn through Cloudflare and Render's proxy
+    (responses carry CF-RAY / Server: cloudflare). Uvicorn trusts forwarding
+    headers only from 127.0.0.1, so `request.client.host` was the proxy's
+    address for EVERY visitor. Everything keyed on it was quietly wrong:
+      * the public-intake rate limit (slowapi, get_remote_address) was ONE
+        budget shared by every visitor - a busy campaign could 429 real
+        demo requests;
+      * the login throttle (IP + email) degraded to per-email;
+      * session and OAuth audit rows recorded the proxy, not the person.
+
+    Cloudflare sets CF-Connecting-IP to the address it accepted the connection
+    from and overwrites any copy a client sends, so it is the trustworthy
+    source. Only a syntactically valid IP is accepted; without the header
+    (local development, tests) nothing changes.
+    """
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") in ("http", "websocket"):
+            for k, v in scope.get("headers") or ():
+                if k == b"cf-connecting-ip":
+                    ip = _valid_ip(v.decode("latin-1").strip())
+                    if ip:
+                        port = (scope.get("client") or (None, 0))[1]
+                        scope = dict(scope, client=(ip, port))
+                    break
+        await self.app(scope, receive, send)
+
+
+def _valid_ip(value: str):
+    import ipaddress
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return None
+
+
+# Added LAST so it runs FIRST: every other middleware and the rate limiter see
+# the real address.
+app.add_middleware(ClientIPFromEdgeMiddleware)
+
 # ── Public compliance pages - registered FIRST so nothing else intercepts them.
 # Required for Twilio A2P 10DLC campaign registration.
 
