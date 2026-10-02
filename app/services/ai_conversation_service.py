@@ -1008,6 +1008,45 @@ def process_scheduled_touches(db: Session, org_id: str = None) -> dict:
 _TOUCH_CLAIM_LEASE = timedelta(hours=1)
 
 
+# A held conversation is looked at again a day later, not every two minutes.
+_OUTREACH_HOLD = timedelta(days=1)
+
+
+def _outreach_gate(db: Session, lead: Lead, conv, now: datetime):
+    """None to proceed, or the decision that stopped this scheduled touch.
+
+    stop / closed      -> the sequence ends (stage stopped, nothing scheduled)
+    follow_up_later    -> next_send_at moves to 9:00 local on the date asked
+    any other hold     -> looked at again in a day
+    unreadable         -> nothing sent; looked at again in a day
+    """
+    from app.services import conversation_intel as ci
+    try:
+        d = ci.decide_outreach(ci.build_context(db, lead, now=now))
+    except Exception:                                            # noqa: BLE001
+        db.rollback()
+        logger.exception("outreach gate: conversation unreadable for lead %s - holding", lead.id)
+        conv.next_send_at = now + _OUTREACH_HOLD
+        db.commit()
+        return {"code": "unreadable"}
+    if d["allowed"]:
+        return None
+    if d["code"] in ("stop", "closed"):
+        conv.stage = "stopped"
+        conv.next_send_at = None
+    elif d.get("defer_until"):
+        from datetime import date as _date
+        from app.services import workspace_time as wt
+        tz = wt.workspace_timezone(db, lead.organization_id)
+        when = wt.local_midnight_utc(_date.fromisoformat(d["defer_until"]), tz) + timedelta(hours=9)
+        conv.next_send_at = max(when, now + timedelta(minutes=5))
+    else:
+        conv.next_send_at = now + _OUTREACH_HOLD
+    db.commit()
+    logger.info("scheduled touch for lead %s not sent: %s (%s)", lead.id, d["code"], d["reason"])
+    return d
+
+
 def _process_scheduled_touches(db: Session, org_id: str = None) -> dict:
     # ── PREFLIGHT. ONE FAILURE, NOT TWENTY-FIVE. ────────────────────────────
     # Before the query, so an unconfigured service does not walk a set of real
@@ -1072,6 +1111,19 @@ def _process_scheduled_touches(db: Session, org_id: str = None) -> dict:
             # upgrade.
             from app.services.lead_capacity import is_held
             if is_held(lead):
+                skipped += 1
+                continue
+
+            # WHAT THE CUSTOMER SAID OUTRANKS THE SCHEDULE. This loop sent the
+            # next scripted touch on the cadence clock whatever had happened
+            # since: a reply only set stage "replied", which this query does
+            # not exclude, so "call me Monday" got the touch-3 email on
+            # Tuesday, and "not now" / a person handling it / an unanswered
+            # question were all talked over. Conversation intelligence decides
+            # (decide_outreach). Fails CLOSED: if the conversation cannot be
+            # read, nothing is sent this pass.
+            gate = _outreach_gate(db, lead, conv, now)
+            if gate is not None:
                 skipped += 1
                 continue
 

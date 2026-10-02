@@ -623,6 +623,44 @@ def decide_ai(ctx: Dict[str, Any], channel: str = "email") -> Dict[str, Any]:
     return {"allowed": True, "code": "ok", "reason": "Clear to reply", "human_review": False}
 
 
+def decide_outreach(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """May a SCHEDULED, unprompted touch go out now? (decide_ai is for replies.)
+
+    A cadence is a plan made before the customer said anything. Once they
+    have, the plan yields to what they said:
+
+      stopped / DNC / "not interested"  -> stop the sequence for good
+      a person should look / team handling / AI paused -> hold (no send)
+      they wrote and we have not answered -> hold: a reply is owed, not the
+                                             next scripted touch
+      "call me Monday" (a follow-up date still ahead) -> defer to that date
+      "not now" with no date                -> hold
+
+    Returns {"allowed", "code", "reason", "defer_until" (ISO date or None)}.
+    """
+    st = ctx["state"]
+
+    def no(code, reason, defer=None):
+        return {"allowed": False, "code": code, "reason": reason, "defer_until": defer}
+    if st["state"] == "stopped" or ctx["consent"]["dnc"]:
+        return no("stop", "Customer asked us to stop / DNC")
+    if ctx.get("current_intent") == "not_interested" or st["state"] == "closed":
+        return no("closed", "They said no")
+    if st.get("needs_human_reason"):
+        return no("human_review", st["needs_human_reason"])
+    if st["mode"] in (MODE_HUMAN_ACTIVE, MODE_AI_PAUSED):
+        return no(st["mode"], st.get("mode_reason") or "A person is handling this conversation")
+    if ctx.get("pending_inbound"):
+        return no("reply_owed", "They wrote and have not been answered - a reply is owed, not the next touch")
+    fu = ctx.get("follow_up") or {}
+    if fu.get("date") and fu["date"] > (ctx.get("today") or ""):
+        return no("follow_up_later", "They asked to be contacted %s" % (fu.get("value") or fu["date"]),
+                  defer=fu["date"])
+    if st["state"] == "not_now":
+        return no("not_now", "They said not now")
+    return {"allowed": True, "code": "ok", "reason": "Clear to send the scheduled touch", "defer_until": None}
+
+
 def build_context(db: Session, lead: Lead, *, now: Optional[datetime] = None, do_sync: bool = True,
                   recent: int = 8) -> Dict[str, Any]:
     now = now or datetime.utcnow()
