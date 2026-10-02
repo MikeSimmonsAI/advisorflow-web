@@ -32,7 +32,7 @@
 }
 .rr-pill--new { background: var(--signal-blue-dim); color: var(--signal-blue); }
 .rr-pill--in_review { background: rgba(124, 77, 214, 0.10); color: #7c4dd6; }
-.rr-pill--options_sent { background: rgba(230, 126, 34, 0.14); color: #b95f12; }
+.rr-pill--options_sent { background: rgba(230, 126, 34, 0.14); color: #8f4708; }
 .rr-pill--booked, .rr-pill--completed { background: var(--signal-green-dim); color: var(--signal-green); }
 
 .rr-pager-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

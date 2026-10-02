@@ -546,7 +546,7 @@ export default function EnergyOverview() {
             <div className="eo-empty">Loading…</div>
           ) : (
             <>
-              <ul className="eo-attn">
+              <ul className="eo-attn" role="none">
                 {attention.map(item => {
                   const actionable = item.count > 0
                   return (
@@ -665,7 +665,7 @@ export default function EnergyOverview() {
               </button>
             </div>
           ) : (
-            <ul className="eo-list">
+            <ul className="eo-list" role="none">
               {recent.slice(0, 5).map(l => (
                 <li key={l.id} className="eo-list-row" role="button" tabIndex={0}
                     onClick={() => go('/leads/' + l.id)}
@@ -719,7 +719,7 @@ export default function EnergyOverview() {
               )}
             </div>
           ) : (
-            <ul className="eo-list">
+            <ul className="eo-list" role="none">
               {rateItems.slice(0, 5).map(r => {
                 const v = r.values || {}
                 const detail = [v.location, v.source_detail].filter(Boolean).join(' · ')
@@ -762,7 +762,7 @@ export default function EnergyOverview() {
                     {enrollStats.date_not_recorded ? ` ${num(enrollStats.date_not_recorded)} earlier customer(s) have no enrollment date on file.` : ''}</span>
             </div>
           ) : (
-            <ul className="eo-list">
+            <ul className="eo-list" role="none">
               {enrollStats.recent.map(r => (
                 <li key={r.id} className="eo-list-row" role="button" tabIndex={0}
                     onClick={() => go(r.link)}

@@ -279,7 +279,7 @@
   text-transform: uppercase; white-space: nowrap;
   background: var(--bg-glass-mid); color: var(--text-secondary);
 }
-.eo-ov .eo-pill--new { background: var(--signal-amber-dim); color: var(--signal-amber); }
+.eo-ov .eo-pill--new { background: var(--signal-amber-dim); color: #7d5a14; }
 .eo-ov .eo-pill--sent,
 .eo-ov .eo-pill--replied { background: var(--signal-blue-dim); color: var(--signal-blue); }
 .eo-ov .eo-pill--hot { background: var(--signal-red-dim); color: var(--signal-red); }
