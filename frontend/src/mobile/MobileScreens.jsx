@@ -18,7 +18,7 @@
  */
 import { useState, useEffect } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { api, login, fetchMyContexts, setWorkspaceContext, clearWorkspaceContext, logout } from '../api/client'
+import { api, login, fetchMyContexts, setWorkspaceContext, clearWorkspaceContext, logout, safeNextPath, getWorkspaceContext } from '../api/client'
 import { useMobile, useApi, ScreenHead, Loading, ErrorState, Empty, Icon, isAuthenticated } from './MobileShell'
 import { needsAttention, refusalReasons, canCompose, relTime, humanize, groupByDay,
          workspaceChoices, parseTs, NOT_AVAILABLE, greetingName, mobilePathFor } from './mobileHelpers'
@@ -35,17 +35,24 @@ export function MobileLogin() {
   const [password, setPassword] = useState('')
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
+  const params = new URLSearchParams(window.location.search)
+  const expired = params.get('expired') === '1'
+  const nextPath = safeNextPath(params.get('next'))
   async function submit(e) {
     e.preventDefault()
     setBusy(true); setErr(null)
+    const priorWorkspace = getWorkspaceContext()
     try {
       const data = await login(email, password)
       if (data && data.must_change_password) { navigate('/change-password'); return }
       try {
         const ctx = await fetchMyContexts({ force: true })
         const def = ctx && ctx.default_context
-        if (def && def.type === 'workspace' && def.organization_id) setWorkspaceContext(def.organization_id)
+        const still = priorWorkspace && (ctx?.contexts || []).some(c => c.type === 'workspace' && c.organization_id === priorWorkspace)
+        if (nextPath && still) setWorkspaceContext(priorWorkspace)
+        else if (def && def.type === 'workspace' && def.organization_id) setWorkspaceContext(def.organization_id)
         else clearWorkspaceContext()
+        if (nextPath && (still || !priorWorkspace) && nextPath.startsWith('/m')) { navigate(nextPath, { replace: true }); return }
       } catch { /* the shell re-asks */ }
       navigate('/m', { replace: true })
     } catch (ex) { setErr(ex.message || 'Sign-in failed') } finally { setBusy(false) }
@@ -59,6 +66,7 @@ export function MobileLogin() {
           <input type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required /></label>
         <label className="mfield"><span>Password</span>
           <input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label>
+        {expired && !err && <div className="mrefusal" role="status">Your session ended. Sign in again to pick up where you left off.</div>}
         {err && <div className="mrefusal" role="alert">{err}</div>}
         <button className="mbtn mbtn--primary" disabled={busy} type="submit">{busy ? 'Signing in…' : 'Sign in'}</button>
       </form>

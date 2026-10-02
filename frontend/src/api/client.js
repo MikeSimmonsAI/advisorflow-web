@@ -37,6 +37,9 @@ export function setToken(token) {
   localStorage.setItem(KEY_TOKEN, token)
 }
 
+import { sessionExpiredUrl, safeNextPath } from '../utils/sessionReturn'
+export { sessionExpiredUrl, safeNextPath }
+
 export function clearToken() {
   localStorage.removeItem(KEY_TOKEN)
   localStorage.removeItem('bookaboost_token') // clean up legacy key if present
@@ -262,7 +265,7 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
     if (!skipRedirect && !window._af_redirecting) {
       window._af_redirecting = true
       clearToken()
-      window.location.href = '/login'
+      window.location.href = sessionExpiredUrl(window.location)
     }
     throw new Error('Session expired')
   }

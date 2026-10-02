@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { login, fetchAndStoreBranding, startKeepAlive, startRefreshLoop,
+import { login, fetchAndStoreBranding, startKeepAlive, startRefreshLoop, safeNextPath, getWorkspaceContext,
          fetchMyContexts, setWorkspaceContext, clearWorkspaceContext } from '../api/client'
 import SignalPulse from '../components/SignalPulse'
 import { detectTheme, THEMES, BRAND_CONFIG } from '../theme.js'
@@ -170,11 +170,17 @@ export default function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const params = new URLSearchParams(window.location.search)
+  const expired = params.get('expired') === '1'
+  const nextPath = safeNextPath(params.get('next'))
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setLoading(true)
+    // The workspace they were in when the session ended; honoured below only
+    // if the server still lists it for them.
+    const priorWorkspace = getWorkspaceContext()
     try {
       const user = await login(email, password)
       await fetchAndStoreBranding()
@@ -203,6 +209,13 @@ export default function Login() {
           } else {
             clearWorkspaceContext()
           }
+        }
+        // BACK TO WHERE THEY WERE after an expired session - into the same
+        // workspace when they still have it, otherwise the default above.
+        if (nextPath) {
+          const still = priorWorkspace && (ctx?.contexts || []).some(c => c.type === 'workspace' && c.organization_id === priorWorkspace)
+          if (still) { setWorkspaceContext(priorWorkspace); dest = nextPath }
+          else if (!priorWorkspace) dest = nextPath
         }
       } catch (ctxErr) {
         // Keep the legacy destination. A context lookup that fails must not
@@ -310,6 +323,7 @@ export default function Login() {
               />
             </label>
 
+            {expired && !error && <div className="login-error" role="status">Your session ended. Sign in again to pick up where you left off.</div>}
             {error && <div className="login-error">{error}</div>}
 
             <button
