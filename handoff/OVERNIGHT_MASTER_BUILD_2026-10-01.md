@@ -77,12 +77,49 @@ communications/calling, mobile/PWA, security/reliability. Budget 8h. Prior hando
   (Babel scope analysis: a project export used without import/declaration fails; proven to catch this case).
   Reports tabs no longer widen a phone page. Re-sweep: 46/46 page loads clean.
 
-## Commits today (all on main, auto-deployed; production /version 8f26bee (backend), frontend 57ed6e8, /health ok)
+## Final verification & closure (23:00 CT Oct 1 → 00:58 CT)
+Why: the 6,987-test full suite ran on 74a48e7; ten later code commits had only targeted tests.
+- Reconciled: repo HEAD = origin/main, clean. Production backend /version = 981cfbc, /health ok; frontend bundle
+  unchanged since 57ed6e8 (no frontend code after it).
+- Targeted regression for every post-74a48e7 commit: 300 passed / 1 FAILED (+ 18/18 frontend checks). The failure
+  was real (below), fixed, then two more fixes; related suites re-run green.
+- FULL SUITE on final code 981cfbc (Windows): start 23:32:04 CT, finish 00:53:05 CT Oct 2, runtime 81 min (pytest 4861.89s) →
+  6,992 passed · 27 skipped · 0 failed (tests/test_zoom_integration.py excluded, as in every full run).
+  (A run started 23:20 on 2cf4126 was stopped at ~10% when the second bug was found, so the green number
+  is on the true final commit.)
+- Bugs found and fixed tonight:
+  1. 2cf4126 — Atlantis "days to renewal" read one day short every evening from 7pm CT, and the 14-day move
+     window started a day late (calendar dates compared with UTC's date). Now the workspace's local date
+     (activity_reporting.org_local_date). Test pins 22:30 CT; fails on old code (44 vs 45).
+  2. 981cfbc — Atlantis Overview "Enrollments This Month" rolled over at 7pm CT on the last day of each month
+     (UTC month). Now the workspace's local month. Test pins 21:00 CT Oct 31; fails on old code (1 vs 2).
+- Workflow proofs on the exact final code (DEMO/QA records only, local, real login screen) — all PASS:
+  1. Max Life assign → accept: read-only before accept (no edit buttons; "Accept the offer" note), edit controls after,
+     "Accepted by DEMO Maya Thompson" for Maya and owner, no 404s, a non-offered agent gets 404, audit
+     offered/accepted, replay + decline-after-accept 409, concurrent accept/decline/accept → exactly 1 winner.
+  2. /m at 390 and 360px: 7 alerts = API = desktop Command Center; "Hi, Morgan"; 7/7 links match; first/last tap open
+     the right record; no overflow; no JS errors.
+  3. Atlantis Enroll: Enrollments This Month 3 → 4, Recent Enrollments shows the customer "just now", audit
+     rate_request.enrolled.
+  4. Move Concierge: search by name, 3-item checklist, drawer fits at 390px, no overflow/errors.
+  5. Leads / Pipeline (6 tabs, energy + wholesale) / Cleaning dashboard: no crash. Guard demo: removing the asUtc
+     import fails missingImports naming LeadsWorkspace.jsx:97; restored → passes; throwaway copy deleted.
+- Smoke: Max Life prospect → issued policy on screen (QA-POL-FINAL-01); Atlantis board move / lost / reopen, rate
+  requests, enroll, move; Intake CSV → 7 steps → results (3 imported, 1 updated, 1 lead); Wholesale "As of" local time
+  + 17-step API walk; API suites (Atlantis, Wholesale e2e, Intake, Max Life/agency) 181 passed.
+- Page sweep: 42 + 46 customer page loads and 21 phone pages at 390px clean; owner console 37/39 (Revenue History
+  500 = SQLite has no to_char, Postgres-only; Compensation 403 = no sales brands seeded locally — both local setup).
+  Production Revenue History not checked (needs an owner sign-in; I don't sign in to production).
+- Security suites (auth, tenant/cross-tenant isolation, permissions, DNC/consent/suppression): 493 passed.
+
+## Commits today (all on main, auto-deployed; production /version 981cfbc (backend), frontend 57ed6e8, /health ok)
 a9ac4b1 build · 3154c9b UTC ago + PWA headers · 5920c74 platform UTC + perf · 7c4dda4 review fixes ·
 74a48e7 phone agency home · 7710f18 offered agent can accept · c413754 Atlantis Enroll screen ·
 5bd2cd1 Move Concierge customer search · 8d4ac40 Wholesale As-of + morning panel · b3db22c offer read-only ·
 84abb1a energy drawers on phone · e0c8979 dark dropdowns · e819c26 conversations phone width ·
-8f26bee licensing milestone progress · b9c7d9b handoff · 57ed6e8 Leads crash fix + missing-import guard.
+8f26bee licensing milestone progress · b9c7d9b handoff · 57ed6e8 Leads crash fix + missing-import guard ·
+90a185b handoff · 2cf4126 renewal days / move window use workspace date · 981cfbc Enrollments This Month uses
+workspace month · (final handoff commit).
 Rollback point: tag pre-overnight-20261001.
 
 
@@ -167,6 +204,9 @@ Rollback point: tag pre-overnight-20261001.
 - Push server side is built but dormant until VAPID keys; in-browser calling not built (tel: fallback + call log).
 - Email send in-flight claim is per process (Render web runs one instance); a second instance would need a DB claim.
 - A pydantic model nested inside a dict response skips the UTC "Z" marking (no live case found).
+- UTC day/month boundaries remain in older screens (energy task due-today/overdue, sales month, work "due today",
+  lead/SMS trend charts, executive). Atlantis renewals, moves and Enrollments This Month now use the workspace date.
+  The real fix is an Organization.timezone column - a deliberate separate change.
 - Wholesale "This morning" (decisions) and deal "Needs attention" (next steps) are different lists by design; the
   empty state now says which.
 
