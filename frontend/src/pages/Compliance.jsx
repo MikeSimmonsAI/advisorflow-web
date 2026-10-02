@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
 import './Compliance.css'
+import { csvRow } from '../utils/csvCell'
 
 /**
  * ORIGIN NOTE: this page's layout and interaction design were drafted
@@ -62,11 +63,11 @@ function exportCsv(entries) {
   const header = ['Phone', 'Reason', 'Source', 'Added']
   const rows = entries.map(e => [
     formatPhone(e.phone),
-    `"${(e.reason || '').replace(/"/g, '""')}"`,
+    e.reason || '',
     e.source === 'REPLY_STOP' || e.source === 'reply_stop' ? 'Reply STOP' : 'Manual',
     formatDate(e.added_at),
   ])
-  const csv = [header, ...rows].map(r => r.join(',')).join('\n')
+  const csv = [header, ...rows].map(csvRow).join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

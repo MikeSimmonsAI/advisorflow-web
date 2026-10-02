@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api, getCurrentUser } from '../api/client'
+import { csvRow } from '../utils/csvCell'
 
 const TC = { mobile: '#22c55e', landline: '#f59e0b', voip: '#8b5cf6', unknown: '#6b7280' }
 const CH = { sms: { color: '#22c55e', label: 'SMS' }, email: { color: '#3b82f6', label: 'Email' }, voice: { color: '#f59e0b', label: 'Voice' } }
@@ -44,15 +45,10 @@ function Stars({ rating }) {
 
 function exportCSV(rows) {
   const cols = ['Name', 'Phone', 'Phone Type', 'Channel', 'Address', 'Website', 'Rating']
-  const lines = [cols.join(','), ...rows.map(r => [
-    `"${(r.name || '').replace(/"/g, '""')}"`,
-    r.phone || '',
-    r.phone_type || '',
-    r.channel || '',
-    `"${(r.address || '').replace(/"/g, '""')}"`,
-    r.website || '',
-    r.rating || '',
-  ].join(','))]
+  const lines = [csvRow(cols), ...rows.map(r => csvRow([
+    r.name || '', r.phone || '', r.phone_type || '', r.channel || '',
+    r.address || '', r.website || '', r.rating || '',
+  ]))]
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a'); a.href = url; a.download = 'leads_export.csv'; a.click()

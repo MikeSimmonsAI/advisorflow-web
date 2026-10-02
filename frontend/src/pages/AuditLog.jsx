@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import '../styles/shared.css'
 import './AuditLog.css'
+import { csvRow } from '../utils/csvCell'
 
 const PAGE_SIZE = 50
 
@@ -31,10 +32,10 @@ function exportCsv(entries) {
     e.action,
     e.target_type,
     e.target_id,
-    `"${(e.actor_name || e.actor_user_id || '').replace(/"/g, '""')}"`,
-    `"${(e.details || '').replace(/"/g, '""')}"`,
+    e.actor_name || e.actor_user_id || '',
+    e.details || '',
   ])
-  const csv = [header, ...rows].map(r => r.join(',')).join('\n')
+  const csv = [header, ...rows].map(csvRow).join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
