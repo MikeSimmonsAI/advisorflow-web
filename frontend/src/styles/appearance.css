@@ -71,7 +71,7 @@ html:root {
   /* ── Text ── */
   --text-strong:    #0e1726;
   --text-body:      #46586f;
-  --text-muted:     #6b7d94;
+  --text-muted:     #56677d;   /* was #6b7d94: 3.9-4.2:1 on panels; now >= 5.3:1 (WCAG AA) */
   --text-on-primary:#ffffff;
   --text-primary:   var(--text-strong);
   --text-secondary: var(--text-body);

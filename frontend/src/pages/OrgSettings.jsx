@@ -445,7 +445,7 @@ export default function OrgSettings() {
       {isSuperAdmin && !getOrgContext() && (
         <div className="panel" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
           <label style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>Managing org:</label>
-          <select
+          <select aria-label="Managing organization"
             className="os-input"
             style={{ maxWidth: 320 }}
             value={selectedOrgId || ''}
@@ -706,7 +706,7 @@ export default function OrgSettings() {
                     </label>
                     <label className="os-tier-label">
                       Color
-                      <select className="os-input os-input--sm" value={tier.color} onChange={(e) => updateTier(i, 'color', e.target.value)}>
+                      <select className="os-input os-input--sm" aria-label="Tier color" value={tier.color} onChange={(e) => updateTier(i, 'color', e.target.value)}>
                         {TIER_COLORS.map((c) => <option key={c} value={c}>{c}</option>)}
                       </select>
                     </label>
@@ -850,7 +850,7 @@ export default function OrgSettings() {
             <div className="os-field-row" style={{ gap: 12, marginTop: 12 }}>
               <div style={{ flex: 1 }}>
                 <label className="os-label">Number type</label>
-                <select className="os-input" value={orgTwilioNumberType} onChange={e => setOrgTwilioNumberType(e.target.value)}>
+                <select className="os-input" aria-label="Number type" value={orgTwilioNumberType} onChange={e => setOrgTwilioNumberType(e.target.value)}>
                   <option value="toll_free">Toll-free (8XX) — TFV approved</option>
                   <option value="10dlc">10DLC — local 10-digit</option>
                   <option value="short_code">Short code</option>
@@ -1480,6 +1480,7 @@ function CRMCustomFieldsSection() {
               onChange={e => update(i, { label: e.target.value })}
             />
             <select
+              aria-label="Field type"
               className="os-input"
               style={{ flex: '0 0 120px', marginBottom: 0 }}
               value={f.type}

@@ -820,7 +820,7 @@ export default function EmailQueue() {
                         </button>
                       </td>
                       <td>
-                        <select
+                        <select aria-label="Flag this lead"
                           style={{ fontSize: 11, padding: '2px 6px', cursor: 'pointer', color: 'var(--text-secondary)', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 4 }}
                           defaultValue=""
                           onChange={(e) => { if (e.target.value) { handleFlagLead(lead, e.target.value); e.target.value = '' } }}

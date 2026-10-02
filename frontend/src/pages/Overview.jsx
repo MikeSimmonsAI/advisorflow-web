@@ -620,7 +620,7 @@ function PlatformOverview() {
             : recentLeads.length === 0 ? (
               <div className="empty-state">No leads yet. Import a list to get started.</div>
             ) : (
-              <div className="ov-tablewrap">
+              <div className="ov-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
                 <table className="ov-table">
                   <thead>
                     <tr>

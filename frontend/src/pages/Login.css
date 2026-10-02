@@ -407,7 +407,7 @@
   color: #c0392b;
 }
 
-.login-page--light .login-support { color: #a08060; }
+.login-page--light .login-support { color: #7a5c3c; }   /* AA on cream (was 3.4:1) */
 .login-page--light .login-support a { color: #8a5a1a; }
 .login-page--light .login-support a:hover { color: #5a3a0a; }
 

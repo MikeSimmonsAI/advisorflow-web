@@ -201,7 +201,7 @@
 .mbubble--out { align-self: flex-end; background: var(--m-brand, var(--m-brand-d)); color: var(--m-on-brand, var(--m-on-brand-d)); border-bottom-right-radius: 4px; }
 .mshell[data-mskin="luxe"] .mbubble, .mshell[data-mskin="wholesale"] .mbubble { border-radius: var(--m-radius); }
 .mbubble-subj { font-weight: 600; margin-bottom: 2px; }
-.mbubble-meta { font-size: 11px; opacity: 0.75; margin-top: 4px; }
+.mbubble-meta { font-size: 11px; opacity: 0.9; margin-top: 4px; }
 .mnote { align-self: stretch; font-size: 13px; background: var(--m-surface-2); border-radius: var(--m-radius); padding: 8px 10px; color: var(--m-text); display: flex; flex-direction: column; gap: 2px; }
 .mnote > span { font-size: 11px; color: var(--m-text-2); text-transform: uppercase; letter-spacing: 0.04em; }
 .mcompose { position: sticky; bottom: calc(68px + env(safe-area-inset-bottom, 0px)); background: var(--m-bg); padding: 8px 0 4px; display: flex; flex-direction: column; gap: 8px; }

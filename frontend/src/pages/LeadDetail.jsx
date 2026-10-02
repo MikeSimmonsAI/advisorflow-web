@@ -1235,7 +1235,7 @@ export default function LeadDetail() {
                   ⚑ Unflag
                 </button>
               ) : (
-                <select
+                <select aria-label="Flag this lead"
                   style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer', color: 'var(--text-secondary)', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 6 }}
                   defaultValue=""
                   onChange={(e) => { if (e.target.value) { handleFlagLead(e.target.value); e.target.value = '' } }}
@@ -1294,8 +1294,9 @@ export default function LeadDetail() {
         </div>
         {canReassignLead && (
           <div className="lead-detail-assign">
-            <span className="lead-detail-assign-label">Assigned to</span>
+            <span className="lead-detail-assign-label" id="lead-assign-label">Assigned to</span>
             <select
+              aria-labelledby="lead-assign-label"
               className="filter-select"
               value={lead.assigned_to_id || ''}
               onChange={handleAssignmentChange}

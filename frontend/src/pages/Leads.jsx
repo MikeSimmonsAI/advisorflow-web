@@ -1190,14 +1190,14 @@ function ClassicLeads() {
               className="leads-search-input"
             />
           </div>
-          <select className="filter-select" value={tierFilter} onChange={(e) => { setTierFilter(e.target.value); setLeadsPage(1) }}>
+          <select className="filter-select" aria-label="Filter by tier" value={tierFilter} onChange={(e) => { setTierFilter(e.target.value); setLeadsPage(1) }}>
             {tierFilterChoices.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}{opt.legacy ? ' (legacy)' : ''}
               </option>
             ))}
           </select>
-          <select className="filter-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setLeadsPage(1) }}>
+          <select className="filter-select" aria-label="Filter by status" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setLeadsPage(1) }}>
             {STATUS_FILTER_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
           {importBatches.length > 0 && (
@@ -1229,7 +1229,7 @@ function ClassicLeads() {
             <button className="back-link" onClick={() => { setShowBulkAssign(false); setBulkAssignError('') }}>Cancel</button>
           </div>
           <div className="leads-import-row">
-            <select className="filter-select" value={bulkAssignTarget} onChange={(e) => setBulkAssignTarget(e.target.value)}>
+            <select className="filter-select" aria-label="Assign selected leads to" value={bulkAssignTarget} onChange={(e) => setBulkAssignTarget(e.target.value)}>
               <option value="">Unassigned (back to pool)</option>
               {assignableUsers.map((user) => (
                 <option key={user.id} value={user.id}>{user.full_name}</option>
@@ -1289,6 +1289,7 @@ function ClassicLeads() {
                   <th style={{ width: 36 }}>
                     <input
                       type="checkbox"
+                      aria-label="Select all sendable leads on this page"
                       checked={sendableLeads.length > 0 && sendableLeads.every((l) => selected.has(l.id))}
                       onChange={toggleSelectAll}
                     />
@@ -1318,7 +1319,8 @@ function ClassicLeads() {
                   >
                     {view !== 'review' && (
                       <td onClick={(e) => e.stopPropagation()}>
-                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(lead.id)} />
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(lead.id)}
+                          aria-label={`Select ${[lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'lead'}`} />
                       </td>
                     )}
                     <td>
@@ -1386,7 +1388,7 @@ function ClassicLeads() {
                           >⚑ Unflag</button>
                         ) : (
                           <div style={{ position: 'relative', display: 'inline-block' }}>
-                            <select
+                            <select aria-label="Flag this lead"
                               className="btn btn--ghost"
                               style={{ fontSize: 11, padding: '2px 6px', cursor: 'pointer', color: 'var(--text-secondary)', background: 'transparent', border: '1px solid var(--border-subtle)', borderRadius: 4 }}
                               defaultValue=""

@@ -125,7 +125,7 @@ export function MobileProspect() {
         {(p.policies || []).map(x => (
           <li key={x.id} className="mrow"><span className="mrow-main"><span className="mrow-title">Policy {x.policy_number || ''}</span>
             <span className="mrow-detail">{humanize(x.status)}</span></span></li>))}
-        {!(p.applications || []).length && !(p.policies || []).length && <Empty>No applications or policies yet.</Empty>}
+        {!(p.applications || []).length && !(p.policies || []).length && <li className="mrow"><Empty>No applications or policies yet.</Empty></li>}
       </ul>
       <p className="mstate mstate--small"><Link to={'/agency/prospects/' + p.id}>Open the full record</Link></p>
     </div>
