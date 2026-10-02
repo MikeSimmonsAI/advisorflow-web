@@ -196,8 +196,10 @@ def test_follow_up_queues_reconcile_with_lists(client, w):
 
 def test_renewal_queue_uses_only_real_dates(client, w):
     db, org, adv = w["db"], w["org"], w["adv"]
-    soon = (date.today() + timedelta(days=45)).isoformat()
-    far = (date.today() + timedelta(days=400)).isoformat()
+    from app.services.activity_reporting import org_local_date
+    today = org_local_date(db, org.id)          # the workspace's day, not UTC's
+    soon = (today + timedelta(days=45)).isoformat()
+    far = (today + timedelta(days=400)).isoformat()
     a = _lead(db, org, adv, tier="contract_signed", first="Soon", cf={"contract_end_date": soon})
     _lead(db, org, adv, tier="contract_signed", first="Far", cf={"contract_end_date": far})
     _lead(db, org, adv, tier="contract_signed", first="NoDate")
@@ -365,3 +367,26 @@ def test_energy_nav_has_no_wholesale_labels():
     block = src[src.index("const ENERGY = {"):src.index("export const VERTICAL_CLEANING")]
     labels = re.findall(r"label:\s*'([^']+)'", block)
     assert labels and not any(re.search(r"wholesal|deal|evosense|max life", l, re.I) for l in labels)
+
+
+def test_renewal_days_and_move_window_use_the_workspace_day_in_the_evening(client, w, monkeypatch):
+    """22:30 Central on Oct 1 is 03:30 UTC on Oct 2. "Days to renewal" was
+    counted from UTC's date - one short every evening - and the 14-day move
+    window started a day late. Found by the final verification run at 23:01 CT."""
+    from app.routers import energy_ops_router as R
+    db, org, adv = w["db"], w["org"], w["adv"]
+    adv.booking_timezone = "America/Chicago"
+    db.commit()
+    evening_utc = datetime(2026, 10, 2, 3, 30)          # = 2026-10-01 22:30 CT
+    monkeypatch.setattr(R, "_now", lambda: evening_utc)
+    _lead(db, org, adv, tier="contract_signed", first="Nov15", cf={"contract_end_date": "2026-11-15"})
+    items = client.get("/energy-ops/queues/renewal_window", headers=_h(db, adv)).json()["items"]
+    row = [i for i in items if i["contract_end_date"] == "2026-11-15"][0]
+    assert row["days_to_renewal"] == 45                  # Oct 1 -> Nov 15, not 44
+    # A move dated "today" (Oct 1, local) is still inside the 14-day window.
+    db.add(EnergyMoveRequest(organization_id=org.id, contact_name="Evening Move (TEST)",
+                             move_date=date(2026, 10, 1), status="requested", created_by_id=adv.id))
+    db.commit()
+    summary = client.get("/energy-ops/moves", headers=_h(db, adv)).json()["summary"]
+    assert summary["moving_in_14_days"] == 1
+

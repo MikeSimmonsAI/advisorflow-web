@@ -184,13 +184,21 @@ def _no_response_q(db, user, request, now):
                     ~later_reply))
 
 
-def _renewal_rows(db, user, request, now):
+def _local_today(db, org_id, now):
+    """The workspace's calendar date (advisors' timezone, else platform default)
+    - the right "today" for calendar-date fields. UTC's date is already
+    tomorrow every evening in the Americas."""
+    from app.services.activity_reporting import org_local_date
+    return org_local_date(db, org_id, on=now)
+
+
+def _renewal_rows(db, user, request, now, today=None):
     """(in_window rows sorted by date, missing_count). Python-side because the
     date lives in a JSON custom field; bounded by the renewal tiers."""
     rows = (lead_scope.authorized_lead_query(db, user, request=request)
             .filter(Lead.tier.in_(RENEWAL_TIERS),
                     or_(Lead.status.is_(None), ~Lead.status.in_(("dnc", "dead")))).all())
-    today = now.date()
+    today = today or now.date()
     inside, missing = [], 0
     for l in rows:
         d = _parse_date(_cf(l.custom_fields).get("contract_end_date"))
@@ -204,7 +212,7 @@ def _renewal_rows(db, user, request, now):
     return inside, missing
 
 
-def _renewal_counts(db, user, request, now):
+def _renewal_counts(db, user, request, now, today=None):
     """(in_window_count, missing_count) - exactly what len(_renewal_rows()[0])
     and _renewal_rows()[1] report, for the /queues summary. PERFORMANCE (S18):
     the summary used to run _renewal_rows TWICE per request, each time loading
@@ -213,7 +221,7 @@ def _renewal_counts(db, user, request, now):
     rows = (lead_scope.authorized_lead_query(db, user, Lead.custom_fields, request=request)
             .filter(Lead.tier.in_(RENEWAL_TIERS),
                     or_(Lead.status.is_(None), ~Lead.status.in_(("dnc", "dead")))).all())
-    today = now.date()
+    today = today or now.date()
     inside = missing = 0
     for (raw,) in rows:
         d = _parse_date(_cf(raw).get("contract_end_date"))
@@ -247,7 +255,7 @@ def _queue_count(db, user, request, org_id, key, now):
         return (lead_scope.authorized_lead_query(db, user, request=request)
                 .filter(Lead.tier == ENROLLED_TIER).count())
     if key == "renewal_window":
-        return len(_renewal_rows(db, user, request, now)[0])
+        return len(_renewal_rows(db, user, request, now, _local_today(db, org_id, now))[0])
     if key in ("previous_customers", "reactivation"):
         if not _is_manager(db, user, request):
             return None
@@ -287,7 +295,7 @@ def queue_summary(request: Request, db: Session = Depends(get_db),
     org_id = _org_id(db, user, request)
     now = _now()
     out = []
-    in_window, missing = _renewal_counts(db, user, request, now)
+    in_window, missing = _renewal_counts(db, user, request, now, _local_today(db, org_id, now))
     for key, label, kind in QUEUES:
         n = (in_window if key == "renewal_window"
              else _queue_count(db, user, request, org_id, key, now))
@@ -393,11 +401,11 @@ def queue_items(key: str, request: Request, page: int = Query(1, ge=1),
                                       _cf(l.custom_fields).get("contract_end_date")})
                  for l in rows]
     elif key == "renewal_window":
-        inside, _ = _renewal_rows(db, user, request, now)
+        today = _local_today(db, org_id, now)
+        inside, _ = _renewal_rows(db, user, request, now, today)
         total = len(inside)
         page_rows = inside[off:off + per_page]
         names = _user_names(db, [l.assigned_to_id for _, l in page_rows])
-        today = now.date()
         items = [_lead_row(l, names, {"contract_end_date": d.isoformat(),
                                       "days_to_renewal": (d - today).days,
                                       "current_supplier": _cf(l.custom_fields).get("current_supplier")})
@@ -558,7 +566,7 @@ def list_moves(request: Request, status: Optional[str] = Query(None),
     base = _moves_q(db, user, request, org_id)
     counts = dict(base.with_entities(EnergyMoveRequest.status, func.count())
                   .group_by(EnergyMoveRequest.status).all())
-    today = _now().date()
+    today = _local_today(db, org_id, _now())
     summary = {s: counts.get(s, 0) for s in MOVE_STATUSES}
     summary["open"] = sum(summary[s] for s in OPEN_MOVE_STATUSES)
     summary["unassigned"] = base.filter(EnergyMoveRequest.assigned_to_id.is_(None),

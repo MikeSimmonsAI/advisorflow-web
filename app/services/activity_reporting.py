@@ -95,6 +95,19 @@ def _org_day_bounds(db: Session, organization_id: str,
     return start, start + timedelta(days=1), tzname
 
 
+def org_local_date(db: Session, organization_id: str, on: Optional[datetime] = None):
+    """The organization's calendar date right now (same timezone resolution as
+    _org_day_bounds). For comparing CALENDAR dates - a contract end date, a
+    move date - against "today": datetime.utcnow().date() is already tomorrow
+    from 7pm Central, which made "days to renewal" one short every evening."""
+    start, _end, tzname = _org_day_bounds(db, organization_id, on=on)
+    try:
+        from zoneinfo import ZoneInfo
+        return start.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tzname)).date()
+    except Exception:
+        return (on or datetime.utcnow()).date()
+
+
 def sent_today(db: Session, organization_id: str, *,
                user_ids: Optional[List[str]] = None,
                limit: int = 500, on: Optional[datetime] = None,
