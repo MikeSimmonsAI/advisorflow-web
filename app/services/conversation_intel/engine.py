@@ -601,7 +601,15 @@ def decide_ai(ctx: Dict[str, Any], channel: str = "email") -> Dict[str, Any]:
     if not ctx["pending_inbound"]:
         return no("nothing_to_answer", "The last message was ours - nothing to answer", human=False)
     if channel == "sms" and not ctx["consent"]["sms"]:
-        return no("no_sms_consent", "No SMS consent on file - an email reply is not SMS consent", human=False)
+        # ANSWERING A TEXT IS NOT OUTREACH. The person texted us; replying on
+        # the channel they used is what the platform has always done (the SMS
+        # send path checks DNC/STOP/suppression, not the marketing consent
+        # flag - qualification applies that to OUTREACH). What must never
+        # happen is an EMAIL conversation turning into texts: no consent of
+        # record and nothing they sent by text -> no SMS.
+        latest = (ctx.get("pending_inbound") or [{}])[-1]
+        if (latest.get("channel") or "") != "sms":
+            return no("no_sms_consent", "No SMS consent on file - an email reply is not SMS consent", human=False)
     if channel == "email" and not ctx["consent"]["email"]:
         return no("no_email", "No usable email address / email opted out", human=False)
     # Bursts ("Yes" / "but my wife" / "call me tomorrow") are handled by the

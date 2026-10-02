@@ -256,6 +256,11 @@ def test_requires_video_not_overwritten_when_user_edited_row(db_session, brand):
         requires_video=False,
         sort_order=1,
         created_at=now - timedelta(days=10),
+        # The system stamped its defaults, then a PERSON changed the row after
+        # that stamp - the only shape meeting_roles._edited_by_a_person reads
+        # as a human decision (an unstamped row that still carries the shipped
+        # name and duration is, by design, the system's own).
+        system_defaults_at=now - timedelta(days=9),
         updated_at=now,  # user edited this row
     )
     db_session.add(mt)

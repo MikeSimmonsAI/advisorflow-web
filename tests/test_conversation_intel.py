@@ -583,3 +583,17 @@ def test_a_seller_naming_a_price_goes_to_a_person(world):
     c = ctx(w, T0 + timedelta(minutes=2))
     assert fact(c, "property.asking_price") == "250k"
     assert "250k" in (c["state"]["needs_human_reason"] or "")
+
+
+def test_answering_a_text_is_not_outreach_but_email_never_becomes_text(world):
+    """No SMS consent of record: a reply BY TEXT to their text is allowed (as the
+    platform always did); an email conversation never turns into texts."""
+    w = world(sms_consent=False)
+    inbound(w, "Can you tell me more about term life?", T0, channel="sms")
+    c = ctx(w, T0 + timedelta(minutes=1))
+    assert ci.decide_ai(c, "sms")["allowed"] is True
+    w2 = world(sms_consent=False)
+    inbound(w2, "Can you tell me more about term life?", T0, channel="email")
+    c2 = ctx(w2, T0 + timedelta(minutes=1))
+    d = ci.decide_ai(c2, "sms")
+    assert d["allowed"] is False and d["code"] == "no_sms_consent"
