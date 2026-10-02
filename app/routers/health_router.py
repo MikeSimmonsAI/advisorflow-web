@@ -21,6 +21,7 @@ the SMS send flow doesn't get touched mid-Twilio-approval, while that
 A2P 10DLC campaign is still pending.
 """
 
+from app.utils.time_fmt import UtcDateTime
 from datetime import datetime
 from typing import Optional
 import os
@@ -51,7 +52,7 @@ class AdvisorHealthStatus(BaseModel):
     twilio_connected: bool
     google_calendar_connected: bool
     microsoft_365_connected: bool
-    last_cadence_run: Optional[datetime] = None
+    last_cadence_run: Optional[UtcDateTime] = None
 
     integrations: list[IntegrationStatus]
 

@@ -8,6 +8,7 @@ marker") instead of generic, and so the org-wide sales analytics later
 reply/booking counts.
 """
 
+from app.utils.time_fmt import UtcDateTime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -40,7 +41,7 @@ class OutcomeResponse(BaseModel):
     id: str
     lead_id: str
     recorded_by_id: str
-    appointment_date: datetime | None
+    appointment_date: UtcDateTime | None
     has_funeral_arrangement: bool | None
     has_cemetery_property: bool | None
     has_marker: bool | None
@@ -50,7 +51,7 @@ class OutcomeResponse(BaseModel):
     sale_items: str | None
     sale_amount: str | None
     notes: str | None
-    created_at: datetime
+    created_at: UtcDateTime
 
 
 def _get_lead_or_404(db: Session, lead_id: str, current_user) -> Lead:

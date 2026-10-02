@@ -26,6 +26,7 @@ import os
 import re
 import secrets
 import string
+from app.utils.time_fmt import UtcDateTime
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -1568,8 +1569,8 @@ class JobRunSummary(BaseModel):
     """One row from the job_runs table — safe to expose to God."""
     id: int
     job_name: str
-    started_at: datetime
-    finished_at: Optional[datetime] = None
+    started_at: UtcDateTime
+    finished_at: Optional[UtcDateTime] = None
     status: str
     error_summary: Optional[str] = None
     duration_ms: Optional[int] = None

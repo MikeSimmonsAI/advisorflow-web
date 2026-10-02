@@ -7,6 +7,7 @@ defines the persistence helper and the read-only admin endpoint.
 """
 
 import json
+from app.utils.time_fmt import UtcDateTime
 from datetime import datetime, date
 from typing import Any, Optional
 
@@ -104,7 +105,7 @@ class AuditLogEntryOut(BaseModel):
     target_type: str
     target_id: str
     details: str | None
-    created_at: datetime
+    created_at: UtcDateTime
 
     model_config = ConfigDict(from_attributes=True)
 
