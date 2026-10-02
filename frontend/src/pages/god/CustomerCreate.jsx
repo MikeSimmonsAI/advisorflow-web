@@ -24,7 +24,8 @@ import './GodOps.css'
 // organization then inherited that vertical's lead tiers, appointment types
 // and AI vocabulary on the day it was created.
 //
-// The list now comes from /org-settings/industries, which is the same registry
+// The list now comes from /org-settings/industries (items are {key, label,
+// segments} - `key` is the value; the fallback below uses `value`), which is the same registry
 // the settings page and the backend provisioning path read, and the field
 // starts EMPTY so the question has to be answered rather than defaulted.
 const INDUSTRY_FALLBACK = [{ value: 'generic', label: 'General service business' }]
@@ -119,14 +120,14 @@ export default function CustomerCreate() {
             <select id="customercr-business-type" aria-label="Business type" className="go-input" value={f.industry} onChange={set('industry')}>
               <option value="">Select a business type…</option>
               {industries.map(i => (
-                <option key={i.value} value={i.value}>{i.label}</option>
+                <option key={i.key ?? i.value} value={i.key ?? i.value}>{i.label}</option>
               ))}
             </select>
             <p className="go-hint">
               Sets this customer's starting lead tiers, appointment types and AI
               vocabulary. Leave it unselected and they start neutral — never
               another industry's defaults.
-              {f.industry && (industries.find(i => i.value === f.industry)?.segments || []).length > 0 && (
+              {f.industry && (industries.find(i => (i.key ?? i.value) === f.industry)?.segments || []).length > 0 && (
                 <> Lines of business can be recorded during onboarding.</>
               )}
             </p>
