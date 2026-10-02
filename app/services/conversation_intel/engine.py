@@ -216,7 +216,9 @@ def _answers(question_words: List[str], outbound_text: str) -> bool:
     they share). A price question is answered only by something about price."""
     if not question_words:
         return True
-    sentences = [x.strip() for x in re.split(r"(?<=[.!?])\s+", outbound_text or "") if x.strip()]
+    # Clauses, not just sentences: "Rates depend on age and health; can I ask
+    # your age?" STATES something before it asks.
+    sentences = [x.strip() for x in re.split(r"(?<=[.!?;])\s+|\s+[-\u2014\u2013]\s+", outbound_text or "") if x.strip()]
     statements = [x for x in sentences if not x.endswith("?")]
     if not statements:
         return False
