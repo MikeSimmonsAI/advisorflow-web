@@ -1344,12 +1344,12 @@ function ClassicLeads() {
                     <td className="mono leads-secondary" style={{ fontSize: 11 }}>
                       <div>{lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 22) : '—'}</div>
                       {lead.imported_by_name && (
-                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 1 }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 1 }}>
                           {lead.imported_by_name}
                         </div>
                       )}
                       {lead.created_at && (
-                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
                           {new Date(lead.created_at).toLocaleDateString()}
                         </div>
                       )}
