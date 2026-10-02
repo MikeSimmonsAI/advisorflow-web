@@ -112,16 +112,38 @@ export function filterLabel(searchParams, allowed) {
   return parts.join(' · ')
 }
 
+/** A server timestamp as a Date. A naive ISO string ("2026-10-02T14:00:00")
+ *  is UTC on this platform, not browser-local. */
+export function parseServerTime(iso) {
+  if (iso instanceof Date) return iso
+  const s = String(iso)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(s + 'T00:00:00Z')
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(s)
+  return new Date(hasZone ? s : s.replace(' ', 'T') + 'Z')
+}
+
+/** A calendar date stored on its 00:00 / 12:00 UTC anchor (date pickers). */
+function isDateAnchor(d) {
+  return d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0 &&
+    (d.getUTCHours() === 0 || d.getUTCHours() === 12)
+}
+
+/** A DATE. Calendar dates (effective date, review date, date-only dues) are
+ *  shown as the date they are; real timestamps (submitted, added, completed)
+ *  in the viewer's own time zone - "submitted 9pm Oct 2" in Chicago is not
+ *  "Oct 3" just because it was already Oct 3 in London. */
 export function fmtDate(iso) {
   if (!iso) return '—'
-  const d = new Date(iso)
+  const d = parseServerTime(iso)
   if (Number.isNaN(d.getTime())) return String(iso)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+  const opts = { month: 'short', day: 'numeric', year: 'numeric' }
+  if (isDateAnchor(d)) opts.timeZone = 'UTC'
+  return d.toLocaleDateString('en-US', opts)
 }
 
 export function fmtDateTime(iso) {
   if (!iso) return '—'
-  const d = new Date(iso)
+  const d = parseServerTime(iso)
   if (Number.isNaN(d.getTime())) return String(iso)
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
@@ -129,7 +151,7 @@ export function fmtDateTime(iso) {
 /** "4h ago" style; `now` injectable for tests. */
 export function relTime(iso, now = Date.now()) {
   if (!iso) return '—'
-  const t = new Date(iso).getTime()
+  const t = parseServerTime(iso).getTime()
   if (Number.isNaN(t)) return '—'
   const s = Math.round((now - t) / 1000)
   const fut = s < 0
