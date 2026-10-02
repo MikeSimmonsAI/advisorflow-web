@@ -217,3 +217,36 @@ def record_job_run_sync(
                 "job_run_service: could not close run row %s for %s: %s",
                 run_id, job_name, close_exc,
             )
+
+
+def claim_pass(job_name: str, interval_seconds, db_factory) -> bool:
+    """One pass of a background loop per interval across EVERY instance.
+
+    Each web instance starts the same loops. With one instance that is fine;
+    with two, every reminder sweep, review-request run and AI pass would run
+    twice (the data-level guards keep most of that from double-sending, but
+    not all of it, and none of it from double-working). The first instance to
+    reach a pass takes a lease named for the job that lives ~90% of the
+    interval and is never released early; the others find it held and skip.
+    If the holder dies the lease simply expires.
+
+    Fails OPEN: if the lease cannot be taken for any reason other than another
+    holder (table missing, database hiccup), the pass runs - exactly the
+    single-instance behaviour this replaced.
+    """
+    try:
+        ttl = max(30, int(float(interval_seconds) * 0.9))
+    except (TypeError, ValueError):
+        ttl = 60
+    try:
+        db = db_factory()
+    except Exception:                                            # noqa: BLE001
+        return True
+    try:
+        from app.services import action_lease
+        return action_lease.acquire(db, "job.pass", job_name, ttl_seconds=ttl) is not None
+    except Exception:                                            # noqa: BLE001
+        log.warning("claim_pass(%s): lease unavailable, running anyway", job_name, exc_info=True)
+        return True
+    finally:
+        db.close()

@@ -148,3 +148,34 @@ def test_a_claim_rolled_back_with_its_failed_work_allows_a_retry(two_instances):
     s.commit()
     assert idempotency.claim(s, "retry.scope", "k") is False
     s.close()
+
+
+def test_background_loop_pass_runs_on_exactly_one_instance(two_instances):
+    """Every web instance starts the same loops; one pass per interval runs."""
+    from app.services.job_run_service import claim_pass
+    a, b = two_instances
+    fa = lambda: Session(bind=a)                         # noqa: E731
+    fb = lambda: Session(bind=b)                         # noqa: E731
+    res = []
+    lock = threading.Lock()
+    barrier = threading.Barrier(4)
+
+    def go(f):
+        barrier.wait()
+        r = claim_pass("cadence_loop", 3600, f)
+        with lock:
+            res.append(r)
+    ts = [threading.Thread(target=go, args=(f,)) for f in (fa, fb, fa, fb)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert sorted(res) == [False, False, False, True], res
+    # a different job is independent
+    assert claim_pass("review_request_loop", 1800, fb) is True
+
+
+def test_a_pass_claim_fails_open_when_the_database_is_unreachable():
+    from app.services.job_run_service import claim_pass
+
+    def broken():
+        raise RuntimeError("database down")
+    assert claim_pass("cadence_loop", 3600, broken) is True

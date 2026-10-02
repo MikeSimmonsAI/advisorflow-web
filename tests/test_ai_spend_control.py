@@ -225,6 +225,10 @@ def test_the_production_loop_skips_the_whole_pass_when_disabled(monkeypatch):
     off_loop = MagicMock()
     monkeypatch.setattr(main, "_off_loop", off_loop)
 
+    async def _always(*a, **k):        # the multi-instance pass lease is not under test here
+        return True
+    monkeypatch.setattr(main, "_pass_claimed", _always)
+
     loop = asyncio.new_event_loop()
     try:
         with pytest.raises(asyncio.CancelledError):

@@ -1131,6 +1131,17 @@ async def _off_loop(fn, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
+async def _pass_claimed(job_name, interval_seconds) -> bool:
+    """True when THIS instance should run the loop's pass now. Fails open (runs,
+    as before) if the lease table cannot be reached."""
+    try:
+        from app.services.job_run_service import claim_pass
+        from app.deps import SessionLocal
+        return await asyncio.to_thread(claim_pass, job_name, interval_seconds, SessionLocal)
+    except Exception:                                            # noqa: BLE001
+        return True
+
+
 async def _support_intelligence_loop():
     """Support Intelligence's own pass. Runs every 6 hours.
 
@@ -1157,6 +1168,11 @@ async def _support_intelligence_loop():
     _logger = _log.getLogger("support_intelligence")
     await asyncio.sleep(180)  # let the app settle before the first heavy pass
     while True:
+        # ONE PASS PER INTERVAL ACROSS ALL INSTANCES (a lease in the shared
+        # database); a second web instance skips instead of repeating it.
+        if not await _pass_claimed(JobName.SUPPORT_INTELLIGENCE, 6 * 3600):
+            await asyncio.sleep(6 * 3600)
+            continue
         try:
             async with record_job_run(JobName.SUPPORT_INTELLIGENCE,
                                       db_factory=SessionLocal) as _m:
@@ -1192,6 +1208,11 @@ async def _review_request_loop():
     _logger = _log.getLogger("review_request_cron")
     await asyncio.sleep(60)  # brief startup delay
     while True:
+        # ONE PASS PER INTERVAL ACROSS ALL INSTANCES (a lease in the shared
+        # database); a second web instance skips instead of repeating it.
+        if not await _pass_claimed(JobName.REVIEW_REQUEST, 1800):
+            await asyncio.sleep(1800)
+            continue
         try:
             async with record_job_run(JobName.REVIEW_REQUEST, db_factory=SessionLocal) as _m:
                 # Off the event loop — see `_off_loop`. This one sends SMS.
@@ -1258,6 +1279,11 @@ async def _ai_conversation_loop():
 
     await asyncio.sleep(30)  # brief startup delay
     while True:
+        # ONE PASS PER INTERVAL ACROSS ALL INSTANCES (a lease in the shared
+        # database); a second web instance skips instead of repeating it.
+        if not await _pass_claimed(JobName.AI_CONVERSATION, 120):
+            await asyncio.sleep(120)
+            continue
         # THE MASTER BACKGROUND SWITCH. Off by default. With it off the pass
         # lists no orgs, queries no conversations, calls no provider, sends
         # nothing and changes nothing - and logs that ONCE per process, not
@@ -1302,6 +1328,11 @@ async def _cadence_loop():
 
     await asyncio.sleep(90)  # brief startup delay — offset from other loops
     while True:
+        # ONE PASS PER INTERVAL ACROSS ALL INSTANCES (a lease in the shared
+        # database); a second web instance skips instead of repeating it.
+        if not await _pass_claimed(JobName.CADENCE_LOOP, 3600):
+            await asyncio.sleep(3600)
+            continue
         try:
             async with record_job_run(JobName.CADENCE_LOOP, db_factory=SessionLocal) as _m:
                 result = await _off_loop(_one_pass)
@@ -1347,6 +1378,11 @@ async def _session_cleanup_loop():
     _logger = _log.getLogger("session_cleanup_loop")
     await asyncio.sleep(300)  # startup delay — offset from every other loop
     while True:
+        # ONE PASS PER INTERVAL ACROSS ALL INSTANCES (a lease in the shared
+        # database); a second web instance skips instead of repeating it.
+        if not await _pass_claimed(JobName.SESSION_CLEANUP, 24 * 3600):
+            await asyncio.sleep(24 * 3600)
+            continue
         try:
             async with record_job_run(JobName.SESSION_CLEANUP,
                                       db_factory=SessionLocal) as _m:
@@ -1398,6 +1434,11 @@ async def _sales_reminder_loop():
     _logger = _log.getLogger("sales_reminder_loop")
     await asyncio.sleep(150)  # startup delay — offset from every other loop
     while True:
+        # ONE PASS PER INTERVAL ACROSS ALL INSTANCES (a lease in the shared
+        # database); a second web instance skips instead of repeating it.
+        if not await _pass_claimed(JobName.SALES_REMINDERS, 900):
+            await asyncio.sleep(900)
+            continue
         try:
             async with record_job_run(JobName.SALES_REMINDERS,
                                       db_factory=SessionLocal) as _m:
@@ -1437,6 +1478,11 @@ async def _evosense_hunt_loop():
     _logger = _log.getLogger("evosense_hunt_loop")
     await asyncio.sleep(210)  # startup delay — offset from every other loop
     while True:
+        # ONE PASS PER INTERVAL ACROSS ALL INSTANCES (a lease in the shared
+        # database); a second web instance skips instead of repeating it.
+        if not await _pass_claimed(JobName.EVOSENSE_HUNT, evosense_scheduler.TICK_SECONDS):
+            await asyncio.sleep(evosense_scheduler.TICK_SECONDS)
+            continue
         try:
             async with record_job_run(JobName.EVOSENSE_HUNT,
                                       db_factory=SessionLocal) as _m:
@@ -1474,6 +1520,11 @@ async def _wholesale_exception_loop():
     _logger = _log.getLogger("wholesale_exception_loop")
     await asyncio.sleep(330)  # startup delay — offset from every other loop
     while True:
+        # ONE PASS PER INTERVAL ACROSS ALL INSTANCES (a lease in the shared
+        # database); a second web instance skips instead of repeating it.
+        if not await _pass_claimed(JobName.WHOLESALE_EXCEPTIONS, wholesale_ex.AUTO_INTERVAL_SECONDS):
+            await asyncio.sleep(wholesale_ex.AUTO_INTERVAL_SECONDS)
+            continue
         try:
             async with record_job_run(JobName.WHOLESALE_EXCEPTIONS,
                                       db_factory=SessionLocal) as _m:
