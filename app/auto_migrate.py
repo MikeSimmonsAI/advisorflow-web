@@ -1145,6 +1145,15 @@ COLUMNS_TO_ADD = [
     ("organizations", "crm_inbound_secure_required",
      "BOOLEAN NOT NULL DEFAULT FALSE"),
 
+    # ── Workspace timezone (2026-10-02) ──────────────────────────────────────
+    #
+    # IANA name ("America/Chicago"), NULL = not configured. NULL is the honest
+    # value for every existing workspace: app/services/workspace_time.py then
+    # falls back to the old resolution (the advisors' shared booking timezone,
+    # else the platform default), so nothing changes for anyone until a
+    # timezone is chosen - and nothing is guessed into the column.
+    ("organizations", "timezone", "VARCHAR NULL"),
+
     # ── Demo Suite tenancy flags (2026-09-10) ───────────────────────────────
     #
     # NOT NULL DEFAULT FALSE, and both halves matter. FALSE because every row
@@ -1576,6 +1585,10 @@ ENUM_COLUMNS_TO_CONVERT_TO_STRING = [
 INDEXES_TO_CREATE = [
     # One Reply per inbound email per lead, whichever reader or run saw it.
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_replies_lead_source_message ON replies(lead_id, source_message_id) WHERE source_message_id IS NOT NULL",
+    # One stored reply per Twilio MessageSid, on every instance (2026-10-02).
+    # If historical duplicates exist this statement fails and is logged; the
+    # webhook's read-check still stops later retries.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_replies_twilio_sid ON replies(twilio_sid) WHERE twilio_sid IS NOT NULL",
     # ── perf (2026-10-01): hot filter columns with no index ─────────────
     "CREATE INDEX IF NOT EXISTS ix_pipeline_conversations_lead_id ON pipeline_conversations(lead_id)",
     "CREATE INDEX IF NOT EXISTS ix_pipeline_conversations_org_stage ON pipeline_conversations(organization_id, stage)",

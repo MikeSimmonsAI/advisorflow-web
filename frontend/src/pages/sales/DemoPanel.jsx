@@ -58,7 +58,7 @@ export default function DemoPanel({ opp, team, onPatch, onRequest, saving }) {
 
   function saveInternal() {
     const body = { ...form }
-    body.demo_due_at = form.demo_due_at ? new Date(form.demo_due_at).toISOString() : null
+    body.demo_due_at = form.demo_due_at ? form.demo_due_at + 'T12:00:00' : null  // date-only anchor
     if (!body.demo_status) delete body.demo_status
     if (!body.demo_owner_user_id) body.demo_owner_user_id = null
     onPatch(body)

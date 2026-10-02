@@ -193,7 +193,16 @@ def get_available_slots(
         except Exception:
             pass
 
-    today = date_cls.today()
+    # The ADVISOR's clock. Slot times ("09:00") are the advisor's local times;
+    # the server runs in UTC, so date.today()/datetime.now() here dropped the
+    # rest of today's slots from 7pm Central and offered "past" ones in the
+    # morning. One local "now" for the whole listing.
+    from app.services import workspace_time as wt
+    _tz = getattr(advisor, "booking_timezone", None)
+    if not wt.is_valid_timezone(_tz):
+        _tz = wt.workspace_timezone(db, advisor.organization_id)
+    local_now = wt.to_local(dt.utcnow(), _tz).replace(tzinfo=None)
+    today = local_now.date()
     slots = []
 
     for day_offset in range(0, DAYS_AHEAD + 1):
@@ -203,8 +212,7 @@ def get_available_slots(
             # Skip past slots for today
             if day_offset == 0:
                 h, m = map(int, time_str.split(":"))
-                now = dt.now()
-                if dt(now.year, now.month, now.day, h, m) <= now:
+                if dt(local_now.year, local_now.month, local_now.day, h, m) <= local_now:
                     continue
 
             # Check advisor blocks

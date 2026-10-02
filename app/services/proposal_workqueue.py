@@ -37,6 +37,7 @@ STALE_UNVIEWED_HOURS = 48
 EXPIRING_WITHIN_DAYS = 7
 
 
+from app.services import workspace_time as _wt  # date-only dues are calendar dates
 def _live_proposals(db: Session, opportunity_ids: List[str]):
     """Every non-superseded proposal on these deals, newest version first."""
     if not opportunity_ids:
@@ -308,7 +309,7 @@ def closing_view(db: Session, opp: Opportunity,
 
     if not (opp.next_action or "").strip():
         warn("amber", "No next action set on this deal.", "Decide the next step")
-    elif opp.next_action_due_at and opp.next_action_due_at < now:
+    elif _wt.is_overdue(opp.next_action_due_at, now, _wt.default_timezone()):
         warn("amber", "The next action is overdue: %s" % opp.next_action)
 
     if next_meeting is None and opp.status == "open":

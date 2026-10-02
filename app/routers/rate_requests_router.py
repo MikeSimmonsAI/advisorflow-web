@@ -666,6 +666,14 @@ def enroll_rate_request(
     prev_tier = lead.tier
     cf = _parse_custom(lead.custom_fields)
     cf.update(_clean_custom(payload.model_dump(exclude={"note"}, exclude_none=True)))
+    if lead.enrolled_at is not None and lead.tier == tier:
+        # ALREADY ENROLLED. A double-click or a retried request returns the
+        # enrollment that exists; it does not re-stamp the date (which moves the
+        # customer between months on the Overview) or write a second audit row.
+        out = _row(lead, _user_names(db, [lead.assigned_to_id]), _bookings_for(db, [lead.id]), _now())
+        out.update(enrolled=True, already_enrolled=True, enrolled_at=_iso(lead.enrolled_at),
+                   relationship_type=lead.relationship_type, contact_reclassified=None)
+        return out
     lead.custom_fields = json.dumps(cf) if cf else None
     lead.tier = tier
     lead.relationship_type = "customer"

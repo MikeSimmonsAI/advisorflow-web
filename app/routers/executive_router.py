@@ -316,7 +316,8 @@ def get_org_observation_overview(
     now = datetime.utcnow()
     start_24h = now - timedelta(hours=24)
     start_7d = now - timedelta(days=7)
-    end_of_today = datetime.combine(now.date(), dt_time.max)
+    from app.services import workspace_time as wt
+    end_of_today = wt.day_bounds(db, org_id, now=now)[1]
 
     # Active lead filter — same exclusion as normal Overview (Gate E).
     # Excludes manual_flag='remove_all'; allows None and 'bad_email'.

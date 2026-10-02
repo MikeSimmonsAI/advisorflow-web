@@ -159,7 +159,8 @@ def _last_touch_at(db: Session, lead_id: str) -> Optional[datetime]:
     return newest
 
 
-def _sends_today(db: Session, employee_id: str, now: datetime) -> int:
+def _sends_today(db: Session, employee_id: str, now: datetime,
+                 organization_id: str = None) -> int:
     """How many outward-reaching tool calls this employee has ALLOWED today.
 
     Counted from the tool-execution ledger rather than from messages, because
@@ -167,7 +168,10 @@ def _sends_today(db: Session, employee_id: str, now: datetime) -> int:
     to deliver still used the allowance, and a message written by a person does
     not.
     """
-    start = datetime(now.year, now.month, now.day)
+    # The daily cap resets at the WORKSPACE's midnight, not 7pm Central.
+    from app.services import workspace_time as _wt
+    start = (_wt.day_bounds(db, organization_id, now=now)[0] if organization_id
+             else datetime(now.year, now.month, now.day))
     from app.services.workforce import registry as _registry
     return (db.query(AIToolExecution)
             .filter(AIToolExecution.employee_id == employee_id,
@@ -281,7 +285,7 @@ def evaluate(db: Session, *, employee: AIEmployee, lead: Lead, channel: str,
     # ── LAYER 6: THE EMPLOYEE'S DAILY ALLOWANCE ─────────────────────────────
     cap = daily_cap if daily_cap is not None else employee.daily_work_cap
     if cap:
-        used = _sends_today(db, employee.id, now)
+        used = _sends_today(db, employee.id, now, employee.organization_id)
         if used >= int(cap):
             return _deny("daily_cap_reached",
                          "%d of %d used today." % (used, int(cap)),

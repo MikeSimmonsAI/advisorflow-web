@@ -33,7 +33,7 @@ export default function NewProspect({ onClose, onCreated }) {
       const body = { ...form }
       Object.keys(body).forEach(k => { if (body[k] === '') delete body[k] })
       if (body.next_action_due_at) {
-        body.next_action_due_at = new Date(body.next_action_due_at).toISOString()
+        body.next_action_due_at = body.next_action_due_at + 'T12:00:00'  // date-only anchor (see parts.isDateAnchor)
       }
       const opp = await api.post('/sales/opportunities', body)
       onCreated(opp)

@@ -379,6 +379,12 @@ class Organization(Base):
     # Existing rows are untouched: a column default applies to inserts only.
     industry = Column(String, default="generic")          # see industry_templates
 
+    # The workspace's calendar: IANA name ("America/Chicago"). NULL = not set;
+    # app/services/workspace_time.py resolves NULL to the advisors' shared
+    # booking timezone, else the platform default. Never an abbreviation
+    # ("CST" is not a timezone - it does not know about daylight saving).
+    timezone = Column(String, nullable=True)
+
     # Org contact details — shown on public booking pages instead of hardcoded values
     org_address = Column(String, nullable=True)
     org_phone = Column(String, nullable=True)
@@ -1263,6 +1269,9 @@ class Reply(Base):
     source_message_id = Column(String, nullable=True)
 
     __table_args__ = (
+        Index("uq_replies_twilio_sid", "twilio_sid", unique=True,
+              postgresql_where=text("twilio_sid IS NOT NULL"),
+              sqlite_where=text("twilio_sid IS NOT NULL")),
         Index("uq_replies_lead_source_message", "lead_id", "source_message_id", unique=True,
               postgresql_where=text("source_message_id IS NOT NULL"),
               sqlite_where=text("source_message_id IS NOT NULL")),

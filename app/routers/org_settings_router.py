@@ -270,7 +270,15 @@ def get_org_settings(
         # Contact / booking page info
         "org_address": getattr(org, "org_address", None),
         "org_phone": getattr(org, "org_phone", None),
+        **_timezone_out(db, org),
     }
+
+
+def _timezone_out(db, org) -> dict:
+    from app.services import workspace_time as wt
+    tz, source = wt.resolve(db, org.id)
+    return {"timezone": getattr(org, "timezone", None), "timezone_effective": tz,
+            "timezone_source": source}
 
 
 @router.get("/platform-identity")
@@ -306,10 +314,11 @@ _SECTIONS = [
         "description": "Who this company is, as its own customers see it.",
         "owner": OWNER_CUSTOMER,
         "risk": "low",
-        "fields": ["name", "org_address", "org_phone", "brand_logo_url",
+        "fields": ["name", "org_address", "org_phone", "timezone", "brand_logo_url",
                    "member_label", "members_label", "facebook_url",
                    "google_review_url", "instagram_url", "linkedin_url"],
         "endpoints": ["PATCH /org-settings/contact",
+                      "PATCH /org-settings/timezone",
                       "PATCH /org-settings/social-links",
                       "PATCH /org-settings/branding"],
         "guard": "require_admin",
@@ -486,6 +495,41 @@ def update_contact_info(
         org.org_phone = req.org_phone.strip() or None
     db.commit()
     return {"updated": True, "name": org.name, "org_address": org.org_address, "org_phone": org.org_phone}
+
+
+class TimezoneUpdate(BaseModel):
+    timezone: Optional[str] = None      # IANA name; null/"" = clear (fall back)
+
+
+@router.get("/timezones")
+def list_timezones(current_user: User = Depends(get_current_user)):
+    from app.services import workspace_time as wt
+    return {"timezones": wt.common_timezones()}
+
+
+@router.patch("/timezone")
+def update_timezone(
+    req: TimezoneUpdate,
+    org_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """The workspace's calendar: what "today", "this month" and "due today" mean.
+
+    IANA names only ("America/Chicago"). "CST"/"EST" are refused - they are not
+    timezones, they are half of one, and they would be wrong for half the year.
+    Clearing it falls back to the primary location, then the advisors' shared
+    booking timezone, then the platform default.
+    """
+    from app.services import workspace_time as wt
+    org = _resolve_org(current_user, org_id, db)
+    value = (req.timezone or "").strip() or None
+    if value is not None and not wt.is_valid_timezone(value):
+        raise HTTPException(status_code=422,
+                            detail="Choose a timezone such as America/Chicago - abbreviations like CST are not timezones.")
+    org.timezone = value
+    db.commit()
+    return {"updated": True, **_timezone_out(db, org)}
 
 
 @router.patch("/industry")

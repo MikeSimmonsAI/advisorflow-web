@@ -845,7 +845,10 @@ def list_tasks(lead_id: Optional[str] = None,
             raise HTTPException(status_code=400, detail="Unknown status: %s" % status)
         q = q.filter(LeadTask.status == status)
     now = _utcnow()
-    today_end = datetime(now.year, now.month, now.day) + timedelta(days=1)
+    # "Today" is the WORKSPACE's day: a task due at 8pm Central is due today,
+    # not tomorrow (UTC's day ends at 7pm Central).
+    from app.services import workspace_time as wt
+    today_end = wt.day_bounds(db, _org_id(db, user), now=now)[1]
     if due == "overdue":
         q = q.filter(LeadTask.due_at.isnot(None), LeadTask.due_at < now)
     elif due == "today":

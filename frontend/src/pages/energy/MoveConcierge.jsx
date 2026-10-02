@@ -274,7 +274,7 @@ function MoveDrawer({ id, meta, onClose, onChanged }) {
                 e.preventDefault()
                 if (!taskTitle.trim()) return
                 const body = { title: taskTitle.trim() }
-                if (taskDue) body.due_at = `${taskDue}T09:00:00`
+                if (taskDue) body.due_at = new Date(`${taskDue}T09:00`).toISOString()  // 9am where the user is
                 act(async () => { await api.post(`/energy-ops/moves/${id}/tasks`, body); setTaskTitle(''); setTaskDue('') })
               }}>
                 <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="New task" aria-label="Task title" />

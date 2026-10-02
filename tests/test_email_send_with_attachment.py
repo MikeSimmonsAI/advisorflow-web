@@ -165,18 +165,20 @@ def test_a_send_already_in_flight_is_refused_not_sent_twice(client, db_session, 
     """Double-click: the second request arrives while the first is still at the
     provider (no EmailMessage row yet). It must not reach the provider."""
     from app.routers import email_router as ER
+    from app.models.idempotency_models import ActionLease
     lead = _lead_with_email(db_session, sample_lead)
     key = (lead.id, "in flight")
-    assert ER._claim_send(key)          # the first request, still sending
+    token = ER._claim_send(key, db_session)     # the first request - on ANY instance - still sending
+    assert token
     try:
         r = client.post(f"/email/send/{lead.id}", headers=auth_headers,
                         json={"subject": "In flight", "body": "b", "include_booking_link": False})
         assert r.status_code == 409 and r.json()["detail"]["code"] == "duplicate_send"
         assert sent == []
     finally:
-        ER._release_send(key)
+        ER._release_send(key, db_session, token)
     # Released (first request finished without recording) -> a send goes through.
     r = client.post(f"/email/send/{lead.id}", headers=auth_headers,
                     json={"subject": "In flight", "body": "b", "include_booking_link": False})
     assert r.status_code == 200 and len(sent) == 1
-    assert ER._SEND_CLAIMS == {} or key not in ER._SEND_CLAIMS
+    assert db_session.query(ActionLease).count() == 0          # released after the send

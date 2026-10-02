@@ -21,7 +21,8 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { api, login, fetchMyContexts, setWorkspaceContext, clearWorkspaceContext, logout } from '../api/client'
 import { useMobile, useApi, ScreenHead, Loading, ErrorState, Empty, Icon, isAuthenticated } from './MobileShell'
 import { needsAttention, refusalReasons, canCompose, relTime, humanize, groupByDay,
-         workspaceChoices, parseTs, NOT_AVAILABLE, greetingName } from './mobileHelpers'
+         workspaceChoices, parseTs, NOT_AVAILABLE, greetingName, mobilePathFor } from './mobileHelpers'
+import { BrainStrip } from './MobileAgency'
 import { hasAgencyFeature } from '../verticals/agencyVertical'
 import { readableTimestamps, replaceKeys } from '../utils/humanize'
 import { APP_STATUS_LABELS } from '../pages/agency/agencyFormat'
@@ -95,7 +96,7 @@ function AgencyMobileHome() {
       <ul className="mlist">
         {items.map((it, i) => (
           <li key={(it.link && it.link.id) || i}>
-            <Link to={(it.link && it.link.path) || '/agency'} className="mrow">
+            <Link to={mobilePathFor((it.link && it.link.path) || '/agency')} className="mrow">
               <span className={'mpill mpill--' + (it.severity === 'high' ? 'reply mpill--hot' : 'task')}>{humanize((it.link && it.link.type) || 'item')}</span>
               <span className="mrow-main"><span className="mrow-title">{it.title}</span>
                 <span className="mrow-detail">{readableTimestamps(replaceKeys(it.detail, APP_STATUS_LABELS))}</span></span>
@@ -254,6 +255,7 @@ export function MobileThread() {
   return (
     <div className="mscreen mthread">
       <ScreenHead title={lead.name} sub={<Link to={'/m/contacts/' + lead.id}>View contact</Link>} back="/m/conversations" />
+      <BrainStrip leadId={lead.id} onDraft={(text) => { if (allowed) setBody(text) }} />
       <div className="mevents">
         {data.events.length === 0 && <Empty>No messages yet.</Empty>}
         {data.events.map(ev => <EventBubble key={ev.type + ev.id} ev={ev} />)}

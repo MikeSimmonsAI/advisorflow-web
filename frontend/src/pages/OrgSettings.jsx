@@ -167,6 +167,7 @@ export default function OrgSettings() {
   const [orgName, setOrgName] = useState('')
   const [orgAddress, setOrgAddress] = useState('')
   const [orgPhone, setOrgPhone] = useState('')
+  const [tzInfo, setTzInfo] = useState(null)
   const [savingContact, setSavingContact] = useState(false)
   const [contactSaved, setContactSaved] = useState(false)
 
@@ -216,6 +217,7 @@ export default function OrgSettings() {
         setOrgName(data.name || '')
         setOrgAddress(data.org_address || '')
         setOrgPhone(data.org_phone || '')
+        setTzInfo({ timezone: data.timezone || '', effective: data.timezone_effective, source: data.timezone_source })
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -921,6 +923,9 @@ export default function OrgSettings() {
           </button>
         </section>
 
+        {/* ── Workspace timezone ── */}
+        {tzInfo && <WorkspaceTimezoneSection orgQuery={orgQuery} initial={tzInfo} />}
+
         {/* ── Appointment Types ── */}
         <AppointmentTypesSection orgQuery={orgQuery} />
 
@@ -1502,6 +1507,58 @@ function CRMCustomFieldsSection() {
           {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Fields'}
         </button>
       </div>
+    </section>
+  )
+}
+
+const TZ_SOURCE_LABEL = {
+  workspace: 'set for this workspace',
+  primary_location: "from the primary location",
+  advisors: "from your team's booking timezone",
+  platform_default: 'platform default - not chosen yet',
+}
+
+// What "today", "this month" and "due today" mean for this workspace. IANA
+// names only; clearing falls back (primary location, team, platform default).
+function WorkspaceTimezoneSection({ orgQuery, initial }) {
+  const [zones, setZones] = useState([])
+  const [value, setValue] = useState(initial.timezone || '')
+  const [info, setInfo] = useState(initial)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  useEffect(() => {
+    api.get('/org-settings/timezones').then(r => setZones(r.timezones || [])).catch(() => setZones([]))
+  }, [])
+  async function save() {
+    setBusy(true); setMsg('')
+    try {
+      const r = await api.patch(`/org-settings/timezone${orgQuery}`, { timezone: value || null })
+      setInfo({ timezone: r.timezone || '', effective: r.timezone_effective, source: r.timezone_source })
+      setMsg('Saved.')
+    } catch (e) { setMsg(e?.message || 'Could not save the timezone.') }
+    finally { setBusy(false) }
+  }
+  return (
+    <section className="panel os-section" style={{ marginTop: 16 }} aria-labelledby="ws-tz-title">
+      <div className="panel-header"><h2 className="panel-title" id="ws-tz-title">🕘 Workspace timezone</h2></div>
+      <p className="os-hint">
+        Decides what "today", "due today", "overdue" and "this month" mean on every screen in this workspace.
+        Times are always stored exactly; this only sets the calendar.
+      </p>
+      <p className="os-hint" data-testid="tz-effective">
+        In use now: <strong>{(info.effective || '').replace(/_/g, ' ')}</strong> ({TZ_SOURCE_LABEL[info.source] || info.source})
+      </p>
+      <label className="os-label">
+        Timezone
+        <select className="os-input" value={value} onChange={e => setValue(e.target.value)} aria-label="Workspace timezone">
+          <option value="">Not set (use the fallback above)</option>
+          {(zones.length ? zones : [value].filter(Boolean)).map(z => <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>)}
+        </select>
+      </label>
+      <button className="btn btn--primary" onClick={save} disabled={busy} style={{ marginTop: 8 }}>
+        {busy ? 'Saving…' : 'Save timezone'}
+      </button>
+      {msg && <span className="os-hint" role="status" style={{ marginLeft: 10 }}>{msg}</span>}
     </section>
   )
 }

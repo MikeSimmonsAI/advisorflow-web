@@ -369,8 +369,11 @@ def overview_sparklines(
     is exactly how it presented while it was missing.
     """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    start_date = now.date() - timedelta(days=days - 1)
-    start_at = datetime.combine(start_date, time.min)
+    # Buckets are the WORKSPACE's days: an 8pm Central import is today's, not
+    # tomorrow's (see app/services/workspace_time.py).
+    from app.services import workspace_time as wt
+    start_date, start_at, _tz = wt.trend_days(
+        db, lead_scope.active_workspace_org_id(current_user, db), days, now=now)
 
     is_manager = lead_scope.is_manager_here(current_user, db)
     base_lead_filters = [Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db)]
@@ -402,7 +405,7 @@ def overview_sparklines(
         for (ts,) in rows:
             if ts is None:
                 continue
-            key = ts.date().isoformat()
+            key = wt.local_date(ts, _tz).isoformat()
             if key in counts:
                 counts[key] += 1
         return [counts[date_key] for date_key in sorted(counts.keys())]
@@ -425,7 +428,8 @@ def daily_briefing(db: Session = Depends(get_db), current_user: User = Depends(r
     """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     start_24h = now - timedelta(hours=24)
-    end_of_today = datetime.combine(now.date(), time.max)
+    from app.services import workspace_time as wt
+    end_of_today = wt.day_bounds(db, lead_scope.active_workspace_org_id(current_user, db), now=now)[1]
     start_7d = now - timedelta(days=7)
 
     is_manager = lead_scope.is_manager_here(current_user, db)

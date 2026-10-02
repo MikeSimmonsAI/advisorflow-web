@@ -53,6 +53,7 @@ OUTSTANDING_PROPOSAL_STATUSES = (PROP_SENT, PROP_VIEWED, PROP_CHANGE_REQUESTED)
 CLOSED_PROPOSAL_STATUSES = (PROP_ACCEPTED, PROP_DECLINED, PROP_EXPIRED, PROP_SUPERSEDED)
 
 
+from app.services import workspace_time as _wt  # date-only dues are calendar dates
 def _f(v) -> Optional[float]:
     return float(v) if v is not None else None
 
@@ -99,7 +100,7 @@ def brand_summary(db: Session, bso: BrandSalesOrg, now: Optional[datetime] = Non
     stalled = [o for o in open_opps
                if (o.updated_at or o.created_at or now) < stale_before]
     overdue = [o for o in open_opps
-               if o.next_action_due_at is not None and o.next_action_due_at < now]
+               if _wt.is_overdue(o.next_action_due_at, now, _wt.default_timezone())]
 
     meetings = (db.query(func.count(SalesAppointment.id))
                   .filter(SalesAppointment.brand_sales_org_id == bso.id,
@@ -537,8 +538,7 @@ def _opp_row(opp: Opportunity, bso: BrandSalesOrg, owner_name: str, now: datetim
     is_stalled = opp.status == "open" and ts < stale_before
     is_overdue = (
         opp.status == "open"
-        and opp.next_action_due_at is not None
-        and opp.next_action_due_at < now
+        and _wt.is_overdue(opp.next_action_due_at, now, getattr(bso, "timezone", None) or _wt.default_timezone())
     )
     return {
         "id": opp.id,

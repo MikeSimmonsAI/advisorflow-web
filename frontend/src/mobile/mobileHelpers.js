@@ -299,3 +299,15 @@ export function greetingName(full) {
   return words[0] || null
 }
 
+
+// Where an alert's desktop link goes ON THE PHONE. A Max Life prospect and a
+// lead open their mobile screens; anything without a mobile screen keeps its
+// (responsive) desktop page rather than a dead link.
+export function mobilePathFor(path) {
+  const p = String(path || '')
+  let m = p.match(/^\/agency\/prospects\/([^/?#]+)/)
+  if (m) return '/m/prospects/' + m[1]
+  m = p.match(/^\/leads\/([^/?#]+)/)
+  if (m) return '/m/contacts/' + m[1]
+  return p || '/m'
+}

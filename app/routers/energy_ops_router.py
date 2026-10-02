@@ -153,13 +153,19 @@ def _flagged_q(db, user, request):
             .filter(Lead.manual_flag.isnot(None), Lead.manual_flag != ""))
 
 
-def _day_bounds(now):
+def _day_bounds(now, db=None, org_id=None):
+    """[start, end) of the WORKSPACE's day as naive UTC (task due_at is an
+    instant). Without a workspace (unit callers) it is the UTC day."""
+    if db is not None:
+        from app.services import workspace_time as wt
+        start, end, _tz = wt.day_bounds(db, org_id, now=now)
+        return start, end
     start = datetime(now.year, now.month, now.day)
     return start, start + timedelta(days=1)
 
 
-def _task_filter(q, key, now):
-    start, end = _day_bounds(now)
+def _task_filter(q, key, now, db=None, org_id=None):
+    start, end = _day_bounds(now, db, org_id)
     if key == "follow_up_due":
         return q.filter(LeadTask.due_at >= start, LeadTask.due_at < end)
     if key == "overdue":
@@ -188,8 +194,8 @@ def _local_today(db, org_id, now):
     """The workspace's calendar date (advisors' timezone, else platform default)
     - the right "today" for calendar-date fields. UTC's date is already
     tomorrow every evening in the Americas."""
-    from app.services.activity_reporting import org_local_date
-    return org_local_date(db, org_id, on=now)
+    from app.services import workspace_time as wt
+    return wt.local_today(db, org_id, now=now)
 
 
 def _renewal_rows(db, user, request, now, today=None):
@@ -245,9 +251,9 @@ def _prev_customers_q(db, org_id):
 
 def _queue_count(db, user, request, org_id, key, now):
     if key in ("follow_up_due", "overdue", "upcoming"):
-        return _task_filter(_tasks_q(db, user, request, org_id), key, now).count()
+        return _task_filter(_tasks_q(db, user, request, org_id), key, now, db, org_id).count()
     if key == "escalation":
-        t = _task_filter(_tasks_q(db, user, request, org_id), key, now).count()
+        t = _task_filter(_tasks_q(db, user, request, org_id), key, now, db, org_id).count()
         return t + _flagged_q(db, user, request).count()
     if key == "no_response":
         return _no_response_q(db, user, request, now).count()
@@ -271,15 +277,8 @@ def _local_month_start(db, org_id, now):
     (enrolled_at is stored naive UTC). The UTC month rolls over at 7pm Central
     on the last day of every month, which emptied "this month" for the rest of
     that evening and credited those evening enrollments to the next month."""
-    from app.services.activity_reporting import _org_day_bounds
-    _start, _end, tzname = _org_day_bounds(db, org_id, on=now)
-    first = _local_today(db, org_id, now).replace(day=1)
-    try:
-        from zoneinfo import ZoneInfo
-        local = datetime(first.year, first.month, 1, tzinfo=ZoneInfo(tzname))
-        return local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-    except Exception:
-        return datetime(now.year, now.month, 1)
+    from app.services import workspace_time as wt
+    return wt.month_bounds(db, org_id, now=now)[0]
 
 
 def _enrollment_stats(db, user, request, now, org_id=None):
@@ -348,9 +347,13 @@ def _lead_row(l: Lead, names, extra=None):
     return r
 
 
-def _task_row(t: LeadTask, lead: Optional[Lead], names, now):
-    start, _ = _day_bounds(now)
-    overdue_days = (start - datetime(t.due_at.year, t.due_at.month, t.due_at.day)).days
+def _task_row(t: LeadTask, lead: Optional[Lead], names, now, tzname=None):
+    if tzname:
+        from app.services import workspace_time as wt
+        overdue_days = (wt.local_date(now, tzname) - wt.local_date(t.due_at, tzname)).days
+    else:
+        start, _ = _day_bounds(now)
+        overdue_days = (start - datetime(t.due_at.year, t.due_at.month, t.due_at.day)).days
     return {"type": "task", "id": t.id, "title": t.title, "details": t.details,
             "due_at": _iso(t.due_at), "days_overdue": max(overdue_days, 0),
             "lead_id": t.lead_id, "name": _name(lead.first_name, lead.last_name) if lead else None,
@@ -381,7 +384,7 @@ def queue_items(key: str, request: Request, page: int = Query(1, ge=1),
     if key in ("follow_up_due", "overdue", "upcoming", "escalation"):
         # Count and page in SQL over the same scoped query the summary counts
         # (tasks first by due date, then - for escalation - flagged leads).
-        q = _task_filter(_tasks_q(db, user, request, org_id), key, now)
+        q = _task_filter(_tasks_q(db, user, request, org_id), key, now, db, org_id)
         task_total = q.count()
         tasks = (q.order_by(LeadTask.due_at.asc(), LeadTask.id.asc())
                  .offset(off).limit(per_page).all()) if off < task_total else []
@@ -398,7 +401,9 @@ def queue_items(key: str, request: Request, page: int = Query(1, ge=1),
         leads = {l.id: l for l in db.query(Lead).filter(Lead.id.in_(lead_ids)).all()} if lead_ids else {}
         names = _user_names(db, [t.assigned_to_id for t in tasks] +
                             [l.assigned_to_id for l in flagged])
-        items = [_task_row(t, leads.get(t.lead_id), names, now) for t in tasks]
+        from app.services import workspace_time as _wt
+        _tz = _wt.workspace_timezone(db, org_id)
+        items = [_task_row(t, leads.get(t.lead_id), names, now, _tz) for t in tasks]
         items += [_lead_row(l, names, {"reason": f"Flagged: {l.manual_flag}"
                                        + (f" - {l.manual_flag_reason}" if l.manual_flag_reason else "")})
                   for l in flagged]

@@ -311,9 +311,11 @@ def list_appointments(ctx: Ctx, range_=None, status=None, agent_id=None, lead_id
     q = ctx.own(ctx.db.query(AgencyAppointment).filter(
         AgencyAppointment.organization_id == ctx.org_id), AgencyAppointment.agent_user_id)
     t = now()
-    sod = t.replace(hour=0, minute=0, second=0, microsecond=0)
     if range_ == "today":
-        q = q.filter(AgencyAppointment.starts_at >= sod, AgencyAppointment.starts_at < sod + timedelta(days=1))
+        # The AGENCY's today: a 7pm Central appointment is today's, not tomorrow's.
+        from app.services import workspace_time as wt
+        sod, eod, _tz = wt.day_bounds(ctx.db, ctx.org_id, now=t)
+        q = q.filter(AgencyAppointment.starts_at >= sod, AgencyAppointment.starts_at < eod)
     elif range_ == "upcoming":
         q = q.filter(AgencyAppointment.starts_at >= t)
     elif range_ == "past":

@@ -11,6 +11,7 @@ import MobileShell from './MobileShell'
 import { MobileLogin, MobileHome, MobileConversations, MobileThread, MobileTasks,
          MobileAppointments, MobileContact, MobileNotifications, MobileMore,
          MobileWorkspaces } from './MobileScreens'
+import { MobileProspect } from './MobileAgency'
 
 export default function MobileApp() {
   return (
@@ -23,6 +24,7 @@ export default function MobileApp() {
         <Route path="tasks" element={<MobileTasks />} />
         <Route path="appointments" element={<MobileAppointments />} />
         <Route path="contacts/:leadId" element={<MobileContact />} />
+        <Route path="prospects/:leadId" element={<MobileProspect />} />
         <Route path="notifications" element={<MobileNotifications />} />
         <Route path="workspaces" element={<MobileWorkspaces />} />
         <Route path="more" element={<MobileMore />} />

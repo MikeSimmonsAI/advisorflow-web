@@ -1,3 +1,4 @@
+import { asUtc } from './calendarTime'
 /**
  * Shared presentational pieces for the Sales Workspace.
  *
@@ -161,13 +162,27 @@ export function dateTime(iso) {
 }
 
 /** "Overdue", "Today", "in 3d" — a due date the rep can act on at a glance. */
+// A date-only due ("Oct 5") is stored on a 00:00 or 12:00 UTC anchor. Read
+// through the browser's timezone that is the evening BEFORE in the Americas, so
+// it showed "Overdue" a day early. Anchors are treated as the calendar date they
+// were written as; any other value is a real instant. Mirrors
+// app/services/workspace_time.is_date_anchor.
+export function isDateAnchor(d) {
+  return d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0 &&
+    (d.getUTCHours() === 0 || d.getUTCHours() === 12)
+}
+
 export function dueLabel(iso) {
   if (!iso) return { text: null, tone: null }
-  const d = new Date(iso)
-  if (isNaN(d)) return { text: null, tone: null }
+  const d = asUtc(iso)
+  if (!d || isNaN(d)) return { text: null, tone: null }
+  const anchor = isDateAnchor(d)
+  const due = anchor ? new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) : d
   const now = new Date()
-  const days = Math.floor((d - now) / 86400000)
-  if (d < now) return { text: 'Overdue', tone: 'red' }
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate())
+  const days = Math.round((dueDay - today) / 86400000)
+  if (days < 0 || (!anchor && due < now)) return { text: 'Overdue', tone: 'red' }
   if (days === 0) return { text: 'Today', tone: 'amber' }
   if (days === 1) return { text: 'Tomorrow', tone: 'amber' }
   return { text: 'in ' + days + 'd', tone: null }

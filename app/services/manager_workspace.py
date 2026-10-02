@@ -77,6 +77,7 @@ _CLOSED_STAGES = (STAGE_WON, STAGE_LOST, STAGE_LIVE, STAGE_ONBOARDING)
 
 # ── small helpers ───────────────────────────────────────────────────────────
 
+from app.services import workspace_time as _wt  # date-only dues are calendar dates
 def _f(v):
     return None if v is None else float(v)
 
@@ -399,7 +400,7 @@ def attention(db: Session, org: BrandSalesOrg, opps: List[Opportunity],
     for opp in opps:
         if opp.stage in _CLOSED_STAGES:
             continue
-        if opp.next_action_due_at and opp.next_action_due_at < now:
+        if _wt.is_overdue(opp.next_action_due_at, now, _wt.default_timezone()):
             items.append(_item("overdue_action", "amber", "Next action is overdue",
                                opp.next_action or "No description.",
                                opp, names, "Reset the date or do it"))
@@ -575,7 +576,7 @@ def rep_rollup(db: Session, members: List[dict], opps: List[Opportunity],
     for m in members:
         mine = by_owner.get(m["id"], [])
         overdue = sum(1 for o in mine
-                      if o.next_action_due_at and o.next_action_due_at < now
+                      if _wt.is_overdue(o.next_action_due_at, now, _wt.default_timezone())
                       and o.stage not in _CLOSED_STAGES)
         # THE SAME RULE THE DEMO QUEUE USES, and it was not before.
         #

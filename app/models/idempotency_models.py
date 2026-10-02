@@ -53,3 +53,41 @@ class IdempotencyKey(Base):
         UniqueConstraint("scope", "key", name="uq_idempotency_scope_key"),
         Index("ix_idempotency_created", "created_at"),
     )
+
+
+class ActionLease(Base):
+    """A short-lived "I am doing this right now" claim, shared by every instance.
+
+    For side effects that may legitimately happen AGAIN later but must not
+    happen twice AT ONCE: a double-clicked email send, two workers reaching the
+    same provider call. Unlike IdempotencyKey a lease is released when the work
+    finishes and EXPIRES if the holder dies, so a crashed request never blocks
+    the action forever. See app/services/action_lease.py.
+    """
+    __tablename__ = "action_leases"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    scope = Column(String(80), nullable=False)
+    key = Column(String(300), nullable=False)
+    holder = Column(String(64), nullable=False)
+    acquired_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("scope", "key", name="uq_action_lease_scope_key"),
+    )
+
+
+class LoginFailure(Base):
+    """One failed sign-in, for the brute-force throttle. Shared by every
+    instance - the in-memory counter it replaces allowed N x the limit across N
+    instances. Rows older than the window are pruned on read."""
+    __tablename__ = "login_failures"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    throttle_key = Column(String(300), nullable=False)
+    failed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_login_failures_key_time", "throttle_key", "failed_at"),
+    )

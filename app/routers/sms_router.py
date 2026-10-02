@@ -465,8 +465,22 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         classification_confidence="high" if is_hard_stop else ai_result.get("confidence"),
         classification_reasoning="Hard STOP keyword match" if is_hard_stop else ai_result.get("reasoning"),
     )
-    db.add(reply)
-    db.flush()  # get reply.id before pipeline processing
+    # THE DATABASE DECIDES WHO STORES IT. The read above catches a retry that
+    # arrives later; two deliveries of the same MessageSid arriving TOGETHER
+    # (Twilio retry racing the original, or two instances behind the load
+    # balancer) both pass it. The unique index on replies.twilio_sid lets one
+    # insert win; the loser answers "duplicate" and runs no AI, no classifier
+    # side effects and no second reply.
+    from sqlalchemy.exc import IntegrityError as _IE
+    _sp = db.begin_nested()
+    try:
+        db.add(reply)
+        db.flush()  # get reply.id before pipeline processing
+        _sp.commit()
+    except _IE:
+        _sp.rollback()
+        _seen = (db.query(Reply).filter(Reply.twilio_sid == MessageSid).first() if MessageSid else None)
+        return {"status": "duplicate", "reply_id": getattr(_seen, "id", None)}
 
     # Route to the correct AI handler:
     #   booked leads  → post-booking concierge (gpt-4o, intent detection, escalate on reschedule/cancel)
@@ -631,8 +645,9 @@ def reply_activity_by_day(
     has to invent data client-side.
     """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    start_date = (now.date() - timedelta(days=days - 1))
-    start_at = datetime.combine(start_date, datetime.min.time())
+    from app.services import workspace_time as wt
+    start_date, start_at, _tz = wt.trend_days(
+        db, lead_scope.active_workspace_org_id(current_user, db), days, now=now)
 
     is_manager = lead_scope.is_manager_here(current_user, db)
     activity_filters = [
@@ -654,7 +669,7 @@ def reply_activity_by_day(
         for offset in range(days)
     }
     for (received_at,) in replies:
-        key = received_at.date().isoformat()
+        key = wt.local_date(received_at, _tz).isoformat()
         if key in counts_by_date:
             counts_by_date[key] += 1
 

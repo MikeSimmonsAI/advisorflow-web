@@ -68,31 +68,17 @@ def _org_day_bounds(db: Session, organization_id: str,
     agrees on one - which is the normal case for a single funeral home - and
     the platform default otherwise. A caller may override per request.
 
-    Adding Organization.timezone is the real fix and is a separate, deliberate
-    change; until then this resolves the same answer from the data that does
-    exist rather than defaulting to UTC and being quietly wrong by six hours.
+    Organization.timezone now exists (2026-10-02) and wins when set; NULL keeps
+    the resolution described above, so unconfigured workspaces are unchanged.
     """
-    from app.models.scheduling_models import DEFAULT_TIMEZONE
-    from app.models.models import User as _User
-
-    if not tzname:
-        zones = [z for (z,) in db.query(_User.booking_timezone)
-                 .filter(_User.organization_id == organization_id,
-                         _User.booking_timezone.isnot(None))
-                 .distinct().all()]
-        tzname = zones[0] if len(zones) == 1 else DEFAULT_TIMEZONE
-
-    now = on or datetime.utcnow()
-    try:
-        from zoneinfo import ZoneInfo
-        tz = ZoneInfo(tzname)
-        local = now.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
-        start_local = datetime.combine(local.date(), time.min, tzinfo=tz)
-        start = start_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-    except Exception:
-        start = datetime.combine(now.date(), time.min)
-        tzname = "UTC"
-    return start, start + timedelta(days=1), tzname
+    # ONE RESOLVER. Organization.timezone when set, else the advisors' shared
+    # booking timezone, else the platform default - see workspace_time. Day
+    # boundaries are local midnights converted per date, so DST days are 23 and
+    # 25 hours long rather than a fixed 24 (the old `start + 1 day` was an
+    # hour off on both transition days).
+    from app.services import workspace_time as wt
+    start, end, tzname = wt.day_bounds(db, organization_id, now=on, tzname=tzname)
+    return start, end, tzname
 
 
 def org_local_date(db: Session, organization_id: str, on: Optional[datetime] = None):
@@ -100,12 +86,8 @@ def org_local_date(db: Session, organization_id: str, on: Optional[datetime] = N
     _org_day_bounds). For comparing CALENDAR dates - a contract end date, a
     move date - against "today": datetime.utcnow().date() is already tomorrow
     from 7pm Central, which made "days to renewal" one short every evening."""
-    start, _end, tzname = _org_day_bounds(db, organization_id, on=on)
-    try:
-        from zoneinfo import ZoneInfo
-        return start.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tzname)).date()
-    except Exception:
-        return (on or datetime.utcnow()).date()
+    from app.services import workspace_time as wt
+    return wt.local_today(db, organization_id, now=on)
 
 
 def sent_today(db: Session, organization_id: str, *,

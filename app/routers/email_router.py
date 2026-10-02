@@ -147,38 +147,43 @@ def _send_custom_email(db: Session, current_user: User, lead: Lead, *, subject: 
     # before the provider call; the loser gets the same 409 the composer
     # already handles. Released when this request finishes, success or not.
     _claim = (lead.id, (subject or "").strip().lower())
-    if not allow_duplicate and not _claim_send(_claim):
-        raise HTTPException(status_code=409, detail={
-            "code": "duplicate_send",
-            "message": f"This email (\"{subject}\") is already being sent to {lead.email}. Send it again anyway?"})
+    token = None
+    if not allow_duplicate:
+        token = _claim_send(_claim, db)
+        if token is None:
+            raise HTTPException(status_code=409, detail={
+                "code": "duplicate_send",
+                "message": f"This email (\"{subject}\") is already being sent to {lead.email}. Send it again anyway?"})
     try:
         return _deliver_custom_email(db, current_user, lead, advisor, identity, subject, body_html,
                                      attachments)
     finally:
-        if not allow_duplicate:
-            _release_send(_claim)
+        if token:
+            _release_send(_claim, db, token)
 
 
-_SEND_CLAIMS: dict = {}
-_SEND_CLAIMS_LOCK = __import__("threading").Lock()
+# THE CLAIM LIVES IN THE DATABASE (action_leases), not in this process. The
+# in-memory dict it replaces was correct for one Render instance and wrong for
+# two: each instance had its own dict, so a double-click load-balanced across
+# them sent twice. A lease is visible to every instance at once, released when
+# the send finishes, and expires after _SEND_CLAIM_TTL_S if the request dies.
 _SEND_CLAIM_TTL_S = 120
+_SEND_SCOPE = "email.manual_send"
 
 
-def _claim_send(key) -> bool:
-    import time as _t
-    now = _t.monotonic()
-    with _SEND_CLAIMS_LOCK:
-        for k in [k for k, at in _SEND_CLAIMS.items() if now - at > _SEND_CLAIM_TTL_S]:
-            _SEND_CLAIMS.pop(k, None)
-        if key in _SEND_CLAIMS:
-            return False
-        _SEND_CLAIMS[key] = now
-        return True
+def _lease_key(key) -> str:
+    lead_id, subject = key
+    return "%s|%s" % (lead_id, subject)
 
 
-def _release_send(key) -> None:
-    with _SEND_CLAIMS_LOCK:
-        _SEND_CLAIMS.pop(key, None)
+def _claim_send(key, db):
+    from app.services import action_lease
+    return action_lease.acquire(db, _SEND_SCOPE, _lease_key(key), ttl_seconds=_SEND_CLAIM_TTL_S)
+
+
+def _release_send(key, db, token) -> None:
+    from app.services import action_lease
+    action_lease.release(db, _SEND_SCOPE, _lease_key(key), token)
 
 
 def _deliver_custom_email(db, current_user, lead, advisor, identity, subject, body_html, attachments):

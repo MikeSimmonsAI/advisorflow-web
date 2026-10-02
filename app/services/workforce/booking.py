@@ -105,7 +105,8 @@ def available_slots(db: Session, *, employee, lead: Lead,
 
     days = max(1, min(int(days_ahead or DEFAULT_DAYS_AHEAD), MAX_DAYS_AHEAD))
     now = now or datetime.utcnow()
-    start = now.date()
+    from app.services import workspace_time as _wt
+    start = _wt.local_today(db, employee.organization_id, now=now)   # the workspace's today
     end = start + timedelta(days=days - 1)
 
     from app.services import tenant_scheduling

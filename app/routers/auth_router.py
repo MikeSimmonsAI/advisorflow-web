@@ -34,34 +34,67 @@ _login_lock = threading.Lock()
 _login_failures: dict[str, list[float]] = defaultdict(list)  # key -> [timestamp, ...]
 
 
-def _login_throttle_check(request: Request, email: str) -> None:
+def _throttle_key(request: Request, email: str) -> str:
+    ip = request.client.host if request.client else "unknown"
+    return f"{ip}:{(email or '').lower()}"[:300]
+
+
+# SHARED BY EVERY INSTANCE (login_failures table, 2026-10-02). The in-memory
+# counter this replaces was per process: with N web instances behind the load
+# balancer an attacker got N x 10 guesses per window. The thresholds are
+# unchanged; only where the count lives moved. `_login_failures`/_login_lock
+# remain as names because tests/conftest.py clears them between tests.
+
+def _login_throttle_check(request: Request, email: str, db: Session = None) -> None:
     """Raise 429 if the (IP, email) pair has too many recent failures."""
-    ip = request.client.host if request.client else "unknown"
-    key = f"{ip}:{email.lower()}"
-    now = time.monotonic()
-    with _login_lock:
-        # Prune timestamps outside the window
-        _login_failures[key] = [t for t in _login_failures[key] if now - t < _WINDOW_SECONDS]
-        if len(_login_failures[key]) >= _MAX_FAILURES:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many failed login attempts. Please wait 15 minutes before trying again.",
-                headers={"Retry-After": str(_LOCKOUT_SECONDS)},
-            )
+    if db is None:
+        return
+    from datetime import datetime as _dt, timedelta as _td
+    from app.models.idempotency_models import LoginFailure
+    since = _dt.utcnow() - _td(seconds=_WINDOW_SECONDS)
+    n = (db.query(LoginFailure.id)
+         .filter(LoginFailure.throttle_key == _throttle_key(request, email),
+                 LoginFailure.failed_at >= since).count())
+    if n >= _MAX_FAILURES:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please wait 15 minutes before trying again.",
+            headers={"Retry-After": str(_LOCKOUT_SECONDS)},
+        )
 
 
-def _login_record_failure(request: Request, email: str) -> None:
-    ip = request.client.host if request.client else "unknown"
-    key = f"{ip}:{email.lower()}"
-    with _login_lock:
-        _login_failures[key].append(time.monotonic())
+def _login_record_failure(request: Request, email: str, db: Session = None) -> None:
+    """Committed on its own session: the request is about to fail with 401 and
+    its own transaction will not be committed."""
+    if db is None:
+        return
+    from datetime import datetime as _dt, timedelta as _td
+    from sqlalchemy.orm import Session as _S
+    from app.models.idempotency_models import LoginFailure
+    s = _S(bind=db.get_bind())
+    try:
+        s.add(LoginFailure(throttle_key=_throttle_key(request, email)))
+        # prune this key's rows that have aged out of the window
+        s.query(LoginFailure).filter(
+            LoginFailure.throttle_key == _throttle_key(request, email),
+            LoginFailure.failed_at < _dt.utcnow() - _td(seconds=_WINDOW_SECONDS * 2)
+        ).delete(synchronize_session=False)
+        s.commit()
+    except Exception:                                            # noqa: BLE001
+        s.rollback()
+    finally:
+        s.close()
 
 
-def _login_clear_failures(request: Request, email: str) -> None:
-    ip = request.client.host if request.client else "unknown"
-    key = f"{ip}:{email.lower()}"
-    with _login_lock:
-        _login_failures.pop(key, None)
+def _login_clear_failures(request: Request, email: str, db: Session = None) -> None:
+    if db is None:
+        return
+    from app.models.idempotency_models import LoginFailure
+    try:
+        db.query(LoginFailure).filter(
+            LoginFailure.throttle_key == _throttle_key(request, email)).delete(synchronize_session=False)
+    except Exception:                                            # noqa: BLE001
+        pass
 
 
 class TokenResponse(BaseModel):
@@ -173,15 +206,15 @@ def _do_login(request: Request, form_data: OAuth2PasswordRequestForm, db: Sessio
     public entry points are decorated; this is not.
     """
     # Rate-limit check BEFORE hitting the DB so we don't waste queries on locked-out attackers
-    _login_throttle_check(request, form_data.username)
+    _login_throttle_check(request, form_data.username, db)
 
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        _login_record_failure(request, form_data.username)
+        _login_record_failure(request, form_data.username, db)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
 
     # Successful login — clear failure counter
-    _login_clear_failures(request, form_data.username)
+    _login_clear_failures(request, form_data.username, db)
 
     # --------------------------------------------------------------------------
     # Platform isolation: god_admin can log in from anywhere.

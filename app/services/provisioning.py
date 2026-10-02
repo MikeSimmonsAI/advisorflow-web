@@ -474,6 +474,12 @@ def provision_customer(
             org_phone=(org_phone or opp.phone or None),
             org_address=(org_address or None),
         )
+        # THE WORKSPACE'S CALENDAR, set at birth when the operator (or the
+        # opportunity) supplied a real IANA zone. Never guessed into the column.
+        from app.services import workspace_time as _wt
+        _tz = timezone or getattr(opp, "timezone", None)
+        if _wt.is_valid_timezone(_tz):
+            org.timezone = _tz
         db.add(org)
         db.flush()
 

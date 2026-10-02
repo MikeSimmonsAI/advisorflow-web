@@ -140,6 +140,10 @@ def create_customer(db: Session, actor: User, *, name: str, platform_id: str,
     )
     if legal_name and hasattr(org, "brand_name"):
         org.brand_name = legal_name
+    from app.services import workspace_time as _wt
+    _tz = (primary_location or {}).get("timezone") or timezone
+    if _wt.is_valid_timezone(_tz):
+        org.timezone = _tz
     db.add(org)
     db.flush()
 

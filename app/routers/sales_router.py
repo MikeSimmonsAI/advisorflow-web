@@ -249,13 +249,25 @@ def _name_map(db: Session, user_ids) -> dict:
             for u in db.query(User).filter(User.id.in_(ids)).all()}
 
 
+def _next_action_overdue(opp: Opportunity, now: datetime) -> bool:
+    """A date-only due ("Oct 5") is overdue from the brand's Oct 6, not from
+    7pm Central on Oct 4 (midnight UTC). See workspace_time.is_overdue."""
+    from app.services import workspace_time as wt
+    tz = None
+    try:
+        tz = opp.brand_sales_org.timezone if getattr(opp, "brand_sales_org", None) else None
+    except Exception:                                            # noqa: BLE001
+        tz = None
+    return wt.is_overdue(opp.next_action_due_at, now, tz or wt.default_timezone())
+
+
 def _attention(opp: Opportunity) -> Optional[str]:
     """Why this deal is shouting. One reason, most urgent first — a card with
     four warnings communicates nothing."""
     now = datetime.utcnow()
     if opp.status == "lost":
         return None
-    if opp.next_action_due_at and opp.next_action_due_at < now:
+    if _next_action_overdue(opp, now):
         return "Next action overdue"
     if opp.stage == STAGE_DEMO_BUILD and opp.demo_due_at and opp.demo_due_at < now:
         return "Demo build past due"
@@ -808,11 +820,12 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     org = _resolve_context(user, db, brand_sales_org_id)
     base = _scoped_opportunities(user, db, org)
     now = datetime.utcnow()
-    today_end = datetime.combine(now.date(), datetime.max.time())
+    # THE BRAND'S DAY, not UTC's: a rep in Chicago at 8pm is still on today.
+    from app.services import workspace_time as wt
+    tz = getattr(org, "timezone", None) or wt.default_timezone()
     open_opps = base.filter(Opportunity.status == "open").all()
 
-    follow_ups = [o for o in open_opps
-                  if o.next_action_due_at and o.next_action_due_at <= today_end]
+    follow_ups = [o for o in open_opps if wt.is_due_by_today(o.next_action_due_at, now, tz)]
     follow_ups.sort(key=lambda o: o.next_action_due_at)
 
     needs_action = [o for o in open_opps if _attention(o)]
@@ -824,7 +837,7 @@ def my_day(brand_sales_org_id: Optional[str] = Query(None),
     demos_to_build = [o for o in open_opps if demo_is_outstanding(o)]
     demos_to_build.sort(key=lambda o: (o.demo_due_at or datetime.max))
 
-    month_start = datetime(now.year, now.month, 1)
+    month_start = wt.month_bounds_tz(now, tz)[0]
     won_this_month = (base.filter(Opportunity.status == "won",
                                   Opportunity.won_at >= month_start).all())
     won_value = sum(float(o.deal_value or 0) for o in won_this_month)

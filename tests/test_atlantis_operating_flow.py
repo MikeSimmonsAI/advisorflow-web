@@ -409,3 +409,18 @@ def test_enrollments_this_month_uses_the_workspace_month_on_the_last_evening(cli
     enr = client.get("/energy-ops/queues", headers=_h(db, adv)).json()["enrollments"]
     assert enr["this_month"] == 2                    # both October enrollments, not just the evening one
     assert enr["month_start"].startswith("2026-10-01T05:00")   # Oct 1 00:00 CDT
+
+
+def test_enrolling_twice_is_one_enrollment(client, w):
+    """Double-click / retried request: the second call returns the enrollment
+    that exists - same date, one audit row - instead of re-stamping it."""
+    db, org, adv = w["db"], w["org"], w["adv"]
+    lead = _lead(db, org, adv, tier="new_inquiry", first="Twice")
+    h = _h(db, adv)
+    r1 = client.post(f"/rate-requests/{lead.id}/enroll", headers=h, json={"current_supplier": "S1"})
+    assert r1.status_code == 200, r1.text
+    r2 = client.post(f"/rate-requests/{lead.id}/enroll", headers=h, json={"current_supplier": "S1"})
+    assert r2.status_code == 200 and r2.json()["already_enrolled"] is True
+    assert r2.json()["enrolled_at"] == r1.json()["enrolled_at"]
+    assert db.query(AuditLogEntry).filter(AuditLogEntry.action == "rate_request.enrolled",
+                                          AuditLogEntry.target_id == lead.id).count() == 1
