@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
+import { readAuthority } from '../../../auth/workspaceAuthority'
 import { Alert, Metric, Metrics, Panel, Tag } from '../ds/ds'
 import { errText } from '../wsShared'
 import './ops.css'
@@ -187,7 +188,12 @@ export default function SkipTraceCostPanel() {
               actual property selection (property ids), after dedupe.
             </p>
           ) : null}
-          {est.status === 'estimated' && est.approvable ? (
+          {est.status === 'estimated' && est.approvable && !readAuthority().isManager ? (
+            <p className="wso-small wso-muted" style={{ marginTop: 10 }}>
+              An administrator of this workspace approves paid spend against this estimate.
+            </p>
+          ) : null}
+          {est.status === 'estimated' && est.approvable && readAuthority().isManager ? (
             <div className="wso-form stc-approve" style={{ marginTop: 10 }}>
               <label className="wso-label">Admin approval — type <code>{est.confirmation_phrase}</code>
                 <input className="wso-input" value={phrase} onChange={e => setPhrase(e.target.value)} />

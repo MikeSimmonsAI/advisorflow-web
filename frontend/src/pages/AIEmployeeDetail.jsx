@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { readAuthority } from '../auth/workspaceAuthority'
 import PageShell from '../components/PageShell'
 import '../styles/shared.css'
 import '../styles/aiWorkforce.css'
@@ -53,6 +54,9 @@ export default function AIEmployeeDetail () {
   const [msg, setMsg] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  // Pause, resume and stage changes are administrator actions on the server
+  // (require_admin). Everyone else sees them disabled, with the reason.
+  const canManage = readAuthority().isManager
 
   const load = useCallback(async () => {
     setLoading(true); setErr('')
@@ -136,16 +140,22 @@ export default function AIEmployeeDetail () {
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             {emp?.paused ? (
-              <button className="btn btn--primary btn--sm" disabled={busy}
+              <button className="btn btn--primary btn--sm" disabled={busy || !canManage}
                       onClick={() => act('/resume')}>Resume</button>
             ) : (
-              <button className="btn btn--danger btn--sm" disabled={busy}
+              <button className="btn btn--danger btn--sm" disabled={busy || !canManage}
                       onClick={() => act('/pause', { reason: 'paused from the team screen' })}>
                 Pause now
               </button>
             )}
           </div>
         </div>
+
+        {!canManage && (
+          <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
+            Only an administrator of this workspace can pause, resume or change how far this employee may go.
+          </p>
+        )}
 
         {emp?.pause_reason && (
           <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -164,7 +174,7 @@ export default function AIEmployeeDetail () {
             <button
               key={stage.key}
               className={`pill-tab ${emp?.activation?.state === stage.key ? 'pill-tab--active' : ''}`}
-              disabled={busy}
+              disabled={busy || !canManage}
               title={stage.hint}
               onClick={() => act('/activation', { state: stage.key, reason: 'set from the team screen' })}
             >

@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../../api/client'
+import { readAuthority } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
 import { Alert, Panel, cents } from '../ds/ds'
 
@@ -129,6 +130,8 @@ function Results({ ev }) {
 }
 
 export default function EvoEvaluation() {
+  // Every write here is workspace-admin only on the server.
+  const isAdmin = readAuthority().isManager
   const [mode, setMode] = useState('contact')
   const [setup, setSetup] = useState(null)
   const [runs, setRuns] = useState([])
@@ -188,6 +191,7 @@ export default function EvoEvaluation() {
     <div className="evo-stack">
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>
+      {!isAdmin ? <p className="evo-muted evo-small" style={{ margin: 0 }}>Provider evaluations and ground truth are run by an administrator of this workspace. You can read the results.</p> : null}
       <Panel title="Provider evaluation"
              hint="Isolated: nothing returned becomes a contact, comp or deal value; nothing is sent to anyone · paid runs need the owner's typed confirmation · admin only">
         <div className="evo-chips" style={{ marginBottom: 12 }}>
@@ -238,7 +242,7 @@ export default function EvoEvaluation() {
               </details>
             ) : null}
             <button type="button" className="evo-btn evo-btn--primary evo-btn--sm" style={{ marginTop: 8 }}
-                    disabled={busy || !chosen.length || !ids.length} onClick={run}>Plan evaluation</button>
+                    disabled={busy || !isAdmin || !chosen.length || !ids.length} onClick={run}>Plan evaluation</button>
             <p className="evo-muted evo-small">Planning calls nothing. A plan with a paid provider shows its maximum spend and runs only when you authorize it with its own phrase; a sandbox-only plan runs at once (synthetic, free).</p>
           </>
         )}
@@ -262,7 +266,7 @@ export default function EvoEvaluation() {
 
       {open ? (
         <Panel title={`${open.name} — ${open.label}`}
-               action={!open.purged && open.status !== 'planned' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
+               action={!open.purged && open.status !== 'planned' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin}
                                               onClick={() => purge(open.id)}>Delete returned data</button> : null}
                hint={(open.results && open.results.label) || ''}>
           {open.status === 'planned' ? <Plan ev={open} busy={busy} onExecute={execute} /> : (
@@ -311,7 +315,7 @@ function GroundTruth({ sample }) {
           {items.map((g) => (
             <li key={g.id} className="evo-small">{g.kind === 'contact' ? `Contact for property ${g.property_id?.slice(0, 8)}: ${(g.data.phones || []).length} phone(s), ${(g.data.emails || []).length} email(s)` :
               `Closed sale ${g.data.street_address}: ${cents(g.data.sale_price * 100)} on ${g.data.sale_date}`} — {g.source_note}{' '}
-              <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => del(g.id)}>Delete</button></li>
+              <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={!isAdmin} onClick={() => del(g.id)}>Delete</button></li>
           ))}
           {!items.length ? <li className="evo-muted">None recorded. Without it, correct-owner and price accuracy are not measured (never guessed).</li> : null}
         </ul>
@@ -337,7 +341,7 @@ function GroundTruth({ sample }) {
         <label className="evo-small" style={{ gridColumn: '1 / -1' }}>How is this lawfully known?
           <input className="evo-input" value={f.source_note} onChange={set('source_note')} placeholder="e.g. seller's phone from our signed contract; MLS closed record from our broker" /></label>
       </div>
-      <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" style={{ marginTop: 8 }} onClick={add}>Add ground truth</button>
+      <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" style={{ marginTop: 8 }} disabled={!isAdmin} onClick={add}>Add ground truth</button>
     </Panel>
   )
 }

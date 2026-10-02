@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
+import { readAuthority } from '../../../auth/workspaceAuthority'
 import '../../../styles/shared.css'
 import '../wholesale.css'
 import { Alert, EvoApp, Hero, Metric, Metrics, Panel, Tag } from '../ds/ds'
@@ -21,6 +22,7 @@ import './ops.css'
 const cents = (c) => (c === null || c === undefined ? '—' : `$${(c / 100).toFixed(2)}`)
 
 export default function PilotControls() {
+  const canManage = readAuthority().isManager
   const [pilot, setPilot] = useState(null)
   const [skip, setSkip] = useState(null)
   const [strategies, setStrategies] = useState([])
@@ -94,12 +96,18 @@ export default function PilotControls() {
                   <input className="wso-input" type="number" min="0" value={form.outreach_daily_limit}
                          onChange={e => set('outreach_daily_limit', e.target.value)} />
                 </label>
+                {/* Changing pilot controls is administrator-only on the server
+                    (put_pilot). Everyone else reads them, with the reason. */}
+                {canManage ? (
                 <div className="wso-row">
                   <button className="btn btn--primary" onClick={() => save()}>Save</button>
                   {pilot.status !== 'running' ? <button className="btn btn--secondary" onClick={() => save({ status: 'running' })}>Mark running</button> : null}
                   {pilot.status === 'running' ? <button className="btn btn--secondary" onClick={() => save({ status: 'paused' })}>Pause</button> : null}
                   {pilot.status !== 'stopped' ? <button className="btn btn--secondary" onClick={() => save({ status: 'stopped' })}>Stop</button> : null}
                 </div>
+                ) : (
+                  <p className="wso-small wso-muted">Only an administrator of this workspace can change pilot controls or start, pause or stop the pilot.</p>
+                )}
               </div>
             ) : null}
             <ul className="wso-list" style={{ marginTop: 12 }}>

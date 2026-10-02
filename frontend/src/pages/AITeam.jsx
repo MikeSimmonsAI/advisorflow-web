@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { readAuthority } from '../auth/workspaceAuthority'
 import PageShell from '../components/PageShell'
 import '../styles/shared.css'
 import '../styles/aiWorkforce.css'
@@ -78,6 +79,7 @@ function QueueChips ({ queue }) {
 
 export default function AITeam () {
   const navigate = useNavigate()
+  const canManage = readAuthority().isManager
   const [team, setTeam] = useState(null)
   const [catalogue, setCatalogue] = useState([])
   const [err, setErr] = useState('')
@@ -223,13 +225,21 @@ export default function AITeam () {
                   {item.description}
                 </p>
               </div>
-              <button
-                className="btn btn--primary btn--sm"
-                disabled={busy}
-                onClick={() => setHiring(item)}
-              >
-                Add
-              </button>
+              {/* Adding is an administrator action (require_admin). Offering
+                  it to everyone ended in "Admin access required". */}
+              {canManage ? (
+                <button
+                  className="btn btn--primary btn--sm"
+                  disabled={busy}
+                  onClick={() => setHiring(item)}
+                >
+                  Add
+                </button>
+              ) : (
+                <span className="badge badge--neutral" style={{ alignSelf: 'flex-start' }}>
+                  An administrator can add this
+                </span>
+              )}
             </div>
           </div>
         ))}

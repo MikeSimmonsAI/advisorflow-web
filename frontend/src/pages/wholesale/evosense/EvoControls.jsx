@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
+import { readAuthority } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
 import {
   Alert, EvoApp, Hero, Metric, Metrics, PageSkeleton, Panel, SandboxTag, TabBar, Tag, Tile, ago, cents, humanize,
@@ -121,6 +122,10 @@ function Kind({ kind }) {
 }
 
 export default function EvoControls() {
+  // Providers, verification, scoring, budgets and RESUMING are workspace-admin
+  // actions on the server (evosense_router._admin / _is_admin_here). Anyone
+  // may pause. Controls the person cannot use are disabled, not offered.
+  const isAdmin = readAuthority().isManager
   const [ctl, setCtl] = useState(null)
   const [prov, setProv] = useState(null)
   const [reg, setReg] = useState(null)
@@ -256,11 +261,11 @@ export default function EvoControls() {
                       <td data-label="" className="is-right">
                         {x.connector_kind === 'real' ? (
                           <span className="evo-chips">
-                            <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
+                            <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin}
                                     onClick={() => provider(x.key, { enabled: !x.enabled })}>{x.enabled ? 'Disable' : 'Enable'}</button>
-                            {x.enabled && x.state !== 'BLOCKED' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
+                            {x.enabled && x.state !== 'BLOCKED' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin}
                                                  onClick={() => verify(x.key)}>Verify</button> : null}
-                            {x.enabled && x.state === 'BLOCKED' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
+                            {x.enabled && x.state === 'BLOCKED' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin}
                                                  title="Blocked platform-wide. Only a platform admin's re-test (one request) is sent; anyone else is refused without calling the source."
                                                  onClick={() => verify(x.key)}>Platform re-test</button> : null}
                           </span>
@@ -337,7 +342,7 @@ export default function EvoControls() {
                     </td>
                     <td data-label="" className="is-right">
                       {['sandbox', 'real'].includes(p.connector_kind) ? (
-                        <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy}
+                        <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin}
                                 onClick={() => provider(p.key, { enabled: !p.enabled })}>{p.enabled ? 'Disable' : 'Enable'}</button>
                       ) : <span className="evo-muted evo-small">{p.connector_kind === 'interface_only' ? 'not purchased' : 'manual — nothing is called'}</span>}
                     </td>
@@ -369,6 +374,7 @@ export default function EvoControls() {
 
       <div className="evo-stack" role="tabpanel" id="panel-controls" aria-labelledby="tab-controls" hidden={tab !== 'controls'}>
         <Panel title="EvoSense controls" hint="Anyone can pause. Only an admin can resume.">
+          {!isAdmin ? <p className="evo-muted evo-small" style={{ margin: '0 0 12px' }}>You can pause any switch. Resuming, provider changes, scoring weights and budgets need an administrator of this workspace.</p> : null}
           <div className="evo-switches">
             {SWITCHES.map(([k, label, help]) => {
               const paused = !!ctl[k]
@@ -377,7 +383,7 @@ export default function EvoControls() {
                 <div key={k} className={`evo-switch${paused ? ' is-paused' : ''}`}>
                   <div className="evo-switch__top">
                     <span className="evo-switch__name">{label}</span>
-                    <button type="button" role="switch" className="evo-toggle" aria-checked={!paused} disabled={busy}
+                    <button type="button" role="switch" className="evo-toggle" aria-checked={!paused} disabled={busy || (paused && !isAdmin)}
                             aria-label={`${label}: ${paused ? 'paused — resume' : 'running — pause'}`}
                             onClick={() => patch({ [k]: !paused })} />
                   </div>
@@ -407,8 +413,8 @@ export default function EvoControls() {
             ))}
           </div>
           <div style={{ marginTop: 12 }} className="evo-chips">
-            <button type="button" className="evo-btn evo-btn--primary" disabled={busy} onClick={saveWeights}>Save weights</button>
-            <button type="button" className="evo-btn evo-btn--ghost" disabled={busy}
+            <button type="button" className="evo-btn evo-btn--primary" disabled={busy || !isAdmin} onClick={saveWeights}>Save weights</button>
+            <button type="button" className="evo-btn evo-btn--ghost" disabled={busy || !isAdmin}
                     onClick={() => patch({ score_weights: null }, 'Weights reset to the defaults.')}>Reset to defaults</button>
           </div>
           <p className="evo-muted evo-small" style={{ margin: '10px 0 0' }}>Points each current signal adds (−30 to 30). Aging evidence counts half;
@@ -416,7 +422,7 @@ export default function EvoControls() {
             {(ctl.never_scored || []).length ? <> {ctl.never_scored.map((k) => humanize(k.toLowerCase())).join(' and ')} are shown as evidence but never scored, whatever the weight.</> : null}</p>
           {ctl.scoring_options ? (
             <label className="evo-field" style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <input type="checkbox" checked={!!ctl.scoring_options.exclude_institutional} disabled={busy}
+              <input type="checkbox" checked={!!ctl.scoring_options.exclude_institutional} disabled={busy || !isAdmin}
                      onChange={(e) => patch({ scoring_options: { ...ctl.scoring_options, exclude_institutional: e.target.checked } },
                        'Scoring option saved. Properties re-score on their next evaluation.')} />
               <span>Exclude institutional owners (government, religious organizations, nonprofits / associations) from scoring
@@ -459,7 +465,7 @@ export default function EvoControls() {
               <input id="c-mon" className="evo-input" inputMode="decimal" value={budget.month} onChange={(e) => setBudget({ ...budget, month: e.target.value })} /></label>
             <label className="evo-field" htmlFor="c-cap"><span className="evo-field__label">Contact one owner at most every (days)</span>
               <input id="c-cap" className="evo-input" inputMode="numeric" value={budget.cap} onChange={(e) => setBudget({ ...budget, cap: e.target.value })} /></label>
-            <div><button type="submit" className="evo-btn evo-btn--primary" disabled={busy}>Save budget</button></div>
+            <div><button type="submit" className="evo-btn evo-btn--primary" disabled={busy || !isAdmin}>Save budget</button></div>
           </form>
           {spent ? (
             <>
