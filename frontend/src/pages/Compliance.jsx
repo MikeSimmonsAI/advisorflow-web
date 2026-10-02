@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, getCurrentUser } from '../api/client'
+import { workspaceRole } from '../auth/workspaceAuthority'
 import '../styles/shared.css'
 import './Compliance.css'
 import { csvRow } from '../utils/csvCell'
@@ -79,7 +80,7 @@ function exportCsv(entries) {
 
 export default function Compliance() {
   const currentUser = getCurrentUser()
-  const isAdmin = ['org_admin', 'super_admin', 'god_admin'].includes(currentUser?.role)
+  const isAdmin = ['org_admin', 'super_admin', 'god_admin'].includes(workspaceRole(currentUser))
 
   const [entries, setEntries] = useState([])
   const [stats, setStats] = useState(emptyStats)

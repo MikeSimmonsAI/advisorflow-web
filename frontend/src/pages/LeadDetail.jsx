@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
+import { workspaceRole } from '../auth/workspaceAuthority'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import SignalPulse from '../components/SignalPulse'
 import OutcomeTracker from '../components/OutcomeTracker'
@@ -499,7 +500,7 @@ export default function LeadDetail() {
   const [editError, setEditError] = useState('')
   const [editSuccess, setEditSuccess] = useState(false)
   const currentUser = getCurrentUser()
-  const canReassignLead = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
+  const canReassignLead = workspaceRole(currentUser) === 'org_admin' || workspaceRole(currentUser) === 'super_admin'
   const [assignableUsers, setAssignableUsers] = useState([])
   const [assignmentSaving, setAssignmentSaving] = useState(false)
   const [assignmentError, setAssignmentError] = useState('')

@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import { api, getCurrentUser, getBranding } from '../api/client'
+import { workspaceRole } from '../auth/workspaceAuthority'
 import { getCachedBrand } from '../theme'
 import { getMemberLabel } from '../utils/labels'
 import '../styles/shared.css'
@@ -41,7 +42,7 @@ const CAL = {
 
 export default function Settings() {
   const currentUser = getCurrentUser()
-  const isAdmin = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin' || currentUser?.role === 'god_admin'
+  const isAdmin = ['org_admin', 'super_admin', 'god_admin'].includes(workspaceRole(currentUser))
 
   // THE PLATFORM'S OWN NAME, RESOLVED. Help copy on this page named one brand
   // in every brand's app. `getCachedBrand()` is the resolved brand the shell

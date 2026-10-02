@@ -9,7 +9,7 @@ import './Leads.css'
 import VoiceCampaign from '../components/VoiceCampaign'
 // Vertical switch (see Leads() below).
 import { verticalFor, VERTICAL_ENERGY } from '../verticals/workspaceVertical'
-import { useWorkspaceAuthority } from '../auth/workspaceAuthority'
+import { useWorkspaceAuthority, workspaceRole } from '../auth/workspaceAuthority'
 import LeadsWorkspace from './vertical/LeadsWorkspace'
 
 // TIERS BELONG TO THE ORGANIZATION, NOT TO THIS FILE.
@@ -202,7 +202,7 @@ function ClassicLeads() {
   const bulkMediaInputRef = useRef(null)
 
   const currentUser = getCurrentUser()
-  const canBulkAssign = currentUser?.role === 'org_admin' || currentUser?.role === 'super_admin'
+  const canBulkAssign = workspaceRole(currentUser) === 'org_admin' || workspaceRole(currentUser) === 'super_admin'
   const [assignableUsers, setAssignableUsers] = useState([])
   const [showBulkAssign, setShowBulkAssign] = useState(false)
   const [bulkAssignTarget, setBulkAssignTarget] = useState('')
@@ -287,7 +287,7 @@ function ClassicLeads() {
   // god_admin included: the platform owner operating inside a customer is an
   // administrator of it, and omitting them here would blank the batch panel in
   // God Mode while the server happily served it.
-  const canManageBatches = currentUser?.role === 'org_admin'
+  const canManageBatches = workspaceRole(currentUser) === 'org_admin'
     || currentUser?.role === 'super_admin'
     || currentUser?.role === 'god_admin'
   const [deletingLeads, setDeletingLeads] = useState(false)

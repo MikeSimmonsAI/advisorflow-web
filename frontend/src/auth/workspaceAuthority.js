@@ -59,6 +59,17 @@ export {
   workspaceLocationChoices, activeLocationId,
 }
 
+/**
+ * The caller's role IN THE SELECTED WORKSPACE (membership role from
+ * /branding/org), falling back to the account's own role. This is what the
+ * server's require_admin checks. Screens that compared `user.role` showed
+ * admin buttons to someone who is an admin elsewhere but an advisor here -
+ * every one of which the server then refused.
+ */
+export function workspaceRole(user = getCurrentUser()) {
+  return roleOf(getBranding(), user)
+}
+
 /* ── the whole answer ─────────────────────────────────────────────────────── */
 
 export function readAuthority({ capabilities = null } = {}) {

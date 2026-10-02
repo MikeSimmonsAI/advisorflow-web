@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
+import { workspaceRole } from '../auth/workspaceAuthority'
 import { TierBadge } from '../components/StatusBadge'
 import '../styles/shared.css'
 import './Cadence.css'
@@ -27,7 +28,7 @@ export default function Cadence() {
   const [lastRunResult, setLastRunResult] = useState(null)
   const [controlling, setControlling] = useState(null)
   const user = getCurrentUser()
-  const isAdmin = user?.role === 'org_admin' || user?.role === 'super_admin'
+  const isAdmin = workspaceRole(user) === 'org_admin' || workspaceRole(user) === 'super_admin'
   const [templates, setTemplates] = useState([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
 
