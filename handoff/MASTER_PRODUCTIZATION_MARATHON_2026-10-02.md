@@ -60,6 +60,8 @@ acceptance matrix are added at closeout.
 - Login errors don't reveal whether an email exists.
 - Public booking: concurrent bookings of one slot are refused by the database (exclusion constraint) and a repeated form submit returns the first booking.
 - Webhooks: Stripe events deduplicated by event id; Retell call events are applied idempotently (assignments, not increments) after signature check.
+- Background sends: AI touches are claimed per conversation before the provider call; cadences use `SKIP LOCKED`.
+- Write routes: every parameterless POST/PUT/PATCH/DELETE (261) with an empty body as admin and advisor — no 5xx (permanent test, outbound braked). One legacy exception: `POST /crm/contacts` (old `contacts_router`, raw SQL for a `crm_contacts` shape only some deployments have; the app uses `/crm-native/contacts`). Candidate to retire.
 - Route reachability: across every registered route, only two literal paths are shadowed by an earlier route (Campaign Builder send — Decision 8; a duplicate `/sales/video/status`, dead copy). A permanent test now fails on any new one.
 
 ## Decisions only Mike can make (found today, not changed)
