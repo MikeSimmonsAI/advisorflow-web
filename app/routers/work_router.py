@@ -702,18 +702,29 @@ def communications_send(req: SendIn,
 
     from app.routers.compose_router import acting_advisor
     from app.services.sms_service import send_sms
+    from app.services import send_guard
+    token = send_guard.claim(db, lead.id, body)
+    if token is None:
+        raise HTTPException(status_code=409, detail={
+            "message": send_guard.DUPLICATE_DETAIL,
+            "reasons": [{"code": "DUPLICATE_SEND", "label": send_guard.DUPLICATE_DETAIL}]})
     try:
         message = send_sms(db, acting_advisor(db, lead, user), lead, body,
                            include_booking_link=False,
                            send_source=_ss.MANUAL, sent_by_user_id=user.id)
     except ValueError as e:
         db.rollback()
+        send_guard.release_after_failure(db, lead.id, body, token)
         raise HTTPException(status_code=409, detail={"message": str(e),
                                                      "reasons": [{"code": "SEND_BLOCKED", "label": str(e)}]})
     except RuntimeError as e:          # DemoBoundaryViolation and friends
         db.rollback()
+        send_guard.release_after_failure(db, lead.id, body, token)
         raise HTTPException(status_code=409, detail={"message": str(e),
                                                      "reasons": [{"code": "SEND_REFUSED", "label": str(e)}]})
+    except Exception:
+        send_guard.release_after_failure(db, lead.id, body, token)
+        raise
     return {"message_id": message.id, "state": message.send_state or message.twilio_status,
             "send_source": message.send_source, "body": message.body,
             "sent_at": _iso(message.sent_at)}

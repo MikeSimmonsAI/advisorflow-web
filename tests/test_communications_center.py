@@ -363,6 +363,37 @@ def test_send_goes_through_send_sms_as_manual(mock_creds, client, db_session, sa
     assert sample_lead.sms_consent is True
 
 
+@patch("app.services.sms_service._resolve_twilio_creds")
+def test_a_double_tap_texts_once_and_a_different_message_still_sends(mock_creds, client, db_session,
+                                                                      sample_lead, auth_headers):
+    fake = MagicMock()
+    fake.messages.create.return_value = MagicMock(sid="SMfake2", status="queued",
+                                                  error_code=None, error_message=None)
+    mock_creds.return_value = (fake, "+12145551111", None)
+    _consenting(db_session, sample_lead)
+    _reply(db_session, sample_lead, "What time works?", ReplyClassification.QUESTION)
+    with patch("app.routers.work_router._utcnow", return_value=MIDDAY_CT):
+        body = {"lead_id": sample_lead.id, "body": "Tomorrow at 10 works for me."}
+        first = client.post("/communications/send", json=body, headers=auth_headers)
+        second = client.post("/communications/send", json=dict(body, body="tomorrow at 10 works for me. "),
+                             headers=auth_headers)
+        other = client.post("/communications/send", json=dict(body, body="Or Thursday at 2?"),
+                            headers=auth_headers)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 409 and "DUPLICATE_SEND" in _codes(second)
+    assert other.status_code == 200, other.text
+    assert fake.messages.create.call_count == 2
+    assert db_session.query(Message).count() == 2
+
+
+def test_a_failed_send_can_be_retried_at_once(client, db_session, sample_lead, auth_headers, monkeypatch):
+    from app.services import send_guard
+    token = send_guard.claim(db_session, sample_lead.id, "hello")
+    assert token and send_guard.claim(db_session, sample_lead.id, "hello") is None
+    send_guard.release_after_failure(db_session, sample_lead.id, "hello", token)
+    assert send_guard.claim(db_session, sample_lead.id, "hello")
+
+
 def test_workspace_identity(client, db_session, sample_org, auth_headers):
     r = client.get("/work/identity", headers=auth_headers)
     assert r.status_code == 200

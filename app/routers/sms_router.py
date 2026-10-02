@@ -141,12 +141,20 @@ def send_single(req: SendRequest, db: Session = Depends(get_db), current_user: U
     lead = authorized_lead_query(db, current_user).filter(Lead.id == req.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    from app.services import send_guard
+    token = send_guard.claim(db, lead.id, req.template)
+    if token is None:
+        raise HTTPException(status_code=409, detail=send_guard.DUPLICATE_DETAIL)
     try:
         message = send_sms(db, acting_advisor(db, lead, current_user), lead,
                            req.template, req.include_booking_link,
                            send_source="manual", sent_by_user_id=current_user.id)
     except ValueError as e:
+        send_guard.release_after_failure(db, lead.id, req.template, token)
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        send_guard.release_after_failure(db, lead.id, req.template, token)
+        raise
     return {"message_id": message.id, "status": message.twilio_status}
 
 
