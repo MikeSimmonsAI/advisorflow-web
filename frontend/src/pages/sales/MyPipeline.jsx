@@ -119,7 +119,7 @@ export default function MyPipeline({ scope = 'mine' }) {
       subtitle={subtitle}
       actions={
         <>
-          {isTeam && team.length > 0 && (
+          {isTeam && isManager && team.length > 0 && (
             <select className="sw-select" style={{ width: 190 }}
                     value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
               <option value="">Everyone on the team</option>

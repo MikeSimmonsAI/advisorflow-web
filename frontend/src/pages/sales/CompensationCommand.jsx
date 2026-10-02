@@ -455,9 +455,13 @@ export default function CompensationCommand({ embedded = false }) {
                   <small>One line per person. This is what a payment run is made of.</small>
                 </div>
                 <div className="sw-flex" style={{ gap: 8, marginLeft: 'auto' }}>
-                  <button className="sw-btn" onClick={promote} disabled={busy}>
-                    {busy ? '…' : 'Release elapsed holdbacks'}
-                  </button>
+                  {/* Settlement authority only (sales_comp_manage / god), the
+                      same as Settle - a manager without it got a 403. */}
+                  {payables.can_process_payments ? (
+                    <button className="sw-btn" onClick={promote} disabled={busy}>
+                      {busy ? '…' : 'Release elapsed holdbacks'}
+                    </button>
+                  ) : null}
                   {payables.can_process_payments ? (
                     <button className="sw-btn sw-primary" onClick={() => setPaying(true)}>
                       Settle all payable

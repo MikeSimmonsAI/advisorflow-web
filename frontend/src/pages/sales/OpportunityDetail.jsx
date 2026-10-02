@@ -464,7 +464,9 @@ function PackageDeal({ opp, packages, onPatch, saving }) {
           </div>
         )}
         <div className="sw-flex sw-mt" style={{ justifyContent: 'flex-end' }}>
-          <button className="sw-btn" disabled={saving || (needsReason && !reason.trim())}
+          <button className="sw-btn"
+                  disabled={saving || (needsReason && !reason.trim())
+                    || (value !== '' && (derived == null || isOverride) && !opp.can_override_value)}
                   onClick={() => onPatch({
                     deal_value: value === '' ? null : Number(value),
                     deal_value_override_reason: reason.trim() || undefined,
