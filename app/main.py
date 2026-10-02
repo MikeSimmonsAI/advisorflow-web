@@ -1512,6 +1512,12 @@ async def on_startup():
         _firewall_ok = _fw.install()
     _env.assert_safe(firewall_installed=_firewall_ok)
 
+    # 0b. THE EMERGENCY BRAKE. Wraps the provider transports so that, when
+    #     OUTBOUND_EMERGENCY_STOP is set, no SMS, call or email can leave by any
+    #     code path. Released (the default) it calls straight through.
+    from app.services import outbound_brake as _brake
+    _brake.install()
+
     # 1. Create any brand-new tables
     Base.metadata.create_all(bind=engine)
 

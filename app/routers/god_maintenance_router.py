@@ -168,9 +168,11 @@ def outbound_switches(
         "note": ("Deployment switches only. Pass organization_id for the "
                  "combined answer - BOTH halves must say yes to send."),
     }
+    from app.services import outbound_brake
     return {
         "read_only": True,
         "organization_id": organization_id,
+        "emergency_stop": outbound_brake.status(),
         "email": email,
         "cadence_sms": {
             "deployment_enabled": cadence_service._sending_enabled(),

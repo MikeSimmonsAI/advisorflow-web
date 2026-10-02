@@ -101,6 +101,13 @@ def providers(db: Session) -> List[Dict[str, Any]]:
     add("google", "Google calendar sign-in", _env("GOOGLE_CLIENT_SECRET"))
     add("zoom", "Zoom meetings", _env("ZOOM_CLIENT_SECRET"))
     add("stripe", "Payments (Stripe)", _env("STRIPE_SECRET_KEY"))
+    try:
+        from app.services import outbound_brake
+        if outbound_brake.engaged():
+            out.insert(0, {"key": "emergency_stop", "label": "OUTBOUND EMERGENCY STOP", "optional": False,
+                           "status": DISABLED, "note": "All SMS, calls and email are refused (%s)." % outbound_brake.ENV})
+    except Exception:                                            # noqa: BLE001
+        pass
     add("voice_ai", "AI voice (Retell)", _env("RETELL_API_KEY"))
     try:
         from app.services.evosense import providers as PV
