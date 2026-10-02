@@ -170,6 +170,48 @@ function PlatformReadiness({ data }) {
   )
 }
 
+/* Owner only, on demand (it scans tables): read-only integrity checks. */
+function IntegrityPanel() {
+  const [rep, setRep] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  async function run() {
+    setBusy(true); setErr('')
+    try { setRep(await api.get('/god/maintenance/integrity')) }
+    catch (e) { setErr(e.message || 'Could not run the checks.') }
+    finally { setBusy(false) }
+  }
+  return (
+    <section className="panel cadence-health-panel" data-testid="integrity-panel">
+      <div className="panel-header">
+        <div>
+          <h2 className="panel-title">Data integrity</h2>
+          <p className="cadence-health-subtitle">
+            Read-only checks: anything pointing across customers, orphaned records, contradictions. Nothing is changed.
+          </p>
+        </div>
+        <button type="button" className="btn btn-secondary" onClick={run} disabled={busy}>
+          {busy ? 'Checking…' : rep ? 'Run again' : 'Run checks'}
+        </button>
+      </div>
+      {err && <div className="system-health-alert">{err}</div>}
+      {rep && (
+        <ul className="readiness-list">
+          {rep.checks.map(c => (
+            <li key={c.key} title={c.meaning}>
+              <span>{c.question}{c.status === 'found' && c.examples?.length ? <span className="readiness-note"> — e.g. {c.examples.slice(0, 2).join(', ')}</span> : null}</span>
+              <span className={'readiness-val' + (c.status === 'found' ? ' is-bad' : c.status === 'ok' ? ' is-ok' : '')}>
+                {c.status === 'not_applicable' ? 'n/a' : c.count === 0 ? 'none' : `${c.count} · ${c.severity}`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {rep && <p className="readiness-note">{rep.found === 0 ? 'Every check came back zero.' : `${rep.found} check(s) found something - hover a row for what it means.`}</p>}
+    </section>
+  )
+}
+
 export default function SystemHealth() {
   const navigate = useNavigate()
   const [status, setStatus] = useState(null)
@@ -257,6 +299,7 @@ export default function SystemHealth() {
       </section>
 
       {platform && <PlatformReadiness data={platform} />}
+      {platform && <IntegrityPanel />}
 
       <section className="panel cadence-health-panel">
         <div className="panel-header">

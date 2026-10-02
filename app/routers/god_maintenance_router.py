@@ -183,6 +183,14 @@ def outbound_switches(
     }
 
 
+@router.get("/integrity")
+def integrity(db: Session = Depends(get_db), current_user: User = Depends(require_god)):
+    """Read-only database integrity checks - cross-tenant references first,
+    then orphans, then contradictions. Counts and example ids; changes nothing."""
+    from app.services import data_integrity
+    return data_integrity.run(db)
+
+
 @router.get("/lifecycle-readiness")
 def lifecycle_readiness(
     organization_id: str = Query(...,
