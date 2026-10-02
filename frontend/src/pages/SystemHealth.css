@@ -46,7 +46,8 @@
   border: 1px solid var(--border-danger);
   border-radius: var(--radius-md);
   background: var(--signal-red-dim);
-  color: var(--signal-red);
+  /* signal red on its own tint is 4.0:1; the alert text uses a darker red. */
+  color: #a3112f;
   padding: 12px 14px;
   font-size: 13px;
   font-weight: 700;

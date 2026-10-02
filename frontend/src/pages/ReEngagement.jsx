@@ -124,10 +124,10 @@ export default function ReEngagement() {
         <div className="re-empty">
           <span style={{ fontSize: 36, opacity: 0.3 }} dangerouslySetInnerHTML={{ __html: tab?.icon }} />
           <span>No {activeTab === 'all' ? 'classified' : activeTab} leads right now.</span>
-          {activeTab === 'hot' && <span style={{ fontSize: 13, opacity: 0.55 }}>Hot leads are auto-classified from reply sentiment and tier urgency.</span>}
-          {activeTab === 'warm' && <span style={{ fontSize: 13, opacity: 0.55 }}>Warm leads are in active cadence with recent touches.</span>}
-          {activeTab === 'cold' && <span style={{ fontSize: 13, opacity: 0.55 }}>Cold leads haven't engaged recently. Import new leads or restart cadence to warm them up.</span>}
-          {activeTab === 'all' && <span style={{ fontSize: 13, opacity: 0.55 }}>No leads have been classified yet.</span>}
+          {activeTab === 'hot' && <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Hot leads are auto-classified from reply sentiment and tier urgency.</span>}
+          {activeTab === 'warm' && <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Warm leads are in active cadence with recent touches.</span>}
+          {activeTab === 'cold' && <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Cold leads haven't engaged recently. Import new leads or restart cadence to warm them up.</span>}
+          {activeTab === 'all' && <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>No leads have been classified yet.</span>}
         </div>
       ) : (
         <div className="re-list">

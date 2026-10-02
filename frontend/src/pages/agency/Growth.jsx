@@ -91,7 +91,7 @@ export function Recruiting() {
       <FilterBar label={label} clearTo="/agency/recruits" />
       {recruitId ? <Section title="Recruit" className="ag-card--focus" aside={<Link className="ag-link" to={`/agency/recruits${params.toString() ? `?${params}` : ''}`}>Close</Link>}><RecruitPanel id={recruitId} onChanged={list.reload} /></Section> : null}
       {(list.loading && !list.data) || (cfg.loading && !cfg.data) ? <Loading /> : list.error || cfg.error ? <ErrorState error={list.error || cfg.error} onRetry={() => { list.reload(); cfg.reload() }} /> : (
-        <div className="ag-board ag-board--stages" data-testid="recruit-board">
+        <div className="ag-board ag-board--stages" data-testid="recruit-board" tabIndex={0} role="region" aria-label="Recruits by stage">
           {groups.map(g => (
             <div key={g.stage} className="ag-board__col">
               <div className="ag-board__head"><span>{humanize(g.stage)}</span> <span className="ag-muted">{g.items.length}</span></div>

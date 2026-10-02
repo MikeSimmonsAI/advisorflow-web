@@ -155,7 +155,7 @@ export default function SalesBoard() {
         </div>
       </div>
       {notice && <p role="status" className={notice.ok ? 'sb-good sb-notice' : 'sb-bad sb-notice'}>{notice.text}</p>}
-      <div className="sb-columns">
+      <div className="sb-columns" tabIndex={0} role="region" aria-label="Pipeline stages">
         {data.columns.map(col => (
           <div key={col.key} className="sb-col" data-testid={`sb-col-${col.key}`}>
             <header className="sb-col-head">

@@ -111,8 +111,8 @@ export default function FiberLeadCapture() {
       <div className="fiber-form">
         <div className="fiber-row">
           <div className="fiber-field">
-            <label>First Name *</label>
-            <input
+            <label htmlFor="fc-first-name">First Name *</label>
+            <input id="fc-first-name"
               type="text" placeholder="First name"
               value={form.first_name}
               onChange={e => set('first_name', e.target.value)}
@@ -120,8 +120,8 @@ export default function FiberLeadCapture() {
             />
           </div>
           <div className="fiber-field">
-            <label>Last Name *</label>
-            <input
+            <label htmlFor="fc-last-name">Last Name *</label>
+            <input id="fc-last-name"
               type="text" placeholder="Last name"
               value={form.last_name}
               onChange={e => set('last_name', e.target.value)}
@@ -132,8 +132,8 @@ export default function FiberLeadCapture() {
 
         <div className="fiber-row">
           <div className="fiber-field">
-            <label>Phone *</label>
-            <input
+            <label htmlFor="fc-phone">Phone *</label>
+            <input id="fc-phone"
               type="tel" placeholder="(555) 000-0000"
               value={form.phone}
               onChange={e => set('phone', e.target.value)}
@@ -142,8 +142,8 @@ export default function FiberLeadCapture() {
             />
           </div>
           <div className="fiber-field">
-            <label>Email</label>
-            <input
+            <label htmlFor="fc-email">Email</label>
+            <input id="fc-email"
               type="email" placeholder="email@example.com"
               value={form.email}
               onChange={e => set('email', e.target.value)}
@@ -154,8 +154,8 @@ export default function FiberLeadCapture() {
         </div>
 
         <div className="fiber-field">
-          <label>Street Address</label>
-          <input
+          <label htmlFor="fc-street-address">Street Address</label>
+          <input id="fc-street-address"
             type="text" placeholder="123 Main St"
             value={form.service_address}
             onChange={e => set('service_address', e.target.value)}
@@ -165,8 +165,8 @@ export default function FiberLeadCapture() {
 
         <div className="fiber-row fiber-row--addr">
           <div className="fiber-field fiber-field--city">
-            <label>City</label>
-            <input
+            <label htmlFor="fc-city">City</label>
+            <input id="fc-city"
               type="text" placeholder="City"
               value={form.city}
               onChange={e => set('city', e.target.value)}
@@ -174,8 +174,8 @@ export default function FiberLeadCapture() {
             />
           </div>
           <div className="fiber-field fiber-field--state">
-            <label>State</label>
-            <input
+            <label htmlFor="fc-state">State</label>
+            <input id="fc-state"
               type="text" placeholder="TX"
               value={form.state}
               onChange={e => set('state', e.target.value.toUpperCase())}
@@ -184,8 +184,8 @@ export default function FiberLeadCapture() {
             />
           </div>
           <div className="fiber-field fiber-field--zip">
-            <label>ZIP</label>
-            <input
+            <label htmlFor="fc-zip">ZIP</label>
+            <input id="fc-zip"
               type="text" placeholder="75001"
               value={form.zip_code}
               onChange={e => set('zip_code', e.target.value)}
@@ -198,31 +198,31 @@ export default function FiberLeadCapture() {
 
         <div className="fiber-row">
           <div className="fiber-field">
-            <label>Current Provider</label>
-            <input
+            <label htmlFor="fc-current-provider">Current Provider</label>
+            <input id="fc-current-provider"
               type="text" placeholder="e.g. Comcast, AT&T"
               value={form.current_provider}
               onChange={e => set('current_provider', e.target.value)}
             />
           </div>
           <div className="fiber-field">
-            <label>Current Speed</label>
-            <select value={form.current_speed} onChange={e => set('current_speed', e.target.value)}>
+            <label htmlFor="fc-current-speed">Current Speed</label>
+            <select id="fc-current-speed" value={form.current_speed} onChange={e => set('current_speed', e.target.value)}>
               {SPEED_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
         </div>
 
         <div className="fiber-field">
-          <label>Interested Plan</label>
-          <select value={form.interested_tier} onChange={e => set('interested_tier', e.target.value)}>
+          <label htmlFor="fc-interested-plan">Interested Plan</label>
+          <select id="fc-interested-plan" value={form.interested_tier} onChange={e => set('interested_tier', e.target.value)}>
             {TIER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
 
         <div className="fiber-field">
-          <label>Notes (optional)</label>
-          <textarea
+          <label htmlFor="fc-notes-optional">Notes (optional)</label>
+          <textarea id="fc-notes-optional"
             placeholder="Gate code, best time to call, objections, anything useful..."
             value={form.notes}
             onChange={e => set('notes', e.target.value)}
@@ -235,11 +235,12 @@ export default function FiberLeadCapture() {
         >
           <input
             type="checkbox"
+            aria-labelledby="fc-consent-text"
             checked={form.verbal_sms_consent}
             onChange={e => set('verbal_sms_consent', e.target.checked)}
             onClick={e => e.stopPropagation()}
           />
-          <span>
+          <span id="fc-consent-text">
             <strong>I confirm the customer verbally consented</strong> to receive SMS messages
             from our team regarding their service inquiry. They were informed they can reply
             STOP to opt out at any time.

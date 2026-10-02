@@ -278,7 +278,8 @@ export default function DLCRegistration() {
           marginBottom: 16, padding: '12px 16px', borderRadius: 8, fontSize: 14,
           background: result.type === 'success' ? 'rgba(34,197,94,0.1)' : result.type === 'warn' ? 'rgba(184,137,42,0.1)' : 'rgba(239,68,68,0.1)',
           border: `1px solid ${result.type === 'success' ? 'rgba(34,197,94,0.3)' : result.type === 'warn' ? 'rgba(184,137,42,0.3)' : 'rgba(239,68,68,0.3)'}`,
-          color: result.type === 'success' ? 'var(--signal-green)' : result.type === 'warn' ? '#b8892a' : 'var(--signal-red)',
+          // Darker than the signal colours: those sit at ~4:1 on their own tints.
+          color: result.type === 'success' ? '#0a6b46' : result.type === 'warn' ? '#7d5a14' : '#a3112f',
         }}>
           {result.text}
         </div>
@@ -553,7 +554,7 @@ export default function DLCRegistration() {
           Check the <strong>Refresh Status</strong> button above after submitting to see the latest state.
           For questions, see{' '}
           <a href="https://help.twilio.com/articles/1260800720410-What-is-A2P-10DLC-" target="_blank" rel="noopener noreferrer"
-            style={{ color: 'var(--accent-blue)' }}>
+            style={{ color: 'var(--accent-blue)', textDecoration: 'underline' }}>
             Twilio's A2P 10DLC guide ↗
           </a>
         </p>

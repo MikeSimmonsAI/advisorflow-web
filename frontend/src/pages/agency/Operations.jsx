@@ -101,7 +101,7 @@ export function Distribution() {
         </div>
       </div>
       {board.loading && !board.data ? <Loading /> : board.error ? <ErrorState error={board.error} onRetry={board.reload} /> : (
-        <div className="ag-board" data-testid="assignment-board">
+        <div className="ag-board" data-testid="assignment-board" tabIndex={0} role="region" aria-label="Assignments by status">
           {cols.map(s => {
             const rows = items.filter(a => a.state === s)
             return (
