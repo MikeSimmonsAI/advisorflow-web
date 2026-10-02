@@ -266,12 +266,30 @@ def _queue_count(db, user, request, org_id, key, now):
     raise HTTPException(404, "Unknown queue")
 
 
-def _enrollment_stats(db, user, request, now):
+def _local_month_start(db, org_id, now):
+    """First instant of the workspace's current calendar month, as naive UTC
+    (enrolled_at is stored naive UTC). The UTC month rolls over at 7pm Central
+    on the last day of every month, which emptied "this month" for the rest of
+    that evening and credited those evening enrollments to the next month."""
+    from app.services.activity_reporting import _org_day_bounds
+    _start, _end, tzname = _org_day_bounds(db, org_id, on=now)
+    first = _local_today(db, org_id, now).replace(day=1)
+    try:
+        from zoneinfo import ZoneInfo
+        local = datetime(first.year, first.month, 1, tzinfo=ZoneInfo(tzname))
+        return local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    except Exception:
+        return datetime(now.year, now.month, 1)
+
+
+def _enrollment_stats(db, user, request, now, org_id=None):
     """ENROLLMENTS, counted from Lead.enrolled_at (set by POST
     /rate-requests/{id}/enroll). A customer enrolled before that column
     existed has no date and is reported as `date_not_recorded`, never counted
-    into a month. Month = calendar month, server UTC."""
-    month_start = datetime(now.year, now.month, 1)
+    into a month. Month = the workspace's calendar month (see
+    _local_month_start); UTC only when no workspace is known."""
+    month_start = (_local_month_start(db, org_id, now) if org_id
+                   else datetime(now.year, now.month, 1))
     base = lead_scope.authorized_lead_query(db, user, request=request)
     this_month = base.filter(Lead.enrolled_at.isnot(None), Lead.enrolled_at >= month_start).count()
     enrolled = or_(Lead.tier == ENROLLED_TIER, Lead.relationship_type == "customer")
@@ -302,7 +320,7 @@ def queue_summary(request: Request, db: Session = Depends(get_db),
         out.append({"key": key, "label": label, "kind": kind, "count": n,
                     "available": n is not None})
     return {"queues": out, "renewal_date_missing": missing,
-            "enrollments": _enrollment_stats(db, user, request, now),
+            "enrollments": _enrollment_stats(db, user, request, now, org_id),
             "rules": {"no_response_days": NO_RESPONSE_DAYS,
                       "escalate_after_days": ESCALATE_AFTER_DAYS,
                       "upcoming_days": UPCOMING_DAYS,

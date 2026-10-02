@@ -390,3 +390,22 @@ def test_renewal_days_and_move_window_use_the_workspace_day_in_the_evening(clien
     summary = client.get("/energy-ops/moves", headers=_h(db, adv)).json()["summary"]
     assert summary["moving_in_14_days"] == 1
 
+
+
+def test_enrollments_this_month_uses_the_workspace_month_on_the_last_evening(client, w, monkeypatch):
+    """21:00 Central on Oct 31 is 02:00 UTC on Nov 1. "Enrollments This Month"
+    started the month at UTC midnight, so for the last five hours of every
+    month it showed only that evening's enrollments, and credited them to the
+    NEXT month. Found by the final verification run (sibling of the renewal
+    days bug)."""
+    from app.routers import energy_ops_router as R
+    db, org, adv = w["db"], w["org"], w["adv"]
+    adv.booking_timezone = "America/Chicago"
+    db.commit()
+    monkeypatch.setattr(R, "_now", lambda: datetime(2026, 11, 1, 2, 0))   # = Oct 31 21:00 CDT
+    _lead(db, org, adv, tier="contract_signed", first="MidOct", enrolled_at=datetime(2026, 10, 15, 17, 0))
+    _lead(db, org, adv, tier="contract_signed", first="OctEve", enrolled_at=datetime(2026, 11, 1, 1, 0))  # Oct 31 20:00 CT
+    _lead(db, org, adv, tier="contract_signed", first="Sept", enrolled_at=datetime(2026, 9, 30, 12, 0))
+    enr = client.get("/energy-ops/queues", headers=_h(db, adv)).json()["enrollments"]
+    assert enr["this_month"] == 2                    # both October enrollments, not just the evening one
+    assert enr["month_start"].startswith("2026-10-01T05:00")   # Oct 1 00:00 CDT
