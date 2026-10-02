@@ -572,7 +572,10 @@ export function MobileWorkspaces() {
   return (
     <div className="mscreen">
       <ScreenHead title="Choose workspace" />
-      <WorkspaceList choices={workspaceChoices(contexts, workspaceId)} onPick={switchWorkspace} />
+      {workspaceChoices(contexts, workspaceId).length > 1
+        ? <WorkspaceList choices={workspaceChoices(contexts, workspaceId)} onPick={switchWorkspace} />
+        // One (or no listed) workspace: say so rather than show a blank screen.
+        : <Empty>You work in one workspace, so there is nothing to switch to.</Empty>}
     </div>
   )
 }
