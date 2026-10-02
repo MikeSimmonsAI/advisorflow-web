@@ -1716,7 +1716,15 @@ export default function LeadDetail() {
               <div className="empty-state">
                 {lead.is_duplicate ? 'This lead is a duplicate.' :
                  lead.status === 'dnc' ? 'This lead is marked do-not-contact.' :
-                 'No phone or email on file.'}
+                 !lead.phone && !lead.email ? 'No phone or email on file.' :
+                 /* The lead HAS contact details; the server said why neither
+                    channel can send. Say that, not "no phone or email". */
+                 <>
+                   <div style={{ fontWeight: 600, marginBottom: 6 }}>Messaging isn't available for this lead yet.</div>
+                   {[['Text', smsBlockedReason], ['Email', emailBlockedReason]]
+                     .filter(([, r]) => r)
+                     .map(([label, r]) => <div key={label} style={{ fontSize: 12.5, marginTop: 4 }}><strong>{label}:</strong> {r}</div>)}
+                 </>}
               </div>
             ) : effectiveSendMode === 'sms' && canSendSMS ? (
               <div className="lead-compose">

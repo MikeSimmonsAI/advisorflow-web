@@ -255,7 +255,7 @@ export function MobileThread() {
   return (
     <div className="mscreen mthread">
       <ScreenHead title={lead.name} sub={<Link to={'/m/contacts/' + lead.id}>View contact</Link>} back="/m/conversations" />
-      <BrainStrip leadId={lead.id} onDraft={(text) => { if (allowed) setBody(text) }} />
+      <BrainStrip compact leadId={lead.id} onDraft={(text) => { if (allowed) setBody(text) }} />
       <div className="mevents">
         {data.events.length === 0 && <Empty>No messages yet.</Empty>}
         {data.events.map(ev => <EventBubble key={ev.type + ev.id} ev={ev} />)}

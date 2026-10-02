@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { api, getCurrentUser, getBranding } from '../api/client'
 import { getCachedBrand } from '../theme'
 import { getMemberLabel } from '../utils/labels'
@@ -656,8 +656,8 @@ export default function Settings() {
                   const configured = !!advisor.twilio_phone_number
                   const isEditing = assigningFor === advisor.id
                   return (
-                    <>
-                      <tr key={advisor.id}>
+                    <Fragment key={advisor.id}>
+                      <tr>
                         <td>{advisor.full_name}</td>
                         <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                           {advisor.role?.replace('_', ' ')}
@@ -752,7 +752,7 @@ export default function Settings() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   )
                 })}
               </tbody>

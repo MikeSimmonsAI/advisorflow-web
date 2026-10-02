@@ -231,8 +231,11 @@
 .mbrain-action{font-weight:800;font-size:15px}
 .mbrain-reason{font-size:13px;opacity:.85;overflow-wrap:anywhere}
 .mbrain-q{font-size:13px;background:rgba(8,124,255,.07);border-radius:8px;padding:6px 8px;overflow-wrap:anywhere}
-.mbrain-btns{display:flex;gap:8px;flex-wrap:wrap}
-.mbrain-btns .mbtn{flex:1 1 auto;min-height:44px}
+.mbrain-btns{display:flex;gap:8px}
+.mbrain-btns .mbtn{flex:1 1 0;min-width:0;min-height:44px;width:auto;margin:0;padding:0 10px;white-space:nowrap}
+.mbrain-toggle{all:unset;box-sizing:border-box;width:100%;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.mbrain-toggle:focus-visible{outline:2px solid var(--m-accent,#087cff);outline-offset:2px;border-radius:6px}
+.mbrain-reason--clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .moffer{margin:8px 12px;padding:12px;border-radius:12px;border:1px solid rgba(214,140,0,.5);background:rgba(214,140,0,.08);display:flex;flex-direction:column;gap:6px}
 .mactions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 12px}
 .mactions .mbtn{flex:1 1 30%;min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none}

@@ -22,11 +22,14 @@ const ACTION = {
 }
 
 /** Next best action + who is driving + one-tap takeover, for a phone. */
-export function BrainStrip({ leadId, onDraft, channel = 'sms' }) {
+export function BrainStrip({ leadId, onDraft, channel = 'sms', compact = false }) {
   const { observing } = useMobile()
   const [ctx, setCtx] = useState(null)
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
+  // On the thread the strip starts folded to one line so the messages stay on
+  // screen at 360px; a tap shows the open questions and follow-up.
+  const [expanded, setExpanded] = useState(!compact)
   useEffect(() => {
     let live = true
     api.get('/conversation-intel/leads/' + encodeURIComponent(leadId))
@@ -50,13 +53,14 @@ export function BrainStrip({ leadId, onDraft, channel = 'sms' }) {
   }
   return (
     <div className={'mbrain' + (st.needs_human_reason ? ' mbrain--human' : '')} data-testid="m-brain">
-      <div className="mbrain-row">
+      <button type="button" className="mbrain-row mbrain-toggle" aria-expanded={expanded}
+        onClick={() => setExpanded(v => !v)}>
         <span className="mbrain-action">{ACTION[nba.action] || humanize(nba.action || '')}</span>
         <span className="mpill mpill--task">{humanize(st.mode || '')}</span>
-      </div>
-      <div className="mbrain-reason">{nba.reason}</div>
-      {(ctx.open_questions || []).slice(0, 2).map(q => <div key={q.id} className="mbrain-q">“{q.value}”</div>)}
-      {ctx.follow_up && <div className="mbrain-q">Follow up: {ctx.follow_up.value}{ctx.follow_up.date ? ' · ' + ctx.follow_up.date : ''}</div>}
+      </button>
+      <div className={'mbrain-reason' + (expanded ? '' : ' mbrain-reason--clip')}>{nba.reason}</div>
+      {expanded && (ctx.open_questions || []).slice(0, 2).map(q => <div key={q.id} className="mbrain-q">“{q.value}”</div>)}
+      {expanded && ctx.follow_up && <div className="mbrain-q">Follow up: {ctx.follow_up.value}{ctx.follow_up.date ? ' · ' + ctx.follow_up.date : ''}</div>}
       {!observing && (
         <div className="mbrain-btns">
           {st.mode === 'human_active'

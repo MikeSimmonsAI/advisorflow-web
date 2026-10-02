@@ -10,6 +10,7 @@ Everything is read from the lead's own organization. Nothing here sends.
 from __future__ import annotations
 
 import json
+import re
 import logging
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -49,6 +50,13 @@ FACT_LABELS = {
 }
 
 # what each vertical needs next, in order; (slot, question, satisfied-by keys / lead fields)
+SLOT_LABELS = {
+    "need": "Why they are looking", "household": "Who it would protect", "existing": "Existing coverage",
+    "age": "Age", "time": "A good time to talk", "address": "Service address", "contract": "Current contract end",
+    "moving": "Staying or moving", "condition": "Property condition", "occupancy": "Who lives there",
+    "timeline": "Timeline to sell",
+}
+
 SLOTS = {
     X.INSURANCE: [
         ("need", "What prompted you to look into coverage - protecting family, retirement income, or something else?",
@@ -196,19 +204,29 @@ def _items(db, lead, *, category=None, status=None, prefix=None):
 
 # ── applying one event ──────────────────────────────────────────────────────
 
+_PRICE_WORDS = {"cost", "price", "pricing", "premium", "rate", "rates", "fee", "fees", "afford", "quote", "much"}
+
+
 def _answers(question_words: List[str], outbound_text: str) -> bool:
+    """Does this outbound plausibly answer the question?
+
+    A reply that only ASKS BACK answers nothing ("Are you looking at 20 or 30
+    year term?" does not answer "how much would term cost?", however many words
+    they share). A price question is answered only by something about price."""
     if not question_words:
         return True
-    out = set(X.content_words(outbound_text))
+    sentences = [x.strip() for x in re.split(r"(?<=[.!?])\s+", outbound_text or "") if x.strip()]
+    statements = [x for x in sentences if not x.endswith("?")]
+    if not statements:
+        return False
+    said = " ".join(statements)
+    out = set(X.content_words(said))
     qw = set(question_words) - {"something", "thing", "anything", "would", "like"}
     if not qw:
         return len(out) >= 4
-    if qw & out:
-        return True
-    price = {"cost", "price", "pricing", "premium", "rate", "rates", "fee", "fees", "afford", "quote", "much"}
-    if qw & price and (out & price or "$" in outbound_text):
-        return True
-    return False
+    if qw & _PRICE_WORDS:
+        return bool(out & _PRICE_WORDS) or "$" in said
+    return bool(qw & out)
 
 
 def apply_event(db: Session, lead: Lead, ev: Event, vertical: str, today: date) -> X.Analysis:
@@ -515,7 +533,8 @@ def unknown_slots(vertical: str, active: Dict[str, ConversationMemoryItem], lead
             elif k in active:
                 known = True
         if not known:
-            out.append({"slot": slot, "question": question,
+            out.append({"slot": slot, "label": SLOT_LABELS.get(slot, slot.replace("_", " ").capitalize()),
+                        "question": question,
                         "already_asked": any(set(X.content_words(question)) & set(X.content_words(a)) and
                                              len(set(X.content_words(question)) & set(X.content_words(a))) >= 2
                                              for a in asked[-3:])})

@@ -466,6 +466,12 @@ def analyze(text: str, *, direction: str, vertical: str = GENERAL, today: Option
     if CALL_RE.search(t):
         intents.append("wants_call")
         a.preferences.append(Finding("pref.channel", "phone", _quote(t)))
+        # "Can you call me after 5pm tomorrow?" is a REQUEST, kept as the
+        # channel preference, the follow-up time and the wants_call intent.
+        # Listing it again as an unanswered question duplicated it on screen.
+        a.questions = [(q, w) for (q, w) in a.questions if not CALL_RE.search(q)]
+        if not a.questions and "question" in intents:
+            intents.remove("question")
     yes_sentence = any(YES_RE.match(x.strip()) for x in re.split(r"(?<=[.!?])\s+", t))
     if (INTERESTED_RE.search(t) and not re.search(r"\bnot (really )?interested\b|\bno longer interested\b", low)) \
             or yes_sentence:

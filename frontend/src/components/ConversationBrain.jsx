@@ -207,7 +207,7 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
 
           {(ctx.unknowns || []).length > 0 && (
             <Section title="Still unknown" count={ctx.unknowns.length} defaultOpen={!compact}>
-              {ctx.unknowns.map(u => <div key={u.slot} className="cb-item cb-muted">{u.slot}{u.already_asked ? ' — already asked' : ''}</div>)}
+              {ctx.unknowns.map(u => <div key={u.slot} className="cb-item cb-muted">{u.label || u.slot}{u.already_asked ? ' — already asked' : ''}</div>)}
               {ctx.next_best_question && <div className="cb-item"><span className="cb-k">Next best question</span> {ctx.next_best_question}</div>}
             </Section>
           )}

@@ -532,3 +532,26 @@ def test_a_second_worker_writing_the_same_memory_row_skips_instead_of_failing(wo
         E._exists = orig
     assert w["db"].query(E.ConversationMemoryItem).filter(
         E.ConversationMemoryItem.lead_id == w["lead"].id).count() == 1
+
+
+# ── found on the Oct 2 walk ─────────────────────────────────────────────────
+
+def test_asking_back_does_not_answer_a_price_question(world):
+    w = world()
+    inbound(w, "How much would a $250k term policy cost for me?", T0)
+    outbound(w, "Happy to help. Are you looking at 20 or 30 year term?", T0 + timedelta(minutes=5), source="manual")
+    c = ctx(w, T0 + timedelta(minutes=10))
+    assert any("cost" in q["value"] for q in c["open_questions"]), c["open_questions"]
+    outbound(w, "A 20-year $250k term policy usually runs about $25 a month at your age.", T0 + timedelta(minutes=20),
+             source="manual")
+    c = ctx(w, T0 + timedelta(minutes=25))
+    assert not any("cost" in q["value"] for q in c["open_questions"]), c["open_questions"]
+
+
+def test_a_call_request_is_a_follow_up_not_an_open_question(world):
+    w = world()
+    inbound(w, "Can you call me after 5pm tomorrow?", T0)
+    c = ctx(w, T0 + timedelta(minutes=1))
+    assert c["open_questions"] == []
+    assert c["follow_up"] is not None
+    assert fact(c, "pref.channel") in (None, "phone")
