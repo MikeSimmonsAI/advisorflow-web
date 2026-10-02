@@ -559,3 +559,48 @@ def test_the_email_queue_still_mounts_the_review_screen():
     assert "<EmailReview" in source, (
         "EmailQueue.jsx imports EmailReview but never renders it - the review "
         "step is unreachable from the queue screen.")
+
+
+# ── DOUBLE-CLICK ─────────────────────────────────────────────────────────────
+# A second "Send reviewed" while the first is in flight (or just finished)
+# mailed every family twice. Lease per lead + subject, shared with the single
+# send; released after a provider failure so the retry goes out.
+
+@patch("app.services.email_service.send_email_via_provider")
+def test_confirm_send_batch_double_click_mails_once(
+        mock_send, client, auth_headers, db_session, sample_org, sample_advisor):
+    mock_send.return_value = _provider_ok()
+    lead = _lead(db_session, sample_org.id, sample_advisor.id)
+    body = {"items": [{"lead_id": lead.id, "subject": "Hello Jane", "body_html": "<p>Hi</p>"}]}
+    first = client.post(CONFIRM, json=body, headers=auth_headers)
+    second = client.post(CONFIRM, json=body, headers=auth_headers)
+    assert first.json()["sent_count"] == 1
+    assert second.json()["sent_count"] == 0
+    assert mock_send.call_count == 1
+    assert "duplicate_send" in str(second.json())
+
+
+@patch("app.services.email_service.send_email_via_provider")
+def test_confirm_send_batch_retry_after_a_provider_failure_goes_out(
+        mock_send, client, auth_headers, db_session, sample_org, sample_advisor):
+    mock_send.side_effect = [{"success": False, "provider_message_id": None, "error": "down"},
+                             _provider_ok()]
+    lead = _lead(db_session, sample_org.id, sample_advisor.id)
+    body = {"items": [{"lead_id": lead.id, "subject": "Hello Jane", "body_html": "<p>Hi</p>"}]}
+    client.post(CONFIRM, json=body, headers=auth_headers)
+    second = client.post(CONFIRM, json=body, headers=auth_headers)
+    assert second.json()["sent_count"] == 1
+    assert mock_send.call_count == 2
+
+
+def test_send_email_batch_skips_a_lead_already_being_mailed(db_session, sample_org, sample_advisor):
+    from app.services import action_lease, email_service
+    a = _lead(db_session, sample_org.id, sample_advisor.id)
+    b = _lead(db_session, sample_org.id, sample_advisor.id, email="b@example.com")
+    assert action_lease.acquire(db_session, email_service.BATCH_SEND_SCOPE, a.id, ttl_seconds=60)
+    from types import SimpleNamespace
+    with patch.object(email_service, "send_email_to_lead",
+                      return_value=SimpleNamespace(status="sent")) as one:
+        out = email_service.send_email_batch(db_session, sample_advisor, [a, b])
+    assert one.call_count == 1
+    assert out["sent_count"] == 1 and out["skipped_count"] == 1

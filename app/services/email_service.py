@@ -540,12 +540,27 @@ def send_email_batch(db: Session, advisor: User, leads: list[Lead]) -> dict:
         if not lead.email:
             skipped.append(lead.id)
             continue
+        # One batch click, one email per lead: a lease per lead (any instance)
+        # so a double-click's second request skips leads the first is mailing.
+        # Kept after a success for the window; released after a failure.
+        from app.services import action_lease
+        token = action_lease.acquire(db, BATCH_SEND_SCOPE, lead.id, ttl_seconds=BATCH_SEND_WINDOW_S)
+        if not token:
+            skipped.append(lead.id)
+            continue
         try:
             msg = send_email_to_lead(db, advisor, lead)
-            (sent if msg.status == "sent" else failed).append(lead.id)
+            ok = msg.status == "sent"
         except Exception:
-            failed.append(lead.id)
+            ok = False
+        (sent if ok else failed).append(lead.id)
+        if not ok:
+            action_lease.release(db, BATCH_SEND_SCOPE, lead.id, token)
     return {"sent_count": len(sent), "failed_count": len(failed), "skipped_count": len(skipped)}
+
+
+BATCH_SEND_SCOPE = "email.batch_send"
+BATCH_SEND_WINDOW_S = 120
 
 
 def describe_email_sender(db, organization_id) -> dict:

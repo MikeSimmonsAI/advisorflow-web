@@ -606,6 +606,16 @@ def confirm_email_send_batch(
         final_subject = (item.subject or "").replace(placeholder, booking_url)
         final_body = (item.body_html or "").replace(placeholder, booking_url)
 
+        # A double-click on "Send reviewed" mailed every family twice: the
+        # second request saw nothing in flight. Same lease as the single send
+        # (lead + subject). Kept for the window after a success; released on
+        # a failure so the retry goes out.
+        _claim = (lead.id, (final_subject or "").strip().lower())
+        _token = _claim_send(_claim, db)
+        if _token is None:
+            skipped.append({"lead_id": item.lead_id, "reason": "duplicate_send"})
+            continue
+
         # Row first, so tracking can reference a real id; store the ORIGINAL
         # edited body and inject tracking only into the copy handed to the
         # provider - see email_tracking_service.py for the full reasoning.
@@ -644,6 +654,7 @@ def confirm_email_send_batch(
             sent_ids.append(lead.id)
         else:
             failed_ids.append(lead.id)
+            _release_send(_claim, db, _token)
 
     db.commit()
 
