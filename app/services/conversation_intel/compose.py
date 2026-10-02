@@ -15,9 +15,10 @@ it, so the person sees what is wrong before they use it.
 """
 from __future__ import annotations
 
+import re
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.services.conversation_intel import quality
 
@@ -64,16 +65,32 @@ def prompt_block(ctx: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _template(ctx: Dict[str, Any]) -> str:
-    """A plain draft from memory alone. Honest about what it cannot answer."""
+_CALL_ASK = re.compile(r"\b(call me|give me a call|can (you|someone) call|ring me|phone me)\b", re.I)
+
+
+def _template(ctx: Dict[str, Any], style: str = "default") -> str:
+    """A plain draft from memory alone. Honest about what it cannot answer.
+
+    Sentences are built as a list so a style can change them without string
+    surgery: "shorter" keeps the greeting and the two that matter, "warmer"
+    adds a thank-you, "more_direct" leads with the answer and drops filler.
+    """
     first = (ctx["lead"]["name"] or "").split(" ")[0] or "there"
-    parts = ["Hi %s," % first]
+    greeting = "Hi %s," % first
+    body: List[str] = []
     vertical = ctx["lead"]["vertical"]
     facts = {f["key"]: f["value"] for f in ctx["known_facts"]}
+    fu = ctx.get("follow_up")
     for q in ctx["open_questions"][:2]:
         text = q["value"]
         low = text.lower()
-        if any(w in low for w in ("cost", "price", "how much", "premium", "rate")):
+        if _CALL_ASK.search(text):
+            # A request for a call is answered by agreeing to the call - not by
+            # promising "a straight answer" to it.
+            when = (fu or {}).get("value")
+            body.append("Happy to call you%s." % ((" " + when) if when else ""))
+            fu = None            # already said
+        elif any(w in low for w in ("cost", "price", "how much", "premium", "rate")):
             who = []
             if facts.get("household.spouse"):
                 who.append("your %s" % facts["household.spouse"])
@@ -81,25 +98,32 @@ def _template(ctx: Dict[str, Any]) -> str:
                 c = facts["household.children"]
                 who.append("your %s kids" % c if c.isdigit() else "your kids")
             if vertical == "insurance":
-                parts.append("Great question on cost%s. It depends on age, health and how much coverage makes sense, "
-                             "so the honest answer is a short review where I can show you real numbers." %
-                             (" for you%s" % ("".join(", " + w for w in who)) if who else ""))
+                body.append("Great question on cost%s. It depends on age, health and how much coverage makes sense, "
+                            "so the honest answer is a short review where I can show you real numbers." %
+                            (" for you" + "".join((" and " if i == len(who) - 1 else ", ") + w
+                                                   for i, w in enumerate(who)) if who else ""))
             elif vertical == "wholesale":
-                parts.append("On price - I won't guess at a number by text. The owner reviews the property details "
-                             "and gets back to you directly.")
+                body.append("On price - I won't guess at a number by text. The owner reviews the property details "
+                            "and gets back to you directly.")
             else:
-                parts.append("On cost - I'll get you accurate numbers rather than a guess.")
+                body.append("On cost - I'll get you accurate numbers rather than a guess.")
         else:
-            parts.append("About your question (“%s”) - I'll confirm the details and get back to you "
-                         "with a straight answer." % text[:120])
-    fu = ctx.get("follow_up")
+            body.append("About your question (“%s”) - I'll confirm the details and get back to you "
+                        "with a straight answer." % text[:120])
     if fu and fu.get("date"):
-        parts.append("I'll reach out %s as you asked." % fu["value"])
-    elif ctx.get("next_best_question") and not ctx["open_questions"]:
-        parts.append(ctx["next_best_question"])
-    elif ctx["open_questions"] and ctx.get("next_best_question"):
-        parts.append(ctx["next_best_question"])
-    return " ".join(parts)
+        wants_call = (ctx.get("preferred_channel") == "phone"
+                      or any(f["key"] == "pref.channel" and f["value"] == "phone"
+                             for f in ctx.get("known_facts", []) + ctx.get("preferences", [])))
+        body.append("I'll %s %s as you asked." % ("call you" if wants_call else "reach out", fu["value"]))
+    elif ctx.get("next_best_question"):
+        body.append(ctx["next_best_question"])
+    if style == "warmer":
+        body.insert(0, "Thanks so much for getting back to me.")
+    elif style == "shorter":
+        body = body[:2]
+    elif style == "more_direct":
+        body = [re.sub(r"^(Great question on cost[^.]*\. )", "", x) for x in body]
+    return " ".join([greeting] + body)
 
 
 def suggest(db, lead, ctx: Dict[str, Any], *, channel: str = "email", style: str = "default",
@@ -125,9 +149,7 @@ def suggest(db, lead, ctx: Dict[str, Any], *, channel: str = "email", style: str
         source, note = "ai", "Drafted by AI from conversation memory."
     except Exception as exc:                                     # noqa: BLE001
         log.info("composer using template (%s)", type(exc).__name__)
-        text = _template(ctx)
-        if style == "shorter":
-            text = " ".join(text.split(". ")[:2])
+        text = _template(ctx, style)
     gate = quality.check_reply(ctx, text, channel)
     return {"suggestion": text, "source": source, "note": note, "style": style, "channel": channel,
             "quality": gate}

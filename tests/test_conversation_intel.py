@@ -597,3 +597,18 @@ def test_answering_a_text_is_not_outreach_but_email_never_becomes_text(world):
     c2 = ctx(w2, T0 + timedelta(minutes=1))
     d = ci.decide_ai(c2, "sms")
     assert d["allowed"] is False and d["code"] == "no_sms_consent"
+
+
+def test_template_composer_styles_and_call_requests(world):
+    from app.services.conversation_intel import compose
+    w = world()
+    inbound(w, "How much would term life cost for me and my wife? Call me tomorrow afternoon.", T0)
+    c = ctx(w, T0 + timedelta(minutes=1))
+    texts = {st: compose._template(c, st) for st in ("default", "shorter", "warmer", "more_direct")}
+    assert texts["default"].startswith("Hi Pat,")
+    assert "straight answer" not in texts["default"]            # no "answer" promised to a call request
+    assert len(texts["shorter"]) <= len(texts["default"])
+    assert texts["warmer"] != texts["default"] and "Thanks" in texts["warmer"]
+    assert "Great question" not in texts["more_direct"]
+    for t in texts.values():
+        assert ".." not in t and "answer I'll" not in t       # sentences stay sentences
