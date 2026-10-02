@@ -140,6 +140,9 @@ class NotificationType(str, enum.Enum):
     # A property owner asked a Wholesale workspace to look at their house
     # (the public seller form). In-app only; see wholesale_notify.
     WHOLESALE_INQUIRY = "wholesale_inquiry"
+    # A website visitor asked for a demo without booking a time (Book a Demo
+    # "send my information instead"). In-app, to the deal's owner.
+    DEMO_REQUEST = "demo_request"
 
 
 # ---------------------------------------------------------------------------

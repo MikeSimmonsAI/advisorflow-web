@@ -134,6 +134,12 @@ def test_an_unbooked_request_lands_in_the_sales_pipeline_with_a_follow_up(client
     cf = json.loads(lead.custom_fields)
     assert cf["utm_source"] == "google" and cf["utm_campaign"] == "fall-demo"
     assert cf["cta"] == "hero" and cf["interest"] == "Insurance / Agency Automation"
+    # the owner hears about it in the app, and the bell opens the deal
+    from app.models.models import Notification, NotificationType
+    n = db_session.query(Notification).filter(Notification.user_id == brand["rep"].id).one()
+    assert n.type == NotificationType.DEMO_REQUEST
+    assert n.link == "/sales/opportunities/%s" % opp.id
+    assert "no time booked yet" in n.message
 
 
 def test_a_replayed_submission_is_answered_once_and_notifies_once(client, db_session, brand):

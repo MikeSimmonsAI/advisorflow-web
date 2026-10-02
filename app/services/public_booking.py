@@ -890,6 +890,7 @@ def record_demo_request(db: Session, *, platform: Platform, form: Dict[str, Any]
             detail=(" · ".join(bits) or None),
             actor_user_id=None,
             occurred_at=now))
+        _notify_owner_of_request(db, resolved.get("owner"), opp, form, lead_id)
         db.commit()
         return {"ok": True, "opportunity_id": opp.id, "created": created,
                 "owner_source": resolved.get("source")}
@@ -898,6 +899,34 @@ def record_demo_request(db: Session, *, platform: Platform, form: Dict[str, Any]
         log.exception("could not file website demo request in the pipeline "
                       "(lead %s kept)", lead_id)
         return {"ok": False, "reason": "exception"}
+
+
+def _notify_owner_of_request(db: Session, owner, opp, form: Dict[str, Any],
+                             lead_id: Optional[str]) -> None:
+    """The deal's owner hears about it in the app, not only by email: the bell
+    shows "Demo requested ..." and opens the deal. Best effort - a request is
+    never lost because a notification could not be written."""
+    owner_id = getattr(owner, "id", None) or (owner if isinstance(owner, str) else None)
+    if not owner_id:
+        return
+    try:
+        from app.models.models import Notification, NotificationType
+        who = " - ".join(b for b in ((form.get("company") or "").strip(),
+                                     (form.get("full_name") or "").strip()) if b)
+        nested = db.begin_nested()
+        db.add(Notification(user_id=owner_id, lead_id=lead_id, type=NotificationType.DEMO_REQUEST,
+                            message="Demo requested on the website%s - no time booked yet. Contact them to schedule."
+                                    % ((": " + who) if who else ""),
+                            link="/sales/opportunities/%s" % opp.id))
+        db.flush()
+        nested.commit()
+    except Exception:                                            # noqa: BLE001
+        try:
+            nested.rollback()
+        except Exception:                                        # noqa: BLE001
+            pass
+        log.warning("demo request: owner notification not written (opportunity %s)", getattr(opp, "id", None),
+                    exc_info=True)
 
 
 def _capture_website_lead(db: Session, platform: Platform, intake_org,

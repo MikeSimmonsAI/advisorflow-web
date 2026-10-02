@@ -1551,6 +1551,7 @@ ENUM_VALUES_TO_ADD = [
     ("suppressionsource", "VOICE_OPT_OUT"),
     ("notificationtype", "REPLY_RECEIVED"),
     ("notificationtype", "WHOLESALE_INQUIRY"),
+    ("notificationtype", "DEMO_REQUEST"),
 ]
 
 
