@@ -21,7 +21,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { api, login, fetchMyContexts, setWorkspaceContext, clearWorkspaceContext, logout, safeNextPath, getWorkspaceContext } from '../api/client'
 import { useMobile, useApi, ScreenHead, Loading, ErrorState, Empty, Icon, isAuthenticated } from './MobileShell'
 import { needsAttention, refusalReasons, canCompose, relTime, humanize, groupByDay,
-         workspaceChoices, parseTs, NOT_AVAILABLE, greetingName, mobilePathFor } from './mobileHelpers'
+         workspaceChoices, parseTs, NOT_AVAILABLE, greetingName, mobilePathFor, mobileSkin } from './mobileHelpers'
 import { BrainStrip } from './MobileAgency'
 import { hasAgencyFeature } from '../verticals/agencyVertical'
 import { readableTimestamps, replaceKeys } from '../utils/humanize'
@@ -79,7 +79,45 @@ export function MobileHome() {
   const { branding } = useMobile()
   // An insurance-agency workspace's "needs attention" is the agency attention
   // list (the same one the desktop Command Center shows), not just replies.
-  return hasAgencyFeature(branding) ? <AgencyMobileHome /> : <CrmMobileHome />
+  if (hasAgencyFeature(branding)) return <AgencyMobileHome />
+  // A wholesale workspace's work is deals that need a person (offer requests,
+  // asking prices, callbacks), not the reply inbox.
+  if (mobileSkin(branding) === 'wholesale') return <WholesaleMobileHome />
+  return <CrmMobileHome />
+}
+
+function WholesaleMobileHome() {
+  const { identity } = useMobile()
+  const ny = useApi('/wholesale/needs-you')
+  const cb = useApi('/wholesale/ops/callbacks?mine=false')
+  const items = ny.data?.items || []
+  const counts = cb.data?.counts || {}
+  const first = greetingName(identity?.user_full_name)
+  return (
+    <div className="mscreen" data-testid="m-wholesale-home">
+      <ScreenHead title={first ? 'Hi, ' + first : 'My Work'} sub={identity?.workspace_role ? humanize(identity.workspace_role) : null} />
+      <div className="mstats">
+        <Stat label="Needs you" value={ny.data ? (ny.data.count ?? items.length) : undefined} to="/wholesale" />
+        <Stat label="Callbacks due" value={cb.data ? (counts.due_now || 0) + (counts.overdue || 0) : undefined} to="/wholesale/callbacks" />
+        <Stat label="Upcoming" value={cb.data ? (counts.upcoming || 0) : undefined} to="/wholesale/callbacks" />
+      </div>
+      <div className="msection-title">Needs you</div>
+      {ny.loading && <Loading />}
+      {!ny.loading && ny.error && <ErrorState error={ny.error} onRetry={ny.reload} />}
+      {!ny.loading && !ny.error && items.length === 0 && <Empty>Nothing needs you right now.</Empty>}
+      <ul className="mlist">
+        {items.slice(0, 30).map((it, i) => (
+          <li key={(it.deal_id || it.lead_id || '') + ':' + it.kind + ':' + i}>
+            <Link to={mobilePathFor(it.link || '/wholesale')} className="mrow">
+              <span className={'mpill mpill--' + (it.priority >= 85 ? 'reply mpill--hot' : 'task')}>{humanize(it.kind)}</span>
+              <span className="mrow-main"><span className="mrow-title">{it.title}</span>
+                <span className="mrow-detail">{it.why}</span></span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 function AgencyMobileHome() {
