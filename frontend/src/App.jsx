@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
+import { lazyPage } from './utils/lazyPage'
 import Layout from './components/Layout'
 import DemoBanner from './components/DemoBanner'
 import ContextBanner from './components/ContextBanner'
@@ -91,15 +92,17 @@ import MobileApp from './mobile/routes'
 // routes below is what stops a workspace without the module walking into the
 // server's 402 — the entitlement itself is enforced on every one of those
 // endpoints, exactly as entitlements.py insists it must be.
-import WholesaleCommand, { DealOperationsClosing, DealOperationsDispositions } from './pages/wholesale/WholesaleCommand'
-import WholesaleProperties from './pages/wholesale/WholesaleProperties'
-import WholesaleDeal from './pages/wholesale/WholesaleDeal'
-import WholesaleBuyers from './pages/wholesale/WholesaleBuyers'
-import WholesaleExceptions from './pages/wholesale/WholesaleExceptions'
-import CallbackCenter from './pages/wholesale/ops/CallbackCenter'
-import PilotControls from './pages/wholesale/ops/PilotControls'
-import WholesaleFundingPartners from './pages/wholesale/WholesaleFundingPartners'
-import WholesaleSettings from './pages/wholesale/WholesaleSettings'
+const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
+const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
+const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
+const WholesaleProperties = lazyPage(() => import('./pages/wholesale/WholesaleProperties'))
+const WholesaleDeal = lazyPage(() => import('./pages/wholesale/WholesaleDeal'))
+const WholesaleBuyers = lazyPage(() => import('./pages/wholesale/WholesaleBuyers'))
+const WholesaleExceptions = lazyPage(() => import('./pages/wholesale/WholesaleExceptions'))
+const CallbackCenter = lazyPage(() => import('./pages/wholesale/ops/CallbackCenter'))
+const PilotControls = lazyPage(() => import('./pages/wholesale/ops/PilotControls'))
+const WholesaleFundingPartners = lazyPage(() => import('./pages/wholesale/WholesaleFundingPartners'))
+const WholesaleSettings = lazyPage(() => import('./pages/wholesale/WholesaleSettings'))
 // MAX LIFE COMMAND (insurance agency). Every screen behind `insurance_agency`.
 import {
   AgencyCommandCenter, AgencyOpportunityCenter, AgencyProspects, AgencyProspectDetail,
@@ -108,11 +111,12 @@ import {
   AgencyConversations, AgencyHomeGate,
 } from './pages/agency'
 // Wholesale Phase 7 — EvoSense acquisition engine. Same feature key.
-import EvoCommand from './pages/wholesale/evosense/EvoCommand'
-import EvoInbox from './pages/wholesale/evosense/EvoInbox'
-import EvoProperty from './pages/wholesale/evosense/EvoProperty'
-import { EvoStrategies, EvoStrategyBuilder } from './pages/wholesale/evosense/EvoStrategies'
-import EvoControls from './pages/wholesale/evosense/EvoControls'
+const EvoCommand = lazyPage(() => import('./pages/wholesale/evosense/EvoCommand'))
+const EvoInbox = lazyPage(() => import('./pages/wholesale/evosense/EvoInbox'))
+const EvoProperty = lazyPage(() => import('./pages/wholesale/evosense/EvoProperty'))
+const EvoStrategies = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategies })))
+const EvoStrategyBuilder = lazyPage(() => import('./pages/wholesale/evosense/EvoStrategies').then(m => ({ default: m.EvoStrategyBuilder })))
+const EvoControls = lazyPage(() => import('./pages/wholesale/evosense/EvoControls'))
 import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
@@ -124,58 +128,58 @@ import FiberLeadCapture from './pages/FiberLeadCapture'
 import OrgManager from './pages/OrgManager'
 import ReEngagement from './pages/ReEngagement'
 import SetupIntegrations from './pages/SetupIntegrations'
-import GodCommandCenter from './pages/GodCommandCenter'
+const GodCommandCenter = lazyPage(() => import('./pages/GodCommandCenter'))
 import Billing from './pages/Billing'
-import GodShell from './pages/GodShell'
-import GodOrganizations from './pages/GodOrganizations'
+const GodShell = lazyPage(() => import('./pages/GodShell'))
+const GodOrganizations = lazyPage(() => import('./pages/GodOrganizations'))
 // Executive Suite — brand-scoped read-only portal. Separate shell from the
 // owner shell (GodShell) and from the tenant Layout. An executive sees their
 // brand's KPIs and customer portfolio; they cannot enter workspaces or use
 // any owner controls. Internal terminology (god, etc.) never appears here.
-import ExecutiveSuite from './pages/executive/ExecutiveSuite'
-import ExecutiveCommandCenter from './pages/executive/ExecutiveCommandCenter'
+const ExecutiveSuite = lazyPage(() => import('./pages/executive/ExecutiveSuite'))
+const ExecutiveCommandCenter = lazyPage(() => import('./pages/executive/ExecutiveCommandCenter'))
 // PORTFOLIO REPLACES the separate Organizations and Customer Health pages —
 // one set of organizations, described once, with health as a column and a
 // filter rather than as a second list somewhere else.
-import ExecutivePortfolio from './pages/executive/ExecutivePortfolio'
-import ExecutiveRevenue from './pages/executive/ExecutiveRevenue'
-import ExecutiveTeam from './pages/executive/ExecutiveTeam'
+const ExecutivePortfolio = lazyPage(() => import('./pages/executive/ExecutivePortfolio'))
+const ExecutiveRevenue = lazyPage(() => import('./pages/executive/ExecutiveRevenue'))
+const ExecutiveTeam = lazyPage(() => import('./pages/executive/ExecutiveTeam'))
 // The organization drill-down, composed for an executive. Replaces the old
 // observation shell, which framed the customer workspace dashboard in a
 // read-only banner — the right screens for the person working the queue and
 // the wrong ones for the executive deciding whether the business is working.
-import ExecutiveOrgPerformance from './pages/executive/ExecutiveOrgPerformance'
-import ExecutiveWorkspace from './pages/executive/ExecutiveWorkspace'
-import ExecutiveWorkspaceItem from './pages/executive/ExecutiveWorkspaceItem'
+const ExecutiveOrgPerformance = lazyPage(() => import('./pages/executive/ExecutiveOrgPerformance'))
+const ExecutiveWorkspace = lazyPage(() => import('./pages/executive/ExecutiveWorkspace'))
+const ExecutiveWorkspaceItem = lazyPage(() => import('./pages/executive/ExecutiveWorkspaceItem'))
 // Checkpoint 6 — God Mode operations. Separate files from the Command Center
 // so the whole Checkpoint 6 surface can be read as one thing.
-import GodSalesOps from './pages/GodSalesOps'
-import GodBrandDetail from './pages/GodBrandDetail'
-import GodProvision from './pages/GodProvision'
+const GodSalesOps = lazyPage(() => import('./pages/GodSalesOps'))
+const GodBrandDetail = lazyPage(() => import('./pages/GodBrandDetail'))
+const GodProvision = lazyPage(() => import('./pages/GodProvision'))
 // Platform separation + customer provisioning.
-import PlatformOverview from './pages/god/PlatformOverview'
-import CustomerCreate from './pages/god/CustomerCreate'
-import CustomerDetail from './pages/god/CustomerDetail'
-import GodImplementations from './pages/GodImplementations'
-import GodImplementationDetail from './pages/GodImplementationDetail'
-import GodCustomers from './pages/GodCustomers'
-import GodOpportunities from './pages/god/GodOpportunities'
-import GodProposals from './pages/god/GodProposals'
-import GodMeetings from './pages/god/GodMeetings'
-import GodControlAudit from './pages/GodControlAudit'
+const PlatformOverview = lazyPage(() => import('./pages/god/PlatformOverview'))
+const CustomerCreate = lazyPage(() => import('./pages/god/CustomerCreate'))
+const CustomerDetail = lazyPage(() => import('./pages/god/CustomerDetail'))
+const GodImplementations = lazyPage(() => import('./pages/GodImplementations'))
+const GodImplementationDetail = lazyPage(() => import('./pages/GodImplementationDetail'))
+const GodCustomers = lazyPage(() => import('./pages/GodCustomers'))
+const GodOpportunities = lazyPage(() => import('./pages/god/GodOpportunities'))
+const GodProposals = lazyPage(() => import('./pages/god/GodProposals'))
+const GodMeetings = lazyPage(() => import('./pages/god/GodMeetings'))
+const GodControlAudit = lazyPage(() => import('./pages/GodControlAudit'))
 // Executive portfolio assignment — the management surface the executive
 // authority needs. Without it, per-organization access would be settable only
 // by a developer, which is the failure mode this platform keeps refusing.
-import GodExecutiveAccess from './pages/god/GodExecutiveAccess'
+const GodExecutiveAccess = lazyPage(() => import('./pages/god/GodExecutiveAccess'))
 // PRICING & COMPENSATION. Discount floors and commission plans, editable by the
 // owner. Registered BEFORE the /god/* catch-all below or it would silently
 // render the Command Center instead.
-import GodPricingCompensation from './pages/god/GodPricingCompensation'
-import GodBillingOps from './pages/god/GodBillingOps'
+const GodPricingCompensation = lazyPage(() => import('./pages/god/GodPricingCompensation'))
+const GodBillingOps = lazyPage(() => import('./pages/god/GodBillingOps'))
 // Customer 360 — one customer's whole commercial and lifecycle picture. Its
 // route is registered as /god/customers/:orgId/360, three segments, so it
 // cannot be shadowed by the two-segment CustomerDetail route above it.
-import Customer360 from './pages/god/Customer360'
+const Customer360 = lazyPage(() => import('./pages/god/Customer360'))
 import SalesImplementations from './pages/SalesImplementations'
 import Activate from './pages/Activate'
 import LeadScraper from './pages/LeadScraper'
@@ -189,43 +193,43 @@ import ImportLedger from './pages/intake/ImportLedger'
 // one-at-a-time Promote to Lead). Same guard as /imports - the contacts API
 // requires import-review permission.
 import Contacts from './pages/contacts/Contacts'
-import MyDay from './pages/sales/MyDay'
-import SellCatalogue from './pages/sales/SellCatalogue'
-import MyPipeline from './pages/sales/MyPipeline'
-import ManagerCommand from './pages/sales/ManagerCommand'
+const MyDay = lazyPage(() => import('./pages/sales/MyDay'))
+const SellCatalogue = lazyPage(() => import('./pages/sales/SellCatalogue'))
+const MyPipeline = lazyPage(() => import('./pages/sales/MyPipeline'))
+const ManagerCommand = lazyPage(() => import('./pages/sales/ManagerCommand'))
 // Compensation Command Center (management) and My Compensation (a rep's own).
 // Two screens because they are two authorities, not one screen with a flag.
-import SalesShell from './pages/sales/SalesShell'
+const SalesShell = lazyPage(() => import('./pages/sales/SalesShell'))
 import CompensationCommand from './pages/sales/CompensationCommand'
-import MyCompensation from './pages/sales/MyCompensation'
-import OpportunityDetail from './pages/sales/OpportunityDetail'
-import MyAvailability from './pages/sales/MyAvailability'
-import TeamAvailability from './pages/sales/TeamAvailability'
-import TeamCalendar from './pages/sales/TeamCalendar'
-import TeamProposals from './pages/sales/TeamProposals'
+const MyCompensation = lazyPage(() => import('./pages/sales/MyCompensation'))
+const OpportunityDetail = lazyPage(() => import('./pages/sales/OpportunityDetail'))
+const MyAvailability = lazyPage(() => import('./pages/sales/MyAvailability'))
+const TeamAvailability = lazyPage(() => import('./pages/sales/TeamAvailability'))
+const TeamCalendar = lazyPage(() => import('./pages/sales/TeamCalendar'))
+const TeamProposals = lazyPage(() => import('./pages/sales/TeamProposals'))
 // DEMOS TO BUILD — the queue, and the workspace a job opens into. Both are
 // Sales Workspace pages: a demo is a stage on an opportunity, so the work of
 // building one belongs beside the deal rather than in God Mode.
-import DemoQueue from './pages/sales/DemoQueue'
-import DemoBuild from './pages/sales/DemoBuild'
-import Salespeople from './pages/sales/Salespeople'
-import Prospects from './pages/sales/Prospects'
-import GodUsers from './pages/god/GodUsers'
-import Workspaces from './pages/god/Workspaces'
-import UserAccessDiagnostic from './pages/god/UserAccessDiagnostic'
-import QualificationDiagnostic from './pages/god/QualificationDiagnostic'
-import GodTwilioDiagnostics from './pages/god/GodTwilioDiagnostics'
-import GodEmailDiagnostics from './pages/god/GodEmailDiagnostics'
-import GodJobRuns from './pages/god/GodJobRuns'
-import GodLeadBrowser from './pages/god/GodLeadBrowser'
-import LeadIntelligence from './pages/god/LeadIntelligence'
-import FeatureEntitlements from './pages/god/FeatureEntitlements'
-import GodVoiceConfig from './pages/god/GodVoiceConfig'
-import GodRevenueHistory from './pages/god/GodRevenueHistory'
-import RoadmapBoard from './pages/god/RoadmapBoard'
-import GodLaunches from './pages/god/GodLaunches'
+const DemoQueue = lazyPage(() => import('./pages/sales/DemoQueue'))
+const DemoBuild = lazyPage(() => import('./pages/sales/DemoBuild'))
+const Salespeople = lazyPage(() => import('./pages/sales/Salespeople'))
+const Prospects = lazyPage(() => import('./pages/sales/Prospects'))
+const GodUsers = lazyPage(() => import('./pages/god/GodUsers'))
+const Workspaces = lazyPage(() => import('./pages/god/Workspaces'))
+const UserAccessDiagnostic = lazyPage(() => import('./pages/god/UserAccessDiagnostic'))
+const QualificationDiagnostic = lazyPage(() => import('./pages/god/QualificationDiagnostic'))
+const GodTwilioDiagnostics = lazyPage(() => import('./pages/god/GodTwilioDiagnostics'))
+const GodEmailDiagnostics = lazyPage(() => import('./pages/god/GodEmailDiagnostics'))
+const GodJobRuns = lazyPage(() => import('./pages/god/GodJobRuns'))
+const GodLeadBrowser = lazyPage(() => import('./pages/god/GodLeadBrowser'))
+const LeadIntelligence = lazyPage(() => import('./pages/god/LeadIntelligence'))
+const FeatureEntitlements = lazyPage(() => import('./pages/god/FeatureEntitlements'))
+const GodVoiceConfig = lazyPage(() => import('./pages/god/GodVoiceConfig'))
+const GodRevenueHistory = lazyPage(() => import('./pages/god/GodRevenueHistory'))
+const RoadmapBoard = lazyPage(() => import('./pages/god/RoadmapBoard'))
+const GodLaunches = lazyPage(() => import('./pages/god/GodLaunches'))
 import HelpSupport from './pages/HelpSupport'
-import GodSupport from './pages/god/GodSupport'
+const GodSupport = lazyPage(() => import('./pages/god/GodSupport'))
 // AI OPERATIONS. The platform-level view of the AI workforce — the dark-launch
 // state, the supervisor read for one customer, inbound nobody could place, and
 // the synthetic proofs. Registered BEFORE the God catch-all route below.
@@ -238,8 +242,8 @@ import GodSupport from './pages/god/GodSupport'
 // what that gate was reading and failed it. Inside a `{/* ... */}` block the
 // same characters are harmless, which is why the route comment below may
 // write the path out in full and this one may not.
-import GodAIOperations from './pages/god/GodAIOperations'
-import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
+const GodAIOperations = lazyPage(() => import('./pages/god/GodAIOperations'))
+const GodMaintenanceOps = lazyPage(() => import('./pages/god/GodMaintenanceOps'))
 // GOD MODE -> MANAGE ACCESS. One person, every context they hold, corrected in
 // place. Registered BEFORE the God catch-all route below, or it would silently
 // render the Command Center instead.
@@ -251,13 +255,13 @@ import GodMaintenanceOps from './pages/god/GodMaintenanceOps'
 // ProtectedRoute body, so `scripts/smoke_platform_frontend.py` could not see
 // `<ContextBanner />` and reported the banner as missing from every tenant
 // screen. The banner was always there; the gate was reading a hole.
-import GodAccess from './pages/god/GodAccess'
-import GodPublicIntake from './pages/god/GodPublicIntake'
+const GodAccess = lazyPage(() => import('./pages/god/GodAccess'))
+const GodPublicIntake = lazyPage(() => import('./pages/god/GodPublicIntake'))
 // ADD A PERSON. The front door for seating somebody - email first, existing
 // identity reused, brand seat and/or customer workspace granted in one act.
-import GodAddPerson from './pages/god/GodAddPerson'
-import GodDemoSuite from './pages/god/GodDemoSuite'
-import GodTraining from './pages/god/GodTraining'
+const GodAddPerson = lazyPage(() => import('./pages/god/GodAddPerson'))
+const GodDemoSuite = lazyPage(() => import('./pages/god/GodDemoSuite'))
+const GodTraining = lazyPage(() => import('./pages/god/GodTraining'))
 // The PRESENTER's Demo Suite and the learner's Training. Both are ordinary
 // authenticated routes: the entitlement is resolved on the server per brand,
 // because hiding a route is not access control.
@@ -278,7 +282,7 @@ import AIEmployeeDetail from './pages/AIEmployeeDetail'
 // above the GodAIOperations import: a line comment containing the two
 // characters that open a block comment makes GATE 29's stripper swallow every
 // line to the next close, and it fails a check about something else entirely.
-import GodWorkforce from './pages/god/GodWorkforce'
+const GodWorkforce = lazyPage(() => import('./pages/god/GodWorkforce'))
 // AI WORKFORCE DEPLOYMENT (T8). Two screens, two authorities, one product.
 //
 // The customer surface is hiring and setting up: what this business could
@@ -296,7 +300,7 @@ import AIWorkforce from './pages/AIWorkforce'
 // back to the layer that owns it.
 import AIWorkforceCommand from './pages/AIWorkforceCommand'
 import AIWorkforceEmployee from './pages/AIWorkforceEmployee'
-import GodAIWorkforceBuilder from './pages/god/GodAIWorkforceBuilder'
+const GodAIWorkforceBuilder = lazyPage(() => import('./pages/god/GodAIWorkforceBuilder'))
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
          clearWorkspaceContext, getBranding } from './api/client'
@@ -830,6 +834,9 @@ export default function App() {
           this process is the demo environment, so a production bundle has no
           demo affordance in its DOM to find. */}
       <DemoBanner />
+      {/* The owner console, Sales, Executive and Wholesale areas load on first
+          visit (utils/lazyPage); this is what shows for that moment. */}
+      <Suspense fallback={<div role="status" aria-live="polite" style={{ padding: 24, color: 'var(--text-secondary)' }}>Loading…</div>}>
       <Routes>
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
         {/* MOBILE / PWA SHELL. Own auth gate (/m/login), own chrome; every call is an existing, server-enforced endpoint. */}
@@ -1358,6 +1365,7 @@ export default function App() {
             : <Navigate to="/login" replace />
         } />
       </Routes>
+      </Suspense>
     </BrowserRouter>
     </ToastProvider>
   )

@@ -50,6 +50,7 @@ acceptance matrix are added at closeout.
 | 45f81f1 · 17a7561 · fcf10a4 | Duplicate sends | Same protection on the lead page's AI voice call (two clicks rang the person twice), SMS send-batch, and both bulk email sends ("Send reviewed" and the email-only batch). Released on failure so a retry works. |
 | e0442f6 | Dead code | Unreachable duplicate `/sales/video/status` removed; route-reachability test added. |
 | ece4e13 · fed94db | Honest dead ends | `/onboarding` no longer shows a three-step signup form that ends in "retired" — it says accounts are set up by the team. Campaign Builder Send explains it is not switched on yet (Decision 8) instead of "Admin access required". |
+| (oct2yy) | Performance | The app was one 3.5 MB script (905 KB gzipped) that every screen downloaded first — Login and phones included. Owner console, Sales, Executive and Wholesale pages now load on first visit: first load 2.0 MB (520 KB gzipped, −43%). A tab left open across a deploy reloads once to pick up the new files instead of showing a blank page. |
 | a978b71 · 88f0bd5 · 3fcea2b · (oct2ww) | Buttons that end in "Admin access required" | Two sweeps of every page a person can reach, against the role each route requires. Admin-only actions are now disabled or replaced with who can do them: AI Team add; AI employee pause/resume/stage; Wholesale pilot controls and paid skip-trace approval; EvoSense providers, resume, scoring, budgets (workspace and per-strategy), evaluations; Sales "release holdbacks", team-pipeline person filter, deal-value override. Admin buttons on Cadence, Lead, Leads, Compliance and Settings now follow the role in the current workspace (they used the account's role). |
 
 ## Checked and clean (no change needed)
@@ -76,6 +77,10 @@ acceptance matrix are added at closeout.
 8. **Campaign Builder "Send" has never worked.** `POST /campaigns/builder/send` is shadowed by `POST /campaigns/{campaign_id}/send` (declared first), so advisors get "Admin access required" and admins get a validation error. Fixing the route order is one line, but it switches on a bulk SMS/email sender that has never run in production for real customers (Atlantis). Decide whether to turn it on, and for whom. A duplicate guard is already in place; a test pins today's behaviour. Until then the page tells the person "not switched on yet, nothing was sent" instead of "Admin access required" (remove that message in `CampaignBuilder.jsx` when switching it on).
 
 9. **Rate limits are per server instance** (slowapi in-memory). With one Render instance that is exact; with more, each public form/login limit multiplies by the instance count. Sharing them needs Redis (a paid add-on) — only matters if the service is scaled out.
+
+## Recommended next (not done today — explained)
+
+- Hashed `/assets/*` are served `max-age=0` (each visit revalidates; 304s, not re-downloads). An `immutable` header in `render.yaml` is the standard fix; left alone because the Blueprint is live-synced and this is not worth a config sync during a marathon.
 
 ## Mike-only actions (unchanged)
 

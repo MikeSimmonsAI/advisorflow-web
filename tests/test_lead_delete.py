@@ -174,7 +174,13 @@ def test_a_server_error_still_carries_cors_headers(db_session, sample_org):
 
     if not any(getattr(r, "path", None) == "/__probe_boom" for r in app.routes):
         app.include_router(probe)
-    r = TestClient(app, raise_server_exceptions=False).get("/__probe_boom", headers={"Origin": origin})
+    try:
+        r = TestClient(app, raise_server_exceptions=False).get("/__probe_boom", headers={"Origin": origin})
+    finally:
+        # The app object is shared by every test in this process: a probe left
+        # behind is a route the GET-route sweep then finds and reports as a 500.
+        app.router.routes[:] = [x for x in app.router.routes
+                                if getattr(x, "path", None) != "/__probe_boom"]
     assert r.status_code == 500
     assert r.headers.get("access-control-allow-origin") == origin
     assert "boom" not in r.text

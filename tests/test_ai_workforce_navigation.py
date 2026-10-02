@@ -110,7 +110,10 @@ def test_no_workforce_route_carries_an_organization_id():
 def test_every_routed_workforce_component_is_imported_and_exists():
     src = _read(APP_JSX)
     for name, path in PAGES.items():
-        assert re.search(r"^import\s+%s\s+from\s+" % name, src, re.M), (
+        # A static import, or a route-level lazy import (utils/lazyPage) for
+        # the areas that load on first visit.
+        assert (re.search(r"^import\s+%s\s+from\s+" % name, src, re.M)
+                or re.search(r"^const\s+%s\s*=\s*lazyPage\(\(\)\s*=>\s*import\('" % name, src, re.M)), (
             "%s is used in a route but never imported into App.jsx." % name)
         assert os.path.exists(path), "%s is imported but %s is missing." % (
             name, path)
