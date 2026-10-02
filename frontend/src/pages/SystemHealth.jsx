@@ -145,7 +145,7 @@ function PlatformReadiness({ data }) {
             {jobs.map(j => (
               <li key={j.job}>
                 <span>{JOB_LABEL[j.job] || j.job.replace(/_/g, ' ')}</span>
-                <span className={'readiness-val' + (j.last_status === 'error' ? ' is-bad' : '')}>
+                <span className={'readiness-val' + (j.last_status === 'error' || j.last_status === 'stuck' ? ' is-bad' : '')}>
                   {j.last_status === 'never_ran' ? 'No run recorded' : `${j.last_status} · ${ageText(j.age_minutes)}`}
                 </span>
               </li>

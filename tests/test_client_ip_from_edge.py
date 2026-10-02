@@ -41,3 +41,37 @@ def test_rate_limit_and_login_throttle_now_see_distinct_callers():
     # the throttle key is built from request.client.host, which the middleware sets
     assert AR._throttle_key(SReq(dict(scope, client=("198.51.100.9", 1))), "A@x.test") == "198.51.100.9:a@x.test"
     assert limiter is not None
+
+
+def test_slow_requests_are_logged_without_the_query_string(caplog, monkeypatch):
+    import logging
+    import time
+    from fastapi.testclient import TestClient
+    from app.main import app
+    path = "/__slow_for_test"
+    if not any(getattr(r, "path", "") == path for r in app.routes):
+        @app.get(path)
+        def _slow():
+            time.sleep(0.05)
+            return {"ok": True}
+    mw = None
+    try:
+        # lower the threshold on the live middleware instance
+        TestClient(app).get("/health")          # builds the middleware stack
+        stack = app.middleware_stack
+        node = stack
+        while node is not None:
+            if type(node).__name__ == "SlowRequestLogMiddleware":
+                mw = node
+                break
+            node = getattr(node, "app", None)
+        assert mw is not None
+        old, mw.threshold = mw.threshold, 10
+        with caplog.at_level(logging.WARNING, logger="slow_request"):
+            TestClient(app).get(path + "?token=secret123")
+        line = next(r.getMessage() for r in caplog.records if r.name == "slow_request")
+        assert path in line and "secret123" not in line and "-> 200" in line
+    finally:
+        if mw is not None:
+            mw.threshold = old
+        app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", "") != path]

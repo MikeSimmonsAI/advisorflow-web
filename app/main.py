@@ -595,6 +595,41 @@ def _valid_ip(value: str):
         return None
 
 
+class SlowRequestLogMiddleware:
+    """One log line per SLOW request: method, path (no query string - it can
+    carry tokens), status and milliseconds. Render keeps the logs; this makes
+    "the app felt slow at 2pm" answerable. Threshold SLOW_REQUEST_MS (2000)."""
+    def __init__(self, app):
+        self.app = app
+        try:
+            self.threshold = float(os.environ.get("SLOW_REQUEST_MS") or 2000)
+        except ValueError:
+            self.threshold = 2000.0
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        import time as _t
+        t0 = _t.perf_counter()
+        status = {"code": None}
+
+        async def _send(message):
+            if message.get("type") == "http.response.start":
+                status["code"] = message.get("status")
+            await send(message)
+        try:
+            await self.app(scope, receive, _send)
+        finally:
+            ms = (_t.perf_counter() - t0) * 1000
+            if ms >= self.threshold:
+                logging.getLogger("slow_request").warning(
+                    "slow request %.0f ms %s %s -> %s", ms, scope.get("method"), scope.get("path"),
+                    status["code"])
+
+
+app.add_middleware(SlowRequestLogMiddleware)
+
 # Added LAST so it runs FIRST: every other middleware and the rate limiter see
 # the real address.
 app.add_middleware(ClientIPFromEdgeMiddleware)

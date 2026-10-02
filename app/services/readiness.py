@@ -30,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 OK, DEGRADED, FAILED = "ok", "degraded", "failed"
+STUCK_AFTER_MINUTES = 6 * 60      # longer than any loop's pass; the longest interval is 6 h
 NOT_CONFIGURED, CONFIGURED, DISABLED = "not_configured", "configured", "disabled"
 
 
@@ -66,9 +67,15 @@ def jobs(db: Session) -> Dict[str, Any]:
                 continue
             age = int((now - (last.finished_at or last.started_at)).total_seconds() // 60) \
                 if (last.finished_at or last.started_at) else None
-            if last.status in ("error", "failed"):        # the ledger writes 'error'
+            status = last.status
+            if status in ("error", "failed"):              # the ledger writes 'error'
                 failed += 1
-            items.append({"job": name, "last_status": last.status, "age_minutes": age})
+            elif status == "running" and age is not None and age > STUCK_AFTER_MINUTES:
+                # A pass that never finished: the process died mid-run (deploy,
+                # OOM) or it hangs. Either way the job is not doing its work.
+                status = "stuck"
+                failed += 1
+            items.append({"job": name, "last_status": status, "age_minutes": age})
     except Exception as exc:                                     # noqa: BLE001
         db.rollback()
         return {"status": DEGRADED, "items": items, "error": type(exc).__name__}

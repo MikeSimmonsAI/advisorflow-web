@@ -44,3 +44,14 @@ def test_a_failed_job_degrades_but_does_not_fail(db_session):
 
 def test_system_health_is_owner_only(client, auth_headers):
     assert client.get("/god/system-health", headers=auth_headers).status_code in (401, 403)
+
+
+def test_a_run_that_never_finished_is_reported_stuck(db_session):
+    from datetime import datetime, timedelta
+    from app.models.job_models import JobRun
+    db_session.add(JobRun(job_name="review_request_loop", status="running",
+                          started_at=datetime.utcnow() - timedelta(hours=7)))
+    db_session.commit()
+    rep = readiness.report(db_session, detail=True)
+    row = next(j for j in rep["jobs"]["items"] if j["job"] == "review_request_loop")
+    assert row["last_status"] == "stuck" and rep["status"] == "degraded"

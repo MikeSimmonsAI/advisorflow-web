@@ -141,7 +141,7 @@ function AgencyMobileHome() {
       {!att.loading && !att.error && items.length === 0 && <Empty>Nothing needs you right now.</Empty>}
       <ul className="mlist">
         {items.map((it, i) => (
-          <li key={(it.link && it.link.id) || i}>
+          <li key={[it.kind || it.type || '', (it.link && it.link.id) || '', i].join(':')}>   {/* one prospect can need attention for two reasons */}
             <Link to={mobilePathFor((it.link && it.link.path) || '/agency')} className="mrow">
               <span className={'mpill mpill--' + (it.severity === 'high' ? 'reply mpill--hot' : 'task')}>{humanize((it.link && it.link.type) || 'item')}</span>
               <span className="mrow-main"><span className="mrow-title">{it.title}</span>
