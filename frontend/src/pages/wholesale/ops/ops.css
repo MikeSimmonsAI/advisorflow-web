@@ -24,7 +24,7 @@
 .wso-temp--WARM { color: var(--evo-warning-ink); background: var(--evo-warning-soft); }
 .wso-temp--COLD { color: var(--evo-info-ink); background: var(--evo-info-soft); }
 .wso-temp--UNKNOWN { color: var(--evo-text-tertiary); background: var(--evo-neutral-soft); }
-.wso-temp__src { font-weight: 500; opacity: .8; letter-spacing: 0; }
+.wso-temp__src { font-weight: 500; letter-spacing: 0; }   /* no fade: AA on the chip */
 
 /* Callback Center buckets */
 .wso-buckets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
