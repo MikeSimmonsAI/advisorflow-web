@@ -40,6 +40,13 @@ acceptance matrix are added at closeout.
 | c7e5296 | Book a Demo | Deal owner gets an in-app notification that opens the deal (enum `DEMO_REQUEST`, additive). |
 | 565fe90 · 6e23010 | Error states | Failure injection on 50+ screens: Org Settings no longer renders defaults that Save would write over real settings; Reports no longer shows fake zeros; Settings no longer hangs; Cadence/Templates/Auto-Send/CRM no longer say "empty" on a failed read; Booking Settings can't save defaults. |
 | (oct2cc) | Broken in production | God Mode Opportunities/Meetings/Proposals and Org Settings CRM stages/custom fields used relative `fetch()` → read the frontend's HTML in production. Now via the API client; a guard test prevents relative API fetches. |
+| ed33285 | API contract | Permanent test: every one of 1,133 `api.*` calls in the frontend matches a backend route. |
+| a495f85 | Security / rate limits | Behind Cloudflare every request looked like it came from the same few edge IPs, so per-IP limits (login throttle) were shared by everyone. The real client IP (`CF-Connecting-IP`, validated) is now used. |
+| 5d09089 | Observability | A background job "running" for over 6 h is shown as **stuck** (red) and degrades readiness; requests slower than 2 s are logged (path only, no query string). |
+| eec4890 | Conversation Brain | Smart Composer: call requests answered "Happy to call you…", warmer / shorter / more direct styles, spouse wording. |
+| 97ebc74 | Conversation Intelligence | **Conversation Queue** page (`/conversation-queue`, linked from Replies): insights, conversations by priority, search of what customers told us. |
+| 2a4f1fe · b8e5026 | Duplicate sends | A double-tap no longer texts a family twice: database lease on lead + exact text (30 s) on every one-message SMS door (lead page, inbox/phone, MMS, AI approve-and-send, drafted batch, Wholesale owner text). |
+| d6503b2 | Duplicate sends | Auto-send approve / approve-all now claim the row atomically (two clicks could both send); campaign sends refuse an identical repeat within 2 min. Corrects b8e5026's message, which said these were already guarded. |
 
 ## Checked and clean (no change needed)
 
@@ -47,6 +54,7 @@ acceptance matrix are added at closeout.
 - Role matrix: advisors reach no admin data or secrets through any read-only route (426 routes × advisor/admin).
 - No route's query count grows with workspace size (247 routes, 10 vs 120 leads).
 - Login errors don't reveal whether an email exists.
+- Route reachability: across every registered route, only two literal paths are shadowed by an earlier route (Campaign Builder send — Decision 8; a duplicate `/sales/video/status`, dead copy). A permanent test now fails on any new one.
 
 ## Decisions only Mike can make (found today, not changed)
 
@@ -57,6 +65,7 @@ acceptance matrix are added at closeout.
 5. **Gold primary/login button** white text is 2.6:1 contrast (brand colour). Darken the gold or use dark text.
 6. **Self-service password reset** does not exist (admins reset passwords). Worth adding; it sends email, so it needs a decision on sender per brand.
 7. **Wholesale skin** on phones depends on the workspace's industry/feature list; a wholesale workspace with no explicit feature list gets the generic phone home.
+8. **Campaign Builder "Send" has never worked.** `POST /campaigns/builder/send` is shadowed by `POST /campaigns/{campaign_id}/send` (declared first), so advisors get "Admin access required" and admins get a validation error. Fixing the route order is one line, but it switches on a bulk SMS/email sender that has never run in production for real customers (Atlantis). Decide whether to turn it on, and for whom. A duplicate guard is already in place; a test pins today's behaviour.
 
 ## Mike-only actions (unchanged)
 
