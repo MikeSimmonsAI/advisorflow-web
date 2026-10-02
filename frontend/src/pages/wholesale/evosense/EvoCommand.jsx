@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../api/client'
-import { readAuthority } from '../../../auth/workspaceAuthority'
+import { isWholesaleAdmin } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
 import {
   Alert, Chips, Empty, EvoApp, Feed, Hero, Metric, Metrics, Num, PageSkeleton, Panel, PropCard,
@@ -31,7 +31,7 @@ const ACT_TONE = {
 
 export default function EvoCommand() {
   // Anyone may pause; only a workspace admin may resume (server rule).
-  const isAdmin = readAuthority().isManager
+  const isAdmin = isWholesaleAdmin()
   const navigate = useNavigate()
   const [cc, setCc] = useState(null)
   const [error, setError] = useState(null)

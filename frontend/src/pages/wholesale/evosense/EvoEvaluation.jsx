@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../../api/client'
-import { readAuthority } from '../../../auth/workspaceAuthority'
+import { isWholesaleAdmin } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
 import { Alert, Panel, cents } from '../ds/ds'
 
@@ -131,7 +131,7 @@ function Results({ ev }) {
 
 export default function EvoEvaluation() {
   // Every write here is workspace-admin only on the server.
-  const isAdmin = readAuthority().isManager
+  const isAdmin = isWholesaleAdmin()
   const [mode, setMode] = useState('contact')
   const [setup, setSetup] = useState(null)
   const [runs, setRuns] = useState([])

@@ -70,6 +70,18 @@ export function workspaceRole(user = getCurrentUser()) {
   return roleOf(getBranding(), user)
 }
 
+/**
+ * Wholesale / EvoSense admin checks (wholesale_ops_router._is_admin,
+ * evosense_router._admin) also accept an ACCOUNT role of super_admin or
+ * god_admin, whatever the membership role in this workspace. Use this for
+ * those screens so a super admin is not shown disabled controls the server
+ * would accept.
+ */
+export function isWholesaleAdmin() {
+  const a = readAuthority()
+  return a.isManager || ['super_admin', 'god_admin'].includes(a.user?.role)
+}
+
 /* ── the whole answer ─────────────────────────────────────────────────────── */
 
 export function readAuthority({ capabilities = null } = {}) {

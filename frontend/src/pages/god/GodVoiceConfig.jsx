@@ -12,7 +12,7 @@
  * Rule: never shows api_key values. Reports key presence only.
  * Rule: test call requires explicit confirm — one extra click, no accident.
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useId } from 'react'
 import { api } from '../../api/client'
 
 const USE_CASES = ['file_check', 'appointment_reminder', 'reengagement']
@@ -40,6 +40,7 @@ function ReadinessChip({ ready, why }) {
 }
 
 function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
+  const uid = useId()
   const [versionEdit, setVersionEdit] = useState(false)
   const [versionVal, setVersionVal] = useState(String(agent.agent_version ?? ''))
   const [versionSaving, setVersionSaving] = useState(false)
@@ -172,11 +173,11 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
             </>
           ) : (
             <>
-              <label style={{ fontSize: 12, color: 'var(--gm-dim)' }} htmlFor="godvoiceco-max-calls">max calls</label>
-              <input id="godvoiceco-max-calls" type="number" min={1} value={maxCall} onChange={e => setMaxCall(e.target.value)}
+              <label style={{ fontSize: 12, color: 'var(--gm-dim)' }} htmlFor={`${uid}-godvoiceco-max-calls`}>max calls</label>
+              <input id={`${uid}-godvoiceco-max-calls`} type="number" min={1} value={maxCall} onChange={e => setMaxCall(e.target.value)}
                      style={fieldStyle} placeholder="default" />
-              <label style={{ fontSize: 12, color: 'var(--gm-dim)' }} htmlFor="godvoiceco-max-dials">max dials</label>
-              <input id="godvoiceco-max-dials" type="number" min={1} value={maxDial} onChange={e => setMaxDial(e.target.value)}
+              <label style={{ fontSize: 12, color: 'var(--gm-dim)' }} htmlFor={`${uid}-godvoiceco-max-dials`}>max dials</label>
+              <input id={`${uid}-godvoiceco-max-dials`} type="number" min={1} value={maxDial} onChange={e => setMaxDial(e.target.value)}
                      style={fieldStyle} placeholder="default" />
               <button style={btnStyle()} onClick={savePolicy} disabled={policySaving}>
                 {policySaving ? 'Saving…' : 'Save'}

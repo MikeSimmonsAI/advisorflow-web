@@ -226,14 +226,14 @@ export function EntitlementsWorkbench({ target, compact = false }) {
           <div className="fe-filters">
             <input className="fe-input fe-search" placeholder="Search features or keys…" value={search}
               onChange={e => setSearch(e.target.value)} aria-label="Search features" />
-            <select aria-label="Filter by status" className="fe-input" value={status} onChange={e => setStatus(e.target.value)} aria-label="Status">
+            <select className="fe-input" value={status} onChange={e => setStatus(e.target.value)} aria-label="Status">
               <option value="all">All statuses</option>
               <option value="enabled">Enabled</option>
               <option value="disabled">Disabled</option>
               <option value="requires_setup">Requires setup</option>
               <option value="blocked_by_dependency">Blocked by dependency</option>
             </select>
-            <select aria-label="Filter by source" className="fe-input" value={source} onChange={e => setSource(e.target.value)} aria-label="Source">
+            <select className="fe-input" value={source} onChange={e => setSource(e.target.value)} aria-label="Source">
               <option value="all">All sources</option>
               <option value="override">Overridden here</option>
               <option value="inherited">Inherited</option>

@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
-import { readAuthority } from '../../../auth/workspaceAuthority'
+import { isWholesaleAdmin } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
 import {
   Alert, EvoApp, Hero, Metric, Metrics, PageSkeleton, Panel, SandboxTag, TabBar, Tag, Tile, ago, cents, humanize,
@@ -125,7 +125,7 @@ export default function EvoControls() {
   // Providers, verification, scoring, budgets and RESUMING are workspace-admin
   // actions on the server (evosense_router._admin / _is_admin_here). Anyone
   // may pause. Controls the person cannot use are disabled, not offered.
-  const isAdmin = readAuthority().isManager
+  const isAdmin = isWholesaleAdmin()
   const [ctl, setCtl] = useState(null)
   const [prov, setProv] = useState(null)
   const [reg, setReg] = useState(null)

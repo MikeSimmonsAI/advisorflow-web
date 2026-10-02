@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../api/client'
-import { readAuthority } from '../../../auth/workspaceAuthority'
+import { isWholesaleAdmin } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
 import {
   Alert, Drawer, Empty, EvoApp, Hero, PageSkeleton, Panel, Status, TabBar, Tag, ago, cents, humanize, moneyK, when,
@@ -410,14 +410,14 @@ export function EvoStrategyBuilder() {
           <Step n={4} q="What should EvoSense avoid?" hint="Properties showing any of these are skipped entirely.">
             <Picks options={signals} value={form.excluded_signals} onChange={(v) => set('excluded_signals', v)} label="Excluded signals" />
           </Step>
-          <Step n={5} q="How much may EvoSense spend?" hint={readAuthority().isManager
+          <Step n={5} q="How much may EvoSense spend?" hint={isWholesaleAdmin()
             ? 'Enforced atomically on the server. $0 per day means EvoSense buys nothing.'
             : 'Only an administrator of this workspace can set or change spending. Without a budget, EvoSense buys nothing.'}>
             <div className="evo-form-grid">
-              <NumIn id="sb-day" label="Per day" prefix="$" disabled={!readAuthority().isManager} value={form.daily_budget} onChange={(v) => set('daily_budget', v)} />
-              <NumIn id="sb-mon" label="Per month" prefix="$" disabled={!readAuthority().isManager} value={form.monthly_budget} onChange={(v) => set('monthly_budget', v)} />
-              <NumIn id="sb-pp" disabled={!readAuthority().isManager} label="Most on one property" prefix="$" value={form.max_cost_per_property} onChange={(v) => set('max_cost_per_property', v)} />
-              <NumIn id="sb-ap" disabled={!readAuthority().isManager} label="Ask me before spending above" prefix="$" value={form.approval_over} onChange={(v) => set('approval_over', v)} />
+              <NumIn id="sb-day" label="Per day" prefix="$" disabled={!isWholesaleAdmin()} value={form.daily_budget} onChange={(v) => set('daily_budget', v)} />
+              <NumIn id="sb-mon" label="Per month" prefix="$" disabled={!isWholesaleAdmin()} value={form.monthly_budget} onChange={(v) => set('monthly_budget', v)} />
+              <NumIn id="sb-pp" disabled={!isWholesaleAdmin()} label="Most on one property" prefix="$" value={form.max_cost_per_property} onChange={(v) => set('max_cost_per_property', v)} />
+              <NumIn id="sb-ap" disabled={!isWholesaleAdmin()} label="Ask me before spending above" prefix="$" value={form.approval_over} onChange={(v) => set('approval_over', v)} />
             </div>
           </Step>
           <Step n={6} q="When should EvoSense bring you in?">

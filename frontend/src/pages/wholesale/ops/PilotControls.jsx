@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
-import { readAuthority } from '../../../auth/workspaceAuthority'
+import { isWholesaleAdmin } from '../../../auth/workspaceAuthority'
 import '../../../styles/shared.css'
 import '../wholesale.css'
 import { Alert, EvoApp, Hero, Metric, Metrics, Panel, Tag } from '../ds/ds'
@@ -22,7 +22,7 @@ import './ops.css'
 const cents = (c) => (c === null || c === undefined ? '—' : `$${(c / 100).toFixed(2)}`)
 
 export default function PilotControls() {
-  const canManage = readAuthority().isManager
+  const canManage = isWholesaleAdmin()
   const [pilot, setPilot] = useState(null)
   const [skip, setSkip] = useState(null)
   const [strategies, setStrategies] = useState([])
