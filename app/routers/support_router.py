@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_not_observation, require_tenant_user
 from app.models.models import Organization, User
+from app.utils.content_disposition import content_disposition
 from app.models.support_models import (
     Queue, Severity, SupportServiceOffering, SupportTicket,
     SupportTicketAttachment, TicketCategory, TicketStatus,
@@ -481,8 +482,8 @@ def download_attachment(ticket_id: str, attachment_id: str,
         raise HTTPException(status_code=404, detail="Attachment not found.")
     return Response(
         content=attachment.file_data, media_type=attachment.content_type,
-        headers={"Content-Disposition":
-                 'attachment; filename="%s"' % attachment.filename})
+        headers={"Content-Disposition": content_disposition(attachment.filename),
+                 "X-Content-Type-Options": "nosniff"})
 
 
 @router.post("/tickets/{ticket_id}/retry-fix")

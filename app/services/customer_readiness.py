@@ -177,6 +177,7 @@ def readiness(db: Session, org: Organization) -> Dict[str, Any]:
         "booking": _booking(db, org),
         "ai": _ai(db, org),
         "data": data_state(db, org),
+        "timezone": _timezone(db, org),
     }
 
     # What genuinely blocks calling this customer live. Deliberately short: a
@@ -200,6 +201,9 @@ def readiness(db: Session, org: Organization) -> Dict[str, Any]:
         warnings.append("Email falls back to the shared platform sender.")
     if sections["calendar"]["status"] not in (ST_CONFIGURED,):
         warnings.append("Not every user has connected a calendar.")
+    if sections["timezone"]["status"] != ST_CONFIGURED:
+        warnings.append("Workspace timezone not chosen - %s is in use (%s)."
+                        % (sections["timezone"]["effective"], sections["timezone"]["source"].replace("_", " ")))
 
     return {
         "organization_id": org.id,
@@ -209,6 +213,18 @@ def readiness(db: Session, org: Organization) -> Dict[str, Any]:
         "warnings": warnings,
         "can_activate": not blockers,
     }
+
+
+def _timezone(db: Session, org: Organization) -> Dict[str, Any]:
+    """What "today" and "this month" mean for this customer. CONFIGURED only
+    when the workspace itself names a zone; a fallback is reported as what it
+    is, never as configured."""
+    from app.services import workspace_time as wt
+    tz, source = wt.resolve(db, org.id)
+    return {"status": ST_CONFIGURED if source == "workspace" else ST_PARTIAL,
+            "reason": ("Workspace timezone is %s." % tz) if source == "workspace" else
+                      ("Not chosen; %s from the %s." % (tz, source.replace("_", " "))),
+            "effective": tz, "source": source}
 
 
 def customer_user_counts(db: Session, org_id: str) -> Dict[str, int]:

@@ -39,6 +39,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_brand_executive
+from app.utils.content_disposition import content_disposition
 from app.models.exec_workspace_models import (
     ExecWorkspaceItem, ExecWorkspaceFile, ExecWorkspaceVersion,
 )
@@ -413,7 +414,7 @@ def serve_file(
         raise HTTPException(status_code=404, detail="File not found")
 
     headers = {
-        "Content-Disposition": f'attachment; filename="{wf.filename}"',
+        "Content-Disposition": content_disposition(wf.filename),
     }
     if wf.content_type and "html" in wf.content_type.lower():
         headers["Content-Security-Policy"] = (

@@ -48,6 +48,7 @@ from app.models.models import (
 from app.services.email_service import send_email
 from app.services.platform_owner import tenant_write_org_id as _tenant_write_org_id
 from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
+from app.utils.content_disposition import content_disposition
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/proposals", tags=["proposals"])
@@ -695,7 +696,7 @@ def serve_proposal_file(file_id: str, db: Session = Depends(get_db)):
         content=pf.file_data,
         media_type=pf.content_type,
         headers={
-            "Content-Disposition": f'inline; filename="{safe_name}"',
+            "Content-Disposition": content_disposition(safe_name, "inline"),
             # private: shared caches/CDNs must not keep a copy that outlives
             # a revocation; nosniff: the browser uses the declared type only.
             "Cache-Control": "private, max-age=3600",

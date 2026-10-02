@@ -30,6 +30,7 @@ from app.models.wholesale_models import (FUNDING_PRODUCTS, FUNDING_SUBMISSION_ST
 from app.services import wholesale_funding as FD
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
+from app.utils.content_disposition import content_disposition
 
 router = APIRouter(prefix="/wholesale/funding", tags=["wholesale-funding"],
                    dependencies=[Depends(require_feature("wholesale_real_estate"))])
@@ -194,6 +195,6 @@ def deal_packet(deal_id: str, format: str = "json", partner_id: Optional[str] = 
     if format == "html":
         safe = "".join(ch if ch.isalnum() else "-" for ch in pk["property"]["address"])[:60].strip("-")
         return HTMLResponse(PK.render_html(pk), headers={
-            "Content-Disposition": 'attachment; filename="funding-packet-%s.html"' % (safe or "deal"),
+            "Content-Disposition": content_disposition("funding-packet-%s.html" % (safe or "deal")),
             "Cache-Control": "no-store"})
     return pk

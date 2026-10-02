@@ -63,6 +63,7 @@ from app.services import wholesale_publication as pub
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
 from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
+from app.utils.content_disposition import content_disposition
 
 log = logging.getLogger(__name__)
 
@@ -672,8 +673,7 @@ def _bytes(row: WholesaleFile) -> Response:
         content=data,
         media_type=row.content_type or "application/octet-stream",
         headers={
-            "Content-Disposition": '%s; filename="%s"'
-                                   % ("inline" if inline else "attachment", safe),
+            "Content-Disposition": content_disposition(safe, "inline" if inline else "attachment"),
             # Never a shared cache entry: the URL is the credential.
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",

@@ -39,6 +39,7 @@ from app.services import wholesale_files as files
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
 from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
+from app.utils.content_disposition import content_disposition
 
 log = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ def serve_file(file_id: str, db: Session = Depends(get_db),
         content=data,
         media_type=row.content_type or "application/octet-stream",
         headers={
-            "Content-Disposition": '%s; filename="%s"' % (disposition, safe_name),
+            "Content-Disposition": content_disposition(safe_name, disposition),
             # A deal document is never a shared cache entry.
             "Cache-Control": "private, max-age=300",
             "X-Content-Type-Options": "nosniff",

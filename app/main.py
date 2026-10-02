@@ -1961,6 +1961,19 @@ def health_check():
     return {"status": "ok", "phase": "1", "build": _build_metadata()}
 
 
+from app.deps import get_db as _deps_get_db  # noqa: E402
+
+
+@app.get("/health/ready")
+def health_ready(db=Depends(_deps_get_db)):
+    """Readiness, component by component - app, database, jobs. Public on
+    purpose (a monitor needs it) and therefore says nothing about providers or
+    secrets; the owner console's /god/system-health has the detail. Optional
+    providers never make this unhealthy. See app/services/readiness.py."""
+    from app.services import readiness
+    return readiness.report(db, detail=False)
+
+
 @app.get("/version")
 def version():
     """The same build metadata on its own, for deploy verification.

@@ -47,6 +47,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user, load_org_in_scope, require_god
+from app.utils.content_disposition import content_disposition
 from app.models.implementation_models import Implementation
 from app.models.launch_intake_models import LaunchIntakeFile
 from app.models.models import Organization, Platform, User
@@ -440,7 +441,7 @@ def download_my_file(file_id: str, request: Request,
             # `attachment` so a browser saves rather than renders. A customer
             # -supplied HTML or SVG rendered inline on the app's own origin is
             # stored XSS; downloading it is inert.
-            "Content-Disposition": 'attachment; filename="%s"' % row.filename,
+            "Content-Disposition": content_disposition(row.filename),
             "X-Content-Type-Options": "nosniff",
         })
 
@@ -809,7 +810,7 @@ def staff_download(organization_id: str, file_id: str,
     return Response(
         content=row.file_data or b"",
         media_type=row.content_type or "application/octet-stream",
-        headers={"Content-Disposition": 'attachment; filename="%s"' % row.filename,
+        headers={"Content-Disposition": content_disposition(row.filename),
                  "X-Content-Type-Options": "nosniff"})
 
 

@@ -2689,3 +2689,12 @@ def god_ai_spend_control(god: User = Depends(require_god)) -> dict:
     """
     from app.services import ai_gateway
     return ai_gateway.config_report()
+
+
+
+@router.get("/system-health")
+def system_health(db: Session = Depends(get_db), user: User = Depends(require_god)):
+    """App / database / each background job / every optional provider, separately.
+    Optional providers never change the overall status; no test calls are made."""
+    from app.services import readiness
+    return readiness.report(db, detail=True)
