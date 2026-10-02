@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, clearToken, setMustChangePassword } from '../api/client'
-import SignalPulse from '../components/SignalPulse'
 import './Login.css'
 
 export default function ChangePassword({ forced = false }) {
@@ -55,14 +54,19 @@ export default function ChangePassword({ forced = false }) {
   }
 
   return (
-    <div className="login-page">
+    // Login.css is written for the dark backdrop the Login page paints with
+    // inline styles. This page borrowed its classes without the backdrop, so
+    // every label, field and the button were white on near-white (1.04:1) -
+    // on the screen every person with a temporary password is sent to first.
+    // The backdrop and button colour are set here, and the old internal
+    // product name ("AdvisorFlow") is no longer shown to customers.
+    <div className="login-page" style={{ background: '#0b1220', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div className="login-card">
-        <div className="login-brand">
-          <SignalPulse color="blue" size={10} />
-          <span className="login-brand-mark">Advisor<span className="login-brand-accent">Flow</span></span>
-        </div>
-        <p className="login-subtitle">
+        <h1 className="login-card-title" style={{ color: '#f4f7fb' }}>
           {forced ? 'Set a new password to continue' : 'Change your password'}
+        </h1>
+        <p className="login-card-sub" style={{ color: 'rgba(255, 255, 255, 0.72)' }}>
+          At least 8 characters. Every session for this account is signed out when it changes.
         </p>
 
         {success ? (
@@ -108,7 +112,7 @@ export default function ChangePassword({ forced = false }) {
 
             {error && <div className="login-error">{error}</div>}
 
-            <button type="submit" className="login-submit" disabled={loading}>
+            <button type="submit" className="login-submit" disabled={loading} style={{ background: '#2563eb' }}>
               {loading ? 'Updating…' : 'Update password'}
             </button>
           </form>
