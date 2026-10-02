@@ -142,7 +142,7 @@ function TrainingHome () {
 
             {data.available.length > 0 && (
               <>
-                <h2 style={{ color: '#fff', fontSize: 15, margin: '32px 0 6px',
+                <h2 style={{ color: 'var(--text-primary)', fontSize: 15, margin: '32px 0 6px',
                              letterSpacing: '-.02em' }}>
                   Also available
                 </h2>
@@ -152,7 +152,7 @@ function TrainingHome () {
                   Access screen.
                 </p>
                 {data.available.map(p => (
-                  <div key={p.key} className="ds-row" style={{ cursor: 'default', opacity: .72 }}>
+                  <div key={p.key} className="ds-row" style={{ cursor: 'default' }}>
                     <span className="ds-pill">not assigned</span>
                     <span>
                       <div className="name">{p.name}</div>

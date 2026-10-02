@@ -28,7 +28,7 @@ const CSS = `
   --ds-line:#dde4ee;--ds-line2:#b9c7da;
   --ds-blue:#1f5eff;--ds-teal:#0b8a5f;--ds-amber:#a8650f;--ds-red:#d31f4b;
   --ds-purple:#6d43cc;--ds-gold:#93601c;
-  --ds-text:#46586f;--ds-head:#0e1726;--ds-dim:#5b6d84;--ds-ghost:#6b7d94;
+  --ds-text:#46586f;--ds-head:#0e1726;--ds-dim:#5b6d84;--ds-ghost:#58697f;
   color:var(--ds-text);font-size:13.5px;
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
   -webkit-font-smoothing:antialiased;min-height:100%;position:relative;

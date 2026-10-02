@@ -362,13 +362,13 @@ export default function LaunchPad() {
   }, [persist, reloadLaunch, preview, sayPreview])
 
   if (loading) {
-    return <Centered><p style={{ color: '#64748b' }}>Loading your launch…</p></Centered>
+    return <Centered><p style={{ color: '#475569' }}>Loading your launch…</p></Centered>
   }
   if (loadErr) {
     return (
       <Centered>
-        <h2 style={{ margin: '0 0 8px', fontSize: 20 }}>Your launch is not ready yet</h2>
-        <p style={{ color: '#64748b', lineHeight: 1.6 }}>{loadErr}</p>
+        <h2 style={{ margin: '0 0 8px', fontSize: 20, color: '#0e1726' }}>Your launch is not ready yet</h2>
+        <p style={{ color: '#475569', lineHeight: 1.6 }}>{loadErr}</p>
       </Centered>
     )
   }
