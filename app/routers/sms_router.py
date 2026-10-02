@@ -179,8 +179,12 @@ def send_batch_endpoint(req: BatchSendRequest, db: Session = Depends(get_db), cu
     # reported skipped, and claims for leads that did not send are released.
     from app.services import send_guard
     tokens, duplicate_ids = {}, []
+    # Every claim is taken before the first send, so it has to outlive the
+    # whole batch: a fixed 30 s let a slow batch's own retry text the first
+    # leads again. ~5 s a lead, at most an hour.
+    batch_ttl = min(3600, 30 + 5 * len(leads))
     for lead in list(leads):
-        t = send_guard.claim(db, lead.id, req.template)
+        t = send_guard.claim(db, lead.id, req.template, ttl_seconds=batch_ttl)
         if t:
             tokens[lead.id] = t
         else:

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom'
 import { Suspense, useEffect, useState } from 'react'
 import { lazyPage } from './utils/lazyPage'
+import PageBoundary from './components/PageBoundary'
 import Layout from './components/Layout'
 import DemoBanner from './components/DemoBanner'
 import ContextBanner from './components/ContextBanner'
@@ -836,6 +837,10 @@ export default function App() {
       <DemoBanner />
       {/* The owner console, Sales, Executive and Wholesale areas load on first
           visit (utils/lazyPage); this is what shows for that moment. */}
+      {/* Outside any shell (owner console, executive, sales) a chunk that
+          cannot load after lazyPage's one reload lands on PageBoundary's
+          recoverable error, not a white screen. */}
+      <PageBoundary>
       <Suspense fallback={<div role="status" aria-live="polite" style={{ padding: 24, color: 'var(--text-secondary)' }}>Loading…</div>}>
       <Routes>
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
@@ -1366,6 +1371,7 @@ export default function App() {
         } />
       </Routes>
       </Suspense>
+      </PageBoundary>
     </BrowserRouter>
     </ToastProvider>
   )

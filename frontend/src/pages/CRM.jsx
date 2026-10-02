@@ -386,7 +386,11 @@ export default function CRM() {
   // search that could not find anybody else. Pages of 200 are read up to
   // CRM_LOAD_CAP; past that the header says so and the search goes to the
   // server (name, phone, email) instead of filtering what happens to be loaded.
+  const fetchSeq = useRef(0)
   const fetchContacts = async (q = '') => {
+    // Only the newest request may write: a slow unfiltered load must not
+    // land on top of the search typed after it.
+    const mine = ++fetchSeq.current
     setLoading(true); setError(null)
     try {
       const all = []
@@ -399,6 +403,7 @@ export default function CRM() {
         all.push(...items)
         if (Array.isArray(data) || items.length < 200 || all.length >= n) break
       }
+      if (mine !== fetchSeq.current) return
       setContacts(all)
       setTotal(Math.max(n, all.length))
       if (!q) setCapped(n > all.length)
@@ -477,7 +482,7 @@ export default function CRM() {
       setSyncResult(result)
       if (result.synced > 0) {
         // Reload contacts to show the newly synced ones
-        await fetchContacts()
+        await fetchContacts(capped ? search.trim() : '')
       }
     } catch (e) {
       setSyncResult({ error: e.message || 'Sync failed' })

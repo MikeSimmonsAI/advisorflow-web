@@ -361,10 +361,14 @@ function ClassicLeads() {
     const q = (searchRef.current || '').trim()
     const searchParam = q ? `&search=${encodeURIComponent(q.slice(0, 120))}` : ''
     const tierParam = tierRef.current ? `&tier=${encodeURIComponent(tierRef.current)}` : ''
+    // Only the newest request may write (search, tier, status and batch can
+    // all start one; a slower earlier answer must not overwrite a newer one).
+    const mine = ++loadSeq.current
     Promise.all([
       api.get(`/leads/?page=1&page_size=500${batchParam}${statusParam}${searchParam}${tierParam}`),
       api.get('/leads/needs-review?page=1&page_size=500'),
     ]).then(([leadsData, reviewData]) => {
+      if (mine !== loadSeq.current) return
       // Both endpoints return a paginated envelope {items, total, page, page_size}.
       // Fall back to raw array for backward-compatibility during rolling deploys.
       const leadsArr = Array.isArray(leadsData) ? leadsData : (leadsData.items ?? [])
@@ -375,6 +379,7 @@ function ClassicLeads() {
       setNeedsReviewTotal(Array.isArray(reviewData) ? reviewData.length : (reviewData.total ?? reviewArr.length))
       setLoading(false)
     }).catch((err) => {
+      if (mine !== loadSeq.current) return
       setLeads([])
       setNeedsReview([])
       setLoadError(err?.message || 'Failed to load leads')
@@ -394,6 +399,7 @@ function ClassicLeads() {
   useEffect(() => { loadLeads() }, [statusFilter])
   // Search (debounced) and tier re-query the server; see loadLeads.
   const searchRef = useRef(searchQuery)
+  const loadSeq = useRef(0)
   const tierRef = useRef(tierFilter)
   const firstQuery = useRef(true)
   useEffect(() => {

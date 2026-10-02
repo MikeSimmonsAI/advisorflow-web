@@ -374,8 +374,11 @@ class CampaignBuildPreview(BaseModel):
     tone: str = "warm"
 
 
-# A repeat of the same send inside this window is refused (409).
-BUILDER_DUPLICATE_WINDOW_S = 120
+# A repeat of the same send inside this window is refused (409). An hour, not
+# two minutes: the lease is taken before the first message, so it must
+# outlive a long send - and re-sending the same campaign to the same people
+# within the hour is never what anybody meant.
+BUILDER_DUPLICATE_WINDOW_S = 3600
 
 
 class CampaignSend(BaseModel):
@@ -745,7 +748,7 @@ def send_campaign(
     from app.services import action_lease as _lease
     if not _lease.acquire(db, "campaign.send", campaign.id, ttl_seconds=BUILDER_DUPLICATE_WINDOW_S):
         raise HTTPException(status_code=409, detail=(
-            "This campaign was just sent (or is still sending). Check its results before sending again."))
+            "This campaign was sent within the last hour (or is still sending). Check its results before sending again."))
 
     criteria = json.loads(campaign.filter_criteria) if campaign.filter_criteria else {}
     query = _apply_filters(db.query(Lead), _org_id(db, current_user), criteria)
@@ -958,7 +961,7 @@ def builder_send(
     if not _lease.acquire(db, "campaign.builder_send", "%s|%s" % (current_user.id, _sig),
                           ttl_seconds=BUILDER_DUPLICATE_WINDOW_S):
         raise HTTPException(status_code=409, detail=(
-            "This campaign was just sent to these people (or is still sending). "
+            "This campaign was sent to these people within the last hour (or is still sending). "
             "Check Campaign history before sending it again."))
 
     now = datetime.utcnow()

@@ -184,7 +184,7 @@ def initiate_call(
     # ONE CLICK, ONE CALL. The redial cooldown above reads the lead's past
     # calls, so two clicks that arrive together both see none and both ring
     # the person. A database lease on the lead closes that window across
-    # instances; it is released if no call was placed.
+    # instances; it is released only when the call was refused before dialling.
     from app.services import action_lease
     lease = action_lease.acquire(db, "voice.call", lead.id, ttl_seconds=CALL_CLAIM_TTL_S)
     if not lease:
@@ -197,7 +197,9 @@ def initiate_call(
         action_lease.release(db, "voice.call", lead.id, lease)
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
-        action_lease.release(db, "voice.call", lead.id, lease)
+        # NOT released: the failure may have come after the provider placed
+        # the call (a commit after the API answered), and the redial cooldown
+        # would not see an uncommitted call. The claim expires in 90 s.
         logger.exception("voice call failed for lead %s", lead_id)
         raise HTTPException(status_code=502,
                             detail="The voice provider could not be reached: %s" % e)

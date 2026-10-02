@@ -30,9 +30,12 @@ def _key(lead_id: str, body: str) -> str:
     return "%s|%s" % (lead_id, digest)
 
 
-def claim(db: Session, lead_id: str, body: str) -> Optional[str]:
+def claim(db: Session, lead_id: str, body: str, ttl_seconds: Optional[int] = None) -> Optional[str]:
+    """`ttl_seconds` longer than the window for a claim taken at the start of
+    a batch: it must outlive the whole batch, not just this lead's send."""
     from app.services import action_lease
-    return action_lease.acquire(db, SCOPE, _key(lead_id, body), ttl_seconds=DUPLICATE_WINDOW_S)
+    return action_lease.acquire(db, SCOPE, _key(lead_id, body),
+                                ttl_seconds=max(DUPLICATE_WINDOW_S, int(ttl_seconds or 0)))
 
 
 def release_after_failure(db: Session, lead_id: str, body: str, token: Optional[str]) -> None:

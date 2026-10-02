@@ -656,8 +656,16 @@ def decide_outreach(ctx: Dict[str, Any]) -> Dict[str, Any]:
     if fu.get("date") and fu["date"] > (ctx.get("today") or ""):
         return no("follow_up_later", "They asked to be contacted %s" % (fu.get("value") or fu["date"]),
                   defer=fu["date"])
-    if st["state"] == "not_now":
+    # "Not now" / "maybe later" with no date. The state only reads not_now
+    # when a follow-up date is far out (handled above), so the objection and
+    # the intent are checked directly - otherwise the next scripted touch
+    # went out as soon as we had answered them.
+    if (st["state"] == "not_now" or ctx.get("current_intent") == "not_now"
+            or any(o.get("key") == "objection.not_now" and o.get("status") == ACTIVE
+                   for o in ctx.get("objections") or [])):
         return no("not_now", "They said not now")
+    if fu and not fu.get("date"):
+        return no("follow_up_asked", "They asked to be contacted (no date) - a person follows up")
     return {"allowed": True, "code": "ok", "reason": "Clear to send the scheduled touch", "defer_until": None}
 
 

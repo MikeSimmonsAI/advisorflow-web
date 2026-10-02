@@ -46,9 +46,9 @@ def _inbound(db, lead, text, at):
     db.add(Reply(lead_id=lead.id, body=text, source="sms", received_at=at)); db.commit()
 
 
-def _ack(db, lead, advisor, at):
+def _ack(db, lead, advisor, at, source="manual"):
     db.add(Message(lead_id=lead.id, sender_id=advisor.id, body="Sounds good - talk then.",
-                   sent_at=at, send_source="manual")); db.commit()
+                   sent_at=at, send_source=source)); db.commit()
 
 
 def _run(db):
@@ -96,4 +96,13 @@ def test_unreadable_conversation_sends_nothing(db_session, sample_org, sample_ad
     lead, conv, now = _setup(db_session, sample_org, sample_advisor)
     with patch("app.services.conversation_intel.build_context", side_effect=RuntimeError("boom")):
         send = _run(db_session)
+    send.assert_not_called()
+
+
+def test_not_now_without_a_date_holds_even_after_we_answered(db_session, sample_org, sample_advisor):
+    lead, conv, now = _setup(db_session, sample_org, sample_advisor)
+    _inbound(db_session, lead, "Not right now, maybe later", now - timedelta(hours=3))
+    # Answered by the AI (not a person), so nothing else holds the touch.
+    _ack(db_session, lead, sample_advisor, now - timedelta(hours=2), source="ai_conversation")
+    send = _run(db_session)
     send.assert_not_called()

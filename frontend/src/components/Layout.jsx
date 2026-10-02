@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation } from '../api/client'
 import { isManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
@@ -1202,7 +1202,12 @@ export default function Layout({ children }) {
             one customer to another both land on the same path. */}
         <main className="main-content">
           <PageBoundary key={location.pathname + '\u0000' + workspaceKey}>
-            {children}
+            {/* A page that loads on first visit (utils/lazyPage) waits HERE,
+                inside the shell - without this the App-level fallback
+                replaced the sidebar and top bar for that moment. */}
+            <Suspense fallback={<div role="status" aria-live="polite" style={{ padding: 24, color: 'var(--text-secondary)' }}>Loading…</div>}>
+              {children}
+            </Suspense>
           </PageBoundary>
         </main>
       </div>

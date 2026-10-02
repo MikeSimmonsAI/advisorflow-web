@@ -117,9 +117,15 @@ def _write_org_id(db: Session, current_user: User) -> str:
 
 
 def _build_stats(db: Session, organization_id: str) -> SuppressionStats:
-    entries = db.query(SuppressionEntry).filter(SuppressionEntry.organization_id == organization_id).all()
-    manual = sum(1 for e in entries if e.source == SuppressionSource.MANUAL)
-    reply_stop = sum(1 for e in entries if e.source == SuppressionSource.REPLY_STOP)
+    # Counted in the database: this loaded every entry to count two kinds,
+    # once per page of the list.
+    from sqlalchemy import func
+    rows = (db.query(SuppressionEntry.source, func.count(SuppressionEntry.id))
+            .filter(SuppressionEntry.organization_id == organization_id)
+            .group_by(SuppressionEntry.source).all())
+    by = {src: n for src, n in rows}
+    manual = int(by.get(SuppressionSource.MANUAL, 0))
+    reply_stop = int(by.get(SuppressionSource.REPLY_STOP, 0))
     return SuppressionStats(total=manual + reply_stop, manual=manual, reply_stop=reply_stop)
 
 
@@ -134,7 +140,9 @@ def list_suppression_entries(
     entries = (
         db.query(SuppressionEntry)
         .filter(SuppressionEntry.organization_id == org_id)
-        .order_by(SuppressionEntry.added_at.desc())
+        # id breaks ties: a bulk import gives many rows one added_at, and
+        # without a total order pages overlapped or skipped rows.
+        .order_by(SuppressionEntry.added_at.desc(), SuppressionEntry.id.asc())
         .limit(limit)
         .offset(offset)
         .all()

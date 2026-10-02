@@ -44,9 +44,13 @@ def test_a_call_already_being_placed_refuses_the_second(client, db_session, samp
     start.assert_not_called()
 
 
-def test_a_failed_attempt_releases_the_claim(client, db_session, sample_org, sample_advisor, auth_headers):
+def test_a_refusal_releases_the_claim_but_an_unknown_failure_keeps_it(
+        client, db_session, sample_org, sample_advisor, auth_headers):
+    """A refusal (PermissionError) is decided before dialling, so a retry is
+    fine at once. Any other failure may have come after the provider placed
+    the call, so the claim is kept (it expires in 90 s)."""
     lead = _lead(db_session, sample_org, sample_advisor)
-    outcomes = [RuntimeError("provider down"), _call()]
+    outcomes = [PermissionError("not permitted"), _call(), RuntimeError("commit failed")]
 
     def start(*a, **k):
         o = outcomes.pop(0)
@@ -55,9 +59,16 @@ def test_a_failed_attempt_releases_the_claim(client, db_session, sample_org, sam
         return o
     a, b, c = _stubs(start)
     with a, b, c:
-        first = client.post("/voice/call/%s" % lead.id, headers=auth_headers)
-        second = client.post("/voice/call/%s" % lead.id, headers=auth_headers)
-        third = client.post("/voice/call/%s" % lead.id, headers=auth_headers)
-    assert first.status_code == 502
-    assert second.status_code == 200, second.text
-    assert third.status_code == 409          # second succeeded; claim held
+        refused = client.post("/voice/call/%s" % lead.id, headers=auth_headers)
+        placed = client.post("/voice/call/%s" % lead.id, headers=auth_headers)
+    assert refused.status_code == 409
+    assert placed.status_code == 200, placed.text
+
+    lead2 = _lead(db_session, sample_org, sample_advisor)
+    outcomes[:] = [RuntimeError("commit failed"), _call()]
+    a, b, c = _stubs(start)
+    with a, b, c:
+        failed = client.post("/voice/call/%s" % lead2.id, headers=auth_headers)
+        again = client.post("/voice/call/%s" % lead2.id, headers=auth_headers)
+    assert failed.status_code == 502
+    assert again.status_code == 409          # claim kept: it may have rung
