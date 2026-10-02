@@ -277,6 +277,25 @@ _DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 from app.utils.time_fmt import install_utc_json as _install_utc_json  # noqa: E402
 _install_utc_json()
 
+
+# ── A BARE DATETIME ON THE WIRE IS UTC, AND SAYS SO ──────────────────────────
+# The database stores naive UTC datetimes. Routes that return them inside a
+# plain dict went out as "2026-10-02T20:00:00" - no zone - and a browser's
+# `new Date()` reads that as LOCAL time, so in Central every such timestamp
+# displayed five hours late and "today" counts covered the wrong window.
+# About 120 fields across the routers did this; some screens patched it by
+# appending "Z" themselves (only when no zone is present, so they are
+# unaffected). Encode once, here: naive -> "...Z", aware -> unchanged.
+import datetime as _dt_wire
+import fastapi.encoders as _fastapi_encoders
+
+
+def _datetime_on_the_wire(value):
+    return value.isoformat() + ("Z" if value.tzinfo is None else "")
+
+
+_fastapi_encoders.ENCODERS_BY_TYPE[_dt_wire.datetime] = _datetime_on_the_wire
+
 app = FastAPI(
     title="BookaBoost",
     version="0.1.0-phase1",

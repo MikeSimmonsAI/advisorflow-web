@@ -23,6 +23,7 @@ Phase 2 additions:
 """
 
 import uuid
+from app.utils.time_fmt import iso_utc
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -75,8 +76,11 @@ def _serialize(item: AutoSendItem, lead: Lead) -> dict:
         "source": item.source,
         "status": item.status,
         "ai_reason": item.ai_reason,
-        "created_at": item.created_at,
-        "actioned_at": item.actioned_at,
+        # Explicitly UTC: a bare datetime went out as "2026-10-02T20:00:00",
+        # which a browser reads as LOCAL time - history showed sends five
+        # hours late in Central and "Sent today" counted the wrong window.
+        "created_at": iso_utc(item.created_at),
+        "actioned_at": iso_utc(item.actioned_at),
     }
 
 
