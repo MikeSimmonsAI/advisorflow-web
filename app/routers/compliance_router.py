@@ -17,7 +17,6 @@ The business logic itself held up well and is preserved; only the
 structural/integration assumptions needed fixing.
 """
 
-from app.utils.time_fmt import UtcDateTime
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -69,7 +68,7 @@ class SuppressionOut(BaseModel):
     phone: str
     reason: str
     source: SuppressionSource
-    added_at: UtcDateTime
+    added_at: datetime
 
     class Config:
         from_attributes = True

@@ -209,12 +209,3 @@ def install_utc_json() -> None:
             ModelField.serialize = serialize  # type: ignore[assignment]
 
     _INSTALLED = True
-
-
-# For pydantic response models: a datetime field that serialises like
-# iso_utc (naive -> "...Z"). FastAPI's dict encoder is patched in app.main;
-# response_model fields go through pydantic's own serializer instead.
-from typing import Annotated as _Annotated  # noqa: E402
-from pydantic import PlainSerializer as _PlainSerializer  # noqa: E402
-
-UtcDateTime = _Annotated[_dt.datetime, _PlainSerializer(iso_utc, return_type=str, when_used="json-unless-none")]

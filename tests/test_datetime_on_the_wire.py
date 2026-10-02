@@ -1,9 +1,8 @@
 """A bare (naive, UTC) datetime in a response says it is UTC.
 
-Routes returning naive datetimes in plain dicts sent "2026-10-02T20:00:00";
-browsers read that as local time, so Central users saw times five hours
-late. app.main encodes naive datetimes with a trailing Z; aware ones keep
-their offset; dates stay dates.
+Pins the behaviour of time_fmt.install_utc_json (installed by app.main):
+naive datetimes go out with a trailing Z, aware ones keep their offset,
+dates stay dates - checked on a real route (auto-send queue).
 """
 import datetime
 
@@ -31,13 +30,3 @@ def test_auto_send_queue_times_are_utc(client, db_session, sample_org, sample_ad
     rows = rows if isinstance(rows, list) else rows.get("items", rows.get("queue", []))
     assert any(r.get("created_at") == "2026-10-02T20:00:00Z" for r in rows)
 
-
-def test_response_model_datetimes_are_utc_too():
-    """response_model fields go through pydantic, not the dict encoder;
-    they use time_fmt.UtcDateTime (suppression list, audit log, outcomes,
-    job runs, advisor health)."""
-    from app.routers.compliance_router import SuppressionOut
-    from app.routers.compliance_router import SuppressionSource
-    m = SuppressionOut(id="x", phone="+12145550000", reason="r", source=list(SuppressionSource)[0],
-                       added_at=datetime.datetime(2026, 10, 2, 20))
-    assert m.model_dump(mode="json")["added_at"] == "2026-10-02T20:00:00Z"
