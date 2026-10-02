@@ -11,6 +11,7 @@ import { leadDetailTabFromSearch } from '../utils/leadDetailTabs'
 import { confirmLeadDelete, deleteLeadIds, deleteSummary } from '../utils/deleteRecords'
 import { useTerminology } from '../terminology'
 import HumanDialerPanel from '../components/telephony/HumanDialerPanel'
+import ConversationBrain from '../components/ConversationBrain'
 import '../styles/shared.css'
 import './LeadDetail.css'
 
@@ -1998,6 +1999,12 @@ export default function LeadDetail() {
         </div>
 
         <div className="lead-detail-right">
+          {/* ── Conversation memory: facts, open questions, next best action ── */}
+          <ConversationBrain leadId={leadId} onUseDraft={(text) => {
+            setMessageText(text)
+            const box = document.querySelector('.lead-detail-left textarea')
+            if (box) { box.scrollIntoView({ behavior: 'smooth', block: 'center' }); box.focus() }
+          }} />
           {/* ── AI Conversation ── */}
           <section className="panel lead-detail-panel">
             <div className="panel-header">

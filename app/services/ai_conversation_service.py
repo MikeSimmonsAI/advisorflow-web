@@ -697,7 +697,8 @@ def generate_touch_email(
         }
 
 
-def generate_reply_response(db: Session, lead: Lead, advisor: User, reply_body: str) -> dict:
+def generate_reply_response(db: Session, lead: Lead, advisor: User, reply_body: str,
+                            intel_block: str = None) -> dict:
     should_escalate, escalate_reason = _check_escalation(reply_body)
     if should_escalate:
         return {"escalate": True, "escalate_reason": escalate_reason, "should_stop": False, "source": "escalation_detected"}
@@ -718,6 +719,8 @@ def generate_reply_response(db: Session, lead: Lead, advisor: User, reply_body: 
         relationship_context=relationship_context,
         lead_context=lead_context,
     )
+    if intel_block:
+        system = system + "\n\n" + intel_block
     user_msg = (
         f"Full conversation history (read this carefully — it is your context):\n{history}\n\n"
         f"Lead's latest reply:\n{reply_body}\n\n"
@@ -1300,6 +1303,77 @@ def _handle_post_booking_reply(db: Session, lead: Lead, advisor: User, reply_bod
         return {"action": "error", "error": str(e)}
 
 
+def _intel_gate(db: Session, lead: Lead, advisor: User, conv, reply_body: str) -> dict:
+    """{"result": <return value>} to stop here, or {"ctx": context} to carry on.
+
+    FAILS CLOSED. If the conversation cannot be read, the AI does not guess -
+    the reply waits for a person, which is what happens with AI off.
+    """
+    from app.services import conversation_intel as ci
+    try:
+        ctx = ci.build_context(db, lead)
+    except Exception as exc:                                     # noqa: BLE001
+        db.rollback()
+        logger.exception("conversation intelligence unavailable for lead %s", lead.id)
+        return {"result": {"action": "held", "reason": "conversation_check_unavailable",
+                           "error_kind": type(exc).__name__}}
+    pending = ctx.get("pending_inbound") or []
+    if len(pending) > 1 and reply_body and (pending[-1]["text"] or "").strip() != (reply_body or "").strip():
+        # MULTI-MESSAGE TURN. A newer message from them is already stored; its
+        # own handling answers the whole turn once. Replying here too is how a
+        # customer typing three quick texts gets three AI answers.
+        return {"result": {"action": "held", "reason": "newer_message_in_same_turn"}}
+    d = ci.decide_ai(ctx, "email")
+    if d["allowed"]:
+        return {"ctx": ctx}
+    code = d["code"]
+    if code in ("stop", "closed"):
+        if conv is not None:
+            conv.stage = "stopped"
+            conv.next_send_at = None
+            db.commit()
+        return {"result": {"action": "stopped", "reason": d["reason"]}}
+    if d.get("human_review"):
+        if conv is not None:
+            _escalate_conversation(db, conv, lead, advisor, d["reason"], reply_body)
+        return {"result": {"action": "escalated", "reason": d["reason"]}}
+    return {"result": {"action": "held", "reason": code, "detail": d["reason"]}}
+
+
+def _whole_turn(ctx, reply_body: str) -> str:
+    pending = (ctx or {}).get("pending_inbound") or []
+    if len(pending) > 1:
+        return "\n".join(p["text"] for p in pending)
+    return reply_body
+
+
+def _intel_block(ctx):
+    if not ctx:
+        return None
+    from app.services import conversation_intel as ci
+    try:
+        return ci.prompt_block(ctx)
+    except Exception:                                            # noqa: BLE001
+        logger.exception("could not render conversation memory block")
+        return None
+
+
+def _quality_hold(db: Session, conv, lead: Lead, advisor: User, ctx, result: dict, reply_body: str):
+    """The quality gate. A failing draft is held for a person with the reasons."""
+    if not ctx or not result.get("body"):
+        return None
+    from app.services import conversation_intel as ci
+    gate = ci.check_reply(ctx, result.get("body") or "", "email")
+    if gate["passed"]:
+        return None
+    reasons = "; ".join(f["message"] for f in gate["failures"])[:480]
+    if conv is not None:
+        conv.flagged_suggested_response = result.get("body")
+        conv.ai_responses_flagged = (conv.ai_responses_flagged or 0) + 1
+        _escalate_conversation(db, conv, lead, advisor, "AI draft held for review: " + reasons, reply_body)
+    return {"action": "held_for_review", "failures": gate["failures"]}
+
+
 def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str) -> dict:
     # BACKGROUND AI: an inbound message triggers this, not a person. With the
     # master switch off, nothing below runs - no provider call, no reply, no
@@ -1312,6 +1386,17 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
         PipelineConversation.lead_id == lead.id,
         PipelineConversation.advisor_id == advisor.id,
     ).first()
+
+    # ── CONVERSATION INTELLIGENCE: may automation speak at all? ─────────────
+    # Memory is brought up to date first (this reply included), then one
+    # question is asked: is this a conversation the AI should be in right now?
+    # A person asked for, a complaint, STOP, a human already replying, a seller
+    # asking for a price - every one of those is a reason the AI stays quiet,
+    # and the reason is recorded, not guessed again by the next caller.
+    intel = _intel_gate(db, lead, advisor, conv, reply_body)
+    if intel.get("result") is not None:
+        return intel["result"]
+    intel_ctx = intel.get("ctx")
 
     # ── Post-booking concierge ──────────────────────────────────────────────
     # lead.status is the authoritative source of truth — conv.stage may lag.
@@ -1342,7 +1427,9 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
     conv.replies_received = (conv.replies_received or 0) + 1
     conv.last_inbound_at = datetime.utcnow()
 
-    result = generate_reply_response(db, lead, advisor, reply_body)
+    turn = _whole_turn(intel_ctx, reply_body)
+    result = generate_reply_response(db, lead, advisor, turn,
+                                     intel_block=_intel_block(intel_ctx))
 
     # A CANNED REPLY IS NOT AN AI REPLY. When generation failed - provider
     # down, spend cap hit, breaker open - the old path mailed the hand-written
@@ -1364,6 +1451,10 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
         lead.status = "cold"
         db.commit()
         return {"action": "stopped", "reason": result.get("stop_reason")}
+
+    held = _quality_hold(db, conv, lead, advisor, intel_ctx, result, reply_body)
+    if held is not None:
+        return held
 
     if result.get("should_book"):
         booking_url = _get_booking_url(db, lead, advisor)
@@ -1400,6 +1491,7 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
             body_html=html_reply,
             status="sent",
             sent_at=datetime.utcnow(),
+            send_source="ai_conversation",
         )
         db.add(msg)
         conv.ai_responses_sent = (conv.ai_responses_sent or 0) + 1

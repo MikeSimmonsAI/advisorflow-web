@@ -16,6 +16,7 @@ import { api } from '../../api/client'
 import { readAuthority } from '../../auth/workspaceAuthority'
 import { factText, fmtDate, fmtDateTime, generatedByLabel, humanize, relTime } from './agencyFormat'
 import { NewApplicationForm, NewAppointmentForm, ProfileEditor, StatedNote } from './AgencyForms'
+import ConversationBrain from '../../components/ConversationBrain'
 import {
   AgencyPage, DemoBadge, Empty, ErrorState, Loading, Notice, Pill, Section, useAction, useAgency,
 } from './agencyUi'
@@ -242,6 +243,7 @@ export default function ProspectDetail() {
             <Conversation rows={p.conversation} />
             <Copilot id={prospectId} prospect={p} onChanged={q.reload} readOnly={readOnly} />
           </Section>
+          {readOnly ? null : <ConversationBrain leadId={prospectId} compact />}
           <Section title="Applications" aside={readOnly ? null : <button type="button" className="ag-btn ag-btn--sm ag-btn--ghost" onClick={() => toggle('application')} data-testid="open-new-application">{open === 'application' ? 'Close' : '+ Start application'}</button>}>
             {open === 'application' ? <NewApplicationForm prospect={{ id: p.id, name: p.name, agentId: p.assigned_agent?.id }} onCancel={() => setOpen(null)} onCreated={() => created('Application started as a draft.')} /> : null}
             {p.applications?.length ? <ul className="ag-linklist">{p.applications.map(a => <li key={a.id}><Link to={`/agency/applications/${a.id}`}>{humanize(a.product_category) || 'Application'} · {a.carrier || 'carrier not recorded'}</Link> <Pill value={a.status} />{a.stalled ? <Pill value="stalled" label="Stalled" /> : null}</li>)}</ul> : <p className="ag-muted">No applications.</p>}

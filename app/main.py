@@ -839,6 +839,8 @@ from app.routers.god_demo_router import router as god_demo_router  # noqa: E402
 app.include_router(god_demo_router)   # /god/demo/maxlife — provision the Max Life DEMO workspace (god only, sends nothing)
 from app.routers import work_router  # noqa: E402
 app.include_router(work_router.router)   # /communications/* and /work/* (notes, tasks, reply review)
+from app.routers import conversation_intel_router  # noqa: E402
+app.include_router(conversation_intel_router.router)   # /conversation-intel/* (memory, takeover, composer)
 from app.routers.telephony_router import router as telephony_router  # noqa: E402
 app.include_router(telephony_router)   # /voicemails, /calls/*, /telephony/*, /god/telephony/*, /voice/inbound/*, /voice/amd, /voice/human/*
 app.include_router(google_contacts_router.router)

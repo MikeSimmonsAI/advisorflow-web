@@ -421,6 +421,34 @@ def process_inbound_reply(
     pipeline.last_inbound_at = datetime.utcnow()
     pipeline.stage = "replied"
 
+    # ── CONVERSATION INTELLIGENCE: may automation speak at all? ─────────────
+    channel = "sms" if (lead.phone and getattr(advisor, "twilio_phone_number", None)) else "email"
+    _ctx = None
+    try:
+        from app.services import conversation_intel as ci
+        _ctx = ci.build_context(db, lead)
+    except Exception as exc:                                     # noqa: BLE001
+        db.rollback()
+        logger.exception("conversation intelligence unavailable for lead %s", lead.id)
+        return {"action": "held", "reason": "conversation_check_unavailable", "error_kind": type(exc).__name__}
+    _pending = _ctx.get("pending_inbound") or []
+    if len(_pending) > 1 and (_pending[-1]["text"] or "").strip() != (reply.body or "").strip():
+        db.commit()
+        return {"action": "held", "reason": "newer_message_in_same_turn", "pipeline_id": pipeline.id}
+    _d = ci.decide_ai(_ctx, channel)
+    if not _d["allowed"]:
+        if _d.get("human_review"):
+            pipeline.flagged = True
+            pipeline.flag_reason = _d["reason"][:300]
+            pipeline.flagged_reply_body = reply.body
+            pipeline.flagged_at = datetime.utcnow()
+            db.commit()
+            return {"action": "flagged", "flag_reason": pipeline.flag_reason, "pipeline_id": pipeline.id}
+        if _d["code"] in ("stop", "closed"):
+            pipeline.stage = "stopped"
+        db.commit()
+        return {"action": "held", "reason": _d["code"], "detail": _d["reason"], "pipeline_id": pipeline.id}
+
     # Analyze the reply
     analysis = analyze_and_respond(db, lead, advisor, pipeline)
 
@@ -443,7 +471,13 @@ def process_inbound_reply(
         )
         return {"action": "booked", "pipeline_id": pipeline.id}
 
-    if confidence >= threshold and pipeline.auto_respond:
+    gate_fail = None
+    if _ctx is not None and analysis.get("reply"):
+        _g = ci.check_reply(_ctx, analysis["reply"], channel)
+        if not _g["passed"]:
+            gate_fail = "; ".join(f["message"] for f in _g["failures"])[:300]
+
+    if confidence >= threshold and pipeline.auto_respond and not gate_fail:
         # NOTHING IS ADVANCED BEFORE THE SEND.
         #
         # stage, ai_responses_sent and last_outbound_at were all written and
@@ -538,7 +572,8 @@ def process_inbound_reply(
     else:
         # Flag for human review
         pipeline.flagged = True
-        pipeline.flag_reason = f"Confidence {confidence}% below threshold {threshold}% — needs review"
+        pipeline.flag_reason = (("AI draft held: " + gate_fail)[:300] if gate_fail else
+                                f"Confidence {confidence}% below threshold {threshold}% — needs review")
         pipeline.flagged_reply_body = reply.body
         pipeline.flagged_suggested_response = analysis["reply"]
         pipeline.flagged_at = datetime.utcnow()
