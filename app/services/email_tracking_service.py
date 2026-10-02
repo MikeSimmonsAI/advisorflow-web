@@ -31,9 +31,10 @@ this only ever modifies that string before it's handed to either
 function, never touches the provider integration itself.
 """
 
+from urllib.parse import quote as _q
 import os
 import re
-from html import escape
+from html import escape, unescape
 
 # NOT a default hostname any more.
 #
@@ -71,7 +72,10 @@ def inject_tracking(body_html: str, email_message_id: str,
     def _rewrite_link(match: re.Match) -> str:
         quote = match.group(1)
         original_url = match.group(2)
-        tracked_url = f"{base}/email-tracking/click/{email_message_id}?url={original_url}"
+        # Percent-encoded: a destination with its own query string
+        # ("...?token=abc&lead=1") was cut at the first "&" when it rode
+        # unencoded inside ours, so the recipient landed on a broken link.
+        tracked_url = f"{base}/email-tracking/click/{email_message_id}?url={_q(unescape(original_url), safe='')}"
         return f'href={quote}{escape(tracked_url, quote=False)}{quote}'
 
     tracked_html = _LINK_PATTERN.sub(_rewrite_link, body_html)

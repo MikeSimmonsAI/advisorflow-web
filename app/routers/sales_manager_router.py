@@ -74,6 +74,13 @@ def manager_rep_detail(user_id: str,
     if not is_sales_manager(user, db, org.id):
         raise HTTPException(status_code=403,
                             detail="Sales manager access required for this brand.")
+    # The rep must sell THIS brand. Without this a manager of one brand could
+    # read any user's name and email - another tenant's, an owner account's -
+    # by id, and learn the id exists.
+    from app.services.sales_access import sales_org_ids
+    target = db.query(User).filter(User.id == user_id).first()
+    if target is None or org.id not in sales_org_ids(target, db):
+        raise HTTPException(status_code=404, detail="Representative not found.")
     return _mw.rep_detail(db, org, user_id)
 
 

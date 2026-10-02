@@ -1030,6 +1030,11 @@ def create_opportunity(body: OpportunityCreate,
         if not is_sales_manager(user, db, org.id):
             raise HTTPException(status_code=403,
                                 detail="Only a sales manager can assign to another representative.")
+        # Same rule as reassign: the owner must actually sell this brand.
+        new_owner = db.query(User).filter(User.id == body.owner_user_id).first()
+        if new_owner is None or org.id not in sales_org_ids(new_owner, db):
+            raise HTTPException(status_code=400,
+                                detail="That person has no active membership in this brand sales organization.")
         owner_id = body.owner_user_id
 
     pkg = _package(db, body.package_interest_id, org.platform_id)

@@ -285,6 +285,16 @@ def create_ticket(req: CreateTicketRequest,
     signature = None
     diagnostic_run_id = req.diagnostic_run_id
     recommended_severity = None
+    # A run id from the body is only evidence if it is THIS organization's
+    # run. Otherwise another tenant's diagnostics would be shown to whoever
+    # works this ticket. A foreign or unknown id is dropped and the checks
+    # simply run fresh below.
+    if diagnostic_run_id:
+        from app.models.support_models import SupportDiagnosticRun
+        if (db.query(SupportDiagnosticRun.id)
+                .filter(SupportDiagnosticRun.id == diagnostic_run_id,
+                        SupportDiagnosticRun.organization_id == org.id).first() is None):
+            diagnostic_run_id = None
 
     conversation = None
     if req.conversation_id:

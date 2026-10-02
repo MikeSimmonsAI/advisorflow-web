@@ -439,8 +439,16 @@ def provision_customer(
     bso = db.query(BrandSalesOrg).filter(BrandSalesOrg.id == opp.brand_sales_org_id).first()
 
     if owner_user_id:
-        if db.query(User).filter(User.id == owner_user_id, User.is_active.is_(True)).first() is None:
+        owner = db.query(User).filter(User.id == owner_user_id, User.is_active.is_(True)).first()
+        if owner is None:
             raise HTTPException(status_code=404, detail="Implementation owner not found.")
+        # Platform staff (no customer organization) or someone who sells this
+        # brand - never a user inside some customer's workspace.
+        if owner.organization_id is not None:
+            from app.services.sales_access import sales_org_ids
+            if opp.brand_sales_org_id not in sales_org_ids(owner, db):
+                raise HTTPException(status_code=400,
+                                    detail="The implementation owner must be platform staff or a member of this brand.")
 
     now = datetime.utcnow()
 

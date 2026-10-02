@@ -31,22 +31,22 @@ def test_inject_tracking_rewrites_a_link_to_point_at_click_endpoint():
     original = '<a href="https://example.com/book">Book now</a>'
     result = inject_tracking(original, "msg-456", BASE)
 
-    assert f"{BASE}/email-tracking/click/msg-456?url=https://example.com/book" in result
+    assert f"{BASE}/email-tracking/click/msg-456?url=https%3A%2F%2Fexample.com%2Fbook" in result
 
 
 def test_inject_tracking_preserves_original_url_as_query_param():
     original = '<a href="https://example.com/book?token=abc">Book</a>'
     result = inject_tracking(original, "msg-789", BASE)
 
-    assert "url=https://example.com/book?token=abc" in result
+    assert "url=https%3A%2F%2Fexample.com%2Fbook%3Ftoken%3Dabc" in result
 
 
 def test_inject_tracking_rewrites_multiple_links_independently():
     original = '<a href="https://example.com/a">A</a> <a href="https://example.com/b">B</a>'
     result = inject_tracking(original, "msg-multi", BASE)
 
-    assert "url=https://example.com/a" in result
-    assert "url=https://example.com/b" in result
+    assert "url=https%3A%2F%2Fexample.com%2Fa" in result
+    assert "url=https%3A%2F%2Fexample.com%2Fb" in result
 
 
 def test_inject_tracking_does_not_touch_non_link_content():
@@ -60,7 +60,7 @@ def test_inject_tracking_handles_single_quoted_href():
     original = "<a href='https://example.com/single'>Link</a>"
     result = inject_tracking(original, "msg-single-quote", BASE)
 
-    assert "url=https://example.com/single" in result
+    assert "url=https%3A%2F%2Fexample.com%2Fsingle" in result
 
 
 def test_inject_tracking_does_not_rewrite_non_http_links():
@@ -80,3 +80,14 @@ def test_inject_tracking_returns_the_body_untouched_without_a_host():
 
     assert inject_tracking(original, "msg-nohost", "") == original
     assert inject_tracking(original, "msg-nohost", None) == original
+
+
+def test_a_link_with_its_own_query_string_survives_the_round_trip():
+    """The destination used to ride unencoded inside our query string, so
+    "?token=abc&lead=1" reached the click endpoint as "?token=abc"."""
+    from urllib.parse import parse_qs, urlparse
+    from html import unescape
+    import re
+    result = inject_tracking('<a href="https://example.com/book?token=abc&amp;lead=1">Book</a>', "m", BASE)
+    href = unescape(re.search(r'href="([^"]+)"', result).group(1))
+    assert parse_qs(urlparse(href).query)["url"] == ["https://example.com/book?token=abc&lead=1"]
