@@ -307,15 +307,25 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # stack, so the CORS headers are applied and the browser lets the page read
 # the status. The traceback is still logged in full; only the client-facing
 # body is generic, because an exception message can carry internals.
+def _error_reference() -> str:
+    """A short id printed BOTH in the log line and in the response, so a
+    customer's "it said reference 3f9c1a2b" finds the exact traceback."""
+    import secrets
+    return secrets.token_hex(4)
+
+
+def _server_error_body(ref: str) -> dict:
+    return {"detail": "Something went wrong on our end. The error has been logged "
+                      "(reference %s)." % ref,
+            "reference": ref}
+
+
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception):
+    ref = _error_reference()
     logging.getLogger(__name__).exception(
-        "unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Something went wrong on our end. "
-                           "The error has been logged."},
-    )
+        "unhandled error [ref=%s] on %s %s", ref, request.method, request.url.path)
+    return JSONResponse(status_code=500, content=_server_error_body(ref))
 
 
 # ── Security headers middleware ───────────────────────────────────────────────
@@ -526,10 +536,10 @@ class ServerErrorInsideCORSMiddleware:
         except Exception:  # noqa: BLE001
             if started:
                 raise
+            ref = _error_reference()
             logging.getLogger(__name__).exception(
-                "unhandled error on %s %s", scope.get("method"), scope.get("path"))
-            resp = JSONResponse(status_code=500, content={
-                "detail": "Something went wrong on our end. The error has been logged."})
+                "unhandled error [ref=%s] on %s %s", ref, scope.get("method"), scope.get("path"))
+            resp = JSONResponse(status_code=500, content=_server_error_body(ref))
             await resp(scope, receive, send)
 
 
