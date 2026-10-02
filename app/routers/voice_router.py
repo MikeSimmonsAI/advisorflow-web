@@ -134,6 +134,9 @@ def call_readiness(
             "attempts": attempts}
 
 
+CALL_CLAIM_TTL_S = 90
+
+
 @router.post("/call/{lead_id}")
 def initiate_call(
     lead_id: str,
@@ -178,12 +181,23 @@ def initiate_call(
         # putting in front of the advisor verbatim.
         raise HTTPException(status_code=409, detail=elig.reason or "Call not permitted.")
 
+    # ONE CLICK, ONE CALL. The redial cooldown above reads the lead's past
+    # calls, so two clicks that arrive together both see none and both ring
+    # the person. A database lease on the lead closes that window across
+    # instances; it is released if no call was placed.
+    from app.services import action_lease
+    lease = action_lease.acquire(db, "voice.call", lead.id, ttl_seconds=CALL_CLAIM_TTL_S)
+    if not lease:
+        raise HTTPException(status_code=409, detail="A call to this person is already being placed.")
+
     try:
         call = start_file_check_call(db, lead, lead.organization_id,
                                      advisor=current_user)
     except PermissionError as e:
+        action_lease.release(db, "voice.call", lead.id, lease)
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
+        action_lease.release(db, "voice.call", lead.id, lease)
         logger.exception("voice call failed for lead %s", lead_id)
         raise HTTPException(status_code=502,
                             detail="The voice provider could not be reached: %s" % e)
