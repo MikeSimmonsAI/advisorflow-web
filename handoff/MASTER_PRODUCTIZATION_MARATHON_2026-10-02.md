@@ -55,12 +55,18 @@ acceptance matrix are added at closeout.
 | 72a4c44 | **Change-password screen** | The screen everyone with a temporary password lands on first was white on near-white (1.04:1) and showed the old internal name "AdvisorFlow". Now readable, unbranded. |
 | 8f3c754 | Billing | Showed the platform owner's personal email as every customer's support address (brand taken from the shared app hostname); dark cards had dark text. Now the workspace's own brand address; readable. |
 | 7abbbeb · e59a6ba · 0afbcf3 · 43f8346 · ad2f274 | Accessibility sweep | axe on all 82 customer screens × agency and wholesale workspaces (+ energy/insurance spot checks): every finding fixed except brand-blue/gold tint chips at 4.1–4.4:1 (brand colour — with Decision 5). |
+| d5ba998 | **Owner console: invisible buttons** | Billing ops (filter, Preview change, Apply, Resync), Stripe catalogue Sync, Brand catalogue Create/Provision had text the same colour as the button; Launches, Maintenance, Voice config, Workspaces used an old white-text token that is now dark. All readable. 86 selects and 107 label/field pairs labelled across 41 owner screens. |
+| d79fb1c | New customer form | Business-type options read `value`; the registry sends `key` (creation still worked only because labels normalise). |
+| b0e3b0e | Regression guards | Static tests pin today's UI defects (same-colour text, Billing brand, change-password backdrop, agency sheet, industry key, CRM paging). |
+| **bf4d79c** | **Conversation: scheduled touches** | The AI cadence loop sent the next scripted touch whatever the customer had said — a reply only set stage "replied", which the loop does not exclude. "Call me next week" now moves the touch to that day (9:00 local); a person needed / team handling / an unanswered message / "not now" holds it; STOP / "not interested" ends the sequence; unreadable conversation sends nothing. (AI background is off in production, so nothing went out this way.) |
+| df3f154 · 396527e | **Lists that showed one page** | CRM showed the newest 50 contacts as "50 contacts". Leads searched only the newest 500 (an older lead "wasn't there"); search and tier now go to the server. Compliance search covered 500 suppressed numbers (a later one read as "not suppressed"); now all. Re-engagement and Activity counts were capped list lengths; now server totals or labelled "latest 300". |
 | a978b71 · 88f0bd5 · 3fcea2b · (oct2ww) | Buttons that end in "Admin access required" | Two sweeps of every page a person can reach, against the role each route requires. Admin-only actions are now disabled or replaced with who can do them: AI Team add; AI employee pause/resume/stage; Wholesale pilot controls and paid skip-trace approval; EvoSense providers, resume, scoring, budgets (workspace and per-strategy), evaluations; Sales "release holdbacks", team-pipeline person filter, deal-value override. Admin buttons on Cadence, Lead, Leads, Compliance and Settings now follow the role in the current workspace (they used the account's role). |
 
 ## Midpoint review (16:12)
 
 - **P0s:** Book a Demo — built, deployed, owner notified (upload is yours). Conversation Intelligence — Brain, queue, composer, 12-case pipeline matrix. Timezone — one resolver everywhere. Idempotency / multi-instance — DB leases on every send door, loop passes, atomic queue claims. Mobile — prospect, wholesale and agency phone homes; notifications; zero axe findings.
 - **Midpoint full suite (container, code as of 14:30):** 7,154 passed, 24 skipped, 2 failed — both one test leaving a probe route on the shared app (fixed in 8692f82). The Windows serial run on 5d09089 is still going.
+- **Windows serial full suite (5d09089, 1h40m):** 7,138 passed, 29 skipped, 3 failed — the same probe-route test pollution (fixed in 8692f82).
 - **Second half:** final sweep of owner console screens, wholesale and agency walk-throughs end to end on sandbox data, remaining Decision write-ups, then the final two hours as scheduled (suite on final code, deploy, smoke, this file, Command Center row, closeout).
 
 ## Checked and clean (no change needed)
@@ -89,6 +95,8 @@ acceptance matrix are added at closeout.
 9. **Rate limits are per server instance** (slowapi in-memory). With one Render instance that is exact; with more, each public form/login limit multiplies by the instance count. Sharing them needs Redis (a paid add-on) — only matters if the service is scaled out.
 
 ## Recommended next (not done today — explained)
+
+- AI Hub "Calls made today" is counted from the newest 100 calls and "Needs attention" from at most 200 flagged conversations — fine at today's volumes; add server counts before heavy call volume.
 
 - Hashed `/assets/*` are served `max-age=0` (each visit revalidates; 304s, not re-downloads). An `immutable` header in `render.yaml` is the standard fix; left alone because the Blueprint is live-synced and this is not worth a config sync during a marathon.
 
