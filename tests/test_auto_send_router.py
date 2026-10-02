@@ -555,3 +555,62 @@ def test_history_shows_actioned_items_not_pending_ones(client, db_session, sampl
 
     assert resolved.id in ids
     assert pending.id not in ids
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Concurrency - two approves of one item (double-click, two tabs, two
+# instances) both read "pending"; only the one that wins the atomic claim sends.
+# ═════════════════════════════════════════════════════════════════════════════
+def test_claim_for_send_is_won_exactly_once(db_session, sample_org, sample_advisor):
+    from app.routers.auto_send_router import _claim_for_send
+    _, item = _queued(db_session, sample_org, sample_advisor)
+    assert _claim_for_send(db_session, item.id) is True
+    assert _claim_for_send(db_session, item.id) is False
+    db_session.refresh(item)
+    assert item.status == "approved"
+
+
+def test_approve_that_loses_the_race_sends_nothing(client, db_session, sample_org,
+                                                   sample_advisor, auth_headers):
+    """Interleaving reproduced: this request has already read the row as
+    pending when a concurrent approve claims it. This one must refuse (409)
+    and must not reach the provider."""
+    import app.routers.auto_send_router as R
+    _, item = _queued(db_session, sample_org, sample_advisor)
+    real = R._claim_for_send
+
+    def competitor_wins_first(db, item_id):
+        assert real(db, item_id) is True          # the other request
+        return real(db, item_id)                  # ours - must lose
+
+    twilio = _twilio()
+    with patch.object(R, "_claim_for_send", side_effect=competitor_wins_first), \
+         patch("app.services.sms_service._resolve_twilio_creds",
+               return_value=(twilio, "+12145551111", None)):
+        response = client.post(f"/auto-send/{item.id}/approve", headers=auth_headers)
+
+    assert response.status_code == 409
+    twilio.messages.create.assert_not_called()
+
+
+def test_approve_all_skips_an_item_claimed_by_a_concurrent_approve(
+        client, db_session, sample_org, sample_advisor, auth_headers):
+    import app.routers.auto_send_router as R
+    _, a = _queued(db_session, sample_org, sample_advisor, phone="12145559801")
+    _, b = _queued(db_session, sample_org, sample_advisor, phone="12145559802")
+    real = R._claim_for_send
+
+    def a_taken_elsewhere(db, item_id):
+        if item_id == a.id:
+            real(db, item_id)
+        return real(db, item_id)
+
+    twilio = _twilio()
+    with patch.object(R, "_claim_for_send", side_effect=a_taken_elsewhere), \
+         patch("app.services.sms_service._resolve_twilio_creds",
+               return_value=(twilio, "+12145551111", None)):
+        response = client.post("/auto-send/approve-all", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["sent"] == 1
+    assert twilio.messages.create.call_count == 1

@@ -374,6 +374,10 @@ class CampaignBuildPreview(BaseModel):
     tone: str = "warm"
 
 
+# A repeat of the same send inside this window is refused (409).
+BUILDER_DUPLICATE_WINDOW_S = 120
+
+
 class CampaignSend(BaseModel):
     campaign_id: str
     message: str
@@ -736,6 +740,13 @@ def send_campaign(
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
+    # One send per campaign per window: a double-click or a retry texted every
+    # matched lead twice. Held at the database so it holds across instances.
+    from app.services import action_lease as _lease
+    if not _lease.acquire(db, "campaign.send", campaign.id, ttl_seconds=BUILDER_DUPLICATE_WINDOW_S):
+        raise HTTPException(status_code=409, detail=(
+            "This campaign was just sent (or is still sending). Check its results before sending again."))
+
     criteria = json.loads(campaign.filter_criteria) if campaign.filter_criteria else {}
     query = _apply_filters(db.query(Lead), _org_id(db, current_user), criteria)
     leads = query.all()
@@ -932,6 +943,23 @@ def builder_send(
                 raise HTTPException(
                     status_code=400,
                     detail=qualification.send_refusal_detail(exc))
+
+    # ONE CLICK, ONE CAMPAIGN. A double-click (or a retry after a slow
+    # response, from any instance) used to write a second campaign row and
+    # text every lead in the list a second time. The same person sending the
+    # same message to the same set of leads within the window is refused at
+    # the database (action_leases) before anything is written. Not released:
+    # the window simply expires.
+    import hashlib as _hl
+    from app.services import action_lease as _lease
+    _sig = _hl.sha256("\x1f".join([
+        _req_channel, (req.message_template or "").strip(), req.schedule_type or "",
+        req.scheduled_at or "", ",".join(sorted(set(req.lead_ids or [])))]).encode("utf-8")).hexdigest()[:32]
+    if not _lease.acquire(db, "campaign.builder_send", "%s|%s" % (current_user.id, _sig),
+                          ttl_seconds=BUILDER_DUPLICATE_WINDOW_S):
+        raise HTTPException(status_code=409, detail=(
+            "This campaign was just sent to these people (or is still sending). "
+            "Check Campaign history before sending it again."))
 
     now = datetime.utcnow()
 

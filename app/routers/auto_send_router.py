@@ -323,6 +323,24 @@ def edit_item(
     return _serialize(item, lead)
 
 
+def _claim_for_send(db: Session, item_id: str) -> bool:
+    """ATOMIC pending -> approved. True only for the one request that flipped it.
+
+    Two approves of the same item (a double-click, two tabs, a retry after a
+    slow response, two instances) both read status == "pending" before either
+    commits, and both would send the same text to the same family. A conditional
+    UPDATE is decided by the database row itself: exactly one caller sees
+    rowcount 1. "approved" is the existing in-flight state (history already
+    lists it); the row ends "sent" or "failed". If the process dies mid-send the
+    row stays "approved" and is never sent again - the safe direction.
+    """
+    n = (db.query(AutoSendItem)
+         .filter(AutoSendItem.id == item_id, AutoSendItem.status == "pending")
+         .update({AutoSendItem.status: "approved"}, synchronize_session=False))
+    db.commit()
+    return n == 1
+
+
 @router.post("/{item_id}/approve")
 def approve_item(
     item_id: str,
@@ -348,6 +366,10 @@ def approve_item(
     # disagree after a reassignment, and the message is what actually reaches a
     # family, so the family is checked as well as the queue row.
     lead = lead_scope.load_lead_in_scope(db, current_user, item.lead_id)
+
+    if not _claim_for_send(db, item.id):
+        raise HTTPException(status_code=409, detail="This message is already being sent or was actioned.")
+    db.refresh(item)
 
     # THE COMPLIANCE GATE, deliberately OUTSIDE the send try/except below.
     # A refusal and a provider error are different facts and must not share
@@ -428,6 +450,11 @@ def approve_all(
         lead = db.query(Lead).filter(Lead.id == item.lead_id).first()
         if not lead:
             continue
+        # Per-item atomic claim: a concurrent single approve (or a second
+        # approve-all) already owns this row - leave it to that request.
+        if not _claim_for_send(db, item.id):
+            continue
+        db.refresh(item)
         # Same gate as the single approve. Bulk is exactly where a missing
         # check does the most damage, so it is checked per item, not once.
         blocked = _compliance_block_reason(db, lead, _channel_for(item, lead))
