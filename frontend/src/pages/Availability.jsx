@@ -2,6 +2,9 @@ import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import '../styles/shared.css'
+
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const localDay = (iso) => { const [y, m, dd] = String(iso).slice(0, 10).split('-').map(Number); return new Date(y, m - 1, dd) }
 import './Availability.css'
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -74,16 +77,21 @@ function MiniCalendar({ events, blocks, onDayClick }) {
 
   // Build a Set of date strings that have appointments: "YYYY-MM-DD"
   const apptDates = new Set(
-    (events || []).map(e => e.booked_time.slice(0, 10))
+    // booked_time is UTC ("...+00:00"); its first ten characters are the UTC
+    // date, so an evening appointment showed on the next day's square.
+    (events || []).map(e => { const t = new Date(e.booked_time); return isNaN(t) ? String(e.booked_time).slice(0, 10) : ymd(t) })
   )
   // Build a Set of blocked dates (date_range and slot blocks)
   const blockedDates = new Set()
   ;(blocks || []).forEach(b => {
     if (b.block_type === 'date_range' && b.start_date && b.end_date) {
-      const s = new Date(b.start_date)
-      const e = new Date(b.end_date)
+      // Calendar dates, walked as calendar dates: new Date('2026-10-05') is
+      // UTC midnight, and stepping it in local time crossed the November DST
+      // change one hour off - the day after a range's end showed blocked.
+      const s = localDay(b.start_date)
+      const e = localDay(b.end_date)
       for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
-        blockedDates.add(d.toISOString().slice(0, 10))
+        blockedDates.add(ymd(d))
       }
     }
     if (b.block_type === 'slot' && b.block_date) {
@@ -105,7 +113,9 @@ function MiniCalendar({ events, blocks, onDayClick }) {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d)
 
   const monthName = firstDay.toLocaleString('default', { month: 'long' })
-  const todayStr = today.toISOString().slice(0, 10)
+  // The viewer's own date. toISOString() is UTC: from 7pm Central the
+  // calendar marked TOMORROW as today and today as past.
+  const todayStr = ymd(today)
 
   return (
     <div className="mini-cal">

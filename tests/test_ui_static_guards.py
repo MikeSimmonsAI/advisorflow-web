@@ -82,3 +82,13 @@ def test_crm_reads_every_page_not_the_first_fifty():
     src = _read("pages", "CRM.jsx")
     assert "page_size=200" in src and "CRM_LOAD_CAP" in src
     assert "&search=" in src            # past the cap, search goes to the server
+
+
+def test_availability_calendar_uses_the_viewers_date():
+    """toISOString() is UTC: from 7pm Central the availability calendar
+    marked tomorrow as today, and evening appointments showed on the next
+    day's square."""
+    src = _read("pages", "Availability.jsx")
+    assert "today.toISOString().slice(0, 10)" not in src
+    assert "e.booked_time.slice(0, 10))" not in src
+    assert "const ymd = " in src
