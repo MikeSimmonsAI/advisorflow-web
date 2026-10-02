@@ -1835,7 +1835,11 @@ def get_revenue_history(
         # Payments by month (last 24 months, newest first)
         raw_months = (
             db.query(
-                func.to_char(BillingPayment.collected_at, "YYYY-MM").label("month"),
+                # to_char is Postgres-only; the same month key on SQLite so the
+                # owner's Revenue History is testable off production.
+                (func.strftime("%Y-%m", BillingPayment.collected_at)
+                 if db.get_bind().dialect.name == "sqlite"
+                 else func.to_char(BillingPayment.collected_at, "YYYY-MM")).label("month"),
                 func.sum(BillingPayment.amount_cents).label("collected_cents"),
             )
             .filter(*pf)

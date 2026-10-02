@@ -417,19 +417,33 @@ function Field({ label, value }) {
 export function MobileNotifications() {
   const { data, error, loading, reload } = useApi('/notifications/')
   const items = Array.isArray(data) ? data : (data?.items || [])
+  const [clearing, setClearing] = useState(false)
   async function markRead(n) { try { await api.post('/notifications/' + n.id + '/read', {}); reload() } catch { /* stays unread */ } }
+  async function markAll() {
+    setClearing(true)
+    try { await api.post('/notifications/read-all', items.length ? { through: items[0].created_at } : {}); reload() }
+    catch { /* stays unread */ } finally { setClearing(false) }
+  }
+  // The server's link wins (a Wholesale inquiry opens its deal), mapped to the
+  // phone screen when there is one; only in-app paths are followed.
+  const target = n => (n.link && n.link.startsWith('/') && !n.link.startsWith('//')) ? mobilePathFor(n.link)
+    : n.lead_id ? '/m/contacts/' + n.lead_id : null
   return (
     <div className="mscreen">
       <ScreenHead title="Notifications" sub={data && typeof data.unread_count === 'number' ? data.unread_count + ' unread' : null} back="/m" />
       {loading && <Loading />}
       {error && <ErrorState error={error} onRetry={reload} />}
       {!loading && !error && items.length === 0 && <Empty>You're all caught up.</Empty>}
+      {items.length > 0 && (
+        <div className="mactions"><button type="button" className="mbtn" disabled={clearing} onClick={markAll}>{clearing ? 'Clearing…' : 'Mark all read'}</button></div>
+      )}
       <ul className="mlist">
         {items.map(n => (
           <li key={n.id} className="mrow">
             <span className="mrow-main"><span className="mrow-title">{n.title || humanize(n.type) || 'Notification'}</span>
               <span className="mrow-detail">{n.message || n.body || ''}</span>
-              {n.lead_id && <Link to={'/m/contacts/' + n.lead_id} className="mrow-link">Open contact</Link>}</span>
+              {n.created_at && <span className="mrow-detail">{relTime(n.created_at)}</span>}
+              {target(n) && <Link to={target(n)} className="mrow-link" onClick={() => markRead(n)}>Open</Link>}</span>
             <button type="button" className="mbtn mbtn--ghost" onClick={() => markRead(n)}>Mark read</button>
           </li>
         ))}

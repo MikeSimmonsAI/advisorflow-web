@@ -32,12 +32,14 @@ function readPayload(res) {
   if (Array.isArray(res)) return { items: res, unreadCount: res.length }
   const items = Array.isArray(res?.items) ? res.items : []
   const unreadCount = Number.isFinite(res?.unread_count) ? res.unread_count : items.length
-  return { items, unreadCount }
+  return { items, unreadCount, hasMore: !!res?.has_more }
 }
 
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [clearing, setClearing] = useState(false)
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
   const wrapRef = useRef(null)
@@ -50,9 +52,10 @@ export default function NotificationBell() {
     inFlight.current = true
     api.get('/notifications/')
       .then((res) => {
-        const { items, unreadCount: n } = readPayload(res)
+        const { items, unreadCount: n, hasMore: more } = readPayload(res)
         setNotifications(items)
         setUnreadCount(n)
+        setHasMore(more)
       })
       .catch(() => {})
       .finally(() => { inFlight.current = false })
@@ -86,9 +89,30 @@ export default function NotificationBell() {
     function handleClickOutside(e) {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
     }
+    function handleKey(e) { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKey)
+    }
   }, [])
+
+  // "Mark all read" clears what the person was LOOKING AT: everything up to
+  // the newest notification in the list. One that arrives meanwhile stays.
+  async function markAllRead() {
+    if (clearing) return
+    setClearing(true)
+    const through = notifications.length ? notifications[0].created_at : null
+    try {
+      await api.post('/notifications/read-all', through ? { through } : {})
+      setNotifications([])
+      setUnreadCount(0)
+      setHasMore(false)
+      load()
+    } catch { /* leave the list as it was; the next poll shows the truth */ }
+    finally { setClearing(false) }
+  }
 
   async function handleNotificationClick(n) {
     try {
@@ -108,7 +132,9 @@ export default function NotificationBell() {
 
   return (
     <div className="notif-bell-wrap" ref={wrapRef}>
-      <button className="notif-bell-btn" onClick={() => setOpen((o) => !o)} aria-label="Notifications">
+      <button type="button" className="notif-bell-btn" onClick={() => setOpen((o) => !o)}
+        aria-label={count > 0 ? `Notifications, ${count} unread` : 'Notifications'}
+        aria-haspopup="true" aria-expanded={open}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
@@ -121,21 +147,31 @@ export default function NotificationBell() {
           <div className="notif-dropdown-header">
             <span>Notifications</span>
             {count > 0 && <span className="notif-dropdown-count">{count} unread</span>}
+            {count > 0 && (
+              <button type="button" className="notif-markall" onClick={markAllRead} disabled={clearing}>
+                {clearing ? 'Clearing…' : 'Mark all read'}
+              </button>
+            )}
           </div>
           {notifications.length === 0 ? (
             <div className="notif-empty">You're all caught up.</div>
           ) : (
             <ul className="notif-list">
               {notifications.map((n) => (
-                <li key={n.id} className="notif-item" onClick={() => handleNotificationClick(n)}>
-                  {(n.type === 'hot_reply' || n.type === 'wholesale_inquiry') && <SignalPulse color={n.type === 'hot_reply' ? 'red' : 'green'} size={6} />}
-                  <div className="notif-item-body">
-                    <p className="notif-item-text">{n.message}</p>
-                    <span className="notif-item-time">{new Date(n.created_at).toLocaleString()}</span>
-                  </div>
+                <li key={n.id}>
+                  <button type="button" className="notif-item" onClick={() => handleNotificationClick(n)}>
+                    {(n.type === 'hot_reply' || n.type === 'wholesale_inquiry') && <SignalPulse color={n.type === 'hot_reply' ? 'red' : 'green'} size={6} />}
+                    <span className="notif-item-body">
+                      <span className="notif-item-text">{n.message}</span>
+                      <span className="notif-item-time">{n.created_at ? new Date(n.created_at).toLocaleString() : ''}</span>
+                    </span>
+                  </button>
                 </li>
               ))}
             </ul>
+          )}
+          {hasMore && notifications.length > 0 && (
+            <div className="notif-more">Showing the newest {notifications.length} of {count}.</div>
           )}
         </div>
       )}

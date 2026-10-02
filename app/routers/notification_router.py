@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user
 from app.models.models import User
 from app.services.notification_service import (NOTIFICATION_PAGE_SIZE,
                                               get_unread_notifications,
+                                              mark_all_read,
                                               mark_notification_read,
                                               unread_notification_count)
 
@@ -40,3 +44,19 @@ def mark_read(notification_id: str, db: Session = Depends(get_db), current_user:
     if not success:
         raise HTTPException(status_code=404, detail="Notification not found")
     return {"marked_read": True}
+
+
+@router.post("/read-all")
+def read_all(through: Optional[str] = Body(None, embed=True),
+             db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """"Mark all read" - bounded by `through`, the created_at of the newest
+    notification the bell was showing. Omitted = everything unread now."""
+    cutoff = None
+    if through:
+        try:
+            cutoff = datetime.fromisoformat(through.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="through must be an ISO timestamp.")
+        if cutoff.tzinfo is not None:
+            cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
+    return {"marked_read": mark_all_read(db, current_user.id, cutoff)}

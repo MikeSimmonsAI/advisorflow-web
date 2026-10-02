@@ -40,7 +40,7 @@ def connect_microsoft_365(request: Request,
         url = get_microsoft_authorization_url(state)
     except RuntimeError as e:
         logger.error("Microsoft OAuth URL error for user %s: %s", current_user.id, e)
-        raise HTTPException(status_code=500, detail="Microsoft integration is not configured. Contact support.")
+        raise HTTPException(status_code=503, detail="Microsoft integration is not configured. Contact support.")
     return {"authorization_url": url}
 
 

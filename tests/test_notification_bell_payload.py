@@ -168,3 +168,31 @@ def test_marking_one_read_removes_it_from_the_payload(
     body = client.get("/notifications/", headers=auth_headers).json()
     assert body["unread_count"] == 1
     assert [i["id"] for i in body["items"]] == [rows[1].id]
+
+
+# ── mark all read ───────────────────────────────────────────────────────────
+
+def test_mark_all_read_clears_only_the_callers_and_only_through_what_they_saw(
+        client, db_session, sample_advisor, second_advisor, sample_lead, auth_headers):
+    seen = _make(db_session, sample_advisor.id, sample_lead.id, 3, minutes_ago=5)
+    theirs = _make(db_session, second_advisor.id, sample_lead.id, 2)
+    newest_seen = client.get("/notifications/", headers=auth_headers).json()["items"][0]["created_at"]
+    assert newest_seen.endswith("Z")
+    # one lands after the bell was rendered, before the click
+    _make(db_session, sample_advisor.id, sample_lead.id, 1, minutes_ago=0)
+    r = client.post("/notifications/read-all", headers=auth_headers, json={"through": newest_seen})
+    assert r.status_code == 200 and r.json() == {"marked_read": 3}
+    body = client.get("/notifications/", headers=auth_headers).json()
+    assert body["unread_count"] == 1                                  # the late one survives
+    assert unread_notification_count(db_session, second_advisor.id) == len(theirs)
+    assert len(seen) == 3
+
+
+def test_mark_all_read_without_a_bound_and_with_a_bad_one(
+        client, db_session, sample_advisor, sample_lead, auth_headers):
+    _make(db_session, sample_advisor.id, sample_lead.id, 4)
+    assert client.post("/notifications/read-all", headers=auth_headers,
+                       json={"through": "yesterday-ish"}).status_code == 422
+    r = client.post("/notifications/read-all", headers=auth_headers, json={})
+    assert r.json() == {"marked_read": 4}
+    assert client.post("/notifications/read-all", json={}).status_code == 401

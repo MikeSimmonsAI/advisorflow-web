@@ -221,3 +221,16 @@ def mark_notification_read(db: Session, notification_id: str, user_id: str) -> b
     notification.is_read = True
     db.commit()
     return True
+
+
+def mark_all_read(db: Session, user_id: str, through=None) -> int:
+    """Mark the caller's unread notifications read - only THEIRS, and only up
+    to `through` (the newest one the person was actually looking at), so an
+    alert that lands while they press the button is not silently cleared."""
+    q = db.query(Notification).filter(Notification.user_id == user_id,
+                                      Notification.is_read == False)  # noqa: E712
+    if through is not None:
+        q = q.filter(Notification.created_at <= through)
+    n = q.update({Notification.is_read: True}, synchronize_session=False)
+    db.commit()
+    return int(n or 0)
