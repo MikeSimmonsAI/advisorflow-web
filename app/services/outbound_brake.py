@@ -29,6 +29,10 @@ message is recorded failed / the send endpoint reports the error), which is
 the honest outcome. Reads - Twilio lookups, Graph mailbox polling, delivery
 status - are untouched, so inbound replies and STOP keep being processed.
 
+Same wrapper, second job: a default TIMEOUT on every Twilio HTTP request
+(TWILIO_HTTP_TIMEOUT_SECONDS, default 20). The Twilio SDK waits forever unless
+told otherwise, and nothing in the platform told it.
+
 Installed once at startup (app.main). Idempotent.
 """
 from __future__ import annotations
@@ -51,6 +55,13 @@ _HTTPX_SENDS = (
 
 class OutboundStopped(RuntimeError):
     """Raised instead of sending while the emergency brake is engaged."""
+
+
+def twilio_timeout() -> float:
+    try:
+        return max(1.0, float(os.environ.get("TWILIO_HTTP_TIMEOUT_SECONDS") or 20))
+    except ValueError:
+        return 20.0
 
 
 def engaged() -> bool:
@@ -94,6 +105,12 @@ def install() -> bool:
         def _tw_request(self, method, url, *a, **kw):
             if engaged() and twilio_blocks(method, url):
                 _stop("Twilio %s %s" % (method, url.rsplit("/", 1)[-1]))
+            # NO REQUEST WAITS FOREVER. Twilio's client has no timeout unless
+            # one is passed, and none of the dozen places that build one pass
+            # it - so a stalled connection to Twilio held a worker thread (or
+            # a whole background loop) indefinitely. Default it here, once.
+            if kw.get("timeout") is None and getattr(self, "timeout", None) is None and len(a) < 5:
+                kw["timeout"] = twilio_timeout()
             return _orig_tw(self, method, url, *a, **kw)
         _tw_request._brake = True
         TwilioHttpClient.request = _tw_request

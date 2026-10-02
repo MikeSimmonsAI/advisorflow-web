@@ -75,3 +75,35 @@ def test_status_is_reported(monkeypatch, client, db_session):
     p = readiness.providers(db_session)
     assert p[0]["key"] == "emergency_stop" and p[0]["status"] == "disabled"
     assert B.status()["engaged"] is True
+
+
+def test_twilio_requests_get_a_default_timeout(monkeypatch):
+    """A stalled Twilio connection must not hold a worker forever."""
+    monkeypatch.delenv(B.ENV, raising=False)
+    from twilio.http.http_client import TwilioHttpClient
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+        content = b"{}"
+        headers = {}
+
+    def fake_send(self, prepared, **kw):
+        seen["timeout"] = kw.get("timeout")
+        return _Resp()
+    import requests
+    monkeypatch.setattr(requests.Session, "send", fake_send)
+    tw = TwilioHttpClient()
+    try:
+        tw.request("GET", "https://api.twilio.com/2010-04-01/Accounts/ACx.json")
+    except Exception:                                            # noqa: BLE001
+        pass                                                     # response parsing is not the point
+    assert seen.get("timeout") == B.twilio_timeout() == 20.0
+    monkeypatch.setenv("TWILIO_HTTP_TIMEOUT_SECONDS", "7")
+    seen.clear()
+    try:
+        TwilioHttpClient(timeout=3).request("GET", "https://api.twilio.com/x.json")
+    except Exception:                                            # noqa: BLE001
+        pass
+    assert seen.get("timeout") == 3                              # an explicit timeout is kept

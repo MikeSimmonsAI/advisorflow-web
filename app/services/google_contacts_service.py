@@ -39,7 +39,7 @@ def _get_access_token(user) -> str:
         "client_secret": client_secret,
         "refresh_token": refresh_token,
         "grant_type": "refresh_token",
-    })
+    }, timeout=20)
 
     if not resp.ok:
         raise ValueError(f"Failed to refresh Google token: {resp.text}")
@@ -82,6 +82,7 @@ def push_lead_to_google_contacts(db, user, lead) -> dict:
         f"{PEOPLE_API_BASE}/people:createContact",
         json=contact_body,
         headers=headers,
+        timeout=20,
     )
 
     if not resp.ok:
@@ -111,6 +112,7 @@ def pull_google_contacts(user, max_results: int = 500) -> list[dict]:
             "pageSize": max_results,
         },
         headers=headers,
+        timeout=20,
     )
 
     if not resp.ok:
