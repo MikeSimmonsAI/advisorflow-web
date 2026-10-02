@@ -92,10 +92,10 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
         </div>
 
         <label style={{ display: 'block', color: 'var(--gm-dim)', fontSize: 11, fontWeight: 700,
-                        letterSpacing: '.07em', marginBottom: 6 }}>
+                        letterSpacing: '.07em', marginBottom: 6 }} htmlFor="resetpassw-new-password">
           NEW PASSWORD
         </label>
-        <input
+        <input id="resetpassw-new-password"
           className="gm-input" type="password" autoComplete="new-password"
           value={pw} onChange={e => setPw(e.target.value)} disabled={busy}
           style={{ width: '100%', marginBottom: tooShort ? 5 : 14 }}
@@ -108,10 +108,10 @@ export default function ResetPasswordDialog({ user, onCancel, onDone }) {
         )}
 
         <label style={{ display: 'block', color: 'var(--gm-dim)', fontSize: 11, fontWeight: 700,
-                        letterSpacing: '.07em', marginBottom: 6 }}>
+                        letterSpacing: '.07em', marginBottom: 6 }} htmlFor="resetpassw-confirm-new-password">
           CONFIRM NEW PASSWORD
         </label>
-        <input
+        <input id="resetpassw-confirm-new-password"
           className="gm-input" type="password" autoComplete="new-password"
           value={confirmPw} onChange={e => setConfirmPw(e.target.value)} disabled={busy}
           style={{ width: '100%', marginBottom: mismatch ? 5 : 16 }}

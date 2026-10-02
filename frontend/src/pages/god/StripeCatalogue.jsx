@@ -310,8 +310,8 @@ export default function StripeCatalogue({ platformId, brands }) {
           onClick={() => provision(true)}
           disabled={busy || !brand?.platform_id || !credentialsReady}
           title={!credentialsReady ? 'Stripe credentials are not configured.' : undefined}
-          style={{ background: credentialsReady ? 'var(--gm-blue)' : 'var(--gm-blue)',
-                   color: credentialsReady ? 'var(--gm-blue)' : 'var(--gm-dim)',
+          style={{ background: credentialsReady ? 'var(--gm-blue)' : 'var(--gm-panel-3)',
+                   color: credentialsReady ? '#fff' : 'var(--gm-dim)',
                    border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 13,
                    fontWeight: 800, cursor: busy || !credentialsReady ? 'default' : 'pointer' }}>
           Provision / sync Stripe TEST catalogue

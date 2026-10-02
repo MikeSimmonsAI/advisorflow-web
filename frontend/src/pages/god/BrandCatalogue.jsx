@@ -167,7 +167,7 @@ export default function BrandCatalogue({ platformId }) {
           key: '', name: '', kind: 'recurring_addon', pricing_mode: 'fixed',
           amount: '', billing_interval: 'month', category: '',
           customer_description: '' }); }}
-          style={{ background: 'var(--gm-blue)', color: 'var(--gm-blue)', border: 'none',
+          style={{ background: 'var(--gm-blue)', color: '#fff', border: 'none',
                    borderRadius: 6, padding: '8px 16px', fontSize: 13,
                    fontWeight: 700, cursor: 'pointer' }}>
           {adding ? 'Close' : '+ Add item'}
@@ -225,8 +225,8 @@ export default function BrandCatalogue({ platformId }) {
           </div>
           <button type="button" onClick={createItem}
             disabled={!draft.key || !draft.name || busy === 'new'}
-            style={{ background: draft.key && draft.name ? 'var(--gm-teal)' : 'var(--gm-blue)',
-                     color: draft.key && draft.name ? 'var(--gm-teal)' : 'var(--gm-ghost)',
+            style={{ background: draft.key && draft.name ? 'var(--gm-teal)' : 'var(--gm-panel-3)',
+                     color: draft.key && draft.name ? '#fff' : 'var(--gm-dim)',
                      border: 'none', borderRadius: 6, padding: '7px 16px',
                      fontSize: 13, fontWeight: 700,
                      cursor: draft.key && draft.name ? 'pointer' : 'default' }}>
@@ -373,7 +373,7 @@ export default function BrandCatalogue({ platformId }) {
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" onClick={() => runProvision(true)}
                 disabled={busy === 'provision'}
-                style={{ background: 'var(--gm-teal)', color: 'var(--gm-teal)', border: 'none',
+                style={{ background: 'var(--gm-teal)', color: '#fff', border: 'none',
                          borderRadius: 6, padding: '6px 14px', fontSize: 12,
                          fontWeight: 700, cursor: 'pointer' }}>
                 {busy === 'provision' ? 'Syncing…' : 'Apply sync'}

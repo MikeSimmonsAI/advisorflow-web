@@ -57,7 +57,7 @@ function Btn({ onClick, disabled, children, variant = 'default' }) {
       style={{
         padding: '8px 18px', borderRadius: 6, border: 'none',
         background: disabled ? 'var(--gm-panel-3)' : bg,
-        color: 'var(--gm-head)', fontSize: 13, fontWeight: 600,
+        color: (!disabled && variant !== 'default') ? '#fff' : 'var(--gm-head)', fontSize: 13, fontWeight: 600,
         cursor: disabled ? 'not-allowed' : 'pointer',
       }}
     >

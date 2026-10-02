@@ -175,7 +175,7 @@ export default function LeadScraper() {
           Find local businesses via Google Places → validate phones → import to any org.
           Imports are normalized, deduplicated and checked against the organization's suppression list first.
           To stage results for review and routing instead, use{' '}
-          <a href="/god/lead-intelligence?tab=scraper" style={{ color: 'var(--accent,#3b82f6)' }}>Lead Intelligence</a>.
+          <a href="/god/lead-intelligence?tab=scraper" style={{ color: 'var(--accent,#3b82f6)', textDecoration: 'underline' }}>Lead Intelligence</a>.
         </p>
       </div>
 
@@ -211,7 +211,7 @@ export default function LeadScraper() {
           </div>
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>State</label>
-            <select value={state} onChange={e => setState(e.target.value)} style={{ ...IS }}>
+            <select aria-label="State" value={state} onChange={e => setState(e.target.value)} style={{ ...IS }}>
               <option value="">— State —</option>
               {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -226,13 +226,13 @@ export default function LeadScraper() {
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Radius</label>
-            <select value={radiusMi} onChange={e => setRadiusMi(+e.target.value)} style={{ ...IS, width: 120 }}>
+            <select aria-label="Radius" value={radiusMi} onChange={e => setRadiusMi(+e.target.value)} style={{ ...IS, width: 120 }}>
               {MILE_OPTIONS.map(({ miles }) => <option key={miles} value={miles}>{miles} {miles === 1 ? 'mile' : 'miles'}</option>)}
             </select>
           </div>
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Max Results</label>
-            <select value={maxR} onChange={e => setMaxR(+e.target.value)} style={{ ...IS, width: 90 }}>
+            <select aria-label="Maximum results" value={maxR} onChange={e => setMaxR(+e.target.value)} style={{ ...IS, width: 90 }}>
               {[10,20,30,40,60].map(n => <option key={n} value={n}>{n}</option>)}
             </select>
           </div>
@@ -373,7 +373,7 @@ export default function LeadScraper() {
                 {orgsLoading ? (
                   <div style={{ ...IS, color: 'var(--text-muted)' }}>Loading orgs…</div>
                 ) : (
-                  <select value={targetOrgId} onChange={e => setTargetOrgId(e.target.value)} style={IS}>
+                  <select aria-label="Destination organization" value={targetOrgId} onChange={e => setTargetOrgId(e.target.value)} style={IS}>
                     <option value="">— Select org —</option>
                     {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                   </select>

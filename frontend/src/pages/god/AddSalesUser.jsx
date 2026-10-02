@@ -157,8 +157,8 @@ export default function AddSalesUser({ brandId, brandName, managers, onClose, on
             <>
               {!exists ? (
                 <>
-                  <label className="go-label" style={{ marginTop: 14 }}>Full name</label>
-                  <input
+                  <label className="go-label" style={{ marginTop: 14 }} htmlFor="addsalesus-full-name">Full name</label>
+                  <input id="addsalesus-full-name"
                     className="go-input"
                     placeholder="Jordan Wells"
                     value={fullName}
@@ -193,10 +193,10 @@ export default function AddSalesUser({ brandId, brandName, managers, onClose, on
 
               {role === 'sales_rep' && managers.length ? (
                 <>
-                  <label className="go-label" style={{ marginTop: 14 }}>
+                  <label className="go-label" style={{ marginTop: 14 }} htmlFor="addsalesus-reports-to-optional">
                     Reports to <span style={{ fontWeight: 400 }}>(optional)</span>
                   </label>
-                  <select className="go-input" value={reportsTo} disabled={busy}
+                  <select id="addsalesus-reports-to-optional" aria-label="Reports to" className="go-input" value={reportsTo} disabled={busy}
                           onChange={e => setReportsTo(e.target.value)}>
                     <option value="">No reporting manager</option>
                     {managers.map(m => (

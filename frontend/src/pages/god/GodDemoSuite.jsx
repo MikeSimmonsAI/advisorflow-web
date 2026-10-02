@@ -139,7 +139,7 @@ export default function GodDemoSuite () {
           ENVIRONMENTS
         </SectionLabel>
         <div className="gm-card" style={{ padding: 0, marginBottom: 18 }}>
-          <div className="gm-tablewrap">
+          <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
             <table className="gm-table">
               <thead><tr>
                 <th>BRAND</th><th>STATE</th><th>WHAT IS IN IT</th>
@@ -223,7 +223,7 @@ export default function GodDemoSuite () {
           PROSPECT DEMOS
         </SectionLabel>
         <div className="gm-card" style={{ padding: 0, marginBottom: 18 }}>
-          <div className="gm-tablewrap">
+          <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
             <table className="gm-table">
               <thead><tr>
                 <th>PROSPECT</th><th>STATE</th><th>WHAT IS IN IT</th><th>ACTIONS</th>
@@ -282,7 +282,7 @@ export default function GodDemoSuite () {
 
         <SectionLabel note="what each scenario demonstrates">GUIDED SCENARIOS</SectionLabel>
         <div className="gm-card" style={{ padding: 0, marginBottom: 18 }}>
-          <div className="gm-tablewrap">
+          <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
             <table className="gm-table">
               <thead><tr><th>SCENARIO</th><th>FOR</th><th>LENGTH</th><th>STEPS</th><th>WHAT IT SHOWS</th></tr></thead>
               <tbody>
@@ -304,7 +304,7 @@ export default function GodDemoSuite () {
           RECENT DEMO ACTIVITY
         </SectionLabel>
         <div className="gm-card" style={{ padding: 0 }}>
-          <div className="gm-tablewrap">
+          <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
             <table className="gm-table">
               <thead><tr><th>WHEN</th><th>WHO</th><th>ACTION</th><th>SCENARIO</th><th>SIMULATED</th><th>DETAIL</th></tr></thead>
               <tbody>

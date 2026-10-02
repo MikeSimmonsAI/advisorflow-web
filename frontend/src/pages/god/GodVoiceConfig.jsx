@@ -92,7 +92,7 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
   }
   const btnStyle = (color = 'var(--gm-blue)') => ({
     fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: 'pointer',
-    background: color, color: 'var(--gm-head)', border: 'none', fontWeight: 600,
+    background: color, color: '#fff', border: 'none', fontWeight: 600,
   })
   const ghostBtn = {
     fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: 'pointer',
@@ -172,11 +172,11 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
             </>
           ) : (
             <>
-              <label style={{ fontSize: 12, color: 'var(--gm-dim)' }}>max calls</label>
-              <input type="number" min={1} value={maxCall} onChange={e => setMaxCall(e.target.value)}
+              <label style={{ fontSize: 12, color: 'var(--gm-dim)' }} htmlFor="godvoiceco-max-calls">max calls</label>
+              <input id="godvoiceco-max-calls" type="number" min={1} value={maxCall} onChange={e => setMaxCall(e.target.value)}
                      style={fieldStyle} placeholder="default" />
-              <label style={{ fontSize: 12, color: 'var(--gm-dim)' }}>max dials</label>
-              <input type="number" min={1} value={maxDial} onChange={e => setMaxDial(e.target.value)}
+              <label style={{ fontSize: 12, color: 'var(--gm-dim)' }} htmlFor="godvoiceco-max-dials">max dials</label>
+              <input id="godvoiceco-max-dials" type="number" min={1} value={maxDial} onChange={e => setMaxDial(e.target.value)}
                      style={fieldStyle} placeholder="default" />
               <button style={btnStyle()} onClick={savePolicy} disabled={policySaving}>
                 {policySaving ? 'Saving…' : 'Save'}
@@ -214,8 +214,8 @@ function AgentCard({ agent, onVersionSave, onAttemptPolicySave, onTestCall }) {
         {testResult && (
           <div style={{
             marginTop: 8, fontSize: 12, padding: '8px 12px', borderRadius: 6,
-            background: testResult.ok ? 'var(--gm-teal)' : 'var(--gm-red)',
-            color: testResult.ok ? 'var(--gm-teal)' : 'var(--gm-red)',
+            background: testResult.ok ? 'rgba(6, 122, 85, 0.10)' : 'rgba(211, 31, 75, 0.10)',
+            color: testResult.ok ? '#055c40' : '#a3112f',
             fontFamily: 'monospace', whiteSpace: 'pre-wrap',
           }}>
             {testResult.ok
@@ -267,7 +267,7 @@ function CreateAgentForm({ orgs, onCreated }) {
                             padding: '8px 12px', fontSize: 12, marginBottom: 12 }}>{err}</div>}
       <div style={fieldRow}>
         <span style={lbl}>Organization</span>
-        <select value={orgId} onChange={e => setOrgId(e.target.value)} style={sel}>
+        <select aria-label="Organization" value={orgId} onChange={e => setOrgId(e.target.value)} style={sel}>
           <option value="">Select org…</option>
           {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
@@ -284,11 +284,11 @@ function CreateAgentForm({ orgs, onCreated }) {
       </div>
       <div style={fieldRow}>
         <span style={lbl}>Provider</span>
-        <select value={provider} onChange={e => setProvider(e.target.value)} style={sel}>
+        <select aria-label="Provider" value={provider} onChange={e => setProvider(e.target.value)} style={sel}>
           {PROVIDERS.map(p => <option key={p}>{p}</option>)}
         </select>
         <span style={lbl}>Use case</span>
-        <select value={useCase} onChange={e => setUseCase(e.target.value)} style={sel}>
+        <select aria-label="Use case" value={useCase} onChange={e => setUseCase(e.target.value)} style={sel}>
           {USE_CASES.map(u => <option key={u} value={u}>{USE_CASE_LABELS[u] || u}</option>)}
         </select>
       </div>
@@ -299,7 +299,7 @@ function CreateAgentForm({ orgs, onCreated }) {
       </div>
       <button onClick={submit} disabled={saving} style={{
         fontSize: 13, padding: '7px 20px', borderRadius: 7, border: 'none',
-        background: 'var(--gm-blue)', color: 'var(--gm-head)', cursor: 'pointer', fontWeight: 600,
+        background: 'var(--gm-blue)', color: '#fff', cursor: 'pointer', fontWeight: 600,
       }}>
         {saving ? 'Creating…' : 'Create mapping'}
       </button>
@@ -368,7 +368,7 @@ export default function GodVoiceConfig() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowCreate(s => !s)} style={{
             fontSize: 12, padding: '6px 14px', borderRadius: 6,
-            border: 'none', background: 'var(--gm-blue)', color: 'var(--gm-head)', cursor: 'pointer',
+            border: 'none', background: 'var(--gm-blue)', color: '#fff', cursor: 'pointer',
           }}>
             {showCreate ? '✕ Cancel' : '+ Add mapping'}
           </button>
@@ -401,7 +401,7 @@ export default function GodVoiceConfig() {
           <br />
           <button onClick={() => setShowCreate(true)} style={{
             marginTop: 12, fontSize: 13, padding: '7px 18px', borderRadius: 7,
-            border: 'none', background: 'var(--gm-blue)', color: 'var(--gm-head)', cursor: 'pointer',
+            border: 'none', background: 'var(--gm-blue)', color: '#fff', cursor: 'pointer',
           }}>
             Add first mapping
           </button>

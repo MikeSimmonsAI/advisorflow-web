@@ -118,24 +118,24 @@ function Row({ pkg, onSaved }) {
           <td colSpan={7} style={{ background: 'var(--go-panel-2)' }}>
             <div className="go-fields">
               <div className="go-field">
-                <label>Implementation fee — one-time</label>
-                <input type="number" min="0" step="1" value={fee}
+                <label htmlFor="packagepri-implementation-fee-one-time">Implementation fee — one-time</label>
+                <input id="packagepri-implementation-fee-one-time" type="number" min="0" step="1" value={fee}
                        onChange={e => setFee(e.target.value)}
                        placeholder={feeShown !== null && feeShown !== undefined ? String(feeShown) : ''} />
               </div>
               <div className="go-field">
-                <label>Month-to-month rate — per month</label>
-                <input type="number" min="0" step="1" value={m2m}
+                <label htmlFor="packagepri-month-to-month-rate-per-month">Month-to-month rate — per month</label>
+                <input id="packagepri-month-to-month-rate-per-month" type="number" min="0" step="1" value={m2m}
                        onChange={e => setM2m(e.target.value)} />
               </div>
               <div className="go-field">
-                <label>Term rate — per month</label>
-                <input type="number" min="0" step="1" value={term}
+                <label htmlFor="packagepri-term-rate-per-month">Term rate — per month</label>
+                <input id="packagepri-term-rate-per-month" type="number" min="0" step="1" value={term}
                        onChange={e => setTerm(e.target.value)} />
               </div>
               <div className="go-field">
-                <label>Term length — months</label>
-                <input type="number" min="1" step="1" value={months}
+                <label htmlFor="packagepri-term-length-months">Term length — months</label>
+                <input id="packagepri-term-length-months" type="number" min="1" step="1" value={months}
                        onChange={e => setMonths(e.target.value)} />
               </div>
             </div>

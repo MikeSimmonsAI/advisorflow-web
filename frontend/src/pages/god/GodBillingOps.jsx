@@ -344,7 +344,7 @@ export default function GodBillingOps() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select value={platformId} onChange={e => setPlatformId(e.target.value)}
+          <select aria-label="Brand" value={platformId} onChange={e => setPlatformId(e.target.value)}
             style={{ background: 'var(--gm-pill-blue-bg)', color: 'var(--gm-blue)', border: '1px solid var(--gm-blue)',
                      borderRadius: 8, padding: '9px 12px', fontSize: 14 }}>
             <option value="">All brands</option>
@@ -429,7 +429,7 @@ export default function GodBillingOps() {
           return (
             <button key={key} onClick={() => setFilter(key)}
               style={{ background: on ? 'var(--gm-blue)' : 'var(--gm-pill-blue-bg)',
-                       color: on ? 'var(--gm-blue)' : attention ? 'var(--gm-amber)' : 'var(--gm-text)',
+                       color: on ? '#fff' : attention ? 'var(--gm-amber)' : 'var(--gm-text)',
                        border: `1px solid ${on ? 'var(--gm-blue)' : attention ? 'var(--gm-pill-amber-bd)' : 'var(--gm-blue)'}`,
                        borderRadius: 20, padding: '7px 14px', fontSize: 13,
                        fontWeight: on ? 700 : 600, cursor: 'pointer' }}>
@@ -487,7 +487,7 @@ export default function GodBillingOps() {
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap',
                           alignItems: 'center', marginBottom: 10 }}>
-              <select
+              <select aria-label="New plan"
                 value={changeForm.planKey}
                 onChange={e => setChangeForm(f => ({ ...f, planKey: e.target.value }))}
                 style={{ background: 'var(--gm-pill-blue-bg)', color: 'var(--gm-blue)',
@@ -499,7 +499,7 @@ export default function GodBillingOps() {
                   <option key={p.key} value={p.key}>{p.name || p.key}</option>
                 ))}
               </select>
-              <select
+              <select aria-label="Commitment"
                 value={changeForm.commitmentKey}
                 onChange={e => setChangeForm(f => ({ ...f, commitmentKey: e.target.value }))}
                 style={{ background: 'var(--gm-pill-blue-bg)', color: 'var(--gm-blue)',
@@ -526,8 +526,8 @@ export default function GodBillingOps() {
                 type="button"
                 onClick={previewAssistedChange}
                 disabled={!changeForm.planKey || Boolean(changing)}
-                style={{ background: changeForm.planKey ? 'var(--gm-blue)' : 'var(--gm-blue)',
-                         color: changeForm.planKey ? 'var(--gm-blue)' : 'var(--gm-ghost)',
+                style={{ background: changeForm.planKey ? 'var(--gm-blue)' : 'var(--gm-panel-3)',
+                         color: changeForm.planKey ? '#fff' : 'var(--gm-dim)',
                          border: 'none', borderRadius: 6, padding: '6px 14px',
                          fontSize: 12, fontWeight: 700,
                          cursor: changeForm.planKey && !changing ? 'pointer' : 'default' }}
@@ -587,7 +587,7 @@ export default function GodBillingOps() {
                 type="button"
                 onClick={applyAssistedChange}
                 disabled={Boolean(changing)}
-                style={{ background: 'var(--gm-teal)', color: 'var(--gm-teal)', border: 'none',
+                style={{ background: 'var(--gm-teal)', color: '#fff', border: 'none',
                          borderRadius: 6, padding: '6px 14px', fontSize: 12,
                          fontWeight: 700,
                          cursor: changing ? 'default' : 'pointer' }}
@@ -648,7 +648,7 @@ export default function GodBillingOps() {
                 type="button"
                 onClick={applyResync}
                 disabled={Boolean(resyncing)}
-                style={{ background: 'var(--gm-teal)', color: 'var(--gm-teal)', border: 'none',
+                style={{ background: 'var(--gm-teal)', color: '#fff', border: 'none',
                          borderRadius: 6, padding: '6px 14px', fontSize: 12,
                          fontWeight: 700,
                          cursor: resyncing ? 'default' : 'pointer' }}

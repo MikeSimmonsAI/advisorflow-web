@@ -550,7 +550,7 @@ export default function GodUsers() {
         </SectionLabel>
 
         <div className="gm-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div className="gm-tablewrap">
+          <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
             <table className="gm-table gm-idtable">
               <thead>
                 <tr>

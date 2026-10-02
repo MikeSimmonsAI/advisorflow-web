@@ -128,7 +128,7 @@ function Picker () {
 
         <SectionLabel note="one row per human">PEOPLE</SectionLabel>
         <div className="gm-card" style={{ padding: 0 }}>
-          <div className="gm-tablewrap">
+          <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
             <table className="gm-table">
               <thead><tr>
                 <th>IDENTITY</th><th>PLATFORM ROLE</th><th>ORGANIZATION</th>
@@ -175,7 +175,7 @@ function ContextGroup ({ title, note, rows, onChange, onRemove, emptyText }) {
     <>
       <SectionLabel note={note}>{title}</SectionLabel>
       <div className="gm-card" style={{ padding: 0, marginBottom: 18 }}>
-        <div className="gm-tablewrap">
+        <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
           <table className="gm-table">
             <thead><tr>
               <th>WHERE</th><th>ROLE</th><th>WHAT IT MEANS</th><th>STATE</th><th></th>
@@ -574,7 +574,7 @@ export default function GodAccess () {
             {/* ── TRAINING ─────────────────────────────────────────────── */}
             <SectionLabel note="assigned, and how far they got">TRAINING</SectionLabel>
             <div className="gm-card" style={{ padding: 0, marginBottom: 18 }}>
-              <div className="gm-tablewrap">
+              <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
                 <table className="gm-table">
                   <thead><tr>
                     <th>PATH</th><th>FOR</th><th>PROGRESS</th><th>STATUS</th><th>DUE</th><th></th>
@@ -603,7 +603,7 @@ export default function GodAccess () {
               </div>
               {dir && (
                 <div className="gm-filters" style={{ padding: 12 }}>
-                  <select className="gm-input" value={trainKey} onChange={e => setTrainKey(e.target.value)}>
+                  <select aria-label="Training path to assign" className="gm-input" value={trainKey} onChange={e => setTrainKey(e.target.value)}>
                     <option value="">Assign a training path…</option>
                     {dir.training_paths.map(p => (
                       <option key={p.key} value={p.key}>{p.name} — {p.audience_label}</option>
@@ -623,13 +623,13 @@ export default function GodAccess () {
               <div style={{ marginBottom: 14 }}>
                 <div style={{ color: T.dim, fontSize: 11, marginBottom: 6 }}>ACCESS TEMPLATE</div>
                 <div className="gm-filters">
-                  <select className="gm-input" value={tplKey}
+                  <select aria-label="Access template" className="gm-input" value={tplKey}
                           onChange={e => { setTplKey(e.target.value); setTplTarget('') }}>
                     <option value="">Choose a template…</option>
                     {dir?.templates.map(t => <option key={t.key} value={t.key}>{t.name}</option>)}
                   </select>
                   {tplKey && (
-                    <select className="gm-input" value={tplTarget}
+                    <select aria-label="Where to apply the template" className="gm-input" value={tplTarget}
                             onChange={e => setTplTarget(e.target.value)}>
                       <option value="">Where…</option>
                       {(dir[PICKER_SOURCE[dir.templates.find(t => t.key === tplKey).picker]] || [])
@@ -651,12 +651,12 @@ export default function GodAccess () {
               <div style={{ borderTop: '1px solid ' + T.line, paddingTop: 14 }}>
                 <div style={{ color: T.dim, fontSize: 11, marginBottom: 6 }}>ADD ACCESS DIRECTLY</div>
                 <div className="gm-filters">
-                  <select className="gm-input" value={addScope} onChange={e => setAddScope(e.target.value)}>
+                  <select aria-label="Kind of access to add" className="gm-input" value={addScope} onChange={e => setAddScope(e.target.value)}>
                     <option value={SCOPE_WORKSPACE}>Customer workspace</option>
                     <option value={SCOPE_SALES}>Sales organization</option>
                     <option value={SCOPE_PLATFORM}>Brand</option>
                   </select>
-                  <select className="gm-input" value={addTarget} onChange={e => setAddTarget(e.target.value)}>
+                  <select aria-label="Where to add access" className="gm-input" value={addTarget} onChange={e => setAddTarget(e.target.value)}>
                     <option value="">Where…</option>
                     {directoryFor(addScope).map(o => (
                       <option key={o.id} value={o.id}>
@@ -808,7 +808,7 @@ export default function GodAccess () {
             {/* ── AUDIT ────────────────────────────────────────────────── */}
             <SectionLabel note="what has been done to this person, and by whom">HISTORY</SectionLabel>
             <div className="gm-card" style={{ padding: 0 }}>
-              <div className="gm-tablewrap">
+              <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
                 <table className="gm-table">
                   <thead><tr><th>WHEN</th><th>ACTION</th><th>BY</th><th>WHAT</th></tr></thead>
                   <tbody>

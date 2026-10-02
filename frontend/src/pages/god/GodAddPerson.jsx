@@ -495,7 +495,7 @@ export default function GodAddPerson () {
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 16,
                               paddingTop: 16, borderTop: '1px solid var(--gm-pill-blue-bd)' }}>
                   <Field label="Sales organization">
-                    <select className="gm-input" value={brandId} style={{ width: '100%' }}
+                    <select aria-label="Sales organization" className="gm-input" value={brandId} style={{ width: '100%' }}
                             onChange={e => { setBrandId(e.target.value); resetPlan() }}>
                       <option value="">Choose…</option>
                       {salesOrgs.map(b => (
@@ -520,7 +520,7 @@ export default function GodAddPerson () {
                              ? 'Optional. Only active managers of this brand can be named.'
                              : 'This brand has no sales manager yet — leave it unset.')
                            : 'Choose the sales organization first.'}>
-                    <select className="gm-input" value={managerId} style={{ width: '100%' }}
+                    <select aria-label="Reports to (sales manager)" className="gm-input" value={managerId} style={{ width: '100%' }}
                             disabled={!brandId || managers.length === 0}
                             onChange={e => { setManagerId(e.target.value); resetPlan() }}>
                       <option value="">Nobody</option>
@@ -551,7 +551,7 @@ export default function GodAddPerson () {
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 16,
                               paddingTop: 16, borderTop: '1px solid var(--gm-pill-blue-bd)' }}>
                   <Field label="Workspace">
-                    <select className="gm-input" value={wsId} style={{ width: '100%' }}
+                    <select aria-label="Workspace" className="gm-input" value={wsId} style={{ width: '100%' }}
                             onChange={e => { setWsId(e.target.value); resetPlan() }}>
                       <option value="">Choose…</option>
                       {workspaces.map(o => (

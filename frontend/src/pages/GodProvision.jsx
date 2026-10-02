@@ -175,51 +175,51 @@ export default function GodProvision() {
         <div className="go-body">
           <div className="go-fields">
             <div className="go-field full">
-              <label>Organisation name</label>
-              <input value={form.org_name} onChange={e => set('org_name', e.target.value)} />
+              <label htmlFor="godprovisi-organisation-name">Organisation name</label>
+              <input id="godprovisi-organisation-name" value={form.org_name} onChange={e => set('org_name', e.target.value)} />
               <div className="hint">
                 Changing this names the customer's tenant. It does not rewrite the
                 opportunity, the proposal, or anything else in the sales record.
               </div>
             </div>
             <div className="go-field">
-              <label>Slug</label>
-              <input value={form.slug} onChange={e => set('slug', e.target.value)} />
+              <label htmlFor="godprovisi-slug">Slug</label>
+              <input id="godprovisi-slug" value={form.slug} onChange={e => set('slug', e.target.value)} />
               <div className="hint">Unique across every platform. Left blank, one is derived.</div>
             </div>
             <div className="go-field">
-              <label>Industry</label>
-              <input value={form.industry} onChange={e => set('industry', e.target.value)} />
+              <label htmlFor="godprovisi-industry">Industry</label>
+              <input id="godprovisi-industry" value={form.industry} onChange={e => set('industry', e.target.value)} />
             </div>
             <div className="go-field">
-              <label>Timezone</label>
-              <input value={form.timezone} onChange={e => set('timezone', e.target.value)}
+              <label htmlFor="godprovisi-timezone">Timezone</label>
+              <input id="godprovisi-timezone" value={form.timezone} onChange={e => set('timezone', e.target.value)}
                      placeholder="America/Chicago" />
             </div>
             <div className="go-field">
-              <label>Plan</label>
-              <select value={form.plan} onChange={e => set('plan', e.target.value)}>
+              <label htmlFor="godprovisi-plan">Plan</label>
+              <select id="godprovisi-plan" aria-label="Plan" value={form.plan} onChange={e => set('plan', e.target.value)}>
                 <option value="trial">trial</option>
                 <option value="standard">standard</option>
                 <option value="enterprise">enterprise</option>
               </select>
             </div>
             <div className="go-field">
-              <label>Phone</label>
-              <input value={form.org_phone} onChange={e => set('org_phone', e.target.value)} />
+              <label htmlFor="godprovisi-phone">Phone</label>
+              <input id="godprovisi-phone" value={form.org_phone} onChange={e => set('org_phone', e.target.value)} />
             </div>
             <div className="go-field">
-              <label>Address</label>
-              <input value={form.org_address} onChange={e => set('org_address', e.target.value)} />
+              <label htmlFor="godprovisi-address">Address</label>
+              <input id="godprovisi-address" value={form.org_address} onChange={e => set('org_address', e.target.value)} />
             </div>
             <div className="go-field">
-              <label>Target launch date</label>
-              <input type="date" value={form.target_launch_date}
+              <label htmlFor="godprovisi-target-launch-date">Target launch date</label>
+              <input id="godprovisi-target-launch-date" type="date" value={form.target_launch_date}
                      onChange={e => set('target_launch_date', e.target.value)} />
             </div>
             <div className="go-field">
-              <label>Implementation owner</label>
-              <select value={form.owner_user_id} onChange={e => set('owner_user_id', e.target.value)}>
+              <label htmlFor="godprovisi-implementation-owner">Implementation owner</label>
+              <select id="godprovisi-implementation-owner" aria-label="Implementation owner" value={form.owner_user_id} onChange={e => set('owner_user_id', e.target.value)}>
                 <option value="">assign later</option>
                 {owners.filter(u => u.is_active !== false).map(u => (
                   <option key={u.id} value={u.id}>{u.full_name}</option>
@@ -230,8 +230,8 @@ export default function GodProvision() {
               </div>
             </div>
             <div className="go-field full">
-              <label>Handoff notes</label>
-              <textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)}
+              <label htmlFor="godprovisi-handoff-notes">Handoff notes</label>
+              <textarea id="godprovisi-handoff-notes" rows={3} value={form.notes} onChange={e => set('notes', e.target.value)}
                         placeholder="Anything the implementation team needs that is not already above." />
             </div>
           </div>

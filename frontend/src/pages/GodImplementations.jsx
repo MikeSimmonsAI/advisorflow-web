@@ -57,7 +57,7 @@ export default function GodImplementations() {
       {err ? <div className="go-note err">{err}</div> : null}
 
       <div className="go-filters">
-        <select value={f.brand_sales_org_id}
+        <select aria-label="Filter by brand" value={f.brand_sales_org_id}
                 onChange={e => setF({ ...f, brand_sales_org_id: e.target.value })}>
           <option value="">All brands</option>
           {brands.map(b => (
@@ -66,11 +66,11 @@ export default function GodImplementations() {
             </option>
           ))}
         </select>
-        <select value={f.status} onChange={e => setF({ ...f, status: e.target.value })}>
+        <select aria-label="Filter by status" value={f.status} onChange={e => setF({ ...f, status: e.target.value })}>
           <option value="">Any status</option>
           {statuses.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
-        <select value={f.flag} onChange={e => setF({ ...f, flag: e.target.value })}>
+        <select aria-label="Filter by flag" value={f.flag} onChange={e => setF({ ...f, flag: e.target.value })}>
           <option value="">No flag filter</option>
           <option value="blocked">Blocked</option>
           <option value="overdue">Launch date overdue</option>

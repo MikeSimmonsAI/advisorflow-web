@@ -52,7 +52,7 @@ export default function GodControlAudit() {
       {err ? <div className="go-note err">{err}</div> : null}
 
       <div className="go-filters">
-        <select value={action} onChange={e => setAction(e.target.value)}>
+        <select aria-label="Filter by action" value={action} onChange={e => setAction(e.target.value)}>
           <option value="">All control-plane actions</option>
           {(d && d.actions ? d.actions : []).map(a => (
             <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>

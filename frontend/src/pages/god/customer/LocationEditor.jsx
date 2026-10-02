@@ -78,13 +78,13 @@ export default function LocationEditor({ orgId, location, onCancel, onSaved }) {
       </p>
       {err && <div className="go-err">{err}</div>}
 
-      <label className="go-label">Location name</label>
-      <input className="go-input" value={f.name} autoFocus
+      <label className="go-label" htmlFor="locationed-location-name">Location name</label>
+      <input id="locationed-location-name" className="go-input" value={f.name} autoFocus
              placeholder="Main office"
              onChange={e => set('name', e.target.value)} />
 
-      <label className="go-label">Address</label>
-      <input className="go-input" value={f.address_line1}
+      <label className="go-label" htmlFor="locationed-address">Address</label>
+      <input id="locationed-address" className="go-input" value={f.address_line1}
              placeholder="Street address"
              onChange={e => set('address_line1', e.target.value)} />
       <input className="go-input" value={f.address_line2}
@@ -93,47 +93,47 @@ export default function LocationEditor({ orgId, location, onCancel, onSaved }) {
 
       <div className="go-two-even">
         <div>
-          <label className="go-label">City</label>
-          <input className="go-input" value={f.city}
+          <label className="go-label" htmlFor="locationed-city">City</label>
+          <input id="locationed-city" className="go-input" value={f.city}
                  onChange={e => set('city', e.target.value)} />
         </div>
         <div>
-          <label className="go-label">State</label>
-          <input className="go-input" value={f.state}
+          <label className="go-label" htmlFor="locationed-state">State</label>
+          <input id="locationed-state" className="go-input" value={f.state}
                  onChange={e => set('state', e.target.value)} />
         </div>
       </div>
 
       <div className="go-two-even">
         <div>
-          <label className="go-label">Postal code</label>
-          <input className="go-input" value={f.postal_code}
+          <label className="go-label" htmlFor="locationed-postal-code">Postal code</label>
+          <input id="locationed-postal-code" className="go-input" value={f.postal_code}
                  onChange={e => set('postal_code', e.target.value)} />
         </div>
         <div>
-          <label className="go-label">Phone</label>
-          <input className="go-input" value={f.phone}
+          <label className="go-label" htmlFor="locationed-phone">Phone</label>
+          <input id="locationed-phone" className="go-input" value={f.phone}
                  onChange={e => set('phone', e.target.value)} />
         </div>
       </div>
 
       <div className="go-two-even">
         <div>
-          <label className="go-label">Email</label>
-          <input className="go-input" value={f.email}
+          <label className="go-label" htmlFor="locationed-email">Email</label>
+          <input id="locationed-email" className="go-input" value={f.email}
                  placeholder="location@example.com"
                  onChange={e => set('email', e.target.value)} />
         </div>
         <div>
-          <label className="go-label">Timezone</label>
-          <input className="go-input" value={f.timezone}
+          <label className="go-label" htmlFor="locationed-timezone">Timezone</label>
+          <input id="locationed-timezone" className="go-input" value={f.timezone}
                  placeholder="America/Chicago"
                  onChange={e => set('timezone', e.target.value)} />
         </div>
       </div>
 
-      <label className="go-label">Notes</label>
-      <input className="go-input" value={f.notes}
+      <label className="go-label" htmlFor="locationed-notes">Notes</label>
+      <input id="locationed-notes" className="go-input" value={f.notes}
              onChange={e => set('notes', e.target.value)} />
 
       <div className="go-actions">

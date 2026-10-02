@@ -329,7 +329,7 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
 
         <div style={{ marginBottom: 14 }}>
           <label style={label}>Their access</label>
-          <select style={field} value={role} onChange={e => setRole(e.target.value)}>
+          <select aria-label="Their access" style={field} value={role} onChange={e => setRole(e.target.value)}>
             {(ctx ? ctx.roles : ['org_admin']).map(r => (
               <option key={r} value={r}>{r}</option>
             ))}

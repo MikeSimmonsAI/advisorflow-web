@@ -198,8 +198,8 @@ function OffboardDialog({ orgId, name, onClose, onDone }) {
 
           <div className="go-fields" style={{ marginTop: 16 }}>
             <div className="go-field">
-              <label>Reason</label>
-              <select value={reason} onChange={e => setReason(e.target.value)}>
+              <label htmlFor="customer36-reason">Reason</label>
+              <select id="customer36-reason" aria-label="Reason" value={reason} onChange={e => setReason(e.target.value)}>
                 <option value="">Not stated</option>
                 {reasons.map(r => (
                   <option key={r.key} value={r.key}>{r.label}</option>
@@ -207,8 +207,8 @@ function OffboardDialog({ orgId, name, onClose, onDone }) {
               </select>
             </div>
             <div className="go-field">
-              <label>Effective cancellation date</label>
-              <input type="date" value={effective}
+              <label htmlFor="customer36-effective-cancellation-date">Effective cancellation date</label>
+              <input id="customer36-effective-cancellation-date" type="date" value={effective}
                      onChange={e => setEffective(e.target.value)} />
               <div className="hint">
                 When service actually ends. Often not today — a notice period or
@@ -216,13 +216,13 @@ function OffboardDialog({ orgId, name, onClose, onDone }) {
               </div>
             </div>
             <div className="go-field full">
-              <label>Admin notes</label>
-              <input type="text" value={note} onChange={e => setNote(e.target.value)}
+              <label htmlFor="customer36-admin-notes">Admin notes</label>
+              <input id="customer36-admin-notes" type="text" value={note} onChange={e => setNote(e.target.value)}
                      placeholder="What happened, in your words" />
             </div>
             <div className="go-field full">
-              <label>Outstanding obligations</label>
-              <input type="text" value={obligations}
+              <label htmlFor="customer36-outstanding-obligations">Outstanding obligations</label>
+              <input id="customer36-outstanding-obligations" type="text" value={obligations}
                      onChange={e => setObligations(e.target.value)}
                      placeholder="Remaining term, unpaid invoices, anything still owed" />
               <div className="hint">
@@ -497,8 +497,8 @@ function DeleteDialog({ orgId, name, onClose, onDone }) {
                     </p>
                   </div>
                   <div className="go-field">
-                    <label>Type <code>{name}</code> to confirm</label>
-                    <input type="text" value={typed}
+                    <label htmlFor="customer36-type-to-confirm">Type <code>{name}</code> to confirm</label>
+                    <input id="customer36-type-to-confirm" type="text" value={typed}
                            onChange={e => setTyped(e.target.value)} />
                   </div>
                   <div className="go-actions" style={{ marginTop: 12, justifyContent: 'flex-start' }}>

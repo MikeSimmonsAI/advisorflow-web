@@ -247,7 +247,7 @@ export default function GodLaunchDelivery({ orgId }) {
               ) : null}
             </b>
             <Chip label={i.status_label} tone={INTEGRATION_TONE[i.status] || 'neutral'} />
-            <select
+            <select aria-label="Integration status"
               value={i.status} disabled={busy || readOnly} style={control}
               onChange={e => act(() => api.patch(
                 base + '/integrations/' + i.id, { status: e.target.value }))}>

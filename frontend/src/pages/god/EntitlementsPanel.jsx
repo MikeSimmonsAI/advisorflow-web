@@ -210,12 +210,12 @@ export function EntitlementsWorkbench({ target, compact = false }) {
       {data?.note && <div className="fe-banner">{data.note}</div>}
       {notice && <div className={`fe-banner fe-banner-${notice.tone}`}>{notice.text}</div>}
 
-      <div className="fe-chips" role="tablist" aria-label="Feature categories">
-        <button className={`fe-chip ${category === 'all' ? 'is-active' : ''}`} onClick={() => setCategory('all')}>
+      <div className="fe-chips" role="group" aria-label="Feature categories">
+        <button className={`fe-chip ${category === 'all' ? 'is-active' : ''}`} aria-pressed={category === 'all'} onClick={() => setCategory('all')}>
           All Features <span>{features.length}</span>
         </button>
         {categories.map(([c, n]) => (
-          <button key={c} className={`fe-chip ${category === c ? 'is-active' : ''}`} onClick={() => setCategory(c)}>
+          <button key={c} className={`fe-chip ${category === c ? 'is-active' : ''}`} aria-pressed={category === c} onClick={() => setCategory(c)}>
             {c} <span>{n}</span>
           </button>
         ))}
@@ -226,14 +226,14 @@ export function EntitlementsWorkbench({ target, compact = false }) {
           <div className="fe-filters">
             <input className="fe-input fe-search" placeholder="Search features or keys…" value={search}
               onChange={e => setSearch(e.target.value)} aria-label="Search features" />
-            <select className="fe-input" value={status} onChange={e => setStatus(e.target.value)} aria-label="Status">
+            <select aria-label="Filter by status" className="fe-input" value={status} onChange={e => setStatus(e.target.value)} aria-label="Status">
               <option value="all">All statuses</option>
               <option value="enabled">Enabled</option>
               <option value="disabled">Disabled</option>
               <option value="requires_setup">Requires setup</option>
               <option value="blocked_by_dependency">Blocked by dependency</option>
             </select>
-            <select className="fe-input" value={source} onChange={e => setSource(e.target.value)} aria-label="Source">
+            <select aria-label="Filter by source" className="fe-input" value={source} onChange={e => setSource(e.target.value)} aria-label="Source">
               <option value="all">All sources</option>
               <option value="override">Overridden here</option>
               <option value="inherited">Inherited</option>

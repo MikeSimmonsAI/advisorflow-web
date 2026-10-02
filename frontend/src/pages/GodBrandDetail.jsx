@@ -181,7 +181,7 @@ export default function GodBrandDetail() {
             </div>
           ) : null}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-            <select
+            <select aria-label="Who receives bookings that arrive with no link"
               className="go-input sm"
               disabled={ownerBusy || team === null}
               value={ownerPick === null ? (inboundOwner.user_id || '') : ownerPick}
@@ -292,7 +292,7 @@ export default function GodBrandDetail() {
                   </td>
                   <td data-label="Email">{u.email}</td>
                   <td data-label="Role">
-                    <select
+                    <select aria-label={`Role for ${u.email}`}
                       className="go-input sm"
                       value={u.role}
                       disabled={busy === u.user_id || !u.membership_is_active}

@@ -45,7 +45,7 @@ export default function GodMeetings() {
       <div className="god-page-header">
         <h1>Scheduled Meetings</h1>
         <div className="god-filter-bar">
-          <select value={brandId} onChange={e => set('brand', e.target.value)}>
+          <select aria-label="Filter by brand" value={brandId} onChange={e => set('brand', e.target.value)}>
             <option value="">All brands</option>
             {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>

@@ -113,7 +113,7 @@ function BrandRow({ brand, onSaved }) {
       <Well tone={state}>{stateText}</Well>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select
+        <select aria-label="Route to organization"
           value={choice}
           onFocus={loadOrgs}
           onChange={e => { setChoice(e.target.value); loadOrgs() }}

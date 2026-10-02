@@ -98,16 +98,16 @@ function PolicyForm({ brands, value, onChange, onSave, onCancel, busy, err, save
     <div style={{ background: 'var(--go-panel-2)', padding: '14px 15px' }}>
       <div className="go-fields">
         <div className="go-field">
-          <label>Applies to</label>
-          <select value={v.brand_sales_org_id} onChange={set('brand_sales_org_id')}>
+          <label htmlFor="godpricing-applies-to">Applies to</label>
+          <select id="godpricing-applies-to" aria-label="Applies to" value={v.brand_sales_org_id} onChange={set('brand_sales_org_id')}>
             <option value="">Every sales organization (platform-wide)</option>
             {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
           <div className="hint">A brand's own policy wins over the platform-wide one.</div>
         </div>
         <div className="go-field">
-          <label>Role</label>
-          <select value={v.role} onChange={set('role')}>
+          <label htmlFor="godpricing-role">Role</label>
+          <select id="godpricing-role" aria-label="Role" value={v.role} onChange={set('role')}>
             <option value="">Every role</option>
             <option value="sales_rep">Sales rep</option>
             <option value="sales_manager">Sales manager</option>
@@ -115,14 +115,14 @@ function PolicyForm({ brands, value, onChange, onSave, onCancel, busy, err, save
           <div className="hint">A role-specific policy wins over the all-roles one.</div>
         </div>
         <div className="go-field">
-          <label>Max discount — setup / implementation (%)</label>
-          <input type="number" min="0" max="100" step="0.5"
+          <label htmlFor="godpricing-max-discount-setup-implementat">Max discount — setup / implementation (%)</label>
+          <input id="godpricing-max-discount-setup-implementat" type="number" min="0" max="100" step="0.5"
                  value={v.max_discount_pct_setup}
                  onChange={set('max_discount_pct_setup')} placeholder="blank = no ceiling" />
         </div>
         <div className="go-field">
-          <label>Max discount — monthly rate (%)</label>
-          <input type="number" min="0" max="100" step="0.5"
+          <label htmlFor="godpricing-max-discount-monthly-rate">Max discount — monthly rate (%)</label>
+          <input id="godpricing-max-discount-monthly-rate" type="number" min="0" max="100" step="0.5"
                  value={v.max_discount_pct_monthly}
                  onChange={set('max_discount_pct_monthly')} placeholder="blank = no ceiling" />
           <div className="hint">
@@ -131,17 +131,17 @@ function PolicyForm({ brands, value, onChange, onSave, onCancel, busy, err, save
           </div>
         </div>
         <div className="go-field">
-          <label>Minimum term (months)</label>
-          <input type="number" min="0" step="1" value={v.min_term_months}
+          <label htmlFor="godpricing-minimum-term-months">Minimum term (months)</label>
+          <input id="godpricing-minimum-term-months" type="number" min="0" step="1" value={v.min_term_months}
                  onChange={set('min_term_months')} placeholder="blank = no minimum" />
         </div>
         <div className="go-field">
-          <label>Effective from</label>
-          <input type="date" value={v.effective_from} onChange={set('effective_from')} />
+          <label htmlFor="godpricing-effective-from">Effective from</label>
+          <input id="godpricing-effective-from" type="date" value={v.effective_from} onChange={set('effective_from')} />
         </div>
         <div className="go-field">
-          <label>Effective to</label>
-          <input type="date" value={v.effective_to} onChange={set('effective_to')} />
+          <label htmlFor="godpricing-effective-to">Effective to</label>
+          <input id="godpricing-effective-to" type="date" value={v.effective_to} onChange={set('effective_to')} />
           <div className="hint">Blank means it stays in force until superseded.</div>
         </div>
         <div className="go-field full">
@@ -158,8 +158,8 @@ function PolicyForm({ brands, value, onChange, onSave, onCancel, busy, err, save
           </label>
         </div>
         <div className="go-field full">
-          <label>Note</label>
-          <input type="text" value={v.note} onChange={set('note')}
+          <label htmlFor="godpricing-note">Note</label>
+          <input id="godpricing-note" type="text" value={v.note} onChange={set('note')}
                  placeholder="Why this ceiling exists" />
         </div>
       </div>
@@ -371,8 +371,8 @@ function RuleForm({ data, value, onChange, onSave, onCancel, busy, err }) {
     <div style={{ background: 'var(--go-panel-2)', padding: '14px 15px' }}>
       <div className="go-fields">
         <div className="go-field">
-          <label>Package</label>
-          <select value={v.package_id} onChange={set('package_id')}>
+          <label htmlFor="godpricing-package">Package</label>
+          <select id="godpricing-package" aria-label="Package" value={v.package_id} onChange={set('package_id')}>
             <option value="">Every package</option>
             {(data.packages || []).map(p => (
               <option key={p.id} value={p.id}>{p.name}</option>
@@ -380,15 +380,15 @@ function RuleForm({ data, value, onChange, onSave, onCancel, busy, err }) {
           </select>
         </div>
         <div className="go-field">
-          <label>Paid to</label>
-          <select value={v.payee_kind} onChange={set('payee_kind')}>
+          <label htmlFor="godpricing-paid-to">Paid to</label>
+          <select id="godpricing-paid-to" aria-label="Paid to" value={v.payee_kind} onChange={set('payee_kind')}>
             <option value="seller">The salesperson</option>
             <option value="override">A manager / upline override</option>
           </select>
         </div>
         <div className="go-field">
-          <label>Override level</label>
-          <input type="number" min="1" step="1" value={v.override_level}
+          <label htmlFor="godpricing-override-level">Override level</label>
+          <input id="godpricing-override-level" type="number" min="1" step="1" value={v.override_level}
                  onChange={set('override_level')}
                  disabled={v.payee_kind !== 'override'}
                  placeholder={v.payee_kind === 'override' ? '1 = direct manager' : 'n/a'} />
@@ -398,8 +398,8 @@ function RuleForm({ data, value, onChange, onSave, onCancel, busy, err }) {
           </div>
         </div>
         <div className="go-field">
-          <label>Basis</label>
-          <select value={v.basis} onChange={set('basis')}>
+          <label htmlFor="godpricing-basis">Basis</label>
+          <select id="godpricing-basis" aria-label="Basis" value={v.basis} onChange={set('basis')}>
             {bases.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
           </select>
         </div>
@@ -416,26 +416,26 @@ function RuleForm({ data, value, onChange, onSave, onCancel, busy, err }) {
           </div>
         </div>
         <div className="go-field">
-          <label>Eligible payment</label>
-          <select value={v.eligible_payment} onChange={set('eligible_payment')}>
+          <label htmlFor="godpricing-eligible-payment">Eligible payment</label>
+          <select id="godpricing-eligible-payment" aria-label="Eligible payment" value={v.eligible_payment} onChange={set('eligible_payment')}>
             <option value="initial">Initial payment only</option>
             <option value="recurring">Recurring payments only</option>
             <option value="both">Initial and recurring</option>
           </select>
         </div>
         <div className="go-field">
-          <label>Recurring months</label>
-          <input type="number" min="0" step="1" value={v.recurring_months}
+          <label htmlFor="godpricing-recurring-months">Recurring months</label>
+          <input id="godpricing-recurring-months" type="number" min="0" step="1" value={v.recurring_months}
                  onChange={set('recurring_months')} placeholder="blank = for the life of the account" />
         </div>
         <div className="go-field">
-          <label>Cap on this rule</label>
-          <input type="number" min="0" step="1" value={v.max_amount}
+          <label htmlFor="godpricing-cap-on-this-rule">Cap on this rule</label>
+          <input id="godpricing-cap-on-this-rule" type="number" min="0" step="1" value={v.max_amount}
                  onChange={set('max_amount')} placeholder="blank = uncapped" />
         </div>
         <div className="go-field full">
-          <label>Note</label>
-          <input type="text" value={v.note} onChange={set('note')} />
+          <label htmlFor="godpricing-note-2">Note</label>
+          <input id="godpricing-note-2" type="text" value={v.note} onChange={set('note')} />
         </div>
       </div>
       {err ? <div className="go-note err" style={{ marginTop: 12 }}>{err}</div> : null}
@@ -602,8 +602,8 @@ function CapEditor({ plan, data, onSaved }) {
       {open ? (
         <div className="go-fields" style={{ marginTop: 12 }}>
           <div className="go-field">
-            <label>Package</label>
-            <select value={pkg} onChange={e => setPkg(e.target.value)}>
+            <label htmlFor="godpricing-package-2">Package</label>
+            <select id="godpricing-package-2" aria-label="Package" value={pkg} onChange={e => setPkg(e.target.value)}>
               <option value="">Choose a package…</option>
               {(data.packages || []).map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -611,8 +611,8 @@ function CapEditor({ plan, data, onSaved }) {
             </select>
           </div>
           <div className="go-field">
-            <label>Maximum total payout</label>
-            <input type="number" min="0" step="1" value={amount}
+            <label htmlFor="godpricing-maximum-total-payout">Maximum total payout</label>
+            <input id="godpricing-maximum-total-payout" type="number" min="0" step="1" value={amount}
                    onChange={e => setAmount(e.target.value)} />
             <div className="hint">
               Everyone's commission on this package together. Where the rules
@@ -748,23 +748,23 @@ function PlanCard({ plan, data, onSaved }) {
         <div style={{ background: 'var(--go-panel-2)', padding: '14px 15px' }}>
           <div className="go-fields">
             <div className="go-field">
-              <label>Plan name</label>
-              <input type="text" value={head.name}
+              <label htmlFor="godpricing-plan-name">Plan name</label>
+              <input id="godpricing-plan-name" type="text" value={head.name}
                      onChange={e => setHead({ ...head, name: e.target.value })} />
             </div>
             <div className="go-field">
-              <label>Effective from</label>
-              <input type="date" value={head.effective_from}
+              <label htmlFor="godpricing-effective-from-2">Effective from</label>
+              <input id="godpricing-effective-from-2" type="date" value={head.effective_from}
                      onChange={e => setHead({ ...head, effective_from: e.target.value })} />
             </div>
             <div className="go-field">
-              <label>Effective to</label>
-              <input type="date" value={head.effective_to}
+              <label htmlFor="godpricing-effective-to-2">Effective to</label>
+              <input id="godpricing-effective-to-2" type="date" value={head.effective_to}
                      onChange={e => setHead({ ...head, effective_to: e.target.value })} />
             </div>
             <div className="go-field">
-              <label>Holdback (days)</label>
-              <input type="number" min="0" step="1" value={head.holdback_days}
+              <label htmlFor="godpricing-holdback-days">Holdback (days)</label>
+              <input id="godpricing-holdback-days" type="number" min="0" step="1" value={head.holdback_days}
                      onChange={e => setHead({ ...head, holdback_days: e.target.value })} />
               <div className="hint">
                 Earned commission becomes payable this many days after
@@ -772,13 +772,13 @@ function PlanCard({ plan, data, onSaved }) {
               </div>
             </div>
             <div className="go-field">
-              <label>Override levels</label>
-              <input type="number" min="0" step="1" value={head.max_override_levels}
+              <label htmlFor="godpricing-override-levels">Override levels</label>
+              <input id="godpricing-override-levels" type="number" min="0" step="1" value={head.max_override_levels}
                      onChange={e => setHead({ ...head, max_override_levels: e.target.value })} />
             </div>
             <div className="go-field full">
-              <label>Note</label>
-              <input type="text" value={head.note}
+              <label htmlFor="godpricing-note-2-3">Note</label>
+              <input id="godpricing-note-2-3" type="text" value={head.note}
                      onChange={e => setHead({ ...head, note: e.target.value })} />
             </div>
           </div>
@@ -869,38 +869,38 @@ function NewPlan({ data, onSaved }) {
       <div style={{ background: 'var(--go-panel-2)', padding: '14px 15px' }}>
         <div className="go-fields">
           <div className="go-field">
-            <label>Sales organization</label>
-            <select value={v.brand_sales_org_id} onChange={set('brand_sales_org_id')}>
+            <label htmlFor="godpricing-sales-organization">Sales organization</label>
+            <select id="godpricing-sales-organization" aria-label="Sales organization" value={v.brand_sales_org_id} onChange={set('brand_sales_org_id')}>
               <option value="">Every sales organization (platform-wide)</option>
               {(data.brands || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
           <div className="go-field">
-            <label>Plan name</label>
-            <input type="text" value={v.name} onChange={set('name')}
+            <label htmlFor="godpricing-plan-name-2">Plan name</label>
+            <input id="godpricing-plan-name-2" type="text" value={v.name} onChange={set('name')}
                    placeholder="e.g. EvoSys Direct Sales 2027" />
           </div>
           <div className="go-field">
-            <label>Effective from</label>
-            <input type="date" value={v.effective_from} onChange={set('effective_from')} />
+            <label htmlFor="godpricing-effective-from-2-3">Effective from</label>
+            <input id="godpricing-effective-from-2-3" type="date" value={v.effective_from} onChange={set('effective_from')} />
             <div className="hint">
               Required. Without a start date this plan could not be superseded
               later without rewriting history.
             </div>
           </div>
           <div className="go-field">
-            <label>Holdback (days)</label>
-            <input type="number" min="0" step="1" value={v.holdback_days}
+            <label htmlFor="godpricing-holdback-days-2">Holdback (days)</label>
+            <input id="godpricing-holdback-days-2" type="number" min="0" step="1" value={v.holdback_days}
                    onChange={set('holdback_days')} />
           </div>
           <div className="go-field">
-            <label>Override levels</label>
-            <input type="number" min="0" step="1" value={v.max_override_levels}
+            <label htmlFor="godpricing-override-levels-2">Override levels</label>
+            <input id="godpricing-override-levels-2" type="number" min="0" step="1" value={v.max_override_levels}
                    onChange={set('max_override_levels')} />
           </div>
           <div className="go-field full">
-            <label>Note</label>
-            <input type="text" value={v.note} onChange={set('note')} />
+            <label htmlFor="godpricing-note-2-3-4">Note</label>
+            <input id="godpricing-note-2-3-4" type="text" value={v.note} onChange={set('note')} />
           </div>
         </div>
         {err ? <div className="go-note err" style={{ marginTop: 12 }}>{err}</div> : null}
@@ -957,8 +957,8 @@ function SeedPanel({ data, onSaved }) {
 
         <div className="go-fields">
           <div className="go-field">
-            <label>Sales organization</label>
-            <select value={brand} onChange={e => { setBrand(e.target.value); setPreview(null); setDone(null) }}>
+            <label htmlFor="godpricing-sales-organization-2">Sales organization</label>
+            <select id="godpricing-sales-organization-2" aria-label="Sales organization" value={brand} onChange={e => { setBrand(e.target.value); setPreview(null); setDone(null) }}>
               <option value="">Choose a sales organization…</option>
               {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
@@ -1115,8 +1115,8 @@ function BrandAccessPanel({ data }) {
 
         <div className="go-fields">
           <div className="go-field">
-            <label>Sales organization</label>
-            <select value={brand} onChange={e => setBrand(e.target.value)}>
+            <label htmlFor="godpricing-sales-organization-2-3">Sales organization</label>
+            <select id="godpricing-sales-organization-2-3" aria-label="Sales organization" value={brand} onChange={e => setBrand(e.target.value)}>
               <option value="">Choose a sales organization…</option>
               {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
@@ -1291,7 +1291,7 @@ export default function GodPricingCompensation() {
       {err ? <div className="go-note err">{err}</div> : null}
 
       <div className="go-filters">
-        <select value={brand} onChange={e => { setBrand(e.target.value); setData(null) }}>
+        <select aria-label="Filter by sales organization" value={brand} onChange={e => { setBrand(e.target.value); setData(null) }}>
           <option value="">All sales organizations</option>
           {(data.brands || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>

@@ -275,14 +275,14 @@ export default function GodLaunches() {
             cursor: 'pointer',
             border: '1px solid ' + (filter === f.key ? 'var(--gm-blue)' : 'var(--god-border, #e5e7eb)'),
             background: filter === f.key ? 'var(--gm-blue)' : 'var(--god-card, #fff)',
-            color: filter === f.key ? 'var(--gm-head)' : 'var(--god-text, #1f2937)',
+            color: filter === f.key ? '#fff' : 'var(--god-text, #1f2937)',
           }}>{f.label} {counts[f.key] ?? 0}</button>
         ))}
         <span style={{ flex: 1 }} />
-        <select value={brand} onChange={e => setBrand(e.target.value)} style={select}>
+        <select aria-label="Filter by brand" value={brand} onChange={e => setBrand(e.target.value)} style={select}>
           {brands.map(b => <option key={b} value={b}>{b === 'all' ? 'All brands' : b}</option>)}
         </select>
-        <select value={implStatus} onChange={e => setImplStatus(e.target.value)} style={select}>
+        <select aria-label="Filter by implementation status" value={implStatus} onChange={e => setImplStatus(e.target.value)} style={select}>
           {statuses.map(s => (
             <option key={s} value={s}>
               {s === 'all' ? 'All implementation statuses' : s.replace(/_/g, ' ')}
@@ -547,7 +547,7 @@ function LaunchReview({ detail, schema, busy, onReviewed }) {
               cursor: 'pointer',
               border: '1px solid ' + (tab === key ? 'var(--gm-blue)' : 'var(--god-border, #e5e7eb)'),
               background: tab === key ? 'var(--gm-blue)' : 'var(--god-card, #fff)',
-              color: tab === key ? 'var(--gm-head)' : 'var(--god-text, #1f2937)',
+              color: tab === key ? '#fff' : 'var(--god-text, #1f2937)',
             }}>{text}</button>
           ))}
       </div>

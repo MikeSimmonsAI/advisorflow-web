@@ -61,14 +61,14 @@ export default function AddPerson({ orgId, locations, onAdded }) {
             ? <div className="go-note">{look.reason}</div>
             : (
               <>
-                <label className="go-label">Full name</label>
-                <input className="go-input" value={name}
+                <label className="go-label" htmlFor="addperson-full-name">Full name</label>
+                <input id="addperson-full-name" className="go-input" value={name}
                        onChange={e => setName(e.target.value)} />
               </>
             )}
 
-          <label className="go-label">Role</label>
-          <select className="go-input" value={role} onChange={e => setRole(e.target.value)}>
+          <label className="go-label" htmlFor="addperson-role">Role</label>
+          <select id="addperson-role" aria-label="Role" className="go-input" value={role} onChange={e => setRole(e.target.value)}>
             <option value="advisor">Advisor</option>
             <option value="org_admin">Customer admin</option>
             <option value="viewer">Viewer</option>

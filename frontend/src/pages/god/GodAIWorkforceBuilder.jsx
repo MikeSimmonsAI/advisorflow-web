@@ -258,7 +258,7 @@ export default function GodAIWorkforceBuilder () {
 
             <div className="gm-card">
               <Sec>The job library — what each job needs before anybody can run it</Sec>
-              <div className="gm-tablewrap">
+              <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
                 <table className="gm-table">
                   <thead className="gm-thead">
                     <tr>
@@ -391,7 +391,7 @@ export default function GodAIWorkforceBuilder () {
         {tab === 'Deployments' && (
           <div className="gm-card">
             <Sec>Every customer&apos;s AI employees</Sec>
-            <div className="gm-tablewrap">
+            <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
               <table className="gm-table">
                 <thead className="gm-thead">
                   <tr>

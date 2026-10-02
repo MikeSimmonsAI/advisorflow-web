@@ -73,15 +73,15 @@ function NumberForm({ orgId, data, number, onDone, onCancel }) {
       {err && <div className="go-err">{err}</div>}
       <div className="go-fields">
         {!number && (
-          <div><label className="go-label">Number</label>
-            <input className="go-input" value={f.e164} placeholder="(214) 555-0100" required
+          <div><label className="go-label" htmlFor="telephonys-number">Number</label>
+            <input id="telephonys-number" className="go-input" value={f.e164} placeholder="(214) 555-0100" required
                    onChange={e => set('e164', e.target.value)} /></div>
         )}
-        <div><label className="go-label">Label</label>
-          <input className="go-input" value={f.label} placeholder="Main line" onChange={e => set('label', e.target.value)} /></div>
+        <div><label className="go-label" htmlFor="telephonys-label">Label</label>
+          <input id="telephonys-label" className="go-input" value={f.label} placeholder="Main line" onChange={e => set('label', e.target.value)} /></div>
         {(data.workspaces || []).length > 0 && (
-          <div><label className="go-label">Location (optional)</label>
-            <select className="go-input" value={f.workspace_id} onChange={e => set('workspace_id', e.target.value)}>
+          <div><label className="go-label" htmlFor="telephonys-location-optional">Location (optional)</label>
+            <select id="telephonys-location-optional" aria-label="Location (optional)" className="go-input" value={f.workspace_id} onChange={e => set('workspace_id', e.target.value)}>
               <option value="">Whole organization</option>
               {data.workspaces.map(w => <option key={w.id} value={w.id}>{w.name || w.id}</option>)}
             </select></div>
@@ -99,18 +99,18 @@ function NumberForm({ orgId, data, number, onDone, onCancel }) {
       </div>
       <h3 style={{ fontSize: 14 }}>Inbound calls</h3>
       <div className="go-fields">
-        <div><label className="go-label">When someone calls</label>
-          <select className="go-input" value={f.mode} onChange={e => set('mode', e.target.value)}>
+        <div><label className="go-label" htmlFor="telephonys-when-someone-calls">When someone calls</label>
+          <select id="telephonys-when-someone-calls" aria-label="When someone calls" className="go-input" value={f.mode} onChange={e => set('mode', e.target.value)}>
             {MODES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select></div>
-        <div><label className="go-label">Ring for (seconds)</label>
-          <input className="go-input" type="number" min={5} max={60} value={f.timeout_seconds}
+        <div><label className="go-label" htmlFor="telephonys-ring-for-seconds">Ring for (seconds)</label>
+          <input id="telephonys-ring-for-seconds" className="go-input" type="number" min={5} max={60} value={f.timeout_seconds}
                  onChange={e => set('timeout_seconds', e.target.value)} /></div>
-        <div><label className="go-label">Voicemail greeting (spoken)</label>
-          <input className="go-input" value={f.greeting_text} maxLength={500}
+        <div><label className="go-label" htmlFor="telephonys-voicemail-greeting-spoken">Voicemail greeting (spoken)</label>
+          <input id="telephonys-voicemail-greeting-spoken" className="go-input" value={f.greeting_text} maxLength={500}
                  placeholder="Default: You have reached <organization>…" onChange={e => set('greeting_text', e.target.value)} /></div>
-        <div><label className="go-label">Greeting recording URL (https, optional)</label>
-          <input className="go-input" value={f.greeting_recording_url} placeholder="https://…"
+        <div><label className="go-label" htmlFor="telephonys-greeting-recording-url-https-o">Greeting recording URL (https, optional)</label>
+          <input id="telephonys-greeting-recording-url-https-o" className="go-input" value={f.greeting_recording_url} placeholder="https://…"
                  onChange={e => set('greeting_recording_url', e.target.value)} /></div>
       </div>
       <label className="occ-muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', margin: '8px 0' }}>
@@ -176,11 +176,11 @@ function DropCard({ orgId, data, reload }) {
       ) : <p className="occ-muted" style={{ margin: '0 0 8px' }}>No approved message - machines are hung up on.</p>}
       {err && <div className="go-err">{err}</div>}
       <div className="go-fields" style={{ marginTop: 8 }}>
-        <div><label className="go-label">Message (spoken)</label>
-          <input className="go-input" value={text} maxLength={1000} onChange={e => setText(e.target.value)}
+        <div><label className="go-label" htmlFor="telephonys-message-spoken">Message (spoken)</label>
+          <input id="telephonys-message-spoken" className="go-input" value={text} maxLength={1000} onChange={e => setText(e.target.value)}
                  placeholder="Hi, this is … please call us back at …" /></div>
-        <div><label className="go-label">Or recording URL (https)</label>
-          <input className="go-input" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…" /></div>
+        <div><label className="go-label" htmlFor="telephonys-or-recording-url-https">Or recording URL (https)</label>
+          <input id="telephonys-or-recording-url-https" className="go-input" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…" /></div>
       </div>
       <div className="go-actions" style={{ marginTop: 10 }}>
         <button className="go-btn" disabled={busy || (!text.trim() && !url.trim())} onClick={() => save(true)}>Approve message</button>

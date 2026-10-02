@@ -272,7 +272,7 @@ export default function GodJobRuns() {
           <span style={{ fontSize: 12, color: 'var(--gm-text)', flex: 1 }}>
             {loading ? 'loading…' : `${total} total`}
           </span>
-          <select value={jobFilter} onChange={e => setJobFilter(e.target.value)}
+          <select aria-label="Filter by job" value={jobFilter} onChange={e => setJobFilter(e.target.value)}
                   style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6,
                            border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel)' }}>
             <option value="">All jobs</option>
@@ -280,7 +280,7 @@ export default function GodJobRuns() {
               <option key={j} value={j}>{JOB_LABELS[j] || j}</option>
             ))}
           </select>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          <select aria-label="Filter by status" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
                   style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6,
                            border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel)' }}>
             <option value="">All statuses</option>

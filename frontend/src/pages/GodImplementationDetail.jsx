@@ -256,8 +256,8 @@ export default function GodImplementationDetail() {
         <div className="go-body">
           <div className="go-fields" style={{ marginBottom: 14 }}>
             <div className="go-field">
-              <label>Implementation owner</label>
-              <select value={i.owner ? i.owner.id : ''} disabled={busy === 'owner'}
+              <label htmlFor="godimpleme-implementation-owner">Implementation owner</label>
+              <select id="godimpleme-implementation-owner" aria-label="Implementation owner" value={i.owner ? i.owner.id : ''} disabled={busy === 'owner'}
                       onChange={e => act('owner', () => api.post(
                         '/god/ops/implementations/' + implId + '/owner',
                         { owner_user_id: e.target.value || null }))}>
@@ -268,8 +268,8 @@ export default function GodImplementationDetail() {
               </select>
             </div>
             <div className="go-field">
-              <label>Status</label>
-              <select value={i.status} disabled={busy === 'status' || i.is_live}
+              <label htmlFor="godimpleme-status">Status</label>
+              <select id="godimpleme-status" aria-label="Status" value={i.status} disabled={busy === 'status' || i.is_live}
                       onChange={e => {
                         const v = e.target.value
                         if (v === 'blocked') return
@@ -284,8 +284,8 @@ export default function GodImplementationDetail() {
               {i.is_live ? <div className="hint">A live customer is not reopened from here.</div> : null}
             </div>
             <div className="go-field">
-              <label>Target launch date</label>
-              <input type="date" disabled={i.is_live}
+              <label htmlFor="godimpleme-target-launch-date">Target launch date</label>
+              <input id="godimpleme-target-launch-date" type="date" disabled={i.is_live}
                      defaultValue={i.target_launch_date ? String(i.target_launch_date).slice(0, 10) : ''}
                      onBlur={e => e.target.value && setStatus(i.status === 'blocked' ? 'configuration' : i.status,
                        { target_launch_date: new Date(e.target.value + 'T12:00:00').toISOString(),
@@ -296,8 +296,8 @@ export default function GodImplementationDetail() {
           {!i.is_live ? (
             <div className="go-fields">
               <div className="go-field full">
-                <label>Record a blocker</label>
-                <input value={blockNote} onChange={e => setBlockNote(e.target.value)}
+                <label htmlFor="godimpleme-record-a-blocker">Record a blocker</label>
+                <input id="godimpleme-record-a-blocker" value={blockNote} onChange={e => setBlockNote(e.target.value)}
                        placeholder="What is this waiting on?" />
               </div>
               <div className="go-field">
@@ -352,7 +352,7 @@ export default function GodImplementationDetail() {
                   {m.is_required ? <span className="go-badge warn" style={{ marginLeft: 8 }}>required</span> : null}
                   <small>{m.description || m.key}</small>
                 </div>
-                <select value={m.status} disabled={busy === 'ms:' + m.key}
+                <select aria-label={`${m.label} status`} value={m.status} disabled={busy === 'ms:' + m.key}
                         onChange={e => setMilestone(m.key, e.target.value)}>
                   {(d.milestone_statuses || []).map(s => (
                     <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
@@ -411,18 +411,18 @@ export default function GodImplementationDetail() {
         <div className="go-body" style={{ borderTop: '1px solid var(--go-line)' }}>
           <div className="go-fields">
             <div className="go-field">
-              <label>Full name</label>
-              <input value={admin.full_name}
+              <label htmlFor="godimpleme-full-name">Full name</label>
+              <input id="godimpleme-full-name" value={admin.full_name}
                      onChange={e => setAdmin({ ...admin, full_name: e.target.value })} />
             </div>
             <div className="go-field">
-              <label>Email</label>
-              <input value={admin.email}
+              <label htmlFor="godimpleme-email">Email</label>
+              <input id="godimpleme-email" value={admin.email}
                      onChange={e => setAdmin({ ...admin, email: e.target.value })} />
             </div>
             <div className="go-field">
-              <label>Role</label>
-              <select value={admin.role} onChange={e => setAdmin({ ...admin, role: e.target.value })}>
+              <label htmlFor="godimpleme-role">Role</label>
+              <select id="godimpleme-role" aria-label="Role" value={admin.role} onChange={e => setAdmin({ ...admin, role: e.target.value })}>
                 <option value="org_admin">org_admin</option>
                 <option value="advisor">advisor</option>
                 <option value="viewer">viewer</option>

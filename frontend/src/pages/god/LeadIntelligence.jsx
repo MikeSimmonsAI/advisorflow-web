@@ -625,37 +625,37 @@ function ProspectBrowser() {
     <>
       <div className="li-card" style={{ marginBottom: 12 }}>
         <div className="li-form">
-          <div className="li-field"><label>Search</label>
-            <input value={q.search} onChange={e => set('search', e.target.value)} placeholder="Name, phone, email, website" /></div>
-          <div className="li-field"><label>Status</label>
-            <select value={q.bucket} onChange={e => set('bucket', e.target.value)}>
+          <div className="li-field"><label htmlFor="leadintell-search">Search</label>
+            <input id="leadintell-search" value={q.search} onChange={e => set('search', e.target.value)} placeholder="Name, phone, email, website" /></div>
+          <div className="li-field"><label htmlFor="leadintell-status">Status</label>
+            <select id="leadintell-status" aria-label="Status" value={q.bucket} onChange={e => set('bucket', e.target.value)}>
               <option value="">All</option><option value={READY}>Ready</option>
               <option value={REVIEW}>Review</option><option value={EXCLUDED}>Excluded</option></select></div>
-          <div className="li-field"><label>Priority</label>
-            <select value={q.priority} onChange={e => set('priority', e.target.value)}>
+          <div className="li-field"><label htmlFor="leadintell-priority">Priority</label>
+            <select id="leadintell-priority" aria-label="Priority" value={q.priority} onChange={e => set('priority', e.target.value)}>
               <option value="">All</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></div>
-          <div className="li-field"><label>Stage</label>
-            <select value={q.stage} onChange={e => set('stage', e.target.value)}>
+          <div className="li-field"><label htmlFor="leadintell-stage">Stage</label>
+            <select id="leadintell-stage" aria-label="Stage" value={q.stage} onChange={e => set('stage', e.target.value)}>
               <option value="">All</option><option value="qualified">Qualified</option>
               <option value="suppressed">Suppressed</option><option value="duplicate">Duplicate</option>
               <option value="invalid">Invalid</option></select></div>
-          <div className="li-field"><label>Industry</label>
-            <input value={q.industry} onChange={e => set('industry', e.target.value)} placeholder="e.g. roofing" /></div>
-          <div className="li-field"><label>State</label>
-            <select value={q.state} onChange={e => set('state', e.target.value)}>
+          <div className="li-field"><label htmlFor="leadintell-industry">Industry</label>
+            <input id="leadintell-industry" value={q.industry} onChange={e => set('industry', e.target.value)} placeholder="e.g. roofing" /></div>
+          <div className="li-field"><label htmlFor="leadintell-state">State</label>
+            <select id="leadintell-state" aria-label="State" value={q.state} onChange={e => set('state', e.target.value)}>
               <option value="">All</option>{US_STATES.map(s => <option key={s}>{s}</option>)}</select></div>
-          <div className="li-field"><label>City</label>
-            <input value={q.city} onChange={e => set('city', e.target.value)} /></div>
+          <div className="li-field"><label htmlFor="leadintell-city">City</label>
+            <input id="leadintell-city" value={q.city} onChange={e => set('city', e.target.value)} /></div>
           <div className="li-field"><label>Score min / max</label>
             <div style={{ display: 'flex', gap: 6 }}>
               <input type="number" value={q.score_min} onChange={e => set('score_min', e.target.value)} placeholder="min" />
               <input type="number" value={q.score_max} onChange={e => set('score_max', e.target.value)} placeholder="max" />
             </div></div>
-          <div className="li-field"><label>Routing</label>
-            <select value={q.routed} onChange={e => set('routed', e.target.value)}>
+          <div className="li-field"><label htmlFor="leadintell-routing">Routing</label>
+            <select id="leadintell-routing" aria-label="Routing" value={q.routed} onChange={e => set('routed', e.target.value)}>
               <option value="">All</option><option value="false">Not routed</option><option value="true">Routed</option></select></div>
-          <div className="li-field"><label>Organization</label>
-            <select value={q.destination_org_id} onChange={e => set('destination_org_id', e.target.value)}>
+          <div className="li-field"><label htmlFor="leadintell-organization">Organization</label>
+            <select id="leadintell-organization" aria-label="Organization" value={q.destination_org_id} onChange={e => set('destination_org_id', e.target.value)}>
               <option value="">All</option>{orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
         </div>
       </div>
@@ -785,22 +785,22 @@ function Routing({ go }) {
         <form className="li-card" onSubmit={save}>
           <h3>{editing ? 'Edit rule' : 'New rule'}</h3>
           <div className="li-form" style={{ gridTemplateColumns: '1fr' }}>
-            <div className="li-field"><label>Name</label>
-              <input required value={form.name} onChange={e => set('name', e.target.value)} /></div>
-            <div className="li-field"><label>Destination organization</label>
-              <select required value={form.destination_org_id} onChange={e => set('destination_org_id', e.target.value)}>
+            <div className="li-field"><label htmlFor="leadintell-name">Name</label>
+              <input id="leadintell-name" required value={form.name} onChange={e => set('name', e.target.value)} /></div>
+            <div className="li-field"><label htmlFor="leadintell-destination-organization">Destination organization</label>
+              <select id="leadintell-destination-organization" aria-label="Destination organization" required value={form.destination_org_id} onChange={e => set('destination_org_id', e.target.value)}>
                 <option value="">— Choose —</option>{orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
               </select></div>
-            <div className="li-field"><label>Industry (key)</label>
-              <input value={form.match_industry} onChange={e => set('match_industry', e.target.value)} placeholder="e.g. roofing" /></div>
+            <div className="li-field"><label htmlFor="leadintell-industry-key">Industry (key)</label>
+              <input id="leadintell-industry-key" value={form.match_industry} onChange={e => set('match_industry', e.target.value)} placeholder="e.g. roofing" /></div>
             <div className="li-field"><label>City / State</label>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input value={form.match_city} onChange={e => set('match_city', e.target.value)} placeholder="City" />
-                <select value={form.match_state} onChange={e => set('match_state', e.target.value)}>
+                <select aria-label="City / State" value={form.match_state} onChange={e => set('match_state', e.target.value)}>
                   <option value="">Any</option>{US_STATES.map(s => <option key={s}>{s}</option>)}</select>
               </div></div>
-            <div className="li-field"><label>Minimum score</label>
-              <input type="number" value={form.min_score} onChange={e => set('min_score', e.target.value)} /></div>
+            <div className="li-field"><label htmlFor="leadintell-minimum-score">Minimum score</label>
+              <input id="leadintell-minimum-score" type="number" value={form.min_score} onChange={e => set('min_score', e.target.value)} /></div>
             <div className="li-field"><label>Applies to</label>
               <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
                 {[READY, REVIEW].map(b => (
@@ -808,8 +808,8 @@ function Routing({ go }) {
                     <input type="checkbox" checked={form.allowed_buckets.includes(b)} onChange={() => toggleBucket(b)} />
                     {BUCKET_LABEL[b]}</label>))}
               </div></div>
-            <div className="li-field"><label>Order</label>
-              <input type="number" value={form.sort_order} onChange={e => set('sort_order', e.target.value)} /></div>
+            <div className="li-field"><label htmlFor="leadintell-order">Order</label>
+              <input id="leadintell-order" type="number" value={form.sort_order} onChange={e => set('sort_order', e.target.value)} /></div>
             <label style={{ display: 'flex', gap: 6, fontSize: 13 }}>
               <input type="checkbox" checked={form.is_active} onChange={e => set('is_active', e.target.checked)} /> Active</label>
             <div style={{ display: 'flex', gap: 8 }}>

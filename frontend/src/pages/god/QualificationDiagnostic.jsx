@@ -631,7 +631,7 @@ export default function QualificationDiagnostic() {
                    fontSize: 14, border: '1px solid var(--gm-card-line)',
                    background: 'transparent', color: 'inherit' }}
         />
-        <select value={channel} onChange={e => setChannel(e.target.value)}
+        <select aria-label="Channel" value={channel} onChange={e => setChannel(e.target.value)}
                 style={{ padding: '10px 12px', borderRadius: 8, fontSize: 14,
                          border: '1px solid var(--gm-card-line)',
                          background: 'transparent', color: 'inherit' }}>

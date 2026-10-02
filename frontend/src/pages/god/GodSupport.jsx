@@ -700,7 +700,7 @@ function RecurringTab() {
       title="Recurring issues"
       subtitle="What keeps coming back, and what that means. A repair that keeps working on a problem that keeps returning is treating a symptom."
       right={
-        <select className="gm-input" value={days}
+        <select aria-label="Time window" className="gm-input" value={days}
                 onChange={(e) => setDays(Number(e.target.value))}>
           <option value={1}>Last 24 hours</option>
           <option value={7}>Last 7 days</option>

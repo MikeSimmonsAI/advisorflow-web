@@ -206,7 +206,7 @@ export default function GodLeadBrowser() {
           </div>
           <div style={{ flex: '1 1 140px' }}>
             <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Platform</div>
-            <select value={platformSlug} onChange={e => setPlatformSlug(e.target.value)}
+            <select aria-label="Platform" value={platformSlug} onChange={e => setPlatformSlug(e.target.value)}
                     style={{ width: '100%', fontSize: 13, padding: '6px 8px',
                              border: '1px solid var(--gm-card-line)', borderRadius: 6 }}>
               <option value="">All platforms</option>
@@ -215,7 +215,7 @@ export default function GodLeadBrowser() {
           </div>
           <div style={{ flex: '1 1 140px' }}>
             <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Organization</div>
-            <select value={orgId} onChange={e => setOrgId(e.target.value)}
+            <select aria-label="Organization" value={orgId} onChange={e => setOrgId(e.target.value)}
                     disabled={!platformSlug}
                     style={{ width: '100%', fontSize: 13, padding: '6px 8px',
                              border: '1px solid var(--gm-card-line)', borderRadius: 6,
@@ -227,7 +227,7 @@ export default function GodLeadBrowser() {
 
           <div style={{ flex: '1 1 120px' }}>
             <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Status</div>
-            <select value={status} onChange={e => setStatus(e.target.value)}
+            <select aria-label="Status" value={status} onChange={e => setStatus(e.target.value)}
                     style={{ width: '100%', fontSize: 13, padding: '6px 8px',
                              border: '1px solid var(--gm-card-line)', borderRadius: 6 }}>
               <option value="">All statuses</option>
@@ -247,14 +247,14 @@ export default function GodLeadBrowser() {
               </div>
               <div style={{ flex: '1 1 130px' }}>
                 <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>First seen from</div>
-                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                <input type="date" aria-label="First seen from" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
                        style={{ width: '100%', fontSize: 13, padding: '5px 8px',
                                 border: '1px solid var(--gm-card-line)', borderRadius: 6,
                                 boxSizing: 'border-box' }} />
               </div>
               <div style={{ flex: '1 1 130px' }}>
                 <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>First seen to</div>
-                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                <input type="date" aria-label="First seen to" value={dateTo} onChange={e => setDateTo(e.target.value)}
                        style={{ width: '100%', fontSize: 13, padding: '5px 8px',
                                 border: '1px solid var(--gm-card-line)', borderRadius: 6,
                                 boxSizing: 'border-box' }} />
@@ -265,7 +265,7 @@ export default function GodLeadBrowser() {
           {isMaster && (
             <div style={{ flex: '1 1 190px' }}>
               <div style={{ fontSize: 11, color: 'var(--gm-dim)', marginBottom: 4 }}>Records</div>
-              <select value={includeSynthetic ? 'all' : 'production'}
+              <select aria-label="Records" value={includeSynthetic ? 'all' : 'production'}
                       onChange={e => setIncludeSynthetic(e.target.value === 'all')}
                       style={{ width: '100%', fontSize: 13, padding: '6px 8px',
                                border: '1px solid var(--gm-card-line)', borderRadius: 6 }}>

@@ -96,7 +96,7 @@ export default function GodTraining () {
         </div>
 
         <div className="gm-filters">
-          <select className="gm-input" value={filter} onChange={e => setFilter(e.target.value)}>
+          <select aria-label="Filter by training path" className="gm-input" value={filter} onChange={e => setFilter(e.target.value)}>
             <option value="">Every path</option>
             {paths.map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
           </select>
@@ -122,7 +122,7 @@ export default function GodTraining () {
 
         <SectionLabel note="one row per person per path">READINESS</SectionLabel>
         <div className="gm-card" style={{ padding: 0, marginBottom: 18 }}>
-          <div className="gm-tablewrap">
+          <div className="gm-tablewrap" tabIndex={0} role="region" aria-label="Scrollable table">
             <table className="gm-table">
               <thead><tr>
                 <th>PERSON</th><th>PATH</th><th>PROGRESS</th><th>STATUS</th>

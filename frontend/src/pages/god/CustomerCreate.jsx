@@ -99,12 +99,12 @@ export default function CustomerCreate() {
       <section className="go-card go-pad">
         <h2 className="go-h2">Company</h2>
 
-        <label className="go-label">Company name <Req /></label>
-        <input className="go-input" value={f.name} onChange={set('name')}
+        <label className="go-label" htmlFor="customercr-company-name">Company name <Req /></label>
+        <input id="customercr-company-name" className="go-input" value={f.name} onChange={set('name')}
                placeholder="e.g. Riverside Memorial" />
 
-        <label className="go-label">Brand <Req /></label>
-        <select className="go-input" value={f.platform_id} onChange={set('platform_id')}>
+        <label className="go-label" htmlFor="customercr-brand">Brand <Req /></label>
+        <select id="customercr-brand" aria-label="Brand" className="go-input" value={f.platform_id} onChange={set('platform_id')}>
           <option value="">Select a brand…</option>
           {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
@@ -115,8 +115,8 @@ export default function CustomerCreate() {
 
         <div className="go-two">
           <div>
-            <label className="go-label">Business type</label>
-            <select className="go-input" value={f.industry} onChange={set('industry')}>
+            <label className="go-label" htmlFor="customercr-business-type">Business type</label>
+            <select id="customercr-business-type" aria-label="Business type" className="go-input" value={f.industry} onChange={set('industry')}>
               <option value="">Select a business type…</option>
               {industries.map(i => (
                 <option key={i.value} value={i.value}>{i.label}</option>
@@ -132,13 +132,13 @@ export default function CustomerCreate() {
             </p>
           </div>
           <div>
-            <label className="go-label">Timezone</label>
-            <input className="go-input" value={f.timezone} onChange={set('timezone')} />
+            <label className="go-label" htmlFor="customercr-timezone">Timezone</label>
+            <input id="customercr-timezone" className="go-input" value={f.timezone} onChange={set('timezone')} />
           </div>
         </div>
 
-        <label className="go-label">Main phone</label>
-        <input className="go-input" value={f.phone} onChange={set('phone')}
+        <label className="go-label" htmlFor="customercr-main-phone">Main phone</label>
+        <input id="customercr-main-phone" className="go-input" value={f.phone} onChange={set('phone')}
                placeholder="optional" />
       </section>
 
@@ -149,24 +149,24 @@ export default function CustomerCreate() {
           be activated — bookings have to route somewhere.
         </p>
 
-        <label className="go-label">Location name</label>
-        <input className="go-input" value={f.loc_name} onChange={set('loc_name')}
+        <label className="go-label" htmlFor="customercr-location-name">Location name</label>
+        <input id="customercr-location-name" className="go-input" value={f.loc_name} onChange={set('loc_name')}
                placeholder="e.g. Riverside Chapel" />
 
         <div className="go-two">
           <div>
-            <label className="go-label">City</label>
-            <input className="go-input" value={f.loc_city} onChange={set('loc_city')} />
+            <label className="go-label" htmlFor="customercr-city">City</label>
+            <input id="customercr-city" className="go-input" value={f.loc_city} onChange={set('loc_city')} />
           </div>
           <div>
-            <label className="go-label">State</label>
-            <input className="go-input go-input-sm" value={f.loc_state}
+            <label className="go-label" htmlFor="customercr-state">State</label>
+            <input id="customercr-state" className="go-input go-input-sm" value={f.loc_state}
                    onChange={set('loc_state')} />
           </div>
         </div>
 
-        <label className="go-label">Location phone</label>
-        <input className="go-input" value={f.loc_phone} onChange={set('loc_phone')} />
+        <label className="go-label" htmlFor="customercr-location-phone">Location phone</label>
+        <input id="customercr-location-phone" className="go-input" value={f.loc_phone} onChange={set('loc_phone')} />
       </section>
 
       <div className="go-actions" style={{ alignItems: 'center' }}>
