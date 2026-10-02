@@ -192,6 +192,33 @@ class TestGodOpportunityList:
         names = [row["company_name"] for row in r.json()]
         assert "Overdue Co" in names
 
+    def test_a_date_only_due_today_is_not_listed_as_overdue(self, client, db_session, god, bso):
+
+        """A date picker stores "due today" on the noon-UTC anchor; later the
+
+        same day that is earlier than now but it is NOT overdue - the list must
+
+        agree with the row's own badge."""
+
+        from app.services import workspace_time as _wt
+
+        tz = getattr(bso, "timezone", None) or _wt.default_timezone()
+
+        today_local = _wt.local_date(datetime.utcnow(), tz)
+
+        anchor = datetime(today_local.year, today_local.month, today_local.day, 12, 0)
+
+        _opp(db_session, bso, status="open", next_action_due_at=anchor, company_name="Due Today Co")
+
+        r = client.get("/god/ops/opportunities?filter_by=stalled_or_overdue", headers=_h(db_session, god))
+
+        assert r.status_code == 200
+
+        rows = {row["company_name"]: row for row in r.json()}
+
+        assert "Due Today Co" not in rows or rows["Due Today Co"]["is_overdue"] is True
+
+
     def test_brand_filter(self, client, db_session, god, bso):
         _opp(db_session, bso)
         r = client.get("/god/ops/opportunities?brand_id=%s" % bso.id,

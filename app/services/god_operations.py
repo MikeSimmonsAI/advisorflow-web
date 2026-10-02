@@ -605,6 +605,17 @@ def opportunity_list(
         )
 
     rows = q.order_by(Opportunity.updated_at.desc().nullslast()).all()
+    if filter_by == "stalled_or_overdue":
+        # The SQL above is a SUPERSET: `next_action_due_at < now` also catches a
+        # date-only due stored on its noon-UTC anchor, which is "due today",
+        # not overdue, for most of the working day in US time zones. Keep only
+        # rows that are stale or overdue by the same rule the row's own
+        # is_overdue badge uses, so the list never shows a deal its badge
+        # says is fine.
+        rows = [(o, b) for o, b in rows
+                if (o.updated_at or o.created_at) and (o.updated_at or o.created_at) < stale_before
+                or _wt.is_overdue(o.next_action_due_at, now,
+                                  getattr(b, "timezone", None) or _wt.default_timezone())]
 
     # batch-load owner names
     owner_ids = list({opp.owner_user_id for opp, _ in rows if opp.owner_user_id})
