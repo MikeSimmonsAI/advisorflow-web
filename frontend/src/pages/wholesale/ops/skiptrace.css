@@ -2,7 +2,10 @@
 .stc-table td { vertical-align: top; }
 .stc-table .stc-wrap { white-space: normal; min-width: 180px; max-width: 320px; overflow-wrap: anywhere; }
 .stc-table .stc-row--off td { color: var(--evo-text-tertiary); background: var(--evo-neutral-soft, transparent); }
-.stc-table a { color: var(--evo-primary); }
+/* Underlined (not colour alone) and a darker blue: the light "off" rows put
+   the primary blue at 3.5:1 on their grey (axe: color-contrast, link-in-text-block). */
+.stc-table a { color: var(--evo-primary); text-decoration: underline; }
+.stc-table .stc-row--off a { color: #0b5cad; }
 .stc-h { font: 600 15px/1.3 var(--evo-font); color: var(--evo-text-primary); margin: 20px 0 8px; }
 @media (max-width: 720px) {
   .stc-table .stc-wrap { min-width: 150px; }
