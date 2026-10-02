@@ -50,6 +50,8 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db
 from app.limiter import limiter
+from app.services import idempotency
+from app.services import public_booking as pb
 from app.services import public_capture as pc
 from app.services import public_intake
 from app.services.dedup_service import normalize_phone
@@ -261,8 +263,24 @@ def site_demo_request(platform_slug: str, payload: SitePayload,
     if not first:
         raise HTTPException(status_code=422, detail="A name is required.")
 
+    # AT MOST ONCE PER SUBMISSION, ON EVERY INSTANCE. The page sends a stable
+    # submission id; a network retry or a second click must return the first
+    # answer, not file a second note and send the notifications again.
+    extra = payload.model_extra or {}
+    submission_id = str(extra.get("submission_id") or "").strip()[:128]
+    idem_key = ("%s:%s" % (platform.slug, submission_id)) if submission_id else ""
+    if not idempotency.claim(db, DEMO_REQUEST_SCOPE, idem_key,
+                             organization_id=org.id):
+        prior = idempotency.previous_result(db, DEMO_REQUEST_SCOPE, idem_key) or {}
+        return dict(prior, success=True, replayed=True)
+
     sub = _submission(payload, pc.KIND_DEMO, _consent(payload, required=False))
     result = pc.capture(db, platform=platform, org=org, sub=sub)
+
+    pipeline = pb.record_demo_request(
+        db, platform=platform, form=_demo_form(payload),
+        code=str(extra.get("booking_code") or "").strip() or None,
+        lead_id=result.get("lead_id"))
     notify = {"internal": False, "customer": False}
     try:
         from app.models.models import Lead
@@ -278,8 +296,48 @@ def site_demo_request(platform_slug: str, payload: SitePayload,
     except Exception:
         log.exception("site demo notification failed after capture for lead %s",
                       result.get("lead_id"))
-    return {"success": True, "action": result["action"],
-            "lead_id": result["lead_id"], "notifications": notify}
+    out = {"success": True, "action": result["action"],
+           "lead_id": result["lead_id"], "notifications": notify,
+           "pipeline": {"filed": bool(pipeline.get("ok")),
+                        "reason": pipeline.get("reason")}}
+    try:
+        idempotency.remember(db, DEMO_REQUEST_SCOPE, idem_key, out)
+        db.commit()
+    except Exception:                                            # noqa: BLE001
+        db.rollback()
+    return out
+
+
+DEMO_REQUEST_SCOPE = "site.demo_request"
+
+
+def _demo_form(payload: SitePayload) -> dict:
+    """The demo-request form in the shape the sales pipeline reads.
+
+    Same keys `public_booking.book` produces, so a request and a booking from
+    the same person fill the same Opportunity and discovery record."""
+    extra = payload.model_extra or {}
+    name = " ".join(p for p in _names(payload) if p) or (payload.name or "")
+    challenge_raw = str(extra.get("pain_point") or "").strip()
+    key = pb.challenge_key(challenge_raw)
+    label = pb.CHALLENGE_LABELS.get(key) if key and key != "other" else (
+        pb.clean_text(challenge_raw, 200) or None)
+    return {
+        "full_name": pb.clean_text(name, 200),
+        "company": pb.clean_text(payload.company, 200),
+        "email": pb.clean_email(payload.email),
+        "phone": pb.clean_text(payload.phone, 60),
+        "industry": pb.clean_text(payload.industry, 120),
+        "primary_challenge": key,
+        "primary_challenge_label": label,
+        "primary_challenge_detail": None,
+        "current_system": pb.clean_text(extra.get("current_system"), 200),
+        "locations": pb.clean_text(extra.get("locations"), 120),
+        "lead_volume": pb.clean_text(extra.get("leads"), 120),
+        "notes": pb.clean_text(payload.goals or payload.message, 2000),
+        "interest": pb.clean_text(extra.get("interest"), 120),
+        "prospect_timezone": pb.valid_timezone(extra.get("visitor_timezone")),
+    }
 
 
 @router.post("/{platform_slug}/sms-optin", status_code=201)

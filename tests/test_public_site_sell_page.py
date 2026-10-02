@@ -151,8 +151,9 @@ def test_homepage_has_one_wholesale_path_and_keeps_the_sms_optin():
     band = page[page.index('id="wholesale"'):page.index('id="trust"')]
     assert "EvoSys Wholesale" in band and "powered by EvoSysPro" in band
     assert 'href="/sell">Sell a Property' in band
-    assert 'href="sms-optin/">SMS Opt-In' in page, "the existing SMS Opt-In stays in the header"
-    assert page.count('href="sms-optin/"') >= 3
+    header = page[page.index('<nav class="nav">'):page.index('</nav>')]
+    assert re.search(r'href="/?sms-optin/">SMS Opt-In', header), "the existing SMS Opt-In stays in the header"
+    assert len(re.findall(r'href="/?sms-optin/"', page)) >= 3
 
 
 def test_existing_sms_optin_page_is_unchanged_and_points_sellers_to_sell():

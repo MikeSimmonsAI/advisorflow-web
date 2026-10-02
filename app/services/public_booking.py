@@ -115,13 +115,56 @@ CHALLENGE_OPTIONS = [
 CHALLENGE_VALUES = {k for k, _ in CHALLENGE_OPTIONS}
 CHALLENGE_LABELS = dict(CHALLENGE_OPTIONS)
 
+# THE WEBSITE'S WORDING, MAPPED BACK TO THE KEYS. The public form shipped with
+# its own copy of these labels ("Responding to new leads fast enough", curly
+# apostrophes) and sent the LABEL, not the key - so every website booking
+# arrived as "other" and the challenge analytics this list exists to protect
+# read as one undifferentiated bucket. Matching is on a normalised form of the
+# text so punctuation and apostrophe style cannot reintroduce the drift.
+_CHALLENGE_ALIASES = {
+    "responding to new leads fast enough": "response_speed",
+    "keeping the team accountable and organized": "team_accountability",
+    "customer communication and follow-up": "customer_comms",
+    "reporting / knowing what's actually happening": "reporting",
+    "our current crm or tools aren't working well": "tools_not_working",
+}
+
+
+def _norm_label(text: str) -> str:
+    t = (text or "").strip().lower()
+    for a, b in (("\u2019", "'"), ("\u2018", "'"), ("\u2013", "-"), ("\u2014", "-")):
+        t = t.replace(a, b)
+    return " ".join(t.split())
+
+
+_CHALLENGE_BY_LABEL = {_norm_label(label): key for key, label in CHALLENGE_OPTIONS}
+_CHALLENGE_BY_LABEL.update({_norm_label(k): v for k, v in _CHALLENGE_ALIASES.items()})
+
+
+def challenge_key(value: Optional[str]) -> Optional[str]:
+    """A known challenge key from either the key itself or its wording; None if unknown."""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    if raw in CHALLENGE_VALUES:
+        return raw
+    return _CHALLENGE_BY_LABEL.get(_norm_label(raw))
+
 # NO "PACKAGE OF INTEREST". Discovery exists to work out which package fits;
 # asking the prospect to pick one first asks them to do the job they booked the
 # call to have done, and the answer is noise in the pipeline either way.
 
 # Optional context the form may collect. Free text, no validation beyond length -
 # these are notes for the person taking the call, not fields anything queries.
-OPTIONAL_CONTEXT_FIELDS = ("current_system", "locations", "lead_volume", "notes")
+OPTIONAL_CONTEXT_FIELDS = ("interest", "current_system", "locations", "lead_volume",
+                           "notes")
+
+# What the visitor said they are interested in. A short fixed list on the form;
+# stored as given (cleaned) because it is context for the person taking the
+# call, not a field anything branches on. It is NOT a package choice - see the
+# note above - it is which product line brought them here.
+INTEREST_OPTIONS = ("EvoSysPro", "EvoSys Wholesale", "Insurance / Agency Automation",
+                    "Energy / Sales CRM", "Custom / Other")
 
 
 # ── outcomes ────────────────────────────────────────────────────────────────
@@ -444,7 +487,7 @@ def _record_discovery(db: Session, opp: Opportunity, form: Dict[str, Any],
             if rec.current_tools else line
 
     extra = []
-    for key in ("locations", "lead_volume", "notes"):
+    for key in ("interest", "locations", "lead_volume", "notes"):
         if form.get(key):
             extra.append("%s: %s" % (key.replace("_", " ").title(), form[key]))
     if extra:
@@ -786,6 +829,77 @@ def _booking_note(form: Dict[str, Any], owner_source: str) -> str:
     return "\n".join(bits)
 
 
+# ── a demo REQUEST (no time chosen) ─────────────────────────────────────────
+
+REQUEST_NEXT_ACTION = "Contact to schedule the demo they requested on the website"
+REQUEST_FOLLOW_UP_HOURS = 2
+
+
+def record_demo_request(db: Session, *, platform: Platform, form: Dict[str, Any],
+                        code: Optional[str] = None,
+                        lead_id: Optional[str] = None,
+                        now: Optional[datetime] = None) -> dict:
+    """Put an unbooked demo request into the sales pipeline. Never raises.
+
+    WHY THIS EXISTS. A visitor who BOOKS gets an Opportunity, an appointment and
+    an owner. A visitor who could not book - online scheduling was down, or they
+    used "Send my information instead" - used to get only a marketing Lead in
+    the intake workspace. Nothing in Sales Operations showed it, nobody owned
+    it, and no follow-up was due: the request sat in a database. That is the
+    "clicked Book a Demo and disappeared" failure.
+
+    Now it lands where a booked demo lands - the brand's pipeline - through the
+    same `upsert_opportunity` (so the same person is never two deals), owned by
+    the same resolver a booking uses (a rep's link wins, otherwise the brand's
+    configured default owner; NEVER an arbitrary user), with a next action due
+    shortly so it appears in "Needs attention" instead of waiting to be found.
+
+    A next action a human already set is never overwritten, and the stage is
+    never moved backwards. With no owner resolvable the request still stands as
+    the Lead and this reports why, so an operations view can see the gap.
+    """
+    now = now or datetime.utcnow()
+    try:
+        bso = brand_sales_org_for_platform(db, platform)
+        if bso is None:
+            return {"ok": False, "reason": "no_brand_sales_org"}
+        from app.services import sales_booking_codes as codes
+        resolved = codes.resolve_inbound_owner(db, bso, code or None)
+        if not resolved.get("ok") and code:
+            # A bad or revoked rep link must not lose the request: fall back to
+            # the brand's default owner, which is what the visitor would have
+            # reached from the plain booking page.
+            resolved = codes.resolve_inbound_owner(db, bso, None)
+        if not resolved.get("ok"):
+            log.warning("demo request for %s has no owner (%s); kept as lead %s",
+                        platform.slug, resolved.get("status"), lead_id)
+            return {"ok": False, "reason": resolved.get("status") or "no_owner"}
+
+        opp, created = upsert_opportunity(db, bso, resolved["owner"], form,
+                                          source=website_source_label(platform),
+                                          now=now)
+        if not (opp.next_action or "").strip():
+            opp.next_action = REQUEST_NEXT_ACTION
+            opp.next_action_due_at = now + timedelta(hours=REQUEST_FOLLOW_UP_HOURS)
+        bits = [b for b in (form.get("interest"),
+                            form.get("primary_challenge_label")) if b]
+        db.add(OpportunityEvent(
+            opportunity_id=opp.id,
+            event_type="demo_requested",
+            summary="Demo requested on the website - no time booked yet",
+            detail=(" · ".join(bits) or None),
+            actor_user_id=None,
+            occurred_at=now))
+        db.commit()
+        return {"ok": True, "opportunity_id": opp.id, "created": created,
+                "owner_source": resolved.get("source")}
+    except Exception:                                            # noqa: BLE001
+        db.rollback()
+        log.exception("could not file website demo request in the pipeline "
+                      "(lead %s kept)", lead_id)
+        return {"ok": False, "reason": "exception"}
+
+
 def _capture_website_lead(db: Session, platform: Platform, intake_org,
                           form: Dict[str, Any],
                           request_meta: Dict[str, Any]) -> Optional[str]:
@@ -815,8 +929,9 @@ def _capture_website_lead(db: Session, platform: Platform, intake_org,
             page_url=request_meta.get("page_url"),
             referrer=request_meta.get("referrer"),
             utm=request_meta.get("utm") or {},
-            extra={k: v for k, v in form.items()
-                   if k in OPTIONAL_CONTEXT_FIELDS and v},
+            extra=dict({k: v for k, v in form.items()
+                        if k in OPTIONAL_CONTEXT_FIELDS and v},
+                       **({"cta": request_meta["cta"]} if request_meta.get("cta") else {})),
             ip=request_meta.get("ip"),
             user_agent=request_meta.get("user_agent"),
         )
