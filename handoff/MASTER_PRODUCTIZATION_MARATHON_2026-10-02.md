@@ -47,6 +47,8 @@ acceptance matrix are added at closeout.
 | 97ebc74 | Conversation Intelligence | **Conversation Queue** page (`/conversation-queue`, linked from Replies): insights, conversations by priority, search of what customers told us. |
 | 2a4f1fe · b8e5026 | Duplicate sends | A double-tap no longer texts a family twice: database lease on lead + exact text (30 s) on every one-message SMS door (lead page, inbox/phone, MMS, AI approve-and-send, drafted batch, Wholesale owner text). |
 | d6503b2 | Duplicate sends | Auto-send approve / approve-all now claim the row atomically (two clicks could both send); campaign sends refuse an identical repeat within 2 min. Corrects b8e5026's message, which said these were already guarded. |
+| 45f81f1 · 17a7561 · fcf10a4 | Duplicate sends | Same protection on the lead page's AI voice call (two clicks rang the person twice), SMS send-batch, and both bulk email sends ("Send reviewed" and the email-only batch). Released on failure so a retry works. |
+| (oct2qq) | Dead code | Unreachable duplicate `/sales/video/status` removed; route-reachability test added. |
 
 ## Checked and clean (no change needed)
 
@@ -54,6 +56,8 @@ acceptance matrix are added at closeout.
 - Role matrix: advisors reach no admin data or secrets through any read-only route (426 routes × advisor/admin).
 - No route's query count grows with workspace size (247 routes, 10 vs 120 leads).
 - Login errors don't reveal whether an email exists.
+- Public booking: concurrent bookings of one slot are refused by the database (exclusion constraint) and a repeated form submit returns the first booking.
+- Webhooks: Stripe events deduplicated by event id; Retell call events are applied idempotently (assignments, not increments) after signature check.
 - Route reachability: across every registered route, only two literal paths are shadowed by an earlier route (Campaign Builder send — Decision 8; a duplicate `/sales/video/status`, dead copy). A permanent test now fails on any new one.
 
 ## Decisions only Mike can make (found today, not changed)
@@ -66,6 +70,8 @@ acceptance matrix are added at closeout.
 6. **Self-service password reset** does not exist (admins reset passwords). Worth adding; it sends email, so it needs a decision on sender per brand.
 7. **Wholesale skin** on phones depends on the workspace's industry/feature list; a wholesale workspace with no explicit feature list gets the generic phone home.
 8. **Campaign Builder "Send" has never worked.** `POST /campaigns/builder/send` is shadowed by `POST /campaigns/{campaign_id}/send` (declared first), so advisors get "Admin access required" and admins get a validation error. Fixing the route order is one line, but it switches on a bulk SMS/email sender that has never run in production for real customers (Atlantis). Decide whether to turn it on, and for whom. A duplicate guard is already in place; a test pins today's behaviour.
+
+9. **Rate limits are per server instance** (slowapi in-memory). With one Render instance that is exact; with more, each public form/login limit multiplies by the instance count. Sharing them needs Redis (a paid add-on) — only matters if the service is scaled out.
 
 ## Mike-only actions (unchanged)
 

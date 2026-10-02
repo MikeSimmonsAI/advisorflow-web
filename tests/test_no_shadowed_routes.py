@@ -10,14 +10,13 @@ KNOWN, documented, deliberately not changed here:
   POST /campaigns/builder/send   shadowed by /campaigns/{campaign_id}/send.
         Turning it on enables a bulk sender never run in production - a
         decision for the owner (handoff, Decisions #8).
-  GET  /sales/video/status       declared twice; the scheduling router's copy
-        (registered first) is the one VideoStatus.jsx reads. The proposal
-        router's copy is dead code.
+  (GET /sales/video/status was declared twice; the unreachable copy in the
+   proposal router was deleted - VideoStatus.jsx reads the scheduling one.)
 Anything else that appears here is a new bug.
 """
 from starlette.routing import Match
 
-KNOWN = {("POST", "/campaigns/builder/send"), ("GET", "/sales/video/status")}
+KNOWN = {("POST", "/campaigns/builder/send")}
 
 
 def test_no_new_shadowed_routes():
