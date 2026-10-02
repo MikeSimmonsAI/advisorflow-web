@@ -33,6 +33,7 @@ export default function AIHub() {
   const [flagged, setFlagged] = useState([])
   const [conversations, setConversations] = useState([])
   const [calls, setCalls] = useState([])
+  const [callsToday, setCallsToday] = useState(null)
   const [queue, setQueue] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -46,16 +47,25 @@ export default function AIHub() {
       api.get('/pipeline/conversations').catch(() => []),
       api.get('/voice/calls').catch(() => []),
       api.get('/auto-send/queue').catch(() => []),
-    ]).then(([s, f, fl, cv, cl, q]) => {
+      api.get('/voice/calls-summary').catch(() => null),
+    ]).then(([s, f, fl, cv, cl, q, cs]) => {
       setStats(s)
       setForecast(f)
       setFlagged(Array.isArray(fl) ? fl : [])
       setConversations(Array.isArray(cv) ? cv : [])
       setCalls(Array.isArray(cl) ? cl : [])
       setQueue(Array.isArray(q) ? q : [])
+      setCallsToday(typeof cs?.today === 'number' ? cs.today : null)
     }).catch(e => setError(e.message))
     .finally(() => setLoading(false))
   }, [])
+
+  // /pipeline/flagged returns at most FLAGGED_LIST_CAP rows. Below the cap the
+  // list length is exact (and drops as items are handled); at the cap, use the
+  // server's own count for this workspace instead of reporting the cap.
+  const FLAGGED_LIST_CAP = 200
+  const needsAttention = (flagged.length >= FLAGGED_LIST_CAP && stats && !stats.is_god_view
+    && typeof stats.flagged_count === 'number') ? Math.max(stats.flagged_count, flagged.length) : flagged.length
 
   async function handleApprove(id, message) {
     try {
@@ -86,8 +96,8 @@ export default function AIHub() {
             onClick={() => setTab(t.key)}
           >
             {t.label}
-            {t.key === 'flagged' && flagged.length > 0 && (
-              <span className="aihub-tab-badge">{flagged.length}</span>
+            {t.key === 'flagged' && needsAttention > 0 && (
+              <span className="aihub-tab-badge">{needsAttention}</span>
             )}
           </button>
         ))}
@@ -104,8 +114,8 @@ export default function AIHub() {
               { label: 'Reply rate', value: forecast?.reply_rate != null ? `${forecast.reply_rate}%` : '—', color: 'var(--color-success)' },
               { label: 'Awaiting booking click', value: forecast?.booking_sent_count ?? '—', color: 'var(--color-warning)' },
               { label: 'Projected bookings', value: forecast?.projected_bookings_this_week ?? '—', color: 'var(--color-info)' },
-              { label: 'Calls made today', value: calls.filter(c => new Date(c.created_at).toDateString() === new Date().toDateString()).length, color: 'var(--signal-purple)' },
-              { label: 'Needs attention', value: flagged.length, color: 'var(--color-danger)' },
+              { label: 'Calls made today', value: callsToday ?? '—', color: 'var(--signal-purple)' },
+              { label: 'Needs attention', value: needsAttention, color: 'var(--color-danger)' },
             ].map(item => (
               <div key={item.label} className="aihub-stat-card">
                 <div className="aihub-stat-value" style={{ color: item.color }}>

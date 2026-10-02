@@ -608,6 +608,29 @@ def list_calls(
     return result
 
 
+@router.get("/calls-summary")
+def calls_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Counts the AI Hub shows, computed on the server.
+
+    "Calls made today" used to be counted in the browser from the newest 100
+    rows of /calls, using the BROWSER's calendar day - so it capped at 100 and
+    disagreed with the workspace's own day for anyone in another zone. Same
+    scope as /calls (the caller's own calls); the day is the workspace's.
+    """
+    from app.services import workspace_time
+    org_id = lead_scope.active_workspace_org_id(current_user, db) or current_user.organization_id
+    start, end, tz = workspace_time.day_bounds(db, org_id)
+    today = db.query(VoiceCall).filter(
+        VoiceCall.advisor_id == current_user.id,
+        VoiceCall.created_at >= start,
+        VoiceCall.created_at < end,
+    ).count()
+    return {"today": today, "timezone": tz}
+
+
 @router.get("/calls/{call_id}")
 def get_call(
     call_id: str,
