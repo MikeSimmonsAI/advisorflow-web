@@ -9,7 +9,7 @@ This module answers the next questions without collapsing them into one word:
     app        the process and its build
     database   can we round-trip a query, and how long did it take
     jobs       each background loop's LAST recorded run (job_runs ledger):
-               failed / ok / never ran - with its age. No made-up "expected
+               error / success / running / never ran - with its age. No made-up "expected
                interval": the ledger says what happened, and an operator
                reads the age.
     providers  optional integrations: NOT CONFIGURED | CONFIGURED | DISABLED.
@@ -66,7 +66,7 @@ def jobs(db: Session) -> Dict[str, Any]:
                 continue
             age = int((now - (last.finished_at or last.started_at)).total_seconds() // 60) \
                 if (last.finished_at or last.started_at) else None
-            if last.status == "failed":
+            if last.status in ("error", "failed"):        # the ledger writes 'error'
                 failed += 1
             items.append({"job": name, "last_status": last.status, "age_minutes": age})
     except Exception as exc:                                     # noqa: BLE001

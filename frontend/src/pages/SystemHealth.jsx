@@ -33,7 +33,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import {
-  ACTION_REQUIRED, HEALTHY, LABELS, MEANINGS, UNAVAILABLE, rank, worst,
+  ACTION_REQUIRED, ATTENTION, HEALTHY, LABELS, MEANINGS, UNAVAILABLE, rank, worst,
 } from '../severity'
 import '../styles/shared.css'
 import './SystemHealth.css'
@@ -101,6 +101,75 @@ function IntegrationCard({ integration, onFix }) {
   )
 }
 
+const READY_SEVERITY = { ok: HEALTHY, degraded: ATTENTION, failed: ACTION_REQUIRED }
+const JOB_LABEL = {
+  cadence_loop: 'Scheduled follow-ups', ai_conversation_loop: 'AI conversations', review_request_loop: 'Review requests',
+  support_intelligence_loop: 'Support intelligence (nightly)', session_cleanup_loop: 'Session cleanup',
+  sales_reminder_loop: 'Sales appointment reminders', ai_conversation_cron: 'AI conversations (cron)',
+  cadence_cron: 'Scheduled follow-ups (cron)', email_poller: 'Inbound email poller',
+  evosense_hunt_loop: 'EvoSense acquisition runs', wholesale_exception_sweep_loop: 'Wholesale exception sweep',
+}
+const PROVIDER_TEXT = { configured: 'Configured', not_configured: 'Not configured', disabled: 'Disabled' }
+
+function ageText(min) {
+  if (min == null) return ''
+  if (min < 60) return `${min} min ago`
+  if (min < 48 * 60) return `${Math.round(min / 60)} h ago`
+  return `${Math.round(min / 1440)} days ago`
+}
+
+/* Platform readiness, for the owner: the database round trip, each background
+   job's last recorded run, and every optional provider by configuration only
+   (no test call is made, and a missing optional provider never changes the
+   overall status). Source: GET /god/system-health. */
+function PlatformReadiness({ data }) {
+  const jobs = data?.jobs?.items || []
+  const providers = data?.providers || []
+  const sev = READY_SEVERITY[data?.status] || UNAVAILABLE
+  return (
+    <section className="panel cadence-health-panel" data-testid="platform-readiness">
+      <div className="panel-header">
+        <div>
+          <h2 className="panel-title">Platform readiness</h2>
+          <p className="cadence-health-subtitle">
+            Database {data?.database?.status === 'ok' ? `answering in ${data.database.latency_ms} ms` : (data?.database?.status || 'unknown')}
+            {' · '}build {data?.app?.build?.commit_short || 'unknown'}
+          </p>
+        </div>
+        <Pill severity={sev} />
+      </div>
+      <div className="readiness-cols">
+        <div>
+          <h3 className="readiness-h">Background jobs — last recorded run</h3>
+          <ul className="readiness-list">
+            {jobs.map(j => (
+              <li key={j.job}>
+                <span>{JOB_LABEL[j.job] || j.job.replace(/_/g, ' ')}</span>
+                <span className={'readiness-val' + (j.last_status === 'error' ? ' is-bad' : '')}>
+                  {j.last_status === 'never_ran' ? 'No run recorded' : `${j.last_status} · ${ageText(j.age_minutes)}`}
+                </span>
+              </li>
+            ))}
+            {!jobs.length && <li><span>No job ledger in this build.</span></li>}
+          </ul>
+        </div>
+        <div>
+          <h3 className="readiness-h">Optional providers</h3>
+          <ul className="readiness-list">
+            {providers.map(p => (
+              <li key={p.key} title={p.note || ''}>
+                <span>{p.label}</span>
+                <span className={'readiness-val' + (p.status === 'configured' ? ' is-ok' : '')}>{PROVIDER_TEXT[p.status] || p.status}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="readiness-note">{data?.providers_note}</p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export default function SystemHealth() {
   const navigate = useNavigate()
   const [status, setStatus] = useState(null)
@@ -138,6 +207,15 @@ export default function SystemHealth() {
   }
 
   useEffect(() => { loadStatus() }, [])
+
+  // OWNER ONLY. /god/system-health answers 403 for everyone else, and then the
+  // panel simply is not there.
+  const [platform, setPlatform] = useState(null)
+  useEffect(() => {
+    let live = true
+    api.get('/god/system-health').then(r => { if (live) setPlatform(r) }).catch(() => {})
+    return () => { live = false }
+  }, [])
 
   function handleFix(settingsPath) {
     navigate(settingsPath)
@@ -177,6 +255,8 @@ export default function SystemHealth() {
                            onFix={handleFix} />
         ))}
       </section>
+
+      {platform && <PlatformReadiness data={platform} />}
 
       <section className="panel cadence-health-panel">
         <div className="panel-header">

@@ -35,11 +35,11 @@ def test_missing_optional_providers_do_not_change_overall(db_session, monkeypatc
 
 def test_a_failed_job_degrades_but_does_not_fail(db_session):
     from app.models.job_models import JobRun
-    db_session.add(JobRun(job_name="cadence_loop", status="failed"))
+    db_session.add(JobRun(job_name="cadence_loop", status="error"))
     db_session.commit()
     rep = readiness.report(db_session, detail=True)
     assert rep["status"] == "degraded" and rep["jobs"]["failed"] == 1
-    assert any(j["job"] == "cadence_loop" and j["last_status"] == "failed" for j in rep["jobs"]["items"])
+    assert any(j["job"] == "cadence_loop" and j["last_status"] == "error" for j in rep["jobs"]["items"])
 
 
 def test_system_health_is_owner_only(client, auth_headers):
