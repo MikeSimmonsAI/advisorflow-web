@@ -10,7 +10,7 @@
 // lead (the inbound webhook drops texts from unknown numbers), so "Convert to
 // Lead" does not apply to anything in this queue and is not offered.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import CommsWorkspace from './comms/CommsWorkspace'
 import { CLASSIFICATIONS, STATUSES, ClassTag, StatusTag, Tag, Icon, channelIcon, timeAgo } from './comms/commsShared'
@@ -171,6 +171,7 @@ export default function Replies() {
           <p>Triage replies, callbacks, questions and Do Not Contact requests in one place.</p>
         </div>
         <div className="cc-head-actions">
+          <Link className="cc-btn" to="/conversation-queue">Conversation queue</Link>
           <label className="cc-switch">
             <input type="checkbox" checked={attentionOnly} onChange={e => setAttentionOnly(e.target.checked)} />
             <span className="cc-switch-track" aria-hidden="true"><span /></span>

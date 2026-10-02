@@ -50,6 +50,7 @@ import Overview from './pages/Overview'
 import Leads from './pages/Leads'
 import LeadDetail from './pages/LeadDetail'
 import Replies from './pages/Replies'
+import ConversationQueue from './pages/ConversationQueue'
 import Cadence from './pages/Cadence'
 import EmailQueue from './pages/EmailQueue'
 import Activity from './pages/Activity'
@@ -1022,6 +1023,7 @@ export default function App() {
         <Route path="/imports/new" element={<ProtectedRoute feature="imports" requireAdmin><ImportWizard /></ProtectedRoute>} />
         <Route path="/imports/:batchId" element={<ProtectedRoute feature="imports" requireAdmin><ImportWizard /></ProtectedRoute>} />
         <Route path="/replies" element={<ProtectedRoute><Replies /></ProtectedRoute>} />
+        <Route path="/conversation-queue" element={<ProtectedRoute><ConversationQueue /></ProtectedRoute>} />
         <Route path="/cadence" element={<ProtectedRoute feature="cadences"><Cadence /></ProtectedRoute>} />
         <Route path="/email-queue" element={<ProtectedRoute feature="email"><EmailQueue /></ProtectedRoute>} />
         <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
