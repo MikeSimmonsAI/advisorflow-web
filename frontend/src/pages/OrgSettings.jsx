@@ -1318,11 +1318,15 @@ function CRMStagesSection({ orgQuery }) {
 
   useEffect(() => {
     setLoading(true)
-    fetch(`/api/crm-native/stages${orgQuery}`, { headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` } })
-      .then(r => r.json()).then(d => {
+    // THROUGH THE API CLIENT. This used a relative '/api/...' URL with the
+    // retired 'bb_token' key: in production the frontend and the API are
+    // different hosts, so it read the frontend's index.html and the section
+    // showed no stages (and Save went nowhere).
+    api.get(`/crm-native/stages${orgQuery}`)
+      .then(d => {
         setData(d)
         setStages(d.stages || [])
-      }).catch(() => {}).finally(() => setLoading(false))
+      }).catch((e) => setErr(e?.message || 'Stages could not be loaded.')).finally(() => setLoading(false))
   }, [])
 
   function addStage() {
@@ -1345,12 +1349,8 @@ function CRMStagesSection({ orgQuery }) {
   async function save() {
     setErr(''); setSaving(true)
     try {
-      const res = await fetch('/api/crm-native/stages', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('bb_token')}` },
-        body: JSON.stringify({ stages }),
-      })
-      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Save failed') }
+      if (!data) throw new Error('The current stages could not be loaded, so nothing was saved.')
+      await api.put('/crm-native/stages', { stages })
       setSaved(true); setTimeout(() => setSaved(false), 3000)
     } catch (e) { setErr(e.message) }
     finally { setSaving(false) }
@@ -1360,12 +1360,8 @@ function CRMStagesSection({ orgQuery }) {
     if (!confirm('Reset to industry default stages?')) return
     setResetting(true)
     try {
-      const res = await fetch('/api/crm-native/stages/reset', {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` },
-      })
-      const d = await res.json()
-      setStages(d.stages || [])
+      const d = await api.delete('/crm-native/stages/reset')
+      setStages((d && d.stages) || [])
       setData(prev => ({ ...prev, is_custom: false }))
     } catch (e) { setErr(e.message) }
     finally { setResetting(false) }
@@ -1429,15 +1425,19 @@ const FIELD_TYPES = [
 
 function CRMCustomFieldsSection() {
   const [fields, setFields] = useState([])
+  const [fieldsLoaded, setFieldsLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    fetch('/api/crm-native/custom-fields', { headers: { Authorization: `Bearer ${localStorage.getItem('bb_token')}` } })
-      .then(r => r.json()).then(d => setFields(Array.isArray(d) ? d : []))
-      .catch(() => {}).finally(() => setLoading(false))
+    api.get('/crm-native/custom-fields')
+      .then(d => { setFields(Array.isArray(d) ? d : []); setFieldsLoaded(true) })
+      // A failed read must not leave an empty list that Save would write back
+      // over the real fields.
+      .catch((e) => setErr(e?.message || 'Custom fields could not be loaded.'))
+      .finally(() => setLoading(false))
   }, [])
 
   function addField() {
@@ -1462,12 +1462,8 @@ function CRMCustomFieldsSection() {
     }))
     if (cleaned.some(f => !f.label)) { setErr('All fields need a label'); setSaving(false); return }
     try {
-      const res = await fetch('/api/crm-native/custom-fields', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('bb_token')}` },
-        body: JSON.stringify({ fields: cleaned }),
-      })
-      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Save failed') }
+      if (!fieldsLoaded) throw new Error('The current fields could not be loaded, so nothing was saved.')
+      await api.put('/crm-native/custom-fields', { fields: cleaned })
       setSaved(true); setTimeout(() => setSaved(false), 3000)
     } catch (e) { setErr(e.message) }
     finally { setSaving(false) }

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { Panel, Empty, money, when, errText } from './GodOpsShared'
 import './GodOps.css'
+import { api } from '../../api/client'
 
 const FILTERS = [
   { value: '', label: 'All' },
@@ -28,17 +29,17 @@ export default function GodOpportunities() {
     const qs = new URLSearchParams()
     if (filterBy) qs.set('filter_by', filterBy)
     if (brandId) qs.set('brand_id', brandId)
-    fetch(`/god/ops/opportunities?${qs}`, { credentials: 'include' })
-      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+    // Through the API client: a relative fetch reached the FRONTEND host in
+    // production (index.html -> "Unexpected token '<'") and carried no token.
+    api.get(`/god/ops/opportunities?${qs}`)
       .then(data => { setRows(data); setError(null) })
       .catch(e => setError(errText(e)))
       .finally(() => setLoading(false))
   }, [filterBy, brandId])
 
   useEffect(() => {
-    fetch('/god/ops/brands', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : [])
-      .then(setBrands)
+    api.get('/god/ops/brands')
+      .then(d => setBrands(Array.isArray(d) ? d : ((d && d.brands) || [])))   // the API answers {brands: [...]}
       .catch(() => {})
   }, [])
 
