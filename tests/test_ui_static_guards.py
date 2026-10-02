@@ -73,3 +73,12 @@ def test_new_customer_form_uses_the_industry_registry_key():
     every option without a value or key."""
     src = _read("pages", "god", "CustomerCreate.jsx")
     assert "value={i.key ?? i.value}" in src
+
+
+def test_crm_reads_every_page_not_the_first_fifty():
+    """/crm-native/contacts is paginated (50 by default). The CRM screen read
+    page 1 only: a workspace with more contacts saw 50, a header saying "50
+    contacts", and a search that could not find anybody else."""
+    src = _read("pages", "CRM.jsx")
+    assert "page_size=200" in src and "CRM_LOAD_CAP" in src
+    assert "&search=" in src            # past the cap, search goes to the server

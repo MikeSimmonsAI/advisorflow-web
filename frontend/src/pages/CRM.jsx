@@ -13,6 +13,8 @@ import './CRM.css'
 // the request failed. A first-paint default is indistinguishable from a
 // decision to the person reading it, so this one carries no vertical at all.
 // See src/terminology.js.
+
+const CRM_LOAD_CAP = 2000
 import { NEUTRAL_STAGES } from '../terminology'
 
 const FALLBACK_STAGES = NEUTRAL_STAGES
@@ -365,6 +367,9 @@ export default function CRM() {
   const [stages, setStages] = useState(FALLBACK_STAGES)
   const [customFields, setCustomFields] = useState([])
   const [contacts, setContacts] = useState([])
+  const [total, setTotal] = useState(0)
+  // True when the UNFILTERED workspace has more contacts than CRM_LOAD_CAP.
+  const [capped, setCapped] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
@@ -375,12 +380,28 @@ export default function CRM() {
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
 
-  const fetchContacts = async () => {
+  // ALL OF THEM, NOT THE FIRST PAGE. The endpoint is paginated (50 by
+  // default) and this read page 1 only, so a workspace with more contacts saw
+  // the 50 most recently updated, a header claiming "50 contacts", and a
+  // search that could not find anybody else. Pages of 200 are read up to
+  // CRM_LOAD_CAP; past that the header says so and the search goes to the
+  // server (name, phone, email) instead of filtering what happens to be loaded.
+  const fetchContacts = async (q = '') => {
     setLoading(true); setError(null)
     try {
-      const data = await api.get('/crm-native/contacts')
-      // Backend returns paginated envelope {items:[...], total:N}
-      setContacts(Array.isArray(data) ? data : (data.items || data.contacts || []))
+      const all = []
+      let n = 0
+      for (let page = 1; page <= CRM_LOAD_CAP / 200; page++) {
+        const qs = `page=${page}&page_size=200` + (q ? `&search=${encodeURIComponent(q)}` : '')
+        const data = await api.get('/crm-native/contacts?' + qs)
+        const items = Array.isArray(data) ? data : (data.items || data.contacts || [])
+        n = Array.isArray(data) ? items.length : (data.total ?? items.length)
+        all.push(...items)
+        if (Array.isArray(data) || items.length < 200 || all.length >= n) break
+      }
+      setContacts(all)
+      setTotal(Math.max(n, all.length))
+      if (!q) setCapped(n > all.length)
     } catch (e) {
       setError(e.message || 'Failed to load contacts')
     } finally {
@@ -401,6 +422,15 @@ export default function CRM() {
       .catch(() => {})
     fetchContacts()
   }, [])
+
+  // Past the cap, search on the server (debounced) so nobody is unfindable.
+  const truncated = total > contacts.length
+  useEffect(() => {
+    if (!capped) return
+    const t = setTimeout(() => fetchContacts(search.trim()), 400)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search])
 
   const filtered = useMemo(() => {
     let list = contacts
@@ -430,11 +460,13 @@ export default function CRM() {
 
   const handleDelete = (deletedId) => {
     setContacts(prev => prev.filter(c => c.id !== deletedId))
+    setTotal(t => Math.max(0, t - 1))
     setSelected(null)
   }
 
   const handleCreate = (created) => {
     setContacts(prev => [created, ...prev])
+    setTotal(t => t + 1)
   }
 
   const handleSyncLeads = async () => {
@@ -487,7 +519,10 @@ export default function CRM() {
       <div className="crm-header">
         <div>
           <h1 className="page-title">CRM</h1>
-          <p className="page-subtitle">{contacts.length} contact{contacts.length !== 1 ? 's' : ''}</p>
+          <p className="page-subtitle">
+            {total} contact{total !== 1 ? 's' : ''}
+            {truncated ? ` · showing the ${contacts.length} most recently updated — search by name, phone or email to find anyone else` : ''}
+          </p>
         </div>
         <div className="crm-header-actions">
           <div className="crm-view-toggle">
