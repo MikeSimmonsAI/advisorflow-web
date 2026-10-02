@@ -301,7 +301,16 @@ export default function CampaignBuilder() {
       })
       setSendResult(result)
     } catch (err) {
-      setSendError(err.message || 'Campaign send failed.')
+      // 403/422 here are not about this campaign: the server's builder send
+      // route is not reachable yet (owner decision pending), and the raw
+      // "Admin access required" / validation text misled people into
+      // thinking they lacked a permission or had filled something in wrong.
+      if (err.status === 403 || err.status === 422) {
+        setSendError('Sending from Campaign Builder is not switched on yet. Nothing was sent. '
+          + 'You can still text or email these people from their lead pages or the queues.')
+      } else {
+        setSendError(err.message || 'Campaign send failed.')
+      }
     } finally {
       setSending(false)
     }
