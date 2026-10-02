@@ -151,7 +151,7 @@
   /* ── Typography ── */
   --text-primary:       #1a1108;
   --text-secondary:     #7a6248;
-  --text-tertiary:      #a08060;
+  --text-tertiary:      #7a5c3c;   /* was #a08060 (3.4:1 on cream); AA */
   --text-inverse:       #faf8f4;
   --text-danger-soft:   #7a1a1a;
 

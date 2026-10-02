@@ -47,14 +47,14 @@ html:root[data-workspace-vertical="energy"] {
   /* ── Type: deep navy ── */
   --text-primary: #0f2a4d;
   --text-secondary: #46597a;
-  --text-tertiary: #7c8ba5;
+  --text-tertiary: #5b6a82;   /* was #7c8ba5 (3.4:1); AA on white and panels */
   --text-inverse: #ffffff;
   --text-danger-soft: #7a1020;
 
   /* ── Accents: blue + cyan ── */
   --signal-blue: #1668d6;
   --signal-blue-dim: rgba(22, 104, 214, 0.10);
-  --signal-green: #0f8a5f;
+  --signal-green: #0a7650;   /* was #0f8a5f (3.8-4.3:1 on tints/white); AA */
   --signal-green-dim: rgba(15, 138, 95, 0.10);
   --signal-red: #b22234;
   --signal-red-dim: rgba(178, 34, 52, 0.09);
@@ -243,7 +243,7 @@ html:root[data-workspace-vertical="energy"] .compose-textarea {
   border-color: var(--border-strong);
 }
 html:root[data-workspace-vertical="energy"] .badge--blue  { background: rgba(22, 104, 214, 0.10); color: #1668d6; }
-html:root[data-workspace-vertical="energy"] .badge--green { background: rgba(15, 138, 95, 0.10); color: #0f8a5f; }
+html:root[data-workspace-vertical="energy"] .badge--green { background: rgba(15, 138, 95, 0.10); color: #0a7650; }
 html:root[data-workspace-vertical="energy"] .badge--red   { background: rgba(178, 34, 52, 0.09); color: #b22234; }
 html:root[data-workspace-vertical="energy"] .badge--amber { background: rgba(168, 102, 10, 0.11); color: #a8660a; }
 

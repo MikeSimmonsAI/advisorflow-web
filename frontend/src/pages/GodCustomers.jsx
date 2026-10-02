@@ -124,13 +124,13 @@ export default function GodCustomers() {
       <div className="go-filters">
         <input value={q} onChange={e => setQ(e.target.value)}
                placeholder="Search by name…" />
-        <select value={status} onChange={e => setStatus(e.target.value)}>
+        <select aria-label="Filter by status" value={status} onChange={e => setStatus(e.target.value)}>
           <option value="">All statuses</option>
           {(d?.vocabulary?.statuses || []).map(s => (
             <option key={s.key} value={s.key}>{s.label}</option>
           ))}
         </select>
-        <select value={platform} onChange={e => setPlatform(e.target.value)}>
+        <select aria-label="Filter by platform" value={platform} onChange={e => setPlatform(e.target.value)}>
           <option value="">All brands</option>
           {(d?.platforms || []).map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>

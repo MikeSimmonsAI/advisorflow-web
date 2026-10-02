@@ -85,7 +85,7 @@ html:root {
   --color-primary-soft:  rgba(31, 94, 255, 0.10);
 
   /* ── Status colours, tuned for a light ground ── */
-  --color-success: #0b8a5f;
+  --color-success: #0a7650;   /* AA on white and tints (was #0b8a5f) */
   --color-warning: #a8650f;
   --color-danger:  #d31f4b;
   --color-info:    #1f6fb8;

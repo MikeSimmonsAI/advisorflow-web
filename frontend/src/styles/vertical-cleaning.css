@@ -50,7 +50,7 @@ html:root[data-workspace-vertical="cleaning"] {
   /* ── Type: the design's ink and muted ── */
   --text-primary: #173047;
   --text-secondary: #435871;
-  --text-tertiary: #71889e;
+  --text-tertiary: #586f85;   /* was #71889e; AA on white and panels */
   --text-inverse: #ffffff;
   --text-danger-soft: #7d1224;
 

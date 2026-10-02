@@ -85,7 +85,7 @@ export default function FollowUpQueues({ initialQueue = 'follow_up_due', title, 
 
       <div className="eo-kpis" role="tablist">
         {queues.map(q => (
-          <button key={q.key} type="button" role="tab" aria-pressed={q.key === active}
+          <button key={q.key} type="button" role="tab" aria-selected={q.key === active}
             className={`eo-kpi${q.available ? '' : ' eo-kpi--na'}`} onClick={() => pick(q.key)}
             data-queue={q.key}>
             <span className="eo-kpi-n">{q.available ? q.count.toLocaleString() : NA}</span>

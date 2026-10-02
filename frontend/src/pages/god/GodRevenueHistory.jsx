@@ -158,7 +158,7 @@ export default function GodRevenueHistory() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select value={platformFilter}
+          <select aria-label="Filter by platform" value={platformFilter}
                   onChange={e => setPlatformFilter(e.target.value)}
                   style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6,
                            border: '1px solid var(--gm-card-line)', background: 'var(--gm-panel)' }}>
