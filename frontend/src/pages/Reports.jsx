@@ -92,15 +92,22 @@ function PlatformReports() {
   const [outcomes, setOutcomes] = useState(null)
   const [crmSummary, setCrmSummary] = useState(null)
   const [loading, setLoading]   = useState(true)
+  // Which sources did NOT load. A failed request must never render as a real
+  // zero ("0 leads, 0% reply rate" on a backend hiccup reads as an empty
+  // business), so the numbers it would have fed are withheld and named.
+  const [failed, setFailed]     = useState([])
   const [activeTab, setActiveTab] = useState('performance')
 
   useEffect(() => {
     Promise.all([
-      api.get('/admin/dashboard/metrics').catch(() => null),
-      api.get('/pipeline/stats').catch(() => null),
-      api.get('/outcomes/summary').catch(() => null),
-      api.get('/reports/crm-summary').catch(() => null),
+      api.get('/admin/dashboard/metrics').catch(() => undefined),
+      api.get('/pipeline/stats').catch(() => undefined),
+      api.get('/outcomes/summary').catch(() => undefined),
+      api.get('/reports/crm-summary').catch(() => undefined),
     ]).then(([metricsData, pipelineData, outcomesData, crmData]) => {
+      const names = ['performance metrics', 'pipeline', 'outcomes', 'CRM summary']
+      setFailed([metricsData, pipelineData, outcomesData, crmData]
+        .map((v, i) => (v === undefined ? names[i] : null)).filter(Boolean))
       setData(metricsData)
       setPipeline(pipelineData)
       setOutcomes(outcomesData)
@@ -135,16 +142,23 @@ function PlatformReports() {
         )}
       </header>
 
+      {!loading && failed.length > 0 && (
+        <div className="empty-state" role="alert" style={{ color: 'var(--signal-red, #b42318)', textAlign: 'left', marginBottom: 16 }}>
+          Some report data could not be loaded ({failed.join(', ')}). Figures that depend on it are not shown as zero -
+          refresh to try again.
+        </div>
+      )}
+
       {/* KPI ROW */}
       <div className="rpt-kpi-row">
-        <KpiCard icon="👥" label="Total leads"       value={loading ? '—' : num(totals.leads_owned)}       sub="Org-wide"                    color="var(--text-primary)" />
-        <KpiCard icon="📤" label="Messages sent"     value={loading ? '—' : num(totals.messages_sent)}     sub="All time"                   color="var(--color-primary)" />
-        <KpiCard icon="💬" label="Replies received"  value={loading ? '—' : num(totals.replies)}           sub={`${num(totals.hot_replies)} hot`}  color="var(--signal-purple)" />
-        <KpiCard icon="📊" label="Reply rate"        value={loading ? '—' : pct(totals.reply_rate)}        sub="Replies / sent"             color="var(--color-warning)" />
-        <KpiCard icon="📅" label="Appointments"      value={loading ? '—' : num(totals.booked_leads)}      sub="Booked all time"            color="var(--color-success)" />
-        <KpiCard icon="🎯" label="Booking rate"      value={loading ? '—' : pct(totals.booking_rate)}      sub="Bookings / sent"            color="var(--color-success)" />
-        <KpiCard icon="🤖" label="AI auto-sent"      value={loading ? '—' : num(pipeline?.ai_auto_sent)}   sub="Pipeline responses"         color="var(--signal-purple)" />
-        <KpiCard icon="💰" label="Sales"             value={loading ? '—' : num(outcomes?.sales_count)}    sub={outcomes?.conversion_rate != null ? `${outcomes.conversion_rate}% close rate` : 'No outcomes yet'} color="var(--color-warning)" />
+        <KpiCard icon="👥" label="Total leads"       value={loading || data === undefined ? '—' : num(totals.leads_owned)}       sub="Org-wide"                    color="var(--text-primary)" />
+        <KpiCard icon="📤" label="Messages sent"     value={loading || data === undefined ? '—' : num(totals.messages_sent)}     sub="All time"                   color="var(--color-primary)" />
+        <KpiCard icon="💬" label="Replies received"  value={loading || data === undefined ? '—' : num(totals.replies)}           sub={`${num(totals.hot_replies)} hot`}  color="var(--signal-purple)" />
+        <KpiCard icon="📊" label="Reply rate"        value={loading || data === undefined ? '—' : pct(totals.reply_rate)}        sub="Replies / sent"             color="var(--color-warning)" />
+        <KpiCard icon="📅" label="Appointments"      value={loading || data === undefined ? '—' : num(totals.booked_leads)}      sub="Booked all time"            color="var(--color-success)" />
+        <KpiCard icon="🎯" label="Booking rate"      value={loading || data === undefined ? '—' : pct(totals.booking_rate)}      sub="Bookings / sent"            color="var(--color-success)" />
+        <KpiCard icon="🤖" label="AI auto-sent"      value={loading || pipeline === undefined ? '—' : num(pipeline?.ai_auto_sent)}   sub="Pipeline responses"         color="var(--signal-purple)" />
+        <KpiCard icon="💰" label="Sales"             value={loading || outcomes === undefined ? '—' : num(outcomes?.sales_count)}    sub={outcomes === undefined ? 'Not loaded' : outcomes?.conversion_rate != null ? `${outcomes.conversion_rate}% close rate` : 'No outcomes yet'} color="var(--color-warning)" />
       </div>
 
       {/* TABS */}
@@ -168,6 +182,8 @@ function PlatformReports() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {loading ? (
             <div className="empty-state">Loading…</div>
+          ) : data === undefined ? (
+            <div className="empty-state">Performance data could not be loaded. Refresh to try again.</div>
           ) : advisors.length === 0 ? (
             <div className="empty-state">No advisor data yet. Performance by advisor appears here once your team sends messages to leads; import or add leads to get started.</div>
           ) : (

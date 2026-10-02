@@ -98,6 +98,7 @@ export default function OrgSettings() {
 
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -218,9 +219,17 @@ export default function OrgSettings() {
         setOrgAddress(data.org_address || '')
         setOrgPhone(data.org_phone || '')
         setTzInfo({ timezone: data.timezone || '', effective: data.timezone_effective, source: data.timezone_source })
+        setLoadFailed(null)
         setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch((err) => {
+        // NEVER RENDER THE FORM ON DEFAULTS. A failed read used to show an
+        // empty name, the default colours and "General Service Business" -
+        // and Save would then have written those blanks over the real
+        // settings. The form waits for the real values.
+        setLoadFailed(err?.message || 'These settings could not be loaded.')
+        setLoading(false)
+      })
 
     // Load org Twilio config separately (never returns the auth token)
     api.get(`/org-settings/twilio${orgQuery}`)
@@ -430,6 +439,15 @@ export default function OrgSettings() {
   // Non-super-admin loading
   if (!isSuperAdmin && loading) {
     return <div className="empty-state">Loading org settings…</div>
+  }
+
+  if (loadFailed && !loading) {
+    return (
+      <div className="empty-state" role="alert">
+        {loadFailed} Nothing has been changed. <button type="button" className="btn btn-secondary"
+          onClick={() => window.location.reload()}>Try again</button>
+      </div>
+    )
   }
 
   return (

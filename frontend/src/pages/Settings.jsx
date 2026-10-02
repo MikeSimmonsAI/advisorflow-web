@@ -52,6 +52,7 @@ export default function Settings() {
 
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
 
   // Own Twilio settings
   const [sid, setSid] = useState('')
@@ -145,6 +146,11 @@ export default function Settings() {
       setBookingConfirmMsg(p.booking_confirmation_message || '')
       setPhotoPreview(p.profile_photo_url || null)
       setDisplayName(p.full_name || '')
+      setLoading(false)
+    }).catch((err) => {
+      // Without this the page sat on "Loading settings…" forever when the
+      // profile could not be read.
+      setLoadError(err?.message || 'Your settings could not be loaded.')
       setLoading(false)
     })
 
@@ -478,6 +484,11 @@ export default function Settings() {
   }
 
   if (loading) return <div className="empty-state">Loading settings…</div>
+  if (loadError) return (
+    <div className="empty-state" role="alert">
+      {loadError} <button type="button" className="btn btn-secondary" onClick={() => window.location.reload()}>Try again</button>
+    </div>
+  )
 
   return (
     <div>
