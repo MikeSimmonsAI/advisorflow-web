@@ -555,3 +555,31 @@ def test_a_call_request_is_a_follow_up_not_an_open_question(world):
     assert c["open_questions"] == []
     assert c["follow_up"] is not None
     assert fact(c, "pref.channel") in (None, "phone")
+
+
+def test_a_death_in_the_family_is_handled_by_a_person_not_sold_to(world):
+    w = world()
+    inbound(w, "My husband passed last year and I need to sort out his policy", T0)
+    c = ctx(w, T0 + timedelta(minutes=1))
+    assert fact(c, "household.spouse") is None
+    assert fact(c, "household.bereavement")
+    assert c["state"]["needs_human_reason"] and "death" in c["state"]["needs_human_reason"]
+    assert not any(u["slot"] == "household" for u in c["unknowns"])
+
+
+def test_busy_or_driving_is_not_now(world):
+    w = world()
+    for i, msg in enumerate(("I'm driving, text me later", "busy")):
+        inbound(w, msg, T0 + timedelta(minutes=i))
+    c = ctx(w, T0 + timedelta(minutes=5))
+    assert any(o["key"] == "objection.not_now" for o in c.get("objections", [])) or \
+        c["state"]["current_intent"] in ("not_now", "follow_up_later")
+
+
+def test_a_seller_naming_a_price_goes_to_a_person(world):
+    w = world(industry="wholesale_real_estate")
+    outbound(w, "Thanks for getting back to me about the house.", T0, source="manual")
+    inbound(w, "I want 250k, not a penny less", T0 + timedelta(minutes=1))
+    c = ctx(w, T0 + timedelta(minutes=2))
+    assert fact(c, "property.asking_price") == "250k"
+    assert "250k" in (c["state"]["needs_human_reason"] or "")

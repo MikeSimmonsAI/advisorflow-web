@@ -45,6 +45,7 @@ FACT_LABELS = {
     "coverage.existing": "Existing coverage", "prior_contact.with": "Already spoke with",
     "property.inherited": "Inherited property", "property.occupancy": "Occupancy",
     "property.condition": "Condition", "property.owner_stated": "Owner on title",
+    "property.asking_price": "Seller's asking price", "household.bereavement": "Bereavement",
     "property.subject_correction": "Which property", "energy.moving": "Moving",
     "energy.contract_end": "Current contract ends", "consent.stop_requested": "Asked us to stop",
 }
@@ -61,7 +62,7 @@ SLOTS = {
     X.INSURANCE: [
         ("need", "What prompted you to look into coverage - protecting family, retirement income, or something else?",
          ("intent.vertical",)),
-        ("household", "Who would the coverage be protecting?", ("household.spouse", "household.children")),
+        ("household", "Who would the coverage be protecting?", ("household.spouse", "household.children", "household.bereavement")),
         ("existing", "Do you have any coverage today, for example through work?", ("coverage.existing",)),
         ("age", "To give you real numbers, may I ask your age?", ("person.age",)),
         ("time", "What's a good day and time to go over options together?", ("follow_up.when", "pref.time_of_day")),
@@ -359,7 +360,8 @@ def _derive(db, lead, st, vertical, today, now):
                      ("flag.human_request", "Customer asked for a person"),
                      ("flag.identity", "Wrong person or identity confusion - verify before anything else"),
                      ("flag.disputes_record", "Customer disputes what we recorded"),
-                     ("property.subject_correction", "Customer says we have the wrong property")):
+                     ("property.subject_correction", "Customer says we have the wrong property"),
+                     ("household.bereavement", "Customer mentioned a death in the family - a person should respond, with care")):
         if key in facts and why:
             needs_human = why
             break
@@ -368,6 +370,9 @@ def _derive(db, lead, st, vertical, today, now):
              any(k in (facts["intent.vertical"].value or "") for k in ("wants_offer", "price_objection"))
              and _latest_inbound_after_outbound(st)):
         needs_human = needs_human or "Seller is asking about price/offer - owner judgment required"
+    if vertical == X.WHOLESALE and facts.get("property.asking_price") and _latest_inbound_after_outbound(st):
+        needs_human = needs_human or ("Seller named a price (%s) - negotiating is the owner's call"
+                                      % facts["property.asking_price"].value)
     if vertical == X.INSURANCE and facts.get("intent.vertical") and \
             "application_question" in (facts["intent.vertical"].value or "") and _latest_inbound_after_outbound(st):
         needs_human = needs_human or "Application/underwriting question - a licensed agent should answer"

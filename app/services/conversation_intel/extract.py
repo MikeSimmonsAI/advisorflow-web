@@ -156,6 +156,13 @@ PRICE_RE = re.compile(r"\b(cost|price|pricing|how much|premium|rate|rates|monthl
                       r"quote)\b", re.I)
 CORRECTION_RE = re.compile(r"\b(actually|i meant|sorry,? i meant|correction|change (that|it) to|make (that|it)|"
                            r"instead|that'?s not what i said|not \w+,? (but )?\w+day)\b", re.I)
+BEREAVEMENT_RE = re.compile(r"\b(passed away|passed (last|this|on|recently|in)|(he|she|they) passed|died|"
+                            r"my late (wife|husband|mother|mom|father|dad|son|daughter|spouse|partner)|widow(ed|er)?|"
+                            r"death (claim|certificate))\b", re.I)
+# NOT "funeral" (a funeral home's prospects say it in every pre-planning
+# message) and NOT "death benefit" (an insurance prospect asking what the
+# policy pays) - neither is news of a death.
+_MONEY_RE = re.compile(r"\$?\s?(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d)?\s?k)\b", re.I)
 ALREADY_ASKED_RE = re.compile(r"\b(you already asked|already told you|i told you|i already said|asked me that)\b", re.I)
 ALREADY_TALKED_RE = re.compile(r"\b(already (talked|spoke|spoken) (to|with) (\w+))\b", re.I)
 
@@ -170,7 +177,9 @@ OBJECTIONS = [
                                  r"not (taking|accepting) (that|less)|that'?s insulting)\b", re.I)),
     ("send_info", re.compile(r"\b(just send (me )?(some )?(info|information|details|something)|send it (by|in|via) email|"
                              r"email me (the )?(info|details))\b", re.I)),
-    ("not_now", re.compile(r"\b(not (right )?now|bad time|busy (right now|this week)|maybe later|not at this time)\b", re.I)),
+    ("not_now", re.compile(r"\b(not (right )?now|bad time|busy( right now| this week)?|maybe later|not at this time|"
+                           r"(text|call|message|email) me later|i'?m driving|(i'?m )?at work( right now)?|"
+                           r"in a meeting|can'?t talk( right now)?)\b", re.I)),
     ("trust", re.compile(r"\b(sounds like a scam|is this legit|is this real|how do i know)\b", re.I)),
     ("happy_with_current", re.compile(r"\b(happy with (my|our) (current )?(provider|plan|supplier|agent|company)|"
                                       r"staying with (my|our))\b", re.I)),
@@ -309,8 +318,15 @@ def _facts(t: str, vertical: str) -> Tuple[List[Finding], List[Finding], List[Fi
     facts, infs, prefs = [], [], []
     low = t.lower()
     q = _quote(t)
+    bereaved = BEREAVEMENT_RE.search(t)
+    if bereaved:
+        # A death in the family is not a household fact to sell against.
+        # Recorded so nobody asks "who would the coverage protect?" next, and
+        # so a person - not a template - answers (engine: needs human).
+        m = re.search(r"\bmy (late )?(wife|husband|spouse|partner|mother|mom|father|dad|son|daughter)\b", low)
+        facts.append(Finding("household.bereavement", "lost %s" % (("their " + m.group(2)) if m else "a family member"), q))
     m = re.search(r"\bmy (wife|husband|spouse|partner)\b", low)
-    if m:
+    if m and not bereaved:
         facts.append(Finding("household.spouse", m.group(1), q))
     m = re.search(r"\b(\d+|one|two|three|four|five|six|a couple of|both)\s+(?:little\s+|young\s+|grown\s+)?(kids|children|daughters|sons|boys|girls)\b", low)
     if m:
@@ -363,6 +379,11 @@ def _facts(t: str, vertical: str) -> Tuple[List[Finding], List[Finding], List[Fi
             facts.append(Finding("property.owner_stated", "the customer's %s" % m.group(1), q))
         if re.search(r"\bnot this (property|house|one),? the other\b|\bthe other (property|house)\b", low):
             facts.append(Finding("property.subject_correction", "the other property", q))
+        # "I want 250k", "asking 180,000", "won't take less than $200k": the
+        # seller named a price. Recorded verbatim; negotiating is a person's job.
+        m = _MONEY_RE.search(t)
+        if m and re.search(r"\b(want|asking|ask|need|take|less than|at least|firm|bottom|price|list(ed|ing)?)\b", low):
+            facts.append(Finding("property.asking_price", m.group(1).replace(" ", ""), q))
     if vertical == ENERGY:
         if re.search(r"\b(moving|move (in|out)|new (house|home|apartment|address))\b", low):
             facts.append(Finding("energy.moving", "yes", q))
