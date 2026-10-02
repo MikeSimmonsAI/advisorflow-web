@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api } from '../api/client';
-import { detectTheme, BRAND_CONFIG } from '../theme.js';
+import { api, getBranding } from '../api/client';
+import { resolveBrand, shellTheme } from '../theme.js';
 // Add-ons and one-time services. Its own component because it is its own
 // commercial object: what the customer holds BESIDES their plan, kept visually
 // and numerically separate from it for the same reason the engine keeps them
@@ -15,8 +15,16 @@ import CatalogSection from './CatalogSection';
 // they have no relationship with, about their own invoice. `theme.js` already
 // resolves the brand from the hostname and every other screen uses it; this one
 // simply never did.
-const BRAND = BRAND_CONFIG[detectTheme()] || {};
-const SUPPORT_EMAIL = BRAND.supportEmail || 'support@evosyspro.live';
+//
+// And the HOSTNAME is the wrong question on the shared app host
+// (advisorflow-frontend.onrender.com): detectTheme() read "advisorflow" there
+// and every customer was shown the platform owner's personal address. The
+// brand is the signed-in WORKSPACE's (shellTheme + resolveBrand, the same
+// resolution the shell uses), read at render time so a workspace switch
+// changes it.
+function supportEmail() {
+  return resolveBrand(shellTheme(getBranding())).supportEmail || 'support@evosyspro.live';
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // THE HARDCODED `PLANS` ARRAY THAT LIVED HERE IS GONE.
@@ -111,7 +119,7 @@ function PlanChangeDialog({ open, change, busy, error, onConfirm, onCancel }) {
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ background: '#14142b', border: '1px solid #2a2a4a',
+        style={{ background: '#14142b', border: '1px solid #2a2a4a', color: '#e8ecf4',
                  borderRadius: 12, padding: '24px', width: '100%',
                  maxWidth: 460, maxHeight: '90vh', overflowY: 'auto',
                  boxShadow: '0 18px 60px #0009' }}
@@ -215,8 +223,10 @@ function fmtRate(cents, currency, interval) {
   return amount + (interval === 'year' ? '/yr' : '/mo');
 }
 
+// Dark cards on a light page: the page's text colour is dark, so every heading
+// and value without its own colour inherited dark-on-dark (1.05:1). Set it.
 const CARD = {
-  background: '#1a1a2e', border: '1px solid #2a2a4a',
+  background: '#1a1a2e', border: '1px solid #2a2a4a', color: '#e8ecf4',
   borderRadius: '12px', padding: '24px',
 };
 
@@ -526,7 +536,7 @@ export default function Billing() {
   }, [sub?.billing_commitment]);
 
   if (loading) return (
-    <div style={{ padding: '40px', color: '#aaa', textAlign: 'center' }}>Loading billing info…</div>
+    <div style={{ padding: '40px', color: 'var(--text-secondary)', textAlign: 'center' }}>Loading billing info…</div>
   );
 
   return (
@@ -547,7 +557,7 @@ export default function Billing() {
         }}
       />
       <h1 style={{ fontSize: '24px', fontWeight: '700', marginBottom: '8px' }}>Billing & Plan</h1>
-      <p style={{ color: '#aaa', marginBottom: '32px' }}>Manage your subscription and see what you have been charged.</p>
+      <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>Manage your subscription and see what you have been charged.</p>
 
       {success && (
         <div style={{ background: '#1ef0a820', border: '1px solid #1ef0a8', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px', color: '#1ef0a8', fontWeight: '600' }}>
@@ -590,13 +600,13 @@ export default function Billing() {
             ← Back to billing
           </a>
           <a href={returnTargets.surfaces.account}
-             style={{ background: 'transparent', color: '#8cc6e8',
+             style={{ background: 'transparent', color: 'var(--text-primary)',
                       border: '1px solid #2a2a4a', borderRadius: 8,
                       padding: '9px 16px', fontSize: 13, fontWeight: 600,
                       textDecoration: 'none' }}>
             Open account
           </a>
-          <span style={{ color: '#666', fontSize: 12 }}>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
             Payment pages are hosted by Stripe. These take you back here at any point.
           </span>
         </div>
@@ -620,7 +630,7 @@ export default function Billing() {
             <div style={{ fontSize: 14 }}>{err}</div>
             <div style={{ fontSize: 13, marginTop: 8, color: '#aaa' }}>
               Need help? Contact your platform administrator at{' '}
-              <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: '#ef4444' }}>{SUPPORT_EMAIL}</a>.
+              <a href={`mailto:${supportEmail()}`} style={{ color: '#ef4444' }}>{supportEmail()}</a>.
             </div>
           </div>
         </div>
@@ -842,7 +852,7 @@ export default function Billing() {
           </div>
           <div style={{ color: '#888', fontSize: '13px' }}>
             Contact your platform administrator at{' '}
-            <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: '#2fb6ff' }}>{SUPPORT_EMAIL}</a>.
+            <a href={`mailto:${supportEmail()}`} style={{ color: '#2fb6ff', textDecoration: 'underline' }}>{supportEmail()}</a>.
           </div>
         </div>
       ) : (
@@ -1134,7 +1144,7 @@ export default function Billing() {
                       refuses it, and a button that always fails is worse than
                       no button. */}
                   {!plan.is_purchasable ? (
-                    <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(plan.name + ' plan enquiry')}`}
+                    <a href={`mailto:${supportEmail()}?subject=${encodeURIComponent(plan.name + ' plan enquiry')}`}
                        style={{ display: 'block', textAlign: 'center', width: '100%', padding: '12px', borderRadius: '8px', background: '#2a2a4a', color: '#fff', fontWeight: '700', fontSize: '14px', textDecoration: 'none', boxSizing: 'border-box' }}>
                       Contact us →
                     </a>
