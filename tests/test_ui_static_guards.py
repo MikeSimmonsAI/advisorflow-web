@@ -126,3 +126,15 @@ def test_god_platform_filters_read_the_bare_list():
     router = open("app/routers/god_router.py", encoding="utf-8").read()
     i = router.index('@router.get("/platforms")')
     assert 'return [{"id": r[0]' in router[i:i + 1500]
+
+
+def test_add_member_shows_the_setup_link_and_asks_for_no_password():
+    """POST /admin/users never accepted a password: the one typed in the Add
+    member modal was dropped, and the one-time setup link the response carries
+    was never shown - the new member had no way in."""
+    src = open("frontend/src/pages/Users.jsx", encoding="utf-8").read()
+    assert "createForm.password" not in src
+    assert "setup_url" in src and "setCreatedLink(" in src
+    router = open("app/routers/admin_router.py", encoding="utf-8").read()
+    i = router.index("class CreateUserRequest(BaseModel):")
+    assert "password" not in router[i:i + 300]

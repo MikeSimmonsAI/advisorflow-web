@@ -267,7 +267,11 @@ export default function Users() {
   const [resetUser, setResetUser] = useState(null)
 
   // Forms
-  const blankCreate = { full_name: '', email: '', role: 'advisor', password: '' }
+  // No password field: POST /admin/users never accepted one (a typed password
+  // was silently dropped). The account is finished through a one-time setup
+  // link, which the response carries and is now shown once below.
+  const blankCreate = { full_name: '', email: '', role: 'advisor' }
+  const [createdLink, setCreatedLink] = useState(null)
   const [createForm, setCreateForm] = useState(blankCreate)
   const [createError, setCreateError] = useState('')
   const [createLoading, setCreateLoading] = useState(false)
@@ -364,9 +368,12 @@ export default function Users() {
     if (!createForm.email) { setCreateError('Email is required'); return }
     setCreateLoading(true)
     try {
-      await api.post('/admin/users', createForm)
-      setShowCreate(false)
+      const created = await api.post('/admin/users', createForm)
+      const raw = created?.setup_url || ''
+      const url = raw.startsWith('/') ? `${window.location.origin}${raw}` : raw
       setCreateForm(blankCreate)
+      if (url) setCreatedLink({ name: created.full_name || created.email, email: created.email, url })
+      else setShowCreate(false)
       await fetchUsers()
     } catch (err) {
       setCreateError(err.message || 'Failed to create user')
@@ -476,7 +483,7 @@ export default function Users() {
           </p>
         </div>
         {isAdmin && (
-          <button className="btn btn--primary" onClick={() => { setCreateForm(blankCreate); setCreateError(''); setShowCreate(true) }}>
+          <button className="btn btn--primary" onClick={() => { setCreateForm(blankCreate); setCreateError(''); setCreatedLink(null); setShowCreate(true) }}>
             + Add member
           </button>
         )}
@@ -560,7 +567,22 @@ export default function Users() {
 
       {/* ── Create Modal ── */}
       {showCreate && (
-        <Modal title="Add team member" onClose={() => setShowCreate(false)}>
+        <Modal title="Add team member" onClose={() => { setShowCreate(false); setCreatedLink(null) }}>
+          {createdLink ? (
+            <div className="modal-form">
+              <p style={{ margin: 0 }}>
+                <strong>{createdLink.name}</strong> was added. Send them this one-time setup
+                link so they can choose their own password. It is shown only once.
+              </p>
+              <code style={{ wordBreak: 'break-all', fontSize: 12, padding: 8, background: 'var(--surface-2, #f3f4f6)', borderRadius: 6 }}>{createdLink.url}</code>
+              <div className="modal-actions">
+                <button type="button" className="btn btn--secondary"
+                  onClick={() => navigator.clipboard && navigator.clipboard.writeText(createdLink.url)}>Copy link</button>
+                <button type="button" className="btn btn--primary"
+                  onClick={() => { setShowCreate(false); setCreatedLink(null) }}>Done</button>
+              </div>
+            </div>
+          ) : (
           <form onSubmit={handleCreate} className="modal-form">
             <label>Full name
               <input value={createForm.full_name} onChange={e => setCreateForm(f => ({...f, full_name: e.target.value}))} placeholder="Jane Smith" />
@@ -575,15 +597,13 @@ export default function Users() {
                 {isSuperAdmin && <option value="super_admin">Super Admin</option>}
               </select>
             </label>
-            <label>Password <span style={{color:'var(--text-tertiary)',fontWeight:400,fontSize:12}}>(leave blank to auto-generate)</span>
-              <input type="password" value={createForm.password} onChange={e => setCreateForm(f => ({...f, password: e.target.value}))} placeholder="Auto-generate if blank" />
-            </label>
             {createError && <div className="form-error">{createError}</div>}
             <div className="modal-actions">
               <button type="button" className="btn btn--secondary" onClick={() => setShowCreate(false)}>Cancel</button>
               <button type="submit" className="btn btn--primary" disabled={createLoading}>{createLoading ? 'Creating…' : 'Create member'}</button>
             </div>
           </form>
+          )}
         </Modal>
       )}
 

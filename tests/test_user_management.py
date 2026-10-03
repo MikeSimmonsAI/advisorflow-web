@@ -677,3 +677,23 @@ def test_unassigned_pool_with_total_reports_the_whole_pool(client, admin_auth_he
     assert d["total"] == len(bare) >= 3 and len(d["items"]) == len(bare)
     src = open("frontend/src/pages/Admin.jsx", encoding="utf-8").read()
     assert "/admin/leads/unassigned?with_total=true" in src and "unassignedTotal" in src
+
+
+def test_lead_cleanup_reassign_assigns_instead_of_unassigning(client, admin_auth_headers, db_session,
+                                                              sample_org, sample_advisor, second_advisor):
+    """Lead Cleanup posted `advisor_id`; the model declared only
+    new_assigned_to_id, so the key was dropped and the leads were UNASSIGNED
+    while the page said "Reassigned N leads". The page now sends the right
+    field, and `advisor_id` is honoured for a browser holding the old bundle."""
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Cleanup", last_name="Move", phone="12145559301")
+    db_session.add(lead)
+    db_session.commit()
+    r = client.post("/admin/leads/reassign", json={"lead_ids": [lead.id], "advisor_id": second_advisor.id},
+                    headers=admin_auth_headers)
+    assert r.status_code == 200 and r.json()["reassigned_count"] == 1
+    db_session.refresh(lead)
+    assert lead.assigned_to_id == second_advisor.id
+    src = open("frontend/src/pages/LeadCleanup.jsx", encoding="utf-8").read()
+    i = src.index("'/admin/leads/reassign'")
+    assert "new_assigned_to_id: reassignAdvisorId" in src[i:i + 400]

@@ -1638,6 +1638,15 @@ def get_user_detail(
 class ReassignLeadRequest(BaseModel):
     lead_ids: list[str] = Field(..., max_length=1000)
     new_assigned_to_id: str | None = None  # None = unassign, leave in the pool
+    # Lead Cleanup sent `advisor_id`, which this model did not declare: it was
+    # dropped, new_assigned_to_id stayed None, and the leads the admin meant to
+    # hand to an advisor were UNASSIGNED while the page said "Reassigned".
+    # Accepted as a synonym so a browser still holding the old page bundle
+    # cannot do that again.
+    advisor_id: str | None = None
+
+    def target_id(self) -> str | None:
+        return self.new_assigned_to_id or self.advisor_id
 
 
 class ReassignResultResponse(BaseModel):
@@ -1665,9 +1674,10 @@ def reassign_leads(
     # admin could hand workspace B's families to a home-org A person, and
     # could not assign them to B's own people who are homed elsewhere.
     org_id = _acting_org_id(db, current_user)
-    if req.new_assigned_to_id:
+    target_id = req.target_id()
+    if target_id:
         target_advisor = db.query(User).filter(
-            User.id == req.new_assigned_to_id,
+            User.id == target_id,
             User.is_active == True,
         ).first()
         if not _is_workspace_person(db, org_id, target_advisor):
@@ -1680,7 +1690,7 @@ def reassign_leads(
     skipped_ids = [lid for lid in req.lead_ids if lid not in found_ids]
 
     for lead in leads:
-        lead.assigned_to_id = req.new_assigned_to_id
+        lead.assigned_to_id = target_id
 
     db.commit()
 
@@ -1690,7 +1700,7 @@ def reassign_leads(
             action="lead.reassign", target_type="lead_batch", target_id=",".join(found_ids) if len(found_ids) <= 20 else f"{len(found_ids)}_leads",
             details={
                 "lead_ids": sorted(found_ids),
-                "new_assigned_to_id": req.new_assigned_to_id,
+                "new_assigned_to_id": target_id,
                 "count": len(leads),
             },
         )

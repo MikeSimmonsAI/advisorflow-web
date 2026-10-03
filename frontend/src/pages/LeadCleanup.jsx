@@ -129,7 +129,9 @@ export default function LeadCleanup() {
     try {
       const result = await api.post('/admin/leads/reassign', {
         lead_ids: Array.from(selectedForReassign),
-        advisor_id: reassignAdvisorId,
+        // The field is new_assigned_to_id; `advisor_id` was dropped and the
+        // leads were unassigned instead.
+        new_assigned_to_id: reassignAdvisorId,
       })
       setReassignResult(result)
       setSelectedForReassign(new Set())
