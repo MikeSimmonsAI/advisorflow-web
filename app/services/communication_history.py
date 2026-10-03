@@ -37,6 +37,7 @@ back the newest events older than it, and the page boundary is stable no
 matter what arrives.
 """
 
+from app.services import booking_time as _bkt
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -200,7 +201,7 @@ def fetch(db: Session, lead_id: str, *, limit: int = DEFAULT_LIMIT,
             events.append(_event(
                 SYSTEM, "appointment", b.created_at, id=b.id, status=b.status,
                 body=None,
-                meta={"booked_time": b.booked_time,
+                meta={"booked_time": _bkt.wire(db, b),  # local wall time + offset
                       "calendar_event_id": b.calendar_event_id,
                       "expires_at": b.expires_at}))
 
