@@ -411,11 +411,17 @@ export default function EmailQueue() {
     return lead && detectMismatch(lead)
   })
 
+  // GET /email/queue returns only actionable statuses (new, needs_tier_review,
+  // queued) and at most EMAIL_QUEUE_CAP rows. "Warm" (sent) and
+  // "Replied/Booked" tiles counted statuses the endpoint never returns, so they
+  // always read 0; the tiles now name the statuses that are actually here.
+  const EMAIL_QUEUE_CAP = 1000
+  const capped = leads.length >= EMAIL_QUEUE_CAP
   const counts = {
     total:    leads.length,
     cold:     leads.filter((l) => l.status === 'new').length,
-    warm:     leads.filter((l) => l.status === 'sent').length,
-    hot:      leads.filter((l) => l.status === 'replied' || l.status === 'booked').length,
+    review:   leads.filter((l) => l.status === 'needs_tier_review').length,
+    queued:   leads.filter((l) => l.status === 'queued').length,
     mismatch: mismatchLeads.length,
     badEmail: badEmailLeads.length,
   }
@@ -423,10 +429,10 @@ export default function EmailQueue() {
   const currentTone = TONE_OPTIONS.find(t => t.key === tone) || TONE_OPTIONS[1]
 
   const STATS = [
-    { key: 'total',    label: 'In queue',       value: counts.total,    color: 'var(--text-primary)',   dot: 'var(--border-strong)', icon: '📬' },
-    { key: 'cold',     label: 'Cold',            value: counts.cold,     color: 'var(--signal-blue)',   dot: 'var(--signal-blue)',  icon: '❄️' },
-    { key: 'warm',     label: 'Warm',            value: counts.warm,     color: 'var(--signal-amber)',  dot: 'var(--signal-amber)', icon: '☀️' },
-    { key: 'hot',      label: 'Replied/Booked',  value: counts.hot,      color: 'var(--signal-green)',  dot: 'var(--signal-green)', icon: '🔥' },
+    { key: 'total',    label: 'In queue',       value: capped ? `${counts.total.toLocaleString()}+` : counts.total,    color: 'var(--text-primary)',   dot: 'var(--border-strong)', icon: '📬' },
+    { key: 'cold',     label: 'New',             value: counts.cold,     color: 'var(--signal-blue)',   dot: 'var(--signal-blue)',  icon: '❄️' },
+    { key: 'review',   label: 'Needs tier review', value: counts.review, color: 'var(--signal-amber)',  dot: 'var(--signal-amber)', icon: '🔎' },
+    { key: 'queued',   label: 'Queued',          value: counts.queued,   color: 'var(--signal-green)',  dot: 'var(--signal-green)', icon: '📤' },
     ...(counts.badEmail > 0 ? [{ key: 'badEmail', label: 'Bad emails', value: counts.badEmail, color: 'var(--color-danger)', dot: '#e74c3c', icon: '🚫' }] : []),
   ]
 
@@ -439,7 +445,7 @@ export default function EmailQueue() {
           <div className="eq-page-title-row">
             <h1 className="page-title" style={{ margin: 0 }}>Email queue</h1>
             {!loading && (
-              <span className="eq-queue-badge">{counts.total} leads</span>
+              <span className="eq-queue-badge">{capped ? `${counts.total.toLocaleString()}+` : counts.total} leads</span>
             )}
           </div>
           <p className="page-subtitle" style={{ marginTop: 6 }}>

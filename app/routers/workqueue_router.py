@@ -16,6 +16,7 @@ from app.models.models import (
     Reply,
     User,
 )
+from app.services import lead_scope
 from app.services import operational_queues
 from app.services import reply_classification_service as _rcs
 
@@ -40,17 +41,22 @@ def _val(value):
     return value.value if hasattr(value, "value") else value
 
 
+WORKQUEUE_CAP = 100  # rows per bucket; "totals" carries the real counts
+
+
 @router.get("/today")
 def get_todays_work(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     now = datetime.utcnow()
-    org_id = current_user.organization_id
+    # The ACTIVE workspace (X-Workspace-Id backed by a membership, else the
+    # home column) - a member of two workspaces sees this one's work here.
+    org_id = lead_scope.active_workspace_org_id(current_user, db) or current_user.organization_id
     user_id = current_user.id
 
     # New leads not yet contacted
-    needs_text_leads = (
+    needs_text_leads_q = (
         db.query(Lead)
         .filter(
             Lead.organization_id == org_id,
@@ -58,13 +64,11 @@ def get_todays_work(
             Lead.status == "new",
             Lead.is_duplicate == False,
         )
-        .order_by(Lead.created_at.asc(), Lead.id.asc())
-        .limit(100)
-        .all()
     )
+    needs_text_leads = needs_text_leads_q.order_by(Lead.created_at.asc(), Lead.id.asc()).limit(WORKQUEUE_CAP).all()
 
     # Hot/callback replies not yet reviewed
-    needs_reply_rows = (
+    needs_reply_rows_q = (
         db.query(Reply, Lead)
         .join(Lead, Reply.lead_id == Lead.id)
         .filter(
@@ -77,13 +81,11 @@ def get_todays_work(
             # once now, beside the vocabulary.
             *_rcs.attention_filters(),
         )
-        .order_by(Reply.received_at.desc(), Reply.id.desc())
-        .limit(100)
-        .all()
     )
+    needs_reply_rows = needs_reply_rows_q.order_by(Reply.received_at.desc(), Reply.id.desc()).limit(WORKQUEUE_CAP).all()
 
     # Cadence touches due now
-    cadence_due_rows = (
+    cadence_due_rows_q = (
         db.query(CadenceState, Lead)
         .join(Lead, CadenceState.lead_id == Lead.id)
         .filter(
@@ -94,13 +96,11 @@ def get_todays_work(
             CadenceState.next_touch_due_at.isnot(None),
             CadenceState.next_touch_due_at <= now,
         )
-        .order_by(CadenceState.next_touch_due_at.asc(), CadenceState.id.asc())
-        .limit(100)
-        .all()
     )
+    cadence_due_rows = cadence_due_rows_q.order_by(CadenceState.next_touch_due_at.asc(), CadenceState.id.asc()).limit(WORKQUEUE_CAP).all()
 
     # Booked leads with no outcome recorded
-    outcomes_needed_leads = (
+    outcomes_needed_leads_q = (
         db.query(Lead)
         .filter(
             Lead.organization_id == org_id,
@@ -113,10 +113,8 @@ def get_todays_work(
                 .scalar_subquery()
             ),
         )
-        .order_by(Lead.updated_at.asc(), Lead.id.asc())
-        .limit(100)
-        .all()
     )
+    outcomes_needed_leads = outcomes_needed_leads_q.order_by(Lead.updated_at.asc(), Lead.id.asc()).limit(WORKQUEUE_CAP).all()
 
     return {
         "needs_text": [
@@ -159,6 +157,13 @@ def get_todays_work(
             }
             for lead in outcomes_needed_leads
         ],
+        # Each list holds at most WORKQUEUE_CAP rows; these are the real sizes.
+        "totals": {
+            "needs_text": needs_text_leads_q.count(),
+            "needs_reply": needs_reply_rows_q.count(),
+            "cadence_due": cadence_due_rows_q.count(),
+            "outcomes_needed": outcomes_needed_leads_q.count(),
+        },
     }
 
 

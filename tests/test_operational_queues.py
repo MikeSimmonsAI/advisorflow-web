@@ -297,8 +297,9 @@ def test_the_old_workqueue_today_still_answers(client, auth_headers):
     """Nothing above replaces it yet, and the page that calls it still works."""
     r = client.get("/workqueue/today", headers=auth_headers)
     assert r.status_code == 200
+    # "totals" (real bucket sizes past the 100-row cap) is additive.
     assert set(r.json()) == {"needs_text", "needs_reply", "cadence_due",
-                             "outcomes_needed"}
+                             "outcomes_needed", "totals"}
 
 
 # ── the screen is reachable ─────────────────────────────────────────────────

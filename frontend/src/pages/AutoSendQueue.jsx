@@ -33,17 +33,22 @@ export default function AutoSendQueue() {
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [settingsSaved, setSettingsSaved] = useState(false)
 
+  // Server counts on the workspace's day; /history is only the newest 50.
+  const [summary, setSummary] = useState(null)
+
   function load() {
     setLoading(true)
     Promise.all([
       api.get('/auto-send/queue').catch(() => undefined),
       api.get('/auto-send/history').catch(() => undefined),
-    ]).then(([q, h]) => {
+      api.get('/auto-send/summary').catch(() => null),
+    ]).then(([q, h, sm]) => {
       // A failed read is not "Queue is clear" with zero counts: messages
       // waiting for review could be sitting there unseen.
       setLoadFailed(q === undefined || h === undefined)
       setQueue(q || [])
       setHistory(h || [])
+      setSummary(sm)
       setLoading(false)
     })
   }
@@ -238,13 +243,13 @@ export default function AutoSendQueue() {
         <div className="panel asq-kpi-card">
           <span className="asq-kpi-label">Sent today</span>
           <strong className="asq-kpi-value" style={{ color: 'var(--signal-green)' }}>
-            {loading || loadFailed ? '—' : history.filter(h => h.status === 'sent' && new Date(h.actioned_at) > new Date(Date.now() - 86400000)).length}
+            {loading || loadFailed ? '—' : (summary?.sent_today ?? history.filter(h => h.status === 'sent' && new Date(h.actioned_at) > new Date(Date.now() - 86400000)).length)}
           </strong>
         </div>
         <div className="panel asq-kpi-card">
-          <span className="asq-kpi-label">Skipped</span>
+          <span className="asq-kpi-label">{summary ? 'Skipped today' : 'Skipped'}</span>
           <strong className="asq-kpi-value" style={{ color: 'var(--text-secondary)' }}>
-            {loading || loadFailed ? '—' : history.filter(h => h.status === 'skipped').length}
+            {loading || loadFailed ? '—' : (summary?.skipped_today ?? history.filter(h => h.status === 'skipped').length)}
           </strong>
         </div>
       </div>

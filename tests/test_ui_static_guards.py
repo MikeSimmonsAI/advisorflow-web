@@ -104,3 +104,13 @@ def test_capped_lists_do_not_report_the_cap_as_the_count():
     assert "REPLIES_CAP" in ov and "See all {replies.length}" not in ov
     pl = open("frontend/src/pages/Pipeline.jsx", encoding="utf-8").read()
     assert "flaggedLabel(" in pl
+
+
+def test_email_queue_tiles_count_statuses_the_queue_returns():
+    """GET /email/queue returns only new / needs_tier_review / queued leads;
+    the Warm and Replied/Booked tiles counted other statuses and always read 0."""
+    src = open("frontend/src/pages/EmailQueue.jsx", encoding="utf-8").read()
+    assert "l.status === 'replied' || l.status === 'booked'" not in src
+    assert "needs_tier_review" in src and "EMAIL_QUEUE_CAP" in src
+    router = open("app/routers/email_router.py", encoding="utf-8").read()
+    assert 'ACTIONABLE = ("new", "needs_tier_review", "queued")' in router

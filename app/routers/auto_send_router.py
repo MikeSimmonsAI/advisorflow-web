@@ -239,6 +239,33 @@ def get_history(
     return [_serialize(item, leads.get(item.lead_id)) for item in items]
 
 
+@router.get("/summary")
+def get_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Today's sent / skipped counts for the caller, on the WORKSPACE's day.
+
+    The Auto-Send page counted "Sent today" in the browser from /history, which
+    holds only the newest 50 actioned items and used "the last 24 hours".
+    Same scope as /history.
+    """
+    from app.services import workspace_time
+    org_id = _org_id(db, current_user)
+    start, end, tz = workspace_time.day_bounds(db, org_id)
+    base = db.query(AutoSendItem).filter(
+        AutoSendItem.organization_id == org_id,
+        AutoSendItem.advisor_id == current_user.id,
+        AutoSendItem.actioned_at >= start,
+        AutoSendItem.actioned_at < end,
+    )
+    return {
+        "sent_today": base.filter(AutoSendItem.status == "sent").count(),
+        "skipped_today": base.filter(AutoSendItem.status == "skipped").count(),
+        "timezone": tz,
+    }
+
+
 @router.get("/settings")
 def get_settings(
     db: Session = Depends(get_db),

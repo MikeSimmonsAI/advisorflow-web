@@ -176,3 +176,21 @@ def test_workqueue_includes_and_excludes_each_bucket_correctly(db_session, sampl
     assert outcome_needed.id in outcomes_needed_ids
     assert outcome_done.id not in outcomes_needed_ids
     assert not_booked.id not in outcomes_needed_ids
+
+
+def test_workqueue_totals_are_real_past_the_bucket_cap(db_session, sample_org, sample_advisor):
+    """Each bucket holds at most WORKQUEUE_CAP rows; Today's Work and My Day
+    showed the list length, so a rep with 140 new leads saw "100"."""
+    from unittest.mock import patch
+    for i in range(7):
+        _lead(db_session, sample_org, sample_advisor, first_name="Cap%d" % i,
+              phone="1214555%04d" % (2000 + i))
+    client = _make_test_client(db_session, sample_advisor)
+    with patch("app.routers.workqueue_router.WORKQUEUE_CAP", 3):
+        data = client.get("/workqueue/today").json()
+    assert len(data["needs_text"]) == 3
+    assert data["totals"]["needs_text"] == 7
+    assert set(data["totals"]) == {"needs_text", "needs_reply", "cadence_due", "outcomes_needed"}
+    src = open("frontend/src/pages/WorkQueue.jsx", encoding="utf-8").read()
+    assert "queue.totals" in src
+    assert "wq?.totals" in open("frontend/src/pages/sales/MyDay.jsx", encoding="utf-8").read()

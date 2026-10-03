@@ -614,3 +614,29 @@ def test_approve_all_skips_an_item_claimed_by_a_concurrent_approve(
     assert response.status_code == 200
     assert response.json()["sent"] == 1
     assert twilio.messages.create.call_count == 1
+
+
+def test_summary_counts_today_on_the_workspace_day_past_the_history_cap(
+        client, db_session, sample_org, sample_advisor, auth_headers):
+    """"Sent today" was counted in the browser from /history (newest 50, last
+    24 h). /auto-send/summary counts on the server on the workspace's day."""
+    from datetime import timedelta
+    from app.services import workspace_time
+    sample_org.timezone = "America/Chicago"
+    db_session.commit()
+    start, end, tz = workspace_time.day_bounds(db_session, sample_org.id)
+    lead = _lead(db_session, sample_org, sample_advisor)
+    for i in range(55):
+        _, it = _queued(db_session, sample_org, sample_advisor, lead=lead, status="sent")
+        it.actioned_at = start + timedelta(minutes=1 + i)
+    _, y = _queued(db_session, sample_org, sample_advisor, lead=lead, status="sent")
+    y.actioned_at = start - timedelta(minutes=1)          # yesterday, local
+    _, sk = _queued(db_session, sample_org, sample_advisor, lead=lead, status="skipped")
+    sk.actioned_at = start + timedelta(minutes=2)
+    db_session.commit()
+    assert len(client.get("/auto-send/history", headers=auth_headers).json()) == 50
+    r = client.get("/auto-send/summary", headers=auth_headers)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"sent_today": 55, "skipped_today": 1, "timezone": "America/Chicago"}
+    src = open("frontend/src/pages/AutoSendQueue.jsx", encoding="utf-8").read()
+    assert "/auto-send/summary" in src and "summary?.sent_today" in src

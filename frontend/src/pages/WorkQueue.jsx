@@ -311,7 +311,10 @@ export default function WorkQueue() {
   // exception queue get an answer; everyone else simply sees no card.
   const [exceptions, setExceptions] = useState(null)
 
-  const total = useMemo(() => sections.reduce((sum, section) => sum + (queue[section.key]?.length || 0), 0), [queue])
+  // Each bucket holds at most 100 rows; `totals` (when the server sends it) is
+  // the real size of each, so the counts never stop at the cap.
+  const countOf = (key) => (typeof queue.totals?.[key] === 'number' ? queue.totals[key] : (queue[key]?.length || 0))
+  const total = useMemo(() => sections.reduce((sum, section) => sum + countOf(section.key), 0), [queue])
 
   async function loadQueue() {
     setError('')
@@ -379,9 +382,12 @@ export default function WorkQueue() {
               <div className="panel-header">
                 <div>
                   <h2 className="panel-title">{section.title}</h2>
-                  <p className="workqueue-section-subtitle">{section.subtitle}</p>
+                  <p className="workqueue-section-subtitle">
+                    {section.subtitle}
+                    {!loading && countOf(section.key) > items.length ? ` Showing the first ${items.length}.` : ''}
+                  </p>
                 </div>
-                <span className={`workqueue-count workqueue-count--${section.accent}`}>{loading ? '—' : items.length}</span>
+                <span className={`workqueue-count workqueue-count--${section.accent}`}>{loading ? '—' : countOf(section.key)}</span>
               </div>
 
               {loading ? (

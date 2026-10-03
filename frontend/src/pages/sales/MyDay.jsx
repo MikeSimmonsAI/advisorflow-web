@@ -118,6 +118,8 @@ export default function MyDay() {
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [wq, setWq] = useState(null)
+  // /workqueue/today caps each bucket at 100 rows; `totals` is the real size.
+  const wqCount = (key) => (typeof wq?.totals?.[key] === 'number' ? wq.totals[key] : (wq?.[key]?.length || 0))
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -180,8 +182,8 @@ export default function MyDay() {
           Fetched in parallel with my-day. Only renders when at least one
           bucket has items — an empty queue is not a card, it's silence.
           Every chip navigates to /workqueue so the number leads to the work. */}
-      {wq && (wq.needs_text?.length + wq.needs_reply?.length +
-              wq.cadence_due?.length + wq.outcomes_needed?.length) > 0 && (
+      {wq && (wqCount('needs_text') + wqCount('needs_reply') +
+              wqCount('cadence_due') + wqCount('outcomes_needed')) > 0 && (
         <div style={{
           display: 'flex', gap: 12, flexWrap: 'wrap',
           marginBottom: 18,
@@ -196,37 +198,37 @@ export default function MyDay() {
             fontSize: 11, fontWeight: 700, letterSpacing: '0.07em',
             color: 'var(--sw-ink2, #6b7280)', marginRight: 4,
           }}>TODAY'S WORK QUEUE →</button>
-          {wq.needs_text?.length > 0 && (
+          {wqCount('needs_text') > 0 && (
             <button onClick={() => nav('/workqueue')} style={{
               padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
               background: 'var(--sw-warn-bg, #fef3c7)',
               color: 'var(--sw-warn-fg, #92400e)',
               fontSize: 12, fontWeight: 600,
-            }}>{wq.needs_text.length} need text</button>
+            }}>{wqCount('needs_text')} need text</button>
           )}
-          {wq.needs_reply?.length > 0 && (
+          {wqCount('needs_reply') > 0 && (
             <button onClick={() => nav('/workqueue')} style={{
               padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
               background: 'var(--sw-ok-bg, #d1fae5)',
               color: 'var(--sw-ok-fg, #065f46)',
               fontSize: 12, fontWeight: 600,
-            }}>{wq.needs_reply.length} to reply</button>
+            }}>{wqCount('needs_reply')} to reply</button>
           )}
-          {wq.cadence_due?.length > 0 && (
+          {wqCount('cadence_due') > 0 && (
             <button onClick={() => nav('/workqueue')} style={{
               padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
               background: 'var(--sw-warn-bg, #fef3c7)',
               color: 'var(--sw-warn-fg, #92400e)',
               fontSize: 12, fontWeight: 600,
-            }}>{wq.cadence_due.length} cadence due</button>
+            }}>{wqCount('cadence_due')} cadence due</button>
           )}
-          {wq.outcomes_needed?.length > 0 && (
+          {wqCount('outcomes_needed') > 0 && (
             <button onClick={() => nav('/workqueue')} style={{
               padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
               background: 'var(--sw-neu-bg, #e5e7eb)',
               color: 'var(--sw-ink, #1f2937)',
               fontSize: 12, fontWeight: 600,
-            }}>{wq.outcomes_needed.length} outcome needed</button>
+            }}>{wqCount('outcomes_needed')} outcome needed</button>
           )}
         </div>
       )}
