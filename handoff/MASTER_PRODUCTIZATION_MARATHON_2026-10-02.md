@@ -3,8 +3,7 @@
 Start 08:12 CT · earliest normal completion 00:12 CT Oct 3.
 Baseline: 981cfbc code / f78b46d HEAD, 6,992 passed / 27 skipped / 0 failed.
 
-This file is updated through the day. Final suite, deploy, smoke and the
-acceptance matrix are added at closeout.
+Final suite, deploy, smoke and the acceptance matrix are in "Final verification" near the end.
 
 ---
 
@@ -71,7 +70,7 @@ acceptance matrix are added at closeout.
 | e7c02dc | Owner platform filter; unassigned pool total | God Lead Browser and Revenue History read `.platforms` off the bare list GET /god/platforms returns, so the platform filter never listed a platform (verified: now lists BookaBoost / EvoSys Pro / Harmony Hustle). Admin → Unassigned pool shows the real pool size (`with_total=true`) instead of the newest-500 length. test_ui_static_guards.py, test_user_management.py |
 | 1824b69 | **Lead Cleanup reassign UNASSIGNED leads**; Add member setup link | Lead Cleanup posted `advisor_id` to /admin/leads/reassign, whose model only declares `new_assigned_to_id` — the key was dropped and every selected lead was put back in the unassigned pool while the page said "Reassigned N leads". Page fixed; backend also honours `advisor_id` so a cached old bundle cannot repeat it. Users → Add member: the password typed was silently dropped (the API never accepted one) and the one-time setup link the response carries was never shown, so the new member had no way in. Password field removed; the link is shown once with Copy. Verified in the browser. Tests in test_user_management.py, test_ui_static_guards.py |
 | 26aabb2 | Response keys the UI read but never got | Customer 360 test-data cleanup always said "0 records deleted" (read `actual_total`; API returns `total_deleted`). Owner Maintenance (phone audit, booking cleanup preview/apply) read `res.data` off a plain body, so all three showed nothing — the cleanup offered "Apply" with no preview. My Commercial: saving an answer flipped the page to "no agreement" (PUT lacked `has_agreement`; now returns the GET shape). Customer 360 lifecycle buttons hid the Sales compensation panel until reload (now re-reads). Wholesale enrichment threw on a not-found property after a committed run. Provision Client and Customer 360 → Add person gave out domain-less `/activate?token=` links that do not work once emailed; both now absolute. test_commercial_api.py, test_ui_static_guards.py |
-| 710ae1a + (oct2bk) | **Appointment times shown 5 hours early** (Workspace Timezone P0) | `BookingLink.booked_time` is the advisor's LOCAL wall time (every booking flow writes it so; reminder texts print it as-is), but the API marked it UTC — a 3:00 PM Central booking showed as **10:00 AM** (reproduced in a Central-time browser; fixed shows 3:00 PM). New `app/services/booking_time.py`: times go out with the advisor's offset (`15:00-05:00`) from /availability/upcoming, /pipeline/appointments, lead detail, lead history, timeline, rate requests, workspace views and /calendar upcoming events; "upcoming" is judged in the advisor's zone (on the phone app the next ~5 h of appointments had vanished). Storage and writers unchanged. Also: /voice/calls-summary limited to the active workspace (review finding); four tests that seeded "today" as the UTC date and failed every evening after 7 PM Central now use the workspace day. tests/test_booking_time_wire.py, test_ai_hub_counts.py |
+| 710ae1a + 2dfe163 | **Appointment times shown 5 hours early** (Workspace Timezone P0) | `BookingLink.booked_time` is the advisor's LOCAL wall time (every booking flow writes it so; reminder texts print it as-is), but the API marked it UTC — a 3:00 PM Central booking showed as **10:00 AM** (reproduced in a Central-time browser; fixed shows 3:00 PM). New `app/services/booking_time.py`: times go out with the advisor's offset (`15:00-05:00`) from /availability/upcoming, /pipeline/appointments, lead detail, lead history, timeline, rate requests, workspace views and /calendar upcoming events; "upcoming" is judged in the advisor's zone (on the phone app the next ~5 h of appointments had vanished). Storage and writers unchanged. Also: /voice/calls-summary limited to the active workspace (review finding); four tests that seeded "today" as the UTC date and failed every evening after 7 PM Central now use the workspace day. tests/test_booking_time_wire.py, test_ai_hub_counts.py |
 | a978b71 · 88f0bd5 · 3fcea2b · (oct2ww) | Buttons that end in "Admin access required" | Two sweeps of every page a person can reach, against the role each route requires. Admin-only actions are now disabled or replaced with who can do them: AI Team add; AI employee pause/resume/stage; Wholesale pilot controls and paid skip-trace approval; EvoSense providers, resume, scoring, budgets (workspace and per-strategy), evaluations; Sales "release holdbacks", team-pipeline person filter, deal-value override. Admin buttons on Cadence, Lead, Leads, Compliance and Settings now follow the role in the current workspace (they used the account's role). |
 
 ## Midpoint review (16:12)
@@ -111,10 +110,45 @@ acceptance matrix are added at closeout.
 ## Recommended next (not done today — explained)
 
 - ~~AI Hub counts capped at 100/200~~ — fixed: server counts on the workspace day (see shipped table).
-- **Appointment time convention — partly fixed.** Readers now send booked times with the advisor's offset (see oct2bj). Still on the old assumption: the /calendar upcoming-events window edges and `workspace_views` "Awaiting outcome" (compare local times with UTC now — off by the UTC offset for a few hours), and the brand-sales tree stores UTC (documented in tenant_scheduling). Sample/demo data writes UTC.
+- **Appointment time convention — partly fixed.** Readers now send booked times with the advisor's offset (710ae1a, 2dfe163). Still on the old assumption: the /calendar upcoming-events window edges and `workspace_views` "Awaiting outcome" (compare local times with UTC now — off by the UTC offset for a few hours), and the brand-sales tree stores UTC (documented in tenant_scheduling). Sample/demo data writes UTC.
+- **Import batches use the home org.** `import_batch_router` (and parts of `case_file_router`, `billing_router`) read `users.organization_id` rather than the active workspace. For a person in one workspace that is the same thing; for someone who belongs to several, an upload while standing in B is filed under their home org. Not a leak (they are a member of both) but the wrong place. Same fix pattern as the 26 routers moved to the active workspace earlier; not done tonight because it touches the import path Atlantis uses.
 - Still capped without a total: Campaign Builder preview count (5,000; sending from the builder is off), Email queue list (1,000 — shown as "1,000+").
 
 - Hashed `/assets/*` are served `max-age=0` (each visit revalidates; 304s, not re-downloads). An `immutable` header in `render.yaml` is the standard fix; left alone because the Blueprint is live-synced and this is not worth a config sync during a marathon.
+
+## Final verification (closeout)
+
+**Application code:** 2dfe163 (`2dfe1638b4f4e6d9d6096aead6f8f7783cbbf4ae`). The container copy was checked file by file against it (1,531 app/test/frontend files, 0 differences). Commits today: 88 after f78b46d.
+
+**Container full suite on 2dfe163** (parallel, 3 workers): start 21:37:27, finish 22:28:34, 51m04s. **7,196 passed, 24 skipped, 1 "failed"**. The one failure is a worker the container's memory limit killed (`Memory cgroup out of memory: Killed process … python` in the kernel log), not an assertion. The QA server and browser were running at the same time. That test file and its neighbour pass on their own (38/38). An earlier run at 20:15 hit the same out-of-memory kill on a different test.
+
+**Windows serial full suite on 2dfe163** (clean worktree C:\Dev\af-final): start 21:36:40, finish 23:04:54, 1h27m38s. **7,192 passed, 29 skipped, 0 failed, exit 0.** This is the authoritative clean run.
+
+**Evening-only failures found and fixed before the final run:** four tests seeded "today" as the UTC date and failed every night after 7 PM Central (daily briefing, energy-ops queue counts ×2, overview reply chart). They now use the workspace day. Without that fix the final suite would have failed.
+
+**Production** (checked 21:39 CT): backend /version = 2dfe163, /health 200, /health/ready 200. Frontend `/`, `/login`, `/m` and `/activate` return 200, and the hashed entry JS/CSS are served. The live bundle contains tonight's frontend changes. All eight new or changed endpoints return 401 without a token (no 5xx). Nothing outbound was sent at any point.
+
+**Browser walk on the final code (local QA copy):**
+- 82 customer screens (insurance admin) and 41 owner screens: no page errors and no 5xx.
+- Phone app (iPhone 13 profile): all 11 screens loaded with no errors.
+- Appointment time in a Central-time browser: shows 3:00 PM for a 3:00 PM booking. Before the fix it showed 10:00 AM.
+
+### Acceptance matrix (section 69)
+
+| Item | Result | Evidence |
+|---|---|---|
+| BOOK A DEMO | PASS (app) · upload is Mike's | b690b2a, c7e5296. Phones see it; unbooked requests reach the sales pipeline; owner notified in app. The cPanel upload was refused by the permission system, so it is yours (package ready). |
+| CONVERSATION INTELLIGENCE | PASS | 8c65468, 26996de, 3a0c1fd, 97ebc74, bf4d79c, 50c4d82. Record-grounded memory, takeover, quality gate, queue; scheduled AI touches yield to what the customer said. |
+| WORKSPACE TIMEZONE | PASS | 1cdbcff, 62f0ae4, 52320b4, 710ae1a, 2dfe163. One resolver; appointment times now carry their offset; the evening-only test failures are fixed. |
+| DB IDEMPOTENCY / MULTI-INSTANCE | PASS | 7485439, 2a4f1fe, b8e5026, d6503b2, 45f81f1, 17a7561, fcf10a4. DB leases on every send door, one loop pass per interval across instances, atomic claims. Rate limits are per instance (Decision 9). |
+| MOBILE | PASS | 1cdbcff, 88cdb3d, f2ab74c, b5e21bb. Zero axe A/AA findings; final phone walk clean. |
+| MAX LIFE | PASS (no regressions) · launch items Mike's | No code changes needed today. Production demo, domain and legal are yours. |
+| ATLANTIS | PASS | 067f875 (energy screens axe-clean), counts and queues fixed. Real import untouched; test leads only. |
+| WHOLESALE | PASS | 88cdb3d, 71835bc, 26aabb2 (enrichment), wholesale suites green. |
+| UNIVERSAL INTAKE | PASS | Intake suites green; no change to the real batch. |
+| OWNER CONSOLE | PASS | d5ba998, e7c02dc, 26aabb2, 41 owner screens walked clean. |
+| SECURITY | PASS | de7556a, a495f85, 4d34ad4, f94b1a7, plus two independent reviews (no tenant leak, no auth regression). |
+| FULL SUITE | PASS | Windows serial on 2dfe163: 7,192 passed / 29 skipped / 0 failed. Container: 7,196 passed; the one worker lost to an out-of-memory kill passes when rerun on its own. |
 
 ## Mike-only actions (unchanged)
 
