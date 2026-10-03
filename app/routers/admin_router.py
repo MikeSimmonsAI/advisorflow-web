@@ -1703,21 +1703,22 @@ def reassign_leads(
 
 
 @router.get("/leads/unassigned")
-def list_unassigned_leads(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+def list_unassigned_leads(with_total: bool = Query(False), db: Session = Depends(get_db),
+                          current_user: User = Depends(require_admin)):
     """
+    with_total=true returns {"items": [...], "total": N} - the list holds the
+    newest 500, and the Admin page showed that length as the pool size.
     Returns every lead in the org's pool that has no advisor assigned yet -
     the queue an admin works through when manually routing leads out to
     the team, rather than every lead defaulting to whoever happened to
     import it.
     """
-    leads = (
+    pool = (
         db.query(Lead)
         .filter(Lead.organization_id == lead_scope.active_workspace_org_id(current_user, db), Lead.assigned_to_id.is_(None))
-        .order_by(Lead.created_at.desc())
-        .limit(500)
-        .all()
     )
-    return [
+    leads = pool.order_by(Lead.created_at.desc()).limit(500).all()
+    items = [
         {
             "id": l.id, "first_name": l.first_name, "last_name": l.last_name,
             "phone": l.phone, "email": l.email,
@@ -1727,6 +1728,7 @@ def list_unassigned_leads(db: Session = Depends(get_db), current_user: User = De
         }
         for l in leads
     ]
+    return {"items": items, "total": pool.count()} if with_total else items
 
 
 # ---------------------------------------------------------------------------

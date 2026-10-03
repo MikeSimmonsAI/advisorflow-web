@@ -111,6 +111,7 @@ export default function Admin() {
   const [allLeads, setAllLeads] = useState([])
   const [leadsTotal, setLeadsTotal] = useState(null)
   const [unassignedLeads, setUnassignedLeads] = useState([])
+  const [unassignedTotal, setUnassignedTotal] = useState(null)
   const [loading, setLoading] = useState(true)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [leadsLoading, setLeadsLoading] = useState(true)
@@ -156,7 +157,13 @@ export default function Admin() {
 
   function loadUnassigned() {
     setUnassignedLoading(true)
-    api.get('/admin/leads/unassigned').then(setUnassignedLeads).finally(() => setUnassignedLoading(false))
+    api.get('/admin/leads/unassigned?with_total=true')
+      .then((d) => {
+        // {items, total}: the list is the newest 500; total is the pool size.
+        setUnassignedLeads(Array.isArray(d) ? d : (Array.isArray(d?.items) ? d.items : []))
+        setUnassignedTotal(typeof d?.total === 'number' ? d.total : null)
+      })
+      .finally(() => setUnassignedLoading(false))
   }
 
   async function loadRevenue() {
@@ -245,7 +252,7 @@ export default function Admin() {
           { key: 'advisors', label: 'By advisor' },
           { key: 'metrics', label: 'Metrics' },
           { key: 'leads', label: `All leads${leadsTotal ? ` (${leadsTotal})` : ''}` },
-          { key: 'unassigned', label: `Unassigned pool${unassignedLeads.length ? ` (${unassignedLeads.length})` : ''}` },
+          { key: 'unassigned', label: `Unassigned pool${(unassignedTotal ?? unassignedLeads.length) ? ` (${unassignedTotal ?? unassignedLeads.length})` : ''}` },
           { key: 'revenue', label: 'Revenue' },
         ].map(({ key, label }) => (
           <button key={key} className={`tab ${view === key ? 'tab--active' : ''}`} onClick={() => setView(key)}>
@@ -392,7 +399,7 @@ export default function Admin() {
         <section className="panel">
           <div className="panel-header">
             <h2 className="panel-title">Unassigned pool</h2>
-            <span className="panel-count">{unassignedLeads.length} leads</span>
+            <span className="panel-count">{unassignedTotal ?? unassignedLeads.length} leads{(unassignedTotal ?? 0) > unassignedLeads.length ? ` · showing the newest ${unassignedLeads.length}` : ''}</span>
           </div>
           {unassignedLoading ? (
             <div className="empty-state">Loading…</div>

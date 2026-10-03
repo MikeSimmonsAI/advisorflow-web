@@ -661,3 +661,19 @@ def test_get_user_detail_includes_last_login(client, db_session, sample_org, sam
 
     assert response.status_code == 200
     assert response.json()["last_login_at"] is not None
+
+
+def test_unassigned_pool_with_total_reports_the_whole_pool(client, admin_auth_headers, db_session,
+                                                          sample_org):
+    """The pool list is the newest 500; the Admin page showed that length as the
+    pool size. with_total=true carries the real count; the bare list is unchanged."""
+    for i in range(3):
+        db_session.add(Lead(organization_id=sample_org.id, assigned_to_id=None,
+                            first_name="Pool%d" % i, last_name="Lead", phone="1214555%04d" % (9100 + i)))
+    db_session.commit()
+    bare = client.get("/admin/leads/unassigned", headers=admin_auth_headers).json()
+    d = client.get("/admin/leads/unassigned?with_total=true", headers=admin_auth_headers).json()
+    assert isinstance(bare, list)
+    assert d["total"] == len(bare) >= 3 and len(d["items"]) == len(bare)
+    src = open("frontend/src/pages/Admin.jsx", encoding="utf-8").read()
+    assert "/admin/leads/unassigned?with_total=true" in src and "unassignedTotal" in src

@@ -13,6 +13,10 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../api/client'
 
+// GET /god/platforms returns a bare list; this read `.platforms` off it, so
+// the platform filter never listed a platform.
+const platformList = (r) => (Array.isArray(r) ? r : (Array.isArray(r?.platforms) ? r.platforms : []))
+
 const fmt = cents =>
   cents == null ? '—'
   : '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -131,7 +135,7 @@ export default function GodRevenueHistory() {
         api.get('/god/platforms'),
       ])
       setData(histRes)
-      setPlatforms(platRes?.platforms || [])
+      setPlatforms(platformList(platRes))
       setRefreshed(new Date())
     } catch (e) {
       setError(e.detail || e.message || 'Failed to load revenue history')

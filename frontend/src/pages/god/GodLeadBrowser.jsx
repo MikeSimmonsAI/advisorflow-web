@@ -25,6 +25,10 @@ import {
   PAGE_SIZE, MASTER_COLUMNS, buildMasterParams, buildTenantParams, formatSeen,
 } from './masterLeadQuery'
 
+// GET /god/platforms returns a bare list; this read `.platforms` off it, so
+// the platform filter never listed a platform.
+const platformList = (r) => (Array.isArray(r) ? r : (Array.isArray(r?.platforms) ? r.platforms : []))
+
 const STATUSES = ['active', 'completed', 'dnc', 'inactive', 'new', 'prospect']
 
 function Card({ children, style }) {
@@ -86,7 +90,7 @@ export default function GodLeadBrowser() {
   const [orgs, setOrgs] = useState([])
 
   useEffect(() => {
-    api.get('/god/platforms').then(r => setPlatforms(r?.platforms || [])).catch(() => {})
+    api.get('/god/platforms').then(r => setPlatforms(platformList(r))).catch(() => {})
   }, [])
 
   useEffect(() => {

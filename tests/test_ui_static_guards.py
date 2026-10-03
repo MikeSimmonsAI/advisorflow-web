@@ -114,3 +114,15 @@ def test_email_queue_tiles_count_statuses_the_queue_returns():
     assert "needs_tier_review" in src and "EMAIL_QUEUE_CAP" in src
     router = open("app/routers/email_router.py", encoding="utf-8").read()
     assert 'ACTIONABLE = ("new", "needs_tier_review", "queued")' in router
+
+
+def test_god_platform_filters_read_the_bare_list():
+    """GET /god/platforms returns a list; two owner pages read `.platforms` off
+    it and their platform filter never listed a platform."""
+    for p in ("frontend/src/pages/god/GodLeadBrowser.jsx",
+              "frontend/src/pages/god/GodRevenueHistory.jsx"):
+        src = open(p, encoding="utf-8").read()
+        assert "?.platforms || []" not in src and "platformList(" in src, p
+    router = open("app/routers/god_router.py", encoding="utf-8").read()
+    i = router.index('@router.get("/platforms")')
+    assert 'return [{"id": r[0]' in router[i:i + 1500]
