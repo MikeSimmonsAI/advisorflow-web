@@ -316,6 +316,11 @@ export default function ProvisionClient() {
         payload.supervisor_password = form.supervisor_password.trim()
       }
       const res = await api.post('/admin/provision-client', payload)
+      // The API builds the setup link without a domain ("/activate?token=…"),
+      // which does not work once sent to the customer. Make it absolute.
+      if (res && typeof res.setup_url === 'string' && res.setup_url.startsWith('/')) {
+        res.setup_url = window.location.origin + res.setup_url
+      }
       setResult(res)
       loadOrgs()
       setForm({

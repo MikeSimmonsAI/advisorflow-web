@@ -25,6 +25,9 @@ export default function AddPerson({ orgId, locations, onAdded }) {
     try {
       const r = await api.post('/god/customers/' + orgId + '/users', {
         email: email.trim(), full_name: name.trim(), role, location_ids: locs,
+        // Without a base the API returns a bare "/activate?token=..." path,
+        // which does not work when pasted into an email.
+        base_url: window.location.origin,
       })
       setEmail(''); setName(''); setLook(null); setLocs([])
       onAdded(r)

@@ -25,6 +25,10 @@ import { api } from '../../api/client'
 import { Panel, Empty, money, when, whenExact, errText } from './GodOpsShared'
 import './GodOps.css'
 
+// The cleanup execute response names the count `total_deleted` (the stored
+// row calls it actual_total); reading actual_total showed "0 deleted" always.
+const receiptTotal = (r) => r?.total_deleted ?? r?.actual_total ?? 0
+
 const STATUS_TONE = {
   active: 'live',
   cancellation_requested: 'warn',
@@ -404,7 +408,7 @@ function CustomerCleanupPanel({ orgId }) {
                             border: '1px solid var(--gm-teal)', borderRadius: 8,
                             background: 'var(--gm-pill-teal-bg)' }}>
                 <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--gm-teal)', marginBottom: 4 }}>
-                  Done — {receipt.actual_total ?? 0} record{receipt.actual_total !== 1 ? 's' : ''} deleted
+                  Done — {receiptTotal(receipt)} record{receiptTotal(receipt) !== 1 ? 's' : ''} deleted
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--gm-teal)' }}>
                   Execution ID: <code>{receipt.execution_id}</code>
@@ -546,8 +550,12 @@ export default function Customer360() {
   async function act(path, body) {
     setBusy(true); setErr('')
     try {
+      // The lifecycle routes answer with the customer WITHOUT compensation
+      // (the GET includes it), so using that answer hid the Sales panel.
+      // Re-read the whole customer instead.
       setD(await api.post('/god/customer-360/customers/' + orgId + '/' + path,
                           body || {}))
+      load()
     } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
 

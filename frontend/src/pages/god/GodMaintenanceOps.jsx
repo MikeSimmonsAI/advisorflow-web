@@ -15,6 +15,10 @@
 import React, { useState } from 'react'
 import { api } from '../../api/client'
 
+// api.post returns the parsed JSON body (not an axios envelope): these three
+// tools read `res.data`, which is undefined, so they showed no result at all.
+const errorText = (e) => (typeof e?.detail === 'string' ? e.detail : e?.message) || 'Unknown error'
+
 // ─── tiny shared primitives ────────────────────────────────────────────────
 
 function Label({ children }) {
@@ -125,9 +129,9 @@ function PhoneAuditTab() {
       const body = { numbers: nums }
       if (orgId.trim()) body.organization_id = orgId.trim()
       const res = await api.post('/god/maintenance/phone-audit', body)
-      setResult(res.data)
+      setResult(res)
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || 'Unknown error')
+      setError(errorText(e) || 'Unknown error')
     } finally {
       setLoading(false)
     }
@@ -277,10 +281,10 @@ function BookingCleanupTab() {
         apply: false,
         reason: reason.trim(),
       })
-      setDryResult(res.data)
+      setDryResult(res)
       setPhase(CLEANUP_PREVIEW)
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || 'Unknown error')
+      setError(errorText(e) || 'Unknown error')
       setPhase(CLEANUP_IDLE)
     }
   }
@@ -294,10 +298,10 @@ function BookingCleanupTab() {
         apply: true,
         reason: reason.trim(),
       })
-      setApplyResult(res.data)
+      setApplyResult(res)
       setPhase(CLEANUP_DONE)
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || 'Unknown error')
+      setError(errorText(e) || 'Unknown error')
       setPhase(CLEANUP_PREVIEW)
     }
   }

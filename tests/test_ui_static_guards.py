@@ -138,3 +138,19 @@ def test_add_member_shows_the_setup_link_and_asks_for_no_password():
     router = open("app/routers/admin_router.py", encoding="utf-8").read()
     i = router.index("class CreateUserRequest(BaseModel):")
     assert "password" not in router[i:i + 300]
+
+
+def test_owner_pages_read_the_keys_their_endpoints_return():
+    """Third audit pass: response keys the UI read but the API never returned."""
+    def src(p):
+        return open(p, encoding="utf-8").read()
+    c360 = src("frontend/src/pages/god/Customer360.jsx")
+    assert "receipt.actual_total ??" not in c360 and "total_deleted" in c360   # cleanup said "0 deleted"
+    maint = src("frontend/src/pages/god/GodMaintenanceOps.jsx")
+    assert "(res.data)" not in maint                                            # api.post returns the body
+    props = src("frontend/src/pages/wholesale/WholesaleProperties.jsx")
+    assert "r.phones.length ||" not in props                                    # not_found rows have no phones
+    assert "base_url: window.location.origin" in src("frontend/src/pages/god/customer/AddPerson.jsx")
+    assert "window.location.origin + res.setup_url" in src("frontend/src/pages/ProvisionClient.jsx")
+    ds = src("app/services/data_cleanup.py")
+    assert '"total_deleted": row.actual_total' in ds

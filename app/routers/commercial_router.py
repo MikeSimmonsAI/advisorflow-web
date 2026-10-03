@@ -246,7 +246,10 @@ def answer_my_question(key: str, body: CustomerAnswer, request: Request,
                expected_revision=body.revision)
     ag.refresh_status(db, agreement, user)
     db.commit()
-    return ag.customer_view(db, agreement)
+    # The same shape GET /me returns. The page stores this answer as its data
+    # and tests `has_agreement`; without the key it switched to "no agreement"
+    # after every saved answer.
+    return {"has_agreement": True, **ag.customer_view(db, agreement)}
 
 
 @router.get("/me/onboarding")

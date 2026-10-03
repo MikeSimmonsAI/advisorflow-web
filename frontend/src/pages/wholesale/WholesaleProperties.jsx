@@ -84,7 +84,9 @@ export default function WholesaleProperties() {
     try {
       const result = await api.post('/wholesale/enrichment/run', { property_ids: chosen })
       const manual = result.results.filter((r) => r.status === 'manual').length
-      const found = result.results.filter((r) => r.phones.length || r.emails.length).length
+      // A property no longer in the workspace comes back as {property_id, status: 'not_found'}
+      // with no phones/emails; reading .length on it threw after a committed run.
+      const found = result.results.filter((r) => (r.phones || []).length || (r.emails || []).length).length
       setNotice(
         `Provider: ${result.provider_label}. ${found} of ${result.results.length} returned contact details.`
         + (manual

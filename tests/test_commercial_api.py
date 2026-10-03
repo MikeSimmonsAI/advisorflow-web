@@ -313,6 +313,9 @@ class TestCustomerQuestions:
         answered = {q["key"]: q for q in r.json()["questions"]}
         assert answered["share_basis"]["answered"] is True
         assert answered["share_basis"]["value_label"] == "Gross collections"
+        # The page stores this answer and tests has_agreement: without the
+        # key it fell back to "no agreement" after every save.
+        assert r.json()["has_agreement"] is True
 
     def test_a_customer_cannot_answer_an_internal_question(
             self, client, db_session, world):
