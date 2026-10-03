@@ -726,14 +726,33 @@ def pipeline_appointments(
     # Upcoming and past are capped SEPARATELY. One ascending query capped at
     # 300 filled up with the oldest past appointments first, so in a busy
     # workspace the upcoming ones - the ones that matter - were the ones cut.
+    #
+    # booked_time is the ADVISOR'S LOCAL wall time (app/services/booking_time).
+    # Rows more than booking_time.WINDOW from now are past/upcoming whatever the
+    # zone; the ones inside it are classified one by one in their own zone.
+    from app.services import booking_time as bkt
     base = (db.query(BookingLink, Lead.first_name, Lead.last_name, Lead.phone)
             .join(Lead, BookingLink.lead_id == Lead.id).filter(*f))
-    upcoming_q = base.filter(BookingLink.booked_time >= now)
-    past_q = base.filter(BookingLink.booked_time < now)
-    up_rows = upcoming_q.order_by(BookingLink.booked_time.asc()).limit(APPOINTMENTS_CAP).all()
-    past_rows = past_q.order_by(BookingLink.booked_time.desc()).limit(APPOINTMENTS_CAP).all()
+    lo, hi = now - bkt.WINDOW, now + bkt.WINDOW
+    window = base.filter(BookingLink.booked_time >= lo, BookingLink.booked_time < hi).all()
+    zmap = bkt.zones(db, [b.user_id for b, *_ in window])
+    w_up, w_past = [], []
+    for row in window:
+        z = bkt.zone_of(zmap, row[0].user_id)
+        (w_up if bkt.is_upcoming(row[0].booked_time, z, now) else w_past).append(row)
+    up_strict = base.filter(BookingLink.booked_time >= hi)
+    past_strict = base.filter(BookingLink.booked_time < lo)
+    _utc = lambda r: bkt.to_utc(r[0].booked_time, bkt.zone_of(zmap, r[0].user_id))
+    up_rows = (sorted(w_up, key=_utc)
+               + up_strict.order_by(BookingLink.booked_time.asc()).limit(APPOINTMENTS_CAP).all()
+               )[:APPOINTMENTS_CAP]
+    past_rows = (sorted(w_past, key=_utc, reverse=True)
+                 + past_strict.order_by(BookingLink.booked_time.desc()).limit(APPOINTMENTS_CAP).all()
+                 )[:APPOINTMENTS_CAP]
     rows = list(reversed(past_rows)) + up_rows
-    totals = {"upcoming": upcoming_q.count(), "past": past_q.count()}
+    up_ids = {r[0].id for r in up_rows}
+    totals = {"upcoming": up_strict.count() + len(w_up), "past": past_strict.count() + len(w_past)}
+    zmap.update(bkt.zones(db, [b.user_id for b, *_ in rows if b.user_id not in zmap]))
     advisor_ids = {b.user_id for b, *_ in rows if b.user_id}
     advisors = ({u.id: u.full_name for u in db.query(User).filter(User.id.in_(advisor_ids)).all()}
                 if advisor_ids else {})
@@ -742,10 +761,11 @@ def pipeline_appointments(
             "id": b.id, "lead_id": b.lead_id,
             "lead_name": f"{fn or ''} {ln or ''}".strip() or None,
             "lead_phone": ph, "status": b.status,
-            "booked_time": b.booked_time.isoformat() + "Z" if b.booked_time else None,
+            # explicit offset: the wall time booked, in the advisor's zone
+            "booked_time": bkt.to_wire(b.booked_time, bkt.zone_of(zmap, b.user_id)),
             "confirmed_at": b.confirmed_at.isoformat() + "Z" if b.confirmed_at else None,
             "appointment_type": b.appt_label, "advisor_name": advisors.get(b.user_id),
-            "upcoming": bool(b.booked_time and b.booked_time >= now),
+            "upcoming": b.id in up_ids,
         } for b, fn, ln, ph in rows],
         "period_days": days,
         "totals": totals,

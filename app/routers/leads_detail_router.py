@@ -33,6 +33,7 @@ from app.routers.audit_log_router import log_action
 from app.services import lead_scope
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
+from app.services import booking_time as _bkt
 
 router = APIRouter()
 
@@ -251,7 +252,8 @@ def get_lead_timeline(lead_id: str,
         booking_info = {
             "id": latest_booking.id,
             "status": latest_booking.status,
-            "booked_time": latest_booking.booked_time,
+            # advisor's local wall time, sent with its offset (booking_time)
+            "booked_time": _bkt.wire(db, latest_booking),
             "calendar_event_id": latest_booking.calendar_event_id,
             "created_at": latest_booking.created_at,
             "expires_at": latest_booking.expires_at,

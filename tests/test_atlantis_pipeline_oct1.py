@@ -236,12 +236,17 @@ def test_enroll_sets_enrolled_at_and_overview_counts_it(client, w):
 def _seed_tasks(db, w):
     org, adv, adv2, admin = w["org"], w["adv"], w["adv2"], w["admin"]
     now = datetime.utcnow()
+    # Noon on the WORKSPACE's day. This was noon on the UTC date, which from
+    # 7 PM Central is tomorrow in the workspace, so the test failed every evening.
+    from app.services import workspace_time
+    start, _, _ = workspace_time.day_bounds(db, org.id, now=now)
+    noon = start + timedelta(hours=12)
     mine = _lead(db, org, adv, first="Own")
     theirs = _lead(db, org, adv2, first="Other")
     _lead(db, org, adv, first="Flag", manual_flag="hot")
     specs = [
-        (mine, adv, now.replace(hour=12, minute=0)),            # due today (mine)
-        (theirs, adv, now.replace(hour=12, minute=0)),          # assigned to adv, lead NOT in adv scope
+        (mine, adv, noon),                                      # due today (mine)
+        (theirs, adv, noon),                                    # assigned to adv, lead NOT in adv scope
         (mine, adv, now - timedelta(days=5)),                   # overdue + escalation
         (theirs, adv, now - timedelta(days=6)),                 # out-of-scope overdue
         (theirs, adv2, now - timedelta(days=5)),                # adv2's own overdue

@@ -41,3 +41,23 @@ def test_ai_hub_uses_the_server_counts():
     assert "/voice/calls-summary" in src
     assert "toDateString()" not in src          # no browser-day counting
     assert "stats.flagged_count" in src         # past the list cap, the server count
+
+
+def test_calls_today_counts_only_the_active_workspace(client, db_session, sample_org,
+                                                      sample_advisor, auth_headers):
+    """An advisor in two workspaces sees this workspace's calls, not both."""
+    import uuid
+    from app.models.models import Organization
+    other = Organization(name="Other WS", slug="ow-%s" % uuid.uuid4().hex[:8], plan="enterprise",
+                         industry="insurance", is_active=True)
+    db_session.add(other)
+    db_session.commit()
+    lead = Lead(organization_id=sample_org.id, assigned_to_id=sample_advisor.id,
+                first_name="Two", last_name="Orgs", phone="12145557401", status="new")
+    db_session.add(lead)
+    db_session.commit()
+    start, _, _ = workspace_time.day_bounds(db_session, sample_org.id)
+    _calls(db_session, sample_org, sample_advisor, lead, start + timedelta(hours=2), 3)
+    _calls(db_session, other, sample_advisor, lead, start + timedelta(hours=2), 4)
+    r = client.get("/voice/calls-summary", headers=auth_headers)
+    assert r.json()["today"] == 3

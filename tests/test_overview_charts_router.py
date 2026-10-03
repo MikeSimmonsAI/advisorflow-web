@@ -65,7 +65,11 @@ def _lead(
 
 def test_reply_activity_by_day_counts_exactly_and_scopes_to_current_advisor(client, db_session, sample_org, sample_advisor, second_advisor):
     now = _now()
-    today = now.date()
+    # The chart's days are the WORKSPACE's days. Seeding by the UTC date failed
+    # every evening (from 7 PM Central the UTC date is already tomorrow).
+    from app.services import workspace_time
+    day_start, _, _ = workspace_time.day_bounds(db_session, sample_org.id, now=now)
+    today = workspace_time.local_today(db_session, sample_org.id, now=now)
     other_org = Organization(name="Other Chart Org", slug="other-chart-org", plan="trial")
     db_session.add(other_org)
     db_session.commit()
@@ -77,8 +81,8 @@ def test_reply_activity_by_day_counts_exactly_and_scopes_to_current_advisor(clie
     other_org_lead = _lead(db_session, other_org, other_org_advisor, first_name="OtherOrg", phone="12145556004")
 
     db_session.add_all([
-        Reply(lead_id=own_lead.id, body="today 1", received_at=now.replace(hour=9, minute=0, second=0, microsecond=0)),
-        Reply(lead_id=own_second_lead.id, body="today 2", received_at=now.replace(hour=10, minute=0, second=0, microsecond=0)),
+        Reply(lead_id=own_lead.id, body="today 1", received_at=day_start + timedelta(minutes=1)),
+        Reply(lead_id=own_second_lead.id, body="today 2", received_at=day_start + timedelta(minutes=2)),
         Reply(lead_id=own_lead.id, body="yesterday", received_at=now - timedelta(days=1)),
         Reply(lead_id=own_lead.id, body="outside range", received_at=now - timedelta(days=4)),
         Reply(lead_id=same_org_other_lead.id, body="same org other advisor", received_at=now),

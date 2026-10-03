@@ -16,6 +16,15 @@ from app.models.models import (
 from app.services.auth_service import create_access_token, hash_password
 
 
+def _later_today(db, org, now):
+    """Later TODAY on the workspace's day. This used 23:30 on the UTC date, which
+    from 7 PM Central onward is already tomorrow in the workspace - the test
+    failed every evening."""
+    from app.services import workspace_time
+    _, end, _ = workspace_time.day_bounds(db, org.id, now=now)
+    return max(now + timedelta(minutes=1), end - timedelta(minutes=30))
+
+
 def _now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -76,7 +85,7 @@ def test_daily_briefing_counts_are_exact_for_current_advisor(client, db_session,
 
     db_session.add_all([
         CadenceState(lead_id=due_today_1.id, status=CadenceStatus.ACTIVE, next_touch_due_at=now - timedelta(minutes=5)),
-        CadenceState(lead_id=due_today_2.id, status=CadenceStatus.ACTIVE, next_touch_due_at=now.replace(hour=23, minute=30, second=0, microsecond=0)),
+        CadenceState(lead_id=due_today_2.id, status=CadenceStatus.ACTIVE, next_touch_due_at=_later_today(db_session, sample_org, now)),
         CadenceState(lead_id=future_due.id, status=CadenceStatus.ACTIVE, next_touch_due_at=now + timedelta(days=1)),
         CadenceState(lead_id=paused_due.id, status=CadenceStatus.PAUSED, next_touch_due_at=now - timedelta(minutes=5)),
     ])

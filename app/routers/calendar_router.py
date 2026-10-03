@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from app.services import booking_time as _bkt
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -1005,7 +1006,9 @@ def list_calendar_events(
     else:
         q = db.query(BookingLink).filter(BookingLink.user_id == current_user.id)
 
-    # The time window is applied in SQL (booked_time is a naive UTC column);
+    # NOTE: booked_time is the advisor's LOCAL wall time (booking_time.py), so
+    # this window is off by the advisor's UTC offset at its two edges.
+    # The time window is applied in SQL;
     # the per-row check below is kept as a guard for tz-aware stored values.
     now_naive = now.replace(tzinfo=None)
     cutoff_naive = cutoff.replace(tzinfo=None)
@@ -1036,6 +1039,7 @@ def list_calendar_events(
             advisor_cache[user_id] = u.full_name if u else "Advisor"
         return advisor_cache[user_id]
 
+    _zones = _bkt.zones(db, {b.user_id for b in bookings})  # one query
     events = []
     for b in bookings:
         if not b.booked_time:
@@ -1051,7 +1055,8 @@ def list_calendar_events(
 
         event = {
             "id": b.id,
-            "booked_time": bt.isoformat(),
+            # local wall time with the advisor's offset (app/services/booking_time)
+            "booked_time": _bkt.to_wire(b.booked_time, _bkt.zone_of(_zones, b.user_id)),
             "lead_name": lead_name,
             "lead_id": b.lead_id,
             "status": b.status,

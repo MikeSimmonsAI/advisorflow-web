@@ -93,6 +93,8 @@ def _now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+from app.services import booking_time as _bkt  # booked_time is local wall time
+
 def _iso(ts):
     return ts.isoformat() + "Z" if ts else None
 
@@ -201,7 +203,7 @@ def _row(lead: Lead, names, bookings, now) -> Dict[str, Any]:
         "status": status,
         "status_label": _LABEL.get(status) if status else None,
         "booked": is_booked,
-        "booking": ({"status": booking.status, "booked_time": _iso(booking.booked_time),
+        "booking": ({"status": booking.status, "booked_time": _bkt.wire_obj(booking),
                      "appointment_type": booking.appt_label} if booking else None),
         "assigned_to_id": lead.assigned_to_id,
         "assigned_to_name": names.get(lead.assigned_to_id),

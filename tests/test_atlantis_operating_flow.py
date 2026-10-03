@@ -171,7 +171,11 @@ def test_follow_up_queues_reconcile_with_lists(client, w):
     db, org, adv = w["db"], w["org"], w["adv"]
     l = _lead(db, org, adv)
     now = datetime.utcnow()
-    today_noon = datetime(now.year, now.month, now.day, 12)
+    # Noon on the WORKSPACE's day (as naive UTC). Noon on the UTC date is
+    # tomorrow in the workspace from 7 PM Central - the test failed every evening.
+    from app.services import workspace_time
+    day_start, _, _ = workspace_time.day_bounds(db, org.id, now=now)
+    today_noon = day_start + timedelta(hours=12)
     for title, due in (("due today", today_noon), ("overdue 1d", today_noon - timedelta(days=1)),
                        ("overdue 5d", today_noon - timedelta(days=5)),
                        ("upcoming", today_noon + timedelta(days=3)),

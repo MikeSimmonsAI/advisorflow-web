@@ -25,6 +25,7 @@ from app.models.models import (
 )
 from app.services.lead_scope import (authorized_lead_query, load_lead_in_scope, assert_leads_in_scope, reject_ownership_fields)
 from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
+from app.services import booking_time as _bkt
 
 router = APIRouter(prefix="/leads", tags=["timeline"])
 
@@ -149,13 +150,16 @@ def get_lead_timeline(
         events.append({
             "id": f"booking-{b.id}",
             "type": f"booking_{b.status}",
-            "ts": _fmt(b.booked_time or b.created_at),
+            # booked_time is the advisor's LOCAL wall time (booking_time): the
+            # sort key is its UTC instant, the shown value carries its offset.
+            "ts": (_fmt(_bkt.to_utc(b.booked_time, _bkt.zone_of_user(db, b.user_id)))
+                   if b.booked_time else _fmt(b.created_at)),
             "label": status_label,
-            "body": _fmt(b.booked_time) if b.booked_time else "No time selected yet",
+            "body": _bkt.wire(db, b) if b.booked_time else "No time selected yet",
             "meta": {
                 "status": b.status,
                 "created_at": _fmt(b.created_at),
-                "booked_time": _fmt(b.booked_time),
+                "booked_time": _bkt.wire(db, b),
                 "calendar_event_id": b.calendar_event_id,
             },
         })

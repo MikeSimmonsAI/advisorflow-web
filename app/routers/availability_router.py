@@ -13,6 +13,7 @@ from datetime import date, timedelta
 from app.deps import get_db, get_current_user
 from app.models.models import User, AdvisorAvailabilityBlock, BlockType, BookingLink, Lead
 from app.services import lead_scope
+from app.services import booking_time as bkt
 from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
 router = APIRouter(prefix="/availability", tags=["availability"])
@@ -444,13 +445,14 @@ def get_upcoming_appointments(
     # every-organization view; an owner who entered a customer sees that one.
     # Without a workspace header this is the home org and users.role, as before.
     is_admin = lead_scope.is_manager_here(current_user, db)
-    now = dt.now()
+    # booked_time is the advisor's LOCAL wall time (app/services/booking_time).
+    # "Upcoming" is decided per booking in its own zone, not against the
+    # server's clock, and the time goes out with an explicit offset.
 
     if org_wide and is_admin:
         if lead_scope.god_sees_all_orgs(current_user):
             bq = db.query(BookingLink).filter(
                 BookingLink.status == "booked",
-                BookingLink.booked_time >= now,
             )
         else:
             scope_org_id = lead_scope.active_workspace_org_id(current_user, db)
@@ -463,9 +465,8 @@ def get_upcoming_appointments(
             bq = db.query(BookingLink).filter(
                 BookingLink.user_id.in_(org_user_ids),
                 BookingLink.status == "booked",
-                BookingLink.booked_time >= now,
             )
-        bookings = bq.order_by(BookingLink.booked_time.asc()).limit(UPCOMING_CAP).all()
+        bookings, total, zmap = _upcoming(db, bq, UPCOMING_CAP)
 
         # Cache advisor names
         advisor_cache = {}
@@ -495,11 +496,11 @@ def get_upcoming_appointments(
                 "lead_id": b.lead_id,
                 "lead_name": lead_name,
                 "lead_phone": lead_phone,
-                "booked_time": iso_utc(b.booked_time),
+                "booked_time": bkt.to_wire(b.booked_time, bkt.zone_of(zmap, b.user_id)),
                 "advisor_name": get_advisor_name(b.user_id),
                 "advisor_id": b.user_id,
             })
-        return {"items": result, "total": bq.count()} if with_total else result
+        return {"items": result, "total": total} if with_total else result
 
     # Single-advisor path (own or specified)
     target = _resolve_advisor(db, current_user, advisor_id)
@@ -507,9 +508,8 @@ def get_upcoming_appointments(
     bq = db.query(BookingLink).filter(
         BookingLink.user_id == target.id,
         BookingLink.status == "booked",
-        BookingLink.booked_time >= now,
     )
-    bookings = bq.order_by(BookingLink.booked_time.asc()).limit(UPCOMING_CAP).all()
+    bookings, total, zmap = _upcoming(db, bq, UPCOMING_CAP)
 
     leads_by_id = _leads_by_id(db, bookings, org_id=target.organization_id)
     result = []
@@ -527,9 +527,27 @@ def get_upcoming_appointments(
             "lead_id": b.lead_id,
             "lead_name": lead_name,
             "lead_phone": lead_phone,
-            "booked_time": iso_utc(b.booked_time),
+            "booked_time": bkt.to_wire(b.booked_time, bkt.zone_of(zmap, b.user_id)),
         })
-    return {"items": result, "total": bq.count()} if with_total else result
+    return {"items": result, "total": total} if with_total else result
+
+
+def _upcoming(db: Session, bq, cap: int):
+    """(the soonest `cap` upcoming bookings, how many are upcoming, {user: zone}).
+
+    Bookings more than booking_time.WINDOW from now are upcoming or past
+    whatever the advisor's zone; those inside it are judged one by one."""
+    from datetime import datetime as _dt
+    now = _dt.utcnow()
+    lo, hi = now - bkt.WINDOW, now + bkt.WINDOW
+    window = bq.filter(BookingLink.booked_time >= lo, BookingLink.booked_time < hi).all()
+    zmap = bkt.zones(db, [b.user_id for b in window])
+    w_up = sorted((b for b in window if bkt.is_upcoming(b.booked_time, bkt.zone_of(zmap, b.user_id), now)),
+                  key=lambda b: bkt.to_utc(b.booked_time, bkt.zone_of(zmap, b.user_id)))
+    strict = bq.filter(BookingLink.booked_time >= hi)
+    rows = (w_up + strict.order_by(BookingLink.booked_time.asc()).limit(cap).all())[:cap]
+    zmap.update(bkt.zones(db, [b.user_id for b in rows if b.user_id not in zmap]))
+    return rows, strict.count() + len(w_up), zmap
 
 
 _NO_ORG_FILTER = object()

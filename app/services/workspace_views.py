@@ -494,7 +494,9 @@ def _appointment_row(booking: BookingLink, lead: Lead, columns, owners,
         elif column == "contact":
             values[column] = {"phone": lead.phone, "email": lead.email}
         elif column == "booked_time":
-            values[column] = iso_utc(booking.booked_time)
+            # the advisor's local wall time, with its offset (booking_time)
+            from app.services import booking_time as _bkt
+            values[column] = _bkt.wire_obj(booking)
         elif column == "appt_label":
             values[column] = booking.appt_label
         elif column == "status":
