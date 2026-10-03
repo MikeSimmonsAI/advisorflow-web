@@ -109,6 +109,7 @@ export default function Admin() {
   const [revenue, setRevenue] = useState(null)
   const [revenueLoading, setRevenueLoading] = useState(false)
   const [allLeads, setAllLeads] = useState([])
+  const [leadsTotal, setLeadsTotal] = useState(null)
   const [unassignedLeads, setUnassignedLeads] = useState([])
   const [loading, setLoading] = useState(true)
   const [metricsLoading, setMetricsLoading] = useState(false)
@@ -127,12 +128,31 @@ export default function Admin() {
   useEffect(() => {
     if (view === 'leads' && allLeads.length === 0) {
       setLeadsLoading(true)
-      api.get('/admin/leads').then(setAllLeads).finally(() => setLeadsLoading(false))
+      loadAllLeads().finally(() => setLeadsLoading(false))
     }
     if (view === 'unassigned') loadUnassigned()
     if (view === 'metrics' && (!metrics || !funnel)) loadMetrics()
     if (view === 'revenue' && !revenue) loadRevenue()
   }, [view])
+
+  // GET /admin/leads is a paged envelope {items, total}. Storing the envelope
+  // as the list made the All leads tab throw on .slice(). Load pages up to
+  // ADMIN_LEADS_CAP for search; the server's total is the count shown.
+  const ADMIN_LEADS_CAP = 2000
+  async function loadAllLeads() {
+    const PAGE = 500
+    let items = []
+    let total = null
+    for (let page = 1; items.length < ADMIN_LEADS_CAP; page++) {
+      const d = await api.get(`/admin/leads?page=${page}&page_size=${PAGE}`)
+      const rows = Array.isArray(d) ? d : (Array.isArray(d?.items) ? d.items : [])
+      total = typeof d?.total === 'number' ? d.total : null
+      items = items.concat(rows)
+      if (Array.isArray(d) || rows.length < PAGE || (total != null && items.length >= total)) break
+    }
+    setAllLeads(items)
+    setLeadsTotal(total ?? items.length)
+  }
 
   function loadUnassigned() {
     setUnassignedLoading(true)
@@ -224,7 +244,7 @@ export default function Admin() {
         {[
           { key: 'advisors', label: 'By advisor' },
           { key: 'metrics', label: 'Metrics' },
-          { key: 'leads', label: `All leads${allLeads.length ? ` (${allLeads.length})` : ''}` },
+          { key: 'leads', label: `All leads${leadsTotal ? ` (${leadsTotal})` : ''}` },
           { key: 'unassigned', label: `Unassigned pool${unassignedLeads.length ? ` (${unassignedLeads.length})` : ''}` },
           { key: 'revenue', label: 'Revenue' },
         ].map(({ key, label }) => (
@@ -339,7 +359,11 @@ export default function Admin() {
               className="search-input"
               style={{ width: 280 }}
             />
-            <span className="panel-count">{filteredLeads.length} leads</span>
+            <span className="panel-count">
+              {searchQuery.trim()
+                ? `${filteredLeads.length} match${filteredLeads.length === 1 ? '' : 'es'}${(leadsTotal ?? 0) > allLeads.length ? ` in the newest ${allLeads.length}` : ''}`
+                : `${leadsTotal ?? allLeads.length} leads${filteredLeads.length > 200 ? ' · showing the newest 200' : ''}`}
+            </span>
           </div>
           {leadsLoading ? (
             <div className="empty-state">Loading leads…</div>

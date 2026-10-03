@@ -36,6 +36,11 @@ const STAGE_TONE = {
   booking_sent: 'orange', booked: 'green', confirmed: 'teal', kept: 'teal', sale: 'gold',
   completed: 'slate', stopped: 'slate', dnc: 'red',
 }
+// GET /pipeline/flagged returns at most FLAGGED_CAP rows; at the cap the real
+// number is higher, so it reads "200+" rather than exactly 200.
+const FLAGGED_CAP = 200
+const flaggedLabel = n => (n >= FLAGGED_CAP ? `${FLAGGED_CAP}+` : `${n}`)
+
 const FLOW_STAGES = ['outreach_sent', 'replied', 'ai_responding', 'flagged', 'booking_sent', 'booked', 'confirmed', 'kept']
 const EXIT_STAGES = ['completed', 'stopped', 'dnc', 'sale']
 
@@ -169,7 +174,7 @@ export default function Pipeline() {
     { key: 'overview', label: 'Conversations Overview' },
     { key: 'conversations', label: 'All Conversations' },
     { key: 'appointments', label: 'Appointments' },
-    { key: 'flagged', label: `Flagged${flagged.length ? ` (${flagged.length})` : ''}` },
+    { key: 'flagged', label: `Flagged${flagged.length ? ` (${flaggedLabel(flagged.length)})` : ''}` },
     { key: 'launch', label: 'Launch' },
   ]
 
@@ -307,7 +312,7 @@ function Overview({ summary, err, days, flaggedCount, onStage, onTab, navigate, 
             <button type="button" className="pl-btn pl-btn--primary" onClick={() => onTab('launch')}><Icon name="rocket" size={16} /> Launch New Pipeline</button>
             {isManager && <button type="button" className="pl-btn" onClick={() => navigate('/imports/new')}><Icon name="upload" size={16} /> Import Leads</button>}
             <button type="button" className="pl-btn" onClick={() => onTab('conversations')}><Icon name="list" size={16} /> View All Conversations</button>
-            <button type="button" className="pl-btn" onClick={() => onTab('flagged')}><Icon name="alert" size={16} /> Review Flagged{flaggedCount ? ` (${flaggedCount})` : ''}</button>
+            <button type="button" className="pl-btn" onClick={() => onTab('flagged')}><Icon name="alert" size={16} /> Review Flagged{flaggedCount ? ` (${flaggedLabel(flaggedCount)})` : ''}</button>
             {isManager && <button type="button" className="pl-btn" onClick={() => navigate('/templates')}><Icon name="file" size={16} /> Manage Templates</button>}
           </div>
         </section>
@@ -456,17 +461,22 @@ function Conversations({ stageFilter, setStageFilter, stages, stageLabel, naviga
 
 function Appointments({ days, navigate }) {
   const [rows, setRows] = useState(null)
+  const [totals, setTotals] = useState(null)
   const [err, setErr] = useState(null)
   useEffect(() => {
     let alive = true
     setErr(null)
     api.get(`/pipeline/appointments?days=${days}`)
-      .then(d => { if (alive) setRows(d?.items || []) })
+      .then(d => { if (alive) { setRows(d?.items || []); setTotals(d?.totals || null) } })
       .catch(e => { if (alive) { setRows([]); setErr(errText(e)) } })
     return () => { alive = false }
   }, [days])
   const upcoming = (rows || []).filter(r => r.upcoming)
   const past = (rows || []).filter(r => !r.upcoming).reverse()
+  // The server caps each list; its totals are the real counts.
+  const upTotal = totals?.upcoming ?? upcoming.length
+  const pastTotal = totals?.past ?? past.length
+  const shown = (n, total) => (total > n ? `${n} of ${total}` : `${total}`)
   const table = list => (
     <div className="pl-tablewrap">
       <table className="pl-table">
@@ -488,15 +498,15 @@ function Appointments({ days, navigate }) {
   )
   return (
     <section className="pl-panel">
-      <div className="pl-panel-head"><h2>Appointments</h2><span className="pl-count">{(rows || []).length}</span></div>
+      <div className="pl-panel-head"><h2>Appointments</h2><span className="pl-count">{upTotal + pastTotal}</span></div>
       {err && <div className="pl-banner pl-banner--error">{err}</div>}
       {rows === null ? <p className="pl-muted">Loading…</p> : rows.length === 0 ? (
         <p className="pl-muted">No booked appointments upcoming or in the last {days} days.</p>
       ) : (
         <>
-          <h3 className="pl-h3">Upcoming ({upcoming.length})</h3>
+          <h3 className="pl-h3">Upcoming ({shown(upcoming.length, upTotal)})</h3>
           {upcoming.length ? table(upcoming) : <p className="pl-muted">Nothing upcoming.</p>}
-          <h3 className="pl-h3">Last {days} days ({past.length})</h3>
+          <h3 className="pl-h3">Last {days} days ({shown(past.length, pastTotal)})</h3>
           {past.length ? table(past) : <p className="pl-muted">None in this period.</p>}
         </>
       )}
@@ -530,7 +540,7 @@ function Flagged({ flagged, reload }) {
     <section className="pl-panel">
       <div className="pl-panel-head">
         <h2>Flagged conversations — needs your review</h2>
-        <span className="pl-count">{flagged.length}</span>
+        <span className="pl-count">{flaggedLabel(flagged.length)}</span>
       </div>
       {err && <div className="pl-banner pl-banner--error">{err}</div>}
       {flagged.length === 0 ? <p className="pl-muted">No flagged conversations right now.</p> : (

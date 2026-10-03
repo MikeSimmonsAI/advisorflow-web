@@ -65,7 +65,8 @@ acceptance matrix are added at closeout.
 | ~~48d689d~~ · ~~903212a~~ · f3b029a | **Correction — reverted** | I believed ~120 fields sent zone-less UTC times. They did not: `time_fmt.install_utc_json` (installed in app.main) already marks naive datetimes UTC on both the dict and response-model paths. My duplicate encoder and the per-field changes were redundant and are reverted; the regression test now pins the existing behaviour on a real route. My 17:10/18:12 check-ins overstated this. |
 | 50c4d82 | Review fixes (1) | Independent review of the day's changes: undated "not now" now holds scheduled AI touches; batch/campaign duplicate leases outlive the send; voice claim kept on unknown failures; Leads/CRM ignore stale responses; lazy pages wait inside the shell; suppression-list paging stable and its counts done in the database. |
 | 71835bc | Review fixes (2) | Wholesale/EvoSense controls match the server for super admins; label ids unique per form instance (useId); duplicate aria-label removed. |
-| (oct2bd) | AI Hub counts | "Calls made today" now comes from GET /voice/calls-summary (server count, workspace timezone, no 100 cap); "Needs attention" uses the server count once the 200-row list is full. tests/test_ai_hub_counts.py |
+| ba5d8f0 | AI Hub counts | "Calls made today" now comes from GET /voice/calls-summary (server count, workspace timezone, no 100 cap); "Needs attention" uses the server count once the 200-row list is full. tests/test_ai_hub_counts.py |
+| (oct2be) | Capped lists | Admin → All leads crashed on open (envelope stored as the list) — now pages in up to 2,000 and shows the server total. Pipeline → Appointments capped upcoming and past separately (one oldest-first list of 300 dropped the upcoming ones) and returns totals. Availability upcoming: 20 → 100 rows plus `with_total=true` → real count. Overview hot replies / Pipeline flagged show "200+" at the cap. tests/test_pipeline_appointments_cap.py, tests/test_availability_upcoming_total.py, test_ui_static_guards.py |
 | a978b71 · 88f0bd5 · 3fcea2b · (oct2ww) | Buttons that end in "Admin access required" | Two sweeps of every page a person can reach, against the role each route requires. Admin-only actions are now disabled or replaced with who can do them: AI Team add; AI employee pause/resume/stage; Wholesale pilot controls and paid skip-trace approval; EvoSense providers, resume, scoring, budgets (workspace and per-strategy), evaluations; Sales "release holdbacks", team-pipeline person filter, deal-value override. Admin buttons on Cadence, Lead, Leads, Compliance and Settings now follow the role in the current workspace (they used the account's role). |
 
 ## Midpoint review (16:12)
@@ -103,6 +104,8 @@ acceptance matrix are added at closeout.
 ## Recommended next (not done today — explained)
 
 - ~~AI Hub counts capped at 100/200~~ — fixed: server counts on the workspace day (see shipped table).
+- **Appointment time convention.** `BookingLink.booked_time` is naive LOCAL wall time (tenant_scheduling docstring), but /availability/upcoming compares it with `datetime.now()` (server clock) and /pipeline/appointments with `utcnow()`. Correct only while the host runs in UTC (Render does). Proper fix: compare against workspace-local now. Left alone — it is a shared convention.
+- Still capped without a total: Today's Work buckets (100 each), Email queue stats (1,000), Auto-send history "Sent today" (50), Admin unassigned pool (500), Campaign Builder preview count (5,000).
 
 - Hashed `/assets/*` are served `max-age=0` (each visit revalidates; 304s, not re-downloads). An `immutable` header in `render.yaml` is the standard fix; left alone because the Blueprint is live-synced and this is not worth a config sync during a marathon.
 

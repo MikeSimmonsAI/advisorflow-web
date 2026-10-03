@@ -176,6 +176,13 @@ export default function Availability() {
   // ── Availability data ─────────────────────────────────────────────────────
   const [blocks, setBlocks] = useState([])
   const [upcoming, setUpcoming] = useState([])
+  const [upcomingTotal, setUpcomingTotal] = useState(null)
+  // with_total=true returns {items, total}; an older server returns the bare list.
+  const setUpcomingPage = (d) => {
+    const items = Array.isArray(d) ? d : (Array.isArray(d?.items) ? d.items : [])
+    setUpcoming(items)
+    setUpcomingTotal(typeof d?.total === 'number' ? d.total : null)
+  }
   const [calEvents, setCalEvents] = useState([])
   const [openSlots, setOpenSlots] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -262,11 +269,11 @@ export default function Availability() {
     if (isAll) {
       // Org-wide aggregate view
       Promise.all([
-        api.get('/availability/upcoming?org_wide=true').catch(() => []),
+        api.get('/availability/upcoming?org_wide=true&with_total=true').catch(() => []),
         api.get('/calendar/events?days_ahead=90&org_wide=true').catch(() => []),
       ]).then(([upcomingData, eventsData]) => {
         setBlocks([])   // blocks are per-advisor, not meaningful in aggregate view
-        setUpcoming(upcomingData || [])
+        setUpcomingPage(upcomingData)
         setOpenSlots(null)
         setCalEvents(eventsData || [])
         setLoading(false)
@@ -278,12 +285,12 @@ export default function Availability() {
         : '/calendar/events?days_ahead=60'
       Promise.all([
         api.get(`/availability/blocks${advisorParam}`).catch(() => []),
-        api.get(`/availability/upcoming${advisorParam}`).catch(() => []),
+        api.get(`/availability/upcoming${advisorParam}${advisorParam ? '&' : '?'}with_total=true`).catch(() => []),
         api.get(`/availability/slots/${adv.id}`).catch(() => null),
         api.get(eventsParam).catch(() => []),
       ]).then(([blocksData, upcomingData, slotsData, eventsData]) => {
         setBlocks(blocksData || [])
-        setUpcoming(upcomingData || [])
+        setUpcomingPage(upcomingData)
         setOpenSlots(slotsData?.slots?.length ?? null)
         setCalEvents(eventsData || [])
         setLoading(false)
@@ -468,7 +475,7 @@ export default function Availability() {
           </div>
           <div className="av-stat-body">
             <strong className="av-stat-value" style={{ color: 'var(--color-success)' }}>
-              {loading ? '--' : upcoming.length}
+              {loading ? '--' : (upcomingTotal ?? upcoming.length)}
             </strong>
             <span className="av-stat-label">Upcoming appointments</span>
           </div>
@@ -541,7 +548,7 @@ export default function Availability() {
                     </span>
                   )}
                 </h2>
-                <span className="panel-count">{upcoming.length}</span>
+                <span className="panel-count">{(upcomingTotal ?? upcoming.length) > upcoming.length ? `${upcoming.length} of ${upcomingTotal}` : upcoming.length}</span>
               </div>
               {loading ? (
                 <div className="empty-state">Loading...</div>

@@ -701,6 +701,9 @@ def pipeline_summary(
     }
 
 
+APPOINTMENTS_CAP = 300  # per side: upcoming, and past
+
+
 @router.get("/appointments")
 def pipeline_appointments(
     days: int = _Query(30, ge=1, le=365),
@@ -720,9 +723,17 @@ def pipeline_appointments(
          BookingLink.booked_time >= now - _td(days=days)]
     if not _is_elevated(current_user, db):
         f.append(Lead.assigned_to_id == current_user.id)
-    rows = (db.query(BookingLink, Lead.first_name, Lead.last_name, Lead.phone)
-            .join(Lead, BookingLink.lead_id == Lead.id)
-            .filter(*f).order_by(BookingLink.booked_time.asc()).limit(300).all())
+    # Upcoming and past are capped SEPARATELY. One ascending query capped at
+    # 300 filled up with the oldest past appointments first, so in a busy
+    # workspace the upcoming ones - the ones that matter - were the ones cut.
+    base = (db.query(BookingLink, Lead.first_name, Lead.last_name, Lead.phone)
+            .join(Lead, BookingLink.lead_id == Lead.id).filter(*f))
+    upcoming_q = base.filter(BookingLink.booked_time >= now)
+    past_q = base.filter(BookingLink.booked_time < now)
+    up_rows = upcoming_q.order_by(BookingLink.booked_time.asc()).limit(APPOINTMENTS_CAP).all()
+    past_rows = past_q.order_by(BookingLink.booked_time.desc()).limit(APPOINTMENTS_CAP).all()
+    rows = list(reversed(past_rows)) + up_rows
+    totals = {"upcoming": upcoming_q.count(), "past": past_q.count()}
     advisor_ids = {b.user_id for b, *_ in rows if b.user_id}
     advisors = ({u.id: u.full_name for u in db.query(User).filter(User.id.in_(advisor_ids)).all()}
                 if advisor_ids else {})
@@ -737,6 +748,8 @@ def pipeline_appointments(
             "upcoming": bool(b.booked_time and b.booked_time >= now),
         } for b, fn, ln, ph in rows],
         "period_days": days,
+        "totals": totals,
+        "truncated": totals["upcoming"] > len(up_rows) or totals["past"] > len(past_rows),
     }
 
 

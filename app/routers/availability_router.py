@@ -415,15 +415,22 @@ def delete_block(
     return {"deleted": True}
 
 
+UPCOMING_CAP = 100  # rows returned; with_total=true reports the real count
+
+
 @router.get("/upcoming")
 def get_upcoming_appointments(
     advisor_id: Optional[str] = Query(None),
     org_wide: bool = Query(False),
+    with_total: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Return upcoming booked appointments.
+    Return upcoming booked appointments (the soonest UPCOMING_CAP).
+    - with_total=true returns {"items": [...], "total": N} so a page can show
+      the real count instead of the length of a capped list. Without it the
+      bare list is returned, as before.
     - Admins can pass advisor_id to view a specific advisor's appointments.
     - Admins can pass org_wide=true to see ALL advisors in the org.
     - god_admin with org_wide=true sees across all orgs on their platform.
@@ -441,10 +448,10 @@ def get_upcoming_appointments(
 
     if org_wide and is_admin:
         if lead_scope.god_sees_all_orgs(current_user):
-            bookings = db.query(BookingLink).filter(
+            bq = db.query(BookingLink).filter(
                 BookingLink.status == "booked",
                 BookingLink.booked_time >= now,
-            ).order_by(BookingLink.booked_time.asc()).limit(100).all()
+            )
         else:
             scope_org_id = lead_scope.active_workspace_org_id(current_user, db)
             org_user_ids = [
@@ -453,11 +460,12 @@ def get_upcoming_appointments(
                     User.is_active == True,
                 ).all()
             ] if scope_org_id else []
-            bookings = db.query(BookingLink).filter(
+            bq = db.query(BookingLink).filter(
                 BookingLink.user_id.in_(org_user_ids),
                 BookingLink.status == "booked",
                 BookingLink.booked_time >= now,
-            ).order_by(BookingLink.booked_time.asc()).limit(100).all()
+            )
+        bookings = bq.order_by(BookingLink.booked_time.asc()).limit(UPCOMING_CAP).all()
 
         # Cache advisor names
         advisor_cache = {}
@@ -491,16 +499,17 @@ def get_upcoming_appointments(
                 "advisor_name": get_advisor_name(b.user_id),
                 "advisor_id": b.user_id,
             })
-        return result
+        return {"items": result, "total": bq.count()} if with_total else result
 
     # Single-advisor path (own or specified)
     target = _resolve_advisor(db, current_user, advisor_id)
 
-    bookings = db.query(BookingLink).filter(
+    bq = db.query(BookingLink).filter(
         BookingLink.user_id == target.id,
         BookingLink.status == "booked",
         BookingLink.booked_time >= now,
-    ).order_by(BookingLink.booked_time.asc()).limit(20).all()
+    )
+    bookings = bq.order_by(BookingLink.booked_time.asc()).limit(UPCOMING_CAP).all()
 
     leads_by_id = _leads_by_id(db, bookings, org_id=target.organization_id)
     result = []
@@ -520,7 +529,7 @@ def get_upcoming_appointments(
             "lead_phone": lead_phone,
             "booked_time": iso_utc(b.booked_time),
         })
-    return result
+    return {"items": result, "total": bq.count()} if with_total else result
 
 
 _NO_ORG_FILTER = object()

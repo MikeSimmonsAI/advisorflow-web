@@ -92,3 +92,15 @@ def test_availability_calendar_uses_the_viewers_date():
     assert "today.toISOString().slice(0, 10)" not in src
     assert "e.booked_time.slice(0, 10))" not in src
     assert "const ymd = " in src
+
+
+def test_capped_lists_do_not_report_the_cap_as_the_count():
+    """Admin All leads stored the {items,total} envelope as the list and threw
+    on .slice(); Overview/Pipeline showed a 200-row cap as an exact count."""
+    admin = open("frontend/src/pages/Admin.jsx", encoding="utf-8").read()
+    assert "api.get('/admin/leads').then(setAllLeads)" not in admin
+    assert "loadAllLeads" in admin and "leadsTotal" in admin
+    ov = open("frontend/src/pages/Overview.jsx", encoding="utf-8").read()
+    assert "REPLIES_CAP" in ov and "See all {replies.length}" not in ov
+    pl = open("frontend/src/pages/Pipeline.jsx", encoding="utf-8").read()
+    assert "flaggedLabel(" in pl

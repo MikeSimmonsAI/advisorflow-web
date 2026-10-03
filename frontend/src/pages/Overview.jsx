@@ -275,6 +275,10 @@ function PlatformOverview() {
   const sentLeads = stage('sent')
   const bookedLeads = stage('booked')
   const hotReplies = replies.length
+  // /sms/replies returns at most REPLIES_CAP rows. At the cap the real number
+  // is higher, so it is shown as "200+" rather than as exactly 200.
+  const REPLIES_CAP = 200
+  const hotLabel = hotReplies >= REPLIES_CAP ? `${num(REPLIES_CAP)}+` : num(hotReplies)
   const replyRate = sentLeads > 0 ? Math.round((hotReplies / sentLeads) * 100) : null
   const bookingRate = sentLeads > 0 ? Math.round((bookedLeads / sentLeads) * 100) : null
 
@@ -302,7 +306,7 @@ function PlatformOverview() {
   const attention = []
   if (hotReplies > 0) attention.push({
     key: 'hot', tone: 'var(--signal-red)',
-    title: `${hotReplies} hot ${hotReplies === 1 ? 'reply needs' : 'replies need'} a human response`,
+    title: `${hotLabel} hot ${hotReplies === 1 ? 'reply needs' : 'replies need'} a human response`,
     sub: 'High-intent contacts waiting on qualification or scheduling.',
     cta: 'Review', to: '/replies?needs_attention=true',
   })
@@ -352,7 +356,7 @@ function PlatformOverview() {
     { label: 'New / unworked', value: num(newLeads), color: 'var(--signal-amber)',
       feature: 'leads',
       trend: newLeads > 0 ? 'needs attention' : 'nothing waiting', to: '/leads?status=new' },
-    { label: 'Hot replies', value: num(hotReplies), color: 'var(--signal-red)',
+    { label: 'Hot replies', value: hotLabel, color: 'var(--signal-red)',
       trend: hotReplies > 0 ? 'awaiting a decision' : 'inbox clear',
       to: '/replies?needs_attention=true' },
     { label: IL.appointments, value: num(bookedLeads), color: 'var(--signal-green)',
@@ -456,7 +460,7 @@ function PlatformOverview() {
       {!loading && (
         <div className="ov-quick-row">
           <button className="ov-quick" onClick={() => go('/replies?needs_attention=true')}>
-            <strong>{num(hotReplies)}</strong> replies awaiting review
+            <strong>{hotLabel}</strong> replies awaiting review
           </button>
           {hasCadences && (
             <button className="ov-quick" onClick={() => go('/cadence')}>
@@ -526,7 +530,7 @@ function PlatformOverview() {
         <section className="panel ov-panel">
           <div className="panel-header">
             <h2 className="panel-title">Hot replies</h2>
-            <span className="panel-count">{replies.length}</span>
+            <span className="panel-count">{hotLabel}</span>
           </div>
           {loading ? <div className="empty-state">Loading…</div>
             : replies.length === 0 ? (
@@ -558,7 +562,7 @@ function PlatformOverview() {
                 {replies.length > 5 && (
                   <button className="ov-btn" style={{ marginTop: 10 }}
                           onClick={() => go('/replies?needs_attention=true')}>
-                    See all {replies.length} →
+                    See all {hotLabel} →
                   </button>
                 )}
               </>
