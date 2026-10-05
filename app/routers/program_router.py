@@ -1,0 +1,991 @@
+"""Location outreach program API (SCI and any multi-location customer).
+
+    /program/...          the customer's own workspace (active workspace org)
+    /program-assets/{t}   hosted flyer / image links - the token IS the authority,
+                          and only an ACTIVE asset is served
+    /god/programs/...     owner-only configuration of a customer as a program
+
+Nothing here sends to a customer. Campaign "preview" renders text; it never
+enrols or sends. Staging an import writes staging rows, never leads.
+"""
+import json
+from collections import Counter, defaultdict
+from datetime import datetime
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import Response
+from pydantic import BaseModel
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.deps import get_db, require_god, require_tenant_or_observer, require_tenant_user
+from app.models.location_models import Location
+from app.models.models import CadenceState, Lead, Organization, User
+from app.models.program_models import (
+    EMAIL_MODES, CampaignFamily, ContactVerification, LocationProfile, OutreachProgram,
+    ProgramAlert, ProgramAsset, ProgramResponse, ProgramSourceRecord,
+)
+from app.services import lead_scope
+from app.services.programs import identity, importer, responses, setup
+
+router = APIRouter(prefix="/program", tags=["program"])
+public_router = APIRouter(tags=["program-public"])
+god_router = APIRouter(prefix="/god/programs", tags=["program-god"])
+
+MAX_ASSET_BYTES = 20 * 1024 * 1024
+ASSET_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/svg+xml"}
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _org_id(db: Session, user: User) -> str:
+    oid = lead_scope.active_workspace_org_id(user, db) or user.organization_id
+    if not oid:
+        raise HTTPException(status_code=404, detail="No workspace selected.")
+    return oid
+
+
+def _program(db: Session, user: User, managers_only: bool = True) -> OutreachProgram:
+    """The caller's program. MANAGERS ONLY by default: these screens carry every
+    family's name, number, email and reply text across the whole customer,
+    which is wider than an advisor's own-leads scope."""
+    prog = identity.program_for_org(db, _org_id(db, user))
+    if prog is None:
+        raise HTTPException(status_code=404, detail="This workspace has no outreach program.")
+    if managers_only and not lead_scope.is_manager_here(user, db):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return prog
+
+
+def _require_manager(db: Session, user: User) -> None:
+    if not lead_scope.is_manager_here(user, db):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+
+
+def _profiles(db: Session, org_id: str) -> List[LocationProfile]:
+    return (db.query(LocationProfile).filter(LocationProfile.organization_id == org_id)
+            .order_by(LocationProfile.is_review_bucket, LocationProfile.official_name).all())
+
+
+def _asset_url(a: Optional[ProgramAsset]) -> Optional[str]:
+    return "/program-assets/%s" % a.public_token if a is not None and a.is_active else None
+
+
+def _profile_json(db: Session, prog: OutreachProgram, p: LocationProfile) -> dict:
+    loc = db.query(Location).filter(Location.id == p.location_id).first()
+    assets = {a.id: a for a in db.query(ProgramAsset).filter(
+        ProgramAsset.id.in_([x for x in (p.logo_asset_id, p.hero_asset_id) if x])).all()} \
+        if (p.logo_asset_id or p.hero_asset_id) else {}
+    return {
+        "id": p.id, "location_id": p.location_id, "official_name": p.official_name,
+        "is_review_bucket": p.is_review_bucket,
+        "source_names": json.loads(p.source_names or "[]"),
+        "address": {k: getattr(loc, k, None) for k in
+                    ("address_line1", "address_line2", "city", "state", "postal_code")} if loc else {},
+        "facility_phone": p.facility_phone or (loc.phone if loc else None),
+        "website": p.website, "manager_name": p.manager_name,
+        "advisor_names": json.loads(p.advisor_names or "[]"),
+        "appointment_link": p.appointment_link,
+        "email_display_name": identity.display_name(prog, p) if not p.is_review_bucket else None,
+        "sms_signoff": identity.sms_signoff(prog, p) if not p.is_review_bucket else None,
+        "logo_url": _asset_url(assets.get(p.logo_asset_id)),
+        "hero_url": _asset_url(assets.get(p.hero_asset_id)),
+        "brand_settings": json.loads(p.brand_settings or "{}"),
+    }
+
+
+def _program_json(db: Session, prog: OutreachProgram) -> dict:
+    logo = db.query(ProgramAsset).filter(ProgramAsset.id == prog.logo_asset_id).first() \
+        if prog.logo_asset_id else None
+    return {
+        "id": prog.id, "organization_id": prog.organization_id, "name": prog.name,
+        "hero_title": prog.hero_title, "hero_subtitle": prog.hero_subtitle,
+        "primary_contact_name": prog.primary_contact_name,
+        "primary_contact_title": prog.primary_contact_title,
+        "primary_contact_user_id": prog.primary_contact_user_id,
+        "alert_email": prog.alert_email, "alert_phone": prog.alert_phone,
+        "management_recipients": json.loads(prog.management_recipients or "[]"),
+        "hot_sla_minutes": prog.hot_sla_minutes,
+        "customer_channels": identity.channels(prog),
+        "reply_instructions_sms": prog.reply_instructions_sms,
+        "reply_instructions_email": prog.reply_instructions_email,
+        "require_location_to_send": prog.require_location_to_send,
+        "staff_alerts_enabled": prog.staff_sms_alerts_enabled,
+        "logo_url": _asset_url(logo),
+    }
+
+
+# ── program & settings ───────────────────────────────────────────────────────
+
+@router.get("/status")
+def program_status(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Whether this workspace runs a program - a 200 either way, for the nav."""
+    prog = identity.program_for_org(db, lead_scope.active_workspace_org_id(user, db) or user.organization_id)
+    manager = bool(prog) and lead_scope.is_manager_here(user, db)
+    return {"active": prog is not None and manager, "name": prog.name if prog else None}
+
+
+@router.get("/me")
+def program_me(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    return _program_json(db, _program(db, user, managers_only=False))
+
+
+class SettingsIn(BaseModel):
+    primary_contact_name: Optional[str] = None
+    primary_contact_title: Optional[str] = None
+    alert_email: Optional[str] = None
+    alert_phone: Optional[str] = None
+    management_recipients: Optional[List[dict]] = None
+    hot_sla_minutes: Optional[int] = None
+    reply_instructions_sms: Optional[str] = None
+    reply_instructions_email: Optional[str] = None
+    staff_alerts_enabled: Optional[bool] = None
+
+
+@router.patch("/settings")
+def update_settings(body: SettingsIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    prog = _program(db, user)
+    _require_manager(db, user)
+    data = body.dict(exclude_unset=True)
+    if "hot_sla_minutes" in data and not (1 <= int(data["hot_sla_minutes"] or 0) <= 1440):
+        raise HTTPException(status_code=422, detail="SLA must be between 1 and 1440 minutes.")
+    for key in ("reply_instructions_sms", "reply_instructions_email"):
+        if key in data and data[key] and "call" in data[key].lower():
+            raise HTTPException(status_code=422,
+                                detail="Reply instructions ask families to reply, not to call.")
+    if "management_recipients" in data:
+        clean = []
+        for m in data.pop("management_recipients") or []:
+            clean.append({k: (str(m.get(k)).strip() if m.get(k) else None)
+                          for k in ("name", "email", "phone", "role")})
+        prog.management_recipients = json.dumps(clean)
+    if "staff_alerts_enabled" in data:
+        prog.staff_sms_alerts_enabled = bool(data.pop("staff_alerts_enabled"))
+    for k, v in data.items():
+        setattr(prog, k, v.strip() if isinstance(v, str) else v)
+    db.commit()
+    return _program_json(db, prog)
+
+
+# ── locations ────────────────────────────────────────────────────────────────
+
+@router.get("/locations")
+def list_locations(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    return [_profile_json(db, prog, p) for p in _profiles(db, prog.organization_id)]
+
+
+class ProfileIn(BaseModel):
+    official_name: Optional[str] = None
+    website: Optional[str] = None
+    facility_phone: Optional[str] = None
+    manager_name: Optional[str] = None
+    advisor_names: Optional[List[str]] = None
+    email_display_name: Optional[str] = None
+    sms_identity_name: Optional[str] = None
+    appointment_link: Optional[str] = None
+    logo_asset_id: Optional[str] = None
+    hero_asset_id: Optional[str] = None
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+
+
+@router.patch("/locations/{profile_id}")
+def update_location(profile_id: str, body: ProfileIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    prog = _program(db, user)
+    _require_manager(db, user)
+    p = db.query(LocationProfile).filter(LocationProfile.id == profile_id,
+                                         LocationProfile.organization_id == prog.organization_id).first()
+    if p is None:
+        raise HTTPException(status_code=404, detail="Location not found.")
+    data = body.dict(exclude_unset=True)
+    for aid_key in ("logo_asset_id", "hero_asset_id"):
+        if data.get(aid_key) and not db.query(ProgramAsset).filter(
+                ProgramAsset.id == data[aid_key],
+                ProgramAsset.organization_id == prog.organization_id).first():
+            raise HTTPException(status_code=422, detail="Unknown asset.")
+    loc = db.query(Location).filter(Location.id == p.location_id).first()
+    for k in ("address_line1", "address_line2", "city", "state", "postal_code"):
+        if k in data and loc is not None:
+            setattr(loc, k, (data.pop(k) or "").strip() or None)
+        data.pop(k, None)
+    if "advisor_names" in data:
+        p.advisor_names = json.dumps([a.strip() for a in data.pop("advisor_names") or [] if a.strip()])
+    for k, v in data.items():
+        setattr(p, k, (v.strip() or None) if isinstance(v, str) else v)
+    db.commit()
+    return _profile_json(db, prog, p)
+
+
+# ── dashboard ────────────────────────────────────────────────────────────────
+
+@router.get("/dashboard")
+def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(get_db),
+              user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    org_id = prog.organization_id
+    profiles = _profiles(db, org_id)
+    if location_id and location_id not in {p.location_id for p in profiles}:
+        raise HTTPException(status_code=404, detail="Location not found.")
+
+    recs_q = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org_id)
+    resp_q = db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id)
+    if location_id:
+        recs_q = recs_q.filter(ProgramSourceRecord.location_id == location_id)
+        resp_q = resp_q.filter(ProgramResponse.location_id == location_id)
+    recs = recs_q.all()
+    resps = resp_q.order_by(ProgramResponse.received_at.desc()).all()
+    now = datetime.utcnow()
+
+    status = Counter((r.source_status or "").strip() or "Unknown" for r in recs)
+    open_resps = [r for r in resps if r.handling_status != "closed"]
+    new_resps = [r for r in resps if r.handling_status == "new"]
+    hot_open = [r for r in open_resps if r.response_class == "hot"]
+    unhandled_hot = [r for r in hot_open if r.handling_status == "new"
+                     and r.sla_due_at and r.sla_due_at <= now]
+
+    by_loc_recs, by_loc_resp = defaultdict(list), defaultdict(list)
+    for r in recs:
+        by_loc_recs[r.location_id].append(r)
+    for r in resps:
+        by_loc_resp[r.location_id].append(r)
+    loc_perf = []
+    for p in profiles:
+        rs = by_loc_recs.get(p.location_id, [])
+        if location_id and p.location_id != location_id:
+            continue
+        if not rs and p.is_review_bucket:
+            continue
+        rr = by_loc_resp.get(p.location_id, [])
+        responders = {x.lead_id for x in rr}
+        loc_perf.append({
+            "location_id": p.location_id, "name": p.official_name,
+            "is_review_bucket": p.is_review_bucket, "leads": len(rs),
+            "qualified": sum(1 for x in rs if (x.source_status or "") == "Qualified"),
+            "new_responses": sum(1 for x in rr if x.handling_status == "new"),
+            "hot": sum(1 for x in rr if x.response_class == "hot" and x.handling_status != "closed"),
+            "response_rate": round(100.0 * len(responders) / len(rs), 1) if rs else None,
+        })
+    loc_perf.sort(key=lambda x: (-x["leads"], x["name"]))
+
+    fams = {f.key: f for f in db.query(CampaignFamily).filter(CampaignFamily.organization_id == org_id).all()}
+    fam_counts = Counter(r.campaign_family or "unmapped" for r in recs)
+    fam_resp = Counter(r.campaign_family or "unmapped" for r in resps)
+    campaign_perf = [{"key": k, "name": fams[k].name if k in fams else "Unmapped",
+                      "leads": n, "responses": fam_resp.get(k, 0),
+                      "is_active": bool(fams[k].is_active) if k in fams else False,
+                      "share": round(100.0 * n / len(recs), 1) if recs else 0}
+                     for k, n in fam_counts.most_common()]
+
+    lead_ids = [r.lead_id for r in recs if r.lead_id]
+    cad = Counter()
+    if lead_ids:
+        for st in db.query(CadenceState.status).filter(CadenceState.lead_id.in_(lead_ids)).all():
+            cad[str(getattr(st[0], "value", st[0]))] += 1
+
+    leads = {}
+    ids = [r.lead_id for r in resps[:8]]
+    if ids:
+        leads = {l.id: l for l in db.query(Lead).filter(Lead.id.in_(ids)).all()}
+    pname = {p.location_id: p.official_name for p in profiles}
+    recent = [{
+        "id": r.id, "lead_id": r.lead_id,
+        "name": ("%s %s" % (leads[r.lead_id].first_name or "", leads[r.lead_id].last_name or "")).strip().title()
+        if r.lead_id in leads else None,
+        "location": pname.get(r.location_id), "channel": r.channel,
+        "class": r.response_class, "summary": r.summary, "status": r.handling_status,
+        "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
+    } for r in resps[:8]]
+
+    sel = next((p for p in profiles if p.location_id == location_id), None) if location_id else None
+    return {
+        "program": _program_json(db, prog),
+        "locations": [{"location_id": p.location_id, "name": p.official_name,
+                       "is_review_bucket": p.is_review_bucket} for p in profiles],
+        "selected_location": _profile_json(db, prog, sel) if sel else None,
+        "metrics": {
+            "leads": len(recs),
+            "contacts": len({r.contact_master_key or r.source_lead_id for r in recs}),
+            "locations": sum(1 for p in profiles if not p.is_review_bucket) if not location_id else 1,
+            "qualified": status.get("Qualified", 0),
+            "new_responses": len(new_resps),
+            "hot_responses": len(hot_open),
+        },
+        "pipeline": [{"status": k, "count": v,
+                      "share": round(100.0 * v / len(recs), 1) if recs else 0}
+                     for k, v in status.most_common()],
+        "attention": {
+            "hot_responses": sum(1 for r in hot_open if r.handling_status == "new"),
+            "new_sms_replies": sum(1 for r in new_resps if r.channel == "sms"),
+            "new_email_replies": sum(1 for r in new_resps if r.channel == "email"),
+            "follow_ups_due": sum(1 for r in open_resps if r.handling_status == "opened"),
+            "unhandled_hot": len(unhandled_hot),
+            "data_review": sum(1 for r in recs if r.needs_data_review),
+            "location_review": sum(1 for r in recs if r.location_status == "location_review"),
+            "duplicate_review": sum(1 for r in recs if r.duplicate_review_reason),
+        },
+        "recent_conversations": recent,
+        "location_performance": loc_perf,
+        "campaign_performance": campaign_perf,
+        "automation": {
+            "active_cadences": cad.get("active", 0), "paused_cadences": cad.get("paused", 0),
+            "awaiting_reply": max(0, len({r.lead_id for r in recs if r.lead_id})
+                                  - len({r.lead_id for r in resps})),
+            "staged_not_live": sum(1 for r in recs if not r.lead_id),
+            "active_campaign_families": sum(1 for f in fams.values() if f.is_active),
+            "suppressed": sum(1 for r in resps if r.response_class == "opt_out"),
+            "review_needed": sum(1 for r in recs if r.needs_data_review or r.duplicate_review_reason
+                                 or r.location_status == "location_review"),
+        },
+        "reporting": _reporting(db, recs, resps),
+        "readiness": readiness(db, prog),
+    }
+
+
+def _reporting(db: Session, recs, resps) -> dict:
+    """Delivery and handling numbers. SENT is never reported as DELIVERED."""
+    from app.models.models import BookingLink, EmailMessage, Message
+    lead_ids = list({r.lead_id for r in recs if r.lead_id})
+    import os as _os
+    events_on = bool((_os.environ.get("RESEND_WEBHOOK_SECRET") or "").strip())
+    out = {"email": {"sent": 0, "delivered": 0 if events_on else None, "bounced": 0, "failed": 0,
+                     "opened": 0, "replied": 0, "unsubscribed": 0, "complained": 0 if events_on else None,
+                     "note": ("Delivered, bounced and complaint counts come from the provider's signed events."
+                              if events_on else
+                              "Provider delivery events are not switched on yet (RESEND_WEBHOOK_SECRET), so "
+                              "delivered and complaint counts are unknown - only sends, failures, opens and "
+                              "replies are counted.")},
+           "sms": {"sent": 0, "delivered": 0, "failed": 0, "replied": 0},
+           "appointments": 0}
+    if lead_ids:
+        for st, n in (db.query(EmailMessage.status, func.count(EmailMessage.id))
+                      .filter(EmailMessage.lead_id.in_(lead_ids)).group_by(EmailMessage.status).all()):
+            st = (st or "").lower()
+            if st in ("sent", "delivered", "opened", "bounced", "complained"):
+                out["email"]["sent"] += n
+            if st == "delivered" and events_on:
+                out["email"]["delivered"] += n
+            if st == "complained" and events_on:
+                out["email"]["complained"] += n
+            if st == "bounced":
+                out["email"]["bounced"] += n
+            if st == "failed":
+                out["email"]["failed"] += n
+        out["email"]["opened"] = (db.query(func.count(EmailMessage.id))
+                                  .filter(EmailMessage.lead_id.in_(lead_ids),
+                                          EmailMessage.opened_at.isnot(None)).scalar() or 0)
+        for st, n in (db.query(Message.delivery_status, func.count(Message.id))
+                      .filter(Message.lead_id.in_(lead_ids)).group_by(Message.delivery_status).all()):
+            out["sms"]["sent"] += n
+            if (st or "") == "delivered":
+                out["sms"]["delivered"] += n
+            if (st or "") in ("failed", "undelivered"):
+                out["sms"]["failed"] += n
+        out["appointments"] = (db.query(func.count(BookingLink.id))
+                               .filter(BookingLink.lead_id.in_(lead_ids),
+                                       BookingLink.status.in_(("booked", "confirmed"))).scalar() or 0)
+    out["email"]["replied"] = sum(1 for r in resps if r.channel == "email")
+    out["sms"]["replied"] = sum(1 for r in resps if r.channel == "sms")
+    out["email"]["unsubscribed"] = sum(1 for r in resps if r.channel == "email" and r.response_class == "opt_out")
+    waits = sorted((r.responded_at - r.received_at).total_seconds() / 60.0
+                   for r in resps if r.responded_at and r.received_at)
+    out["response_time_minutes"] = {
+        "handled": len(waits),
+        "median": round(waits[len(waits) // 2], 1) if waits else None,
+        "average": round(sum(waits) / len(waits), 1) if waits else None,
+    }
+    return out
+
+
+def readiness(db: Session, prog: OutreachProgram) -> dict:
+    """What would stop production outreach today. Read from configuration only."""
+    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    from app.services.public_identity import sending_identity_for_org
+    ident = sending_identity_for_org(db, prog.organization_id)
+    import os
+    sms_number = getattr(org, "org_twilio_phone_number", None)
+    items = [
+        {"key": "email_sender", "ok": bool(getattr(ident, "from_email", None)),
+         "detail": getattr(ident, "from_email", None) or "no verified sending address resolved"},
+        {"key": "reply_to", "ok": bool(getattr(ident, "reply_to_email", None)),
+         "detail": getattr(ident, "reply_to_email", None) or "no Reply-To set - replies go to the From address"},
+        {"key": "sms_number", "ok": bool(sms_number),
+         "detail": sms_number or "no organization Twilio number configured"},
+        _sms_routing_item(db, prog.organization_id, sms_number),
+        _mailbox_item(db, ident),
+        {"key": "primary_contact_user", "ok": bool(prog.primary_contact_user_id),
+         "detail": "account linked" if prog.primary_contact_user_id else "profile only - add an email to create the account"},
+        {"key": "alert_recipients", "ok": bool(prog.alert_phone or prog.alert_email),
+         "detail": "configured" if (prog.alert_phone or prog.alert_email) else "blank until supplied"},
+        {"key": "outbound_brake", "ok": os.environ.get("OUTBOUND_EMERGENCY_STOP", "").lower() not in ("1", "true", "yes", "on"),
+         "detail": "emergency stop is ON" if os.environ.get("OUTBOUND_EMERGENCY_STOP", "").lower() in ("1", "true", "yes", "on") else "off"},
+    ]
+    return {"items": items, "ready": all(i["ok"] for i in items)}
+
+
+def _sms_routing_item(db: Session, org_id: str, number: Optional[str]) -> dict:
+    """Inbound texts are routed to a workspace BY THE NUMBER THEY WERE SENT TO.
+    A number another workspace (or a user there) also uses would send this
+    program's replies to the wrong place."""
+    if not number:
+        return {"key": "sms_reply_routing", "ok": False,
+                "detail": "no number, so replies cannot be routed here"}
+    from app.services.dedup_service import normalize_phone
+    forms = {number, normalize_phone(number), "+" + normalize_phone(number)}
+    others = (db.query(Organization.id).filter(Organization.org_twilio_phone_number.in_(forms),
+                                               Organization.id != org_id).count()
+              + db.query(User.id).filter(User.twilio_phone_number.in_(forms),
+                                         User.organization_id != org_id).count())
+    return {"key": "sms_reply_routing", "ok": others == 0,
+            "detail": "number used only by this workspace" if others == 0 else
+            "number is also used by %d other workspace(s)/user(s) - replies would be routed "
+            "to whichever matches first" % others}
+
+
+def _mailbox_item(db: Session, ident) -> dict:
+    """Email replies come back through the shared sending mailbox, if connected."""
+    try:
+        from app.models.inbound_mailbox_models import InboundMailbox
+        addrs = {a.lower() for a in (getattr(ident, "reply_to_email", None),
+                                     getattr(ident, "from_email", None)) if a}
+        box = (db.query(InboundMailbox).filter(InboundMailbox.address.in_(addrs),
+                                               InboundMailbox.is_active.is_(True)).first()
+               if addrs else None)
+    except Exception:
+        box = None
+    if box is None:
+        return {"key": "email_reply_mailbox", "ok": False,
+                "detail": "the sending mailbox is not connected for reply reading"}
+    return {"key": "email_reply_mailbox", "ok": (box.last_status or "ok") == "ok",
+            "detail": "%s connected, last read %s (%s)" % (
+                box.address, box.last_polled_at.isoformat() + "Z" if box.last_polled_at else "never",
+                box.last_status or "not yet polled")}
+
+
+# ── responses ────────────────────────────────────────────────────────────────
+
+@router.get("/responses")
+def list_responses(status: Optional[str] = Query(None), response_class: Optional[str] = Query(None),
+                   location_id: Optional[str] = Query(None), limit: int = Query(100, ge=1, le=500),
+                   db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    q = db.query(ProgramResponse).filter(ProgramResponse.organization_id == prog.organization_id)
+    if status == "open":
+        q = q.filter(ProgramResponse.handling_status != "closed")
+    elif status:
+        q = q.filter(ProgramResponse.handling_status == status)
+    if response_class:
+        q = q.filter(ProgramResponse.response_class == response_class)
+    if location_id:
+        q = q.filter(ProgramResponse.location_id == location_id)
+    total = q.count()
+    rows = q.order_by(ProgramResponse.received_at.desc()).limit(limit).all()
+    leads = {l.id: l for l in db.query(Lead).filter(Lead.id.in_([r.lead_id for r in rows])).all()} if rows else {}
+    pname = {p.location_id: p.official_name for p in _profiles(db, prog.organization_id)}
+    now = datetime.utcnow()
+    return {"total": total, "items": [{
+        "id": r.id, "lead_id": r.lead_id, "source_lead_id": r.source_lead_id,
+        "name": ("%s %s" % (leads[r.lead_id].first_name or "", leads[r.lead_id].last_name or "")).strip().title()
+        if r.lead_id in leads else None,
+        "location": pname.get(r.location_id), "campaign_family": r.campaign_family,
+        "channel": r.channel, "class": r.response_class, "label": responses.LABELS.get(r.response_class),
+        "summary": r.summary, "recommended_action": r.recommended_action, "body": r.body_excerpt,
+        "status": r.handling_status, "cadence_paused": r.cadence_paused,
+        "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
+        "sla_due_at": r.sla_due_at.isoformat() + "Z" if r.sla_due_at else None,
+        "sla_breached": bool(r.response_class == "hot" and r.handling_status == "new"
+                             and r.sla_due_at and r.sla_due_at <= now),
+        "sla_alert_count": r.sla_alert_count,
+    } for r in rows]}
+
+
+class MarkIn(BaseModel):
+    state: str
+
+
+@router.post("/responses/{response_id}/mark")
+def mark_response(response_id: str, body: MarkIn, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_user)):
+    prog = _program(db, user)
+    r = db.query(ProgramResponse).filter(ProgramResponse.id == response_id,
+                                         ProgramResponse.organization_id == prog.organization_id).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="Response not found.")
+    try:
+        responses.mark(db, r, body.state, user)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"id": r.id, "status": r.handling_status}
+
+
+@router.get("/alerts")
+def list_alerts(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db),
+                user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    _require_manager(db, user)
+    rows = (db.query(ProgramAlert).filter(ProgramAlert.organization_id == prog.organization_id)
+            .order_by(ProgramAlert.created_at.desc()).limit(limit).all())
+    return [{"id": a.id, "kind": a.kind, "audience": a.audience, "channel": a.channel,
+             "delivered": a.delivered, "reason": a.reason, "message": a.message,
+             "created_at": a.created_at.isoformat() + "Z" if a.created_at else None} for a in rows]
+
+
+# ── source records (review queues) ───────────────────────────────────────────
+
+@router.get("/records")
+def list_records(queue: Optional[str] = Query(None), location_id: Optional[str] = Query(None),
+                 search: Optional[str] = Query(None), limit: int = Query(200, ge=1, le=1000),
+                 offset: int = Query(0, ge=0),
+                 db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    q = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == prog.organization_id)
+    if queue == "data_review":
+        q = q.filter(ProgramSourceRecord.needs_data_review.is_(True))
+    elif queue == "location_review":
+        q = q.filter(ProgramSourceRecord.location_status == "location_review")
+    elif queue == "duplicate_review":
+        q = q.filter(ProgramSourceRecord.duplicate_review_reason.isnot(None))
+    elif queue == "linked":
+        q = q.filter(ProgramSourceRecord.link_status.in_(("primary", "linked")))
+    if location_id:
+        q = q.filter(ProgramSourceRecord.location_id == location_id)
+    if search:
+        term = "%%%s%%" % search.strip()
+        q = q.filter((ProgramSourceRecord.first_name.ilike(term)) | (ProgramSourceRecord.last_name.ilike(term))
+                     | (ProgramSourceRecord.email.ilike(term)) | (ProgramSourceRecord.source_lead_id.ilike(term)))
+    total = q.count()
+    rows = q.order_by(ProgramSourceRecord.row_number).offset(offset).limit(limit).all()
+    pname = {p.location_id: p.official_name for p in _profiles(db, prog.organization_id)}
+    return {"total": total, "items": [{
+        "id": r.id, "source_lead_id": r.source_lead_id, "first_name": r.first_name,
+        "last_name": r.last_name, "email": r.email, "phone": r.phone,
+        "source_status": r.source_status, "source_campaign": r.source_campaign,
+        "source_location_name": r.source_location_name, "location": pname.get(r.location_id),
+        "location_status": r.location_status, "campaign_family": r.campaign_family,
+        "contact_master_key": r.contact_master_key, "link_status": r.link_status,
+        "link_reason": r.link_reason, "duplicate_review_reason": r.duplicate_review_reason,
+        "data_note_flags": json.loads(r.data_note_flags or "[]"), "lead_id": r.lead_id,
+    } for r in rows]}
+
+
+class AssignLocationIn(BaseModel):
+    location_id: str
+
+
+@router.post("/records/{record_id}/location")
+def assign_location(record_id: str, body: AssignLocationIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    """Resolve Location Review by hand. The source location name is kept as supplied."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    rec = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.id == record_id,
+                                               ProgramSourceRecord.organization_id == prog.organization_id).first()
+    prof = db.query(LocationProfile).filter(LocationProfile.organization_id == prog.organization_id,
+                                            LocationProfile.location_id == body.location_id).first()
+    if rec is None or prof is None or prof.is_review_bucket:
+        raise HTTPException(status_code=404, detail="Record or location not found.")
+    rec.location_id, rec.location_status = prof.location_id, "mapped"
+    rec.location_assigned_manually = True
+    db.commit()
+    return {"id": rec.id, "location": prof.official_name, "location_status": rec.location_status}
+
+
+class ClearReviewIn(BaseModel):
+    review: str          # data_review | duplicate_review
+    note: Optional[str] = None
+
+
+@router.post("/records/{record_id}/review")
+def clear_review(record_id: str, body: ClearReviewIn, db: Session = Depends(get_db),
+                 user: User = Depends(require_tenant_user)):
+    """A person has looked. Clears the hold; the flags and reasons stay on record
+    (data_note_flags is kept, the duplicate reason moves to the link note)."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    rec = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.id == record_id,
+                                               ProgramSourceRecord.organization_id == prog.organization_id).first()
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    if body.review == "data_review":
+        rec.needs_data_review = False
+        rec.data_review_cleared_at = datetime.utcnow()
+    elif body.review == "duplicate_review":
+        if rec.duplicate_review_reason:
+            rec.link_reason = ("%s | reviewed by %s: %s" % (
+                rec.link_reason or "", user.full_name or user.email,
+                rec.duplicate_review_reason)).strip(" |")
+        rec.duplicate_review_reason = None
+        rec.duplicate_review_cleared_at = datetime.utcnow()
+    else:
+        raise HTTPException(status_code=422, detail="review must be data_review or duplicate_review.")
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.review_cleared",
+               target_type="program_source_record", target_id=rec.id,
+               details={"review": body.review, "source_lead_id": rec.source_lead_id,
+                        "note": (body.note or "")[:300]})
+    db.commit()
+    return {"id": rec.id, "needs_data_review": rec.needs_data_review,
+            "duplicate_review_reason": rec.duplicate_review_reason}
+
+
+# ── verification / enrichment (stored beside the originals) ─────────────────
+
+class VerificationIn(BaseModel):
+    verified_phone: Optional[str] = None
+    phone_line_type: Optional[str] = None
+    phone_ownership_confidence: Optional[int] = None
+    alternate_phone: Optional[str] = None
+    verified_email: Optional[str] = None
+    email_confidence: Optional[int] = None
+    verified_address: Optional[str] = None
+    current_address: Optional[str] = None
+    identity_confidence: Optional[int] = None
+    provider: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.get("/records/{record_id}/verification")
+def get_verification(record_id: str, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    rec = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.id == record_id,
+                                               ProgramSourceRecord.organization_id == prog.organization_id).first()
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    v = (db.query(ContactVerification).filter(ContactVerification.source_record_id == rec.id)
+         .order_by(ContactVerification.created_at.desc()).first())
+    verified = None
+    if v is not None:
+        verified = {c: getattr(v, c) for c in (
+            "verified_phone", "phone_line_type", "phone_ownership_confidence", "alternate_phone",
+            "verified_email", "email_confidence", "verified_address", "current_address",
+            "identity_confidence", "provider", "notes", "outreach_eligible")}
+        verified["verified_at"] = v.verified_at.isoformat() + "Z" if v.verified_at else None
+    return {
+        "original": {"phone": rec.phone, "email": rec.email, "source_lead_id": rec.source_lead_id},
+        "verified": verified,
+    }
+
+
+@router.post("/records/{record_id}/verification")
+def add_verification(record_id: str, body: VerificationIn, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user)):
+    """Record a verification result. Never edits the source record; never grants outreach."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    rec = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.id == record_id,
+                                               ProgramSourceRecord.organization_id == prog.organization_id).first()
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    v = ContactVerification(organization_id=prog.organization_id, source_record_id=rec.id,
+                            verified_at=datetime.utcnow(), outreach_eligible=False,
+                            **body.dict(exclude_unset=True))
+    db.add(v)
+    db.commit()
+    return {"id": v.id, "outreach_eligible": False}
+
+
+# ── campaign families ────────────────────────────────────────────────────────
+
+def _family_json(f: CampaignFamily) -> dict:
+    return {"id": f.id, "key": f.key, "name": f.name, "language": f.language,
+            "asset_category": f.asset_category, "is_active": f.is_active,
+            "first_touch_email_mode": f.first_touch_email_mode,
+            "followup_email_mode": f.followup_email_mode,
+            "source_campaign_patterns": json.loads(f.source_campaign_patterns or "[]"),
+            "sms_template": f.sms_template, "email_subject_template": f.email_subject_template,
+            "email_body_template": f.email_body_template}
+
+
+@router.get("/campaigns")
+def list_campaigns(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    return [_family_json(f) for f in db.query(CampaignFamily)
+            .filter(CampaignFamily.organization_id == prog.organization_id)
+            .order_by(CampaignFamily.name).all()]
+
+
+class FamilyIn(BaseModel):
+    first_touch_email_mode: Optional[str] = None
+    followup_email_mode: Optional[str] = None
+    sms_template: Optional[str] = None
+    email_subject_template: Optional[str] = None
+    email_body_template: Optional[str] = None
+    asset_category: Optional[str] = None
+
+
+@router.patch("/campaigns/{family_id}")
+def update_campaign(family_id: str, body: FamilyIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    """Edit a family's modes and copy. Activation is not done here - see readiness."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    f = db.query(CampaignFamily).filter(CampaignFamily.id == family_id,
+                                        CampaignFamily.organization_id == prog.organization_id).first()
+    if f is None:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    data = body.dict(exclude_unset=True)
+    for k in ("first_touch_email_mode", "followup_email_mode"):
+        if k in data and data[k] not in EMAIL_MODES:
+            raise HTTPException(status_code=422, detail="Email mode must be one of %s." % ", ".join(EMAIL_MODES))
+    for k in ("sms_template", "email_body_template"):
+        if k in data and data[k] and "call us" in data[k].lower():
+            raise HTTPException(status_code=422, detail="Families are asked to reply, not to call.")
+    for k, v in data.items():
+        setattr(f, k, v)
+    db.commit()
+    return _family_json(f)
+
+
+class ActivationIn(BaseModel):
+    active: bool
+    confirm: Optional[str] = None
+
+
+@router.post("/campaigns/{family_id}/activation")
+def set_campaign_active(family_id: str, body: ActivationIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user)):
+    """Switch a family on or off. ON lets AUTOMATED sends go to contacts already
+    enrolled in it; it enrols no one by itself. Switching on requires typing the
+    family's name, and is audit-logged."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    f = db.query(CampaignFamily).filter(CampaignFamily.id == family_id,
+                                        CampaignFamily.organization_id == prog.organization_id).first()
+    if f is None:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    if body.active and (body.confirm or "").strip().lower() != f.name.strip().lower():
+        raise HTTPException(status_code=422, detail="Type the campaign name to confirm switching it on.")
+    f.is_active = bool(body.active)
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.campaign_%s" % ("on" if f.is_active else "off"),
+               target_type="program_campaign_family", target_id=f.id, details={"key": f.key, "name": f.name})
+    db.commit()
+    return _family_json(f)
+
+
+@router.get("/campaigns/{family_id}/preview")
+def preview_campaign(family_id: str, location_id: Optional[str] = Query(None),
+                     record_id: Optional[str] = Query(None), touch: str = Query("first"),
+                     db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Render one family for one location (and optionally one contact). Sends nothing."""
+    prog = _program(db, user)
+    f = db.query(CampaignFamily).filter(CampaignFamily.id == family_id,
+                                        CampaignFamily.organization_id == prog.organization_id).first()
+    if f is None:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    rec = None
+    if record_id:
+        rec = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.id == record_id,
+                                                   ProgramSourceRecord.organization_id == prog.organization_id).first()
+        location_id = location_id or (rec.location_id if rec else None)
+    prof = db.query(LocationProfile).filter(LocationProfile.organization_id == prog.organization_id,
+                                            LocationProfile.location_id == location_id).first() if location_id else None
+    if prof is None or prof.is_review_bucket:
+        return {"ok": False, "reason": identity.LOCATION_REVIEW_REFUSAL}
+    mode = f.first_touch_email_mode if touch == "first" else f.followup_email_mode
+    flyer = flyer_for(db, prog.organization_id, f, prof.location_id)
+    flyer_link = ""
+    attachment = None
+    if flyer is not None and mode == "hosted":
+        flyer_link = "View your %s: %s" % (flyer.title, public_asset_url(flyer.public_token))
+    elif flyer is not None and mode == "attached":
+        attachment = {"filename": flyer.filename or "%s.pdf" % flyer.title, "asset_id": flyer.id}
+    fields = {
+        "first_name": (rec.first_name if rec else "Pat").strip().title() if (rec and rec.first_name) else "Pat",
+        "location_name": prof.official_name,
+        "primary_contact_name": prog.primary_contact_name or "",
+        "location_website": prof.website or "", "flyer_link": flyer_link,
+    }
+    sms = identity.render(f.sms_template, dict(fields, reply_instructions=prog.reply_instructions_sms or ""))
+    sms = "%s %s" % (sms, identity.sms_signoff(prog, prof))
+    return {
+        "ok": True, "family": f.key, "location": prof.official_name, "email_mode": mode,
+        "from_display_name": identity.display_name(prog, prof),
+        "sms": sms + " Reply STOP to opt out.",
+        "email_subject": identity.render(f.email_subject_template, fields),
+        "email_body": identity.render(f.email_body_template,
+                                      dict(fields, reply_instructions=prog.reply_instructions_email or "")),
+        "attachment": attachment, "flyer_available": flyer is not None,
+    }
+
+
+def public_asset_url(token: str) -> str:
+    """Absolute hosted link for a family. PROGRAM_ASSET_BASE_URL (e.g. the
+    customer-facing app domain) wins; otherwise the backend's own public origin."""
+    import os
+    from app.services.twilio_callbacks import public_api_base
+    base = (os.environ.get("PROGRAM_ASSET_BASE_URL") or "").strip().rstrip("/") or public_api_base()
+    return "%s/program-assets/%s" % (base, token)
+
+
+def flyer_for(db: Session, org_id: str, fam: CampaignFamily, location_id: str) -> Optional[ProgramAsset]:
+    """The active flyer for this family/category, location-specific first."""
+    q = db.query(ProgramAsset).filter(ProgramAsset.organization_id == org_id,
+                                      ProgramAsset.kind == "flyer", ProgramAsset.is_active.is_(True))
+    cands = q.filter((ProgramAsset.campaign_family == fam.key) |
+                     (ProgramAsset.category == fam.asset_category)).all()
+    cands.sort(key=lambda a: (a.location_id != location_id, a.location_id is not None and a.location_id != location_id,
+                              a.campaign_family != fam.key, -a.version))
+    for a in cands:
+        if a.location_id in (None, location_id):
+            return a
+    return None
+
+
+# ── assets ───────────────────────────────────────────────────────────────────
+
+def _asset_json(a: ProgramAsset) -> dict:
+    return {"id": a.id, "kind": a.kind, "category": a.category, "campaign_family": a.campaign_family,
+            "location_id": a.location_id, "title": a.title, "version": a.version,
+            "is_active": a.is_active, "filename": a.filename, "content_type": a.content_type,
+            "size_bytes": a.size_bytes, "hosted_url": _asset_url(a),
+            "preview_url": "/program/assets/%s/preview" % a.id,
+            "dynamic_fields": json.loads(a.dynamic_fields or "[]"),
+            "created_at": a.created_at.isoformat() + "Z" if a.created_at else None}
+
+
+@router.get("/assets")
+def list_assets(kind: Optional[str] = Query(None), db: Session = Depends(get_db),
+                user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    q = db.query(ProgramAsset).filter(ProgramAsset.organization_id == prog.organization_id)
+    if kind:
+        q = q.filter(ProgramAsset.kind == kind)
+    return {"categories": setup.FLYER_CATEGORIES,
+            "items": [_asset_json(a) for a in q.order_by(ProgramAsset.kind, ProgramAsset.title,
+                                                          ProgramAsset.version.desc()).all()]}
+
+
+@router.post("/assets")
+async def upload_asset(file: UploadFile = File(...), kind: str = Form(...), title: str = Form(...),
+                       category: Optional[str] = Form(None), campaign_family: Optional[str] = Form(None),
+                       location_id: Optional[str] = Form(None), activate: bool = Form(False),
+                       db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    prog = _program(db, user)
+    _require_manager(db, user)
+    if kind not in ("logo", "facility_image", "flyer"):
+        raise HTTPException(status_code=422, detail="kind must be logo, facility_image or flyer.")
+    if category and category not in setup.FLYER_CATEGORIES:
+        raise HTTPException(status_code=422, detail="Unknown flyer category.")
+    if location_id and not db.query(LocationProfile).filter(
+            LocationProfile.organization_id == prog.organization_id,
+            LocationProfile.location_id == location_id).first():
+        raise HTTPException(status_code=404, detail="Location not found.")
+    data = await file.read(MAX_ASSET_BYTES + 1)
+    if len(data) > MAX_ASSET_BYTES:
+        raise HTTPException(status_code=413, detail="Files up to 20 MB.")
+    ctype = (file.content_type or "").split(";")[0].strip().lower()
+    if ctype not in ASSET_TYPES:
+        raise HTTPException(status_code=415, detail="PDF, PNG, JPEG, WebP or SVG only.")
+    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    a = setup.store_asset(db, org, kind=kind, title=title.strip(), data=data, content_type=ctype,
+                          filename=file.filename, category=category or None,
+                          campaign_family=campaign_family or None, location_id=location_id or None,
+                          activate=activate, uploaded_by=user.id)
+    db.commit()
+    return _asset_json(a)
+
+
+class ActiveIn(BaseModel):
+    active: bool
+
+
+@router.post("/assets/{asset_id}/active")
+def set_asset_active(asset_id: str, body: ActiveIn, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user)):
+    prog = _program(db, user)
+    _require_manager(db, user)
+    a = db.query(ProgramAsset).filter(ProgramAsset.id == asset_id,
+                                      ProgramAsset.organization_id == prog.organization_id).first()
+    if a is None:
+        raise HTTPException(status_code=404, detail="Asset not found.")
+    setup.set_active(db, a, body.active)
+    db.commit()
+    return _asset_json(a)
+
+
+@router.get("/assets/{asset_id}/preview")
+def preview_asset(asset_id: str, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    a = db.query(ProgramAsset).filter(ProgramAsset.id == asset_id,
+                                      ProgramAsset.organization_id == prog.organization_id).first()
+    if a is None:
+        raise HTTPException(status_code=404, detail="Asset not found.")
+    headers = {"Content-Disposition": 'inline; filename="%s"' % _safe_name(a.filename, "asset"),
+               "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=60",
+               "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:"}
+    return Response(content=a.data, media_type=a.content_type, headers=headers)
+
+
+def _safe_name(name: Optional[str], default: str) -> str:
+    import re as _re
+    clean = _re.sub(r'[^A-Za-z0-9._ -]', "_", (name or "").strip())[:120]
+    return clean or default
+
+
+@public_router.get("/program-assets/{token}")
+def hosted_asset(token: str, db: Session = Depends(get_db)):
+    """The hosted link a family opens. Only an ACTIVE version is served."""
+    a = db.query(ProgramAsset).filter(ProgramAsset.public_token == token,
+                                      ProgramAsset.is_active.is_(True)).first()
+    if a is None:
+        raise HTTPException(status_code=404, detail="Not found.")
+    headers = {"Content-Disposition": 'inline; filename="%s"' % _safe_name(a.filename, "file"),
+               "X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=300"}
+    if a.content_type == "image/svg+xml":
+        headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'"
+    return Response(content=a.data, media_type=a.content_type, headers=headers)
+
+
+# ── import (staging only) ────────────────────────────────────────────────────
+
+@router.post("/import")
+async def import_source(file: UploadFile = File(...), dry_run: bool = Form(True),
+                        db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Dry-run (default) or STAGE a source file. Never creates leads or sends."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    content = await file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Files up to 10 MB.")
+    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    return importer.stage(db, org, content, filename=file.filename, dry_run=dry_run, actor_id=user.id)
+
+
+# ── owner: configure a customer as a program ─────────────────────────────────
+
+class GodSetupIn(BaseModel):
+    organization_id: str
+    name: str
+    primary_contact_name: Optional[str] = None
+    primary_contact_title: Optional[str] = None
+    hero_title: Optional[str] = None
+    hero_subtitle: Optional[str] = None
+    location_names: List[str] = []
+
+
+@god_router.post("/setup")
+def god_setup(body: GodSetupIn, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Idempotent: program row, one location + profile per name, review bucket,
+    inactive campaign families. Creates no users and sends nothing."""
+    org = db.query(Organization).filter(Organization.id == body.organization_id).first()
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    prog = setup.ensure_program(db, org, name=body.name,
+                                primary_contact_name=body.primary_contact_name,
+                                primary_contact_title=body.primary_contact_title,
+                                hero_title=body.hero_title, hero_subtitle=body.hero_subtitle)
+    profiles = setup.ensure_locations(db, org, god, body.location_names)
+    fams = setup.ensure_campaign_families(db, org)
+    db.commit()
+    return {"program": _program_json(db, prog),
+            "locations": sum(1 for p in profiles.values() if not p.is_review_bucket),
+            "review_bucket": True, "campaign_families": len(fams)}

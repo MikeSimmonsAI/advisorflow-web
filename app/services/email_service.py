@@ -175,6 +175,7 @@ def send_email_via_provider(
     message_type: str = None,
     sensitivity: str = None,
     template_id: str = None,
+    headers: dict = None,
 ) -> dict:
     """
     Sends via Resend. Returns {"success": bool, "provider_message_id": str|None, "error": str|None}.
@@ -288,6 +289,10 @@ def send_email_via_provider(
         _audit = audit_bcc_for(org, message_type, sensitivity) if org else None
         if _audit and _audit.strip().lower() != (to_email or "").strip().lower():
             params["bcc"] = [_audit]
+
+        if headers:
+            # e.g. List-Unsubscribe / List-Unsubscribe-Post for program email.
+            params["headers"] = dict(headers)
 
         if attachments:
             params["attachments"] = [
@@ -420,6 +425,12 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     from app.services.sms_service import _demo_send_guard
     _demo_send_guard(db, lead, "email")
 
+    # A program lead with no resolved location is never emailed.
+    from app.services.programs import identity as _program_identity
+    _loc_refusal = _program_identity.send_refusal(db, lead, send_source)
+    if _loc_refusal:
+        raise ValueError(f"Lead {lead.id}: {_loc_refusal}")
+
     # THE COMPLIANCE GATE, and it is the SAME one the auto-send queue runs.
     #
     # This function used to check two things itself - a missing address and a
@@ -486,6 +497,20 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     # with it.
     from app.services.public_identity import sending_identity_for_org
     org = sending_identity_for_org(db, lead.organization_id)
+    # LOCATION OUTREACH PROGRAMS: the From name is the program's person at the
+    # family's own location ("Kerry Allan | Eastern Gate Memorial Gardens").
+    # The address and domain stay the resolved, verified ones.
+    from app.services.programs import identity as _program_identity
+    org = _program_identity.apply_email_identity(db, lead, org)
+    # Program email carries a one-click unsubscribe (footer link + RFC 8058
+    # headers). Other organizations' mail is unchanged.
+    _program_headers = None
+    if _program_identity.program_for_org(db, lead.organization_id) is not None:
+        from app.services.programs import unsubscribe as _unsub
+        rendered = dict(rendered)
+        rendered["body_html"] = (rendered.get("body_html") or "") + _unsub.footer_html(lead.id)
+        _program_headers = {"List-Unsubscribe": "<%s>" % _unsub.url_for(lead.id),
+                            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"}
 
     # Provider selection: Resend using the org's own API key + from address when
     # configured; falls back to global env vars for orgs that haven't set them yet.
@@ -499,6 +524,7 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
         subject=rendered["subject"],
         body_html=rendered["body_html"],
         org=org,
+        **({"headers": _program_headers} if _program_headers else {}),
     )
 
     email_msg = EmailMessage(

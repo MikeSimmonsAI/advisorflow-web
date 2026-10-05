@@ -277,6 +277,11 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             # a re-read finds the Reply above and stops: at most one hand-off.
             db.commit()
 
+            # Location outreach programs: pause, classify, alert, SLA. Never raises.
+            from app.services.programs import responses as _program_responses
+            _program_responses.safe_on_inbound(db, lead, body_text, "email",
+                                               reply_id=reply.id)
+
             # Trigger AI conversation handler if active, else fall back to pipeline
             try:
                 from app.services.ai_conversation_service import handle_inbound_reply as ai_handle

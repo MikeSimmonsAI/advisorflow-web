@@ -62,6 +62,9 @@ const NAV_GROUPS = [
     label: 'Workspace',
     items: [
       { to: '/', label: 'Overview', icon: 'grid' },
+      // A location outreach program's own center (SCI). Shown only when the
+      // workspace runs one - answered by GET /program/status on mount.
+      { to: '/program', label: 'Family Service Center', icon: 'home', programOnly: true },
       // LAUNCH — the customer's onboarding. Shown ONLY while setup is still
       // open. A completed launch remains reviewable from Organization settings
       // for admins, but no longer sits in the normal operational rail.
@@ -344,6 +347,14 @@ export default function Layout({ children }) {
   // item stays hidden; `implementation: null` (a 200 - no 404, no console
   // error) is the normal answer for many orgs. `live` is the authoritative
   // completed state.
+  const [programActive, setProgramActive] = useState(false)
+  useEffect(() => {
+    let alive = true
+    api.get('/program/status', { skipRedirect: true })
+      .then(d => { if (alive) setProgramActive(!!d?.active) })
+      .catch(() => { if (alive) setProgramActive(false) })
+    return () => { alive = false }
+  }, [])
   const [launchNavState, setLaunchNavState] = useState(null)
   useEffect(() => {
     let alive = true
@@ -885,6 +896,7 @@ export default function Layout({ children }) {
               // means the answer has not arrived yet, and the item stays
               // hidden until it does — a nav entry that appears a second late
               // is far better than one that flashes and vanishes.
+              if (item.programOnly && !programActive) return false
               if (item.launchOnly &&
                   (!launchNavState?.exists || launchNavState.completed)) return false
               // A capability item is NEVER shown on the strength of a role.

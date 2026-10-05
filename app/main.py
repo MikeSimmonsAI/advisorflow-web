@@ -1186,6 +1186,17 @@ app.include_router(wholesale_rooms_public)  # public — token IS the authorizat
 app.include_router(wholesale_contracts_router)
 # Phase 7 EvoSense - same gates as the rest of the Wholesale module.
 app.include_router(evosense_router)
+# Location outreach programs (SCI): /program, hosted /program-assets/{token}, /god/programs.
+from app.routers.program_router import (router as program_router,
+                                        public_router as program_public_router,
+                                        god_router as program_god_router)
+app.include_router(program_router)
+app.include_router(program_public_router)  # public - the token IS the authorization
+app.include_router(program_god_router)
+# Resend delivery / bounce / complaint events (signed; inert until RESEND_WEBHOOK_SECRET is set).
+from app.routers.email_events_router import router as email_events_router, unsubscribe_router as email_unsubscribe_router
+app.include_router(email_events_router)
+app.include_router(email_unsubscribe_router)  # public - the signed token IS the authorization
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
@@ -1634,6 +1645,40 @@ async def _wholesale_exception_loop():
         await asyncio.sleep(wholesale_ex.AUTO_INTERVAL_SECONDS)
 
 
+async def _program_sla_loop():
+    """Location outreach programs: re-alert HOT replies past their SLA.
+
+    Every two minutes, one pass across instances. Writes in-app alerts and the
+    alert log; staff SMS/email only where a program has switched them on and
+    configured a recipient. Never contacts a customer.
+    """
+    from app.services.programs import responses as program_responses
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("program_sla_loop")
+    interval = 120
+    await asyncio.sleep(95)  # startup delay - offset from the other loops
+    while True:
+        if not await _pass_claimed(JobName.PROGRAM_SLA, interval):
+            await asyncio.sleep(interval)
+            continue
+        try:
+            async with record_job_run(JobName.PROGRAM_SLA, db_factory=SessionLocal) as _m:
+                def _one_pass():
+                    db = SessionLocal()
+                    try:
+                        return {"realerted": len(program_responses.sla_sweep(db))}
+                    finally:
+                        db.close()
+                report = await _off_loop(_one_pass)
+                _m.update(report)
+        except Exception as exc:                               # noqa: BLE001
+            _logger.error("program_sla error: %s", exc, exc_info=True)
+        await asyncio.sleep(interval)
+
+
 @app.on_event("startup")
 async def on_startup():
     # 0. THE ENVIRONMENT BOUNDARY. Before the database is touched, before a
@@ -2021,6 +2066,7 @@ async def on_startup():
         JobName.SALES_REMINDERS:      _sales_reminder_loop,
         JobName.EVOSENSE_HUNT:        _evosense_hunt_loop,
         JobName.WHOLESALE_EXCEPTIONS: _wholesale_exception_loop,
+        JobName.PROGRAM_SLA:          _program_sla_loop,
     }
     for _job_name in _plan["start"]:
         _factory = _loop_factories.get(_job_name)

@@ -441,6 +441,10 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                     db.add(row)
                     db.commit()
                     if created:
+                        # Location outreach programs: pause, classify, alert, SLA.
+                        from app.services.programs import responses as _program_responses
+                        _program_responses.safe_on_inbound(db, lead, body, "email",
+                                                           reply_id=reply.id)
                         _maybe_hand_to_ai(db, lead, reply)
                         db.commit()
                     matched += 1

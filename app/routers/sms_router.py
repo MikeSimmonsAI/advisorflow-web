@@ -594,6 +594,14 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
     logger.info("twilio inbound: lead=%s hot=%s classification=%s",
                 lead.id, is_hot, classification.value)
 
+    # LOCATION OUTREACH PROGRAMS: attach location/campaign, pause the cadence,
+    # classify HOT/ACTIVE/LOW/OPT-OUT/BAD DATA, alert, start the HOT SLA.
+    # After the commit and wrapped: it can never lose the message or 500.
+    from app.services.programs import responses as _program_responses
+    _program_responses.safe_on_inbound(
+        db, lead, Body, "sms", reply_id=reply.id,
+        reply_classification=classification.value if classification else None)
+
     # PHASE 7.1 (3/3) — the reply is committed; now EvoSense may read it.
     # After the commit on purpose: an EvoSense or AI failure can never lose the
     # seller's message, and never turns into a 500 that makes Twilio retry.
@@ -951,7 +959,8 @@ def send_mms_endpoint(
         raise HTTPException(status_code=409, detail=send_guard.DUPLICATE_DETAIL)
     try:
         message = send_mms(db, acting_advisor(db, lead, current_user), lead,
-                           req.template, req.media_url, req.include_booking_link)
+                           req.template, req.media_url, req.include_booking_link,
+                           send_source="manual", sent_by_user_id=current_user.id)
         return {"message_id": message.id, "status": message.twilio_status}
     except ValueError as e:
         send_guard.release_after_failure(db, lead.id, guard_text, token)

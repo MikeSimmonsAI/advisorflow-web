@@ -443,6 +443,26 @@ BOOKING_LINK_PLACEHOLDER = "{booking_link}"
 
 
 def compose_body(template: str, lead: Lead, advisor: User, booking_url: str) -> str:
+    """The EXACT text that will be sent - preview and send both call this.
+
+    For a lead in a location outreach program the location sign-off
+    ("- Kerry Allan, Eastern Gate Memorial Gardens") is added here, at the one
+    point preview and send share, so the preview shows what the family gets.
+    Every other lead is returned exactly as `_compose_body_core` built it.
+    """
+    body = _compose_body_core(template, lead, advisor, booking_url)
+    try:
+        from sqlalchemy.orm import object_session
+        from app.services.programs import identity as _program_identity
+        _db = object_session(lead)
+        if _db is not None:
+            body = _program_identity.apply_sms_signoff(_db, lead, body)
+    except Exception:  # never let identity decoration break a send path
+        pass
+    return body
+
+
+def _compose_body_core(template: str, lead: Lead, advisor: User, booking_url: str) -> str:
     """The EXACT text that will be sent. One function, used by preview and send.
 
     `render_template` only substitutes a `{booking_link}` placeholder. A message
@@ -537,6 +557,14 @@ def send_sms(
     # one-to-one MANUAL send by a person who sees the TEST badge may.
     if test_records.is_test_record(lead) and send_source != _ss.MANUAL:
         raise ValueError(test_records.blocked_reason(lead))
+
+    # LOCATION OUTREACH PROGRAMS: a lead whose location is unresolved is not
+    # sent to under a made-up facility name - it waits in Location Review.
+    # None for every organization without a program.
+    from app.services.programs import identity as _program_identity
+    _loc_refusal = _program_identity.send_refusal(db, lead, send_source)
+    if _loc_refusal:
+        raise ValueError(f"Lead {lead.id}: {_loc_refusal}")
 
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC (likely a duplicate) - blocked from sending.")
@@ -674,6 +702,14 @@ def send_mms(
     # one-to-one MANUAL send by a person who sees the TEST badge may.
     if test_records.is_test_record(lead) and send_source != _ss.MANUAL:
         raise ValueError(test_records.blocked_reason(lead))
+
+    # LOCATION OUTREACH PROGRAMS: a lead whose location is unresolved is not
+    # sent to under a made-up facility name - it waits in Location Review.
+    # None for every organization without a program.
+    from app.services.programs import identity as _program_identity
+    _loc_refusal = _program_identity.send_refusal(db, lead, send_source)
+    if _loc_refusal:
+        raise ValueError(f"Lead {lead.id}: {_loc_refusal}")
 
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC - blocked from sending.")

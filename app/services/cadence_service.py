@@ -238,6 +238,13 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
     preview a user sees before confirming an import batch is genuinely
     the same text that would actually go out, not an approximation.
     """
+    # LOCATION OUTREACH PROGRAMS: the program's campaign family, rendered for
+    # this family's own location. None for every other organization.
+    from app.services.programs import identity as _program_identity
+    _program_text = _program_identity.cadence_text(db, lead, touch_number)
+    if _program_text:
+        return enforce_sms_content_policy(_program_text)
+
     # If a cadence template touch provides a message, use it directly
     if message_template:
         org = db.query(__import__('app.models.models', fromlist=['Organization']).Organization).filter_by(id=lead.organization_id).first()

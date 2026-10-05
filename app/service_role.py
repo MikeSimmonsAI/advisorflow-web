@@ -114,6 +114,8 @@ SCHEDULER_OWNER: Dict[str, str] = {
     # Wholesale P6 exception sweep. The backend, once: two processes sweeping
     # would race to open the same exception.
     JobName.WHOLESALE_EXCEPTIONS: ROLE_BACKEND,
+    # Program HOT-response SLA re-alerts. Once, so a breach alerts once.
+    JobName.PROGRAM_SLA: ROLE_BACKEND,
 }
 
 # A guard rather than a comment: a loop added to JobName without an owner here
