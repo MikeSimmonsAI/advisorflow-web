@@ -846,3 +846,329 @@ def test_the_daily_cap_trickles_sends(program, sample_advisor, monkeypatch):
     assert r1["sent"] == 1 and r2["sent"] == 0 and "daily cap" in r2["reason"] and len(sent) == 1
     with _fake_provider(sent):
         assert et.run(db, org.id, now=datetime.utcnow() + timedelta(days=1), force_hours=True)["sent"] == 1
+
+
+# ── location email aliases, central inbox routing, holds, management alerts ──
+
+def test_alias_slugs_are_unique_and_twins_keep_their_type():
+    from app.services.programs import aliases
+    names = ["Eastern Gate Memorial Funeral Home", "Eastern Gate Memorial Gardens", "Striffler-Hamby Mortuary",
+             "Alabama Heritage Cemetery", "Alabama Heritage Funeral Home", "Radney Funeral Home",
+             "Radney Funeral Home-Mobile", "Rockco Funeral Home (Montevallo)", "Ridout's Valley Chapel"]
+    s = aliases.slugs_for(names)
+    assert s["Eastern Gate Memorial Funeral Home"] == "easterngatefuneralhome"
+    assert s["Eastern Gate Memorial Gardens"] == "easterngategardens"
+    assert s["Striffler-Hamby Mortuary"] == "strifflerhamby"
+    assert s["Alabama Heritage Cemetery"] == "alabamaheritagecemetery"
+    assert s["Radney Funeral Home-Mobile"] == "radneymobile" and s["Radney Funeral Home"] == "radney"
+    assert s["Rockco Funeral Home (Montevallo)"] == "rockcomontevallo"
+    assert s["Ridout's Valley Chapel"] == "ridoutsvalley"
+    assert len(set(s.values())) == len(names)
+    assert aliases.validate_local("support") and aliases.validate_local("Bad Name")
+    assert aliases.validate_local("easterngategardens") is None
+
+
+def _alias_program(program, from_email="support@evosyspro.live"):
+    from app.services.programs import aliases
+    db, org, prog = program["db"], program["org"], program["prog"]
+    org.from_email = from_email
+    db.commit()
+    table = aliases.assign(db, prog)
+    db.commit()
+    return db, org, prog, table
+
+
+def test_aliases_are_assigned_per_location_never_the_review_bucket(program):
+    from app.models.program_models import LocationProfile
+    db, org, prog, table = _alias_program(program)
+    assert table == {"Alabama Heritage Funeral Home": "alabamaheritage@evosyspro.live",
+                     "Eastern Gate Memorial Gardens": "easterngate@evosyspro.live",
+                     "Striffler-Hamby Mortuary": "strifflerhamby@evosyspro.live"}
+    review = db.query(LocationProfile).filter_by(organization_id=org.id, is_review_bucket=True).one()
+    assert review.email_alias is None
+    from app.services.programs import aliases
+    again = aliases.assign(db, prog)          # existing addresses are kept
+    assert again == table
+
+
+def _sent_identity(db, lead, sample_advisor):
+    seen = {}
+
+    def fake(**kw):
+        seen.update(kw)
+        return {"success": True, "provider_message_id": "pm"}
+    with patch("app.services.email_service.send_email_via_provider", side_effect=fake):
+        from app.services import email_service
+        email_service.send_email_to_lead(db, sample_advisor, lead, subject="Hi", body_html="<p>x</p>",
+                                         send_source="manual")
+    return seen["org"]
+
+
+def test_an_alias_is_not_used_until_it_receives_mail(program, sample_advisor):
+    db, org, prog, _ = _alias_program(program)
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    ident = _sent_identity(db, lead, sample_advisor)
+    # Not yet known to receive: exactly as before - verified From, location display name.
+    assert ident.from_email == "support@evosyspro.live"
+    assert getattr(ident, "reply_to_email", None) in (None, "")
+    assert ident.from_name == "Kerry Allan | Eastern Gate Memorial Gardens"
+
+
+def test_a_receiving_alias_on_the_verified_domain_is_the_from(program, sample_advisor):
+    from app.models.program_models import LocationProfile
+    db, org, prog, _ = _alias_program(program)
+    prof = db.query(LocationProfile).filter_by(organization_id=org.id,
+                                               official_name="Eastern Gate Memorial Gardens").one()
+    prof.alias_verified_at = datetime.utcnow()
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    ident = _sent_identity(db, lead, sample_advisor)
+    assert ident.from_email == "easterngate@evosyspro.live"
+    assert ident.reply_to_email == "easterngate@evosyspro.live"
+    assert ident.from_name == "Kerry Allan | Eastern Gate Memorial Gardens"
+
+
+def test_an_alias_off_the_verified_domain_is_only_the_reply_to(program, sample_advisor):
+    db, org, prog, _ = _alias_program(program)
+    prog.alias_domain = "other-domain.test"
+    from app.models.program_models import LocationProfile
+    for p in db.query(LocationProfile).filter_by(organization_id=org.id):
+        p.email_alias = None
+    db.commit()
+    from app.services.programs import aliases
+    aliases.assign(db, prog)
+    prog.aliases_receiving_confirmed_at = datetime.utcnow()
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    ident = _sent_identity(db, lead, sample_advisor)
+    assert ident.from_email == "support@evosyspro.live"           # never weakens DMARC alignment
+    assert ident.reply_to_email == "easterngate@other-domain.test"
+
+
+def test_confirming_aliases_needs_the_phrase(client, program):
+    db, org, prog, _ = _alias_program(program)
+    h = _h(db, program["admin"])
+    assert client.post("/program/aliases/confirm-receiving", headers=h, json={"confirm": "yes"}).status_code == 422
+    r = client.post("/program/aliases/confirm-receiving", headers=h, json={"confirm": "aliases receive mail"})
+    assert r.status_code == 200 and r.json()["confirmed_all"] is True and r.json()["effective"] == {"from": 3}
+    csv_text = client.get("/program/aliases.csv", headers=h).text
+    assert "easterngate@evosyspro.live,Eastern Gate Memorial Gardens" in csv_text
+
+
+def _central_box(db):
+    from app.models.inbound_mailbox_models import InboundMailbox
+    box = InboundMailbox(address="support@evosyspro.live", is_active=True)
+    db.add(box)
+    db.commit()
+    return box
+
+
+def _graph_msg(gid, sender, to, body, subject="Re: Your veteran benefits information"):
+    t = (datetime.utcnow() - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"id": gid, "internetMessageId": "<%s@mail.test>" % gid, "subject": subject,
+            "from": {"emailAddress": {"address": sender}},
+            "toRecipients": [{"emailAddress": {"address": to}}], "ccRecipients": [],
+            "receivedDateTime": t, "body": {"content": body}, "bodyPreview": body[:50]}
+
+
+def test_alias_to_central_inbox_to_the_right_contact_and_location(program, sample_advisor):
+    from app.models.models import Reply
+    from app.models.program_models import LocationProfile
+    from app.services import inbound_mailbox_service as S
+    db, org, prog, _ = _alias_program(program)
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    box = _central_box(db)
+    msgs = [_graph_msg("a1", "Ollie@Example.com", "EasternGate@evosyspro.live",
+                       "Yes please, I'd like to set up a time to go over the veteran guide.")]
+    res = S.poll_mailbox(db, box, fetch=lambda since: msgs)
+    assert res["matched"] == 1
+    reply = db.query(Reply).filter_by(lead_id=lead.id).one()
+    assert "veteran guide" in reply.body
+    resp = db.query(ProgramResponse).filter_by(lead_id=lead.id).one()
+    prof = db.query(LocationProfile).filter_by(organization_id=org.id,
+                                               official_name="Eastern Gate Memorial Gardens").one()
+    assert resp.reply_to_alias == "easterngate@evosyspro.live" and resp.location_id == prof.location_id
+    assert resp.response_class == "hot" and resp.sla_due_at is not None
+    assert prof.alias_verified_at is not None              # seen arriving -> alias now in use
+    # the very next email to this family goes out From the alias
+    ident = _sent_identity(db, lead, sample_advisor)
+    assert ident.from_email == "easterngate@evosyspro.live"
+
+
+def test_plus_addressed_alias_also_routes(program, sample_advisor):
+    from app.services import inbound_mailbox_service as S
+    db, org, prog, _ = _alias_program(program)
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    box = _central_box(db)
+    S.poll_mailbox(db, box, fetch=lambda since: [
+        _graph_msg("p1", "ollie@example.com", "support+easterngate@evosyspro.live", "ok thanks")])
+    assert db.query(ProgramResponse).filter_by(lead_id=lead.id).one().reply_to_alias == "easterngate@evosyspro.live"
+
+
+def test_writing_to_another_locations_alias_stays_on_the_contacts_own_conversation(program, sample_advisor):
+    from app.models.program_models import LocationProfile
+    from app.services import inbound_mailbox_service as S
+    db, org, prog, _ = _alias_program(program)
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    box = _central_box(db)
+    S.poll_mailbox(db, box, fetch=lambda since: [
+        _graph_msg("m1", "ollie@example.com", "strifflerhamby@evosyspro.live", "Is the guide free?")])
+    resp = db.query(ProgramResponse).filter_by(lead_id=lead.id).one()
+    home = db.query(LocationProfile).filter_by(organization_id=org.id,
+                                               official_name="Eastern Gate Memorial Gardens").one()
+    assert resp.location_id == home.location_id
+    assert "Striffler-Hamby Mortuary address" in resp.summary
+
+
+def test_a_reply_to_an_alias_from_an_unknown_sender_is_kept_and_alerted(client, program, sample_advisor):
+    from app.models.inbound_mailbox_models import InboundMailboxMessage
+    from app.models.program_models import ProgramUnmatchedReply
+    from app.services import inbound_mailbox_service as S
+    db, org, prog, _ = _alias_program(program)
+    box = _central_box(db)
+    S.poll_mailbox(db, box, fetch=lambda since: [
+        _graph_msg("u1", "daughter@example.org", "strifflerhamby@evosyspro.live",
+                   "My father got your letter - can you send the guide to me instead?")])
+    u = db.query(ProgramUnmatchedReply).one()
+    assert u.alias == "strifflerhamby@evosyspro.live" and u.status == "open" and u.reason == "no_lead"
+    row = db.query(InboundMailboxMessage).one()
+    assert row.organization_id == org.id and "Striffler-Hamby" in row.detail
+    assert db.query(ProgramResponse).count() == 0
+    assert db.query(Notification).filter(Notification.message.contains("matches no contact")).count() >= 1
+    h = _h(db, program["admin"])
+    listed = client.get("/program/unmatched-replies", headers=h).json()
+    assert listed[0]["location"] == "Striffler-Hamby Mortuary" and listed[0]["from"] == "daughter@example.org"
+    assert client.post("/program/unmatched-replies/%s/handled" % u.id, headers=h).json()["status"] == "handled"
+    # re-reading the same message does not duplicate it
+    S.poll_mailbox(db, box, fetch=lambda since: [
+        _graph_msg("u1", "daughter@example.org", "strifflerhamby@evosyspro.live", "same")])
+    assert db.query(ProgramUnmatchedReply).count() == 1
+
+
+def test_an_alias_routes_only_into_its_own_workspace(program, sample_advisor, db_session):
+    import uuid
+    from app.models.models import Reply
+    from app.services import inbound_mailbox_service as S
+    db, org, prog, _ = _alias_program(program)
+    other = Organization(name="Other Co", slug="oc-%s" % uuid.uuid4().hex[:6], is_active=True,
+                         from_email="support@evosyspro.live")
+    db.add(other)
+    db.commit()
+    stranger = Lead(organization_id=other.id, first_name="Ollie", email="ollie@example.com", status="sent")
+    db.add(stranger)
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    box = _central_box(db)
+    S.poll_mailbox(db, box, fetch=lambda since: [
+        _graph_msg("w1", "ollie@example.com", "easterngate@evosyspro.live", "Yes please")])
+    assert db.query(Reply).filter_by(lead_id=lead.id).count() == 1
+    assert db.query(Reply).filter_by(lead_id=stranger.id).count() == 0
+
+
+def test_holding_open_reviews_excludes_them_and_does_not_block_the_rest(client, program, sample_advisor):
+    from app.services.programs import holds, promote
+    db, org = program["db"], program["org"]
+    h = _h(db, program["admin"])
+    res = client.post("/program/records/hold-open-reviews", headers=h).json()
+    recs = {r.source_lead_id: r for r in db.query(ProgramSourceRecord).filter_by(organization_id=org.id)}
+    assert res["held"] == 4 and sorted(res["source_lead_ids"]) == ["L003", "L004", "L005", "L006"]
+    assert recs["L006"].hold_reason == "LOCATION REVIEW" and "DUPLICATE REVIEW" in recs["L003"].hold_reason
+    assert recs["L005"].last_name == "Fakename- NOT INTERESTED DISQUALIFIED"       # nothing auto-fixed
+    assert recs["L005"].needs_data_review is True
+    assert db.query(ProgramSourceRecord).filter_by(organization_id=org.id).count() == 7   # nothing deleted
+    p = promote.promote(db, org, apply=True)
+    assert p["held_not_promoted"] == 4 and p["created"] == 2    # L001+L002 (one contact) and L007
+    assert all(recs[k].lead_id is None for k in ("L003", "L004", "L005", "L006"))
+    q = client.get("/program/records?queue=on_hold", headers=h).json()
+    assert q["total"] == 4 and all(i["on_hold"] for i in q["items"])
+    dash = client.get("/program/dashboard", headers=h).json()
+    assert dash["attention"]["on_hold"] == 4
+    item = [i for i in dash["readiness"]["items"] if i["key"] == "held_records"][0]
+    assert item["ok"] is True and "4 on hold" in item["detail"]
+    # a person can release one; nothing else changes
+    r = client.post("/program/records/%s/hold" % recs["L006"].id, headers=h, json={"on_hold": False}).json()
+    assert r["on_hold"] is False
+
+
+def test_a_held_contact_is_refused_on_every_path(program, sample_advisor):
+    from app.services.programs import holds
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    rec = db.query(ProgramSourceRecord).filter_by(source_lead_id="L001").one()
+    holds.set_hold(db, rec, True, None, "held for test")
+    db.commit()
+    assert identity.send_refusal(db, lead, "manual") == identity.HOLD_REFUSAL
+    from app.services import email_service
+    with patch("app.services.email_service.send_email_via_provider") as prov:
+        with pytest.raises(ValueError, match="ON HOLD"):
+            email_service.send_email_to_lead(db, sample_advisor, lead, subject="Hi", body_html="<p>x</p>",
+                                             send_source="manual")
+    assert not prov.called
+
+
+def test_linked_rows_at_two_locations_are_held_as_a_location_conflict(program):
+    from app.models.program_models import LocationProfile
+    from app.services.programs import holds
+    db, org = program["db"], program["org"]
+    recs = {r.source_lead_id: r for r in db.query(ProgramSourceRecord).filter_by(organization_id=org.id)}
+    other = db.query(LocationProfile).filter_by(organization_id=org.id,
+                                                official_name="Striffler-Hamby Mortuary").one()
+    recs["L002"].location_id = other.location_id     # same person, second row at another home
+    db.commit()
+    res = holds.hold_open_reviews(db, org.id, None)
+    assert res["by_reason"]["LOCATION CONFLICT"] == 2
+    assert recs["L001"].on_hold and "LOCATION CONFLICT" in recs["L001"].hold_reason
+
+
+def test_management_recipients_are_normalised_and_validated(client, program):
+    db = program["db"]
+    h = _h(db, program["admin"])
+    r = client.patch("/program/settings", headers=h, json={
+        "management_recipients": [{"name": "Manager", "phone": "540-555-0123", "email": "Manager@Example.com"}],
+        "staff_alerts_enabled": True})
+    assert r.status_code == 200
+    m = r.json()["management_recipients"][0]
+    assert m["phone"] == "+15405550123" and m["email"] == "manager@example.com"
+    assert client.patch("/program/settings", headers=h, json={
+        "management_recipients": [{"phone": "12"}]}).status_code == 422
+    assert client.patch("/program/settings", headers=h, json={
+        "management_recipients": [{"email": "not-an-email"}]}).status_code == 422
+    item = [i for i in client.get("/program/dashboard", headers=h).json()["readiness"]["items"]
+            if i["key"] == "alert_recipients"][0]
+    assert item["ok"] is True and "sms+email" in item["detail"]
+
+
+def test_a_hot_reply_alerts_management_by_sms_and_email_immediately(program, sample_advisor):
+    from app.models.program_models import ProgramAlert
+    db, org, prog = program["db"], program["org"], program["prog"]
+    prog.management_recipients = json.dumps([{"name": "Manager", "phone": "+15405550123",
+                                              "email": "manager@example.com"}])
+    prog.staff_sms_alerts_enabled = True
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    calls = []
+
+    def fake_deliver(db_, prog_, channel, to, message, **kw):
+        calls.append((channel, to, kw.get("kind")))
+        return True, None
+    with patch("app.services.programs.responses._deliver_staff_alert", side_effect=fake_deliver):
+        responses.on_inbound(db, lead, "Yes I'd like to set up a time to visit", "sms")
+    assert ("sms", "+15405550123", "hot") in calls and ("email", "manager@example.com", "hot") in calls
+    alerts = db.query(ProgramAlert).filter_by(organization_id=org.id, audience="management").all()
+    assert {a.channel for a in alerts} >= {"in_app", "sms", "email"}
+
+
+def test_management_hot_email_has_a_clear_subject(program, monkeypatch):
+    from app.services.programs import responses as R
+    db, prog = program["db"], program["prog"]
+    monkeypatch.setenv("APP_BASE_URL", "https://app.example.com")
+    seen = {}
+
+    def fake_send(to, subject, body, org=None, **kw):
+        seen.update(to=to, subject=subject, body=body)
+        return {"success": True}
+    with patch("app.services.email_service.send_email_via_provider", side_effect=fake_send):
+        ok, _ = R._deliver_staff_alert(db, prog, "email", "manager@example.com", "Ollie <b>replied</b>",
+                                       kind="hot", response_id="r1")
+    assert ok and seen["subject"].startswith("HOT RESPONSE")
+    assert "&lt;b&gt;" in seen["body"] and "https://app.example.com/program?tab=responses&amp;id=r1" in seen["body"]

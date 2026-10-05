@@ -60,6 +60,14 @@ def main(argv=None):
     ap.add_argument("--promote", action="store_true",
                     help="with --apply: turn staged rows into live contacts/leads (one per contact "
                          "master, no consent inferred, nothing enrolled or sent)")
+    ap.add_argument("--mgmt-name", help="management alert recipient name")
+    ap.add_argument("--mgmt-sms", help="management alert phone (10-digit US or +E.164)")
+    ap.add_argument("--mgmt-email", help="management alert email")
+    ap.add_argument("--staff-alerts", choices=("on", "off"),
+                    help="real SMS/email staff alerts for HOT replies (in-app is always on)")
+    ap.add_argument("--hold-reviews", action="store_true",
+                    help="with --stage: put every record still in a review state ON HOLD")
+    ap.add_argument("--no-aliases", action="store_true", help="do not assign location email addresses")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args(argv)
 
@@ -108,7 +116,28 @@ def main(argv=None):
                                      content_type="image/png", filename=os.path.basename(a.logo),
                                      activate=True, uploaded_by=actor.id)
             prog.logo_asset_id = logo.id
+        if a.mgmt_sms or a.mgmt_email:
+            from app.routers.program_router import _clean_email, _clean_phone
+            m = {"name": a.mgmt_name or "Management", "role": "management",
+                 "phone": _clean_phone(a.mgmt_sms, "--mgmt-sms"), "email": _clean_email(a.mgmt_email, "--mgmt-email")}
+            others = [x for x in json.loads(prog.management_recipients or "[]")
+                      if isinstance(x, dict) and (x.get("phone"), x.get("email")) != (m["phone"], m["email"])]
+            prog.management_recipients = json.dumps(others + [m])
+            print("management recipient:", m["name"], m["phone"] or "-", m["email"] or "-")
+        if a.staff_alerts:
+            prog.staff_sms_alerts_enabled = a.staff_alerts == "on"
+            print("staff alerts:", a.staff_alerts)
         db.flush()
+        if not a.no_aliases:
+            from app.services.programs import aliases
+            try:
+                table = aliases.assign(db, prog)
+                print("location addresses: %d on %s (used only once they receive mail)"
+                      % (len(table), aliases.alias_domain(db, prog)))
+                for name, addr in sorted(table.items()):
+                    print("   %-42s %s" % (name, addr))
+            except ValueError as exc:
+                print("location addresses NOT assigned:", exc)
         print("program:", prog.id, "| locations:", sum(1 for p in profiles.values() if not p.is_review_bucket),
               "+ review bucket | campaign families:", len(fams), "(all inactive)")
 
@@ -123,6 +152,11 @@ def main(argv=None):
         res = importer.stage(db, org, content, filename=os.path.basename(a.source),
                              dry_run=not a.stage, actor_id=actor.id)
         print(json.dumps(res["summary"], indent=1, ensure_ascii=False))
+        if a.hold_reviews and a.stage:
+            from app.services.programs import holds
+            h = holds.hold_open_reviews(db, org.id, actor.id)
+            db.commit()
+            print("held:", json.dumps({k: v for k, v in h.items() if k != "source_lead_ids"}))
         from app.services.programs import promote
         try:
             pr = promote.promote(db, org, actor, apply=a.promote)

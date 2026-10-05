@@ -38,9 +38,15 @@ def plan(db: Session, org: Organization) -> Dict:
     groups: Dict[str, List[ProgramSourceRecord]] = defaultdict(list)
     for r in recs:
         groups[r.contact_master_key or r.source_lead_id].append(r)
-    todo = {k: v for k, v in groups.items() if not any(x.lead_id for x in v)}
+    # A contact with ANY held row stays staged: held records are excluded from
+    # outreach and promotion until a person releases them (programs/holds.py).
+    held = {k for k, v in groups.items() if any(getattr(x, "on_hold", False) for x in v)}
+    todo = {k: v for k, v in groups.items() if k not in held and not any(x.lead_id for x in v)}
+    live = sum(1 for v in groups.values() if any(x.lead_id for x in v))
     return {"records": len(recs), "masters": len(groups), "to_create": len(todo),
-            "already_live": len(groups) - len(todo), "groups": todo}
+            "already_live": live, "held_not_promoted": len(held - {k for k, v in groups.items()
+                                                                if any(x.lead_id for x in v)}),
+            "groups": todo}
 
 
 def promote(db: Session, org: Organization, actor: Optional[User] = None, *,

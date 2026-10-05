@@ -72,6 +72,19 @@ class OutreachProgram(Base):
     # Staff SMS alerts are a real send; off until someone turns them on.
     staff_sms_alerts_enabled = Column(Boolean, nullable=False, default=False)
     logo_asset_id = Column(String, nullable=True)
+    # LOCATION EMAIL ALIASES (easterngategardens@evosyspro.live). One alias per
+    # location, all delivered into ONE central monitored mailbox that EvoSys
+    # reads. alias_domain NULL = the domain of the verified sending address.
+    # alias_mode: "from" (alias is the From and Reply-To, only when its domain
+    # is the verified sending domain), "reply_to" (verified sender stays the
+    # From; alias is the Reply-To) or "off". An alias is used ONLY once it is
+    # known to RECEIVE mail - seen arriving in the central mailbox, or
+    # confirmed by a person - because an alias that does not exist yet would
+    # bounce every reply.
+    alias_domain = Column(String, nullable=True)
+    alias_mode = Column(String, nullable=False, default="from")
+    aliases_receiving_confirmed_at = Column(DateTime, nullable=True)
+    aliases_receiving_confirmed_by = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -82,6 +95,7 @@ class LocationProfile(Base):
     __tablename__ = "location_profiles"
     __table_args__ = (
         UniqueConstraint("organization_id", "location_id", name="uq_location_profile_location"),
+        UniqueConstraint("email_alias", name="uq_location_profile_alias"),
         Index("ix_location_profiles_org", "organization_id"),
     )
 
@@ -98,6 +112,8 @@ class LocationProfile(Base):
     advisor_names = Column(Text, nullable=True)              # JSON list
     email_display_name = Column(String, nullable=True)       # override; default "<contact> | <home>"
     sms_identity_name = Column(String, nullable=True)        # override for the SMS sign-off
+    email_alias = Column(String, nullable=True)              # full address, lower-case, unique
+    alias_verified_at = Column(DateTime, nullable=True)      # first time mail to it was seen arriving
     appointment_link = Column(String, nullable=True)
     logo_asset_id = Column(String, nullable=True)
     hero_asset_id = Column(String, nullable=True)
@@ -151,6 +167,12 @@ class ProgramSourceRecord(Base):
     location_assigned_manually = Column(Boolean, nullable=False, default=False)
     data_review_cleared_at = Column(DateTime, nullable=True)
     duplicate_review_cleared_at = Column(DateTime, nullable=True)
+    # HOLD: parked by a person's decision - excluded from ALL outreach and from
+    # promotion, never deleted, never auto-fixed. Released only by a person.
+    on_hold = Column(Boolean, nullable=False, default=False)
+    hold_reason = Column(Text, nullable=True)
+    held_at = Column(DateTime, nullable=True)
+    held_by = Column(String, nullable=True)
     # Set only when the staged row is later committed to a live contact/lead.
     org_contact_id = Column(String, nullable=True)
     lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
@@ -182,6 +204,7 @@ class ProgramResponse(Base):
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
     lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
     reply_id = Column(String, nullable=True)
+    reply_to_alias = Column(String, nullable=True)           # the location address the family wrote to
     channel = Column(String, nullable=False)                 # sms | email
     location_id = Column(String, nullable=True)
     campaign_family = Column(String, nullable=True)
@@ -332,4 +355,31 @@ class ProgramEmailTouch(Base):
     reason = Column(Text, nullable=True)
     email_message_id = Column(String, nullable=True)
     attempted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ProgramUnmatchedReply(Base):
+    """A reply that reached a location alias but matches no contact.
+
+    It is never dropped: it is kept here with the location its address names,
+    raises an in-app alert, and stays in the Responses queue until a person
+    marks it handled (for example after finding the family under another
+    address).
+    """
+    __tablename__ = "program_unmatched_replies"
+    __table_args__ = (Index("ix_program_unmatched_org_status", "organization_id", "status"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    location_id = Column(String, nullable=True)
+    alias = Column(String, nullable=True)
+    from_address = Column(String, nullable=True)
+    subject = Column(String, nullable=True)
+    body_excerpt = Column(Text, nullable=True)
+    received_at = Column(DateTime, nullable=True)
+    mailbox_message_id = Column(String, nullable=True)       # InboundMailboxMessage.id
+    reason = Column(String, nullable=True)                   # no_lead | ambiguous
+    status = Column(String, nullable=False, default="open")  # open | handled
+    handled_at = Column(DateTime, nullable=True)
+    handled_by = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

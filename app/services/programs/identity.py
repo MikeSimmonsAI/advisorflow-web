@@ -129,6 +129,9 @@ DUPLICATE_REVIEW_REFUSAL = (
     "source data. Confirm who it belongs to before anything is sent.")
 
 
+HOLD_REFUSAL = (
+    "ON HOLD: this contact was put on hold by a person and is excluded from outreach. "
+    "Release the hold in Review before anything is sent.")
 CAMPAIGN_OFF_REFUSAL = (
     "CAMPAIGN OFF: this contact's campaign is not switched on, so no automated "
     "message goes out. A person can still reply by hand.")
@@ -145,6 +148,8 @@ def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None) -> 
         return None
     recs = records_for_lead(db, lead)
     rec = source_record_for_lead(db, lead)
+    if any(getattr(r, "on_hold", False) for r in recs):
+        return HOLD_REFUSAL
     if any(r.needs_data_review for r in recs):
         return DATA_REVIEW_REFUSAL
     if any(r.duplicate_review_reason for r in recs):
@@ -164,11 +169,19 @@ def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None) -> 
 
 
 def apply_email_identity(db: Session, lead: Lead, ident):
-    """Set the From display name on a resolved SendingIdentity for a program lead."""
+    """Set the From display name - and, once the location's alias is known to
+    receive mail, the alias as From (verified domain) or Reply-To - on a
+    resolved SendingIdentity for a program lead. See programs/aliases.py."""
     ctx = context_for(db, lead, channel="email")
     if ctx and ctx.get("ok") and ident is not None:
         try:
             ident.from_name = ctx["display_name"]
+        except AttributeError:
+            pass
+        try:
+            from app.services.programs import aliases as _aliases
+            prog = program_for_org(db, lead.organization_id)
+            _aliases.apply(prog, location_profile_for_lead(db, lead), ident)
         except AttributeError:
             pass
     return ident

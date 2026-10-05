@@ -202,6 +202,83 @@ plan endpoint sends nothing; plus the independent review's regressions
 
 ---
 
+## 5b. Production-readiness update (2026-10-05 afternoon, Mike's instructions)
+
+### Location email aliases — one address per location, ONE central inbox
+* 39 addresses, one per location, e.g. `easterngategardens@evosyspro.live`,
+  `strifflerhamby@evosyspro.live` (full list: `scripts/sci_location_aliases.csv`;
+  live list: Settings → Location email addresses, or `GET /program/aliases.csv`).
+  Rule: drop generic words (funeral home, memorial gardens, cemetery…); two
+  locations with the same proper name keep their type word — your examples
+  `easterngate` / `alabamaheritage` each name TWO locations, so they are
+  `easterngatefuneralhome` / `easterngategardens` and
+  `alabamaheritagecemetery` / `alabamaheritagefuneralhome`. Editable per
+  location (Locations tab), unique platform-wide, reserved names refused.
+* **Authentication (live DNS, 13:15 CT):** Resend is verified for the WHOLE
+  domain `evosyspro.live` (`resend-domain-verification` TXT at the root, DKIM
+  at `resend._domainkey.evosyspro.live`, nothing on the `send.` subdomain);
+  return-path `send.evosyspro.live` (SPF `include:…_spfm.send.evosyspro.live`);
+  DMARC `p=quarantine; adkim=r; aspf=r`. So `<alias>@evosyspro.live` as the
+  From is DKIM-aligned (d=evosyspro.live) and SPF relaxed-aligned →
+  **DMARC passes, no DNS change needed.** The code enforces it: an alias is
+  the From only when its domain equals the verified sender's domain;
+  otherwise the verified sender stays the From and the alias is Reply-To only.
+* **Receiving is the real dependency.** `evosyspro.live` MX is Microsoft 365
+  (GoDaddy-provisioned tenant). An alias that does not exist there would
+  bounce every reply — as From or as Reply-To. So an alias is used ONLY once
+  it is known to receive mail: seen arriving in the central mailbox (EvoSys
+  marks it automatically) or confirmed by a person (Settings → "Confirm
+  addresses receive mail…", typed confirmation). Until then each send goes out
+  exactly as before: From `support@evosyspro.live`, display name
+  "Kerry Allan | <Location>", replies to support@ — still routed to the right
+  family by the sender's address.
+* **Creating them (not 39 mailboxes):** `scripts/m365_location_aliases.bat`
+  (dry run) → `m365_location_aliases.bat apply` adds all 39 as ALIASES on
+  `support@evosyspro.live` via Exchange Online PowerShell; you sign in
+  yourself in the Microsoft window. Refuses addresses owned by another
+  mailbox. GoDaddy fallback: admin.microsoft.com → Users → support →
+  Manage username and email → add aliases.
+* **Routing (proven, simulated):** the central-mailbox reader now reads
+  To/Cc. Mail addressed to an alias (or `support+<alias>@…`) routes ONLY into
+  that alias's workspace, to the contact with the sender's address; the
+  response is tagged with the alias; a family writing to a different
+  location's address stays on their own conversation (summary notes it). No
+  matching contact → kept in "Replies to a location address that match no
+  contact" (Responses tab + dashboard), in-app alert, never dropped; "Mark
+  handled" when dealt with. QA run (central mailbox, simulated Graph
+  messages): HOT reply to `greenwoodserenity@` → right lead, HOT, SLA;
+  `support+alabamaheritagecemetery@` → right lead; unknown sender to
+  `strifflerhamby@` → unmatched queue + alert; each alias marked receiving.
+
+### Management alerts
+* Management recipient: SMS +1 540-392-7776, email michaelpschlueter@gmail.com
+  (configured in QA; production via `program_setup.py --mgmt-sms … --mgmt-email
+  … --staff-alerts on`). Kerry remains primary contact. Editable in Settings;
+  phones normalised to E.164, emails validated.
+* HOT: in-app + SMS + email to management immediately inside the reply
+  webhook; email subject "HOT RESPONSE - <program>" with a link to the
+  response; SLA breach re-alerts "HOT RESPONSE - NOT YET HANDLED".
+* **Management SMS alerts need a sending number** — the same blocker as
+  customer SMS (no SCI number / TFV unconfirmed). Until then the SMS alert is
+  recorded "not sent" with that reason; in-app and email still fire.
+
+### Review records → HOLD
+* `hold_open_reviews` (Review tab "Hold all open reviews", or
+  `program_setup.py --hold-reviews`): **10 source records = 9 contacts** — your
+  8 (2 Location, 2 Duplicate, 4 Data) plus 1 found tonight: two rows
+  auto-linked as the same person that name **two different locations**
+  ("LOCATION CONFLICT"). Held = refused on every send path (checked first),
+  skipped by the email runner, NOT promoted to a live lead, nothing deleted,
+  nothing auto-fixed. Readiness shows "N on hold - does not block the rest".
+  A person can release a record (audited).
+
+### Tests
+101 SCI/mailbox tests pass (alias rules, From/Reply-To decision incl. the
+not-yet-receiving and off-domain cases, routing through the real mailbox
+reader incl. plus-addressing, cross-workspace isolation, unmatched replies,
+holds incl. location conflict, promotion skipping holds, management
+normalisation, HOT alerts on SMS+email, alert subject/escaping).
+
 ## 6. Exactly what remains before SCI production outreach can be turned on
 
 1. **Deploy this code** (it is on branch `sci-program`, not on `main`):
@@ -211,19 +288,23 @@ plan endpoint sends nothing; plus the independent review's regressions
    * App: owner console → create customer "Service Corporation International"
      (industry Funeral home / cemetery, brand EvoSys Pro), then
      `POST /god/programs/setup` with the 39 location names; or
-   * Render shell: `python scripts/program_setup.py --create --platform-slug evosyspro --actor-email <owner> --source SCI_Filtered_551_Leads.csv --logo SCI_Logo.png`
-     (dry run), then the same with `--apply --stage`.
-3. **Review queues** in Family Service Center: 2 Location Review, 2 Duplicate
-   Review, 4 Data Review — decide each.
+   * Render shell: `python scripts/program_setup.py --create --platform-slug evosyspro --actor-email <owner> --source SCI_Filtered_551_Leads.csv --logo SCI_Logo.png --mgmt-name Management --mgmt-sms 5403927776 --mgmt-email michaelpschlueter@gmail.com --staff-alerts on`
+     (dry run; prints the 39 location addresses), then the same with
+     `--apply --stage --hold-reviews`.
+3. **Review queues:** ON HOLD (9 contacts / 10 records) — excluded; decide
+   them whenever convenient, they do not block the clean population.
+3a. **Location addresses:** run `scripts/m365_location_aliases.bat` (dry run),
+   then `… apply`; connect `support@evosyspro.live` as the reply mailbox if it
+   is not already; send one test email to any alias — it shows "receiving" and
+   that location's emails start using it (or confirm all in Settings).
 4. **Location profiles**: addresses, websites, managers, facility images,
    location logos (we invented none).
 5. **Kerry Allan**: her email (to create her account — no invite is sent until
-   you choose) and alert phone/email; management recipients. Then switch staff
-   alerts on.
+   you choose) and her own alert phone/email. Management alerts are already
+   configured (step 2 flags) and staff alerts on.
 6. **Email**: set `RESEND_WEBHOOK_SECRET` and add the webhook in Resend
    (`/email/events/resend`, events delivered / bounced / complained / opened);
-   set SCI's Reply-To or connect the `support@evosyspro.live` mailbox for reply
-   reading; set `PROGRAM_ASSET_BASE_URL` so hosted flyer and unsubscribe links
+   the location addresses (step 3a) replace a separate Reply-To; set `PROGRAM_ASSET_BASE_URL` so hosted flyer and unsubscribe links
    use your domain.
 7. **SMS**: confirm TFV approval for +1 844-917-2171; assign a number used by
    SCI alone for inbound routing.
@@ -232,8 +313,7 @@ plan endpoint sends nothing; plus the independent review's regressions
 9. **Promote staged rows to live contacts/leads** (one per contact master,
    every Lead ID traceable, no consent inferred, nothing enrolled or sent):
    `python scripts/program_setup.py --org-id <SCI id> --source SCI_Filtered_551_Leads.csv --apply --stage --promote`
-   — after the review queues are decided (held rows are promoted but every
-   send path refuses them until cleared).
+   — held contacts are not promoted (they stay staged until released).
 10. **One live end-to-end test** to your own phone/email: send, reply by text
     and by email, confirm the reply lands in Responses, the cadence pauses,
     and alerts fire.

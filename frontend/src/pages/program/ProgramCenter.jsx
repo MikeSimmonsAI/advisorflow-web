@@ -138,6 +138,8 @@ function Dashboard({ data, go }) {
     { label: 'Data Review', value: att.data_review, tone: 'amber', to: ['tab', 'review'], queue: 'data_review' },
     { label: 'Location Review', value: att.location_review, tone: 'amber', to: ['tab', 'review'], queue: 'location_review' },
     { label: 'Duplicate Review', value: att.duplicate_review, to: ['tab', 'review'], queue: 'duplicate_review' },
+    { label: 'On Hold (excluded)', value: att.on_hold || 0, to: ['tab', 'review'], queue: 'on_hold' },
+    { label: 'Unmatched Email Replies', value: att.unmatched_replies || 0, to: ['tab', 'responses'] },
   ]
   const openReview = queue => { go('queue', queue); go('tab', 'review') }
   const a = data.automation
@@ -337,6 +339,8 @@ function Responses({ locationId, onChange, navigate }) {
     } catch (e) { setErr(errText(e)) }
   }
   return (
+    <>
+    <UnmatchedReplies onChange={onChange} />
     <section className="pc-card">
       {err && <div className="pc-alert" role="alert">{err}</div>}
       <div className="pc-filters">
@@ -381,10 +385,40 @@ function Responses({ locationId, onChange, navigate }) {
                 <button type="button" className="pc-btn" onClick={() => mark(sel, 'closed')}>Close</button>
                 <button type="button" className="pc-btn primary" onClick={() => navigate(`/leads/${sel.lead_id}`)}>Open conversation</button>
               </div>
+              {sel.reply_to_alias && <p className="pc-small pc-muted">Written to {sel.reply_to_alias}</p>}
             </div>
           )}
         </div>
       </div>
+    </section>
+    </>
+  )
+}
+
+function UnmatchedReplies({ onChange }) {
+  const [rows, setRows] = useState([])
+  const [err, setErr] = useState('')
+  const load = useCallback(() => { api.get('/program/unmatched-replies').then(setRows).catch(e => setErr(errText(e))) }, [])
+  useEffect(() => { load() }, [load])
+  if (!rows.length && !err) return null
+  const done = async u => {
+    try { await api.post(`/program/unmatched-replies/${u.id}/handled`, {}); load(); onChange() } catch (e) { setErr(errText(e)) }
+  }
+  return (
+    <section className="pc-card" style={{ marginBottom: 14 }}>
+      <h2 style={{ fontSize: 16, margin: '0 0 4px' }}>Replies to a location address that match no contact <span className="pc-badge warn">{rows.length}</span></h2>
+      <p className="pc-small pc-muted" style={{ marginTop: 0 }}>Someone wrote to a location's address from an email we don't have. Find the family (for example under their spouse's address), answer them, then mark it handled.</p>
+      {err && <div className="pc-alert" role="alert">{err}</div>}
+      {rows.map(u => (
+        <div className="pc-row" key={u.id} style={{ alignItems: 'flex-start' }}>
+          <div>
+            <strong>{u.from || 'Unknown sender'}</strong> <span className="pc-small pc-muted">to {u.alias} · {u.location || '—'} · {when(u.received_at)}</span>
+            <div className="pc-small">{u.subject}</div>
+            <div className="pc-small pc-muted">{u.body}</div>
+          </div>
+          <button type="button" className="pc-btn" onClick={() => done(u)}>Mark handled</button>
+        </div>
+      ))}
     </section>
   )
 }
@@ -409,12 +443,21 @@ function Review({ locationId, locations, isManager, initialQueue, onChange }) {
     try { await api.post(`/program/records/${rec.id}/location`, { location_id: loc }); load(); onChange() } catch (e) { setErr(errText(e)) }
   }
   const homes = locations.filter(l => !l.is_review_bucket)
+  const setHold = async (rec, on) => {
+    try { await api.post(`/program/records/${rec.id}/hold`, { on_hold: on }); load(); onChange() } catch (e) { setErr(errText(e)) }
+  }
+  const holdAll = async () => {
+    if (!window.confirm('Put every record still in Location, Duplicate or Data Review on hold? Nothing is deleted or changed; they are excluded from outreach until released.')) return
+    try { const r = await api.post('/program/records/hold-open-reviews', {}); setQueue('on_hold'); load(); onChange(); setErr(r.held ? '' : 'Nothing new to hold.') } catch (e) { setErr(errText(e)) }
+  }
   return (
     <section className="pc-card">
       {err && <div className="pc-alert" role="alert">{err}</div>}
+      {isManager && <div className="pc-detail-actions" style={{ marginTop: 0 }}><button type="button" className="pc-btn" onClick={holdAll}>Hold all open reviews</button></div>}
       <div className="pc-filters">
         <label className="pc-small">Queue
           <select className="pc-input" value={queue} onChange={e => setQueue(e.target.value)}>
+            <option value="on_hold">On hold (excluded from outreach)</option>
             <option value="data_review">Data Review (source notes)</option>
             <option value="location_review">Location Review</option>
             <option value="duplicate_review">Duplicate Review</option>
@@ -449,6 +492,7 @@ function Review({ locationId, locations, isManager, initialQueue, onChange }) {
                 <td>{r.source_status}</td>
                 <td className="pc-small">{r.campaign_family || '—'}</td>
                 <td className="pc-small">
+                  {r.on_hold && <div><span className="pc-badge hot">ON HOLD</span> {r.hold_reason}{isManager && <> · <button type="button" className="pc-linkbtn" onClick={() => setHold(r, false)}>Release</button></>}</div>}
                   {r.data_note_flags.length > 0 && <div><span className="pc-badge warn">SOURCE DATA NOTE DETECTED — REVIEW</span> {r.data_note_flags.join(', ')}</div>}
                   {r.duplicate_review_reason && <div>Duplicate review: {r.duplicate_review_reason}</div>}
                   {r.link_reason && <div>{r.link_reason}</div>}
@@ -469,7 +513,8 @@ function Review({ locationId, locations, isManager, initialQueue, onChange }) {
 const PROFILE_FIELDS = [
   ['official_name', 'Official location name'], ['website', 'Website'], ['facility_phone', 'Facility phone (not shown to families)'],
   ['manager_name', 'Manager'], ['address_line1', 'Address'], ['city', 'City'], ['state', 'State'], ['postal_code', 'ZIP'],
-  ['appointment_link', 'Appointment link'], ['email_display_name', 'Email sender name (override)'], ['sms_identity_name', 'Text sign-off name (override)'],
+  ['appointment_link', 'Appointment link'], ['email_alias', 'Location email address'],
+  ['email_display_name', 'Email sender name (override)'], ['sms_identity_name', 'Text sign-off name (override)'],
 ]
 
 function Locations({ isManager, selected, onChange }) {
@@ -494,6 +539,7 @@ function Locations({ isManager, selected, onChange }) {
       official_name: p.official_name || '', website: p.website || '', facility_phone: p.facility_phone || '',
       manager_name: p.manager_name || '', address_line1: p.address?.address_line1 || '', city: p.address?.city || '',
       state: p.address?.state || '', postal_code: p.address?.postal_code || '', appointment_link: p.appointment_link || '',
+      email_alias: p.email_alias || '',
       email_display_name: '', sms_identity_name: '', advisor_names: (p.advisor_names || []).join(', '),
       logo_asset_id: '', hero_asset_id: '',
     })
@@ -526,6 +572,8 @@ function Locations({ isManager, selected, onChange }) {
             {cur.is_review_bucket ? <p className="pc-note">Contacts whose location could not be resolved wait here. Nothing in this bucket is ever sent to.</p> : (
               <>
                 <p className="pc-small pc-muted">Families see: <strong>{cur.email_display_name}</strong> · texts end “{cur.sms_signoff}”. Source names: {cur.source_names.join(', ') || '—'}</p>
+                <p className="pc-small">Location email: <strong>{cur.email_alias || 'none yet'}</strong>{' '}
+                  {cur.email_alias && <span className={`pc-badge ${cur.alias_receiving ? 'ok' : 'warn'}`}>{cur.alias_receiving ? (cur.alias_mode === 'from' ? 'in use as From + Reply-To' : cur.alias_mode === 'reply_to' ? 'in use as Reply-To' : 'receiving') : 'not used yet - not seen receiving mail'}</span>}</p>
                 {msg && <div className="pc-okmsg">{msg}</div>}
                 <div className="pc-form">
                   {PROFILE_FIELDS.map(([k, label]) => (
@@ -556,6 +604,59 @@ function Locations({ isManager, selected, onChange }) {
             )}
           </div>
         )}
+      </div>
+    </section>
+  )
+}
+
+/* ── location email addresses ───────────────────────────────────────────── */
+
+function AliasSettings({ isManager, form, setForm, onChange }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  const load = useCallback(() => { api.get('/program/aliases').then(setD).catch(e => setErr(errText(e))) }, [])
+  useEffect(() => { load() }, [load])
+  const assign = async () => { try { await api.post('/program/aliases/assign', {}); load(); onChange() } catch (e) { setErr(errText(e)) } }
+  const confirmAll = async () => {
+    const c = window.prompt('Only after the addresses were added to the central mailbox in Microsoft 365. Type ALIASES RECEIVE MAIL to confirm.')
+    if (c == null) return
+    try { await api.post('/program/aliases/confirm-receiving', { confirm: c }); load(); onChange() } catch (e) { setErr(errText(e)) }
+  }
+  if (!d) return null
+  const st = d.status
+  const eff = st.effective || {}
+  return (
+    <section className="pc-card" style={{ marginTop: 14 }}>
+      <h2>Location email addresses</h2>
+      {err && <div className="pc-alert" role="alert">{err}</div>}
+      <p className="pc-small pc-muted" style={{ marginTop: 0 }}>
+        One address per location on <strong>{st.domain || '—'}</strong>, all delivered to the one central mailbox EvoSys reads ({st.verified_from || 'no verified sender'}).
+        Authentication: <strong>{st.auth_ok ? 'aligned - same domain as the verified sender' : 'not aligned - used as Reply-To only'}</strong>.
+        An address is used only once it receives mail ({st.seen_receiving} of {st.assigned} seen receiving{st.confirmed_all ? '; all confirmed' : ''}).
+        In use: {eff.from || 0} as From, {eff.reply_to || 0} as Reply-To, {eff.none || 0} not yet.
+      </p>
+      <div className="pc-filters">
+        <label className="pc-small">Use the location address as
+          <select className="pc-input" disabled={!isManager} value={form.alias_mode} onChange={e => setForm(f => ({ ...f, alias_mode: e.target.value }))}>
+            <option value="from">From and Reply-To (when aligned)</option><option value="reply_to">Reply-To only</option><option value="off">Not used</option>
+          </select>
+        </label>
+        {isManager && <button type="button" className="pc-btn" onClick={assign}>Assign missing addresses</button>}
+        {isManager && !st.confirmed_all && <button type="button" className="pc-btn" onClick={confirmAll}>Confirm addresses receive mail…</button>}
+      </div>
+      <p className="pc-small pc-muted">Saved with "Save settings" above.</p>
+      <div className="pc-tablewrap">
+        <table className="pc-table">
+          <thead><tr><th>Location</th><th>Address</th><th>Status</th></tr></thead>
+          <tbody>
+            {d.items.map(r => (
+              <tr key={r.location_id}>
+                <td>{r.location}</td><td className="pc-small">{r.alias || '—'}</td>
+                <td className="pc-small">{r.mode === 'from' ? 'From + Reply-To' : r.mode === 'reply_to' ? 'Reply-To' : (r.alias ? 'waiting to receive mail' : '—')}{r.seen_receiving_at ? ` · seen ${when(r.seen_receiving_at)}` : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </section>
   )
@@ -789,6 +890,7 @@ function Settings({ isManager, program, readiness, onChange }) {
     hot_sla_minutes: program.hot_sla_minutes, reply_instructions_sms: program.reply_instructions_sms || '',
     reply_instructions_email: program.reply_instructions_email || '',
     managers: (program.management_recipients || []).map(m => [m.name, m.email, m.phone].map(x => x || '').join(' | ')).join('\n'),
+    staff_alerts_enabled: !!program.staff_alerts_enabled, alias_mode: program.alias_mode || 'from',
   })
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
@@ -806,6 +908,7 @@ function Settings({ isManager, program, readiness, onChange }) {
         alert_email: form.alert_email || null, alert_phone: form.alert_phone || null,
         hot_sla_minutes: Number(form.hot_sla_minutes) || 15, reply_instructions_sms: form.reply_instructions_sms,
         reply_instructions_email: form.reply_instructions_email, management_recipients: managers,
+        staff_alerts_enabled: form.staff_alerts_enabled, alias_mode: form.alias_mode,
       })
       setMsg('Saved.'); onChange()
     } catch (e) { setErr(errText(e)) }
@@ -836,7 +939,11 @@ function Settings({ isManager, program, readiness, onChange }) {
           <label>Alert email (blank until supplied)<input className="pc-input" disabled={!isManager} value={form.alert_email} onChange={e => setForm(f => ({ ...f, alert_email: e.target.value }))} /></label>
           <label>Alert phone (blank until supplied)<input className="pc-input" disabled={!isManager} value={form.alert_phone} onChange={e => setForm(f => ({ ...f, alert_phone: e.target.value }))} /></label>
           <label>HOT response SLA (minutes)<input className="pc-input" type="number" min="1" max="1440" disabled={!isManager} value={form.hot_sla_minutes} onChange={e => setForm(f => ({ ...f, hot_sla_minutes: e.target.value }))} /></label>
-          <label>Staff text/email alerts<input className="pc-input" disabled value={program.staff_alerts_enabled ? 'On' : 'Off (in-app alerts only)'} /></label>
+          <label>Staff text/email alerts (HOT: immediate)
+            <select className="pc-input" disabled={!isManager} value={form.staff_alerts_enabled ? 'on' : 'off'} onChange={e => setForm(f => ({ ...f, staff_alerts_enabled: e.target.value === 'on' }))}>
+              <option value="on">On - in-app, text and email</option><option value="off">Off - in-app only</option>
+            </select>
+          </label>
           <label className="full">Management alert recipients - one per line: name | email | phone
             <textarea disabled={!isManager} value={form.managers} onChange={e => setForm(f => ({ ...f, managers: e.target.value }))} />
           </label>
@@ -845,6 +952,7 @@ function Settings({ isManager, program, readiness, onChange }) {
         </div>
         {isManager && <div className="pc-detail-actions"><button type="button" className="pc-btn primary" onClick={save}>Save settings</button></div>}
       </section>
+      <AliasSettings isManager={isManager} form={form} setForm={setForm} onChange={onChange} />
       {isManager && (
         <section className="pc-card" style={{ marginTop: 14 }}>
           <h2>Source import (staging only)</h2>

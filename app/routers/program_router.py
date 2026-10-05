@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 
 from app.utils.content_disposition import content_disposition
+from app.services.programs import aliases as _aliases
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_god, require_tenant_or_observer, require_tenant_user
@@ -90,11 +91,19 @@ def _profile_json(db: Session, prog: OutreachProgram, p: LocationProfile) -> dic
         "advisor_names": json.loads(p.advisor_names or "[]"),
         "appointment_link": p.appointment_link,
         "email_display_name": identity.display_name(prog, p) if not p.is_review_bucket else None,
+        "email_alias": p.email_alias, "alias_verified_at": _iso(p.alias_verified_at),
+        "alias_receiving": _aliases.receiving(prog, p),
+        "alias_mode": _aliases.effective_mode(prog, p, _aliases.sending_address(db, prog.organization_id))
+        if not p.is_review_bucket else None,
         "sms_signoff": identity.sms_signoff(prog, p) if not p.is_review_bucket else None,
         "logo_url": _asset_url(assets.get(p.logo_asset_id)),
         "hero_url": _asset_url(assets.get(p.hero_asset_id)),
         "brand_settings": json.loads(p.brand_settings or "{}"),
     }
+
+
+def _iso(dt):
+    return dt.isoformat() + "Z" if dt else None
 
 
 def _program_json(db: Session, prog: OutreachProgram) -> dict:
@@ -114,6 +123,9 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "reply_instructions_email": prog.reply_instructions_email,
         "require_location_to_send": prog.require_location_to_send,
         "staff_alerts_enabled": prog.staff_sms_alerts_enabled,
+        "alias_mode": prog.alias_mode or "from",
+        "aliases": _aliases.status(db, prog),
+        "aliases_receiving_confirmed_at": _iso(prog.aliases_receiving_confirmed_at),
         "logo_url": _asset_url(logo),
     }
 
@@ -143,6 +155,33 @@ class SettingsIn(BaseModel):
     reply_instructions_sms: Optional[str] = None
     reply_instructions_email: Optional[str] = None
     staff_alerts_enabled: Optional[bool] = None
+    alias_mode: Optional[str] = None
+
+
+_EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _clean_phone(raw, field: str):
+    """US numbers to E.164 (+1XXXXXXXXXX); anything else must already be +E.164."""
+    if raw is None or not str(raw).strip():
+        return None
+    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    if str(raw).strip().startswith("+") and 8 <= len(digits) <= 15:
+        return "+" + digits
+    if len(digits) == 10:
+        return "+1" + digits
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    raise HTTPException(status_code=422, detail="%s: %r is not a valid phone number." % (field, raw))
+
+
+def _clean_email(raw, field: str):
+    if raw is None or not str(raw).strip():
+        return None
+    v = str(raw).strip().lower()
+    if not _EMAIL_RE.match(v):
+        raise HTTPException(status_code=422, detail="%s: %r is not a valid email address." % (field, raw))
+    return v
 
 
 @router.patch("/settings")
@@ -160,9 +199,20 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db),
     if "management_recipients" in data:
         clean = []
         for m in data.pop("management_recipients") or []:
-            clean.append({k: (str(m.get(k)).strip() if m.get(k) else None)
-                          for k in ("name", "email", "phone", "role")})
+            row = {k: (str(m.get(k)).strip() if m.get(k) else None) for k in ("name", "role")}
+            row["role"] = row["role"] or "management"
+            row["phone"] = _clean_phone(m.get("phone"), "Management phone")
+            row["email"] = _clean_email(m.get("email"), "Management email")
+            if row["phone"] or row["email"]:
+                clean.append(row)
         prog.management_recipients = json.dumps(clean)
+    if "alert_phone" in data:
+        data["alert_phone"] = _clean_phone(data["alert_phone"], "Alert phone")
+    if "alert_email" in data:
+        data["alert_email"] = _clean_email(data["alert_email"], "Alert email")
+    if "alias_mode" in data:
+        if data["alias_mode"] not in ("from", "reply_to", "off"):
+            raise HTTPException(status_code=422, detail="alias_mode must be from, reply_to or off.")
     if "staff_alerts_enabled" in data:
         prog.staff_sms_alerts_enabled = bool(data.pop("staff_alerts_enabled"))
     for k, v in data.items():
@@ -187,6 +237,7 @@ class ProfileIn(BaseModel):
     advisor_names: Optional[List[str]] = None
     email_display_name: Optional[str] = None
     sms_identity_name: Optional[str] = None
+    email_alias: Optional[str] = None
     appointment_link: Optional[str] = None
     logo_asset_id: Optional[str] = None
     hero_asset_id: Optional[str] = None
@@ -219,6 +270,25 @@ def update_location(profile_id: str, body: ProfileIn, db: Session = Depends(get_
         data.pop(k, None)
     if "advisor_names" in data:
         p.advisor_names = json.dumps([a.strip() for a in data.pop("advisor_names") or [] if a.strip()])
+    if "email_alias" in data:
+        raw = (data.pop("email_alias") or "").strip().lower()
+        if p.is_review_bucket:
+            raise HTTPException(status_code=422, detail="The review bucket has no email address.")
+        if not raw:
+            p.email_alias, p.alias_verified_at = None, None
+        else:
+            domain = _aliases.alias_domain(db, prog)
+            local = raw.split("@", 1)[0]
+            if "@" in raw and raw.split("@", 1)[1] != domain:
+                raise HTTPException(status_code=422, detail="Location addresses must be on %s." % domain)
+            why = _aliases.validate_local(local)
+            if why:
+                raise HTTPException(status_code=422, detail="Address: %s." % why)
+            addr = "%s@%s" % (local, domain)
+            if _aliases.taken(db, addr, p.id):
+                raise HTTPException(status_code=409, detail="%s is already used by another location." % addr)
+            if addr != p.email_alias:
+                p.email_alias, p.alias_verified_at = addr, None
     for k, v in data.items():
         setattr(p, k, (v.strip() or None) if isinstance(v, str) else v)
     db.commit()
@@ -331,6 +401,8 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
             "data_review": sum(1 for r in recs if r.needs_data_review),
             "location_review": sum(1 for r in recs if r.location_status == "location_review"),
             "duplicate_review": sum(1 for r in recs if r.duplicate_review_reason),
+            "on_hold": sum(1 for r in recs if r.on_hold),
+            "unmatched_replies": _unmatched_open(db, prog.organization_id),
         },
         "recent_conversations": recent,
         "location_performance": loc_perf,
@@ -415,21 +487,66 @@ def readiness(db: Session, prog: OutreachProgram) -> dict:
     items = [
         {"key": "email_sender", "ok": bool(getattr(ident, "from_email", None)),
          "detail": getattr(ident, "from_email", None) or "no verified sending address resolved"},
-        {"key": "reply_to", "ok": bool(getattr(ident, "reply_to_email", None)),
-         "detail": getattr(ident, "reply_to_email", None) or "no Reply-To set - replies go to the From address"},
+        _alias_item(db, prog),
         {"key": "sms_number", "ok": bool(sms_number),
          "detail": sms_number or "no organization Twilio number configured"},
         _sms_routing_item(db, prog.organization_id, sms_number),
         _mailbox_item(db, ident),
         {"key": "primary_contact_user", "ok": bool(prog.primary_contact_user_id),
          "detail": "account linked" if prog.primary_contact_user_id else "profile only - add an email to create the account"},
-        {"key": "alert_recipients", "ok": bool(prog.alert_phone or prog.alert_email),
-         "detail": "configured" if (prog.alert_phone or prog.alert_email) else "blank until supplied"},
+        _alert_item(prog),
+        _hold_item(db, prog),
         _email_runner_item(),
         {"key": "outbound_brake", "ok": os.environ.get("OUTBOUND_EMERGENCY_STOP", "").lower() not in ("1", "true", "yes", "on"),
          "detail": "emergency stop is ON" if os.environ.get("OUTBOUND_EMERGENCY_STOP", "").lower() in ("1", "true", "yes", "on") else "off"},
     ]
     return {"items": items, "ready": all(i["ok"] for i in items)}
+
+
+def _alias_item(db: Session, prog: OutreachProgram) -> dict:
+    st = _aliases.status(db, prog)
+    eff = st["effective"]
+    if not st["assigned"]:
+        return {"key": "location_email_aliases", "ok": False, "detail": "no location addresses assigned yet"}
+    live = eff.get("from", 0) + eff.get("reply_to", 0)
+    detail = ("%d of %d location addresses on %s; authentication %s; %d seen receiving%s; in use: %d as From, %d as Reply-To"
+              % (st["assigned"], st["locations"], st["domain"],
+                 "aligned (same domain as the verified sender)" if st["auth_ok"] else "NOT aligned - Reply-To only",
+                 st["seen_receiving"], ", all confirmed by a person" if st["confirmed_all"] else "",
+                 eff.get("from", 0), eff.get("reply_to", 0)))
+    if not live:
+        detail += " - not used until they receive mail (add them in Microsoft 365, then confirm)"
+    return {"key": "location_email_aliases", "ok": live == st["locations"] and st["locations"] > 0,
+            "detail": detail}
+
+
+def _alert_item(prog: OutreachProgram) -> dict:
+    mgrs = [m for m in json.loads(prog.management_recipients or "[]") if isinstance(m, dict)]
+    chans = []
+    if prog.alert_phone or prog.alert_email:
+        chans.append("primary")
+    if mgrs:
+        chans.append("%d management (%s)" % (len(mgrs), ", ".join(
+            "+".join(c for c, v in (("sms", m.get("phone")), ("email", m.get("email"))) if v) for m in mgrs)))
+    ok = bool(chans) and bool(prog.staff_sms_alerts_enabled)
+    detail = ("; ".join(chans) or "no recipients configured") + (
+        "; staff alerts ON" if prog.staff_sms_alerts_enabled else "; staff alerts OFF (in-app only)")
+    return {"key": "alert_recipients", "ok": ok, "detail": detail}
+
+
+def _hold_item(db: Session, prog: OutreachProgram) -> dict:
+    n = (db.query(func.count(ProgramSourceRecord.id))
+         .filter(ProgramSourceRecord.organization_id == prog.organization_id,
+                 ProgramSourceRecord.on_hold.is_(True)).scalar() or 0)
+    return {"key": "held_records", "ok": True,
+            "detail": "%d on hold - excluded from outreach; does not block the rest" % n}
+
+
+def _unmatched_open(db: Session, org_id: str) -> int:
+    from app.models.program_models import ProgramUnmatchedReply
+    return (db.query(func.count(ProgramUnmatchedReply.id))
+            .filter(ProgramUnmatchedReply.organization_id == org_id,
+                    ProgramUnmatchedReply.status == "open").scalar() or 0)
 
 
 def _email_runner_item() -> dict:
@@ -509,6 +626,7 @@ def list_responses(status: Optional[str] = Query(None), response_class: Optional
         "location": pname.get(r.location_id), "campaign_family": r.campaign_family,
         "channel": r.channel, "class": r.response_class, "label": responses.LABELS.get(r.response_class),
         "summary": r.summary, "recommended_action": r.recommended_action, "body": r.body_excerpt,
+        "reply_to_alias": r.reply_to_alias,
         "status": r.handling_status, "cadence_paused": r.cadence_paused,
         "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
         "sla_due_at": r.sla_due_at.isoformat() + "Z" if r.sla_due_at else None,
@@ -558,7 +676,9 @@ def list_records(queue: Optional[str] = Query(None), location_id: Optional[str] 
                  db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     prog = _program(db, user)
     q = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == prog.organization_id)
-    if queue == "data_review":
+    if queue == "on_hold":
+        q = q.filter(ProgramSourceRecord.on_hold.is_(True))
+    elif queue == "data_review":
         q = q.filter(ProgramSourceRecord.needs_data_review.is_(True))
     elif queue == "location_review":
         q = q.filter(ProgramSourceRecord.location_status == "location_review")
@@ -584,6 +704,7 @@ def list_records(queue: Optional[str] = Query(None), location_id: Optional[str] 
         "contact_master_key": r.contact_master_key, "link_status": r.link_status,
         "link_reason": r.link_reason, "duplicate_review_reason": r.duplicate_review_reason,
         "data_note_flags": json.loads(r.data_note_flags or "[]"), "lead_id": r.lead_id,
+        "on_hold": bool(r.on_hold), "hold_reason": r.hold_reason, "held_at": _iso(r.held_at),
     } for r in rows]}
 
 
@@ -645,6 +766,143 @@ def clear_review(record_id: str, body: ClearReviewIn, db: Session = Depends(get_
     db.commit()
     return {"id": rec.id, "needs_data_review": rec.needs_data_review,
             "duplicate_review_reason": rec.duplicate_review_reason}
+
+
+# ── holds ────────────────────────────────────────────────────────────────────
+
+class HoldIn(BaseModel):
+    on_hold: bool
+    reason: Optional[str] = None
+
+
+@router.post("/records/{record_id}/hold")
+def hold_record(record_id: str, body: HoldIn, db: Session = Depends(get_db),
+                user: User = Depends(require_tenant_user)):
+    """Put one record on hold, or release it. Audited; nothing else changes."""
+    from app.services.programs import holds
+    prog = _program(db, user)
+    _require_manager(db, user)
+    rec = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.id == record_id,
+                                               ProgramSourceRecord.organization_id == prog.organization_id).first()
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    holds.set_hold(db, rec, body.on_hold, user.id, body.reason)
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.record_hold" if body.on_hold else "program.record_release",
+               target_type="program_source_record", target_id=rec.id,
+               details={"source_lead_id": rec.source_lead_id, "reason": (body.reason or "")[:300]})
+    db.commit()
+    return {"id": rec.id, "on_hold": rec.on_hold, "hold_reason": rec.hold_reason}
+
+
+@router.post("/records/hold-open-reviews")
+def hold_open_reviews(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Hold every record still in Location / Duplicate / Data Review (or a
+    location conflict). Deletes nothing, fixes nothing."""
+    from app.services.programs import holds
+    prog = _program(db, user)
+    _require_manager(db, user)
+    res = holds.hold_open_reviews(db, prog.organization_id, user.id)
+    db.commit()
+    return res
+
+
+# ── location email aliases ───────────────────────────────────────────────────
+
+@router.get("/aliases")
+def list_aliases(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    frm = _aliases.sending_address(db, prog.organization_id)
+    rows = [{"location": p.official_name, "location_id": p.location_id, "alias": p.email_alias,
+             "seen_receiving_at": _iso(p.alias_verified_at), "receiving": _aliases.receiving(prog, p),
+             "mode": _aliases.effective_mode(prog, p, frm)}
+            for p in _profiles(db, prog.organization_id) if not p.is_review_bucket]
+    return {"status": _aliases.status(db, prog), "items": rows}
+
+
+@router.get("/aliases.csv")
+def export_aliases(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Alias,Location - the input for scripts/m365_location_aliases.ps1."""
+    import csv as _csv
+    import io as _io
+    from fastapi.responses import Response
+    prog = _program(db, user)
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["Alias", "Location"])
+    for p in _profiles(db, prog.organization_id):
+        if p.email_alias and not p.is_review_bucket:
+            w.writerow([p.email_alias, p.official_name])
+    return Response(buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": content_disposition("location_aliases.csv")})
+
+
+@router.post("/aliases/assign")
+def assign_aliases(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Give every location without one its address (existing ones are kept)."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    try:
+        out = _aliases.assign(db, prog)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return {"assigned": out, "status": _aliases.status(db, prog)}
+
+
+class ConfirmAliasesIn(BaseModel):
+    confirm: Optional[str] = None
+    receiving: bool = True
+
+
+@router.post("/aliases/confirm-receiving")
+def confirm_aliases(body: ConfirmAliasesIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    """A person confirms the aliases were added to the central mailbox. Until
+    then an alias is used only once mail to it has been SEEN arriving."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    if body.receiving:
+        if (body.confirm or "").strip().upper() != "ALIASES RECEIVE MAIL":
+            raise HTTPException(status_code=422, detail='Type "ALIASES RECEIVE MAIL" to confirm.')
+        prog.aliases_receiving_confirmed_at, prog.aliases_receiving_confirmed_by = datetime.utcnow(), user.id
+    else:
+        prog.aliases_receiving_confirmed_at = prog.aliases_receiving_confirmed_by = None
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.aliases_receiving",
+               target_type="outreach_program", target_id=prog.id, details={"receiving": body.receiving})
+    db.commit()
+    return _aliases.status(db, prog)
+
+
+# ── replies to a location address that match no contact ─────────────────────
+
+@router.get("/unmatched-replies")
+def unmatched_replies(status: str = Query("open"), db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_or_observer)):
+    from app.models.program_models import ProgramUnmatchedReply
+    prog = _program(db, user)
+    q = db.query(ProgramUnmatchedReply).filter(ProgramUnmatchedReply.organization_id == prog.organization_id)
+    if status in ("open", "handled"):
+        q = q.filter(ProgramUnmatchedReply.status == status)
+    pname = {p.location_id: p.official_name for p in _profiles(db, prog.organization_id)}
+    return [{"id": u.id, "location": pname.get(u.location_id), "alias": u.alias, "from": u.from_address,
+             "subject": u.subject, "body": u.body_excerpt, "received_at": _iso(u.received_at),
+             "reason": u.reason, "status": u.status, "handled_at": _iso(u.handled_at)}
+            for u in q.order_by(ProgramUnmatchedReply.received_at.desc()).limit(200).all()]
+
+
+@router.post("/unmatched-replies/{reply_id}/handled")
+def unmatched_handled(reply_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.models.program_models import ProgramUnmatchedReply
+    prog = _program(db, user)
+    u = db.query(ProgramUnmatchedReply).filter(ProgramUnmatchedReply.id == reply_id,
+                                               ProgramUnmatchedReply.organization_id == prog.organization_id).first()
+    if u is None:
+        raise HTTPException(status_code=404, detail="Reply not found.")
+    u.status, u.handled_at, u.handled_by = "handled", datetime.utcnow(), user.id
+    db.commit()
+    return {"id": u.id, "status": u.status}
 
 
 # ── verification / enrichment (stored beside the originals) ─────────────────
@@ -988,6 +1246,10 @@ def god_setup(body: GodSetupIn, db: Session = Depends(get_db), god: User = Depen
                                 hero_title=body.hero_title, hero_subtitle=body.hero_subtitle)
     profiles = setup.ensure_locations(db, org, god, body.location_names)
     fams = setup.ensure_campaign_families(db, org)
+    try:
+        _aliases.assign(db, prog)            # addresses only; unused until they receive mail
+    except ValueError:
+        pass
     db.commit()
     return {"program": _program_json(db, prog),
             "locations": sum(1 for p in profiles.values() if not p.is_review_bucket),

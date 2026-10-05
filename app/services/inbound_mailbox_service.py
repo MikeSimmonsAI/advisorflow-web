@@ -153,7 +153,7 @@ def _fetch(token: str, since: datetime) -> List[dict]:
     skip = _skip_folder_ids(token)
     url = f"{GRAPH}/me/messages"
     params = {"$filter": f"receivedDateTime ge {iso}",
-              "$select": "id,internetMessageId,subject,from,receivedDateTime,body,bodyPreview,conversationId,parentFolderId",
+              "$select": "id,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,bodyPreview,conversationId,parentFolderId",
               "$orderby": "receivedDateTime asc", "$top": 50}
     out: List[dict] = []
     while url and len(out) < MAX_MESSAGES_PER_RUN:
@@ -317,6 +317,30 @@ def route(db: Session, org_ids: List[str], sender: str, subject: Optional[str] =
     return pool[0], "matched", detail
 
 
+def recipients_of(m: dict) -> List[str]:
+    """Every To/Cc address on a Graph message, lower-cased."""
+    out = []
+    for key in ("toRecipients", "ccRecipients"):
+        for r in m.get(key) or []:
+            a = ((r or {}).get("emailAddress") or {}).get("address")
+            if a and a.strip():
+                out.append(a.strip().lower())
+    return out
+
+
+def _alias_location(db: Session, m: dict):
+    """LOCATION OUTREACH PROGRAMS: the location profile whose alias this
+    message was addressed to (easterngategardens@...), or None. An alias names
+    exactly one workspace and location, so it - not the shared-mailbox sender
+    list - decides where the reply is routed."""
+    try:
+        from app.services.programs import aliases as _aliases
+        return _aliases.resolve(db, recipients_of(m))
+    except Exception:  # noqa: BLE001 - routing falls back to the sender, as before
+        log.exception("alias resolution failed")
+        return None
+
+
 def _store_reply(db: Session, lead, body: str, received_at: datetime, message_id: Optional[str] = None):
     from app.models.models import Notification, Reply
     # Same message (same body, received within minutes), not merely the same
@@ -426,8 +450,30 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
             if not sender or sender == box.address:
                 row.outcome, row.detail = "own_mail", "Sent by the mailbox itself."
             else:
-                lead, outcome, detail = route(db, org_ids, sender, m.get("subject"))
+                alias_prof = _alias_location(db, m)
+                if alias_prof is not None:
+                    from app.services.programs import aliases as _aliases
+                    _aliases.mark_verified(alias_prof, now)
+                    lead, outcome, detail = route(db, [alias_prof.organization_id], sender, m.get("subject"))
+                    detail = ("Sent to %s (%s). " % (alias_prof.email_alias, alias_prof.official_name)
+                              + (detail or "")).strip()
+                else:
+                    lead, outcome, detail = route(db, org_ids, sender, m.get("subject"))
                 row.outcome, row.detail = outcome, detail
+                if lead is None and alias_prof is not None:
+                    # Addressed to a location but no contact matches: kept,
+                    # alerted and queued in the program - never left unread.
+                    row.organization_id = alias_prof.organization_id
+                    db.add(row)
+                    db.flush()
+                    from app.services.programs import responses as _program_responses
+                    _program_responses.record_unmatched(
+                        db, alias_prof, alias=alias_prof.email_alias, sender=sender,
+                        subject=m.get("subject"),
+                        body=clean_body((m.get("body") or {}).get("content") or m.get("bodyPreview") or ""),
+                        received_at=received, mailbox_message_id=row.id, reason=outcome)
+                    db.commit()
+                    continue
                 if lead is not None:
                     body = clean_body((m.get("body") or {}).get("content") or m.get("bodyPreview") or "")
                     if not body:
@@ -443,8 +489,10 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                     if created:
                         # Location outreach programs: pause, classify, alert, SLA.
                         from app.services.programs import responses as _program_responses
-                        _program_responses.safe_on_inbound(db, lead, body, "email",
-                                                           reply_id=reply.id)
+                        _program_responses.safe_on_inbound(
+                            db, lead, body, "email", reply_id=reply.id,
+                            reply_to_alias=alias_prof.email_alias if alias_prof is not None else None,
+                            alias_location_id=alias_prof.location_id if alias_prof is not None else None)
                         _maybe_hand_to_ai(db, lead, reply)
                         db.commit()
                     matched += 1

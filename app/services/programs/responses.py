@@ -171,7 +171,8 @@ def _alert(db: Session, prog: OutreachProgram, resp: ProgramResponse, lead: Lead
             elif not prog.staff_sms_alerts_enabled:
                 reason = "staff alerts are switched off for this program"
             else:
-                delivered, reason = _deliver_staff_alert(db, prog, channel, to, message)
+                delivered, reason = _deliver_staff_alert(db, prog, channel, to, message,
+                                                         kind=kind, response_id=resp.id)
             out.append(ProgramAlert(organization_id=prog.organization_id, response_id=resp.id,
                                     kind=kind, audience=audience, channel=channel, recipient=to,
                                     delivered=delivered, reason=reason, message=message))
@@ -180,8 +181,14 @@ def _alert(db: Session, prog: OutreachProgram, resp: ProgramResponse, lead: Lead
     return out
 
 
+def _app_link(response_id: Optional[str]) -> Optional[str]:
+    import os
+    base = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
+    return "%s/program?tab=responses%s" % (base, "&id=%s" % response_id if response_id else "") if base else None
+
+
 def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: str,
-                         message: str):
+                         message: str, *, kind: Optional[str] = None, response_id: Optional[str] = None):
     """A real staff alert. Reached only when switched on with a recipient set."""
     from app.models.models import Organization
     org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
@@ -189,15 +196,22 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
         if channel == "email":
             from app.services.email_service import send_email_via_provider
             from app.services.public_identity import sending_identity_for_org
-            res = send_email_via_provider(to, "Response alert - %s" % prog.name,
-                                          "<p>%s</p>" % message,
+            import html as _html
+            label = {"hot": "HOT RESPONSE", "sla_breach": "HOT RESPONSE - NOT YET HANDLED"}.get(kind, "Response")
+            link = _app_link(response_id)
+            body = "<p>%s</p>" % _html.escape(message)
+            if link:
+                body += '<p><a href="%s">Open it in EvoSys</a></p>' % _html.escape(link)
+            res = send_email_via_provider(to, "%s - %s" % (label, prog.name), body,
                                           org=sending_identity_for_org(db, prog.organization_id))
             return bool(res.get("success")), res.get("error")
         from app.services.sms_service import Client, _org_twilio_credentials
         sid, token = _org_twilio_credentials(org)
         if not (sid and token and org and org.org_twilio_phone_number):
             return False, "the organization has no Twilio number configured"
-        Client(sid, token).messages.create(body=message[:300],
+        link = _app_link(response_id)
+        text = ("%s %s" % (message[:250], link)) if link else message[:300]
+        Client(sid, token).messages.create(body=text,
                                            from_=org.org_twilio_phone_number, to=to)
         return True, None
     except Exception as exc:  # pragma: no cover - provider failure path
@@ -216,8 +230,14 @@ def _pause_cadence(db: Session, lead: Lead) -> bool:
 
 def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
                reply_id: Optional[str] = None, reply_classification: Optional[str] = None,
-               now: Optional[datetime] = None) -> Optional[ProgramResponse]:
-    """Record and route one inbound reply. None for non-program organizations."""
+               now: Optional[datetime] = None, reply_to_alias: Optional[str] = None,
+               alias_location_id: Optional[str] = None) -> Optional[ProgramResponse]:
+    """Record and route one inbound reply. None for non-program organizations.
+
+    reply_to_alias / alias_location_id: the location address the family wrote
+    to. The conversation is ALWAYS the contact's own; the alias's location is
+    used when the contact has none resolved, and a mismatch is called out in
+    the summary rather than silently re-homing the family."""
     prog = identity.program_for_org(db, lead.organization_id)
     if prog is None:
         return None
@@ -228,9 +248,17 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
            .filter(ProgramSourceRecord.organization_id == lead.organization_id,
                    ProgramSourceRecord.lead_id == lead.id).first())
     prof = identity.location_profile_for_lead(db, lead)
+    alias_prof = None
+    if alias_location_id:
+        from app.models.program_models import LocationProfile
+        alias_prof = (db.query(LocationProfile)
+                      .filter(LocationProfile.organization_id == lead.organization_id,
+                              LocationProfile.location_id == alias_location_id).first())
     resp = ProgramResponse(
         organization_id=lead.organization_id, lead_id=lead.id, reply_id=reply_id,
-        channel=channel, location_id=prof.location_id if prof else (rec.location_id if rec else None),
+        reply_to_alias=reply_to_alias,
+        channel=channel, location_id=prof.location_id if prof else (
+            alias_prof.location_id if alias_prof else (rec.location_id if rec else None)),
         campaign_family=rec.campaign_family if rec else None,
         source_lead_id=rec.source_lead_id if rec else None,
         response_class=cls, body_excerpt=(body or "")[:1000],
@@ -238,6 +266,9 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
         recommended_action=RECOMMENDED[cls], received_at=now,
         handling_status="closed" if cls in (OPT_OUT,) else "new",
     )
+    if alias_prof is not None and prof is not None and alias_prof.location_id != prof.location_id:
+        resp.summary = "%s [Wrote to the %s address; contact is at %s.]" % (
+            resp.summary, alias_prof.official_name, prof.official_name)
     if cls == HOT:
         resp.sla_due_at = now + timedelta(minutes=max(1, int(prog.hot_sla_minutes or 15)))
     # Any meaningful reply pauses the cadence; an acknowledgement does too -
@@ -344,3 +375,35 @@ def sla_sweep(db: Session, now: Optional[datetime] = None,
         breached.append(resp)
     db.commit()
     return breached
+
+
+def record_unmatched(db: Session, prof, *, alias: str, sender: Optional[str], subject: Optional[str],
+                     body: Optional[str], received_at: Optional[datetime], mailbox_message_id: Optional[str],
+                     reason: str) -> Optional["ProgramUnmatchedReply"]:
+    """A reply to a location alias that matches no contact: keep it, alert, queue it."""
+    from app.models.program_models import ProgramUnmatchedReply
+    prog = identity.program_for_org(db, prof.organization_id)
+    if prog is None:
+        return None
+    if mailbox_message_id and db.query(ProgramUnmatchedReply.id).filter(
+            ProgramUnmatchedReply.mailbox_message_id == mailbox_message_id).first():
+        return None
+    row = ProgramUnmatchedReply(organization_id=prof.organization_id, location_id=prof.location_id,
+                                alias=alias, from_address=sender, subject=(subject or "")[:500],
+                                body_excerpt=(body or "")[:1000], received_at=received_at,
+                                mailbox_message_id=mailbox_message_id, reason=reason)
+    db.add(row)
+    db.flush()
+    msg = ("📩 Reply to %s (%s) from %s matches no contact - open Responses to handle it."
+           % (alias, prof.official_name, sender or "unknown sender"))
+    recipients = {}
+    if prog.primary_contact_user_id:
+        recipients[prog.primary_contact_user_id] = "primary"
+    for u in _org_admin_users(db, prog.organization_id):
+        recipients.setdefault(u.id, "management")
+    for uid, audience in recipients.items():
+        db.add(Notification(user_id=uid, type=NotificationType.REPLY_RECEIVED, message=msg,
+                            link="/program?tab=responses"))
+        db.add(ProgramAlert(organization_id=prog.organization_id, response_id=None, kind="unmatched_reply",
+                            audience=audience, channel="in_app", recipient=uid, delivered=True, message=msg))
+    return row
