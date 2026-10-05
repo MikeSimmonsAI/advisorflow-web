@@ -567,3 +567,173 @@ def test_email_opt_out_is_recorded_on_the_lead(program, sample_advisor):
     responses.on_inbound(db, lead, "Please remove me from your list", "email")
     db.refresh(lead)
     assert lead.allow_email is False
+
+
+# ── campaign email touches ───────────────────────────────────────────────────
+
+def _touch_ready(program, sample_advisor, monkeypatch, source="L001", **lead_kw):
+    from app.services.programs import email_touches
+    db, org = program["db"], program["org"]
+    monkeypatch.setenv(email_touches.SENDING_ENV, "on")
+    fam = db.query(CampaignFamily).filter_by(organization_id=org.id, key="veteran_planning_guide").one()
+    fam.is_active = True
+    setup.store_asset(db, org, kind="flyer", title="Veteran Planning Guide", data=b"%PDF-1.4 guide",
+                      content_type="application/pdf", filename="guide.pdf",
+                      category="veteran_planning_guide", activate=True)
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, source, **lead_kw)
+    return db, org, lead, email_touches
+
+
+def _fake_provider(sent):
+    def fake(**kw):
+        sent.append(kw)
+        return {"success": True, "provider_message_id": "pm-%d" % len(sent)}
+    return patch("app.services.email_service.send_email_via_provider", side_effect=fake)
+
+
+def test_email_touches_are_off_by_default(program, sample_advisor, monkeypatch):
+    from app.models.program_models import ProgramEmailTouch
+    from app.services.programs import email_touches
+    db, org = program["db"], program["org"]
+    monkeypatch.delenv(email_touches.SENDING_ENV, raising=False)
+    _lead_for(db, org, sample_advisor, "L001")
+    sent = []
+    with _fake_provider(sent):
+        r = email_touches.run(db, org.id, force_hours=True)
+    assert r["sent"] == 0 and "off" in r["reason"] and sent == []
+    assert db.query(ProgramEmailTouch).count() == 0
+
+
+def test_email_touches_need_the_campaign_switched_on(program, sample_advisor, monkeypatch):
+    from app.services.programs import email_touches
+    db, org = program["db"], program["org"]
+    monkeypatch.setenv(email_touches.SENDING_ENV, "on")
+    _lead_for(db, org, sample_advisor, "L001")
+    sent = []
+    with _fake_provider(sent):
+        r = email_touches.run(db, org.id, force_hours=True)
+    assert r["due"] == 0 and sent == []
+
+
+def test_first_touch_hosted_then_followup_attached_never_twice(program, sample_advisor, monkeypatch):
+    from app.models.program_models import ProgramEmailTouch
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    sent = []
+    with _fake_provider(sent):
+        r1 = et.run(db, org.id, force_hours=True)
+        r2 = et.run(db, org.id, force_hours=True)          # same day: nothing more
+    assert r1["sent"] == 1 and r2["sent"] == 0 and len(sent) == 1
+    first = sent[0]
+    assert first["org"].from_name == "Kerry Allan | Eastern Gate Memorial Gardens"
+    assert "/program-assets/" in first["body_html"] and '<a href=' in first["body_html"]
+    assert "attachments" not in first and "/email/unsubscribe/" in first["body_html"]
+    later = datetime.utcnow() + timedelta(days=et.followup_days() + 1)
+    with _fake_provider(sent):
+        r3 = et.run(db, org.id, now=later, force_hours=True)
+        r4 = et.run(db, org.id, now=later, force_hours=True)
+    assert r3["sent"] == 1 and r4["sent"] == 0 and len(sent) == 2
+    assert sent[1]["attachments"][0]["filename"] == "guide.pdf"
+    rows = db.query(ProgramEmailTouch).filter_by(lead_id=lead.id).order_by(ProgramEmailTouch.touch_number).all()
+    assert [(t.touch_number, t.status, t.email_mode) for t in rows] == [(1, "sent", "hosted"), (2, "sent", "attached")]
+    from app.models.models import EmailMessage
+    assert {m.send_source for m in db.query(EmailMessage).filter_by(lead_id=lead.id)} == {"cadence"}
+
+
+def test_a_reply_ends_the_email_sequence(program, sample_advisor, monkeypatch):
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    responses.on_inbound(db, lead, "Yes please send the guide", "sms")
+    db.commit()
+    sent = []
+    with _fake_provider(sent):
+        r = et.run(db, org.id, force_hours=True)
+    assert sent == [] and r["skipped"] == 1
+
+
+def test_email_touches_respect_reviews_and_opt_out(program, sample_advisor, monkeypatch):
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    other = _lead_for(db, org, sample_advisor, "L003", phone="2145550103", first="Pat",
+                      last="Sampleton", email="shared@example.com")       # open duplicate review
+    lead.allow_email = False
+    db.commit()
+    sent = []
+    with _fake_provider(sent):
+        r = et.run(db, org.id, force_hours=True)
+    assert sent == [] and r["skipped"] == 2 and other is not None
+
+
+def test_a_compliance_refusal_is_recorded_as_blocked(program, sample_advisor, monkeypatch):
+    from app.models.program_models import ProgramEmailTouch
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    lead.manual_flag = "bad_email"
+    db.commit()
+    sent = []
+    with _fake_provider(sent):
+        r = et.run(db, org.id, force_hours=True)
+    assert sent == [] and r["blocked"] == 1
+    row = db.query(ProgramEmailTouch).filter_by(lead_id=lead.id).one()
+    assert row.status == "blocked" and row.reason
+
+
+def test_email_touches_only_in_sending_hours(program, sample_advisor, monkeypatch):
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    night = datetime(2026, 10, 5, 8, 0)      # 03:00 Central
+    day = datetime(2026, 10, 5, 16, 0)       # 11:00 Central
+    assert not et.in_sending_hours(db, org.id, night) and et.in_sending_hours(db, org.id, day)
+    sent = []
+    with _fake_provider(sent):
+        assert et.run(db, org.id, now=night)["sent"] == 0
+    assert sent == []
+
+
+def test_email_touch_plan_endpoint_sends_nothing(client, program, sample_advisor, monkeypatch):
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    sent = []
+    with _fake_provider(sent):
+        res = client.get("/program/email-touches", headers=_h(db, program["admin"])).json()
+    assert sent == [] and res["enabled"] is True and res["would_send_total"] == 1
+    w = res["would_send"][0]
+    assert w["location"] == "Eastern Gate Memorial Gardens" and w["touch"] == 1 and w["email_mode"] == "hosted"
+
+
+def test_a_flyer_campaign_without_an_approved_flyer_is_held(program, sample_advisor, monkeypatch):
+    from app.services.programs import email_touches as et
+    db, org = program["db"], program["org"]
+    monkeypatch.setenv(et.SENDING_ENV, "on")
+    fam = db.query(CampaignFamily).filter_by(organization_id=org.id, key="veteran_planning_guide").one()
+    fam.is_active = True          # first touch mode is "hosted" and no flyer is uploaded
+    db.commit()
+    _lead_for(db, org, sample_advisor, "L001")
+    sent = []
+    with _fake_provider(sent):
+        r = et.run(db, org.id, force_hours=True)
+    assert sent == [] and r["held_no_flyer"] == 1
+    fam.first_touch_email_mode = "none"
+    db.commit()
+    with _fake_provider(sent):
+        assert et.run(db, org.id, force_hours=True)["sent"] == 1
+    assert "/program-assets/" not in sent[0]["body_html"]
+
+
+def test_emergency_stop_claims_no_touches(program, sample_advisor, monkeypatch):
+    from app.models.program_models import ProgramEmailTouch
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    monkeypatch.setenv("OUTBOUND_EMERGENCY_STOP", "1")
+    sent = []
+    with _fake_provider(sent):
+        r = et.run(db, org.id, force_hours=True)
+    assert sent == [] and "emergency" in r["reason"]
+    assert db.query(ProgramEmailTouch).count() == 0
+
+
+def test_promotion_respects_the_plan_lead_limit(program, monkeypatch):
+    from fastapi import HTTPException
+    from app.models.models import Lead as _Lead
+    from app.services import plan_limits
+    from app.services.programs import promote
+    db, org = program["db"], program["org"]
+    monkeypatch.setattr(plan_limits, "limit_for", lambda *a, **k: 1)
+    with pytest.raises(HTTPException) as ei:
+        promote.promote(db, org, apply=True)
+    assert ei.value.status_code == 402
+    assert db.query(_Lead).filter(_Lead.organization_id == org.id).count() == 0   # nothing half-done

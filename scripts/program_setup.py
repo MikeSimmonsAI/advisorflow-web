@@ -21,6 +21,10 @@ WHAT IT DOES (with --apply):
     5. --logo: stores the logo as the program's active logo asset.
     6. Source file: dry run always; --stage writes staging rows (551 in, 551
        kept). Neither creates leads, enrols anyone or sends anything.
+    7. --promote: staged rows -> live contacts/leads, one per contact master,
+       every source Lead ID kept on it; sms_consent False; no enrolment, no
+       sends. Rows still held in a review queue are promoted but every send
+       path refuses them until the review is cleared.
 
 Without --apply it prints what it would do and rolls everything back.
 """
@@ -53,6 +57,9 @@ def main(argv=None):
     ap.add_argument("--source", required=True)
     ap.add_argument("--logo")
     ap.add_argument("--stage", action="store_true", help="write staging rows (still no leads)")
+    ap.add_argument("--promote", action="store_true",
+                    help="with --apply: turn staged rows into live contacts/leads (one per contact "
+                         "master, no consent inferred, nothing enrolled or sent)")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args(argv)
 
@@ -116,6 +123,15 @@ def main(argv=None):
         res = importer.stage(db, org, content, filename=os.path.basename(a.source),
                              dry_run=not a.stage, actor_id=actor.id)
         print(json.dumps(res["summary"], indent=1, ensure_ascii=False))
+        from app.services.programs import promote
+        try:
+            pr = promote.promote(db, org, actor, apply=a.promote)
+        except Exception as exc:                             # noqa: BLE001 - e.g. plan limit (402)
+            db.rollback()
+            sys.exit("Promotion refused, nothing promoted: %s" % getattr(exc, "detail", exc))
+        db.commit()
+        print("promotion%s:" % ("" if a.promote else " (plan only - add --promote)"),
+              json.dumps(pr, ensure_ascii=False))
         print("\nAPPLIED. Organization id:", org.id)
     finally:
         db.close()

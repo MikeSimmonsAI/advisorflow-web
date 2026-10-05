@@ -368,7 +368,8 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
                        subject: str = None, body_html: str = None,
                        send_source: str = None,
                        sent_by_user_id: str = None,
-                       raise_on_provider_failure: bool = False) -> EmailMessage:
+                       raise_on_provider_failure: bool = False,
+                       attachments: list = None) -> EmailMessage:
     """Sends one email to a lead and logs it. Raises ValueError if the lead
     may not be emailed.
 
@@ -525,6 +526,7 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
         body_html=rendered["body_html"],
         org=org,
         **({"headers": _program_headers} if _program_headers else {}),
+        **({"attachments": attachments} if attachments else {}),
     )
 
     email_msg = EmailMessage(

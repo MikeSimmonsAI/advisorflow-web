@@ -17,6 +17,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func
+
+from app.utils.content_disposition import content_disposition
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_god, require_tenant_or_observer, require_tenant_user
@@ -423,10 +425,20 @@ def readiness(db: Session, prog: OutreachProgram) -> dict:
          "detail": "account linked" if prog.primary_contact_user_id else "profile only - add an email to create the account"},
         {"key": "alert_recipients", "ok": bool(prog.alert_phone or prog.alert_email),
          "detail": "configured" if (prog.alert_phone or prog.alert_email) else "blank until supplied"},
+        _email_runner_item(),
         {"key": "outbound_brake", "ok": os.environ.get("OUTBOUND_EMERGENCY_STOP", "").lower() not in ("1", "true", "yes", "on"),
          "detail": "emergency stop is ON" if os.environ.get("OUTBOUND_EMERGENCY_STOP", "").lower() in ("1", "true", "yes", "on") else "off"},
     ]
     return {"items": items, "ready": all(i["ok"] for i in items)}
+
+
+def _email_runner_item() -> dict:
+    from app.services.programs import email_touches as _et
+    on = _et.sending_enabled()
+    return {"key": "email_campaign_runner", "ok": on,
+            "detail": ("on - campaign emails go out for campaigns that are switched on, "
+                       "%d per pass, follow-up after %d days" % (_et.batch_limit(), _et.followup_days()))
+            if on else "off (%s) - no campaign email goes out" % _et.SENDING_ENV}
 
 
 def _sms_routing_item(db: Session, org_id: str, number: Optional[str]) -> dict:
@@ -789,54 +801,49 @@ def preview_campaign(family_id: str, location_id: Optional[str] = Query(None),
                                             LocationProfile.location_id == location_id).first() if location_id else None
     if prof is None or prof.is_review_bucket:
         return {"ok": False, "reason": identity.LOCATION_REVIEW_REFUSAL}
-    mode = f.first_touch_email_mode if touch == "first" else f.followup_email_mode
-    flyer = flyer_for(db, prog.organization_id, f, prof.location_id)
-    flyer_link = ""
-    attachment = None
-    if flyer is not None and mode == "hosted":
-        flyer_link = "View your %s: %s" % (flyer.title, public_asset_url(flyer.public_token))
-    elif flyer is not None and mode == "attached":
-        attachment = {"filename": flyer.filename or "%s.pdf" % flyer.title, "asset_id": flyer.id}
-    fields = {
-        "first_name": (rec.first_name if rec else "Pat").strip().title() if (rec and rec.first_name) else "Pat",
-        "location_name": prof.official_name,
-        "primary_contact_name": prog.primary_contact_name or "",
-        "location_website": prof.website or "", "flyer_link": flyer_link,
-    }
+    from app.services.programs import email_touches as _et
+    r = _et.render_touch(db, prog, f, prof, rec.first_name if rec else "Pat",
+                         "first" if touch == "first" else "followup")
+    fields = r["fields"]
     sms = identity.render(f.sms_template, dict(fields, reply_instructions=prog.reply_instructions_sms or ""))
     sms = "%s %s" % (sms, identity.sms_signoff(prog, prof))
     return {
-        "ok": True, "family": f.key, "location": prof.official_name, "email_mode": mode,
+        "ok": True, "family": f.key, "location": prof.official_name, "email_mode": r["email_mode"],
         "from_display_name": identity.display_name(prog, prof),
         "sms": sms + " Reply STOP to opt out.",
-        "email_subject": identity.render(f.email_subject_template, fields),
-        "email_body": identity.render(f.email_body_template,
-                                      dict(fields, reply_instructions=prog.reply_instructions_email or "")),
-        "attachment": attachment, "flyer_available": flyer is not None,
+        "email_subject": r["subject"],
+        "email_body": r["body"],
+        "attachment": r["attachment"], "flyer_available": r["flyer_available"],
     }
 
 
-def public_asset_url(token: str) -> str:
-    """Absolute hosted link for a family. PROGRAM_ASSET_BASE_URL (e.g. the
-    customer-facing app domain) wins; otherwise the backend's own public origin."""
-    import os
-    from app.services.twilio_callbacks import public_api_base
-    base = (os.environ.get("PROGRAM_ASSET_BASE_URL") or "").strip().rstrip("/") or public_api_base()
-    return "%s/program-assets/%s" % (base, token)
+@router.get("/email-touches")
+def email_touches(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """What the campaign email runner WOULD send now (dry run) and what it has sent. Sends nothing."""
+    from app.services.programs import email_touches as _et
+    from app.models.program_models import ProgramEmailTouch
+    prog = _program(db, user)
+    report = _et.run(db, prog.organization_id, dry_run=True)
+    recent = (db.query(ProgramEmailTouch).filter(ProgramEmailTouch.organization_id == prog.organization_id)
+              .order_by(ProgramEmailTouch.created_at.desc()).limit(50).all())
+    counts = {}
+    for st, n in (db.query(ProgramEmailTouch.status, func.count(ProgramEmailTouch.id))
+                  .filter(ProgramEmailTouch.organization_id == prog.organization_id)
+                  .group_by(ProgramEmailTouch.status).all()):
+        counts[st] = n
+    return {
+        "enabled": report["enabled"], "followup_days": _et.followup_days(), "batch": _et.batch_limit(),
+        "due": report["due"], "skipped": report["skipped"], "held_no_flyer": report.get("held_no_flyer", 0), "would_send": report["would_send"][:200],
+        "would_send_total": len(report["would_send"]), "counts": counts,
+        "recent": [{"id": t.id, "lead_id": t.lead_id, "family": t.campaign_family, "touch": t.touch_number,
+                    "email_mode": t.email_mode, "status": t.status, "reason": t.reason,
+                    "attempted_at": t.attempted_at.isoformat() + "Z" if t.attempted_at else None}
+                   for t in recent],
+    }
 
 
-def flyer_for(db: Session, org_id: str, fam: CampaignFamily, location_id: str) -> Optional[ProgramAsset]:
-    """The active flyer for this family/category, location-specific first."""
-    q = db.query(ProgramAsset).filter(ProgramAsset.organization_id == org_id,
-                                      ProgramAsset.kind == "flyer", ProgramAsset.is_active.is_(True))
-    cands = q.filter((ProgramAsset.campaign_family == fam.key) |
-                     (ProgramAsset.category == fam.asset_category)).all()
-    cands.sort(key=lambda a: (a.location_id != location_id, a.location_id is not None and a.location_id != location_id,
-                              a.campaign_family != fam.key, -a.version))
-    for a in cands:
-        if a.location_id in (None, location_id):
-            return a
-    return None
+# Shared with the email touch runner - one renderer for preview and send.
+from app.services.programs.email_touches import public_asset_url, flyer_for  # noqa: E402,F401
 
 
 # ── assets ───────────────────────────────────────────────────────────────────
@@ -919,16 +926,10 @@ def preview_asset(asset_id: str, db: Session = Depends(get_db),
                                       ProgramAsset.organization_id == prog.organization_id).first()
     if a is None:
         raise HTTPException(status_code=404, detail="Asset not found.")
-    headers = {"Content-Disposition": 'inline; filename="%s"' % _safe_name(a.filename, "asset"),
+    headers = {"Content-Disposition": content_disposition(a.filename or "asset", "inline"),
                "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=60",
                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:"}
     return Response(content=a.data, media_type=a.content_type, headers=headers)
-
-
-def _safe_name(name: Optional[str], default: str) -> str:
-    import re as _re
-    clean = _re.sub(r'[^A-Za-z0-9._ -]', "_", (name or "").strip())[:120]
-    return clean or default
 
 
 @public_router.get("/program-assets/{token}")
@@ -938,7 +939,7 @@ def hosted_asset(token: str, db: Session = Depends(get_db)):
                                       ProgramAsset.is_active.is_(True)).first()
     if a is None:
         raise HTTPException(status_code=404, detail="Not found.")
-    headers = {"Content-Disposition": 'inline; filename="%s"' % _safe_name(a.filename, "file"),
+    headers = {"Content-Disposition": content_disposition(a.filename or "file", "inline"),
                "X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=300"}
     if a.content_type == "image/svg+xml":
         headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'"

@@ -649,7 +649,45 @@ function Campaigns({ isManager, locationId, locations }) {
           </div>
         )}
       </div>
+      {isManager && <EmailRunner />}
     </section>
+  )
+}
+
+function EmailRunner() {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  useEffect(() => { api.get('/program/email-touches').then(setD).catch(e => setErr(errText(e))) }, [])
+  if (err) return <div className="pc-alert" role="alert">{err}</div>
+  if (!d) return null
+  const c = d.counts || {}
+  return (
+    <div style={{ marginTop: 16 }}>
+      <h3 className="pc-small" style={{ margin: '0 0 6px' }}>Campaign email</h3>
+      <p className="pc-note" style={{ marginTop: 0 }}>
+        Automated campaign email is <strong>{d.enabled ? 'ON' : 'OFF'}</strong> for this deployment
+        {d.enabled ? ` (up to ${d.batch} per pass, 9am–6pm local, follow-up after ${d.followup_days} days).` : ' - nothing is emailed automatically until it is switched on.'}
+        {' '}A reply on any channel ends a contact's sequence.
+      </p>
+      <p className="pc-small">Would go out now: <strong>{d.would_send_total}</strong> · held (reply, review, opt-out, no approved flyer): <strong>{d.skipped}</strong>{d.held_no_flyer ? ` (${d.held_no_flyer} waiting for a flyer)` : ''} · sent: <strong>{c.sent || 0}</strong> · blocked: <strong>{c.blocked || 0}</strong> · failed: <strong>{c.failed || 0}</strong></p>
+      {d.would_send?.length > 0 && (
+        <div className="pc-tablewrap">
+          <table className="pc-table">
+            <thead><tr><th>Lead ID</th><th>Location</th><th>Campaign</th><th>Touch</th><th>Email</th><th>Subject</th></tr></thead>
+            <tbody>
+              {d.would_send.slice(0, 25).map(w => (
+                <tr key={`${w.lead_id}-${w.touch}`}>
+                  <td>{w.source_lead_id}</td><td>{w.location}</td><td>{w.family}</td>
+                  <td>{w.touch === 1 ? 'first' : 'follow-up'}</td>
+                  <td>{w.email_mode === 'attached' ? 'attached PDF' : w.email_mode === 'hosted' ? 'hosted link' : 'no flyer'}</td>
+                  <td>{w.subject}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   )
 }
 

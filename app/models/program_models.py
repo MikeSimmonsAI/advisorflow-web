@@ -302,3 +302,34 @@ class ContactVerification(Base):
     outreach_eligible = Column(Boolean, nullable=False, default=False)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ProgramEmailTouch(Base):
+    """One automated campaign email to one contact (touch 1 = first, 2 = follow-up).
+
+    The unique key IS the idempotency guard: a touch is claimed by inserting
+    its row before the provider is called, so two runner instances (or a
+    retried pass) can never email the same family the same touch twice.
+    Every outcome is kept - sent, failed, blocked (with the refusal) - so
+    "why didn't this family get the guide?" always has an answer.
+    """
+    __tablename__ = "program_email_touches"
+    __table_args__ = (
+        UniqueConstraint("lead_id", "touch_number", name="uq_program_email_touch"),
+        Index("ix_program_email_touches_org", "organization_id", "status"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
+    source_record_id = Column(String, nullable=True)
+    campaign_family = Column(String, nullable=True)
+    location_id = Column(String, nullable=True)
+    touch_number = Column(Integer, nullable=False)
+    email_mode = Column(String, nullable=True)               # none | hosted | attached
+    flyer_asset_id = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="claimed")  # claimed | sent | failed | blocked
+    reason = Column(Text, nullable=True)
+    email_message_id = Column(String, nullable=True)
+    attempted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -1646,11 +1646,13 @@ async def _wholesale_exception_loop():
 
 
 async def _program_sla_loop():
-    """Location outreach programs: re-alert HOT replies past their SLA.
+    """Location outreach programs: re-alert HOT replies past their SLA, and
+    (only when PROGRAM_EMAIL_TOUCHES_SENDING is on) send due campaign emails.
 
     Every two minutes, one pass across instances. Writes in-app alerts and the
     alert log; staff SMS/email only where a program has switched them on and
-    configured a recipient. Never contacts a customer.
+    configured a recipient. Contacts a customer only through the email-touch
+    switch above.
     """
     from app.services.programs import responses as program_responses
     from app.services.job_run_service import record_job_run
@@ -1669,7 +1671,19 @@ async def _program_sla_loop():
                 def _one_pass():
                     db = SessionLocal()
                     try:
-                        return {"realerted": len(program_responses.sla_sweep(db))}
+                        out = {"realerted": len(program_responses.sla_sweep(db))}
+                        # Campaign email touches. Returns at once unless
+                        # PROGRAM_EMAIL_TOUCHES_SENDING is on AND a campaign
+                        # family is switched on; never raises out of the pass.
+                        try:
+                            from app.services.programs import email_touches as _et
+                            if _et.sending_enabled():
+                                r = _et.run(db)
+                                out["email_touches"] = {k: r[k] for k in ("sent", "failed", "blocked", "skipped")}
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("program email touches error: %s", exc, exc_info=True)
+                        return out
                     finally:
                         db.close()
                 report = await _off_loop(_one_pass)

@@ -28,11 +28,12 @@ organization without a program behaves exactly as before on every path below
 | Alerts | `program_alerts` | Every alert decision — in-app delivered, staff SMS/email recorded with the reason it was not sent (switched off / no recipient). |
 | Campaign families | `program_campaign_families` | Veteran Planning Guide, Veteran Official, Veteran – Spanish callouts, General Survey, Life Story, Cemetery X-Sell, Cremation, Re-engagement. One template each, rendered per location. **All OFF.** Email mode per family: first touch *hosted flyer*, follow-up *attached PDF* (each: none / hosted / attached). |
 | Assets / flyers | `program_assets` | Logos, facility images, approved flyers (PDF/PNG/JPEG/WebP/SVG ≤ 20 MB). Versioned, one active version per slot, preview, hosted public link (active versions only), location-specific or every-location, flyer categories (Veteran Planning Guide, General Pre-Planning, Cemetery Planning, Cremation Information, Re-engagement). Dynamic-field list recorded for the creative. |
+| Campaign email touches | `program_email_touches` | One row per automated campaign email (touch 1 = first touch, touch 2 = follow-up after 4 days): sent / failed / blocked with the reason. Unique per contact + touch and claimed before the provider is called, so a family can never get the same touch twice. |
 | Verification | `contact_verifications` | Verified phone / line type / ownership confidence / alternate phone, verified email / confidence, verified & current address, identity confidence, provider, date — **beside** the SCI originals. `outreach_eligible` is always false: verification is evidence, not permission. |
 
 Code: `app/models/program_models.py`, `app/services/programs/`
 (`normalize`, `setup`, `importer`, `identity`, `responses`, `promote`,
-`unsubscribe`), `app/routers/program_router.py`,
+`unsubscribe`, `email_touches`), `app/routers/program_router.py`,
 `app/routers/email_events_router.py`, `scripts/program_setup.py`,
 `frontend/src/pages/program/ProgramCenter.jsx` (+ `.css`).
 
@@ -57,6 +58,17 @@ Code: `app/models/program_models.py`, `app/services/programs/`
   for their location.
 * **Background loop** `program_sla_loop` (every 2 min, one instance): re-alerts
   HOT responses untouched past the SLA — "HOT RESPONSE — NOT YET HANDLED".
+* **Campaign email runner** (`programs/email_touches.py`, same loop): the SMS
+  cadence engine never sent email, so this sends a program's campaign emails —
+  first touch in the family's first-touch mode (no flyer / hosted link /
+  attached PDF), follow-up in its follow-up mode. **Off twice over**:
+  `PROGRAM_EMAIL_TOUCHES_SENDING` (deployment, default off) AND the campaign
+  family switch (default off). Holds a contact who replied on any channel, has
+  an open review, opted out, or whose campaign needs a flyer that is not
+  uploaded yet; sends only 9:00–18:00 in the org's timezone; at most 25 per
+  pass (`PROGRAM_EMAIL_TOUCH_BATCH`); goes through `send_email_to_lead`, so
+  DNC / opt-out / bad address / demo / AI-paused refusals all apply. The
+  Campaigns tab shows what *would* go out right now (dry run).
 
 ### Screens — "Family Service Center" (`/program`, admins only)
 Dashboard (hero, location selector, Leads / Contacts / Locations / Qualified /
@@ -67,6 +79,8 @@ Delivery & Response Reporting) · Responses queue · Review queues (Data /
 Location / Duplicate / Linked) · Locations · Campaigns (per-location preview,
 email modes, switch on/off with typed confirmation) · Assets & Flyers ·
 Settings (readiness, program settings, staging import, alert log).
+Campaigns also shows "Campaign email": on/off, would-go-out-now list, sent /
+blocked / failed counts.
 Desktop and phone layouts. Advisors do not see it (every family's details are
 on these screens).
 
@@ -97,6 +111,13 @@ Simulated replies through the real inbound code (local, test leads only):
 cadence paused, in-app alert, 15-minute SLA; past SLA it re-alerted.
 Email "What does the veteran guide include…" → HOT (wants information).
 "ok thanks" → LOW.
+
+Full pipeline on a scratch copy of the local database with the real file
+(`program_setup.py --create … --apply --stage --promote`): 551 staged, **544
+leads + 544 contacts** created, 0 with SMS consent, 0 enrolled, 0 messages.
+Email runner dry run with every campaign hypothetically on: **535 would get a
+first touch across all 39 locations; 9 held** (4 Data Review, 3 Location
+Review, 2 Duplicate Review). Nothing was sent.
 
 ---
 
@@ -143,7 +164,7 @@ Email "What does the veteran guide include…" → HOT (wants information).
 
 ## 5. Tests
 
-* `tests/test_outreach_program.py` (40) and `tests/test_email_events.py` (5):
+* `tests/test_outreach_program.py` (52) and `tests/test_email_events.py` (5):
   staging and the dedup rule, idempotent setup, nothing invented, identity and
   sign-off, send refusals (no location / data review / duplicate review /
   campaign off), email From name, unsubscribe, non-program orgs unchanged,
@@ -153,7 +174,11 @@ Email "What does the veteran guide include…" → HOT (wants information).
   cross-tenant isolation, settings validation, assets versioning and hosting,
   campaign preview with flyer modes, verification beside originals, location
   review, promotion, review holds, re-import keeps people's decisions, signed
-  webhook (bad / stale signatures refused), bounce / complaint.
+  webhook (bad / stale signatures refused), bounce / complaint; email runner:
+off by default, needs the campaign on, hosted-then-attached never twice,
+a reply ends the sequence, reviews / opt-out hold, compliance refusal recorded
+as blocked, sending hours, no-flyer hold, emergency stop claims nothing,
+plan endpoint sends nothing.
 * An independent review found 7 issues (linked-row review bypass, reply
   misclassification, re-import erasing review state, manual MMS blocked,
   advisor visibility, SLA double-alert path, small items). **All fixed** with
@@ -190,17 +215,18 @@ Email "What does the veteran guide include…" → HOT (wants information).
 8. **Approved flyers**: upload in Assets & Flyers and mark active; review the
    campaign copy (it is a starting point, not approved creative).
 9. **Promote staged rows to live contacts/leads** (one per contact master,
-   every Lead ID traceable, no consent inferred):
-   `python -c` / script step `promote.promote(db, org, apply=True)` —
-   tomorrow, after review.
+   every Lead ID traceable, no consent inferred, nothing enrolled or sent):
+   `python scripts/program_setup.py --org-id <SCI id> --source SCI_Filtered_551_Leads.csv --apply --stage --promote`
+   — after the review queues are decided (held rows are promoted but every
+   send path refuses them until cleared).
 10. **One live end-to-end test** to your own phone/email: send, reply by text
     and by email, confirm the reply lands in Responses, the cadence pauses,
     and alerts fire.
-11. **Email channel for campaigns**: the cadence engine sends SMS only
-    (email-only contacts are skipped). Location-aware email *campaign*
-    sending (first-touch hosted flyer / follow-up PDF) is ready in the
-    templates and preview but needs an email touch runner before email
-    campaigns can be automated. Manual and one-off emails work now.
+11. **Email campaigns**: when ready, set `PROGRAM_EMAIL_TOUCHES_SENDING=on`
+    on Render (optionally `PROGRAM_EMAIL_TOUCH_BATCH`, default 25 per pass,
+    and `PROGRAM_EMAIL_FOLLOWUP_DAYS`, default 4). Nothing goes out until a
+    campaign family is also switched on. Check Campaigns → "Campaign email"
+    first: it lists exactly who would get what.
 12. Switch on one campaign family (typed confirmation), enrol a small batch,
     watch the dashboard.
 

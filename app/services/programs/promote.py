@@ -50,6 +50,12 @@ def promote(db: Session, org: Organization, actor: Optional[User] = None, *,
     if not apply:
         summary["applied"] = False
         return summary
+    # PLAN CAPACITY: all or nothing. A promotion that stopped halfway would
+    # leave some of one customer's contacts live and the rest staged, which is
+    # worse than a clear refusal to raise the plan first.
+    from app.services import plan_limits
+    if p["to_create"]:
+        plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=p["to_create"], actor=actor)
     prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org.id).first()
     owner = assign_to_id or (prog.primary_contact_user_id if prog else None)
     created = 0
