@@ -666,10 +666,10 @@ function EmailRunner() {
       <h3 className="pc-small" style={{ margin: '0 0 6px' }}>Campaign email</h3>
       <p className="pc-note" style={{ marginTop: 0 }}>
         Automated campaign email is <strong>{d.enabled ? 'ON' : 'OFF'}</strong> for this deployment
-        {d.enabled ? ` (up to ${d.batch} per pass, 9am–6pm local, follow-up after ${d.followup_days} days).` : ' - nothing is emailed automatically until it is switched on.'}
+        {d.enabled ? ` (at most ${d.daily_cap} a day - ${d.used_today} so far today - and ${d.batch} per pass, 9am–6pm local, follow-up after ${d.followup_days} days).` : ' - nothing is emailed automatically until it is switched on.'}
         {' '}A reply on any channel ends a contact's sequence.
       </p>
-      <p className="pc-small">Would go out now: <strong>{d.would_send_total}</strong> · held (reply, review, opt-out, no approved flyer): <strong>{d.skipped}</strong>{d.held_no_flyer ? ` (${d.held_no_flyer} waiting for a flyer)` : ''} · sent: <strong>{c.sent || 0}</strong> · blocked: <strong>{c.blocked || 0}</strong> · failed: <strong>{c.failed || 0}</strong></p>
+      <p className="pc-small">Would go out now: <strong>{d.would_send_total}</strong> · held (reply, review, opt-out, no approved flyer): <strong>{d.skipped}</strong>{d.held_no_flyer ? ` (${d.held_no_flyer} waiting for a flyer)` : ''} · sent: <strong>{c.sent || 0}</strong> · blocked: <strong>{c.blocked || 0}</strong> · failed: <strong>{c.failed || 0}</strong>{c.unknown ? <> · <strong>{c.unknown} outcome unknown - check before resending</strong></> : null}</p>
       {d.would_send?.length > 0 && (
         <div className="pc-tablewrap">
           <table className="pc-table">

@@ -437,7 +437,8 @@ def _email_runner_item() -> dict:
     on = _et.sending_enabled()
     return {"key": "email_campaign_runner", "ok": on,
             "detail": ("on - campaign emails go out for campaigns that are switched on, "
-                       "%d per pass, follow-up after %d days" % (_et.batch_limit(), _et.followup_days()))
+                       "%d per pass, %d per day, follow-up after %d days"
+                       % (_et.batch_limit(), _et.daily_cap(), _et.followup_days()))
             if on else "off (%s) - no campaign email goes out" % _et.SENDING_ENV}
 
 
@@ -833,6 +834,7 @@ def email_touches(db: Session = Depends(get_db), user: User = Depends(require_te
         counts[st] = n
     return {
         "enabled": report["enabled"], "followup_days": _et.followup_days(), "batch": _et.batch_limit(),
+        "daily_cap": _et.daily_cap(), "used_today": _et.used_today(db, prog.organization_id),
         "due": report["due"], "skipped": report["skipped"], "held_no_flyer": report.get("held_no_flyer", 0), "would_send": report["would_send"][:200],
         "would_send_total": len(report["would_send"]), "counts": counts,
         "recent": [{"id": t.id, "lead_id": t.lead_id, "family": t.campaign_family, "touch": t.touch_number,

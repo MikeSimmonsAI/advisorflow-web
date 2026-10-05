@@ -737,3 +737,112 @@ def test_promotion_respects_the_plan_lead_limit(program, monkeypatch):
         promote.promote(db, org, apply=True)
     assert ei.value.status_code == 402
     assert db.query(_Lead).filter(_Lead.organization_id == org.id).count() == 0   # nothing half-done
+
+
+# ── email runner: review regressions ─────────────────────────────────────────
+
+@pytest.mark.parametrize("status", ["booked", "hot", "not_interested", "dead"])
+def test_a_staff_set_status_holds_the_sequence_and_is_not_overwritten(program, sample_advisor, monkeypatch, status):
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    lead.status = status
+    db.commit()
+    sent = []
+    with _fake_provider(sent):
+        r = et.run(db, org.id, force_hours=True)
+    db.refresh(lead)
+    assert sent == [] and r["skipped"] == 1 and lead.status == status
+
+
+def test_a_blocked_touch_is_retried_after_the_hold_clears(program, sample_advisor, monkeypatch):
+    from app.models.program_models import ProgramEmailTouch
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    lead.manual_flag = "bad_email"
+    db.commit()
+    sent = []
+    with _fake_provider(sent):
+        assert et.run(db, org.id, force_hours=True)["blocked"] == 1
+    lead.manual_flag = None
+    db.commit()
+    with _fake_provider(sent):
+        assert et.run(db, org.id, force_hours=True)["sent"] == 0          # not before 24 h
+        later = datetime.utcnow() + timedelta(hours=25)
+        assert et.run(db, org.id, now=later, force_hours=True)["sent"] == 1
+    rows = db.query(ProgramEmailTouch).filter_by(lead_id=lead.id).all()
+    assert len(rows) == 1 and rows[0].status == "sent" and len(sent) == 1
+
+
+def test_an_error_after_the_provider_is_unknown_not_failed(program, sample_advisor, monkeypatch):
+    from app.models.program_models import ProgramEmailTouch
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    calls = []
+
+    def accepted_then_boom(**kw):
+        calls.append(kw)
+        raise ConnectionError("socket closed after send")
+    with patch("app.services.email_service.send_email_via_provider", side_effect=accepted_then_boom):
+        r = et.run(db, org.id, force_hours=True)
+    row = db.query(ProgramEmailTouch).filter_by(lead_id=lead.id).one()
+    assert r["unknown"] == 1 and row.status == "unknown" and "check the provider" in row.reason
+    with _fake_provider(calls):
+        assert et.run(db, org.id, force_hours=True)["sent"] == 0           # never auto-resent
+
+
+def test_a_demo_refusal_is_blocked(program, sample_advisor, monkeypatch):
+    from app.services.demo_guard import DemoBoundaryViolation
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+
+    def demo(*a, **k):
+        raise DemoBoundaryViolation("demo lead")
+    monkeypatch.setattr("app.services.sms_service._demo_send_guard", demo)
+    sent = []
+    with _fake_provider(sent):
+        assert et.run(db, org.id, force_hours=True)["blocked"] == 1
+    assert sent == []
+
+
+def test_a_stale_claim_surfaces_as_unknown(program, sample_advisor, monkeypatch):
+    from app.models.program_models import ProgramEmailTouch
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    db.add(ProgramEmailTouch(organization_id=org.id, lead_id=lead.id, touch_number=1, status="claimed",
+                             attempted_at=datetime.utcnow() - timedelta(hours=2)))
+    db.commit()
+    sent = []
+    with _fake_provider(sent):
+        et.run(db, org.id, force_hours=True)
+    row = db.query(ProgramEmailTouch).filter_by(lead_id=lead.id).one()
+    assert sent == [] and row.status == "unknown"
+
+
+def test_template_fields_are_never_expanded_twice():
+    assert identity.render("Hi {first_name} - {location_name}",
+                           {"first_name": "{location_name}", "location_name": "Home"}) == "Hi {location_name} - Home"
+
+
+def test_the_dry_run_plan_writes_nothing(program, sample_advisor, monkeypatch):
+    from app.models.program_models import ProgramEmailTouch
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    db.add(ProgramEmailTouch(organization_id=org.id, lead_id=lead.id, touch_number=1, status="claimed",
+                             attempted_at=datetime.utcnow() - timedelta(hours=2)))
+    db.commit()
+    lead.notes = "unsaved edit"                     # caller's pending change survives
+    et.run(db, org.id, dry_run=True)
+    assert lead.notes == "unsaved edit"
+    db.rollback()
+    assert db.query(ProgramEmailTouch).filter_by(lead_id=lead.id).one().status == "claimed"
+
+
+def test_the_daily_cap_trickles_sends(program, sample_advisor, monkeypatch):
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    _lead_for(db, org, sample_advisor, "L007", phone="2145550107", first="Rosa", last="Diaz",
+              email="rd@example.com")
+    fam = db.query(CampaignFamily).filter_by(organization_id=org.id, key="veteran_spanish").one()
+    fam.is_active, fam.first_touch_email_mode = True, "none"
+    db.commit()
+    monkeypatch.setenv("PROGRAM_EMAIL_TOUCH_DAILY_CAP", "1")
+    sent = []
+    with _fake_provider(sent):
+        r1 = et.run(db, org.id, force_hours=True)
+        r2 = et.run(db, org.id, force_hours=True)
+    assert r1["sent"] == 1 and r2["sent"] == 0 and "daily cap" in r2["reason"] and len(sent) == 1
+    with _fake_provider(sent):
+        assert et.run(db, org.id, now=datetime.utcnow() + timedelta(days=1), force_hours=True)["sent"] == 1

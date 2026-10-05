@@ -110,10 +110,11 @@ def context_for(db: Session, lead: Lead, channel: str = "sms",
 
 
 def render(template: str, fields: Dict[str, str]) -> str:
-    out = template or ""
-    for k, v in fields.items():
-        out = out.replace("{%s}" % k, v or "")
     import re
+    # ONE pass: a value that itself contains "{location_website}" (customer
+    # data in a name field) is inserted literally, never expanded.
+    out = re.sub(r"\{(\w+)\}", lambda m: (fields.get(m.group(1)) or "") if m.group(1) in fields
+                 else m.group(0), template or "")
     out = "\n".join(line.rstrip() for line in out.splitlines()).strip()
     # An empty field (no flyer yet) must not leave a hole in the message.
     out = re.sub(r"\n{3,}", "\n\n", out)

@@ -65,10 +65,16 @@ Code: `app/models/program_models.py`, `app/services/programs/`
   `PROGRAM_EMAIL_TOUCHES_SENDING` (deployment, default off) AND the campaign
   family switch (default off). Holds a contact who replied on any channel, has
   an open review, opted out, or whose campaign needs a flyer that is not
-  uploaded yet; sends only 9:00–18:00 in the org's timezone; at most 25 per
-  pass (`PROGRAM_EMAIL_TOUCH_BATCH`); goes through `send_email_to_lead`, so
-  DNC / opt-out / bad address / demo / AI-paused refusals all apply. The
-  Campaigns tab shows what *would* go out right now (dry run).
+  uploaded yet, or whose lead status a person has set (booked, hot, not
+  interested, dead…); sends only 9:00–18:00 in the org's timezone; at most
+  **50 per program per local day** (`PROGRAM_EMAIL_TOUCH_DAILY_CAP`) and 25
+  per pass (`PROGRAM_EMAIL_TOUCH_BATCH`), one pass every 10 minutes; goes
+  through `send_email_to_lead`, so DNC / opt-out / bad address / demo /
+  AI-paused / plan refusals all apply. A refused touch is recorded *blocked*
+  and re-tried after 24 h (a temporary hold never uses up the family's
+  touch); a provider rejection is *failed*; an error after the provider call
+  is *unknown* — never auto-resent, because it may have gone out. The
+  Campaigns tab shows what *would* go out right now (dry run — reads only).
 
 ### Screens — "Family Service Center" (`/program`, admins only)
 Dashboard (hero, location selector, Leads / Contacts / Locations / Qualified /
@@ -164,7 +170,7 @@ Review, 2 Duplicate Review). Nothing was sent.
 
 ## 5. Tests
 
-* `tests/test_outreach_program.py` (52) and `tests/test_email_events.py` (5):
+* `tests/test_outreach_program.py` (64) and `tests/test_email_events.py` (5):
   staging and the dedup rule, idempotent setup, nothing invented, identity and
   sign-off, send refusals (no location / data review / duplicate review /
   campaign off), email From name, unsubscribe, non-program orgs unchanged,
@@ -178,7 +184,16 @@ Review, 2 Duplicate Review). Nothing was sent.
 off by default, needs the campaign on, hosted-then-attached never twice,
 a reply ends the sequence, reviews / opt-out hold, compliance refusal recorded
 as blocked, sending hours, no-flyer hold, emergency stop claims nothing,
-plan endpoint sends nothing.
+plan endpoint sends nothing; plus the independent review's regressions
+  (staff status holds and is not overwritten, blocked touch retried after the
+  hold clears, error after provider = unknown and never resent, demo refusal
+  blocked, stale claim surfaced, dry run writes nothing, template fields never
+  expanded twice).
+* A second independent review of the email runner found 4 high/medium issues
+  (staff-set statuses ignored and overwritten; a temporary hold burned the
+  touch; mail that went out could be labelled failed; ~5k queries per pass)
+  and 5 low ones. **All fixed** with regression tests; a pass over the full
+  544-lead set is now ~670 queries / 0.25 s, every 10 minutes.
 * An independent review found 7 issues (linked-row review bypass, reply
   misclassification, re-import erasing review state, manual MMS blocked,
   advisor visibility, SLA double-alert path, small items). **All fixed** with
@@ -223,12 +238,15 @@ plan endpoint sends nothing.
     and by email, confirm the reply lands in Responses, the cadence pauses,
     and alerts fire.
 11. **Email campaigns**: when ready, set `PROGRAM_EMAIL_TOUCHES_SENDING=on`
-    on Render (optionally `PROGRAM_EMAIL_TOUCH_BATCH`, default 25 per pass,
-    and `PROGRAM_EMAIL_FOLLOWUP_DAYS`, default 4). Nothing goes out until a
+    on Render (optionally `PROGRAM_EMAIL_TOUCH_DAILY_CAP`, default 50 a day;
+    `PROGRAM_EMAIL_TOUCH_BATCH`, default 25 per pass; `PROGRAM_EMAIL_FOLLOWUP_DAYS`,
+    default 4). For the first day consider a cap of 10. Nothing goes out until a
     campaign family is also switched on. Check Campaigns → "Campaign email"
     first: it lists exactly who would get what.
-12. Switch on one campaign family (typed confirmation), enrol a small batch,
-    watch the dashboard.
+12. Switch on ONE campaign family (typed confirmation). Email: every promoted,
+    unheld contact in that family becomes eligible and goes out at the daily
+    cap. SMS cadence: nobody is enrolled by promotion — enrol a small batch
+    deliberately. Watch Responses and the dashboard.
 
 ## 7. Known issues
 * The supplied SCI logo PNG is cropped on the right ("Corporatio"); used as

@@ -1677,7 +1677,7 @@ async def _program_sla_loop():
                         # family is switched on; never raises out of the pass.
                         try:
                             from app.services.programs import email_touches as _et
-                            if _et.sending_enabled():
+                            if _et.sending_enabled() and _et.pass_due():
                                 r = _et.run(db)
                                 out["email_touches"] = {k: r[k] for k in ("sent", "failed", "blocked", "skipped")}
                         except Exception as exc:                 # noqa: BLE001
