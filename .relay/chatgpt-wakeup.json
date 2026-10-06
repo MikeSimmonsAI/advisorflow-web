@@ -1,10 +1,10 @@
 {
-  "relay_run_id": "control-room-20261006-1324-a1",
-  "parent_run_id": "relay-loop-test-003",
+  "relay_run_id": "control-room-20261006-1331-a2",
+  "parent_run_id": "control-room-20261006-1324-a1",
   "project": "EvoSys / AdvisorFlow Control Room",
-  "status": "COMPLETED",
+  "status": "BLOCKED",
   "branch": "sci-program",
-  "timestamp_ct": "2026-10-06 13:31 CT",
+  "timestamp_ct": "2026-10-06 13:33 CT",
   "issue": 1,
-  "status_comment_id": 6022857226
+  "status_comment_id": 6022896075
 }
