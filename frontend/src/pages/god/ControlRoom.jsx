@@ -10,6 +10,10 @@ import { api } from '../../api/client'
 import {
   POLL_MS, toneFor, showNeedsMike, KIND_LABEL, timelineNewestFirst,
   makeSubmitGuard, directionDisabledReason, errorMessage,
+  homeCards, COMPLETED_FILTERS, filterCompleted, dismissSuggestion, loadDismissed, visibleSuggestions,
+  suggestionActions, emptyPackage, addObjective, moveObjective, removeObjective, renamePackage,
+  savePackageDraft, loadPackageDraft, packageState, canStartPackage, packageSequence, objectivesForServer,
+  monitoringView, MAX_OBJECTIVES,
 } from './controlRoomView'
 
 const CSS = `
@@ -54,6 +58,22 @@ const CSS = `
 .cr details pre { white-space: pre-wrap; word-break: break-all; background: var(--god-surface,#f9fafb); padding: 8px; border-radius: 6px; margin: 4px 0 0; }
 .cr .note { font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--god-border,#f3f4f6); }
 .cr .q { font-size: 13px; padding: 5px 0; }
+.cr .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.cr .hc { background: var(--god-card,#fff); border: 1px solid var(--god-border,#e5e7eb); border-radius: 12px; padding: 12px; }
+.cr .hc.needs { border: 2px solid #dc2626; background:#fef2f2; }
+.cr .hc.working { border-color:#93c5fd; background:#eff6ff; }
+.cr .hc .v { font-size: 16px; font-weight: 700; word-break: break-word; }
+.cr .hc .s { font-size: 12px; color: var(--god-muted,#6b7280); margin-top: 2px; }
+.cr .seg { display:inline-flex; gap:4px; margin-bottom:10px; }
+.cr .seg button { padding: 4px 12px; border-radius: 999px; border:1px solid var(--god-border,#d1d5db); background: var(--god-card,#fff); font-size: 12px; font-weight:600; }
+.cr .seg button.on { background:#1d4ed8; color:#fff; border-color:#1d4ed8; }
+.cr .item { padding: 10px 0; border-bottom: 1px solid var(--god-border,#f3f4f6); }
+.cr .item:last-child { border-bottom: 0; }
+.cr .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:6px; }
+.cr .btn.sm { padding: 3px 10px; font-size: 12px; }
+.cr input[type=text] { padding: 8px 10px; border-radius: 8px; border:1px solid var(--god-border,#d1d5db); font: inherit; font-size: 14px; background: var(--god-field,#fff); color: inherit; flex: 1; min-width: 180px; }
+.cr .gate { color:#b91c1c; font-weight:700; font-size: 12px; }
+.cr .state-pill { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:700; background:#e0e7ff; color:#3730a3; }
 .cr .tag { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background:#e0e7ff; color:#3730a3; margin-left: 6px; }
 `
 
@@ -125,6 +145,175 @@ function Timeline({ events }) {
   )
 }
 
+function HomeSummary({ home }) {
+  return (
+    <div className="cards" data-testid="home-summary">
+      {homeCards(home).map((c) => (
+        <div key={c.key} className={'hc ' + c.tone} data-testid={'home-' + c.key}>
+          <div className="lbl">{c.label}</div>
+          <div className="v">{c.value}</div>
+          {c.sub && <div className="s">{c.sub}</div>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MonitoringNotice({ m }) {
+  const v = monitoringView(m)
+  if (!v) return null
+  return (
+    <div className={v.kind === 'setup' ? 'setup' : 'err'} data-testid="monitoring-notice" role="status">
+      <strong>{v.title}.</strong> {v.message}
+      {v.kind === 'setup' && <div className="evd" style={{ marginTop: 4 }}>
+        Added once on the staging backend by Mike, in the host's environment settings. It is never shown here or entered in this page.
+      </div>}
+    </div>
+  )
+}
+
+function CompletedWork({ items }) {
+  const [filter, setFilter] = useState('today')
+  const rows = filterCompleted(items, filter)
+  return (
+    <div className="card" data-testid="completed-work"><h2>Completed work</h2>
+      <div className="seg" role="group" aria-label="Completed filter">
+        {COMPLETED_FILTERS.map((f) => (
+          <button key={f.id} className={filter === f.id ? 'on' : ''} onClick={() => setFilter(f.id)}>{f.label}</button>
+        ))}
+      </div>
+      {!rows.length && <div className="evd">Nothing completed in this range.</div>}
+      {rows.map((i) => (
+        <div className="item" key={i.relay_ref + i.at}>
+          <div className="evt">{i.title}</div>
+          <div className="evd">{i.result}</div>
+          <div className="evt-time">{i.project || 'No project'} · {i.at_ct} · {i.actor} · ref {i.relay_ref}</div>
+          {Object.keys(i.technical || {}).length > 0 && (
+            <details><summary>Technical details</summary><pre>{JSON.stringify(i.technical, null, 1)}</pre></details>)}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SuggestedNext({ items, dismissed, onDismiss, onPackage, onQueue, blocked }) {
+  const rows = visibleSuggestions(items, dismissed)
+  return (
+    <div className="card" data-testid="suggested-next"><h2>Suggested next</h2>
+      {!rows.length && <div className="evd">No suggestions right now. They appear only when a finished or blocked run points somewhere.</div>}
+      {rows.map((s) => {
+        const a = suggestionActions(s, !!blocked)
+        return (
+          <div className="item" key={s.id}>
+            <div className="evt">{s.suggestion}</div>
+            <div className="evd">Why: {s.reason}</div>
+            {s.effort && <div className="evd">Effort: {s.effort}</div>}
+            {s.dependency && <div className="evd">Depends on: {s.dependency}</div>}
+            <div className="row">
+              {a.canPackage && <button className="btn sm" onClick={() => onPackage(s)}>Add to overnight package</button>}
+              {a.canQueue && <button className="btn sm" onClick={() => onQueue(s)}>Add to queue</button>}
+              {a.canDismiss && <button className="btn sm" onClick={() => onDismiss(s.id)}>Dismiss</button>}
+            </div>
+          </div>)
+      })}
+    </div>
+  )
+}
+
+function MorningSummary({ m }) {
+  if (!m) return null
+  const block = (title, rows, render) => (
+    <div><div className="lbl">{title}</div>
+      {rows.length ? rows.map((r, i) => <div className="q" key={i}>{render(r)}</div>) : <div className="q">None</div>}</div>)
+  return (
+    <div className="item" data-testid="morning-summary"><div className="lbl">Morning summary</div>
+      {block('Completed work', m.completed_work, (r) => r.what)}
+      {block('Changes', m.changes, (r) => r.commits)}
+      {block('Tests', m.tests, (r) => r.result)}
+      {block('Blockers', m.blockers, (r) => r.what)}
+      {block('Mike decisions', m.mike_decisions, (r) => r.decision)}
+    </div>
+  )
+}
+
+function OvernightPackage({ pkg, setPkg, overnight, blocked, onStarted }) {
+  const [text, setText] = useState('')
+  const [safety, setSafety] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const state = packageState(pkg, overnight && overnight.status)
+  const key = JSON.stringify(objectivesForServer(pkg))
+
+  useEffect(() => {
+    if (!pkg.objectives.length) { setSafety(null); return undefined }
+    let live = true
+    api.post('/god/relay/package/review', { objectives: objectivesForServer(pkg) })
+      .then((r) => { if (live) setSafety(r) }).catch(() => { if (live) setSafety(null) })
+    return () => { live = false }
+  }, [key])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const start = async () => {
+    setBusy(true); setMsg(null)
+    try {
+      const r = await api.post('/god/relay/package', { name: pkg.name, objectives: objectivesForServer(pkg) })
+      setMsg({ ok: true, t: r.chatgpt_signalled
+        ? 'Started. ChatGPT will review it and send Claude one directive at a time.'
+        : 'Recorded. The ChatGPT wake-up did not go through; it picks this up on its next check.' })
+      setPkg(emptyPackage()); onStarted()
+    } catch (e) { setMsg({ ok: false, t: errorMessage(e) }) } finally { setBusy(false) }
+  }
+  const seq = packageSequence(pkg, safety)
+  const add = () => { setPkg(addObjective(pkg, text)); setText('') }
+  return (
+    <div className="card" data-testid="overnight-package"><h2>Overnight package</h2>
+      <div className="row" style={{ marginTop: 0, marginBottom: 8 }}>
+        <span className="state-pill" data-testid="package-state">{state}</span>
+        {overnight && overnight.package && overnight.status !== 'None' && (
+          <span className="evd">{overnight.package.name}: {overnight.package.completed_runs} run(s) finished, {overnight.package.objective_count} objective(s)</span>)}
+      </div>
+      {blocked && <div className="setup" data-testid="package-setup-required">{blocked}</div>}
+      {msg && <div className={msg.ok ? 'ok' : 'err'}>{msg.t}</div>}
+      <div className="row" style={{ marginTop: 0 }}>
+        <input type="text" aria-label="Package name" placeholder="Package name" value={pkg.name} maxLength={80}
+               onChange={(e) => setPkg(renamePackage(pkg, e.target.value))} />
+      </div>
+      <div className="row">
+        <input type="text" aria-label="New objective" placeholder="Add a custom objective" value={text} maxLength={300}
+               onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add() }} />
+        <button className="btn sm" disabled={!text.trim() || pkg.objectives.length >= MAX_OBJECTIVES} onClick={add}>Add</button>
+      </div>
+      <ol data-testid="package-objectives" style={{ marginTop: 10 }}>
+        {seq.map((o, i) => (
+          <li className="item" key={o.text}>
+            <span className="evt">{o.step}. {o.text}</span>
+            {o.gate && <div className="gate" data-testid="gate-flag">Approval gate: {o.gate_reasons.join(', ')}. ChatGPT stops and asks Mike first.</div>}
+            <div className="row">
+              <button className="btn sm" disabled={i === 0} onClick={() => setPkg(moveObjective(pkg, i, -1))} aria-label="Move up">↑</button>
+              <button className="btn sm" disabled={i === seq.length - 1} onClick={() => setPkg(moveObjective(pkg, i, 1))} aria-label="Move down">↓</button>
+              <button className="btn sm" onClick={() => setPkg(removeObjective(pkg, i))}>Remove</button>
+            </div>
+          </li>
+        ))}
+      </ol>
+      {!seq.length && <div className="evd">No objectives yet. Add one above, or use "Add to overnight package" on a suggestion.</div>}
+      {safety && (
+        <div className="item" data-testid="package-safety">
+          <div className="lbl">Safety summary · {safety.objective_count} objective(s) · {safety.gate_count} approval gate(s)</div>
+          <div className="evd">{safety.summary}</div>
+          <ul>{safety.rules.map((r) => <li key={r} className="evd">{r}</li>)}</ul>
+          <div className="evd">The sequence is order only; no time estimates are made. Flagged steps pause for Mike.</div>
+        </div>)}
+      <button className="btn primary" disabled={busy || !canStartPackage(pkg, blocked)} onClick={start}>
+        {busy ? 'Starting…' : 'Start Overnight Package'}
+      </button>
+      <div className="evd" style={{ marginTop: 8 }}>
+        This goes to ChatGPT for review, never to Claude. Give Direction stays available while a package runs.
+      </div>
+      {overnight && overnight.package && <MorningSummary m={overnight.morning_summary} />}
+    </div>
+  )
+}
+
 function Composer({ data, onSent }) {
   const [text, setText] = useState('')
   const [mode, setMode] = useState(data.default_mode || 'next_priority')
@@ -178,6 +367,19 @@ export default function ControlRoom() {
   const [busy, setBusy] = useState(false)
   const [answered, setAnswered] = useState(null)
   const [tick, setTick] = useState(0)
+  const [pkg, setPkgState] = useState(() => loadPackageDraft(window.localStorage))
+  const [dismissed, setDismissed] = useState(() => loadDismissed(window.localStorage))
+  const [notice, setNotice] = useState(null)
+
+  const setPkg = (p) => { setPkgState(p); savePackageDraft(window.localStorage, p) }
+  const addSuggestion = (s) => { setPkg(addObjective(pkg, s.suggestion, 'suggested')); setNotice('Added to the overnight package draft.') }
+  // Explicit click only: goes to ChatGPT as a human-input event, never straight to Claude.
+  const queueSuggestion = async (s) => {
+    try {
+      await api.post('/god/relay/direction', { text: s.suggestion, mode: 'after_current' })
+      setNotice('Added to the queue. ChatGPT will review it first.'); load(true)
+    } catch (e) { setLoadErr(errorMessage(e)) }
+  }
 
   const load = useCallback(async (refresh = false) => {
     try {
@@ -208,11 +410,14 @@ export default function ControlRoom() {
         <button className="btn" onClick={() => load(true)}>Refresh now</button>
         {data.notify && <span className="evd">Email alerts: {data.notify.recipients_configured ? `${data.notify.recipients_configured} recipient(s) set, off in staging` : 'no recipients set'}</span>}
       </div>
-      {(loadErr || !data.available) && <div className="err">{loadErr || data.error}</div>}
+      <MonitoringNotice m={data.monitoring} />
+      {(loadErr || (!data.available && !monitoringView(data.monitoring))) && <div className="err">{loadErr || data.error}</div>}
+      {notice && <div className="ok">{notice}</div>}
       {answered && <div className="ok">Your answer ({answered}) went to ChatGPT.</div>}
 
       {showNeedsMike(data) && <NeedsMike gate={data.needs_mike} onChoose={choose} busy={busy}
                                          disabled={!!directionDisabledReason(data)} />}
+      <HomeSummary home={data.home} />
       <StatusHeader s={data.state} />
 
       {(data.notifications || []).length > 0 && (
@@ -223,6 +428,12 @@ export default function ControlRoom() {
       <div className="cols">
         <div>
           <Composer data={data} onSent={() => load(true)} />
+          <OvernightPackage pkg={pkg} setPkg={setPkg} overnight={data.overnight}
+                            blocked={directionDisabledReason(data)} onStarted={() => load(true)} />
+          <SuggestedNext items={data.suggested_next} dismissed={dismissed} blocked={directionDisabledReason(data)}
+                         onDismiss={(id) => setDismissed(dismissSuggestion(window.localStorage, id))}
+                         onPackage={addSuggestion} onQueue={queueSuggestion} />
+          <CompletedWork items={data.completed_work} />
           <div className="card"><h2>Timeline</h2><Timeline events={data.events} /></div>
         </div>
         <div className="card" data-testid="queue"><h2>Active queue</h2>

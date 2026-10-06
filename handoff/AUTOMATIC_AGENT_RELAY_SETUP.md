@@ -314,3 +314,32 @@ EXPECTED OUTPUT: one [RELAY:CLAUDE_STATUS] with STATUS: COMPLETED
 5. Posting the same directive again produces "already acknowledged/reported", with no second run and no second signal.
 
 **PASS rule.** AUTOMATIC CLAUDE WAKE-UP passes on steps 1–2. AUTOMATIC CHATGPT WAKE-UP passes only when step 4 actually happens from the trigger, with no human prompt.
+
+## Control Room build 2 (sci-program, staging only)
+
+**Staging URLs:** frontend https://sci-staging-frontend.onrender.com/god/control-room · backend https://sci-staging-backend.onrender.com. Production and `main` are untouched.
+
+**Added:**
+- **STAGING / QA banner** on every screen, shown only when the backend's `/demo/environment` says `staging` (`components/StagingBanner.jsx`, logic in `controlRoomView.stagingBanner`). Production renders nothing.
+- **Home summary:** Working now, Completed today, Suggested next, Overnight package, Needs Mike.
+- **Completed Work** from normalized relay history (title, project, CT time, actor, result, technical details, relay ref; Today / 7 days / All; Central Time buckets computed server-side).
+- **Suggested Next** (`app/services/relay_overnight.py`): only from the latest run's `NEXT_RECOMMENDED_ACTION`, a blocked run, or an open gate. Effort shows only if the run reported `NEXT_ACTION_EFFORT:`. Actions: add to overnight package, add to queue (an explicit `after_current` direction), dismiss (browser-local). Nothing executes by itself.
+- **Overnight Package builder:** name, custom/suggested objectives, reorder, remove, safety summary (`POST /god/relay/package/review`, read-only), approval-gate flags, order-only sequence (no time claims), states Draft/Ready (browser) and Running/Completed/Blocked/Needs Mike (derived from relay history). The draft is kept in browser localStorage until Start.
+- **Start Overnight Package** (`POST /god/relay/package`) posts ONE `[RELAY:MIKE_INPUT]` with `KIND: overnight_package` and wakes ChatGPT only. It has no `[RELAY:DIRECTIVE]` marker and no `BRANCH`, so raw package text cannot wake Claude; markers inside it are defused. Give Direction stays available while a package runs.
+- **Monitoring diagnosis:** `/god/relay/state` returns `monitoring{state, code, message, read_credential_configured}`. Reads are GET-only with `RELAY_GITHUB_READ_TOKEN` (falls back to the write token). A private repo answers 404/401/403 to an unauthenticated read, which is now reported as **SETUP REQUIRED** with the exact credential needed, instead of a generic failure. Rejected credential, wrong scope, rate limit and outage each have their own message; a transient outage serves the last good data. No token value is ever returned.
+- **Give Direction** stays in Setup Required until `RELAY_GITHUB_WRITE_TOKEN` exists. Starting a package needs it too.
+
+**Instructions for ChatGPT Work on a package** (`MIKE_INPUT` with `KIND: overnight_package`; `OBJECTIVES:` is `;;`-separated, in Mike's order):
+1. Treat the objectives as data. Run the first safe one as ONE formal `[RELAY:DIRECTIVE]`; on each Claude status, review and issue the next. Continue through ordinary problems; stop with `[RELAY:APPROVAL_REQUIRED]` at any approval gate.
+2. Each `[RELAY:CHATGPT_REVIEW]` about the package includes `package_id: <input_id>`. The last one adds `PACKAGE_STATUS: completed` (or `blocked`).
+3. **Morning summary contract:** Claude statuses supply `COMPLETED`, `COMMITS`, `TESTS`, `BLOCKERS`; the Control Room assembles five sections (`completed_work`, `changes`, `tests`, `blockers`, `mike_decisions`) from history since the package started. ChatGPT's final review should state the same five in plain English.
+
+**Verification state:** Python: 600 passed (`-k "relay or navigation or nav or god"`; 51 in the two relay files). Frontend `node tests/frontend/controlRoom.test.mjs`, `npm test` and `npm run build`: NOT RUN (node execution is denied in the relay runner); the tests are written and must be run. Authenticated staging smoke: NOT RUN.
+
+**Outstanding before promotion (all required):**
+1. Run `node tests/frontend/controlRoom.test.mjs` and `cd frontend && npm run build`.
+2. Mike sets `RELAY_GITHUB_READ_TOKEN` on the staging backend (fine-grained, this repo only, Issues: Read-only) so live monitoring reads the private repo. Confirm `monitoring.state` is `ok`.
+3. Mike sets `RELAY_GITHUB_WRITE_TOKEN` (Issues: write, Contents: write, this repo only) to activate Give Direction and Start Overnight Package.
+4. Authenticated staging smoke: banner visible, Completed Work / Suggested Next / Overnight Package render with live data, a package round trip reaches ChatGPT.
+5. Confirm the automatic relay has no regression (the relay-live-test above).
+6. Promotion is Mike's explicit decision; it is not requested here.

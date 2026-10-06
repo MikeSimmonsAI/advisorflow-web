@@ -50,6 +50,11 @@ DUPLICATE_WINDOW_MIN = 10
 STALE_HOURS = 2.5
 VALID_STATUSES = ("WORKING", "COMPLETED", "BLOCKED", "APPROVAL_REQUIRED")
 ISSUE = 1
+PACKAGE_KIND = "overnight_package"
+PKG_SEP = " ;; "
+PKG_MAX_OBJECTIVES = 12
+PKG_MAX_OBJECTIVE_CHARS = 300
+PKG_MAX_NAME = 80
 
 _SECRET = re.compile(
     r"(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}"
@@ -144,7 +149,13 @@ def normalize_events(comments: List[Dict]) -> List[Dict]:
         k = _kind(body)
         f = _fields(body)
         run = f.get("RELAY_RUN_ID")
-        if k == MIKE_INPUT:
+        if k == MIKE_INPUT and f.get("KIND") == PACKAGE_KIND:
+            objs = [o.strip() for o in (f.get("OBJECTIVES") or "").split(PKG_SEP) if o.strip()]
+            add(c, "mike_direction", "Mike started an Overnight Package", _short(f.get("DIRECTION", "")),
+                run_id=run, mode=f.get("MODE", DEFAULT_MODE), input_id=f.get("INPUT_ID"),
+                package_id=f.get("INPUT_ID"), package_name=f.get("PACKAGE_NAME"),
+                objectives=objs, gates=f.get("APPROVAL_GATES", "0"))
+        elif k == MIKE_INPUT:
             add(c, "mike_direction", "Mike gave direction", _short(f.get("DIRECTION", "")),
                 run_id=run, mode=f.get("MODE", DEFAULT_MODE), input_id=f.get("INPUT_ID"))
         elif k == DIRECTIVE:
@@ -171,10 +182,14 @@ def normalize_events(comments: List[Dict]) -> List[Dict]:
             else:
                 word = "finished" if st == "COMPLETED" else "hit a blocker"
                 add(c, "claude_complete", f"Claude {word}", detail, run_id=run, status=st,
-                    project=f.get("PROJECT"), branch=f.get("BRANCH"), next_action=f.get("NEXT_RECOMMENDED_ACTION"))
+                    project=f.get("PROJECT"), branch=f.get("BRANCH"), next_action=f.get("NEXT_RECOMMENDED_ACTION"),
+                    result=f.get("COMPLETED"), tests=f.get("TESTS"), commits=f.get("COMMITS"),
+                    blockers=f.get("BLOCKERS"), effort=f.get("NEXT_ACTION_EFFORT"),
+                    production_impact=f.get("PRODUCTION_IMPACT"))
         elif k == REVIEW:
             add(c, "chatgpt_review", "ChatGPT reviewed", _short(re.sub(r"^\[RELAY:[A-Z_]+\]\s*", "", body)),
-                run_id=run, input_id=f.get("INPUT_ID"), parent_run_id=f.get("PARENT_RUN_ID"))
+                run_id=run, input_id=f.get("INPUT_ID"), parent_run_id=f.get("PARENT_RUN_ID"),
+                package_id=f.get("PACKAGE_ID"), package_status=(f.get("PACKAGE_STATUS") or "").lower() or None)
         elif k == APPROVAL:
             add(c, "approval_gate", "Mike approval needed",
                 _short(f.get("DECISION") or f.get("APPROVAL_REQUIRED") or ""), run_id=run,
@@ -250,6 +265,9 @@ def compute_state(events: List[Dict], now: Optional[datetime] = None) -> Dict:
     if events:
         state["last_update_ct"] = events[-1]["at_ct"]
     if not directives:
+        if pending_inputs(events) and not gate:
+            state.update(actor="ChatGPT", status="Working",
+                         next_action="ChatGPT is reading Mike's direction and will decide what Claude does next.")
         return {**state, "needs_mike": gate}
 
     d = directives[-1]
@@ -334,8 +352,10 @@ def notifications(events: List[Dict], state: Dict) -> List[Dict]:
 def snapshot(comments: List[Dict], now: Optional[datetime] = None) -> Dict:
     events = normalize_events(comments)
     state = compute_state(events, now)
+    from app.services import relay_overnight
     return {"state": state, "needs_mike": state.get("needs_mike"), "events": events,
-            "queue": build_queue(events, state, now), "notifications": notifications(events, state)}
+            "queue": build_queue(events, state, now), "notifications": notifications(events, state),
+            **relay_overnight.extras(events, state, now)}
 
 
 # ── GitHub I/O (server side only) ───────────────────────────────────────────
@@ -367,21 +387,62 @@ _lock = threading.Lock()
 CACHE_SECONDS = 15
 
 
+class MonitorError(Exception):
+    """Why the relay log could not be read, in terms Mike can act on."""
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code, self.message = code, message
+
+
+def classify_read_error(e: Exception, has_token: bool) -> "MonitorError":
+    """HTTP/network failure -> a precise state. A private repo answers 404 (not
+    403) to an unauthenticated read, so no token + 404/401/403 means the read
+    credential is missing, not that the repo is gone."""
+    if isinstance(e, urllib.error.HTTPError):
+        remaining = e.headers.get("X-RateLimit-Remaining") if e.headers else None
+        if e.code in (403, 429) and remaining == "0":
+            return MonitorError("rate_limited", "GitHub is rate-limiting the Control Room. It retries automatically.")
+        if e.code in (401, 403, 404) and not has_token:
+            return MonitorError("setup_required",
+                                "SETUP REQUIRED: the relay repository is private. Add one read-only credential "
+                                "(RELAY_GITHUB_READ_TOKEN: fine-grained, this repository only, Issues: Read-only) "
+                                "to the staging backend.")
+        if e.code == 401:
+            return MonitorError("credential_rejected",
+                                "SETUP REQUIRED: GitHub rejected the relay read credential (expired or revoked). Replace it.")
+        if e.code in (403, 404):
+            return MonitorError("credential_scope",
+                                "SETUP REQUIRED: the relay read credential cannot see issue #1. It needs this repository "
+                                "selected and Issues: Read-only (or RELAY_GITHUB_REPO is wrong).")
+        return MonitorError("github_error", "GitHub returned an error (%s). Retrying automatically." % e.code)
+    return MonitorError("unreachable", "Could not reach GitHub just now. Retrying automatically.")
+
+
 def fetch_comments(force: bool = False) -> List[Dict]:
-    """All comments on issue #1, cached briefly so polling stays cheap."""
+    """All comments on issue #1, cached briefly so polling stays cheap. Read-only:
+    GET requests with the read credential (or none). Raises MonitorError."""
     with _lock:
         if not force and _cache["comments"] is not None and time.time() - _cache["at"] < CACHE_SECONDS:
             return _cache["comments"]
+    token = read_token()
     out, page = [], 1
-    while page <= 20:
-        batch = _gh("GET", f"/issues/{ISSUE}/comments?per_page=100&page={page}", read_token())
-        out += batch or []
-        if not batch or len(batch) < 100:
-            break
-        page += 1
+    try:
+        while page <= 20:
+            batch = _gh("GET", f"/issues/{ISSUE}/comments?per_page=100&page={page}", token)
+            out += batch or []
+            if not batch or len(batch) < 100:
+                break
+            page += 1
+    except Exception as e:                                # noqa: BLE001
+        raise classify_read_error(e, bool(token)) from None
     with _lock:
         _cache.update(at=time.time(), comments=out)
     return out
+
+
+def stale_comments() -> Optional[List[Dict]]:
+    with _lock:
+        return _cache["comments"]
 
 
 def invalidate_cache() -> None:
@@ -498,3 +559,40 @@ def submit_direction(text: str, mode: str, who: str, *, events: Optional[List[Di
         log.warning("relay direction: wake-up signal failed: %s", type(e).__name__)
     invalidate_cache()
     return {"input_id": input_id, "recorded": True, "chatgpt_signalled": signalled, "mode": mode}
+
+
+def submit_package(name: str, objectives: List[str], who: str, *, events: Optional[List[Dict]] = None,
+                   now: Optional[datetime] = None) -> Dict:
+    """Start Overnight Package: validate, record ONE human-input event in issue
+    #1, then signal ChatGPT Work. It never creates a directive and never wakes
+    Claude; ChatGPT decomposes the package one formal directive at a time."""
+    from app.services import relay_overnight as ov
+    clean = ov.validate_package(name, objectives)
+    safety = ov.package_safety(clean["objectives"])
+    token = write_token()
+    if not token:
+        raise DirectionError("setup_required",
+                             "SETUP REQUIRED: the server has no GitHub write credential yet.", 503)
+    if events is None:
+        events = normalize_events(fetch_comments(force=True))
+    fp = input_fingerprint(clean["name"] + "|" + "|".join(clean["objectives"]), "package")
+    if is_duplicate(events, fp, now):
+        raise DirectionError("duplicate", "You already started this package. ChatGPT has it.", 409)
+    now = now or datetime.now(timezone.utc)
+    input_id = "mike-pkg-%s-%s" % (now.astimezone(timezone.utc).strftime("%Y%m%d%H%M"), fp)
+    ct = ct_str(now)
+    try:
+        _gh("POST", f"/issues/{ISSUE}/comments", token, {"body": ov.build_package_comment(
+            input_id, clean["name"], clean["objectives"], safety["gate_count"], who, ct)})
+    except Exception as e:                                # noqa: BLE001
+        log.warning("relay package: audit write failed: %s", type(e).__name__)
+        raise DirectionError("github_error", "GitHub did not accept the package. Nothing was sent.", 502)
+    signalled = True
+    try:
+        _write_signal(signal_payload(input_id, "after_current", ct), token)
+    except Exception as e:                                # noqa: BLE001
+        signalled = False
+        log.warning("relay package: wake-up signal failed: %s", type(e).__name__)
+    invalidate_cache()
+    return {"package_id": input_id, "recorded": True, "chatgpt_signalled": signalled,
+            "objective_count": len(clean["objectives"]), "approval_gates": safety["gate_count"]}

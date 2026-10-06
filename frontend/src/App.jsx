@@ -4,6 +4,7 @@ import { lazyPage } from './utils/lazyPage'
 import PageBoundary from './components/PageBoundary'
 import Layout from './components/Layout'
 import DemoBanner from './components/DemoBanner'
+import StagingBanner from './components/StagingBanner'
 import ContextBanner from './components/ContextBanner'
 import DemoConsole from './pages/DemoConsole'
 import Login from './pages/Login'
@@ -837,6 +838,8 @@ export default function App() {
           this process is the demo environment, so a production bundle has no
           demo affordance in its DOM to find. */}
       <DemoBanner />
+      {/* STAGING / QA strip: backend-reported, renders nothing outside staging. */}
+      <StagingBanner />
       {/* The owner console, Sales, Executive and Wholesale areas load on first
           visit (utils/lazyPage); this is what shows for that moment. */}
       {/* Outside any shell (owner console, executive, sales) a chunk that
