@@ -1,0 +1,371 @@
+"""SCI POC readiness harness: stdlib only, no pytest / FastAPI / SQLAlchemy / network.
+
+Runs deterministic scenarios against the REAL production decision modules
+(these are imported, not re-implemented here):
+
+    app/services/programs/regional_pools.py   pools, routing decision
+    app/services/programs/alias_rules.py      entity -> alias slug, address validation
+    app/services/programs/reply_rules.py      HOT/ACTIVE/LOW, opt-out/wrong-person/bad-data,
+                                              cadence, alert, duplicate, draft-reply decisions
+    app/services/optout_parser.py             global opt-out parser
+    scripts/sci_campuses.csv                  the locked 30-campus / 39-entity grouping
+
+Run:  python3 -I scripts/sci_readiness_harness.py [--md PATH]
+Exit status 0 only if every scenario passes.
+
+WHAT THIS IS NOT: it does not replace the dependency-backed pytest suites or
+the DB integration tests (webhook -> DB rows, Twilio guard, real PhoneNumber
+rows, cadence rows). Those remain unrun in this environment. See
+handoff/SCI_READINESS_HARNESS.md for the explicit list.
+"""
+import ast
+import csv
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+from app.services import optout_parser as op                      # noqa: E402
+from app.services.programs import alias_rules as ar               # noqa: E402
+from app.services.programs import regional_pools as rp            # noqa: E402
+from app.services.programs import reply_rules as rr               # noqa: E402
+
+with open(os.path.join(ROOT, "scripts", "sci_campuses.csv"), encoding="utf-8") as _f:
+    ROWS = list(csv.DictReader(_f))
+BY_NAME = {r["Location"]: r for r in ROWS}
+AREAS = ["205", "334", "850", "251", "706", "318"]
+SCENARIOS = []          # (group, name, fn)
+
+
+def scenario(group, name):
+    def deco(fn):
+        SCENARIOS.append((group, name, fn))
+        return fn
+    return deco
+
+
+def add(group, name, fn):
+    SCENARIOS.append((group, name, fn))
+
+
+def eq(got, want):
+    assert got == want, "got %r, want %r" % (got, want)
+
+
+# ── pools (all six) ──────────────────────────────────────────────────────────
+for _a in AREAS:
+    def _pool(a=_a):
+        pool = rp.pool_for_area_code(a)
+        assert pool and rp.sender_pool(a) == pool["pool_id"]
+        assert rp.pool_members(ROWS)[pool["pool_id"]], "pool has no entities"
+    add("pools", "pool %s resolves and has entities" % _a, _pool)
+
+    def _label(a=_a):
+        rec = type("N", (), {"label": rp.POOL_LABEL_PREFIX + rp.POOLS[a]["pool_id"]})()
+        eq(rp.pool_for_phone_number(rec), rp.POOLS[a])
+    add("pools", "pool %s number label round-trips (no location in the number)" % _a, _label)
+
+eq_pools = {a: rp.POOLS[a]["pool_id"] for a in AREAS}
+add("pools", "exactly six pools, unique ids", lambda: eq((len(rp.POOLS), len(set(eq_pools.values()))), (6, 6)))
+add("pools", "every pooled entity belongs to exactly one pool",
+    lambda: eq(sum(len(v) for v in rp.pool_members(ROWS).values()), 38))
+add("pools", "foreign/missing pool label is not a pool",
+    lambda: eq([rp.pool_for_phone_number(type("N", (), {"label": l})()) for l in ("pool:pool-999-x", None, "main")],
+               [None, None, None]))
+
+
+@scenario("pools", "Pine Crest Cemetery West is verified and in the 251 (Mobile) pool")
+def _():
+    r = BY_NAME["Pine Crest Cemetery West"]
+    eq((r["Area Code"], r["Address Status"]), ("251", "verified"))
+    assert "Pine Crest Cemetery West" in rp.pool_members(ROWS)["pool-251-mobile"]
+
+
+@scenario("pools", "Oaklawn is unresolved: no area code, no pool, no sender")
+def _():
+    r = BY_NAME["Oaklawn Central Care Center"]
+    eq((r["Area Code"], r["Address Status"]), ("", "unverified"))
+    assert all(r["Location"] not in v for v in rp.pool_members(ROWS).values())
+    try:
+        rp.sender_pool(r["Area Code"])
+    except LookupError:
+        return
+    raise AssertionError("Oaklawn must have no sender pool")
+
+
+@scenario("pools", "844 toll-free is overflow only: never a pool, never a sender")
+def _():
+    eq(rp.BACKUP_TOLL_FREE, "+18449172171")
+    eq(rp.pool_for_area_code("844"), None)
+    assert not any("844" in p["pool_id"] for p in rp.POOLS.values())
+    try:
+        rp.sender_pool("844")
+    except LookupError:
+        return
+    raise AssertionError("844 must not resolve as a sender")
+
+
+for _bad in (None, "", "   ", "999", "214"):
+    def _unv(b=_bad):
+        eq(rp.pool_for_area_code(b), None)
+        try:
+            rp.sender_pool(b)
+        except LookupError:
+            return
+        raise AssertionError("no sender expected")
+    add("pools", "unverified/foreign area code %r has no sender (844 not a silent default)" % (_bad,), _unv)
+
+# ── exact entity and alias preservation ──────────────────────────────────────
+add("entities", "30 campuses / 39 entities locked",
+    lambda: eq((len(ROWS), len({r["Campus"] for r in ROWS})), (39, 30)))
+add("entities", "entity names are unique (no merging)",
+    lambda: eq(len({r["Location"] for r in ROWS}), 39))
+
+
+@scenario("entities", "alias slugs are unique and non-empty for all 39 entities")
+def _():
+    slugs = ar.slugs_for([r["Location"] for r in ROWS])
+    eq(len(slugs), 39)
+    eq(len(set(slugs.values())), 39)
+    assert all(slugs.values())
+
+
+@scenario("entities", "alias slugs are valid local parts and not reserved")
+def _():
+    bad = {n: ar.validate_local(s) for n, s in ar.slugs_for([r["Location"] for r in ROWS]).items()
+           if ar.validate_local(s)}
+    eq(bad, {})
+
+
+@scenario("entities", "shared-campus twins keep distinct entity names AND distinct aliases")
+def _():
+    by_campus = {}
+    for r in ROWS:
+        by_campus.setdefault(r["Campus"], []).append(r["Location"])
+    twins = [v for v in by_campus.values() if len(v) > 1]
+    assert twins, "expected multi-entity campuses"
+    slugs = ar.slugs_for([r["Location"] for r in ROWS])
+    for v in twins:
+        eq(len({slugs[n] for n in v}), len(v))
+
+
+@scenario("entities", "Pine Crest Cemetery / Funeral Home share a campus, Cemetery West is its own")
+def _():
+    eq(BY_NAME["Pine Crest Cemetery"]["Campus"], BY_NAME["Pine Crest Funeral Home"]["Campus"])
+    assert BY_NAME["Pine Crest Cemetery West"]["Campus"] != BY_NAME["Pine Crest Cemetery"]["Campus"]
+
+
+@scenario("entities", "alias casing/apostrophes normalised without changing the entity name")
+def _():
+    s = ar.slugs_for(["Pine Crest Cemetery West"])
+    eq(s["Pine Crest Cemetery West"], "pinecrestwest")
+    for bad in ("Admin", "a..b", "support", "-x"):
+        assert ar.validate_local(bad), bad
+    eq(ar.validate_local("pinecrestwest"), None)
+
+
+@scenario("entities", "alias domain extraction")
+def _():
+    eq((ar.domain_of("Hello@Example.COM"), ar.domain_of("nope"), ar.domain_of(None)), ("example.com", None, None))
+
+
+# ── known-contact exact-entity routing / unknown review routing ──────────────
+for _a in AREAS:
+    def _known(a=_a):
+        ent = next(r["Location"] for r in ROWS if r["Area Code"] == a)
+        d = rp.route_inbound(ent, rp.POOLS[a]["pool_id"])
+        eq((d["location"], d["queue"], d["pool_id"]), (ent, None, rp.POOLS[a]["pool_id"]))
+    add("routing", "pool %s: known contact routes to own exact entity" % _a, _known)
+
+    def _unknown(a=_a):
+        pid = rp.POOLS[a]["pool_id"]
+        d = rp.route_inbound(None, pid)
+        eq((d["location"], d["queue"]), (None, "regional_review:" + pid))
+    add("routing", "pool %s: unknown sender/caller goes to regional review, no location guessed" % _a, _unknown)
+
+
+@scenario("routing", "same-campus twin: funeral-home contact is NOT re-homed to the cemetery")
+def _():
+    d = rp.route_inbound("Pine Crest Funeral Home", rp.POOLS["251"]["pool_id"])
+    eq(d["location"], "Pine Crest Funeral Home")
+
+
+@scenario("routing", "a pool number never supplies identity (empty-string sender is unknown)")
+def _():
+    eq(rp.route_inbound("", rp.POOLS["205"]["pool_id"])["queue"], "regional_review:pool-205-birmingham")
+
+
+# ── opt-outs and "stop by" false-positive protection ─────────────────────────
+for _t in ("STOP", "stop", "Stop.", "unsubscribe", "Please STOP", "QUIT", "cancel", "stopall", "END", "OPT OUT"):
+    add("opt-out", "clear opt-out suppresses: %r" % _t, lambda t=_t: eq(op.contains_hard_stop_language(t), True))
+for _t in ("remove me from your list", "Please take me off this list", "stop texting me", "Stop calling me",
+           "stop sending these messages", "unsubscribe me please"):
+    add("opt-out", "explicit opt-out phrase suppresses: %r" % _t,
+        lambda t=_t: eq(op.contains_hard_stop_language(t), True))
+for _t in ("Can I stop by Friday?", "I'll stop by the office tomorrow", "Stop by anytime after 3, we can talk then",
+           "we can't stop by", "I need to cancel my appointment", "see you this weekend", "Please remove my old address"):
+    add("opt-out", "scheduling/ordinary language does NOT suppress: %r" % _t,
+        lambda t=_t: eq(op.contains_hard_stop_language(t), False))
+add("opt-out", "empty / None body is not an opt-out",
+    lambda: eq((op.contains_hard_stop_language(""), op.contains_hard_stop_language(None)), (False, False)))
+add("opt-out", "program classifier: 'Can I stop by Tuesday?' is HOT, not OPT-OUT",
+    lambda: eq(rr.classify("Can I stop by Tuesday?")["class"], rr.HOT))
+for _t in ("STOP", "unsubscribe", "Stop!"):
+    add("opt-out", "program classifier: %r is OPT-OUT, closed, no alert, no draft" % _t,
+        lambda t=_t: (eq(rr.classify(t)["class"], rr.OPT_OUT), eq(rr.alert_plan(rr.OPT_OUT), None),
+                      eq(rr.suggested_reply(rr.OPT_OUT, [], first_name="A", contact="C", location="L",
+                                            channel="sms"), None)))
+add("opt-out", "program classifier: 'do not text me' is OPT-OUT",
+    lambda: eq(rr.classify("Please do not text me again")["class"], rr.OPT_OUT))
+
+# ── HOT / ACTIVE / LOW ───────────────────────────────────────────────────────
+for _t, _c in (("Yes please, I'm interested", rr.HOT), ("How much does a plan cost?", rr.HOT),
+               ("Please call me tomorrow", rr.HOT), ("Can we schedule a visit?", rr.HOT),
+               ("What does the package include?", rr.ACTIVE), ("Can you send me a brochure", rr.ACTIVE),
+               ("ok", rr.LOW), ("Thanks!", rr.LOW), ("", rr.LOW)):
+    add("classify", "%r -> %s" % (_t, _c), lambda t=_t, c=_c: eq(rr.classify(t)["class"], c))
+add("classify", "bereavement reply is HOT and routed to a personal reply",
+    lambda: eq(rr.classify("My husband passed away last month")["class"], rr.HOT))
+add("classify", "upstream 'interested' classification promotes a neutral-looking reply to HOT",
+    lambda: eq(rr.classify("sounds fine", "interested")["class"], rr.HOT))
+add("classify", "urgency mapping: HOT/ACTIVE high, terminal lanes LOW (never an emergency page)",
+    lambda: eq([rr.urgency(c) for c in (rr.HOT, rr.ACTIVE, rr.LOW, rr.OPT_OUT, rr.BAD_DATA, rr.WRONG_PERSON)],
+               ["HOT", "ACTIVE", "LOW", "LOW", "LOW", "LOW"]))
+add("classify", "intents: pricing + appointment detected, ack for 'ok'",
+    lambda: (eq(sorted(rr.intents("What's the price? Can I schedule a visit?", rr.HOT))[:2],
+                sorted([rr.APPOINTMENT, rr.PRICING])[:2]),
+             eq(rr.intents("ok", rr.LOW), [rr.ACKNOWLEDGMENT])))
+
+# ── wrong person / bad data ──────────────────────────────────────────────────
+for _t, _c in (("This is not him, wrong person", rr.WRONG_PERSON), ("you have the wrong number", rr.BAD_DATA),
+               ("who is this?", rr.BAD_DATA), ("she doesn't live here", rr.WRONG_PERSON)):
+    add("data", "%r -> %s (held for Data Review, not sold to)" % (_t, _c),
+        lambda t=_t, c=_c: eq(rr.classify(t)["class"], c))
+add("data", "wrong person/bad data raise an in-app alert only (no external)",
+    lambda: eq([rr.alert_plan(c)["external"] for c in (rr.WRONG_PERSON, rr.BAD_DATA)], [False, False]))
+add("data", "wrong-person draft acknowledges and promises no further contact",
+    lambda: assert_in("won't hear from us again",
+                      rr.suggested_reply(rr.WRONG_PERSON, [rr.I_WRONG_PERSON], first_name="Pat", contact="Sam",
+                                         location="Pine Crest", channel="sms")))
+
+
+def assert_in(needle, hay):
+    assert needle in hay, "%r not in %r" % (needle, hay)
+
+
+# ── cadence pause ────────────────────────────────────────────────────────────
+add("cadence", "any reply pauses an ACTIVE cadence",
+    lambda: eq(rr.cadence_action(rr.ACTIVE, "active"), {"new_status": "paused", "paused": True}))
+add("cadence", "HOT reply pauses an ACTIVE cadence",
+    lambda: eq(rr.cadence_action(rr.HOT, "active")["new_status"], "paused"))
+add("cadence", "opt-out ENDS an active cadence (stopped_dnc), not just pauses",
+    lambda: eq(rr.cadence_action(rr.OPT_OUT, "active")["new_status"], "stopped_dnc"))
+add("cadence", "opt-out ENDS an already-paused cadence",
+    lambda: eq(rr.cadence_action(rr.OPT_OUT, "paused")["new_status"], "stopped_dnc"))
+add("cadence", "no cadence: nothing to pause",
+    lambda: eq(rr.cadence_action(rr.HOT, None), {"new_status": None, "paused": False}))
+add("cadence", "a stopped cadence is never resumed by a reply",
+    lambda: eq(rr.cadence_action(rr.HOT, "stopped_dnc")["new_status"], "stopped_dnc"))
+
+# ── duplicate / idempotency ──────────────────────────────────────────────────
+add("idempotency", "retried MessageSid with stored reply -> duplicate, no second pipeline",
+    lambda: eq(rr.duplicate_inbound_result("SM1", "r-1"), {"status": "duplicate", "reply_id": "r-1"}))
+add("idempotency", "new MessageSid -> processed",
+    lambda: eq(rr.duplicate_inbound_result("SM2", None), None))
+add("idempotency", "no MessageSid cannot be deduped (processed)",
+    lambda: eq(rr.duplicate_inbound_result("", "r-1"), None))
+add("idempotency", "same input classifies identically twice (deterministic)",
+    lambda: eq(rr.classify("Can I schedule a visit?"), rr.classify("Can I schedule a visit?")))
+
+# ── alerts ───────────────────────────────────────────────────────────────────
+add("alerts", "HOT: management + external alert, kind hot",
+    lambda: eq(rr.alert_plan(rr.HOT), {"kind": "hot", "management": True, "external": True}))
+add("alerts", "ACTIVE: external, no management",
+    lambda: eq(rr.alert_plan(rr.ACTIVE), {"kind": "active", "management": False, "external": True}))
+add("alerts", "LOW: in-app only",
+    lambda: eq(rr.alert_plan(rr.LOW)["external"], False))
+add("alerts", "staff SMS/email is OFF by default: attempt refused with reason",
+    lambda: eq(rr.staff_alert_gate("+15555550100", "sms", "primary", False),
+               (False, "staff alerts are switched off for this program")))
+add("alerts", "missing recipient is recorded, never guessed",
+    lambda: eq(rr.staff_alert_gate(None, "email", "management", True),
+               (False, "no email configured for management alerts")))
+add("alerts", "enabled + recipient configured -> allowed",
+    lambda: eq(rr.staff_alert_gate("+15555550100", "sms", "primary", True), (True, None)))
+
+# ── no AI auto-send ──────────────────────────────────────────────────────────
+add("no-auto-send", "suggested reply is a DRAFT string; terminal lanes get none",
+    lambda: (assert_in("Hi Pat,", rr.suggested_reply(rr.HOT, [rr.APPOINTMENT], first_name="pat", contact="Sam",
+                                                     location="Pine Crest", channel="sms")),
+             eq(rr.suggested_reply(rr.LOW, [], first_name="p", contact="c", location="l", channel="sms"), None)))
+add("no-auto-send", "draft never asks the family to call",
+    lambda: eq("call" in rr.suggested_reply(rr.HOT, [rr.APPOINTMENT, rr.PRICING], first_name="P", contact="S",
+                                            location="L", channel="sms").lower(), False))
+
+
+def _imports_of(path):
+    tree = ast.parse(open(os.path.join(ROOT, path), encoding="utf-8").read())
+    out = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            out |= {a.name for a in n.names}
+        elif isinstance(n, ast.ImportFrom):
+            out.add(n.module or "")
+    return out
+
+
+def _no_send_surface(path):
+    imps = _imports_of(path)
+    banned = ("twilio", "sms_service", "email_service", "requests", "httpx", "openai", "ai_gateway",
+              "sqlalchemy", "smtplib", "socket")
+    hits = {i for i in imps if any(b in i for b in banned)}
+    eq(hits, set())
+
+
+for _p in ("app/services/programs/reply_rules.py", "app/services/optout_parser.py",
+           "app/services/programs/regional_pools.py", "app/services/programs/alias_rules.py"):
+    add("no-auto-send", "decision module has no send/network/DB imports: %s" % _p,
+        lambda p=_p: _no_send_surface(p))
+
+
+@scenario("no-auto-send", "responses.py reply path never calls a customer-send function")
+def _():
+    src = open(os.path.join(ROOT, "app/services/programs/responses.py"), encoding="utf-8").read()
+    # the only outbound in this module is _deliver_staff_alert (staff, gated by staff_alert_gate)
+    tree = ast.parse(src)
+    calls = {n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
+             for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    assert not (calls & {"send_sms", "send_message", "send_sms_via_provider", "send_to_lead"}), calls
+    assert "staff_alert_gate" in calls and "_deliver_staff_alert" in calls
+
+
+# ── runner ───────────────────────────────────────────────────────────────────
+
+def run(md_path=None):
+    rows, failed = [], 0
+    for i, (group, name, fn) in enumerate(SCENARIOS, 1):
+        try:
+            fn()
+            status, note = "PASS", ""
+        except Exception as exc:                                 # noqa: BLE001
+            status, note, failed = "FAIL", "%s: %s" % (type(exc).__name__, exc), failed + 1
+        rows.append((i, group, name, status, note))
+        print("%3d  %-4s  [%s] %s%s" % (i, status, group, name, "  <- " + note if note else ""))
+    total = len(rows)
+    print("\nEXECUTED %d  PASS %d  FAIL %d" % (total, total - failed, failed))
+    if md_path:
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write("# SCI readiness harness: executed results\n\n")
+            f.write("Executed %d scenarios: **%d PASS, %d FAIL**. Stdlib only; real decision modules; "
+                    "does not replace dependency-backed pytest or DB integration suites.\n\n"
+                    % (total, total - failed, failed))
+            f.write("| # | Group | Scenario | Result |\n|---|---|---|---|\n")
+            for i, g, n, s, note in rows:
+                f.write("| %d | %s | %s | %s%s |\n" % (i, g, n.replace("|", "/"), s, " " + note if note else ""))
+    return failed
+
+
+if __name__ == "__main__":
+    out = sys.argv[sys.argv.index("--md") + 1] if "--md" in sys.argv else None
+    sys.exit(1 if run(out) else 0)

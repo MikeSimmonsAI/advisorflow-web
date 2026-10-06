@@ -515,9 +515,11 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         _seen = (db.query(Reply).join(Lead, Lead.id == Reply.lead_id)
                  .filter(Reply.twilio_sid == MessageSid,
                          Lead.organization_id == org_id).first())
-        if _seen is not None:
+        from app.services.programs.reply_rules import duplicate_inbound_result
+        _dup = duplicate_inbound_result(MessageSid, getattr(_seen, "id", None))
+        if _dup is not None:
             _route_to_evosense(db, org_id, lead, _seen)
-            return {"status": "duplicate", "reply_id": _seen.id}
+            return _dup
 
     # PHASE 7.1 (2/3) — does an EvoSense acquisition conversation own this
     # sender? If so EvoSense reads the reply (after it is saved, below) and the
