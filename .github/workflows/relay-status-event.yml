@@ -1,0 +1,51 @@
+# Relay status event: a [RELAY:CLAUDE_STATUS] comment on issue #1 is validated
+# by the guard (trusted author, real ACKed run, matching branch, valid STATUS,
+# first terminal status for the run). A trusted TERMINAL status (COMPLETED |
+# BLOCKED | APPROVAL_REQUIRED) produces exactly one push to the relay PR - the
+# ChatGPT Work wake-up event. Forged, unknown, duplicate or WORKING statuses do
+# nothing. Never wakes Claude. Runs from the default branch, like every
+# issue_comment workflow. See handoff/AUTOMATIC_AGENT_RELAY_SETUP.md.
+name: Relay status event
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+concurrency:
+  group: relay-signal
+  cancel-in-progress: false
+
+jobs:
+  status:
+    if: >-
+      github.event.issue.number == 1 &&
+      contains(github.event.comment.body, '[RELAY:CLAUDE_STATUS]') &&
+      !contains(github.event.comment.body, '[RELAY:DIRECTIVE]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write        # push the relay-signal branch only
+      pull-requests: write   # keep the one relay PR open
+      issues: read
+    env:
+      RELAY_ISSUE: "1"
+      RELAY_AUTHORIZED_ACTORS: MikeSimmonsAI
+      RELAY_ALLOWED_BRANCHES: ${{ vars.RELAY_ALLOWED_BRANCHES || 'sci-program' }}
+      RELAY_STATUS_ACTORS: ${{ vars.RELAY_STATUS_ACTORS || 'github-actions[bot],claude[bot]' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/relay
+      - run: cp -r scripts/relay "$RUNNER_TEMP/relay" && echo "RELAY_DIR=$RUNNER_TEMP/relay" >> "$GITHUB_ENV"
+      - id: s
+        name: Validate the status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 "$RELAY_DIR/relay_guard.py" status
+      - name: ChatGPT wake-up signal (one relay PR, one event per terminal status)
+        if: steps.s.outputs.terminal == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash "$RELAY_DIR/signal.sh"
