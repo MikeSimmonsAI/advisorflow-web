@@ -228,6 +228,7 @@ const LeadIntelligence = lazyPage(() => import('./pages/god/LeadIntelligence'))
 const FeatureEntitlements = lazyPage(() => import('./pages/god/FeatureEntitlements'))
 const GodVoiceConfig = lazyPage(() => import('./pages/god/GodVoiceConfig'))
 const GodRevenueHistory = lazyPage(() => import('./pages/god/GodRevenueHistory'))
+const ControlRoom = lazyPage(() => import('./pages/god/ControlRoom'))
 const RoadmapBoard = lazyPage(() => import('./pages/god/RoadmapBoard'))
 const GodLaunches = lazyPage(() => import('./pages/god/GodLaunches'))
 import HelpSupport from './pages/HelpSupport'
@@ -1317,6 +1318,8 @@ export default function App() {
         {/* GOD-09: cross-org lead browser */}
         <Route path="/god/lead-browser"          element={<GodRoute><GodModeLayout><GodLeadBrowser /></GodModeLayout></GodRoute>} />
         <Route path="/god/lead-intelligence"     element={<GodRoute><GodModeLayout><LeadIntelligence /></GodModeLayout></GodRoute>} />
+        {/* Control Room: relay status, timeline, Needs Mike, Give Direction */}
+        <Route path="/god/control-room"          element={<GodRoute><GodModeLayout><ControlRoom /></GodModeLayout></GodRoute>} />
         {/* GOD-04: platform roadmap board */}
         <Route path="/god/roadmap"               element={<GodRoute><GodModeLayout><RoadmapBoard /></GodModeLayout></GodRoute>} />
         {/* Customer Launches — the staff view of onboarding intake. Sits in

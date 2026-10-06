@@ -76,6 +76,7 @@ from app.routers.god_sms_trace_router import router as god_sms_trace_router
 # implementation lifecycle and the control-plane audit view. Separate module
 # from god_router so the whole Checkpoint 6 surface reads as one thing.
 from app.routers.god_ops_router import router as god_ops_router
+from app.routers.god_relay_router import router as god_relay_router
 # Pricing floors and compensation plans — the owner's commercial control panel.
 # Separate module from god_router because it configures COMMERCIAL POLICY rather
 # than operating on records, and because payroll configuration is worth being
@@ -990,6 +991,7 @@ app.include_router(god_calendar_diag_router)  # read-only calendar wiring report
 app.include_router(god_maintenance_router)   # one record, dry-run first, no messages sent
 app.include_router(god_sms_trace_router)      # read-only provider forensics, sends nothing
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
+app.include_router(god_relay_router)   # Control Room: relay status + Mike direction, god_admin only
 app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisioning, implementations
 app.include_router(god_pricing_router)   # Pricing floors + compensation plans — god_admin only
 app.include_router(god_billing_router)   # Customer SaaS plan catalogue + billing policy + revenue — god_admin only
