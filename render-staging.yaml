@@ -10,8 +10,8 @@
 # marked `sync: false`; fill them as the comment on each line says.
 # Production (render.yaml, branch main) is not touched by any of this.
 #
-# PLAN NOTES: the database is basic-256mb (paid, hourly - delete it after
-# the staging run); the web services are free. Free web services sleep after ~15 idle minutes (the
+# PLAN NOTES: the database is basic-256mb (paid, hourly - KEEP it until the
+# SCI staging validation is finished and Mike approves cleanup); the web services are free. Free web services sleep after ~15 idle minutes (the
 # Family Service Center Health tab refreshes every minute and keeps it awake
 # while open); there is no pre-deploy step on free plans, so the schema step
 # runs at start instead.
@@ -19,7 +19,7 @@
 databases:
   - name: sci-staging-db
     # Paid (approved 2026-10-05): the workspace's one free database slot is
-    # used by restland-fsa-db. Billed by the hour - delete after the staging run.
+    # used by restland-fsa-db. Billed by the hour - kept until Mike approves cleanup.
     plan: basic-256mb
     databaseName: sci_staging
     user: sci_staging
@@ -80,15 +80,15 @@ services:
       - key: GOD_ADMIN_INIT_PW
         sync: false   # a password you choose for the staging owner login
       - key: RESEND_API_KEY
-        sync: false   # Resend → API Keys → create "sci-staging" (Sending access, domain evosyspro.live)
+        sync: false   # STAGING-ONLY Resend key "sci-staging" - never the production key
       - key: EMAIL_FROM_ADDRESS
         sync: false   # support@evosyspro.live
       - key: RESEND_WEBHOOK_SECRET
-        sync: false   # Resend → Webhooks → add https://sci-staging-backend.onrender.com/email/events/resend → its signing secret (whsec_...)
+        sync: false   # STAGING-ONLY: signing secret of the webhook to https://sci-staging-backend.onrender.com/email/events/resend
       - key: MICROSOFT_CLIENT_ID
-        sync: false   # same value as production
+        sync: false   # the EvoSys Microsoft app (Mike pastes it)
       - key: MICROSOFT_CLIENT_SECRET
-        sync: false   # same value as production
+        sync: false   # the EvoSys Microsoft app (Mike pastes it)
 
   - type: web
     name: sci-staging-frontend

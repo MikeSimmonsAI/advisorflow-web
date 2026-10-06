@@ -1427,6 +1427,8 @@ def test_staging_harness_seeds_and_refuses_a_second_send(client, db_session, mon
                                                               "mgmt_sms": "5405550123",
                                                               "mgmt_email": "mgr@example.com"}).json()
     assert s["locations"] == 39 and s["aliases_assigned"] == 39 and s["alias_mismatches"] == {}
+    # the live-loop seed creates the approved test contact ONLY
+    assert s["simulation_contacts"] == [] and s["contacts_in_workspace"] == 1
     sent = []
 
     def fake(**kw):
@@ -1443,3 +1445,8 @@ def test_staging_harness_seeds_and_refuses_a_second_send(client, db_session, mon
     assert sent[0]["to_email"] == "tester@example.com"
     st = client.get("/god/staging/sci/status", headers=h).json()
     assert st["outbound"][0]["status"] == "sent" and st["campaign_touches"] == 0 and st["active_campaigns"] == []
+    assert st["contacts_in_workspace"] == ["tester@example.com"]
+    assert client.post("/god/staging/sci/simulate/active", headers=h).status_code == 409
+    again = client.post("/god/staging/sci/seed", headers=h, json={"test_email": "tester@example.com",
+                                                                  "simulation_contacts": True}).json()
+    assert len(again["simulation_contacts"]) == 5 and again["contacts_in_workspace"] == 6

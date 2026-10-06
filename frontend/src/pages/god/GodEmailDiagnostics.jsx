@@ -97,7 +97,9 @@ export default function GodEmailDiagnostics() {
         </div>
         <p style={{ color: 'var(--text-secondary, #64748b)', fontSize: 13 }}>
           Connect the address workspaces send from (for example <b>support@evosyspro.live</b>). On Microsoft's page, pick
-          that mailbox's account. EvoSys gets read-only access to its Inbox; it never sends from here.
+          that mailbox's account. EvoSys gets read and write access to that mailbox (Mail.ReadWrite): it reads replies
+          from the Inbox and, only after a reply has been processed, files it into its location's Outlook folder. It
+          never sends, deletes or creates folders from here.
         </p>
         {data && boxes.length === 0 ? (
           <div style={{ padding: 12, background: '#fffbeb', borderRadius: 8 }}>

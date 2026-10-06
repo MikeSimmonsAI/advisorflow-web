@@ -4,7 +4,9 @@ See app/models/inbound_mailbox_models.py for why this exists.
 
 CONNECT: a platform owner signs in to Microsoft AS the mailbox (for example
 support@evosyspro.live) through the normal OAuth consent screen. Delegated
-Mail.Read only - this path never sends mail and never holds a password.
+Mail.ReadWrite: EvoSys reads the Inbox and, only AFTER a reply has been fully
+processed, moves it into its location's Outlook folder (programs/mailfiling.py).
+This path never sends mail, never deletes mail and never holds a password.
 
 POLL (every run of the email poller cron): read the Inbox from the stored
 cursor (first run: the last 3 days, so replies that already arrived are picked
@@ -601,11 +603,14 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
     return {"mailbox": box.address, "checked": len(messages), "matched": matched, "errors": errors}
 
 
-def probe(db: Session, box: InboundMailbox) -> Dict:
-    """Read-only look at the mailbox: its folders and the 15 newest messages in
-    ANY folder, so "why was nothing read?" can be answered (moved to another
-    folder, Junk, a different account signed in...)."""
-    token = _access_token(box)
+def probe(db: Session, box: InboundMailbox, folder: Optional[str] = None) -> Dict:
+    """Look at the mailbox without changing it: the access the sign-in actually
+    grants, its folders and the 15 newest messages in ANY folder, so "why was
+    nothing read / filed?" can be answered (moved to another folder, Junk, a
+    different account signed in, a Mail.Read-only sign-in...). With `folder`
+    (e.g. "Inbox/Customers Folder/SCI/Eastern Gate Memorial Gardens") it also
+    says whether that Outlook folder exists - nothing is created or moved."""
+    token, can_write = _access_token_rw(box)
     db.commit()
     h = {"Authorization": f"Bearer {token}"}
     me = httpx.get(f"{GRAPH}/me", headers=h, params={"$select": "mail,userPrincipalName,displayName"}, timeout=15)
@@ -615,7 +620,9 @@ def probe(db: Session, box: InboundMailbox) -> Dict:
     msgs = httpx.get(f"{GRAPH}/me/messages", headers=h,
                      params={"$select": "subject,from,receivedDateTime,parentFolderId",
                              "$orderby": "receivedDateTime desc", "$top": 15}, timeout=20)
-    return {
+    out = {
+        "mail_access": "Mail.ReadWrite" if can_write else "Mail.Read only - reconnect to allow Outlook filing",
+        "can_file": can_write,
         "account": me.json() if me.status_code == 200 else {"error": me.status_code, "body": me.text[:300]},
         "folders": ([{"name": f["displayName"], "total": f.get("totalItemCount"), "unread": f.get("unreadItemCount")}
                      for f in folders.json().get("value", [])] if folders.status_code == 200
@@ -626,6 +633,13 @@ def probe(db: Session, box: InboundMailbox) -> Dict:
                     for m in msgs.json().get("value", [])] if msgs.status_code == 200
                    else {"error": msgs.status_code, "body": msgs.text[:300]}),
     }
+    if folder:
+        from app.services.programs.mailfiling import GraphMover
+        try:
+            out["folder_check"] = {"path": folder, "exists": bool(GraphMover(token, can_write).folder_id(folder))}
+        except Exception as exc:  # noqa: BLE001
+            out["folder_check"] = {"path": folder, "exists": None, "error": "%s: %s" % (type(exc).__name__, str(exc)[:200])}
+    return out
 
 
 def poll_all_mailboxes(db: Session) -> Dict:

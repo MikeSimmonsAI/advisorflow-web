@@ -1,10 +1,13 @@
 """/god/email/inbound-mailboxes - connect and watch the shared reply mailboxes.
 
 Platform-owner only. Connecting is a Microsoft sign-in done BY THE PERSON in
-their browser (we never see a password); everything else here is read-only
-status plus a "poll now" for a controlled test.
+their browser (we never see a password); everything else here is status plus
+a "poll now" for a controlled test. The sign-in grants Mail.ReadWrite so a
+processed reply can be filed into its location's Outlook folder.
 """
 from __future__ import annotations
+
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
@@ -95,12 +98,14 @@ def poll_now(box_id: str, god: User = Depends(require_god), db: Session = Depend
 
 
 @router.get("/inbound-mailboxes/{box_id}/probe")
-def probe_mailbox(box_id: str, god: User = Depends(require_god), db: Session = Depends(get_db)):
-    """Read-only: folders and newest messages (subject/from/folder only)."""
+def probe_mailbox(box_id: str, folder: Optional[str] = Query(None, max_length=400),
+                  god: User = Depends(require_god), db: Session = Depends(get_db)):
+    """Changes nothing: granted access, folders, newest messages (subject/from/
+    folder only) and, with ?folder=, whether that Outlook folder exists."""
     from app.services.inbound_mailbox_service import MailboxAuthError, probe
     box = _box_or_404(db, box_id)
     try:
-        return probe(db, box)
+        return probe(db, box, folder=folder)
     except MailboxAuthError as e:
         raise HTTPException(status_code=409, detail=str(e))
 

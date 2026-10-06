@@ -5,8 +5,9 @@ stack (its own database) with the real Resend sender and the real
 support@evosyspro.live mailbox - without a shell on the staging host.
 
     POST /god/staging/sci/seed          SCI org, 39 locations, aliases, program
-                                        settings, ONE approved test contact,
-                                        synthetic simulation contacts (never emailed)
+                                        settings, ONE approved test contact (and,
+                                        only with simulation_contacts=true,
+                                        synthetic example.com contacts, never emailed)
     POST /god/staging/sci/send-test     the ONE real test email (refuses a second)
     POST /god/staging/sci/poll          read the reply mailbox now
     GET  /god/staging/sci/status        the whole chain for the test contact
@@ -91,6 +92,9 @@ class SeedIn(BaseModel):
     mgmt_sms: Optional[str] = None
     mgmt_email: Optional[str] = None
     mail_folder: Optional[str] = "Inbox/Customers Folder/SCI"
+    # Off by default: the live-loop proof seeds the approved test contact ONLY.
+    # The simulation matrix needs the synthetic example.com contacts.
+    simulation_contacts: bool = False
 
 
 @router.post("/seed")
@@ -164,15 +168,17 @@ def seed(body: SeedIn, db: Session = Depends(get_db), god: User = Depends(requir
 
     contact(TEST_SOURCE_ID, "Mike", "Simmons", test_email, TEST_LOCATION,
             "STAGING approved test contact - the only address ever emailed")
-    for src, first, last, email, loc in SIM_CONTACTS:
-        contact(src, first, last, email, loc, "STAGING simulation contact - never emailed")
-    held = (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org.id,
-                                                 ProgramSourceRecord.source_lead_id == "SIM-HELD").one())
-    held.on_hold, held.hold_reason, held.held_at = True, "STAGING hold test", datetime.utcnow()
+    if body.simulation_contacts:
+        for src, first, last, email, loc in SIM_CONTACTS:
+            contact(src, first, last, email, loc, "STAGING simulation contact - never emailed")
+        held = (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org.id,
+                                                     ProgramSourceRecord.source_lead_id == "SIM-HELD").one())
+        held.on_hold, held.hold_reason, held.held_at = True, "STAGING hold test", datetime.utcnow()
     db.commit()
     return {"organization_id": org.id, "locations": len(names), "aliases_assigned": len(assigned),
             "alias_mismatches": mismatch, "test_contact": test_email,
-            "simulation_contacts": [c[3] for c in SIM_CONTACTS],
+            "simulation_contacts": [c[3] for c in SIM_CONTACTS] if body.simulation_contacts else [],
+            "contacts_in_workspace": db.query(Lead).filter(Lead.organization_id == org.id).count(),
             "mail_folder": prog.mailbox_folder_path,
             "management": json.loads(prog.management_recipients or "[]")}
 
@@ -274,6 +280,7 @@ def status(db: Session = Depends(get_db), god: User = Depends(require_god)):
         "campaign_touches": db.query(ProgramEmailTouch).filter(ProgramEmailTouch.organization_id == org.id).count(),
         "active_campaigns": [f.key for f in db.query(__import__("app.models.program_models", fromlist=["CampaignFamily"]).CampaignFamily)
                              .filter_by(organization_id=org.id, is_active=True)],
+        "contacts_in_workspace": [l.email for l in db.query(Lead).filter(Lead.organization_id == org.id)],
         "held_records": db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org.id,
                                                              ProgramSourceRecord.on_hold.is_(True)).count(),
         "unmatched_open": db.query(ProgramUnmatchedReply).filter(ProgramUnmatchedReply.organization_id == org.id,
@@ -340,6 +347,11 @@ def simulate(case: str, db: Session = Depends(get_db), god: User = Depends(requi
     prof = {p.official_name: p for p in db.query(LocationProfile).filter(LocationProfile.organization_id == org.id)}
     eg, sh = prof[TEST_LOCATION].email_alias, prof["Striffler-Hamby Mortuary"].email_alias
     gid = "sim-%s-%s" % (case, uuid.uuid4().hex[:8])
+    if (case not in ("duplicate_outbound", "resend_temporary_failure", "mailbox_temporary_failure")
+            and db.query(Lead).filter(Lead.organization_id == org.id,
+                                      Lead.email == "sim.active@example.com").first() is None):
+        raise HTTPException(status_code=409, detail="This case needs the synthetic contacts: "
+                            "seed again with simulation_contacts=true.")
     if case == "active":
         res, moves = _inbound(db, [_graph(gid, "sim.active@example.com", eg, "What does the veteran guide include?")])
         return {"result": res, "response": _resp_for(db, "sim.active@example.com"), "filed_to": moves}
