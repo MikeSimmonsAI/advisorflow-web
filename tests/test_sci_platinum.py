@@ -225,11 +225,11 @@ def test_simulation_contacts_are_removed_and_nothing_else(client, db_session, mo
     h = _h(db_session, _god(db_session))
     s = client.post("/god/staging/sci/seed", headers=h, json={"test_email": "tester@example.net",
                                                               "simulation_contacts": True}).json()
-    assert s["contacts_in_workspace"] == 6
+    assert s["contacts_in_workspace"] == 7
     with patch("app.services.programs.responses._deliver_staff_alert", return_value=(False, "sim")):
         pass
     out = client.post("/god/staging/sci/remove-simulation-contacts", headers=h).json()
-    assert out["contacts"] == 5 and out["contacts_in_workspace"] == ["tester@example.net"]
+    assert out["contacts"] == 6 and out["contacts_in_workspace"] == ["tester@example.net"]
     assert db_session.query(Lead).filter(Lead.email.like("sim.%@example.com")).count() == 0
 
 
@@ -513,3 +513,63 @@ def test_a_missed_call_gets_a_suggested_text_that_is_never_sent(program, sample_
     rep = program_voice.location_report(db, org.id)
     eg = next(x for x in rep if x["location"] == "Eastern Gate Memorial Gardens")
     assert eg["calls"] == 1 and eg["missed"] == 1
+
+
+# ── physical campuses: one number per campus ────────────────────────────────
+
+def test_sci_grouping_is_30_campuses_for_39_locations():
+    from app.services.programs import campuses
+    rows = campuses.load_grouping()
+    assert len(rows) == 39 and len({r["Campus"] for r in rows}) == 30
+    by = {}
+    for r in rows:
+        by.setdefault(r["Campus"], []).append(r["Location"])
+    assert sorted(by["eastern-gate-memorial-pensacola"]) == ["Eastern Gate Memorial Funeral Home",
+                                                             "Eastern Gate Memorial Gardens"]
+    assert sum(len(v) == 2 for v in by.values()) == 9
+
+
+def test_a_campus_number_reply_lands_on_the_contacts_own_location_without_a_mismatch(
+        program, sample_advisor, twilio_webhook):
+    from app.models.program_models import LocationProfile, ProgramResponse
+    from app.services.programs import campuses
+    db, org = program["db"], program["org"]
+    for p in db.query(LocationProfile).filter_by(organization_id=org.id).all():
+        if p.official_name.startswith("Eastern Gate"):
+            p.campus_key, p.campus_label = "eastern-gate", "Eastern Gate"
+    db.commit()
+    gardens = _location_number(db, org)            # the campus number points at the Gardens
+    lead = _lead_for(db, org, sample_advisor, "L001", phone="2145550101")
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(False, "test")):
+        r = twilio_webhook("/sms/webhook/inbound", data={
+            "From": "+12145550101", "To": "+12055550199", "Body": "Can we set up a visit next week?",
+            "MessageSid": "SMcampus1"})
+    assert r.status_code == 200
+    resp = db.query(ProgramResponse).filter_by(lead_id=lead.id).one()
+    assert "Wrote to the" not in resp.summary         # same campus: no false mismatch
+    rows = campuses.plan(db, org.id)
+    eg = next(x for x in rows if x["campus"] == "eastern-gate")
+    assert eg["numbers"] == ["+12055550199"] and eg["number_status"] == "assigned"
+    assert gardens.location_id
+
+
+def test_staging_sms_round_trip_proves_the_software_path(client, db_session, monkeypatch):
+    from app.models.models import Platform
+    monkeypatch.setenv("STAGING_TEST_HARNESS", "on")
+    if not db_session.query(Platform).filter_by(slug="evosyspro").first():
+        db_session.add(Platform(id="plt-evosyspro-t3", name="EvoSys Pro", slug="evosyspro",
+                                support_email="support@evosyspro.live"))
+        db_session.commit()
+    h = _h(db_session, _god(db_session))
+    s = client.post("/god/staging/sci/seed", headers=h, json={"test_email": "tester@example.net",
+                                                              "simulation_contacts": True}).json()
+    assert s["campuses"]["campuses"] == 30 and s["campuses"]["unknown_locations"] == []
+    with patch("app.services.sms_service.Client") as tw:
+        out = client.post("/god/staging/sci/simulate/sms_round_trip", headers=h).json()
+        tw.assert_not_called()
+    assert out["outbound_identity_ok"] and out["same_campus"] and out["reply_attached"] == 1
+    assert out["response"]["class"] == "hot" and out["response"]["location_is_contacts_own"]
+    assert out["cadence"] in ("paused", "stopped_replied") and out["unknown_sender_kept"]["status"] == "open"
+    assert out["campus_report"][0]["numbers"] == ["+18505550100"]
+    rm = client.post("/god/staging/sci/remove-simulation-contacts", headers=h).json()
+    assert rm["sim_numbers"] == 1 and rm["contacts_in_workspace"] == ["tester@example.net"]

@@ -1,109 +1,96 @@
-# SCI — 39 location numbers: plan and status (2026-10-06)
+# SCI — CAMPUS NUMBER PLAN (proof of concept, 2026-10-06)
 
-## Status in one line
+**One local number per PHYSICAL CAMPUS.** Each named entity on a campus keeps its own identity: name, email alias, Outlook folder, reporting, campaign/source context and the "Kerry Allan | <entity>" sign-off. The entities on a campus share the phone number.
 
-**No numbers have been bought.** Under the existing Twilio registration, nothing can be provisioned for SCI *texting* without a new carrier registration. That registration needs an attestation from Mike/SCI. *Voice-only* use of local numbers needs no 10DLC registration, but it should wait until the map below is confirmed.
+- **Exact count: 30 campuses for 39 named locations.**
+  - 9 campuses hold two entities each: a funeral home with a cemetery or chapel.
+  - 21 campuses hold one entity.
+  - 2 of the 30 are unverified, because their address was not found.
+- **Contacts: 535 / 535** clean contacts are bound to a campus through their location.
+  - 25 of them belong to the 2 unverified campuses.
+  - The 10 held source rows (9 contacts) are excluded and untouched.
+  - This was checked against the full local import rehearsal. Real contacts are not loaded into staging.
+- Grouping data: `scripts/sci_campuses.csv`. The grouping is by street address, from the locations' public pages: research, to be confirmed with SCI before any address goes in mail. The code is in `app/services/programs/campuses.py`.
 
-## What the Twilio account holds today (inspected read-only, 2026-10-06)
+## Routing rules
 
-**A2P brands**
+1. The campus number is stored in `phone_numbers`, with `workspace_id` set to one location on the campus.
+2. **SMS to the campus number:** the sender is matched by phone across the workspace. The reply attaches to the contact's OWN location: a family of the funeral home who texts the shared number lands on the funeral home. No false "wrote to another location" flag is raised for entities on the same campus. Then:
+   - cadence pause;
+   - classification (intent + urgency);
+   - alerts;
+   - audit.
+3. **Unknown sender:** kept in the unmatched queue at the campus, never attached to anyone.
+4. **Voice:** a campus greeting, voicemail with transcription, and reply handling as above. A missed call produces a suggested text that is never sent.
+5. **Outbound identity is always per entity:** "Kerry Allan | Eastern Gate Memorial Funeral Home" or "Kerry Allan | Eastern Gate Memorial Gardens", from the campus number.
+6. **Reporting:** `GET /program/campuses` (entities, contacts, number) and `GET /program/voice` (calls per location).
 
-| Brand | Type | Status |
-|---|---|---|
-| EVO Integrated Solutions LLC (BN68b7…) | Low Volume Standard | Approved |
-| Mike Simmon (BNa3dc…) | Sole proprietor | Approved |
+## Campus table
 
-**A2P campaigns:** one campaign, CM24a1…, approved. Use case Low Volume Mixed, under the EVO brand. Messaging service: "Low Volume Mixed A2P Messaging Service" (MG37…).
+| # | Campus | Entities served | City, ST | Area code | Contacts | Number | Status |
+|---|---|---|---|---|---|---|---|
+| 1 | Alabama Heritage | Alabama Heritage Cemetery; Alabama Heritage Funeral Home | Montgomery, AL | 334 | 34 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 2 | Bayview | Bayview Fisher-Pou Chapel; Bayview Memorial Park | Pensacola, FL | 850 | 50 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 3 | Centuries Memorial | Centuries Memorial Funeral Home; Centuries Memorial Park | Shreveport, LA | 318 | 2 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 4 | Eastern Gate Memorial | Eastern Gate Memorial Funeral Home; Eastern Gate Memorial Gardens | Pensacola, FL | 850 | 23 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 5 | Elmwood | Elmwood Cemetery & Mausoleum; Johns-Ridout's Mortuary-Elmwood Chapel | Birmingham, AL | 205 | 18 | to buy | Confirm address with SCI, then buy |
+| 6 | Greenwood | Greenwood Serenity Memorial Gardens; White Chapel-Greenwood Funeral Home | Montgomery, AL | 334 | 37 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 7 | Heritage Chapel Funeral Home | Heritage Chapel Funeral Home | Tuscaloosa, AL | 205 | 3 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 8 | Highland Memorial Gardens | Highland Memorial Gardens | Bessemer, AL | 205 | 7 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 9 | Johns-Ridout's Funeral Parlors | Johns-Ridout's Funeral Parlors | Birmingham, AL | 205 | 8 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 10 | Kilgore Green Funeral Home | Kilgore Green Funeral Home | Jasper, AL | 205 | 1 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 11 | Leak Memory Chapel | Leak Memory Chapel | Montgomery, AL | 334 | 16 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 12 | Memory Hill Gardens | Memory Hill Gardens | Tuscaloosa, AL | 205 | 1 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 13 | Memory Park Cemetery | Memory Park Cemetery | Milton, FL | 850 | 26 | to buy | Confirm address with SCI, then buy |
+| 14 | Oak Lawn Funeral Home | Oak Lawn Funeral Home | Pensacola, FL | 850 | 24 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 15 | Oaklawn Central Care Center | Oaklawn Central Care Center | — | — | 9 | to buy | BLOCKED: address not found — confirm location |
+| 16 | Oakwood Memorial Gardens | Oakwood Memorial Gardens | Gardendale, AL | 205 | 5 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 17 | Parkhill Cemetery | Parkhill Cemetery | Columbus, GA | 706 | 35 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 18 | Pine Crest | Pine Crest Cemetery; Pine Crest Funeral Home | Mobile, AL | 251 | 15 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 19 | Pine Crest Cemetery West | Pine Crest Cemetery West | — | — | 16 | to buy | BLOCKED: address not found — confirm location |
+| 20 | Radney Funeral Home | Radney Funeral Home | Saraland, AL | 251 | 25 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 21 | Radney Funeral Home-Mobile | Radney Funeral Home-Mobile | Mobile, AL | 251 | 22 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 22 | Ridout's Gardendale Chapel | Ridout's Gardendale Chapel | Gardendale, AL | 205 | 11 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 23 | Ridout's Trussville Chapel | Ridout's Trussville Chapel | Birmingham, AL | 205 | 2 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 24 | Ridout's Valley Chapel | Ridout's Valley Chapel | Homewood, AL | 205 | 19 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 25 | Ridout's-Brown-Service Prattville Chapel | Ridout's-Brown-Service Prattville Chapel | Prattville, AL | 334 | 20 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 26 | Rockco Funeral Home | Rockco Funeral Home | Centreville, AL | 205 | 2 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 27 | Rockco Funeral Home (Montevallo) | Rockco Funeral Home (Montevallo) | Montevallo, AL | 205 | 2 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 28 | Southern Heritage | Southern Heritage Cemetery; Southern Heritage Funeral Home | Pelham, AL | 205 | 33 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
+| 29 | Striffler-Hamby Mortuary | Striffler-Hamby Mortuary | Columbus, GA | 706 | 52 | to buy | Confirm address with SCI, then buy |
+| 30 | Sunset Brown-Service | Sunset Brown-Service Funeral Home; Sunset Brown-Service Memorial Park | Northport, AL | 205 | 17 | to buy | Ready to buy & configure (voice/voicemail now; SMS after registration) |
 
-**Active numbers**
+Contacts total: 535.
 
-| Number | Type | Configuration |
-|---|---|---|
-| +1 844-917-2171 | Toll-free | SMS webhook goes to production `/sms/webhook/inbound`. **Voice webhook is still Twilio's demo URL (demo.twilio.com/welcome/voice)**, so a caller hears Twilio's sample message. **Keep this number** (backup / overflow). Mike should repoint its voice URL to `/voice/inbound` when he decides; production configuration was not changed tonight. |
-| +1 469-224-1155 | Local (DFW) | Voice → `/voice/inbound`. Messaging → the Low Volume Mixed service. |
-| +1 469-405-0255 | Local (Dallas) | Messaging → a second messaging service (created 2026-09-25). Voice not configured. |
+Parkhill Cemetery (4161 Macon Rd) and Striffler-Hamby Mortuary (4071 Macon Rd) are adjacent but at different addresses, so they are kept as 2 campuses. If SCI confirms they are one campus, the count becomes 29.
 
-## Why texting from 39 SCI numbers cannot be switched on under the existing registration
+## Carrier registration
 
-1. **The campaign describes EvoSys's own traffic.** These messages would come from SCI locations, signed "Kerry Allan | <location>". A 10DLC campaign has to describe the real sender and the real use case. Attaching 39 SCI-location numbers to EVO's Low Volume Mixed campaign would misdescribe the traffic.
-2. **Throughput.** A Low Volume Standard brand is capped at low daily volume. That is fine for a 10-contact pilot, but it is not a 39-location program.
-3. **The registration that fits** is a customer (secondary) brand for SCI, or for the SCI entity that operates these locations, registered through EvoSys as an ISV, with a campaign whose use case covers local-location customer care and marketing to people who asked for information. An **Agents/Franchises**-style campaign is the structure designed for many local numbers under one brand. Choosing between that and a standard Mixed/Marketing campaign depends on SCI's legal entity and consent language, and that statement must come from SCI/Mike.
+- **Target 10DLC classification:** use case **AGENTS_FRANCHISES**, Twilio's multi-office, one-local-number-per-office use case. It applies only once a registered Brand legitimately represents the multi-location sender. This is the TARGET, not a claim that it is approved today.
+- **Today the account holds:**
+  - Brand "EVO Integrated Solutions LLC": Low Volume Standard, approved.
+  - One campaign: Low Volume Mixed, approved. It covers EvoSys's own traffic.
+  - Numbers: toll-free 844-917-2171 (kept as backup/overflow), plus 469-224-1155 and 469-405-0255.
 
-**Needed from Mike/SCI:**
-- the legal entity name, EIN and business address of the brand that will be registered;
-- an authorized contact;
-- the opt-in/consent description: how these 535 people asked to be contacted;
-- sample messages (the message brain can supply these).
+## What can be done TODAY, with no SCI paperwork
 
-Claude will not submit any of this on anyone's behalf.
-
-## The 39-location map
-
-The area code is taken from the location's own public phone number. Addresses and phones come from each location's public page and are research only: **confirm with SCI before any of them is used**. The quality gate requires a verified postal address per location before automated email.
-
-| # | Location | City, ST | Local area code | Status |
-|---|---|---|---|---|
-| 1 | Alabama Heritage Cemetery | Montgomery, AL | 334 | READY TO MAP - registration needed before SMS |
-| 2 | Alabama Heritage Funeral Home | Montgomery, AL | 334 | READY TO MAP - registration needed before SMS |
-| 3 | Bayview Fisher-Pou Chapel | Pensacola, FL | 850 | READY TO MAP - registration needed before SMS |
-| 4 | Bayview Memorial Park | Pensacola, FL | 850 | READY TO MAP - registration needed before SMS |
-| 5 | Centuries Memorial Funeral Home | Shreveport, LA | 318 | READY TO MAP - registration needed before SMS |
-| 6 | Centuries Memorial Park | Shreveport, LA | 318 | READY TO MAP - registration needed before SMS |
-| 7 | Eastern Gate Memorial Funeral Home | Pensacola, FL | 850 | READY TO MAP - registration needed before SMS |
-| 8 | Eastern Gate Memorial Gardens | Pensacola, FL | 850 | READY TO MAP - registration needed before SMS |
-| 9 | Elmwood Cemetery & Mausoleum | Birmingham, AL | 205 | READY TO MAP - registration needed before SMS |
-| 10 | Greenwood Serenity Memorial Gardens | Montgomery, AL | 334 | READY TO MAP - registration needed before SMS |
-| 11 | Heritage Chapel Funeral Home | Tuscaloosa, AL | 205 | READY TO MAP - registration needed before SMS |
-| 12 | Highland Memorial Gardens | Bessemer, AL | 205 | READY TO MAP - registration needed before SMS |
-| 13 | Johns-Ridout's Funeral Parlors | Birmingham, AL | 205 | READY TO MAP - registration needed before SMS |
-| 14 | Johns-Ridout's Mortuary-Elmwood Chapel | Birmingham, AL | 205 | READY TO MAP - registration needed before SMS |
-| 15 | Kilgore Green Funeral Home | Jasper, AL | 205 | READY TO MAP - registration needed before SMS |
-| 16 | Leak Memory Chapel | Montgomery, AL | 334 | READY TO MAP - registration needed before SMS |
-| 17 | Memory Hill Gardens | Tuscaloosa, AL | 205 | READY TO MAP - registration needed before SMS |
-| 18 | Memory Park Cemetery | Milton, FL | 850 (alt 903) | CONFIRM with SCI (two places share this name) |
-| 19 | Oak Lawn Funeral Home | Pensacola, FL | 850 | READY TO MAP - registration needed before SMS |
-| 20 | Oaklawn Central Care Center | ? | confirm | BLOCKED - location not found; SCI to confirm address |
-| 21 | Oakwood Memorial Gardens | Gardendale, AL | 205 | READY TO MAP - registration needed before SMS |
-| 22 | Parkhill Cemetery | Columbus, GA | 706 | READY TO MAP - registration needed before SMS |
-| 23 | Pine Crest Cemetery | Mobile, AL | 251 | READY TO MAP - registration needed before SMS |
-| 24 | Pine Crest Cemetery West | ? | confirm | BLOCKED - location not found; SCI to confirm address |
-| 25 | Pine Crest Funeral Home | Mobile, AL | 251 | READY TO MAP - registration needed before SMS |
-| 26 | Radney Funeral Home | Saraland, AL | 251 | READY TO MAP - registration needed before SMS |
-| 27 | Radney Funeral Home-Mobile | Mobile, AL | 251 | READY TO MAP - registration needed before SMS |
-| 28 | Ridout's Gardendale Chapel | Gardendale, AL | 205 | READY TO MAP - registration needed before SMS |
-| 29 | Ridout's Trussville Chapel | Birmingham, AL | 205 | READY TO MAP - registration needed before SMS |
-| 30 | Ridout's Valley Chapel | Homewood, AL | 205 | READY TO MAP - registration needed before SMS |
-| 31 | Ridout's-Brown-Service Prattville Chapel | Prattville, AL | 334 | READY TO MAP - registration needed before SMS |
-| 32 | Rockco Funeral Home | Centreville, AL | 205 | READY TO MAP - registration needed before SMS |
-| 33 | Rockco Funeral Home (Montevallo) | Montevallo, AL | 205 | READY TO MAP - registration needed before SMS |
-| 34 | Southern Heritage Cemetery | Pelham, AL | 205 | READY TO MAP - registration needed before SMS |
-| 35 | Southern Heritage Funeral Home | Pelham, AL | 205 | READY TO MAP - registration needed before SMS |
-| 36 | Striffler-Hamby Mortuary | Columbus, GA | 706 (alt 706) | CONFIRM with SCI (two places share this name) |
-| 37 | Sunset Brown-Service Funeral Home | Northport, AL | 205 | READY TO MAP - registration needed before SMS |
-| 38 | Sunset Brown-Service Memorial Park | Northport, AL | 205 | READY TO MAP - registration needed before SMS |
-| 39 | White Chapel-Greenwood Funeral Home | Montgomery, AL | 334 | READY TO MAP - registration needed before SMS |
-
-**Summary:**
-
-| Status | Count |
+| Item | Status |
 |---|---|
-| Ready to map, waiting on registration | 35 |
-| Confirm, because two places share the name (Memory Park Cemetery, Striffler-Hamby Mortuary) | 2 |
-| Blocked, address not found (Oaklawn Central Care Center, Pine Crest Cemetery West) | 2 |
+| Campus grouping, 535-contact binding, routing, voice, voicemail, transcription, missed-call follow-up, reporting | **Done** in code. Proven in staging with a fictional campus number. |
+| Buy the 30 campus numbers (local, by the area codes above) and configure voice + voicemail | **Ready.** Voice does not need 10DLC. Needs Mike's explicit purchase authorization: roughly 30 numbers at Twilio's local-number monthly rate. |
+| Email proof of concept | **Not blocked.** The live loop already passed. |
 
-Where two locations share a campus and a public phone, SCI may prefer **one number per campus**. Examples: Eastern Gate Gardens and Funeral Home, or Alabama Heritage Cemetery and Funeral Home. That would cut 39 numbers to about 25 and keep routing exact, because the alias still names the location. Ask SCI.
+## What must wait for valid carrier registration
 
-## Provisioning steps, once the registration is approved
+- **SCI-branded outbound SMS from the campus numbers.** Production SMS stays OFF until a campaign that matches this traffic is approved. The campus numbers are not attached to EVO's Low Volume Mixed campaign, because that would misdescribe the sender.
 
-1. Buy one local number per row, in the row's area code. These are standard local numbers; keep the toll-free number.
-2. Attach every number to the SCI campaign's messaging service.
-3. In EvoSys, create one `phone_numbers` row per number:
-   - `organization_id` = SCI;
-   - `workspace_id` = that location;
-   - `cap_sms`, `cap_voice_inbound` and `cap_voicemail` switched on;
-   - route = ring members at their verified callback numbers (Kerry's number once she verifies it herself), then voicemail.
-4. Point the number's voice URL to `/voice/inbound` and its SMS URL to `/sms/webhook/inbound`.
+## Fastest legitimate path to real-contact SMS
 
-From then on, inbound texts and calls resolve to the location automatically. Inbound SMS routing by location number shipped in e268847, and voice/voicemail in 56cf3dd.
+Mike decides and attests; Claude submits nothing.
 
-**Caller ID (CNAM):** set per number in Twilio once registered. Display depends on the carrier and is not guaranteed.
+1. Register the SCI program traffic as its own campaign under EvoSys as the ISV, with use case AGENTS_FRANCHISES. It needs only:
+   - the brand that will appear in the messages;
+   - the opt-in description (how these contacts asked for information);
+   - sample messages, which the message brain supplies.
+   - No subsidiary or location-level entity structure is needed for a proof-of-concept campaign whose brand is the business actually sending.
+2. **In the meantime:** toll-free verification of 844-917-2171 for this exact use case is usually the quickest single-number route. Its verification status could not be read from the console in this session.

@@ -826,6 +826,15 @@ def response_viewed(response_id: str, db: Session = Depends(get_db),
     return {"id": r.id, "status": r.handling_status}
 
 
+@router.get("/campuses")
+def campus_plan(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """One local number per PHYSICAL CAMPUS: entities served, contacts, number."""
+    from app.services.programs import campuses
+    prog = _program(db, user)
+    rows = campuses.plan(db, prog.organization_id)
+    return {"campuses": len(rows), "locations": sum(len(r["entities"]) for r in rows), "items": rows}
+
+
 @router.get("/voice")
 def voice_report(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db),
                  user: User = Depends(require_tenant_or_observer)):

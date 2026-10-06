@@ -118,6 +118,11 @@ class LocationProfile(Base):
     # Every spelling the customer's source data used for this home (JSON list).
     source_names = Column(Text, nullable=True)
     is_review_bucket = Column(Boolean, nullable=False, default=False)
+    # PHYSICAL CAMPUS: co-located entities (a funeral home and its cemetery)
+    # share ONE local phone number while staying separate locations for
+    # identity, aliases, reporting and campaigns. NULL = its own campus.
+    campus_key = Column(String, nullable=True, index=True)
+    campus_label = Column(String, nullable=True)
     website = Column(String, nullable=True)
     facility_phone = Column(String, nullable=True)
     manager_name = Column(String, nullable=True)

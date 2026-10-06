@@ -1478,4 +1478,4 @@ def test_staging_harness_seeds_and_refuses_a_second_send(client, db_session, mon
     assert client.post("/god/staging/sci/simulate/active", headers=h).status_code == 409
     again = client.post("/god/staging/sci/seed", headers=h, json={"test_email": "tester@example.com",
                                                                   "simulation_contacts": True}).json()
-    assert len(again["simulation_contacts"]) == 5 and again["contacts_in_workspace"] == 6
+    assert len(again["simulation_contacts"]) == 6 and again["contacts_in_workspace"] == 7

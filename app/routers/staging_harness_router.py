@@ -55,7 +55,11 @@ SIM_CONTACTS = [  # synthetic, never emailed
     ("SIM-WRONG", "Wendy", "Wrong", "sim.wrong@example.com", "Striffler-Hamby Mortuary"),
     ("SIM-NOLOC", "Nora", "Noloc", "sim.noloc@example.com", None),
     ("SIM-HELD", "Hal", "Held", "sim.held@example.com", TEST_LOCATION),
+    ("SIM-CAMPUS", "Cami", "Campus", "sim.campus@example.com", "Eastern Gate Memorial Funeral Home"),
 ]
+# Fictional 555-01xx numbers (reserved for fiction; never routable).
+SIM_PHONES = {"SIM-CAMPUS": "12055550101", "SIM-ACTIVE": "12055550102"}
+SIM_CAMPUS_NUMBER = "+18505550100"     # a staging-only campus number record, never a real Twilio number
 
 
 def _on():
@@ -132,6 +136,8 @@ def seed(body: SeedIn, db: Session = Depends(get_db), god: User = Depends(requir
     prog.staff_sms_alerts_enabled = True
     prog.mailbox_folder_path = (body.mail_folder or "").strip().strip("/") or None
     by_name = {p.official_name: p for p in profiles.values()}
+    from app.services.programs import campuses as _campuses
+    campus_result = _campuses.assign(db, org.id, _campuses.load_grouping())
     # Mike verified easterngategardens@ receives (2026-10-05 21:03 CT) - the
     # rest switch on as mail to them is seen arriving.
     aliases.mark_verified(by_name[TEST_LOCATION])
@@ -147,7 +153,8 @@ def seed(body: SeedIn, db: Session = Depends(get_db), god: User = Depends(requir
         from app.services import plan_limits
         plan_limits.require_capacity(db, org, plan_limits.LIMIT_LEADS, adding=1, actor=god)
         lead = Lead(organization_id=org.id, first_name=first, last_name=last, email=email,
-                    status="new", is_test=True, test_note=note, assigned_to_id=god.id)
+                    phone=SIM_PHONES.get(src), status="new", is_test=True, test_note=note,
+                    assigned_to_id=god.id)
         db.add(lead)
         db.flush()
         raw = {"Lead ID": src, "First Name": first, "Last Name": last, "Email": email,
@@ -180,6 +187,7 @@ def seed(body: SeedIn, db: Session = Depends(get_db), god: User = Depends(requir
             "simulation_contacts": [c[3] for c in SIM_CONTACTS] if body.simulation_contacts else [],
             "contacts_in_workspace": db.query(Lead).filter(Lead.organization_id == org.id).count(),
             "mail_folder": prog.mailbox_folder_path,
+            "campuses": campus_result,
             "management": json.loads(prog.management_recipients or "[]")}
 
 
@@ -349,6 +357,13 @@ def remove_simulation_contacts(db: Session = Depends(get_db), god: User = Depend
         db.flush()
         for l in leads:
             db.delete(l)
+    from app.models.telephony_models import PhoneNumber
+    removed["sim_numbers"] = db.query(PhoneNumber).filter(PhoneNumber.e164 == SIM_CAMPUS_NUMBER).delete(
+        synchronize_session=False)
+    removed["sms_unmatched"] = (db.query(ProgramUnmatchedReply)
+                                .filter(ProgramUnmatchedReply.organization_id == org.id,
+                                        ProgramUnmatchedReply.from_address.like("+1205555%"))
+                                .delete(synchronize_session=False))
     # simulated unknown senders kept in the unmatched queue (example.org only)
     removed["unmatched"] = (db.query(ProgramUnmatchedReply)
                             .filter(ProgramUnmatchedReply.organization_id == org.id,
@@ -543,7 +558,63 @@ def simulate(case: str, db: Session = Depends(get_db), god: User = Depends(requi
             realerted = R.sla_sweep(db)
         return {"class": r.response_class, "realerted": len(realerted),
                 "alert_kinds": sorted({a.kind for a in db.query(ProgramAlert).filter(ProgramAlert.response_id == r.id)})}
-    raise HTTPException(status_code=404, detail="Unknown case. Cases: normal, active, opt_out, wrong_person, "
+    if case == "sms_round_trip":
+        return _sms_round_trip(db, org, prog, prof)
+    raise HTTPException(status_code=404, detail="Unknown case. Cases: sms_round_trip, normal, active, opt_out, wrong_person, "
                         "unknown_sender, wrong_alias, duplicate_inbound, duplicate_outbound, missing_location, "
                         "held_contact, flyer_missing, resend_temporary_failure, mailbox_temporary_failure, "
                         "bounce, sla_escalation")
+
+
+def _sms_round_trip(db, org, prog, prof):
+    """The SMS software path on the staging database, with no carrier involved:
+    outbound composition (Kerry sign-off, location identity) -> a reply on the
+    CAMPUS number -> campus/location resolution -> contact match -> cadence
+    pause -> classification -> alerts (recorded, not delivered) -> audit ->
+    campus report. A fictional staging-only campus number; nothing is sent."""
+    from app.models.models import Reply
+    from app.models.telephony_models import PhoneNumber
+    from app.routers.sms_router import process_inbound_sms
+    from app.services.programs import campuses, identity
+    gardens, home = prof[TEST_LOCATION], prof["Eastern Gate Memorial Funeral Home"]
+    num = db.query(PhoneNumber).filter(PhoneNumber.e164 == SIM_CAMPUS_NUMBER).first()
+    if num is None:
+        num = PhoneNumber(e164=SIM_CAMPUS_NUMBER, organization_id=org.id, workspace_id=gardens.location_id,
+                          cap_sms=True, cap_voice_inbound=True, cap_voicemail=True,
+                          label="STAGING SIM campus number (Eastern Gate campus)")
+        db.add(num)
+        db.commit()
+    lead = db.query(Lead).filter(Lead.organization_id == org.id, Lead.email == "sim.campus@example.com").one()
+    outbound = identity.apply_sms_signoff(db, lead, (identity.cadence_text(db, lead, 1) or "Hi Cami"))
+    sid = "SMsim%s" % uuid.uuid4().hex[:10]
+    with mock.patch("app.services.programs.responses._deliver_staff_alert",
+                    side_effect=lambda *a, **k: (False, "simulation - not sent")):
+        process_inbound_sms(db, org_id=org.id, advisor=None, From="+12055550101",
+                            Body="Yes, can I come by Friday to go over the guide?", MessageSid=sid,
+                            called_number=SIM_CAMPUS_NUMBER, called_location_id=gardens.location_id)
+        process_inbound_sms(db, org_id=org.id, advisor=None, From="+12055550999",
+                            Body="Who is this? Got your text.", MessageSid=sid + "u",
+                            called_number=SIM_CAMPUS_NUMBER, called_location_id=gardens.location_id)
+    resp = (db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id)
+            .order_by(ProgramResponse.created_at.desc()).first())
+    cad = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    alerts = db.query(ProgramAlert).filter(ProgramAlert.response_id == resp.id).all() if resp else []
+    unknown = (db.query(ProgramUnmatchedReply).filter(ProgramUnmatchedReply.organization_id == org.id,
+                                                      ProgramUnmatchedReply.from_address == "+12055550999").first())
+    return {
+        "outbound_text": outbound,
+        "outbound_identity_ok": "Kerry Allan" in outbound and home.official_name in outbound,
+        "same_campus": campuses.same_campus(db, org.id, gardens.location_id, home.location_id),
+        "reply_attached": db.query(Reply).filter(Reply.lead_id == lead.id).count(),
+        "response": None if resp is None else {
+            "class": resp.response_class, "urgency": resp.urgency, "intents": json.loads(resp.intents or "[]"),
+            "location_is_contacts_own": resp.location_id == home.location_id,
+            "via_number": resp.reply_to_alias, "summary": resp.summary, "sla_due_at": _iso(resp.sla_due_at),
+            "suggested_reply": resp.suggested_reply},
+        "cadence": str(getattr(cad.status, "value", cad.status)) if cad else None,
+        "alerts": [{"audience": a.audience, "channel": a.channel, "delivered": a.delivered, "reason": a.reason}
+                   for a in alerts],
+        "unknown_sender_kept": None if unknown is None else {"location_id": unknown.location_id,
+                                                             "status": unknown.status},
+        "campus_report": [r for r in campuses.plan(db, org.id) if r["campus"] == gardens.campus_key],
+    }

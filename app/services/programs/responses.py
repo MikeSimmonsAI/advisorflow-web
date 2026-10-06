@@ -387,7 +387,9 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
         recommended_action=RECOMMENDED[cls], received_at=now,
         handling_status="closed" if cls in (OPT_OUT,) else "new",
     )
-    if alias_prof is not None and prof is not None and alias_prof.location_id != prof.location_id:
+    from app.services.programs import campuses as _campuses
+    if alias_prof is not None and prof is not None and alias_prof.location_id != prof.location_id \
+            and not _campuses.same_campus(db, lead.organization_id, alias_prof.location_id, prof.location_id):
         resp.summary = "%s [Wrote to the %s address; contact is at %s.]" % (
             resp.summary, alias_prof.official_name, prof.official_name)
     if cls == HOT:
