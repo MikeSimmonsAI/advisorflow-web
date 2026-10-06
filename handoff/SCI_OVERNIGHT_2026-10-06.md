@@ -193,3 +193,37 @@ After `remove-simulation-contacts` the workspace again holds only the approved t
 - Delete the staging database (keep it until Mike approves cleanup).
 - Delete held SCI records.
 - Touch the Restland FSA Command system.
+
+
+---
+
+## 6. Production-readiness phase (2026-10-06, 09:36–10:25 CT)
+
+Commits on `sci-program`: `9b436d9`, `56cf3dd`, plus this docs commit.
+
+- **Live HOT reply:** PASS end to end. Details are in relay issue #1. The test response is now marked responded, and SLA re-alerts are capped at 3.
+- **Email Diagnostics:** refreshes every 30 s and drops a stale failure banner once every mailbox is healthy.
+- **Deliverability:**
+  - The commercial footer carries the location's verified postal address.
+  - The quality gate holds automated email for a location without one.
+  - The first touch can be link-free.
+  - Seed-inbox placement checks (Gmail/Outlook/Yahoo/iCloud) are part of readiness.
+  - Gmail's API shows the test email without an INBOX label: it was filed outside the Inbox. That is consistent with a filter or category on that account.
+  - Inbox placement is not guaranteed.
+- **Michael:**
+  - His existing login was identified (Michael Schlueter); no duplicate was created.
+  - New workspace role `manager`: works leads, conversations, campaigns, reports and the program; no user administration, organization settings or credentials.
+  - SCI does not exist in production yet, so the grant runs at promotion with `program_setup.py --manager-email`, against an existing login only.
+- **Voice:**
+  - Location greeting, with a generic greeting for a number not tied to a location.
+  - Voicemail transcription goes through reply handling and produces a text draft that is never sent.
+  - Unknown callers go to the unmatched queue.
+  - A missed call produces a suggested text, never sent.
+  - `GET /program/voice` reports calls per location.
+  - Forwarding uses verified callback numbers only.
+- **39 numbers:** see `SCI_39_NUMBER_PLAN.md`. Nothing was bought; SCI texting needs its own 10DLC registration.
+- **Toll-free number:** its voice webhook still points at Twilio's demo URL (production configuration, left unchanged).
+- **Flaky wholesale tests:** not a test defect. Two pytest-xdist workers were terminated at the same moment ("node down: Not properly terminated"), with no Python traceback.
+  - The two tests passed 3/3 serially and 2/2 under xdist.
+  - The full wholesale group passed 456/456 under xdist.
+- **Staging matrix on `56cf3dd`:** 15/15 PASS. Mailbox ok. The synthetic contacts were removed; the workspace again holds only the approved test contact.
