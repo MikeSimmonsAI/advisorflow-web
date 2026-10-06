@@ -19,7 +19,7 @@ SHARED = {
     "southern-heritage-pelham": {"Southern Heritage Cemetery", "Southern Heritage Funeral Home"},
     "sunset-brown-service-northport": {"Sunset Brown-Service Funeral Home", "Sunset Brown-Service Memorial Park"},
 }
-UNVERIFIED = {"Oaklawn Central Care Center", "Pine Crest Cemetery West"}
+UNVERIFIED = {"Oaklawn Central Care Center"}   # Pine Crest West verified: 1599 Snow Rd S, Mobile AL 36695 (251)
 
 
 def _by_campus():

@@ -533,6 +533,17 @@ def sla_sweep(db: Session, now: Optional[datetime] = None,
     return breached
 
 
+class RegionalReviewBucket:
+    """Stand-in profile for an unknown sender to a shared regional number: no
+    location (never guessed), so the item queues for regional review."""
+    location_id = None
+
+    def __init__(self, organization_id, pool_id, label):
+        self.organization_id = organization_id
+        self.pool_id = pool_id
+        self.official_name = "regional pool %s (%s) - location unknown" % (pool_id, label)
+
+
 def record_unmatched(db: Session, prof, *, alias: str, sender: Optional[str], subject: Optional[str],
                      body: Optional[str], received_at: Optional[datetime], mailbox_message_id: Optional[str],
                      reason: str) -> Optional["ProgramUnmatchedReply"]:

@@ -390,6 +390,7 @@ async def inbound_webhook(
     # was DROPPED below. The number's workspace_id names the location, so the
     # reply is attributed to the location the family actually wrote to.
     called_location_id = None
+    called_pool_id = None
     try:
         from app.services.number_resolution import resolve_owner_by_called_number
         _owner = resolve_owner_by_called_number(db, To)
@@ -399,6 +400,11 @@ async def inbound_webhook(
                 org_id = _owner.organization_id
             if _owner.organization_id == org_id:
                 called_location_id = getattr(_owner.record, "workspace_id", None)
+                from app.services.programs import regional_pools as _rp
+                _pool = _rp.pool_for_phone_number(_owner.record)
+                if _pool is not None:
+                    called_pool_id = _pool["pool_id"]
+                    called_location_id = None      # a shared regional number never names a location
     except Exception:                                       # noqa: BLE001
         logger.exception("[sms_webhook] location-number lookup failed for %s", twilio_to)
 
@@ -414,13 +420,14 @@ async def inbound_webhook(
 
     process_inbound_sms(db, org_id=org_id, advisor=advisor, From=From, Body=Body,
                         MessageSid=MessageSid, called_number=To,
-                        called_location_id=called_location_id)
+                        called_location_id=called_location_id, called_pool_id=called_pool_id)
     return _twiml_ack()
 
 
 def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: str,
                         MessageSid: str, called_number: Optional[str] = None,
-                        called_location_id: Optional[str] = None) -> dict:
+                        called_location_id: Optional[str] = None,
+                        called_pool_id: Optional[str] = None) -> dict:
     """Everything the inbound webhook does once it knows WHICH ORGANIZATION the
     message arrived for. Split out of `inbound_webhook` in Wholesale Phase 7.1
     so there is exactly one inbound path: the Twilio webhook calls it after the
@@ -461,6 +468,21 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         except Exception:                                   # noqa: BLE001
             db.rollback()
             logger.exception("[sms_webhook] unmatched location text not recorded")
+
+    if not lead and called_pool_id:
+        # A shared regional number, an unknown sender: regional review queue,
+        # never attached to any location.
+        try:
+            from app.services.programs import regional_pools as _rp, responses as _pr
+            _label = next((p["label"] for p in _rp.POOLS.values() if p["pool_id"] == called_pool_id), "")
+            _pr.record_unmatched(db, _pr.RegionalReviewBucket(org_id, called_pool_id, _label),
+                                 alias=called_number or "", sender=From, subject=None, body=Body,
+                                 received_at=datetime.utcnow(), mailbox_message_id="sms:%s" % MessageSid,
+                                 reason="text to regional pool %s from a phone that matches no contact" % called_pool_id)
+            db.commit()
+        except Exception:                                   # noqa: BLE001
+            db.rollback()
+            logger.exception("[sms_webhook] unmatched regional text not recorded")
 
     if not lead:
         # Unknown sender - nothing to route. A STOP is still honoured: the

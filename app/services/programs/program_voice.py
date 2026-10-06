@@ -92,6 +92,19 @@ def on_voicemail_text(db: Session, vm) -> Optional[object]:
                     mailbox_message_id="vm:%s" % (vm.recording_sid or vm.id),
                     reason="voicemail to a location number from a caller that matches no contact")
                 db.commit()
+            else:
+                from app.models.telephony_models import PhoneNumber
+                from app.services.programs import regional_pools
+                rec = db.query(PhoneNumber).filter(PhoneNumber.id == vm.phone_number_id).first()
+                pool = regional_pools.pool_for_phone_number(rec) if rec else None
+                if pool is not None:             # shared regional number: review queue, no location guessed
+                    responses.record_unmatched(
+                        db, responses.RegionalReviewBucket(vm.organization_id, pool["pool_id"], pool["label"]),
+                        alias=vm.to_e164 or "", sender=vm.from_e164, subject="Voicemail",
+                        body=vm.transcript, received_at=vm.received_at,
+                        mailbox_message_id="vm:%s" % (vm.recording_sid or vm.id),
+                        reason="voicemail to regional pool %s from a caller that matches no contact" % pool["pool_id"])
+                    db.commit()
             return None
         if vm.caller_state in ("dnc", "suppressed"):
             return None                                  # reviewed by a person; no outreach suggestions
