@@ -25,6 +25,7 @@ const CSS = `
 .cr button { font: inherit; cursor: pointer; }
 .cr .btn { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--god-border,#d1d5db); background: var(--god-card,#fff); font-size: 13px; font-weight: 600; }
 .cr .btn.primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+.cr .btn.status { padding: 10px 16px; background:#111827; color:#fff; border-color:#111827; font-size:14px; }
 .cr .btn:disabled { opacity: .5; cursor: not-allowed; }
 .cr .card { background: var(--god-card,#fff); border: 1px solid var(--god-border,#e5e7eb); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
 .cr .card h2 { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--god-muted,#6b7280); margin: 0 0 10px; }
@@ -370,6 +371,8 @@ export default function ControlRoom() {
   const [pkg, setPkgState] = useState(() => loadPackageDraft(window.localStorage))
   const [dismissed, setDismissed] = useState(() => loadDismissed(window.localStorage))
   const [notice, setNotice] = useState(null)
+  const [checking, setChecking] = useState(false)
+  const [lastChecked, setLastChecked] = useState(null)
 
   const setPkg = (p) => { setPkgState(p); savePackageDraft(window.localStorage, p) }
   const addSuggestion = (s) => { setPkg(addObjective(pkg, s.suggestion, 'suggested')); setNotice('Added to the overnight package draft.') }
@@ -389,6 +392,17 @@ export default function ControlRoom() {
   }, [])
 
   useEffect(() => { load() ; const t = setInterval(() => load(), POLL_MS); return () => clearInterval(t) }, [load])
+
+  const checkStatusNow = async () => {
+    setChecking(true)
+    try {
+      await load(true)
+      setLastChecked(new Date())
+      setNotice('Status updated from the relay right now.')
+    } finally {
+      setChecking(false)
+    }
+  }
   useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t) }, [])
 
   const choose = async (c) => {
@@ -407,7 +421,14 @@ export default function ControlRoom() {
       <h1>Control Room</h1>
       <div className="sub">ChatGPT and Claude, in one place. Staging view; updates itself every {POLL_MS / 1000}s.</div>
       <div className="bar">
-        <button className="btn" onClick={() => load(true)}>Refresh now</button>
+        <button className="btn status" onClick={checkStatusNow} disabled={checking} data-testid="check-status-now">
+          {checking ? 'Checking status…' : 'Check status now'}
+        </button>
+        <span className="evd">
+          Current: {data.state?.status || 'Unknown'}
+          {data.state?.actor ? ` · ${data.state.actor}` : ''}
+          {lastChecked ? ` · checked ${lastChecked.toLocaleTimeString()}` : (data.state?.last_update_ct ? ` · last update ${data.state.last_update_ct}` : '')}
+        </span>
         {data.notify && <span className="evd">Email alerts: {data.notify.recipients_configured ? `${data.notify.recipients_configured} recipient(s) set, off in staging` : 'no recipients set'}</span>}
       </div>
       <MonitoringNotice m={data.monitoring} />
