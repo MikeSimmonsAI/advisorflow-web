@@ -1,0 +1,42 @@
+# Relay status event: when a [RELAY:CLAUDE_STATUS] comment with a terminal
+# STATUS (COMPLETED | BLOCKED | APPROVAL_REQUIRED) appears on issue #1, label
+# the issue so ChatGPT Work (or anything watching) has one deterministic event:
+#   label "relay:needs-chatgpt-review" added  -> review Claude's latest status
+#   label "relay:approval-required" added     -> Mike must decide
+# Never wakes Claude (claude-relay.yml ignores status comments).
+# Like every issue_comment workflow, it only runs from the default branch.
+name: Relay status event
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  status:
+    if: >-
+      github.event.issue.number == 1 &&
+      contains(github.event.comment.body, '[RELAY:CLAUDE_STATUS]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/relay
+      - id: s
+        run: python3 scripts/relay/relay_guard.py status
+      - name: Label for ChatGPT review
+        if: steps.s.outputs.terminal == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "relay:needs-chatgpt-review" --repo "$GITHUB_REPOSITORY" --color 0E8A16 2>/dev/null || true
+          gh label create "relay:approval-required" --repo "$GITHUB_REPOSITORY" --color D93F0B 2>/dev/null || true
+          # remove-then-add so every terminal status produces a fresh "labeled" event
+          gh issue edit 1 --repo "$GITHUB_REPOSITORY" --remove-label "relay:needs-chatgpt-review" || true
+          gh issue edit 1 --repo "$GITHUB_REPOSITORY" --add-label "relay:needs-chatgpt-review"
+          if [ "${{ steps.s.outputs.status }}" = "APPROVAL_REQUIRED" ]; then
+            gh issue edit 1 --repo "$GITHUB_REPOSITORY" --add-label "relay:approval-required"
+          fi
