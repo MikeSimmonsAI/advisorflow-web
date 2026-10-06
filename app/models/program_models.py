@@ -94,6 +94,9 @@ class OutreachProgram(Base):
     # folder> (e.g. "Inbox/Customers Folder/SCI"). NULL = never move. Nothing is
     # moved before processing; unmatched mail is never moved.
     mailbox_folder_path = Column(String, nullable=True)
+    # {"gmail": "...", "outlook": "...", "yahoo": "...", "icloud": "..."} - seed inboxes
+    # a person owns, used only for inbox-placement checks (never customers).
+    placement_seed_addresses = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -371,6 +374,30 @@ class ProgramEmailTouch(Base):
     next_attempt_at = Column(DateTime, nullable=True)
     email_message_id = Column(String, nullable=True)
     attempted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ProgramPlacementCheck(Base):
+    """One inbox-placement observation: a sample of the real first touch sent
+    to a seed inbox a person owns, and where it landed, as that person saw it.
+    Evidence for the deliverability gate - never a guarantee."""
+    __tablename__ = "program_placement_checks"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, index=True)
+    provider = Column(String, nullable=False)                # gmail | outlook | yahoo | icloud
+    seed_address = Column(String, nullable=False)
+    subject = Column(String, nullable=True)
+    location_id = Column(String, nullable=True)
+    touch = Column(String, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    provider_message_id = Column(String, nullable=True)
+    send_error = Column(Text, nullable=True)
+    # primary | inbox | promotions | updates | other_tab | spam | missing ; NULL until a person looks
+    folder = Column(String, nullable=True)
+    recorded_at = Column(DateTime, nullable=True)
+    recorded_by = Column(String, nullable=True)
+    note = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

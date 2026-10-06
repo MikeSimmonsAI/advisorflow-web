@@ -585,6 +585,22 @@ def require_admin(request: Request,
     return user
 
 
+def require_org_admin(request: Request,
+                      user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)) -> User:
+    """require_admin, minus the workspace "manager" role: the workspace's own
+    user administration and organization settings (integration credentials
+    included) stay with org_admin. A manager works the business; an admin
+    runs the workspace."""
+    from app.services.lead_scope import effective_role, is_manager_here
+    if not is_manager_here(user, db, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    if effective_role(user, db, request) == "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Workspace administration requires the org admin role")
+    return user
+
+
 def require_super_admin(user: User = Depends(get_current_user)) -> User:
     """Platform-operator guard — super_admin and god_admin pass.
     god_admin sits above super_admin and is never blocked by this gate."""

@@ -580,12 +580,20 @@ def _touch_ready(program, sample_advisor, monkeypatch, source="L001", **lead_kw)
     # The quality gate refuses automated mail with no verified sending identity.
     if not getattr(org, "from_email", None):
         org.from_email = "support@evosyspro.live"
+    _addresses(db, org)
     setup.store_asset(db, org, kind="flyer", title="Veteran Planning Guide", data=b"%PDF-1.4 guide",
                       content_type="application/pdf", filename="guide.pdf",
                       category="veteran_planning_guide", activate=True)
     db.commit()
     lead = _lead_for(db, org, sample_advisor, source, **lead_kw)
     return db, org, lead, email_touches
+
+
+def _addresses(db, org):
+    """Commercial email carries the location's postal address; test locations get one."""
+    from app.models.location_models import Location
+    for loc in db.query(Location).filter_by(organization_id=org.id).all():
+        loc.address_line1, loc.city, loc.state, loc.postal_code = "1 Test Way", "Testville", "AL", "35000"
 
 
 def _fake_provider(sent):
@@ -707,6 +715,7 @@ def test_a_flyer_campaign_without_an_approved_flyer_is_held(program, sample_advi
     fam = db.query(CampaignFamily).filter_by(organization_id=org.id, key="veteran_planning_guide").one()
     fam.is_active = True          # first touch mode is "hosted" and no flyer is uploaded
     org.from_email = "support@evosyspro.live"
+    _addresses(db, org)
     db.commit()
     _lead_for(db, org, sample_advisor, "L001")
     sent = []

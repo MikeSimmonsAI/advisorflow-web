@@ -162,6 +162,7 @@ class SettingsIn(BaseModel):
     alias_mode: Optional[str] = None
     mailbox_folder_path: Optional[str] = None
     customer_identity_locked: Optional[bool] = None
+    placement_seed_addresses: Optional[dict] = None
 
 
 _EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -221,6 +222,17 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db),
             raise HTTPException(status_code=422, detail="alias_mode must be from, reply_to or off.")
     if "staff_alerts_enabled" in data:
         prog.staff_sms_alerts_enabled = bool(data.pop("staff_alerts_enabled"))
+    if "placement_seed_addresses" in data:
+        from app.services.programs import placement as _pl
+        raw = data.pop("placement_seed_addresses") or {}
+        clean = {}
+        for k, v in raw.items():
+            if k not in _pl.PROVIDERS:
+                raise HTTPException(status_code=422, detail="Seed providers: %s." % ", ".join(_pl.PROVIDERS))
+            e = _clean_email(v, "Seed inbox (%s)" % k)
+            if e:
+                clean[k] = e
+        prog.placement_seed_addresses = json.dumps(clean)
     # CUSTOMER-FACING IDENTITY is locked until the platform owner unlocks it:
     # a manager may write and send, but the family always sees Kerry Allan.
     from app.services.capabilities import is_god as _is_god_user
@@ -529,10 +541,49 @@ def readiness(db: Session, prog: OutreachProgram) -> dict:
         _alert_item(prog),
         _hold_item(db, prog),
         _email_runner_item(),
+        _postal_item(db, prog),
+        _link_domain_item(ident),
+        _placement_item(db, prog),
         {"key": "outbound_brake", "ok": os.environ.get("OUTBOUND_EMERGENCY_STOP", "").lower() not in ("1", "true", "yes", "on"),
          "detail": "emergency stop is ON" if os.environ.get("OUTBOUND_EMERGENCY_STOP", "").lower() in ("1", "true", "yes", "on") else "off"},
     ]
     return {"items": items, "ready": all(i["ok"] for i in items)}
+
+
+def _placement_item(db: Session, prog: OutreachProgram) -> dict:
+    from app.services.programs import placement as _pl
+    return _pl.readiness_item(db, prog)
+
+
+def _postal_item(db: Session, prog: OutreachProgram) -> dict:
+    """Commercial email must carry a valid postal address. Taken from each
+    location's verified address - never invented; a missing one holds that
+    location's automated email (message_brain quality gate)."""
+    from app.models.location_models import Location
+    profs = _profiles(db, prog.organization_id)
+    real = [p for p in profs if not p.is_review_bucket]
+    locs = {l.id: l for l in db.query(Location).filter(Location.id.in_([p.location_id for p in real] or ["-"]))}
+    have = sum(1 for p in real if locs.get(p.location_id) is not None and locs[p.location_id].address_line1
+               and locs[p.location_id].city and locs[p.location_id].state)
+    return {"key": "postal_addresses", "ok": bool(real) and have == len(real),
+            "detail": "%d of %d locations have a verified postal address for the email footer%s"
+                      % (have, len(real), "" if have == len(real) else
+                         " - automated email to the others is held until one is entered")}
+
+
+def _link_domain_item(ident) -> dict:
+    """Links in a first touch that point at a different domain than the sender
+    (e.g. a *.onrender.com host) are a classic bulk/phishing signal."""
+    import os
+    from urllib.parse import urlparse
+    from app.services.programs import aliases as _al
+    base = (os.environ.get("PROGRAM_ASSET_BASE_URL") or "").strip()
+    host = (urlparse(base).hostname or "").lower() if base else ""
+    dom = _al.domain_of(getattr(ident, "from_email", None)) or ""
+    ok = bool(host) and bool(dom) and (host == dom or host.endswith("." + dom))
+    return {"key": "link_domain", "ok": ok,
+            "detail": ("hosted links and unsubscribe use %s (sender domain %s)" % (host or "the API host", dom or "?"))
+                      + ("" if ok else " - set PROGRAM_ASSET_BASE_URL to a host on the sending domain")}
 
 
 def _alias_item(db: Session, prog: OutreachProgram) -> dict:
@@ -628,6 +679,68 @@ def _mailbox_item(db: Session, ident) -> dict:
             "detail": "%s connected, last read %s (%s)" % (
                 box.address, box.last_polled_at.isoformat() + "Z" if box.last_polled_at else "never",
                 box.last_status or "not yet polled")}
+
+
+# ── inbox placement checks ───────────────────────────────────────────────────
+
+class PlacementSendIn(BaseModel):
+    location_id: Optional[str] = None
+    family: str = "veteran_planning_guide"
+
+
+class PlacementResultIn(BaseModel):
+    folder: str
+    note: Optional[str] = None
+
+
+def _check_json(c) -> dict:
+    return {"id": c.id, "provider": c.provider, "seed_address": c.seed_address, "subject": c.subject,
+            "sent_at": c.sent_at.isoformat() + "Z" if c.sent_at else None, "send_error": c.send_error,
+            "folder": c.folder, "recorded_at": c.recorded_at.isoformat() + "Z" if c.recorded_at else None,
+            "note": c.note}
+
+
+@router.get("/placement-checks")
+def list_placement_checks(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.models.program_models import ProgramPlacementCheck
+    from app.services.programs import placement as _pl
+    prog = _program(db, user)
+    rows = (db.query(ProgramPlacementCheck).filter(ProgramPlacementCheck.organization_id == prog.organization_id)
+            .order_by(ProgramPlacementCheck.created_at.desc()).limit(40).all())
+    return {"seeds": _pl.seeds(prog), "providers": list(_pl.PROVIDERS), "folders": list(_pl.FOLDERS),
+            "checks": [_check_json(c) for c in rows], "readiness": _pl.readiness_item(db, prog)}
+
+
+@router.post("/placement-checks/send")
+def send_placement_checks(body: PlacementSendIn, db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_user)):
+    """Mail the real first touch to the program's own seed inboxes (never customers)."""
+    from app.services.programs import placement as _pl
+    prog = _program(db, user)
+    _require_manager(db, user)
+    try:
+        rows = _pl.send_checks(db, prog, user.id, location_id=body.location_id, family=body.family)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"checks": [_check_json(c) for c in rows]}
+
+
+@router.post("/placement-checks/{check_id}/result")
+def record_placement_result(check_id: str, body: PlacementResultIn, db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_user)):
+    from app.models.program_models import ProgramPlacementCheck
+    from app.services.programs import placement as _pl
+    prog = _program(db, user)
+    _require_manager(db, user)
+    c = db.query(ProgramPlacementCheck).filter(ProgramPlacementCheck.id == check_id,
+                                               ProgramPlacementCheck.organization_id == prog.organization_id).first()
+    if c is None:
+        raise HTTPException(status_code=404, detail="Check not found.")
+    try:
+        _pl.record(db, c, body.folder, user.id, body.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return _check_json(c)
 
 
 # ── responses ────────────────────────────────────────────────────────────────

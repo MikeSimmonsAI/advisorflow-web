@@ -509,7 +509,8 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     if _program_identity.program_for_org(db, lead.organization_id) is not None:
         from app.services.programs import unsubscribe as _unsub
         rendered = dict(rendered)
-        rendered["body_html"] = (rendered.get("body_html") or "") + _unsub.footer_html(lead.id)
+        rendered["body_html"] = (rendered.get("body_html") or "") + _unsub.footer_html(
+            lead.id, _unsub.postal_line(db, lead))
         _program_headers = {"List-Unsubscribe": "<%s>" % _unsub.url_for(lead.id),
                             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"}
 

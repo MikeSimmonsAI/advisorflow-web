@@ -22,7 +22,7 @@ def _validate_url(url: Optional[str], field: str) -> Optional[str]:
         raise HTTPException(status_code=400, detail=f"{field} must be an http or https URL.")
     return url
 
-from app.deps import get_db, get_current_user, require_admin, load_org_in_scope
+from app.deps import get_db, get_current_user, require_admin, require_org_admin, load_org_in_scope
 from app.models.models import Organization, Platform, User
 # The SAME writer the god-side Features screen uses. Importing it rather than
 # reimplementing it is the point of this import: one column, one set of rules.
@@ -440,7 +440,7 @@ def list_industries(user: User = Depends(get_current_user)) -> dict:
 def get_industry_template(industry: Optional[str] = Query(None),
                           org_id: Optional[str] = Query(None),
                           db: Session = Depends(get_db),
-                          current_user: User = Depends(require_admin)) -> dict:
+                          current_user: User = Depends(require_org_admin)) -> dict:
     """What a given industry configures, without applying anything.
 
     `matched: false` means the industry string did not resolve to a template
@@ -458,7 +458,7 @@ def update_branding(
     req: BrandingUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
 ):
     org = _resolve_org(current_user, org_id, db)
     if req.brand_name is not None: org.brand_name = req.brand_name
@@ -483,7 +483,7 @@ def update_contact_info(
     req: ContactInfoUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
 ):
     """Update org name, address and phone — shown on the booking page header and confirmation emails."""
     org = _resolve_org(current_user, org_id, db)
@@ -512,7 +512,7 @@ def update_timezone(
     req: TimezoneUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
 ):
     """The workspace's calendar: what "today", "this month" and "due today" mean.
 
@@ -537,7 +537,7 @@ def update_industry(
     req: IndustryUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
 ):
     """Set the organization's business type.
 
@@ -576,7 +576,7 @@ def preview_industry_change(
     req: IndustryMigrationRequest,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
 ):
     """What changing this organization's industry would do. Writes nothing."""
     org = _resolve_org(current_user, org_id, db)
@@ -589,7 +589,7 @@ def apply_industry_change(
     req: IndustryMigrationRequest,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
 ):
     """Apply an industry template to an existing organization.
 
@@ -617,7 +617,7 @@ def update_tier_config(
     req: TierConfigUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
 ):
     org = _resolve_org(current_user, org_id, db)
     org.tier_config = json.dumps(req.tiers)
@@ -630,7 +630,7 @@ def update_social_links(
     req: SocialLinksUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
 ):
     """Save organization-level social media / review page URLs."""
     org = _resolve_org(current_user, org_id, db)
@@ -661,7 +661,7 @@ def update_email_sender(
     req: EmailSenderUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
 ):
     """
     Saves the org-level Resend API key and from-address. The key is stored
@@ -696,7 +696,7 @@ def update_calendar_provider(
     req: CalendarProviderUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
 ):
     """Which calendar this organization's scheduling runs on.
 
@@ -912,7 +912,7 @@ class AdvisorNumberUpdate(BaseModel):
 def get_org_twilio(
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
     _cap: User = Depends(require_capability("twilio_credentials")),
 ):
     """Return the org's shared Twilio config (auth token is never returned)."""
@@ -936,7 +936,7 @@ def update_org_twilio(
     req: OrgTwilioUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
     _cap: User = Depends(require_capability("twilio_credentials")),
 ):
     """Save org-level Twilio credentials (auth token is encrypted at rest).
@@ -978,7 +978,7 @@ def update_org_twilio_phone(
     req: OrgTwilioPhoneUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
     _cap: User = Depends(require_capability("twilio_numbers")),
 ):
     """Update the shared phone number / caller ID only — no auth token re-entry.
@@ -1005,7 +1005,7 @@ def transfer_user_number_to_shared_org_number(
     req: OrgTwilioSharedTransfer,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
     _cap: User = Depends(require_capability("twilio_numbers")),
 ):
     """Atomically move a same-org advisor number to the shared org sender.
@@ -1073,7 +1073,7 @@ def transfer_user_number_to_shared_org_number(
 def list_org_sending_numbers(
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
     _cap: User = Depends(require_capability("twilio_numbers")),
 ):
     """Who in this organization holds which sending number.
@@ -1112,7 +1112,7 @@ def assign_org_sending_number(
     req: AdvisorNumberUpdate,
     org_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_org_admin),
     _cap: User = Depends(require_capability("twilio_numbers")),
 ):
     """Assign (or clear) one advisor's sending number.

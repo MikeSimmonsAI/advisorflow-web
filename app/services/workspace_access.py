@@ -82,7 +82,12 @@ _MEMBERSHIP_MEMO = "_workspace_memberships_memo"
 # able to mint one, and no sales_manager/sales_rep, because those are the BRAND
 # sales vocabulary and reusing them here is how two scopes start sharing a
 # meaning they do not have.
-WORKSPACE_ROLES = ("org_admin", "advisor", "viewer", "super_admin")
+# "manager" (2026-10-06): a customer's sales/operations manager. Sees and works
+# every lead, conversation, campaign and report in THAT workspace, like
+# org_admin - but not the workspace's user administration or its organization
+# settings / integration credentials (deps.require_org_admin). Granted to an
+# EXISTING login through God -> Manage Access; never creates a user.
+WORKSPACE_ROLES = ("org_admin", "advisor", "viewer", "super_admin", "manager")
 DEFAULT_WORKSPACE_ROLE = "advisor"
 
 # The header a client uses to say which workspace it is currently in. It is a

@@ -163,6 +163,7 @@ COLUMNS_TO_ADD = [
     # creates missing TABLES).
     ("program_responses", "urgency", "VARCHAR"),
     ("outreach_programs", "customer_identity_locked", "BOOLEAN DEFAULT TRUE"),
+    ("outreach_programs", "placement_seed_addresses", "TEXT"),
     # @@PROGRAM_COLUMNS@@
     # ── Telephony (2026-09-28): human dialer, AMD, number record ──
     ("voice_calls", "is_human_call", "BOOLEAN"),

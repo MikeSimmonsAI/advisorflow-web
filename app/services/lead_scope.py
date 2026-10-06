@@ -50,7 +50,9 @@ from app.models.models import Lead, User
 _sec = logging.getLogger("security.authz")
 
 # Roles that see the whole organization's leads.
-MANAGER_ROLES = ("org_admin", "super_admin")
+MANAGER_ROLES = ("org_admin", "super_admin", "manager")
+# Of those, the ones that may administer the workspace itself (users, settings).
+WORKSPACE_ADMIN_ROLES = ("org_admin", "super_admin")
 # Roles confined to their own assigned leads.
 OWNER_SCOPED_ROLES = ("advisor",)
 GOD_ROLE = "god_admin"

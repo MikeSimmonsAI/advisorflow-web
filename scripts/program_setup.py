@@ -69,6 +69,9 @@ def main(argv=None):
                     help="with --stage: put every record still in a review state ON HOLD")
     ap.add_argument("--no-aliases", action="store_true", help="do not assign location email addresses")
     ap.add_argument("--mail-folder", help='Outlook folder processed replies are filed under, e.g. "Inbox/Customers Folder/SCI"')
+    ap.add_argument("--manager-email", action="append", default=[],
+                    help="EXISTING login to give the workspace 'manager' role (repeatable). "
+                         "Never creates an account; refuses an unknown email.")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args(argv)
 
@@ -128,6 +131,14 @@ def main(argv=None):
         if a.staff_alerts:
             prog.staff_sms_alerts_enabled = a.staff_alerts == "on"
             print("staff alerts:", a.staff_alerts)
+        for em in a.manager_email:
+            from app.services.workspace_access import grant_workspace_membership
+            u = db.query(User).filter(User.email == em.strip().lower(), User.is_active.is_(True)).all()
+            if len(u) != 1:
+                sys.exit("--manager-email %s: %s - no account was created." % (
+                    em, "no active login with that email" if not u else "more than one login matches"))
+            grant_workspace_membership(db, u[0].id, org.id, role="manager", granted_by=actor.id, commit=False)
+            print("manager access (workspace role 'manager', this workspace only):", u[0].email)
         if a.mail_folder:
             prog.mailbox_folder_path = a.mail_folder.strip().strip("/")
             print("Outlook filing under:", prog.mailbox_folder_path)

@@ -659,6 +659,7 @@ function Health() {
           <span className="pc-small" style={{ textAlign: 'right' }}>inbound sync {when(d.last_successful.inbound_sync) || '—'} · email send {when(d.last_successful.email_send) || '—'} · webhook event {when(d.last_successful.webhook_event) || '—'}</span>
         </div>
       </section>
+      <Placement />
       <section className="pc-card" style={{ marginTop: 14 }}>
         <h2 style={{ margin: '0 0 6px' }}>Recent automated decisions</h2>
         {d.decisions.length === 0 ? <p className="pc-empty">Nothing yet.</p> : d.decisions.map((x, i) => (
@@ -666,6 +667,53 @@ function Health() {
         ))}
       </section>
     </>
+  )
+}
+
+/* ── inbox placement (measured, never guaranteed) ───────────────────────── */
+
+function Placement() {
+  const [d, setD] = useState(null)
+  const [seeds, setSeeds] = useState({})
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(() => {
+    api.get('/program/placement-checks').then(x => { setD(x); setSeeds(x.seeds || {}) }).catch(e => setMsg(errText(e)))
+  }, [])
+  useEffect(() => { load() }, [load])
+  if (!d) return null
+  const saveSeeds = async () => {
+    try { await api.patch('/program/settings', { placement_seed_addresses: seeds }); setMsg('Seed inboxes saved.'); load() } catch (e) { setMsg(errText(e)) }
+  }
+  const send = async () => {
+    setBusy(true)
+    try { const r = await api.post('/program/placement-checks/send', {}); setMsg(`Sent ${r.checks.filter(c => c.sent_at).length} sample(s). Open each seed inbox and record where it landed.`); load() } catch (e) { setMsg(errText(e)) } finally { setBusy(false) }
+  }
+  const mark = async (id, folder) => {
+    try { await api.post(`/program/placement-checks/${id}/result`, { folder }); load() } catch (e) { setMsg(errText(e)) }
+  }
+  return (
+    <section className="pc-card" style={{ marginTop: 14 }}>
+      <h2 style={{ margin: '0 0 6px' }}>Inbox placement <span className={`pc-badge ${d.readiness.ok ? 'ok' : 'warn'}`}>{d.readiness.ok ? 'ready' : 'not proven'}</span></h2>
+      <p className="pc-small pc-muted" style={{ marginTop: 0 }}>{d.readiness.detail}. Seeds are inboxes you own - never customers.</p>
+      <div className="pc-row" style={{ flexWrap: 'wrap', gap: 8 }}>
+        {d.providers.map(p => (
+          <label key={p} className="pc-small">{p} <input value={seeds[p] || ''} onChange={e => setSeeds({ ...seeds, [p]: e.target.value })} placeholder={`${p} seed inbox`} /></label>
+        ))}
+        <button type="button" className="pc-btn" onClick={saveSeeds}>Save seeds</button>
+        <button type="button" className="pc-btn primary" disabled={busy} onClick={send}>{busy ? 'Sending…' : 'Send placement check'}</button>
+      </div>
+      {msg && <p className="pc-small">{msg}</p>}
+      {d.checks.map(c => (
+        <div className="pc-row" key={c.id}>
+          <span className="pc-small">{c.provider} · {c.seed_address} · {c.sent_at ? when(c.sent_at) : (c.send_error || 'not sent')}</span>
+          <select aria-label={`Where it landed at ${c.provider}`} value={c.folder || ''} onChange={e => mark(c.id, e.target.value)}>
+            <option value="">where did it land?</option>
+            {d.folders.map(f => <option key={f} value={f}>{f.replace('_', ' ')}</option>)}
+          </select>
+        </div>
+      ))}
+    </section>
   )
 }
 

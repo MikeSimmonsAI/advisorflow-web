@@ -329,7 +329,13 @@ def context_packet(db: Session, lead, now: Optional[datetime] = None) -> Optiona
         "facility": {"name": prof.official_name, "website": prof.website} if prof else None,
         "sender_address": sender,
         "sender_healthy": bool(sender),
+        "postal": _postal(db, lead),
     }
+
+
+def _postal(db: Session, lead) -> Optional[str]:
+    from app.services.programs.unsubscribe import postal_line
+    return postal_line(db, lead)
 
 
 # ── 2. compose ───────────────────────────────────────────────────────────────
@@ -348,7 +354,9 @@ def compose(packet: Dict, touch, channel: str = "email", *, flyer_line: str = ""
         "location": packet.get("location") or "",
         "why": pb["why"], "Why": _cap(pb["why"]),
         "topic": pb["topic"], "useful": pb["useful_info"], "question": pb["common_question"],
-        "flyer_line": (flyer_line.strip() + "\n\n") if flyer_line and flyer_line.strip() else "",
+        "flyer_line": (flyer_line.strip() + "\n\n") if flyer_line and flyer_line.strip() else (
+            "If you'd like me to send the information again, just say so and I'll send it to you "
+            "personally.\n\n" if touch == 1 and channel == "email" else ""),
     }
     from app.services.programs.identity import render
     tmpl = (_EMAIL if channel == "email" else _SMS).get(touch)
@@ -408,6 +416,8 @@ def quality(packet: Dict, msg: Dict, *, prior_bodies: Optional[List[str]] = None
         fails.append("campaign is not switched on")
     if not packet.get("sender_healthy"):
         fails.append("no verified sending identity")
+    if channel == "email" and "postal" in packet and not packet.get("postal"):
+        fails.append("no postal address on file for the location (commercial email must carry one)")
     touch = msg.get("touch")
     if touch not in list(range(1, MAX_TOUCHES + 1)) + [REACTIVATION]:
         fails.append("touch %r is outside the playbook" % (touch,))

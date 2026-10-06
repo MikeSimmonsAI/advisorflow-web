@@ -478,6 +478,20 @@ def mark(db: Session, resp: ProgramResponse, state: str, user: User,
     return resp
 
 
+DEFAULT_SLA_REALERTS = 3
+
+
+def sla_realert_cap() -> int:
+    """How many times an unhandled HOT reply re-alerts management (one per SLA
+    window). After that it stays flagged "past SLA" on the dashboard and in the
+    Health tab, but management's phone and inbox stop being paged."""
+    import os
+    try:
+        return max(1, int(os.environ.get("PROGRAM_SLA_MAX_REALERTS") or DEFAULT_SLA_REALERTS))
+    except ValueError:
+        return DEFAULT_SLA_REALERTS
+
+
 def sla_sweep(db: Session, now: Optional[datetime] = None,
               organization_id: Optional[str] = None) -> List[ProgramResponse]:
     """Re-alert HOT responses still untouched past their SLA. Once per SLA window."""
@@ -490,10 +504,13 @@ def sla_sweep(db: Session, now: Optional[datetime] = None,
     if organization_id:
         q = q.filter(ProgramResponse.organization_id == organization_id)
     breached = []
+    cap = sla_realert_cap()
     for resp in q.all():
         prog = identity.program_for_org(db, resp.organization_id)
         if prog is None:
             continue
+        if (resp.sla_alert_count or 0) >= cap:
+            continue                     # escalated enough; it stays red on the dashboard
         window = timedelta(minutes=max(1, int(prog.hot_sla_minutes or 15)))
         if resp.last_sla_alert_at and now - resp.last_sla_alert_at < window:
             continue

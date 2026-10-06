@@ -16,7 +16,8 @@ def _packet(**over):
     p = {"first_name": "Ollie", "kerry": "Kerry Allan", "location": "Eastern Gate Memorial Gardens",
          "campaign_family": "veteran_planning_guide", "campaign_active": True, "sender_healthy": True,
          "display_name": "Kerry Allan | Eastern Gate Memorial Gardens", "responses": [],
-         "on_hold": False, "in_review": False, "suppressed": False, "appointment_booked": False}
+         "on_hold": False, "in_review": False, "suppressed": False, "appointment_booked": False,
+         "postal": "Eastern Gate Memorial Gardens, 1 Test Way, Testville, FL 32500"}
     p.update(over)
     return p
 
@@ -291,3 +292,100 @@ def test_an_unknown_texter_to_a_location_number_is_kept_for_review_not_attached(
         "From": "+13345550000", "To": "+12055550199", "Body": "Who is this? I got your letter",
         "MessageSid": "SMloc2"})
     assert db.query(ProgramUnmatchedReply).filter_by(organization_id=org.id).count() == 1
+
+
+# ── workspace "manager" role (Michael's SCI access on his existing login) ────
+
+def test_a_manager_works_the_program_but_not_the_workspace_admin(client, program, db_session):
+    from app.models.models import Organization, User
+    from app.services.workspace_access import grant_workspace_membership, WORKSPACE_ROLES
+    from tests.test_outreach_program import hash_password
+    db, org = program["db"], program["org"]
+    assert "manager" in WORKSPACE_ROLES
+    home = Organization(name="Michael Home Co", slug="michael-home-co")
+    db.add(home)
+    db.commit()
+    mgr = User(organization_id=home.id, email="michael.mgr@example.com", password_hash=hash_password("Pass12345!"),
+               full_name="Michael Manager", role="advisor", is_active=True, must_change_password=False)
+    db.add(mgr)
+    db.commit()
+    grant_workspace_membership(db, mgr.id, org.id, role="manager", check_capacity=False)
+    users_before = db.query(User).count()
+    h = dict(_h(db, mgr), **{"X-Workspace-Id": org.id})
+    assert client.get("/program/responses", headers=h).status_code == 200      # works the program
+    assert client.get("/program/health", headers=h).status_code == 200
+    assert client.get("/admin/users", headers=h).status_code == 403             # not user admin
+    assert client.get("/org-settings/twilio", headers=h).status_code == 403      # not credentials
+    assert client.patch("/program/settings", headers=h, json={"customer_identity_locked": False}).status_code == 403
+    assert db.query(User).count() == users_before                               # no account created
+
+
+# ── deliverability: postal footer, placement checks, SLA cap ────────────────
+
+def test_no_postal_address_holds_automated_email(program, sample_advisor, monkeypatch):
+    from app.models.location_models import Location
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    for loc in db.query(Location).filter_by(organization_id=org.id):
+        loc.address_line1 = None
+    db.commit()
+    sent = []
+    with _fake_provider(sent):
+        r = et.run(db, org.id, force_hours=True)
+    t = db.query(ProgramEmailTouch).filter_by(lead_id=lead.id).one()
+    assert sent == [] and r["held_quality"] == 1 and "postal address" in t.reason
+
+
+def test_program_email_footer_carries_the_location_postal_address(program, sample_advisor, monkeypatch):
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    sent = []
+    with _fake_provider(sent):
+        et.run(db, org.id, force_hours=True)
+    assert "1 Test Way" in sent[0]["body_html"] and "/email/unsubscribe/" in sent[0]["body_html"]
+
+
+def test_placement_checks_send_the_real_first_touch_to_seeds_and_gate_readiness(client, program, sample_advisor,
+                                                                              monkeypatch):
+    from app.services.programs import placement
+    db, org, prog, admin = program["db"], program["org"], program["prog"], program["admin"]
+    org.from_email = "support@evosyspro.live"
+    from tests.test_outreach_program import _addresses
+    _addresses(db, org)
+    db.commit()
+    h = _h(db, admin)
+    assert client.patch("/program/settings", headers=h, json={"placement_seed_addresses": {
+        "gmail": "seed.g@example.com", "outlook": "seed.o@example.com",
+        "yahoo": "seed.y@example.com", "icloud": "seed.i@example.com"}}).status_code == 200
+    sent = []
+    with _fake_provider(sent):
+        r = client.post("/program/placement-checks/send", headers=h, json={})
+    assert r.status_code == 200 and len(sent) == 4
+    assert {s["to_email"] for s in sent} == {"seed.g@example.com", "seed.o@example.com",
+                                             "seed.y@example.com", "seed.i@example.com"}
+    assert all("Kerry Allan" in s["body_html"] and "List-Unsubscribe" in s["headers"] for s in sent)
+    assert sent[0]["org"].from_name.startswith("Kerry Allan | ")
+    checks = r.json()["checks"]
+    assert placement.readiness_item(db, prog)["ok"] is False                  # nobody has looked yet
+    for c in checks:
+        folder = "promotions" if c["provider"] == "gmail" else "inbox"
+        assert client.post("/program/placement-checks/%s/result" % c["id"], headers=h,
+                           json={"folder": folder}).status_code == 200
+    item = placement.readiness_item(db, prog)
+    assert item["ok"] is False and "gmail: promotions" in item["detail"]
+    gm = next(c for c in checks if c["provider"] == "gmail")
+    client.post("/program/placement-checks/%s/result" % gm["id"], headers=h, json={"folder": "primary"})
+    assert placement.readiness_item(db, prog)["ok"] is True
+    assert client.post("/program/placement-checks/%s/result" % gm["id"], headers=h,
+                       json={"folder": "somewhere"}).status_code == 422
+
+
+def test_hot_sla_re_alerts_are_capped(program, sample_advisor, monkeypatch):
+    db, org = program["db"], program["org"]
+    monkeypatch.setenv("PROGRAM_SLA_MAX_REALERTS", "2")
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(False, "test")):
+        r = responses.on_inbound(db, lead, "Can I book a visit this week?", "sms")
+        t = r.received_at
+        for i in range(6):
+            responses.sla_sweep(db, now=t + timedelta(minutes=16 * (i + 1)))
+    db.refresh(r)
+    assert r.sla_alert_count == 2

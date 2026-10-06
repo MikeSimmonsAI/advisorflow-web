@@ -288,6 +288,30 @@ def status(db: Session = Depends(get_db), god: User = Depends(require_god)):
     }
 
 
+class MarkIn(BaseModel):
+    state: str = "responded"
+
+
+@router.post("/mark-test-response")
+def mark_test_response(body: MarkIn, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Mark the live test reply handled (stops its SLA escalation), exactly as
+    Kerry pressing "I responded" would. Test contact only."""
+    _on()
+    from app.services.programs import responses as R
+    org = _org(db)
+    lead = _test_lead(db, org)
+    resp = (db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id)
+            .order_by(ProgramResponse.created_at.desc()).first())
+    if resp is None:
+        raise HTTPException(status_code=404, detail="The test contact has no response yet.")
+    try:
+        R.mark(db, resp, body.state, god)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"id": resp.id, "status": resp.handling_status, "sla_alert_count": resp.sla_alert_count,
+            "opened_at": _iso(resp.opened_at), "responded_at": _iso(resp.responded_at)}
+
+
 @router.post("/remove-simulation-contacts")
 def remove_simulation_contacts(db: Session = Depends(get_db), god: User = Depends(require_god)):
     """Delete the synthetic example.com contacts (and everything recorded about
