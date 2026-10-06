@@ -1,4 +1,4 @@
-# render-staging.yaml — SCI STAGING stack (Render Blueprint, $0 free plans)
+# render-staging.yaml — SCI STAGING stack (Render Blueprint)
 #
 # An ISOLATED copy of the EvoSys stack for proving the SCI email loop:
 #   * its own empty Postgres (no production data, no real SCI leads)
@@ -10,15 +10,17 @@
 # marked `sync: false`; fill them as the comment on each line says.
 # Production (render.yaml, branch main) is not touched by any of this.
 #
-# FREE-PLAN NOTES: free web services sleep after ~15 idle minutes (the
+# PLAN NOTES: the database is basic-256mb (paid, hourly - delete it after
+# the staging run); the web services are free. Free web services sleep after ~15 idle minutes (the
 # Family Service Center Health tab refreshes every minute and keeps it awake
 # while open); there is no pre-deploy step on free plans, so the schema step
-# runs at start instead; the free database expires after 30 days - fine for
-# a staging proof, recreate it if needed.
+# runs at start instead.
 
 databases:
   - name: sci-staging-db
-    plan: free
+    # Paid (approved 2026-10-05): the workspace's one free database slot is
+    # used by restland-fsa-db. Billed by the hour - delete after the staging run.
+    plan: basic-256mb
     databaseName: sci_staging
     user: sci_staging
 
