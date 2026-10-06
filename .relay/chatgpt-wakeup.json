@@ -1,10 +1,10 @@
 {
-  "relay_run_id": "sci-readiness-matrix-20261006-1533",
-  "parent_run_id": "sci-regional-numbers-20261006-1528",
+  "relay_run_id": "sci-readiness-matrix-workaround-20261006-1536",
+  "parent_run_id": "sci-readiness-matrix-20261006-1533",
   "project": "SCI POC Readiness Sprint",
-  "status": "BLOCKED",
+  "status": "COMPLETED",
   "branch": "sci-program",
-  "timestamp_ct": "2026-10-06 15:35 CT",
+  "timestamp_ct": "2026-10-06 15:39 CT",
   "issue": 1,
-  "status_comment_id": 6024953572
+  "status_comment_id": 6025029926
 }
