@@ -1,42 +1,51 @@
-# Relay status event: when a [RELAY:CLAUDE_STATUS] comment with a terminal
-# STATUS (COMPLETED | BLOCKED | APPROVAL_REQUIRED) appears on issue #1, label
-# the issue so ChatGPT Work (or anything watching) has one deterministic event:
-#   label "relay:needs-chatgpt-review" added  -> review Claude's latest status
-#   label "relay:approval-required" added     -> Mike must decide
-# Never wakes Claude (claude-relay.yml ignores status comments).
-# Like every issue_comment workflow, it only runs from the default branch.
+# Relay status event: a [RELAY:CLAUDE_STATUS] comment on issue #1 is validated
+# by the guard (trusted author, real ACKed run, matching branch, valid STATUS,
+# first terminal status for the run). A trusted TERMINAL status (COMPLETED |
+# BLOCKED | APPROVAL_REQUIRED) produces exactly one push to the relay PR - the
+# ChatGPT Work wake-up event. Forged, unknown, duplicate or WORKING statuses do
+# nothing. Never wakes Claude. Runs from the default branch, like every
+# issue_comment workflow. See handoff/AUTOMATIC_AGENT_RELAY_SETUP.md.
 name: Relay status event
 
 on:
   issue_comment:
     types: [created]
 
-permissions:
-  issues: write
-  contents: read
+permissions: {}
+
+concurrency:
+  group: relay-signal
+  cancel-in-progress: false
 
 jobs:
   status:
     if: >-
       github.event.issue.number == 1 &&
-      contains(github.event.comment.body, '[RELAY:CLAUDE_STATUS]')
+      contains(github.event.comment.body, '[RELAY:CLAUDE_STATUS]') &&
+      !contains(github.event.comment.body, '[RELAY:DIRECTIVE]')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write        # push the relay-signal branch only
+      pull-requests: write   # keep the one relay PR open
+      issues: read
+    env:
+      RELAY_ISSUE: "1"
+      RELAY_AUTHORIZED_ACTORS: MikeSimmonsAI
+      RELAY_ALLOWED_BRANCHES: ${{ vars.RELAY_ALLOWED_BRANCHES || 'sci-program' }}
+      RELAY_STATUS_ACTORS: ${{ vars.RELAY_STATUS_ACTORS || 'github-actions[bot],claude[bot]' }}
     steps:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: scripts/relay
+      - run: cp -r scripts/relay "$RUNNER_TEMP/relay" && echo "RELAY_DIR=$RUNNER_TEMP/relay" >> "$GITHUB_ENV"
       - id: s
-        run: python3 scripts/relay/relay_guard.py status
-      - name: Label for ChatGPT review
+        name: Validate the status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 "$RELAY_DIR/relay_guard.py" status
+      - name: ChatGPT wake-up signal (one relay PR, one event per terminal status)
         if: steps.s.outputs.terminal == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh label create "relay:needs-chatgpt-review" --repo "$GITHUB_REPOSITORY" --color 0E8A16 2>/dev/null || true
-          gh label create "relay:approval-required" --repo "$GITHUB_REPOSITORY" --color D93F0B 2>/dev/null || true
-          # remove-then-add so every terminal status produces a fresh "labeled" event
-          gh issue edit 1 --repo "$GITHUB_REPOSITORY" --remove-label "relay:needs-chatgpt-review" || true
-          gh issue edit 1 --repo "$GITHUB_REPOSITORY" --add-label "relay:needs-chatgpt-review"
-          if [ "${{ steps.s.outputs.status }}" = "APPROVAL_REQUIRED" ]; then
-            gh issue edit 1 --repo "$GITHUB_REPOSITORY" --add-label "relay:approval-required"
-          fi
+        run: bash "$RELAY_DIR/signal.sh"
