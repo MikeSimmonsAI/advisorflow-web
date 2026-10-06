@@ -1,12 +1,10 @@
 {
- "relay_run_id": "mike-pkg-202610061434-controlroomtest",
- "parent_run_id": "",
- "project": "Control Room",
- "status": "MIKE_INPUT",
- "kind": "mike_input",
- "mode": "after_current",
- "branch": "sci-program",
- "timestamp_ct": "2026-10-06 14:34 CT",
- "issue": 1,
- "status_comment_id": null
+  "relay_run_id": "overnight-test-step1-20261006-1435",
+  "parent_run_id": "mike-pkg-202610061434-controlroomtest",
+  "project": "EvoSys / AdvisorFlow Control Room",
+  "status": "COMPLETED",
+  "branch": "sci-program",
+  "timestamp_ct": "2026-10-06 14:36 CT",
+  "issue": 1,
+  "status_comment_id": 6024013301
 }
