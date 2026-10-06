@@ -300,6 +300,19 @@ class MarkIn(BaseModel):
     state: str = "responded"
 
 
+@router.get("/manager-provisioning")
+def manager_provisioning(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """God-only, staging-only, read-only. Booleans/counts; no PII or secrets.
+
+    Gated on APP_ENV=staging (not STAGING_TEST_HARNESS) so it answers 404 in
+    production and demo.
+    """
+    from app.services import environment, sci_staging_bootstrap
+    if environment.current() != environment.ENV_STAGING:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return sci_staging_bootstrap.provisioning_status(db)
+
+
 @router.post("/mark-test-response")
 def mark_test_response(body: MarkIn, db: Session = Depends(get_db), god: User = Depends(require_god)):
     """Mark the live test reply handled (stops its SLA escalation), exactly as

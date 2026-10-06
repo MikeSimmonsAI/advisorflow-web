@@ -226,6 +226,52 @@ def _send_activation(db: Session, user) -> Dict[str, Any]:
             "token_prefix": prefix}
 
 
+def provisioning_status(db: Session) -> Dict[str, Any]:
+    """READ-ONLY, booleans and counts only: no email, id, token or hash.
+
+    Answers "did the bootstrap do its job" for the God Mode diagnostics route.
+    Writes nothing and never sends anything.
+    """
+    from app.models.models import AuditLogEntry, Organization, User
+    from app.models.sales_models import Membership
+    from app.services.workspace_access import SCOPE_CUSTOMER_ORG
+
+    out: Dict[str, Any] = {
+        "bootstrap_enabled": _truthy(ENV_ENABLED),
+        "send_enabled": _truthy(ENV_SEND),
+        "database_is_sci_staging": database_is_sci_staging(),
+        "commit": (os.environ.get("RENDER_GIT_COMMIT")
+                   or os.environ.get("GIT_COMMIT") or "unknown"),
+    }
+    email = _env(ENV_EMAIL).lower()
+    org_id = _env(ENV_ORG)
+    out["email_configured"] = bool(email and EMAIL_RE.match(email))
+    org = (db.query(Organization).filter(Organization.id == org_id).first()
+           if org_id else None)
+    out["org_found"] = org is not None
+    out["org_name_matches"] = bool(org and (org.name or "").strip() == SCI_ORG_NAME)
+    users = (db.query(User).filter(func.lower(User.email) == email).all()
+             if email else [])
+    out["user_count"] = len(users)
+    user = users[0] if len(users) == 1 else None
+    out["user_active_advisor_no_org"] = bool(
+        user and user.is_active and user.role == "advisor"
+        and user.organization_id is None)
+    if user is None:
+        return out
+    rows = db.query(Membership).filter(Membership.user_id == user.id).all()
+    sci = [m for m in rows if m.scope_type == SCOPE_CUSTOMER_ORG
+           and m.scope_id == org_id and m.is_active and m.role == MANAGER_ROLE]
+    out["sci_manager_membership_count"] = len(sci)
+    out["unrelated_active_membership_count"] = sum(
+        1 for m in rows if m.is_active and m not in sci)
+    state = _activation_state(db, user)
+    out["activation_accepted"] = state["accepted"] > 0
+    out["activation_pending"] = state["pending"] > 0
+    out["activation_sent_marker"] = state["sent_markers"] > 0
+    return out
+
+
 def run(db: Session) -> Dict[str, Any]:
     """Idempotent. Returns a NON-SECRET summary; never raises on gate failure."""
     if not _truthy(ENV_ENABLED):
