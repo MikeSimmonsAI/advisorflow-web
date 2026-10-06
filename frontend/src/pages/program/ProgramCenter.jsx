@@ -334,6 +334,11 @@ function Responses({ locationId, onChange, navigate }) {
       .catch(e => { if (mine === seq.current) { setErr(errText(e)); setRows([]) } })
   }, [status, cls, locationId])
   useEffect(() => { load() }, [load])
+  const view = r => {
+    setSel(r)
+    // The server records "opened" only when the viewer is the program's primary contact.
+    api.post(`/program/responses/${r.id}/viewed`, {}).catch(() => { /* viewing never fails the screen */ })
+  }
   const mark = async (r, state) => {
     try {
       await api.post(`/program/responses/${r.id}/mark`, { state })
@@ -364,7 +369,7 @@ function Responses({ locationId, onChange, navigate }) {
         <div className="pc-list" aria-label="Responses">
           {rows === null ? <p className="pc-muted">Loading…</p> : rows.length === 0 ? <p className="pc-empty">Nothing here.</p>
             : rows.map(r => (
-              <button key={r.id} type="button" aria-current={sel?.id === r.id} onClick={() => setSel(r)}>
+              <button key={r.id} type="button" aria-current={sel?.id === r.id} onClick={() => view(r)}>
                 <span className={`pc-badge ${r.class}`}>{r.label}</span> {r.sla_breached && <span className="pc-badge hot">past SLA</span>}
                 <div><strong>{r.name || 'Contact'}</strong></div>
                 <div className="pc-small pc-muted">{r.location || 'Location review'} · {when(r.received_at)}</div>
@@ -378,7 +383,7 @@ function Responses({ locationId, onChange, navigate }) {
               <div className="pc-small pc-muted">{sel.channel === 'sms' ? 'Text reply' : 'Email reply'} · {sel.location || 'Location review'} · Lead ID {sel.source_lead_id || '—'} · {sel.campaign_family || 'no campaign'}</div>
               <p><strong>Summary.</strong> {sel.summary}</p>
               <div className="pc-pre">{sel.body}</div>
-              {sel.intents?.length > 0 && <p className="pc-small">{sel.intents.map(i => <span key={i.key} className="pc-badge" style={{ marginRight: 6 }}>{i.label}</span>)}</p>}
+              {(sel.urgency || sel.intents?.length > 0) && <p className="pc-small">{sel.urgency && <span className={`pc-badge ${String(sel.urgency).toLowerCase()}`} style={{ marginRight: 6 }}>Urgency: {sel.urgency}</span>}{(sel.intents || []).map(i => <span key={i.key} className="pc-badge" style={{ marginRight: 6 }}>{i.label}</span>)}</p>}
               <p><strong>Recommended next step.</strong> {sel.recommended_action}</p>
               {sel.suggested_reply && (
                 <div>
@@ -387,7 +392,7 @@ function Responses({ locationId, onChange, navigate }) {
                   <div className="pc-pre">{sel.suggested_reply}</div>
                 </div>
               )}
-              <p className="pc-small pc-muted">Status: {sel.status}{sel.cadence_paused ? ' · cadence paused' : ''}{sel.sla_due_at ? ` · SLA due ${when(sel.sla_due_at)}` : ''}</p>
+              <p className="pc-small pc-muted">Status: {sel.status}{sel.cadence_paused ? ' · cadence paused' : ''}{sel.sla_due_at ? ` · SLA due ${when(sel.sla_due_at)}` : ''}{sel.minutes_to_open != null ? ` · opened after ${sel.minutes_to_open} min` : ''}{sel.minutes_to_respond != null ? ` · responded after ${sel.minutes_to_respond} min` : ''}</p>
               <div className="pc-detail-actions">
                 <button type="button" className="pc-btn" onClick={() => mark(sel, 'opened')}>Mark opened</button>
                 <button type="button" className="pc-btn" onClick={() => mark(sel, 'responded')}>I responded</button>

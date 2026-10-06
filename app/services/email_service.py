@@ -544,6 +544,9 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     if result["success"]:
         lead.status = "sent"
     db.commit()
+    if result["success"] and _program_identity.program_for_org(db, lead.organization_id) is not None:
+        _program_identity.record_on_behalf(db, lead, channel="email", actor_user_id=sent_by_user_id,
+                                           sender_user_id=advisor.id, message_id=email_msg.id)
 
     # THE ROW IS WRITTEN EITHER WAY - a failed send is a fact worth keeping,
     # and status="failed" above records it. What differs is whether the caller

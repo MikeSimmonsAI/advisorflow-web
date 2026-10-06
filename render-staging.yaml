@@ -47,6 +47,9 @@ services:
         generateValue: true
       - key: BOOKING_SECRET
         generateValue: true
+      # Names this deploy STAGING in /health and the Health tab.
+      - key: APP_ENV
+        value: staging
       # Runs the in-process schedulers (SLA loop etc.) exactly like production.
       - key: SERVICE_ROLE
         value: backend

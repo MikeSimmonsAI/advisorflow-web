@@ -115,6 +115,7 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "id": prog.id, "organization_id": prog.organization_id, "name": prog.name,
         "hero_title": prog.hero_title, "hero_subtitle": prog.hero_subtitle,
         "primary_contact_name": prog.primary_contact_name,
+        "customer_identity_locked": identity.locked(prog),
         "primary_contact_title": prog.primary_contact_title,
         "primary_contact_user_id": prog.primary_contact_user_id,
         "alert_email": prog.alert_email, "alert_phone": prog.alert_phone,
@@ -160,6 +161,7 @@ class SettingsIn(BaseModel):
     staff_alerts_enabled: Optional[bool] = None
     alias_mode: Optional[str] = None
     mailbox_folder_path: Optional[str] = None
+    customer_identity_locked: Optional[bool] = None
 
 
 _EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -219,9 +221,30 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db),
             raise HTTPException(status_code=422, detail="alias_mode must be from, reply_to or off.")
     if "staff_alerts_enabled" in data:
         prog.staff_sms_alerts_enabled = bool(data.pop("staff_alerts_enabled"))
+    # CUSTOMER-FACING IDENTITY is locked until the platform owner unlocks it:
+    # a manager may write and send, but the family always sees Kerry Allan.
+    from app.services.capabilities import is_god as _is_god_user
+    if "customer_identity_locked" in data:
+        if not _is_god_user(user):
+            raise HTTPException(status_code=403, detail="Only the platform owner can unlock the "
+                                "customer-facing identity.")
+        prog.customer_identity_locked = bool(data.pop("customer_identity_locked"))
+    if "primary_contact_name" in data and identity.locked(prog) \
+            and (data["primary_contact_name"] or "").strip() != (prog.primary_contact_name or ""):
+        raise HTTPException(status_code=409, detail="The customer-facing identity is locked to %s. "
+                            "Only the platform owner can change it." % (prog.primary_contact_name or "the program contact"))
+    before = {k: getattr(prog, k, None) for k in data}
     for k, v in data.items():
         setattr(prog, k, v.strip() if isinstance(v, str) else v)
     db.commit()
+    try:
+        from app.routers.audit_log_router import log_action
+        log_action(db, prog.organization_id, user.id, "program.settings_changed", "program", prog.id,
+                   before={k: (str(v) if v is not None else None) for k, v in before.items()},
+                   after={k: (str(getattr(prog, k, None)) if getattr(prog, k, None) is not None else None)
+                          for k in before})
+    except Exception:                                    # noqa: BLE001
+        db.rollback()
     return _program_json(db, prog)
 
 
@@ -275,6 +298,10 @@ def update_location(profile_id: str, body: ProfileIn, db: Session = Depends(get_
         data.pop(k, None)
     if "advisor_names" in data:
         p.advisor_names = json.dumps([a.strip() for a in data.pop("advisor_names") or [] if a.strip()])
+    for k in ("email_display_name", "sms_identity_name"):
+        if k in data and not identity.override_allowed(prog, p, data[k]):
+            raise HTTPException(status_code=409, detail="The customer-facing identity is locked: this must read "
+                                "\"%s | %s\"." % (prog.primary_contact_name or "", p.official_name))
     if "email_alias" in data:
         raw = (data.pop("email_alias") or "").strip().lower()
         if p.is_review_bucket:
@@ -633,7 +660,14 @@ def list_responses(status: Optional[str] = Query(None), response_class: Optional
         "summary": r.summary, "recommended_action": r.recommended_action, "body": r.body_excerpt,
         "reply_to_alias": r.reply_to_alias,
         "intents": [{"key": k, "label": responses.INTENT_LABELS.get(k, k)} for k in json.loads(r.intents or "[]")],
+        "urgency": r.urgency or responses.urgency(r.response_class),
         "suggested_reply": r.suggested_reply,
+        "opened_at": r.opened_at.isoformat() + "Z" if r.opened_at else None,
+        "responded_at": r.responded_at.isoformat() + "Z" if r.responded_at else None,
+        "minutes_to_open": (int((r.opened_at - r.received_at).total_seconds() // 60)
+                            if r.opened_at and r.received_at else None),
+        "minutes_to_respond": (int((r.responded_at - r.received_at).total_seconds() // 60)
+                               if r.responded_at and r.received_at else None),
         "status": r.handling_status, "cadence_paused": r.cadence_paused,
         "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
         "sla_due_at": r.sla_due_at.isoformat() + "Z" if r.sla_due_at else None,
@@ -659,6 +693,23 @@ def mark_response(response_id: str, body: MarkIn, db: Session = Depends(get_db),
         responses.mark(db, r, body.state, user)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    return {"id": r.id, "status": r.handling_status}
+
+
+@router.post("/responses/{response_id}/viewed")
+def response_viewed(response_id: str, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    """KERRY OPENED, recorded automatically - but only when the program's
+    primary contact opens it. A manager looking at a HOT reply must not stop
+    its SLA clock; that would hide the very response management is watching."""
+    prog = _program(db, user)
+    r = db.query(ProgramResponse).filter(ProgramResponse.id == response_id,
+                                         ProgramResponse.organization_id == prog.organization_id).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="Response not found.")
+    if prog.primary_contact_user_id and user.id == prog.primary_contact_user_id \
+            and (r.handling_status or "new") == "new":
+        responses.mark(db, r, "opened", user)
     return {"id": r.id, "status": r.handling_status}
 
 

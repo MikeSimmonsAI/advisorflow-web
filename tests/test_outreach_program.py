@@ -218,7 +218,7 @@ def test_organizations_without_a_program_are_untouched(db_session, sample_org, s
     ("Please remove me from your list", "opt_out"),
     ("Yes I'd like an appointment next week", "hot"),
     ("How much does it cost?", "hot"),
-    ("Please send me more information", "hot"),
+    ("Please send me more information", "active"),   # ACTIVE + Information Request (2026-10-06)
     ("What hours are you open on Saturday?", "active"),
     ("ok thanks", "low"),
     ("Not interested, remove me", "opt_out"),
@@ -577,6 +577,9 @@ def _touch_ready(program, sample_advisor, monkeypatch, source="L001", **lead_kw)
     monkeypatch.setenv(email_touches.SENDING_ENV, "on")
     fam = db.query(CampaignFamily).filter_by(organization_id=org.id, key="veteran_planning_guide").one()
     fam.is_active = True
+    # The quality gate refuses automated mail with no verified sending identity.
+    if not getattr(org, "from_email", None):
+        org.from_email = "support@evosyspro.live"
     setup.store_asset(db, org, kind="flyer", title="Veteran Planning Guide", data=b"%PDF-1.4 guide",
                       content_type="application/pdf", filename="guide.pdf",
                       category="veteran_planning_guide", activate=True)
@@ -619,6 +622,7 @@ def test_email_touches_need_the_campaign_switched_on(program, sample_advisor, mo
 def test_first_touch_hosted_then_followup_attached_never_twice(program, sample_advisor, monkeypatch):
     from app.models.program_models import ProgramEmailTouch
     db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    monkeypatch.setenv("PROGRAM_EMAIL_MAX_TOUCHES", "2")   # this test is about touches 1 and 2
     sent = []
     with _fake_provider(sent):
         r1 = et.run(db, org.id, force_hours=True)
@@ -702,6 +706,7 @@ def test_a_flyer_campaign_without_an_approved_flyer_is_held(program, sample_advi
     monkeypatch.setenv(et.SENDING_ENV, "on")
     fam = db.query(CampaignFamily).filter_by(organization_id=org.id, key="veteran_planning_guide").one()
     fam.is_active = True          # first touch mode is "hosted" and no flyer is uploaded
+    org.from_email = "support@evosyspro.live"
     db.commit()
     _lead_for(db, org, sample_advisor, "L001")
     sent = []
@@ -1177,14 +1182,29 @@ def test_management_hot_email_has_a_clear_subject(program, monkeypatch):
 @pytest.mark.parametrize("text,cls,found", [
     ("Yes, I would like more information and would like to schedule a time.", "hot",
      ["appointment_intent", "information_request"]),
-    ("How much does a cemetery plot cost at your location?", "hot", ["pricing_question"]),
-    ("What does the veteran guide include?", "hot", ["information_request"]),
-    ("This is not him, you have the wrong person", "wrong_person", []),
-    ("Wrong number", "bad_data", []),
+    ("How much does a cemetery plot cost at your location?", "hot", ["pricing_question", "cemetery_interest"]),
+    ("What does the veteran guide include?", "active", ["information_request", "veteran_planning_question"]),
+    ("This is not him, you have the wrong person", "wrong_person", ["wrong_person"]),
+    ("Wrong number", "bad_data", ["bad_data"]),
+    ("Am I eligible for burial benefits as a veteran?", "active",
+     ["benefits_question", "veteran_planning_question", "cemetery_interest"]),
+    ("We're thinking about cremation, what are the options?", "active", ["information_request", "cremation_interest"]),
+    ("I'd like to start pre-planning my arrangements", "active", ["general_planning"]),
+    ("Not right now, maybe later", "active", ["objection"]),
+    ("Not interested, remove me", "opt_out", ["not_interested", "opt_out"]),
+    ("STOP", "opt_out", ["opt_out"]),
+    ("thank you", "low", ["simple_acknowledgment"]),
 ])
 def test_classes_and_intents(text, cls, found):
-    assert responses.classify(text)["class"] == cls
-    assert responses.intents(text) == found
+    c = responses.classify(text)["class"]
+    assert c == cls
+    assert responses.intents(text, c) == found
+
+
+@pytest.mark.parametrize("cls,urg", [("hot", "HOT"), ("active", "ACTIVE"), ("low", "LOW"),
+                                     ("opt_out", "LOW"), ("wrong_person", "LOW"), ("bad_data", "LOW")])
+def test_urgency_is_separate_from_intent(cls, urg):
+    assert responses.urgency(cls) == urg
 
 
 def test_a_hot_reply_gets_intents_and_a_draft_that_is_never_sent(program, sample_advisor):

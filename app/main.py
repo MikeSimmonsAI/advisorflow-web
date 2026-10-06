@@ -2154,7 +2154,11 @@ def _build_metadata() -> dict:
 
     # RENDER_SERVICE_ID present means a Render deploy; its absence means local
     # or another host. Stated rather than guessed at from the hostname.
-    environment = ("production" if _os.environ.get("RENDER_SERVICE_ID")
+    # APP_ENV (app/services/environment.py) names staging/demo explicitly;
+    # without it a Render deploy is production and anything else development.
+    _app_env = (_os.environ.get("APP_ENV") or "").strip().lower()
+    environment = (_app_env if _app_env in ("production", "staging", "demo")
+                   else "production" if _os.environ.get("RENDER_SERVICE_ID")
                    else "development")
 
     return {

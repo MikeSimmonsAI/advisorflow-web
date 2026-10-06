@@ -56,6 +56,10 @@ class OutreachProgram(Base):
     # The human every family hears from, whichever home they belong to.
     primary_contact_user_id = Column(String, ForeignKey("users.id"), nullable=True)
     primary_contact_name = Column(String, nullable=True)
+    # UNBREAKABLE until the platform owner changes it: every customer-facing
+    # message is "<primary_contact_name> | <location>". While locked, the
+    # person's name cannot be changed and no location override may drop it.
+    customer_identity_locked = Column(Boolean, nullable=False, default=True)
     primary_contact_title = Column(String, nullable=True)
     # Where alerts go. BLANK UNTIL SUPPLIED - never guessed, never hard-coded.
     alert_email = Column(String, nullable=True)
@@ -213,6 +217,7 @@ class ProgramResponse(Base):
     reply_id = Column(String, nullable=True)
     reply_to_alias = Column(String, nullable=True)           # the location address the family wrote to
     intents = Column(Text, nullable=True)                    # JSON list: appointment_intent, pricing_question, ...
+    urgency = Column(String, nullable=True)                  # HOT | ACTIVE | LOW (separate from intents)
     suggested_reply = Column(Text, nullable=True)            # a DRAFT for a person; never sent automatically
     channel = Column(String, nullable=False)                 # sms | email
     location_id = Column(String, nullable=True)

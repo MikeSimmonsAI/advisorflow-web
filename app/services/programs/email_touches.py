@@ -4,7 +4,14 @@ The SMS cadence engine sends texts only; an email-only family was skipped.
 This runner sends a program's campaign emails, location by location:
 
     touch 1  first-touch email  (family's first_touch_email_mode: none | hosted | attached)
-    touch 2  follow-up email    (followup_email_mode), FOLLOWUP_DAYS after touch 1
+    touch 2..5 follow-ups       (followup_email_mode), each FOLLOWUP_DAYS after the last,
+                                every one a DIFFERENT strategy (programs/message_brain.py):
+                                useful info -> common question -> easy appointment ->
+                                permission-based close. PROGRAM_EMAIL_MAX_TOUCHES caps it.
+
+Every touch's copy comes from the message brain (or, for touch 1, the
+family's own edited copy) and must pass its QUALITY GATE; a failing message is
+recorded as blocked "held by quality check" with its reasons and never sent.
 
 WHO GETS A TOUCH - every one of these must hold, every pass:
   * PROGRAM_EMAIL_TOUCHES_SENDING is on for the deployment (default OFF), and
@@ -38,6 +45,7 @@ import base64
 import html
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -272,24 +280,90 @@ def _skip_reason(db: Session, lead: Lead, replied: bool) -> Optional[str]:
     return identity.send_refusal(db, lead, "cadence")
 
 
+DEFAULT_MAX_TOUCHES = 5
+
+
+def max_touches() -> int:
+    """Active email touches per contact (message_brain.TOUCH_STRATEGY 1..5)."""
+    try:
+        return max(1, min(5, int(os.environ.get("PROGRAM_EMAIL_MAX_TOUCHES") or DEFAULT_MAX_TOUCHES)))
+    except ValueError:
+        return DEFAULT_MAX_TOUCHES
+
+
 def _due_touch(touches: Dict[int, ProgramEmailTouch], now: datetime) -> Optional[int]:
-    """1, 2, or None. A blocked touch is retried after BLOCKED_RETRY_AFTER."""
-    t1, t2 = touches.get(1), touches.get(2)
-    if t1 is None:
-        return 1
-    if t1.status == "blocked":
-        return 1 if (t1.attempted_at is None or now - t1.attempted_at >= BLOCKED_RETRY_AFTER) else None
-    if t1.status == "retry":
-        return 1 if (t1.next_attempt_at is None or now >= t1.next_attempt_at) else None
-    if t1.status != "sent" or not t1.attempted_at:
-        return None                              # failed / unknown / claimed: a person looks
-    if t2 is None:
-        return 2 if now - t1.attempted_at >= timedelta(days=followup_days()) else None
-    if t2.status == "blocked":
-        return 2 if (t2.attempted_at is None or now - t2.attempted_at >= BLOCKED_RETRY_AFTER) else None
-    if t2.status == "retry":
-        return 2 if (t2.next_attempt_at is None or now >= t2.next_attempt_at) else None
+    """The touch due now (1..max_touches), or None.
+
+    Touch n is due FOLLOWUP_DAYS after touch n-1 was SENT. A blocked touch is
+    retried after BLOCKED_RETRY_AFTER, a temporary failure on its backoff;
+    failed / unknown / claimed stop the sequence until a person looks."""
+    for n in range(1, max_touches() + 1):
+        t = touches.get(n)
+        if t is None:
+            if n == 1:
+                return 1
+            prev = touches.get(n - 1)
+            return n if now - prev.attempted_at >= timedelta(days=followup_days()) else None
+        if t.status == "blocked":
+            return n if (t.attempted_at is None or now - t.attempted_at >= BLOCKED_RETRY_AFTER) else None
+        if t.status == "retry":
+            return n if (t.next_attempt_at is None or now >= t.next_attempt_at) else None
+        if t.status != "sent" or not t.attempted_at:
+            return None                          # failed / unknown / claimed: a person looks
     return None
+
+
+def _hold(db: Session, prog: OutreachProgram, item: Dict, prof: LocationProfile, reason: str) -> None:
+    """Record a touch the quality gate held. Nothing is sent; it is re-checked
+    after BLOCKED_RETRY_AFTER (copy or data may have been fixed meanwhile)."""
+    now = datetime.utcnow()
+    row = item.get("existing")
+    if row is None:
+        row = ProgramEmailTouch(organization_id=prog.organization_id, lead_id=item["lead"].id,
+                                source_record_id=item["record"].id, campaign_family=item["family"].key,
+                                location_id=prof.location_id, touch_number=item["touch"])
+        db.add(row)
+    row.status, row.attempted_at, row.reason = "blocked", now, reason[:500]
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+
+
+def _family_copy_is_default(fam: CampaignFamily) -> bool:
+    from app.services.programs.setup import DEFAULT_FAMILIES
+    d = next((f for f in DEFAULT_FAMILIES if f["key"] == fam.key), None)
+    return d is None or ((fam.email_body_template or "") == d["body"]
+                         and (fam.email_subject_template or "") == d["subject"])
+
+
+def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: LocationProfile,
+                  lead: Lead, touch: int, r: Dict) -> Dict:
+    """The copy for this touch and its quality verdict.
+
+    Touch 1 uses the family's own email copy when a person has edited it
+    (approved creative wins); otherwise, and for every follow-up, the message
+    brain writes the touch from the family's playbook. Either way the quality
+    gate decides whether it may go."""
+    from app.services.programs import message_brain as brain
+    from app.models.models import EmailMessage
+    packet = brain.context_packet(db, lead)
+    if touch == 1 and not _family_copy_is_default(fam):
+        msg = {"touch": 1, "channel": "email", "subject": r["subject"], "body": r["body"],
+               "strategy": brain.TOUCH_STRATEGY[1], "family": fam.key, "source": "family copy"}
+    else:
+        flyer_line = r["fields"].get("flyer_link") or ""
+        msg = dict(brain.compose(packet, touch, "email", flyer_line=flyer_line), source="playbook")
+    prior = [re.sub(r"<[^>]+>", " ", m.body_html or "") for m in
+             db.query(EmailMessage).filter(EmailMessage.lead_id == lead.id,
+                                           EmailMessage.status != "failed").limit(10).all()]
+    others = [p.official_name for p in db.query(LocationProfile).filter(
+        LocationProfile.organization_id == prog.organization_id,
+        LocationProfile.is_review_bucket.is_(False)).all()]
+    verdict = brain.quality(packet, msg, prior_bodies=prior, other_locations=others,
+                            expected_display_name=packet.get("display_name"))
+    msg["body_html"] = text_to_html(msg["body"], r.get("flyer_url") or "")
+    return {"message": msg, "quality": verdict, "packet": packet}
 
 
 def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
@@ -387,7 +461,7 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
         now: Optional[datetime] = None, force_hours: bool = False) -> Dict:
     """One pass. Returns counts plus (dry_run) the would-send list."""
     report = {"enabled": sending_enabled(), "sent": 0, "failed": 0, "blocked": 0, "unknown": 0, "retry": 0,
-              "skipped": 0, "held_no_flyer": 0, "due": 0, "dry_run": dry_run, "would_send": []}
+              "skipped": 0, "held_no_flyer": 0, "held_quality": 0, "due": 0, "dry_run": dry_run, "would_send": []}
     if not dry_run and not report["enabled"]:
         report["reason"] = "%s is off" % SENDING_ENV
         return report
@@ -451,13 +525,24 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
                 report["skipped"] += 1
                 report["held_no_flyer"] += 1
                 continue
+            built = build_message(db, prog, fam, prof, lead, touch, r)
+            q = built["quality"]
             if dry_run:
                 report["would_send"].append({
                     "lead_id": lead.id, "source_lead_id": item["record"].source_lead_id,
                     "location": prof.official_name, "family": fam.key, "touch": touch,
-                    "email_mode": r["email_mode"], "subject": r["subject"],
+                    "strategy": built["message"].get("strategy"),
+                    "email_mode": r["email_mode"], "subject": built["message"]["subject"],
+                    "quality_ok": q["ok"], "quality_score": q["score"], "quality_failures": q["failures"],
                     "flyer": r["flyer"].title if r["flyer"] is not None else None})
                 continue
+            if not q["ok"]:
+                # Low-confidence copy is HELD, never sent: recorded with every reason.
+                _hold(db, prog, item, prof, "held by quality check: " + "; ".join(q["failures"]))
+                report["held_quality"] = report.get("held_quality", 0) + 1
+                report["skipped"] += 1
+                continue
+            r = dict(r, subject=built["message"]["subject"], body_html=built["message"]["body_html"])
             if budget <= 0:
                 break
             # Re-checked at the moment of sending: hours (a long pass), and a

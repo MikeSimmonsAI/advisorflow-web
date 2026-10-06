@@ -6,7 +6,9 @@ for program organizations only:
 
     attach   contact + source Lead ID + location + campaign family
     pause    any active cadence for the lead (never resumed automatically)
-    classify HOT / ACTIVE / LOW / OPT-OUT / BAD DATA
+    classify urgency HOT / ACTIVE / LOW (or OPT-OUT / BAD DATA / WRONG PERSON)
+             plus intents: appointment, information, pricing, benefits,
+             veteran, cemetery, cremation, general planning, objection...
     summary  a one-line summary and a recommended next action
     alert    in-app to the primary contact and managers; staff SMS/email only
              when switched on AND a recipient is configured (default: off)
@@ -35,22 +37,45 @@ HOT, ACTIVE, LOW, OPT_OUT, BAD_DATA = "hot", "active", "low", "opt_out", "bad_da
 WRONG_PERSON = "wrong_person"
 LABELS = {HOT: "HOT", ACTIVE: "ACTIVE", LOW: "LOW", OPT_OUT: "OPT-OUT", BAD_DATA: "BAD DATA",
           WRONG_PERSON: "WRONG PERSON"}
-# What the person is asking for, independent of the class (several can apply).
+# WHAT the person is asking for / telling us (several can apply). Kept apart
+# from the class above, which is the URGENCY / handling lane: HOT, ACTIVE, LOW,
+# or a terminal lane (OPT-OUT, BAD DATA, WRONG PERSON).
 APPOINTMENT, PRICING, INFORMATION = "appointment_intent", "pricing_question", "information_request"
-INTENT_LABELS = {APPOINTMENT: "APPOINTMENT INTENT", PRICING: "PRICING QUESTION", INFORMATION: "INFORMATION REQUEST"}
+BENEFITS, VETERAN, CEMETERY = "benefits_question", "veteran_planning_question", "cemetery_interest"
+CREMATION, GENERAL_PLANNING, OBJECTION = "cremation_interest", "general_planning", "objection"
+NOT_INTERESTED, ACKNOWLEDGMENT = "not_interested", "simple_acknowledgment"
+I_OPT_OUT, I_WRONG_PERSON, I_BAD_DATA = "opt_out", "wrong_person", "bad_data"
+INTENT_LABELS = {
+    APPOINTMENT: "APPOINTMENT INTENT", INFORMATION: "INFORMATION REQUEST", PRICING: "PRICING QUESTION",
+    BENEFITS: "BENEFITS QUESTION", VETERAN: "VETERAN PLANNING QUESTION", CEMETERY: "CEMETERY INTEREST",
+    CREMATION: "CREMATION INTEREST", GENERAL_PLANNING: "GENERAL PLANNING", OBJECTION: "OBJECTION",
+    NOT_INTERESTED: "NOT INTERESTED", I_WRONG_PERSON: "WRONG PERSON", I_OPT_OUT: "OPT-OUT",
+    I_BAD_DATA: "BAD DATA", ACKNOWLEDGMENT: "SIMPLE ACKNOWLEDGMENT",
+}
 _INTENT_PATTERNS = [
     (APPOINTMENT, r"\b(appointment|appt|schedule|book|meet(ing)?|visit|tour|come (by|in|out)|stop by|"
                   r"set up a time|a time to|available|availability|this week|next week)\b"),
     (PRICING, r"\b(price|prices|pricing|cost|costs|how much|payment|payments|afford|financ\w*|plan options|discount)\b"),
     (INFORMATION, r"\b(more info|information|details|brochure|guide|packet|flyer|send (me|it|the|over)|"
                   r"what (does|is|are)|how does|include|includes|explain|learn more)\b"),
+    (BENEFITS, r"\b(benefit|benefits|eligib\w*|entitled|qualify|qualifies|allowance|va (pays|covers|will)|"
+               r"covered|coverage|insurance)\b"),
+    (VETERAN, r"\b(veteran|veterans|va|military|served|service member|army|navy|marine|marines|air force|"
+              r"coast guard|dd ?214|honorable discharge|national cemetery|flag)\b"),
+    (CEMETERY, r"\b(cemetery|plot|plots|grave|graves|burial|bury|lot|lots|mausoleum|crypt|niche|headstone|"
+               r"marker|monument|space|spaces)\b"),
+    (CREMATION, r"\b(cremat\w*|urn|urns|ashes|scatter\w*|columbarium)\b"),
+    (GENERAL_PLANNING, r"\b(pre-?plan\w*|plan ahead|planning ahead|arrangements?|pre-?arrang\w*|"
+                       r"pre-?need|final wishes|funeral plan\w*|my wishes|prepaid|pre-?pay\w*)\b"),
+    (OBJECTION, r"\b(too expensive|can'?t afford|not (right )?now|not ready|maybe later|later on|"
+                r"already (have|has|bought|made|got)|already taken care|think about it|talk (to|with) my|"
+                r"not sure|busy right now|bad time)\b"),
 ]
 SLA_BREACH_LABEL = "HOT RESPONSE — NOT YET HANDLED"
 
 _HOT_PATTERNS = [
     (r"\b(appointment|appt|schedule|book|meet(ing)?|visit|tour|come (by|in|out)|stop by)\b", "wants a meeting or visit"),
     (r"\b(price|pricing|cost|costs|how much|payment|plan options|financ)", "asked about price"),
-    (r"\b(more info|information|details|send (me|it|the)|brochure|guide|packet|flyer|mail me)\b", "wants more information"),
     (r"(?<!not )(?<!no longer )\b(interested|yes please|sounds good|i('| a)m in|sign me up|let'?s do)\b", "interested"),
     (r"\b(call me|reach (out|me)|get back to me|follow ?up|contact me|text me)\b", "requests follow-up"),
 ]
@@ -103,15 +128,41 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
         return {"class": upstream, "reasons": ["classified as %s on arrival" % reply_classification]}
     if re.search(_LOW_PATTERNS, text) or not text:
         return {"class": LOW, "reasons": ["acknowledgement only"]}
+    if re.search(_INFO_ASK, text):
+        return {"class": ACTIVE, "reasons": ["wants more information"]}
     if "?" in text or upstream == ACTIVE:
         return {"class": ACTIVE, "reasons": ["asked a question"]}
     return {"class": ACTIVE if len(text.split()) >= 4 else LOW,
             "reasons": ["engaged reply" if len(text.split()) >= 4 else "short reply"]}
 
 
-def intents(body: str) -> List[str]:
+_INFO_ASK = r"\b(more info|information|details|send (me|it|the)|brochure|guide|packet|flyer|mail me)\b"
+
+
+def intents(body: str, cls: Optional[str] = None) -> List[str]:
+    """Every intent the text shows, plus the one its class implies (opt-out,
+    wrong person, bad data, a bare acknowledgement, not interested)."""
     text = (body or "").strip().lower()
-    return [k for k, pat in _INTENT_PATTERNS if re.search(pat, text)]
+    found = [k for k, pat in _INTENT_PATTERNS if re.search(pat, text)]
+    if re.search(_OPT_OUT_PHRASES, text) and re.search(r"\b(not interested|no thank(s| you))\b", text):
+        found.append(NOT_INTERESTED)
+    implied = {OPT_OUT: I_OPT_OUT, WRONG_PERSON: I_WRONG_PERSON, BAD_DATA: I_BAD_DATA}.get(cls)
+    if implied:
+        found.append(implied)
+    if cls == LOW and not found and (re.search(_LOW_PATTERNS, text) or not text):
+        found.append(ACKNOWLEDGMENT)
+    out = []
+    for k in found:
+        if k not in out:
+            out.append(k)
+    return out
+
+
+def urgency(cls: str) -> str:
+    """HOT / ACTIVE / LOW, separate from WHAT they said. Terminal lanes
+    (opt-out, wrong person, bad data) are LOW: logged and actioned, never an
+    emergency page."""
+    return {HOT: "HOT", ACTIVE: "ACTIVE"}.get(cls, "LOW")
 
 
 def suggested_reply(cls: str, found: List[str], *, first_name: Optional[str], contact: Optional[str],
@@ -139,6 +190,15 @@ def suggested_reply(cls: str, found: List[str], *, first_name: Optional[str], co
                 " at %s" % location if location else ""))
         if INFORMATION in found:
             parts.append("I'll send that information over for you.")
+        if (BENEFITS in found or VETERAN in found) and APPOINTMENT not in found:
+            parts.append("Good question - I'd like to make sure you get an accurate answer for your situation "
+                         "rather than a general one. Could you tell me a little more about what you'd like to know?")
+        if (CEMETERY in found or CREMATION in found or GENERAL_PLANNING in found) and not parts:
+            parts.append("I'd be glad to walk you through the options%s. What matters most to you as you "
+                         "think about this?" % (" at %s" % location if location else ""))
+        if OBJECTION in found and APPOINTMENT not in found:
+            parts.append("I understand completely, and there's no pressure at all. If it would help, I can "
+                         "send something you can look over whenever the time is right.")
         if not parts:
             parts.append("thank you for your message - I'll get back to you with an answer shortly."
                          if cls == ACTIVE else "thank you - I'd be glad to help.")
@@ -352,8 +412,9 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
         resp.closed_at = now
         if channel == "email":
             lead.allow_email = False          # an email opt-out of record
-    found = intents(body)
+    found = intents(body, cls)
     resp.intents = json.dumps(found) if found else None
+    resp.urgency = urgency(cls)
     resp.suggested_reply = suggested_reply(
         cls, found, first_name=lead.first_name, contact=prog.primary_contact_name,
         location=(prof.official_name if prof else (alias_prof.official_name if alias_prof else None)),

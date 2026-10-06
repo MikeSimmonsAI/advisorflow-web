@@ -669,6 +669,7 @@ def send_sms(
     from app.services.send_record import record_after_send
     saved = record_after_send(db, lambda: message, lead=lead, channel="sms",
                               provider_id=getattr(twilio_msg, "sid", None))
+    _record_program_on_behalf(db, lead, sent_by_user_id, advisor, saved if saved is not None else message)
     return saved if saved is not None else message
 
 
@@ -773,6 +774,7 @@ def send_mms(
     from app.services.send_record import record_after_send
     saved = record_after_send(db, lambda: message, lead=lead, channel="sms",
                               provider_id=getattr(twilio_msg, "sid", None))
+    _record_program_on_behalf(db, lead, sent_by_user_id, advisor, saved if saved is not None else message)
     return saved if saved is not None else message
 
 
@@ -822,3 +824,14 @@ def send_batch(
         except Exception:
             skipped.append(lead.id)
     return {"sent_count": len(sent), "skipped_count": len(skipped), "sent_ids": sent, "skipped_ids": skipped}
+
+def _record_program_on_behalf(db, lead, sent_by_user_id, advisor, message):
+    """Program leads: audit the real sender behind "Kerry Allan, <location>"."""
+    try:
+        from app.services.programs import identity as _pid
+        if _pid.program_for_org(db, lead.organization_id) is not None:
+            _pid.record_on_behalf(db, lead, channel="sms", actor_user_id=sent_by_user_id,
+                                  sender_user_id=getattr(advisor, "id", None),
+                                  message_id=getattr(message, "id", None))
+    except Exception:  # noqa: BLE001 - auditing never breaks a send that went out
+        pass

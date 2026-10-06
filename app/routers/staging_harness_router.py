@@ -288,6 +288,53 @@ def status(db: Session = Depends(get_db), god: User = Depends(require_god)):
     }
 
 
+@router.post("/remove-simulation-contacts")
+def remove_simulation_contacts(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Delete the synthetic example.com contacts (and everything recorded about
+    them) after a simulation run. Touches nothing else: the approved test
+    contact, real records and held records are never matched here."""
+    _on()
+    from app.models.inbound_mailbox_models import InboundMailboxMessage
+    from app.models.models import Notification, Reply
+    org = _org(db)
+    sims = [c[0] for c in SIM_CONTACTS]
+    recs = (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org.id,
+                                                 ProgramSourceRecord.source_lead_id.in_(sims)).all())
+    lead_ids = [r.lead_id for r in recs if r.lead_id]
+    leads = (db.query(Lead).filter(Lead.organization_id == org.id, Lead.id.in_(lead_ids or ["-"]),
+                                   Lead.email.like("%@example.com"), Lead.is_test.is_(True)).all())
+    ids = [l.id for l in leads]
+    removed = {"contacts": len(ids)}
+    if ids:
+        resp_ids = [r.id for r in db.query(ProgramResponse.id).filter(ProgramResponse.lead_id.in_(ids))]
+        removed["alerts"] = (db.query(ProgramAlert).filter(ProgramAlert.response_id.in_(resp_ids or ["-"]))
+                             .delete(synchronize_session=False))
+        removed["responses"] = db.query(ProgramResponse).filter(ProgramResponse.lead_id.in_(ids)).delete(
+            synchronize_session=False)
+        removed["touches"] = db.query(ProgramEmailTouch).filter(ProgramEmailTouch.lead_id.in_(ids)).delete(
+            synchronize_session=False)
+        mm = [m.id for m in db.query(InboundMailboxMessage.id).filter(InboundMailboxMessage.lead_id.in_(ids))]
+        db.query(ProgramMailFiling).filter(ProgramMailFiling.mailbox_message_id.in_(mm or ["-"])).delete(
+            synchronize_session=False)
+        db.query(InboundMailboxMessage).filter(InboundMailboxMessage.id.in_(mm or ["-"])).delete(
+            synchronize_session=False)
+        for model in (Notification, Reply, EmailMessage, CadenceState):
+            db.query(model).filter(model.lead_id.in_(ids)).delete(synchronize_session=False)
+        for r in recs:
+            db.delete(r)
+        db.flush()
+        for l in leads:
+            db.delete(l)
+    # simulated unknown senders kept in the unmatched queue (example.org only)
+    removed["unmatched"] = (db.query(ProgramUnmatchedReply)
+                            .filter(ProgramUnmatchedReply.organization_id == org.id,
+                                    ProgramUnmatchedReply.from_address.like("%@example.org"))
+                            .delete(synchronize_session=False))
+    db.commit()
+    removed["contacts_in_workspace"] = [l.email for l in db.query(Lead).filter(Lead.organization_id == org.id)]
+    return removed
+
+
 # ── simulations (no real mail) ──────────────────────────────────────────────
 
 class _NoMove:

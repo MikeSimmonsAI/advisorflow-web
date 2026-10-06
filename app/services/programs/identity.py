@@ -65,16 +65,63 @@ def location_profile_for_lead(db: Session, lead: Lead) -> Optional[LocationProfi
     return prof
 
 
+def locked(prog: OutreachProgram) -> bool:
+    return getattr(prog, "customer_identity_locked", True) is not False
+
+
+def override_allowed(prog: OutreachProgram, prof: LocationProfile, value: Optional[str]) -> bool:
+    """While the identity is locked, a location override must still read
+    "<person> | <this location>" (an SMS sign-off may use a comma)."""
+    if not value or not locked(prog):
+        return True
+    person = (prog.primary_contact_name or "").strip().lower()
+    v = value.strip().lower()
+    return bool(person) and v.startswith(person) and (prof.official_name or "").strip().lower() in v
+
+
 def display_name(prog: OutreachProgram, prof: LocationProfile) -> str:
-    if prof.email_display_name:
+    if prof.email_display_name and override_allowed(prog, prof, prof.email_display_name):
         return prof.email_display_name
     person = (prog.primary_contact_name or "").strip()
     return "%s | %s" % (person, prof.official_name) if person else prof.official_name
 
 
 def sms_signoff(prog: OutreachProgram, prof: LocationProfile) -> str:
-    who = prof.sms_identity_name or display_name(prog, prof)
+    own = prof.sms_identity_name if override_allowed(prog, prof, prof.sms_identity_name) else None
+    who = own or display_name(prog, prof)
     return "- %s" % who.replace(" | ", ", ")
+
+
+def record_on_behalf(db: Session, lead: Lead, *, channel: str, actor_user_id: Optional[str],
+                     sender_user_id: Optional[str], message_id: Optional[str]) -> None:
+    """INTERNAL AUDIT: who really sent a program message that the family saw
+    as "<person> | <location>". Never raises; never changes what was sent."""
+    try:
+        prog = program_for_org(db, lead.organization_id)
+        if prog is None:
+            return
+        prof = location_profile_for_lead(db, lead)
+        shown = display_name(prog, prof) if prof else (prog.primary_contact_name or "")
+        from app.models.models import User
+        actor = db.query(User).filter(User.id == actor_user_id).first() if actor_user_id else None
+        who = (actor.full_name or actor.email) if actor else "automation"
+        note = "Sent by %s on behalf of %s / %s." % (
+            who, prog.primary_contact_name or "the program contact", prof.official_name if prof else "no location")
+        from app.routers.audit_log_router import log_action
+        log_action(db, lead.organization_id, actor_user_id or sender_user_id, "program.sent_on_behalf",
+                   "lead", lead.id, details={"channel": channel, "customer_saw": shown,
+                                             "real_actor_user_id": actor_user_id,
+                                             "automated": actor_user_id is None,
+                                             "message_id": message_id},
+                   note=note)
+    except Exception:                                    # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning("on-behalf audit failed for lead %s", getattr(lead, "id", "?"),
+                                            exc_info=True)
+        try:
+            db.rollback()
+        except Exception:                                # noqa: BLE001
+            pass
 
 
 def context_for(db: Session, lead: Lead, channel: str = "sms",
