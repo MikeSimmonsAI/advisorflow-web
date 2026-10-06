@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation } from '../api/client'
-import { isManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
+import { isManagerRole, isWorkspaceManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
 import { detectTheme, shellTheme, shellThemeSource, productName, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
@@ -186,10 +186,10 @@ const NAV_GROUPS = [
   {
     label: 'Administration',
     items: [
-      { to: '/users', label: 'Users', icon: 'user-plus', adminOnly: true, featureKey: 'users' },
+      { to: '/users', label: 'Users', icon: 'user-plus', adminOnly: true, workspaceAdminOnly: true, featureKey: 'users' },
       { to: '/settings', label: 'My Settings', icon: 'settings' },
-      { to: '/org-settings', label: 'Organization', icon: 'building', adminOnly: true, featureKey: 'branding_settings' },
-      { to: '/tier-definitions', label: 'Tier Config', icon: 'layers', adminOnly: true, featureKey: 'tier_config' },
+      { to: '/org-settings', label: 'Organization', icon: 'building', adminOnly: true, workspaceAdminOnly: true, featureKey: 'branding_settings' },
+      { to: '/tier-definitions', label: 'Tier Config', icon: 'layers', adminOnly: true, workspaceAdminOnly: true, featureKey: 'tier_config' },
       { to: '/audit-log', label: 'Audit Log', icon: 'activity', adminOnly: true, featureKey: 'audit_log' },
 
       // ── ADMINISTRATION OF INFRASTRUCTURE, not use of a feature ───────────
@@ -889,7 +889,11 @@ export default function Layout({ children }) {
             // and falls back to the user row only for a deployment that has
             // not refreshed its cached branding yet.
             const workspaceRole = roleOf(branding, user)
-            const isOrgAdmin = isManagerRole(workspaceRole) || isGodAdmin
+            // adminOnly = backend require_admin (is_manager_here: admins AND the
+            // workspace 'manager'). workspaceAdminOnly = backend require_org_admin
+            // (users, organization settings), which refuses a manager.
+            const isOrgAdmin = isWorkspaceManagerRole(workspaceRole) || isGodAdmin
+            const isWorkspaceAdmin = isManagerRole(workspaceRole) || isGodAdmin
             const visible = (item) => {
               if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
               // Only orgs with an open implementation see Launch. `null`
@@ -904,6 +908,7 @@ export default function Layout({ children }) {
               // `capability` asks what the server says you may administer.
               if (item.capability) return hasCapability(item.capability)
               if (item.adminOnly && !isOrgAdmin) return false
+              if (item.workspaceAdminOnly && !isWorkspaceAdmin) return false
               if (item.featureKey !== undefined && !navFeatureEnabled(item.featureKey)) return false
               return true
             }

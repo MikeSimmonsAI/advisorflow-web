@@ -466,6 +466,18 @@ def require_tenant_or_observer(request: Request = None,
         return user
     if user.organization_id is not None:
         return user
+    # A membership-only identity (organization_id NULL, e.g. the SCI workspace
+    # "manager") that SELECTED a workspace it holds a membership in. This is the
+    # same test require_tenant_user applies to the writes on the same screens;
+    # without it that person could save settings but not read the page.
+    # selected_workspace_id returns nothing for a workspace merely asserted.
+    if request is not None and db is not None:
+        try:
+            from app.services import workspace_access
+            if workspace_access.selected_workspace_id(user, db, request):
+                return user
+        except Exception:
+            pass
     _obs = None
     if request is not None:
         _obs = getattr(request.state, "executive_observation", None)

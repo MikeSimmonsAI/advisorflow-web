@@ -45,7 +45,7 @@ export default function ProgramCenter() {
   const locationId = params.get('location') || ''
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
-  const isManager = readAuthority().isManager
+  const isManager = readAuthority().isWorkspaceManager
   const navigate = useNavigate()
 
   const setParam = (key, value) => {

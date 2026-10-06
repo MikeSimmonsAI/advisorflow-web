@@ -44,7 +44,7 @@ import { api, getBranding, getCurrentUser, getOrgContext } from '../api/client'
 // two expressions rather than four paraphrases of them. See workspaceRules.js
 // for the three that had already drifted.
 import {
-  featureEnabled, featuresOf, isManagerRole, isOperator, operatorRouteExempt,
+  featureEnabled, featuresOf, isManagerRole, isWorkspaceManagerRole, isOperator, operatorRouteExempt,
   roleOf, routeFeatureDenied, workspaceFeatures,
   WHOLESALE_FEATURE, productOffered, canEnterProduct,
   workspaceLocationChoices, activeLocationId,
@@ -53,7 +53,7 @@ import {
 // Re-exported so every existing import site keeps working and there is still
 // only one module a surface needs to know about.
 export {
-  featureEnabled, featuresOf, isManagerRole, isOperator, operatorRouteExempt,
+  featureEnabled, featuresOf, isManagerRole, isWorkspaceManagerRole, isOperator, operatorRouteExempt,
   roleOf, routeFeatureDenied, workspaceFeatures,
   WHOLESALE_FEATURE, productOffered, canEnterProduct,
   workspaceLocationChoices, activeLocationId,
@@ -102,6 +102,8 @@ export function readAuthority({ capabilities = null } = {}) {
     role,
     organizationId: branding?.organization_id ?? user?.organization_id ?? null,
     isManager: isManagerRole(role),
+    // Backend is_manager_here parity: admins AND the workspace 'manager' role.
+    isWorkspaceManager: isWorkspaceManagerRole(role),
     features,
     // `capabilities === null` means NOT ANSWERED YET, and renders as no
     // capability rather than as all of them. A nav item that appears for a
