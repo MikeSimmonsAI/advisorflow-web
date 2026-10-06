@@ -1,10 +1,10 @@
 {
-  "relay_run_id": "sci-readiness-campus-20261006-1512",
-  "parent_run_id": "mike-pkg-202610061454-sci-readiness",
+  "relay_run_id": "sci-readiness-optout-20261006-1516",
+  "parent_run_id": "sci-readiness-campus-20261006-1512",
   "project": "SCI POC Readiness Sprint",
   "status": "COMPLETED",
   "branch": "sci-program",
-  "timestamp_ct": "2026-10-06 15:15 CT",
+  "timestamp_ct": "2026-10-06 15:19 CT",
   "issue": 1,
-  "status_comment_id": 6024628676
+  "status_comment_id": 6024691390
 }
