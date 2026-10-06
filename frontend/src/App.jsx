@@ -681,6 +681,7 @@ function SciFrontDoor() {
   const { phase, ctx, retry } = useAuthorizedContexts()
   const navigate = useNavigate()
   const [godEntry, setGodEntry] = useState({ phase: 'idle', error: null })
+  const [godEntryAttempt, setGodEntryAttempt] = useState(0)
 
   const user = getCurrentUser()
   const decision = phase === 'ready' && ctx ? decideSciDoor(ctx) : null
@@ -720,6 +721,11 @@ function SciFrontDoor() {
           )
         }
 
+        // God enters by audited organization override, not workspace membership.
+        // Clear any stale X-Workspace-Id first; otherwise Program endpoints can
+        // interpret the old workspace id as a membership-scoped request and
+        // correctly refuse a god_admin who does not hold that membership.
+        clearWorkspaceContext()
         await enterCustomer(exact[0].id, exact[0].name)
         if (live) navigate('/program', { replace: true })
       } catch (err) {
@@ -733,7 +739,7 @@ function SciFrontDoor() {
     })()
 
     return () => { live = false }
-  }, [decision?.state, godEntry.phase, navigate, user?.role])
+  }, [decision?.state, godEntryAttempt, navigate, user?.role])
 
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
@@ -776,7 +782,10 @@ function SciFrontDoor() {
           <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
             <button
               type="button"
-              onClick={() => setGodEntry({ phase: 'idle', error: null })}
+              onClick={() => {
+                setGodEntry({ phase: 'idle', error: null })
+                setGodEntryAttempt((n) => n + 1)
+              }}
               style={{ padding: '10px 16px', borderRadius: 8, cursor: 'pointer' }}
             >
               Try again
