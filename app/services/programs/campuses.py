@@ -74,6 +74,17 @@ def plan(db: Session, organization_id: str) -> List[Dict]:
                                           PhoneNumber.is_active.is_(True)):
         if n.workspace_id:
             numbers.setdefault(n.workspace_id, []).append(n.e164)
+    from app.services.programs import regional_pools
+    pool_numbers: Dict[str, List[str]] = {}          # pool id -> active pool-number e164s
+    for n in db.query(PhoneNumber).filter(PhoneNumber.organization_id == organization_id,
+                                          PhoneNumber.is_active.is_(True)):
+        pool = regional_pools.pool_for_phone_number(n)
+        if pool and n.e164 not in pool_numbers.setdefault(pool["pool_id"], []):
+            pool_numbers[pool["pool_id"]].append(n.e164)
+    try:
+        area_by_name = {r["Location"]: (r.get("Area Code") or "").strip() for r in load_grouping()}
+    except OSError:
+        area_by_name = {}
     counts: Dict[str, int] = {}
     for loc_id, lead_id in db.query(ProgramSourceRecord.location_id, ProgramSourceRecord.lead_id).filter(
             ProgramSourceRecord.organization_id == organization_id, ProgramSourceRecord.lead_id.isnot(None),
@@ -83,12 +94,25 @@ def plan(db: Session, organization_id: str) -> List[Dict]:
     for p in profs:
         key = p.campus_key or "loc:%s" % p.location_id
         row = out.setdefault(key, {"campus": key, "label": p.campus_label or p.official_name,
-                                   "entities": [], "contacts": 0, "numbers": []})
+                                   "entities": [], "contacts": 0, "numbers": [],
+                                   "area_code": None, "pool_id": None, "pool_label": None})
         row["entities"].append(p.official_name)
+        pool = regional_pools.pool_for_area_code(area_by_name.get(p.official_name))
+        if pool and row["pool_id"] is None:
+            row["area_code"] = area_by_name[p.official_name]
+            row["pool_id"], row["pool_label"] = pool["pool_id"], pool["label"]
         row["contacts"] += counts.get(p.location_id, 0)
         for e in numbers.get(p.location_id, []):
             if e not in row["numbers"]:
                 row["numbers"].append(e)
     for row in out.values():
-        row["number_status"] = "assigned" if row["numbers"] else "not provisioned"
+        row["pool_numbers"] = pool_numbers.get(row["pool_id"], []) if row["pool_id"] else []
+        if row["numbers"]:
+            row["number_status"] = "assigned"
+        elif row["pool_numbers"]:
+            row["number_status"] = "pooled"                 # sends from its regional pool number
+        elif row["pool_id"]:
+            row["number_status"] = "pool number not yet provisioned"
+        else:
+            row["number_status"] = "no verified area code"  # never silently falls to the 844 backup
     return list(out.values())
