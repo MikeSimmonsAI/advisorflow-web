@@ -51,6 +51,7 @@ INTENT_LABELS = {
     CREMATION: "CREMATION INTEREST", GENERAL_PLANNING: "GENERAL PLANNING", OBJECTION: "OBJECTION",
     NOT_INTERESTED: "NOT INTERESTED", I_WRONG_PERSON: "WRONG PERSON", I_OPT_OUT: "OPT-OUT",
     I_BAD_DATA: "BAD DATA", ACKNOWLEDGMENT: "SIMPLE ACKNOWLEDGMENT",
+    "missed_call": "MISSED CALL",
 }
 _INTENT_PATTERNS = [
     (APPOINTMENT, r"\b(appointment|appt|schedule|book|meet(ing)?|visit|tour|come (by|in|out)|stop by|"
@@ -205,7 +206,7 @@ def suggested_reply(cls: str, found: List[str], *, first_name: Optional[str], co
         core = " ".join(parts)
     body = "%s %s" % (hi, core)
     sign = ("- %s, %s" % (contact, location)) if (contact and location) else ""
-    if channel == "sms":
+    if channel in ("sms", "voicemail", "call"):         # a phone contact: the follow-up is a text
         return ("%s %s" % (body, sign)).strip()
     return "%s\n\n%s\n%s" % (body, contact or "", location or "")
 

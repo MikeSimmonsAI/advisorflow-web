@@ -10,7 +10,7 @@ enrols or sends. Staging an import writes staging rows, never leads.
 """
 import json
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -824,6 +824,16 @@ def response_viewed(response_id: str, db: Session = Depends(get_db),
             and (r.handling_status or "new") == "new":
         responses.mark(db, r, "opened", user)
     return {"id": r.id, "status": r.handling_status}
+
+
+@router.get("/voice")
+def voice_report(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db),
+                 user: User = Depends(require_tenant_or_observer)):
+    """Calls, answered, missed, voicemails and transcripts per location."""
+    from app.services.programs import program_voice
+    prog = _program(db, user)
+    since = datetime.utcnow() - timedelta(days=days)
+    return {"days": days, "locations": program_voice.location_report(db, prog.organization_id, since)}
 
 
 @router.get("/alerts")

@@ -321,16 +321,24 @@ def _advisor_for_lead(db, lead: Lead, route: dict) -> Optional[User]:
 # ── inbound ─────────────────────────────────────────────────────────────────
 
 def voicemail_twiml(db, log_row: InboundCallLog, route: dict, voicemail_capable: bool) -> str:
+    from app.services.programs import program_voice as _pv
     if not (route.get("voicemail") and voicemail_capable):
         log_row.status = "no_voicemail"
+        _pv.on_missed_call(db, log_row)      # program numbers: a suggested follow-up, never sent
         return TT.twiml_hangup("Sorry, no one is available to take your call. Please try again later.")
     text, rec_url = greeting_for(db, log_row.organization_id, route)
+    if not (route.get("greeting_text") or route.get("greeting_recording_url")):
+        # Location outreach programs: "Thank you for calling <location>..."
+        text = _pv.greeting_text(db, log_row.organization_id, log_row.phone_number_id) or text
     log_row.status = "voicemail"
+    transcribe = ("%s/voice/inbound/voicemail-transcription?log_id=%s" % (backend_base(), log_row.id)
+                  if _pv.wants_transcription(db, log_row.organization_id) else None)
     return TT.twiml_record_voicemail(
         greeting_text=text, greeting_recording_url=rec_url,
         recording_callback_url="%s/voice/inbound/voicemail-recording?log_id=%s" % (
             backend_base(), log_row.id),
-        finish_url="/voice/inbound/voicemail-done?log_id=%s" % log_row.id)
+        finish_url="/voice/inbound/voicemail-done?log_id=%s" % log_row.id,
+        transcribe_callback_url=transcribe)
 
 
 def handle_inbound(db, verified) -> str:
@@ -443,6 +451,37 @@ def handle_dial_status(db, row: InboundCallLog, dial_status: str) -> str:
     return twiml
 
 
+def _transcript_status_for(db, org_id: str) -> str:
+    """"pending" when the voicemail was recorded with transcription (program
+    numbers); otherwise the platform's "not_enabled"."""
+    from app.services.programs import program_voice as _pv
+    return "pending" if _pv.wants_transcription(db, org_id) else TRANSCRIPT_NOT_ENABLED
+
+
+def store_transcript(db, row: InboundCallLog, *, recording_sid: Optional[str], text: Optional[str],
+                     status: Optional[str]):
+    """Twilio's transcription callback. Idempotent; the voicemail must belong to
+    this call's organization. A completed transcript is then handled like a
+    reply for program organizations (classified, summarized, draft reply)."""
+    vm = (db.query(Voicemail).filter(Voicemail.recording_sid == recording_sid,
+                                     Voicemail.organization_id == row.organization_id).first()
+          if recording_sid else None)
+    if vm is None:
+        vm = (db.query(Voicemail).filter(Voicemail.inbound_call_id == row.id,
+                                         Voicemail.organization_id == row.organization_id).first())
+    if vm is None or vm.transcript_status == "completed":
+        return vm
+    if (status or "").lower() == "completed" and (text or "").strip():
+        vm.transcript, vm.transcript_status = text.strip()[:5000], "completed"
+        db.commit()
+        from app.services.programs import program_voice as _pv
+        _pv.on_voicemail_text(db, vm)
+    else:
+        vm.transcript_status = "failed"
+        db.commit()
+    return vm
+
+
 def store_voicemail(db, row: InboundCallLog, *, recording_sid: str, recording_url: str,
                     duration, call_sid: Optional[str]) -> Voicemail:
     """Idempotent on RecordingSid. Creates the review task once. A RecordingSid
@@ -464,7 +503,7 @@ def store_voicemail(db, row: InboundCallLog, *, recording_sid: str, recording_ur
                    caller_state=row.caller_state, call_sid=call_sid or row.call_sid,
                    recording_sid=recording_sid or None, recording_url=recording_url or None,
                    duration_seconds=dur, transcript=None,
-                   transcript_status=TRANSCRIPT_NOT_ENABLED, status="new",
+                   transcript_status=_transcript_status_for(db, row.organization_id), status="new",
                    received_at=datetime.utcnow())
     db.add(vm)
     db.flush()

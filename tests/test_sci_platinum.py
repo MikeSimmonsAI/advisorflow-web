@@ -389,3 +389,127 @@ def test_hot_sla_re_alerts_are_capped(program, sample_advisor, monkeypatch):
             responses.sla_sweep(db, now=t + timedelta(minutes=16 * (i + 1)))
     db.refresh(r)
     assert r.sla_alert_count == 2
+
+
+# ── voice: location greeting, transcription, missed-call follow-up ─────────
+
+def _voice_number(db, org, e164="+12055550188", location=True, voicemail=True):
+    import app.models.telephony_models  # noqa: F401
+    from app.models.program_models import LocationProfile
+    from app.models.telephony_models import PhoneNumber
+    prof = db.query(LocationProfile).filter_by(organization_id=org.id,
+                                               official_name="Eastern Gate Memorial Gardens").one()
+    db.add(PhoneNumber(e164=e164, organization_id=org.id, workspace_id=prof.location_id if location else None,
+                       cap_voice_inbound=True, cap_voicemail=voicemail, cap_sms=True))
+    db.commit()
+    return prof
+
+
+def _mount_voice():
+    from app.main import app
+    from app.routers.telephony_router import router
+    if not any(getattr(r, "path", "") == "/voicemails" for r in app.routes):
+        app.include_router(router)
+
+
+def _call(twilio_webhook, to, frm, sid):
+    _mount_voice()
+    return twilio_webhook("/voice/inbound", {"To": to, "From": frm, "CallSid": sid})
+
+
+def _rec(n):
+    return "RE%032x" % n
+
+
+def test_location_number_greets_with_the_location_and_asks_for_a_transcript(program, twilio_webhook, monkeypatch):
+    monkeypatch.setenv("API_BASE_URL", "https://api.example.test")
+    db, org = program["db"], program["org"]
+    _voice_number(db, org)
+    r = _call(twilio_webhook, "+12055550188", "+13345550123", "CA-G1")
+    assert r.status_code == 200, r.text
+    assert "Thank you for calling Eastern Gate Memorial Gardens" in r.text and "Kerry Allan" in r.text
+    assert 'transcribe="true"' in r.text and "voicemail-transcription" in r.text
+
+
+def test_a_shared_number_greets_without_naming_a_location(program, twilio_webhook, monkeypatch):
+    monkeypatch.setenv("API_BASE_URL", "https://api.example.test")
+    db, org = program["db"], program["org"]
+    _voice_number(db, org, e164="+12055550177", location=False)
+    r = _call(twilio_webhook, "+12055550177", "+13345550123", "CA-G2")
+    assert "planning line for Kerry Allan" in r.text and "Eastern Gate" not in r.text
+
+
+def test_a_transcribed_voicemail_is_handled_like_a_reply_and_nothing_is_sent(program, sample_advisor,
+                                                                             twilio_webhook, monkeypatch):
+    from app.models.program_models import ProgramResponse
+    from app.models.telephony_models import InboundCallLog, Voicemail
+    monkeypatch.setenv("API_BASE_URL", "https://api.example.test")
+    db, org = program["db"], program["org"]
+    prof = _voice_number(db, org)
+    lead = _lead_for(db, org, sample_advisor, "L001", phone="2145550101")
+    with patch("app.services.sms_service.Client") as tw, \
+            patch("app.services.programs.responses._deliver_staff_alert", return_value=(False, "test")):
+        _call(twilio_webhook, "+12055550188", "+12145550101", "CA-V1")
+        row = db.query(InboundCallLog).filter_by(call_sid="CA-V1").one()
+        assert row.lead_id == lead.id
+        twilio_webhook("/voice/inbound/voicemail-recording?log_id=%s" % row.id,
+                       {"CallSid": "CA-V1", "RecordingSid": _rec(7), "RecordingStatus": "completed",
+                        "RecordingUrl": "https://api.twilio.com/x/%s" % _rec(7), "RecordingDuration": "21"})
+        vm = db.query(Voicemail).filter_by(recording_sid=_rec(7)).one()
+        assert vm.transcript_status == "pending"
+        body = {"CallSid": "CA-V1", "RecordingSid": _rec(7), "TranscriptionStatus": "completed",
+                "TranscriptionText": "Hi, this is Ollie. I'd like to set up a visit this week to go over the guide."}
+        r = twilio_webhook("/voice/inbound/voicemail-transcription?log_id=%s" % row.id, body)
+        assert r.status_code == 200
+        twilio_webhook("/voice/inbound/voicemail-transcription?log_id=%s" % row.id, body)   # retry
+        tw.assert_not_called()
+    db.refresh(vm)
+    assert vm.transcript_status == "completed" and "set up a visit" in vm.transcript
+    resp = db.query(ProgramResponse).filter_by(lead_id=lead.id).one()
+    assert resp.channel == "voicemail" and resp.response_class == "hot" and resp.urgency == "HOT"
+    assert resp.location_id == prof.location_id and "appointment_intent" in resp.intents
+    assert resp.cadence_paused and resp.sla_due_at is not None
+    assert "Kerry Allan" in resp.suggested_reply and "\n" not in resp.suggested_reply   # a text draft
+
+
+def test_an_unknown_callers_voicemail_waits_in_review_with_the_location(program, twilio_webhook, monkeypatch):
+    from app.models.program_models import ProgramResponse, ProgramUnmatchedReply
+    from app.models.telephony_models import InboundCallLog
+    monkeypatch.setenv("API_BASE_URL", "https://api.example.test")
+    db, org = program["db"], program["org"]
+    prof = _voice_number(db, org)
+    _call(twilio_webhook, "+12055550188", "+13345550124", "CA-V2")
+    row = db.query(InboundCallLog).filter_by(call_sid="CA-V2").one()
+    twilio_webhook("/voice/inbound/voicemail-recording?log_id=%s" % row.id,
+                   {"CallSid": "CA-V2", "RecordingSid": _rec(8), "RecordingStatus": "completed",
+                    "RecordingUrl": "https://api.twilio.com/x", "RecordingDuration": "9"})
+    twilio_webhook("/voice/inbound/voicemail-transcription?log_id=%s" % row.id,
+                   {"CallSid": "CA-V2", "RecordingSid": _rec(8), "TranscriptionStatus": "completed",
+                    "TranscriptionText": "Please call me about a plot."})
+    u = db.query(ProgramUnmatchedReply).filter_by(organization_id=org.id).one()
+    assert u.location_id == prof.location_id and u.from_address == "+13345550124"
+    assert db.query(ProgramResponse).count() == 0
+
+
+def test_a_missed_call_gets_a_suggested_text_that_is_never_sent(program, sample_advisor, twilio_webhook,
+                                                               monkeypatch):
+    from app.models.program_models import ProgramResponse
+    from app.services.programs import program_voice
+    monkeypatch.setenv("API_BASE_URL", "https://api.example.test")
+    db, org = program["db"], program["org"]
+    _voice_number(db, org, voicemail=False)
+    lead = _lead_for(db, org, sample_advisor, "L001", phone="2145550101")
+    with patch("app.services.sms_service.Client") as tw:
+        r = _call(twilio_webhook, "+12055550188", "+12145550101", "CA-M1")
+        assert "<Record" not in r.text
+        tw.assert_not_called()
+    resp = db.query(ProgramResponse).filter_by(lead_id=lead.id).one()
+    assert resp.channel == "call" and resp.intents == '["missed_call"]' and resp.urgency == "ACTIVE"
+    assert resp.suggested_reply.startswith("Hi Ollie, this is Kerry Allan with Eastern Gate Memorial Gardens")
+    assert resp.cadence_paused
+    from app.models.telephony_models import InboundCallLog
+    row = db.query(InboundCallLog).filter_by(call_sid="CA-M1").one()
+    assert program_voice.on_missed_call(db, row) is None          # once per call
+    rep = program_voice.location_report(db, org.id)
+    eg = next(x for x in rep if x["location"] == "Eastern Gate Memorial Gardens")
+    assert eg["calls"] == 1 and eg["missed"] == 1
