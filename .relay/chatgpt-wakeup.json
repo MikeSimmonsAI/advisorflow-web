@@ -1,10 +1,10 @@
 {
-  "relay_run_id": "sci-readiness-manager-role-20261006-1541",
-  "parent_run_id": "sci-readiness-matrix-workaround-20261006-1536",
+  "relay_run_id": "sci-staging-michael-access-20261006-1551",
+  "parent_run_id": "sci-readiness-manager-role-20261006-1541",
   "project": "SCI POC Readiness Sprint",
-  "status": "COMPLETED",
+  "status": "BLOCKED",
   "branch": "sci-program",
-  "timestamp_ct": "2026-10-06 15:44 CT",
+  "timestamp_ct": "2026-10-06 15:54 CT",
   "issue": 1,
-  "status_comment_id": 6025102378
+  "status_comment_id": 6025269924
 }
