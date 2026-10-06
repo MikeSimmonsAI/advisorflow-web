@@ -41,6 +41,7 @@ opt-out language always still applies as a hard override.
 """
 
 import os
+import re
 import json
 from app.services import ai_gateway
 
@@ -137,12 +138,11 @@ def _fallback_keyword_classify(body: str, error: str = None) -> dict:
     body_lower = body.lower()
     hot_keywords = ["yes", "interested", "book", "schedule", "ok let's", "when can"]
     callback_keywords = ["call me", "call back"]
-    hard_stop_keywords = ["stop", "unsubscribe", "remove me"]
     not_interested_keywords = ["not interested", "no thanks", "no thank you", "not right now"]
     wrong_number_keywords = ["wrong number", "who is this", "don't know what this is"]
     question_marker = "?"
 
-    if any(kw in body_lower for kw in hard_stop_keywords):
+    if contains_hard_stop_language(body):
         classification = "dnc"
     elif any(kw in body_lower for kw in wrong_number_keywords):
         classification = "wrong_number"
@@ -179,14 +179,38 @@ def contains_hard_stop_language(body: str) -> bool:
     trigger this - see module docstring for why that's now its own
     not_interested category instead of an automatic DNC trigger.
     """
-    body_lower = body.lower()
-    if any(kw in body_lower for kw in HARD_STOP_KEYWORDS):
-        return True
+    text = _normalize_reply(body)
+    if not text:
+        return False
     # Twilio's standard opt-out keywords, which the carrier layer already
-    # honours on its own. Matched only as the WHOLE message, because as
-    # substrings "end", "quit" and "cancel" appear in ordinary replies
-    # ("weekend", "cancel my appointment") that are not opt-outs.
-    return body_lower.strip().strip(".!").strip() in STANDARD_OPT_OUT_WORDS
+    # honours on its own. Matched only as the WHOLE message (optionally with
+    # "please"), because as substrings "end", "quit", "cancel" and "stop"
+    # appear in ordinary replies ("weekend", "cancel my appointment",
+    # "can I stop by Friday?") that are not opt-outs.
+    if _WHOLE_MESSAGE_OPT_OUT.match(text):
+        return True
+    return bool(_OPT_OUT_INTENT.search(text))
+
+
+def _normalize_reply(body) -> str:
+    """Lowercase, drop quotes/punctuation at the edges, collapse whitespace."""
+    text = " ".join(str(body or "").lower().split())
+    return text.strip(" \t.!?,;:'\"`“”‘’*_-")
+
+
+_OPT_OUT_WORD = "|".join(sorted(
+    (re.escape(w) for w in set(STANDARD_OPT_OUT_WORDS) | {"stop", "unsubscribe", "stop all"}),
+    key=len, reverse=True))
+_WHOLE_MESSAGE_OPT_OUT = re.compile(rf"^(?:please )?(?:{_OPT_OUT_WORD})(?: please)?$")
+# Unambiguous requests inside a longer message. "stop" alone is NOT here: it
+# only counts when it is directed at us contacting them.
+_OPT_OUT_INTENT = re.compile(
+    r"\bunsubscribe\b"
+    r"|\bremove me\b"
+    r"|\btake me off\b"
+    r"|\bstop (?:all )?(?:texting|texts|messaging|messages|calling|calls|emailing|emails|contacting|sending)\b"
+    r"|\bstop (?:harassing|bothering|spamming|pestering) (?:me|us)\b"
+)
 
 
 # ── ONE DEFINITION OF "THIS REPLY STILL NEEDS A PERSON" ──────────────────────
