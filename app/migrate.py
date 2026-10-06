@@ -136,6 +136,21 @@ def main(argv=None) -> int:
         log.error("Migration aborted: %s", str(e)[:300])
         return EXIT_FAILED
 
+    # ── 3b. SCI STAGING MANAGER ACCESS (inert unless explicitly enabled) ──
+    # Never changes the exit code: a refused or failed bootstrap must not stop
+    # a deploy. It fails closed outside SCI staging (see the module docstring).
+    try:
+        from app.deps import SessionLocal
+        from app.services import sci_staging_bootstrap
+        _db = SessionLocal()
+        try:
+            sci_staging_bootstrap.run(_db)
+        finally:
+            _db.close()
+    except Exception as e:                                   # noqa: BLE001
+        log.error("SCI staging bootstrap errored (deploy continues): %s",
+                  type(e).__name__)
+
     # ── 4. SAY WHAT HAPPENED ──────────────────────────────────────────────
     log.info("migration outcome=%s elapsed=%ss columns_checked=%s",
              LAST_RUN["outcome"], LAST_RUN["elapsed_seconds"],

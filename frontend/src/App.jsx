@@ -123,6 +123,7 @@ const EvoControls = lazyPage(() => import('./pages/wholesale/evosense/EvoControl
 import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
+import { decideSciDoor, shouldLandInSci } from './auth/sciDoor'
 import CRMIntegration from './pages/CRMIntegration'
 import CRM from './pages/CRM'
 import TierDefinitions from './pages/TierDefinitions'
@@ -479,6 +480,11 @@ function HomeRedirect() {
     if (def.type === 'executive') {
       return <Navigate to="/executive" replace />
     }
+    // SCI-only manager: straight into the SCI front door. Anyone else with a
+    // single workspace keeps the route they always had.
+    if (shouldLandInSci(ctx)) {
+      return <Navigate to="/sci" replace />
+    }
     if (def.type === 'workspace' && def.organization_id) {
       return <Navigate to={'/workspace/' + def.organization_id} replace />
     }
@@ -663,6 +669,40 @@ function WorkspaceRoute() {
   // guess. It also covers the 401 case, where the API client is already on its
   // way to /login.
   return null
+}
+
+/**
+ * SciFrontDoor - /sci. Auth required; selects the SCI workspace only for a
+ * caller whose server-built context list contains it, then opens Program Center.
+ * A platform owner without an SCI membership is sent to the Platform Console
+ * (God Mode enters a customer explicitly). Everyone else is refused cleanly.
+ */
+function SciFrontDoor() {
+  const { phase, ctx, retry } = useAuthorizedContexts()
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  if (mustChangePassword()) return <Navigate to="/change-password" replace />
+  const here = typeof window !== 'undefined' ? window.location.pathname : ''
+  if (phase === 'error') {
+    return (
+      <Layout>
+        <VerificationUnavailable status={null} message="Could not confirm your access."
+                                 path={here} onRetry={retry} />
+      </Layout>
+    )
+  }
+  if (phase !== 'ready' || !ctx) return null
+  const d = decideSciDoor(ctx)
+  if (d.state === 'enter') {
+    if (getWorkspaceContext() !== d.organizationId) setWorkspaceContext(d.organizationId)
+    return <Navigate to="/program" replace />
+  }
+  if (d.state === 'god') return <Navigate to="/god" replace />
+  return (
+    <Layout>
+      <Unauthorized required="SCI workspace membership"
+                    role={getCurrentUser()?.role} path={here} />
+    </Layout>
+  )
 }
 
 /**
@@ -857,6 +897,7 @@ export default function App() {
             mechanisms, deliberately not merged. */}
         <Route path="/workspace/:organizationId" element={<WorkspaceRoute />} />
         <Route path="/workspaces" element={<WorkspaceSelector />} />
+        <Route path="/sci" element={<SciFrontDoor />} />
         <Route path="/onboarding" element={<Onboarding />} />
         {/* Public by necessity: the invited customer has no account yet. */}
         <Route path="/activate" element={<Activate />} />
