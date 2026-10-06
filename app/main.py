@@ -456,6 +456,10 @@ ALLOWED_ORIGINS = [
     "http://localhost:5174",
     "http://localhost:3000",
 ]
+# A STAGING (or other non-production) frontend declares its own origin here,
+# comma separated. Unset in production, so the list above is unchanged there.
+ALLOWED_ORIGINS += [o.strip().rstrip("/") for o in (os.environ.get("CORS_EXTRA_ORIGINS") or "").split(",")
+                    if o.strip().startswith("https://")]
 
 # ── EVERY HEADER THE BROWSER IS ALLOWED TO SEND ─────────────────────────────
 #
@@ -1172,6 +1176,8 @@ from app.routers.skiptrace_cost_router import router as skiptrace_cost_router  #
 app.include_router(skiptrace_cost_router)   # /wholesale/skip-trace — cost catalogue, estimates, compare, approval (never calls a vendor)
 from app.routers.inbound_mailbox_router import router as inbound_mailbox_router  # noqa: E402
 app.include_router(inbound_mailbox_router)   # /god/email/inbound-mailboxes — shared reply mailbox connect/status/poll
+from app.routers.staging_harness_router import router as staging_harness_router  # noqa: E402
+app.include_router(staging_harness_router)   # /god/staging/sci — 404 unless STAGING_TEST_HARNESS=on (staging only)
 # Files — photos, documents, proof of funds. One upload path and one
 # authenticated serve path for the whole module; see the router's docstring for
 # why no stored object is ever given a public URL.
@@ -1675,6 +1681,22 @@ async def _program_sla_loop():
                         # Campaign email touches. Returns at once unless
                         # PROGRAM_EMAIL_TOUCHES_SENDING is on AND a campaign
                         # family is switched on; never raises out of the pass.
+                        # STAGING ONLY: production reads the reply mailbox from
+                        # the advisorflow-email-poller cron every 5 minutes. A
+                        # staging stack without that cron sets
+                        # INBOUND_MAILBOX_INPROCESS_POLL=on to read it here on
+                        # the same 5-minute pace. Never set in production.
+                        if (os.environ.get("INBOUND_MAILBOX_INPROCESS_POLL") or "").lower() in ("1", "true", "on", "yes"):
+                            try:
+                                from app.services.programs import email_touches as _et_pace
+                                from datetime import timedelta as _td
+                                if _et_pace.pass_due(key="mailbox_poll", every=_td(minutes=5)):
+                                    from app.services.inbound_mailbox_service import poll_all_mailboxes
+                                    mb = poll_all_mailboxes(db)
+                                    out["mailbox"] = {k: mb[k] for k in ("mailboxes_polled", "mailbox_matched", "mailbox_errors")}
+                            except Exception as exc:                 # noqa: BLE001
+                                db.rollback()
+                                _logger.error("in-process mailbox poll error: %s", exc, exc_info=True)
                         try:
                             from app.services.programs import email_touches as _et
                             if _et.sending_enabled() and _et.pass_due():

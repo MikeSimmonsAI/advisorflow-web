@@ -63,13 +63,14 @@ PASS_INTERVAL = timedelta(minutes=10)
 _last_pass: Dict[str, datetime] = {}
 
 
-def pass_due(now: Optional[datetime] = None) -> bool:
+def pass_due(now: Optional[datetime] = None, *, key: str = "run",
+             every: Optional[timedelta] = None) -> bool:
     """The SLA loop ticks every 2 minutes; campaign email needs no such pace."""
     now = now or datetime.utcnow()
-    last = _last_pass.get("run")
-    if last is not None and now - last < PASS_INTERVAL:
+    last = _last_pass.get(key)
+    if last is not None and now - last < (every or PASS_INTERVAL):
         return False
-    _last_pass["run"] = now
+    _last_pass[key] = now
     return True
 
 
@@ -217,6 +218,25 @@ def text_to_html(text: str, link_url: str = "") -> str:
 # where this family stands, and an automated email on top of that is wrong.
 OUTREACH_STATUSES = {"new", "sent", "contacted", "no_response", ""}
 BLOCKED_RETRY_AFTER = timedelta(hours=24)   # a refused touch is re-tried, not burned
+# A TEMPORARY provider failure (rate limit, 5xx, connection refused before the
+# request was sent) is retried on this backoff; anything else is permanent.
+# A timeout is NOT temporary here: the provider may have accepted the email,
+# so it is "unknown" and never re-sent automatically.
+RETRY_BACKOFF = (timedelta(minutes=10), timedelta(minutes=45), timedelta(hours=3))
+_TRANSIENT = ("429", "rate limit", "too many requests", "500", "502", "503", "504",
+              "service unavailable", "bad gateway", "connection refused", "connecterror",
+              "name or service not known", "temporarily")
+_AMBIGUOUS = ("timed out", "timeout", "remotedisconnected", "connection reset", "connection aborted")
+
+
+def classify_provider_error(text: Optional[str]) -> str:
+    """'transient' | 'ambiguous' | 'permanent'."""
+    t = (text or "").lower()
+    if any(k in t for k in _AMBIGUOUS):
+        return "ambiguous"
+    if any(k in t for k in _TRANSIENT):
+        return "transient"
+    return "permanent"
 STALE_CLAIM_AFTER = timedelta(hours=1)      # a claim never resolved -> outcome unknown
 
 
@@ -245,6 +265,10 @@ def _skip_reason(db: Session, lead: Lead, replied: bool) -> Optional[str]:
         return "lead status is '%s' - a person has it" % lead.status
     if replied:
         return "replied - a person has it"
+    from app.models.models import BookingLink
+    if db.query(BookingLink.id).filter(BookingLink.lead_id == lead.id,
+                                       BookingLink.status.in_(("booked", "confirmed"))).first():
+        return "an appointment is booked - the sequence stops"
     return identity.send_refusal(db, lead, "cadence")
 
 
@@ -255,12 +279,16 @@ def _due_touch(touches: Dict[int, ProgramEmailTouch], now: datetime) -> Optional
         return 1
     if t1.status == "blocked":
         return 1 if (t1.attempted_at is None or now - t1.attempted_at >= BLOCKED_RETRY_AFTER) else None
+    if t1.status == "retry":
+        return 1 if (t1.next_attempt_at is None or now >= t1.next_attempt_at) else None
     if t1.status != "sent" or not t1.attempted_at:
         return None                              # failed / unknown / claimed: a person looks
     if t2 is None:
         return 2 if now - t1.attempted_at >= timedelta(days=followup_days()) else None
     if t2.status == "blocked":
         return 2 if (t2.attempted_at is None or now - t2.attempted_at >= BLOCKED_RETRY_AFTER) else None
+    if t2.status == "retry":
+        return 2 if (t2.next_attempt_at is None or now >= t2.next_attempt_at) else None
     return None
 
 
@@ -330,7 +358,7 @@ def _claim(db: Session, prog: OutreachProgram, item: Dict, prof: LocationProfile
     if existing is not None:
         res = db.execute(update(ProgramEmailTouch)
                          .where(ProgramEmailTouch.id == existing.id,
-                                ProgramEmailTouch.status == "blocked",
+                                ProgramEmailTouch.status.in_(("blocked", "retry")),
                                 ProgramEmailTouch.attempted_at == existing.attempted_at)
                          .values(status="claimed", attempted_at=now, reason=None,
                                  email_mode=r["email_mode"],
@@ -358,7 +386,7 @@ def _claim(db: Session, prog: OutreachProgram, item: Dict, prof: LocationProfile
 def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = False,
         now: Optional[datetime] = None, force_hours: bool = False) -> Dict:
     """One pass. Returns counts plus (dry_run) the would-send list."""
-    report = {"enabled": sending_enabled(), "sent": 0, "failed": 0, "blocked": 0, "unknown": 0,
+    report = {"enabled": sending_enabled(), "sent": 0, "failed": 0, "blocked": 0, "unknown": 0, "retry": 0,
               "skipped": 0, "held_no_flyer": 0, "due": 0, "dry_run": dry_run, "would_send": []}
     if not dry_run and not report["enabled"]:
         report["reason"] = "%s is off" % SENDING_ENV
@@ -456,12 +484,26 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
             row_id = row.id
             try:
                 msg = send_email_to_lead(db, advisor, lead, subject=r["subject"], body_html=r["body_html"],
-                                         send_source=_ss.CADENCE, attachments=attachments)
-                status, reason, msg_id = ("sent", None, msg.id) if msg.status == "sent" else \
-                    ("failed", "the email provider did not accept the message", msg.id)
+                                         send_source=_ss.CADENCE, attachments=attachments,
+                                         raise_on_provider_failure=True)
+                status, reason, msg_id = "sent", None, msg.id
             except (ValueError, DemoBoundaryViolation) as exc:
                 db.rollback()
                 status, reason, msg_id = "blocked", str(exc)[:500], None
+            except RuntimeError as exc:
+                # The provider answered and refused (the failed EmailMessage row
+                # is already written). Temporary -> retry on a backoff;
+                # ambiguous -> unknown; anything else -> failed (a person looks).
+                db.rollback()
+                kind = classify_provider_error(str(exc))
+                msg_id = None
+                if kind == "transient":
+                    status, reason = "retry", ("temporary provider failure: %s" % exc)[:500]
+                elif kind == "ambiguous":
+                    status, reason = "unknown", ("outcome unknown (%s) - check the provider log "
+                                                 "before resending" % exc)[:500]
+                else:
+                    status, reason = "failed", ("provider refused: %s" % exc)[:500]
             except Exception as exc:                  # noqa: BLE001
                 # The provider MAY have accepted it before this failed - so this
                 # is "unknown", never "failed": a person checks before resending.
@@ -470,7 +512,13 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
                                                      "before resending" % exc)[:500], None
                 log.error("program email touch error for lead %s: %s", lead.id, exc, exc_info=True)
             row = db.get(ProgramEmailTouch, row_id)
+            row.attempts = (row.attempts or 0) + 1
+            if status == "retry":
+                if row.attempts > len(RETRY_BACKOFF):
+                    status, reason = "failed", "gave up after %d temporary failures: %s" % (row.attempts, reason)
+                else:
+                    row.next_attempt_at = datetime.utcnow() + RETRY_BACKOFF[row.attempts - 1]
             row.status, row.reason, row.email_message_id = status, reason, msg_id
             db.commit()
-            report[status] += 1
+            report[status] = report.get(status, 0) + 1
     return report

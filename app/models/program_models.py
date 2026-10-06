@@ -85,6 +85,11 @@ class OutreachProgram(Base):
     alias_mode = Column(String, nullable=False, default="from")
     aliases_receiving_confirmed_at = Column(DateTime, nullable=True)
     aliases_receiving_confirmed_by = Column(String, nullable=True)
+    # OUTLOOK FILING: after EvoSys has fully processed a reply that came in on
+    # a location alias, it moves the message to <mailbox_folder_path>/<location
+    # folder> (e.g. "Inbox/Customers Folder/SCI"). NULL = never move. Nothing is
+    # moved before processing; unmatched mail is never moved.
+    mailbox_folder_path = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -114,6 +119,8 @@ class LocationProfile(Base):
     sms_identity_name = Column(String, nullable=True)        # override for the SMS sign-off
     email_alias = Column(String, nullable=True)              # full address, lower-case, unique
     alias_verified_at = Column(DateTime, nullable=True)      # first time mail to it was seen arriving
+    alias_last_seen_at = Column(DateTime, nullable=True)     # most recent mail to it
+    mailbox_folder = Column(String, nullable=True)           # Outlook folder name; default official_name
     appointment_link = Column(String, nullable=True)
     logo_asset_id = Column(String, nullable=True)
     hero_asset_id = Column(String, nullable=True)
@@ -205,6 +212,8 @@ class ProgramResponse(Base):
     lead_id = Column(String, ForeignKey("leads.id"), nullable=False)
     reply_id = Column(String, nullable=True)
     reply_to_alias = Column(String, nullable=True)           # the location address the family wrote to
+    intents = Column(Text, nullable=True)                    # JSON list: appointment_intent, pricing_question, ...
+    suggested_reply = Column(Text, nullable=True)            # a DRAFT for a person; never sent automatically
     channel = Column(String, nullable=False)                 # sms | email
     location_id = Column(String, nullable=True)
     campaign_family = Column(String, nullable=True)
@@ -351,8 +360,10 @@ class ProgramEmailTouch(Base):
     touch_number = Column(Integer, nullable=False)
     email_mode = Column(String, nullable=True)               # none | hosted | attached
     flyer_asset_id = Column(String, nullable=True)
-    status = Column(String, nullable=False, default="claimed")  # claimed | sent | failed | blocked
+    status = Column(String, nullable=False, default="claimed")  # claimed | sent | failed | blocked | retry | unknown
     reason = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime, nullable=True)
     email_message_id = Column(String, nullable=True)
     attempted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -382,4 +393,52 @@ class ProgramUnmatchedReply(Base):
     status = Column(String, nullable=False, default="open")  # open | handled
     handled_at = Column(DateTime, nullable=True)
     handled_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ProgramMailFiling(Base):
+    """One processed message EvoSys filed (or tried to file) in Outlook.
+
+    Written only AFTER the reply was read, routed, attached, classified and
+    alerted. A failed move is retried on later polls (MAX attempts), then left
+    in the Inbox with the reason - mail is never lost by a failed move.
+    """
+    __tablename__ = "program_mail_filings"
+    __table_args__ = (UniqueConstraint("mailbox_message_id", name="uq_program_mail_filing_msg"),
+                      Index("ix_program_mail_filings_org_status", "organization_id", "status"))
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    mailbox_id = Column(String, nullable=False)
+    mailbox_message_id = Column(String, nullable=False)      # InboundMailboxMessage.id
+    graph_message_id = Column(String, nullable=False)
+    location_id = Column(String, nullable=True)
+    folder_path = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="pending")   # pending | filed | failed | skipped
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    filed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class EmailProviderEvent(Base):
+    """Every signed provider webhook event, once (svix-id is the key).
+
+    A redelivered event (Resend retries) is acknowledged and ignored, and the
+    table is the "last successful webhook event" health signal.
+    """
+    __tablename__ = "email_provider_events"
+    __table_args__ = (UniqueConstraint("provider", "event_id", name="uq_email_provider_event"),
+                      Index("ix_email_provider_events_created", "created_at"))
+
+    id = Column(String, primary_key=True, default=_uuid)
+    provider = Column(String, nullable=False, default="resend")
+    event_id = Column(String, nullable=False)                # svix-id
+    event_type = Column(String, nullable=True)
+    provider_message_id = Column(String, nullable=True)
+    email_message_id = Column(String, nullable=True)
+    lead_id = Column(String, nullable=True)
+    organization_id = Column(String, nullable=True)
+    action = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

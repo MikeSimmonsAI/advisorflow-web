@@ -91,11 +91,29 @@ async def resend_event(request: Request, db: Session = Depends(get_db)):
     etype = (event.get("type") or "").strip()
     data = event.get("data") or {}
     msg_id = data.get("email_id") or data.get("id")
+    # ONCE PER EVENT. Resend redelivers until it gets a 2xx; the svix-id is
+    # the event's identity, so a redelivery is acknowledged and changes nothing.
+    from sqlalchemy.exc import IntegrityError
+    from app.models.program_models import EmailProviderEvent
+    sid = request.headers.get("svix-id") or request.headers.get("webhook-id")
+    rec = EmailProviderEvent(provider="resend", event_id=sid, event_type=etype or None,
+                             provider_message_id=msg_id)
+    db.add(rec)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        return {"ok": True, "duplicate": True}
     if not msg_id:
+        rec.action = "ignored: no email id"
+        db.commit()
         return {"ok": True, "ignored": "no email id"}
     msg = db.query(EmailMessage).filter(EmailMessage.provider_message_id == msg_id).first()
     if msg is None:
+        rec.action = "ignored: unknown email"
+        db.commit()
         return {"ok": True, "ignored": "unknown email"}
+    rec.email_message_id, rec.lead_id = msg.id, msg.lead_id
     lead = db.query(Lead).filter(Lead.id == msg.lead_id).first()
     action = "recorded"
     if etype == "email.delivered":
@@ -119,6 +137,11 @@ async def resend_event(request: Request, db: Session = Depends(get_db)):
         if not getattr(msg, "opened_at", None):
             msg.opened_at = datetime.utcnow()
         action = "opened"
+    elif etype == "email.delivery_delayed":
+        action = "delivery delayed (provider still retrying)"
+    if lead is not None:
+        rec.organization_id = lead.organization_id
+    rec.action = action
     db.commit()
     log.info("resend event %s for message %s: %s", etype, msg.id, action)
     return {"ok": True, "action": action}

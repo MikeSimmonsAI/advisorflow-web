@@ -204,8 +204,12 @@ def resolve(db: Session, addresses: Iterable[str]) -> Optional[LocationProfile]:
 
 
 def mark_verified(prof: LocationProfile, now: Optional[datetime] = None) -> None:
-    if prof is not None and prof.alias_verified_at is None:
-        prof.alias_verified_at = now or datetime.utcnow()
+    if prof is None:
+        return
+    now = now or datetime.utcnow()
+    if prof.alias_verified_at is None:
+        prof.alias_verified_at = now
+    prof.alias_last_seen_at = now
 
 
 def status(db: Session, prog: OutreachProgram) -> Dict:

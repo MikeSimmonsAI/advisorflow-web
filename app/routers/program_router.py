@@ -92,6 +92,8 @@ def _profile_json(db: Session, prog: OutreachProgram, p: LocationProfile) -> dic
         "appointment_link": p.appointment_link,
         "email_display_name": identity.display_name(prog, p) if not p.is_review_bucket else None,
         "email_alias": p.email_alias, "alias_verified_at": _iso(p.alias_verified_at),
+        "alias_last_seen_at": _iso(p.alias_last_seen_at),
+        "mailbox_folder": p.mailbox_folder or (None if p.is_review_bucket else p.official_name),
         "alias_receiving": _aliases.receiving(prog, p),
         "alias_mode": _aliases.effective_mode(prog, p, _aliases.sending_address(db, prog.organization_id))
         if not p.is_review_bucket else None,
@@ -124,6 +126,7 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "require_location_to_send": prog.require_location_to_send,
         "staff_alerts_enabled": prog.staff_sms_alerts_enabled,
         "alias_mode": prog.alias_mode or "from",
+        "mailbox_folder_path": prog.mailbox_folder_path,
         "aliases": _aliases.status(db, prog),
         "aliases_receiving_confirmed_at": _iso(prog.aliases_receiving_confirmed_at),
         "logo_url": _asset_url(logo),
@@ -156,6 +159,7 @@ class SettingsIn(BaseModel):
     reply_instructions_email: Optional[str] = None
     staff_alerts_enabled: Optional[bool] = None
     alias_mode: Optional[str] = None
+    mailbox_folder_path: Optional[str] = None
 
 
 _EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -238,6 +242,7 @@ class ProfileIn(BaseModel):
     email_display_name: Optional[str] = None
     sms_identity_name: Optional[str] = None
     email_alias: Optional[str] = None
+    mailbox_folder: Optional[str] = None
     appointment_link: Optional[str] = None
     logo_asset_id: Optional[str] = None
     hero_asset_id: Optional[str] = None
@@ -627,6 +632,8 @@ def list_responses(status: Optional[str] = Query(None), response_class: Optional
         "channel": r.channel, "class": r.response_class, "label": responses.LABELS.get(r.response_class),
         "summary": r.summary, "recommended_action": r.recommended_action, "body": r.body_excerpt,
         "reply_to_alias": r.reply_to_alias,
+        "intents": [{"key": k, "label": responses.INTENT_LABELS.get(k, k)} for k in json.loads(r.intents or "[]")],
+        "suggested_reply": r.suggested_reply,
         "status": r.handling_status, "cadence_paused": r.cadence_paused,
         "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
         "sla_due_at": r.sla_due_at.isoformat() + "Z" if r.sla_due_at else None,
@@ -766,6 +773,16 @@ def clear_review(record_id: str, body: ClearReviewIn, db: Session = Depends(get_
     db.commit()
     return {"id": rec.id, "needs_data_review": rec.needs_data_review,
             "duplicate_review_reason": rec.duplicate_review_reason}
+
+
+# ── operations health ────────────────────────────────────────────────────────
+
+@router.get("/health")
+def program_health(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Is the SCI system working? Read-only; managers only."""
+    from app.services.programs import health
+    prog = _program(db, user)
+    return health.snapshot(db, prog)
 
 
 # ── holds ────────────────────────────────────────────────────────────────────

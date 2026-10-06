@@ -1,0 +1,106 @@
+# render-staging.yaml — SCI STAGING stack (Render Blueprint, $0 free plans)
+#
+# An ISOLATED copy of the EvoSys stack for proving the SCI email loop:
+#   * its own empty Postgres (no production data, no real SCI leads)
+#   * backend + frontend built from branch `sci-program`
+#   * the real Resend sender and the real support@evosyspro.live mailbox
+#
+# Create it: Render → New → Blueprint → this repo → branch `sci-program` →
+# Blueprint file path `render-staging.yaml`. Render asks for every value
+# marked `sync: false`; fill them as the comment on each line says.
+# Production (render.yaml, branch main) is not touched by any of this.
+#
+# FREE-PLAN NOTES: free web services sleep after ~15 idle minutes (the
+# Family Service Center Health tab refreshes every minute and keeps it awake
+# while open); there is no pre-deploy step on free plans, so the schema step
+# runs at start instead; the free database expires after 30 days - fine for
+# a staging proof, recreate it if needed.
+
+databases:
+  - name: sci-staging-db
+    plan: free
+    databaseName: sci_staging
+    user: sci_staging
+
+services:
+  - type: web
+    name: sci-staging-backend
+    runtime: python
+    plan: free
+    branch: sci-program
+    autoDeploy: true
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python -m app.migrate && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sci-staging-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: BOOKING_SECRET
+        generateValue: true
+      # Runs the in-process schedulers (SLA loop etc.) exactly like production.
+      - key: SERVICE_ROLE
+        value: backend
+      # Production reads the mailbox from a cron every 5 minutes; staging has
+      # no cron, so the backend reads it itself on the same pace.
+      - key: INBOUND_MAILBOX_INPROCESS_POLL
+        value: "on"
+      # Owner-only SCI test harness (/god/staging/sci). NEVER set in production.
+      - key: STAGING_TEST_HARNESS
+        value: "on"
+      # Campaign email stays OFF in staging: nothing is sent automatically.
+      - key: PROGRAM_EMAIL_TOUCHES_SENDING
+        value: "off"
+      - key: CADENCE_SMS_SENDING
+        value: "off"
+      - key: API_BASE_URL
+        value: https://sci-staging-backend.onrender.com
+      - key: FRONTEND_URL
+        value: https://sci-staging-frontend.onrender.com
+      - key: APP_BASE_URL
+        value: https://sci-staging-frontend.onrender.com
+      - key: CORS_EXTRA_ORIGINS
+        value: https://sci-staging-frontend.onrender.com
+      - key: PROGRAM_ASSET_BASE_URL
+        value: https://sci-staging-backend.onrender.com
+      - key: MICROSOFT_REDIRECT_URI
+        value: https://sci-staging-backend.onrender.com/microsoft/oauth/callback
+      # ── values you paste (secrets / your own accounts) ──
+      - key: GOD_ADMIN_EMAIL
+        sync: false   # your owner login for STAGING (e.g. simmonsmj242@gmail.com)
+      - key: GOD_ADMIN_INIT_PW
+        sync: false   # a password you choose for the staging owner login
+      - key: RESEND_API_KEY
+        sync: false   # Resend → API Keys → create "sci-staging" (Sending access, domain evosyspro.live)
+      - key: EMAIL_FROM_ADDRESS
+        sync: false   # support@evosyspro.live
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false   # Resend → Webhooks → add https://sci-staging-backend.onrender.com/email/events/resend → its signing secret (whsec_...)
+      - key: MICROSOFT_CLIENT_ID
+        sync: false   # same value as production
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false   # same value as production
+
+  - type: web
+    name: sci-staging-frontend
+    runtime: static
+    branch: sci-program
+    autoDeploy: true
+    buildCommand: "cd frontend && npm ci && npm run build"
+    staticPublishPath: frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "20.11.0"
+      - key: VITE_API_BASE_URL
+        value: https://sci-staging-backend.onrender.com

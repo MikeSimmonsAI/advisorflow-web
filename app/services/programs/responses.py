@@ -32,7 +32,19 @@ from app.services.programs import identity
 log = logging.getLogger(__name__)
 
 HOT, ACTIVE, LOW, OPT_OUT, BAD_DATA = "hot", "active", "low", "opt_out", "bad_data"
-LABELS = {HOT: "HOT", ACTIVE: "ACTIVE", LOW: "LOW", OPT_OUT: "OPT-OUT", BAD_DATA: "BAD DATA / WRONG PERSON"}
+WRONG_PERSON = "wrong_person"
+LABELS = {HOT: "HOT", ACTIVE: "ACTIVE", LOW: "LOW", OPT_OUT: "OPT-OUT", BAD_DATA: "BAD DATA",
+          WRONG_PERSON: "WRONG PERSON"}
+# What the person is asking for, independent of the class (several can apply).
+APPOINTMENT, PRICING, INFORMATION = "appointment_intent", "pricing_question", "information_request"
+INTENT_LABELS = {APPOINTMENT: "APPOINTMENT INTENT", PRICING: "PRICING QUESTION", INFORMATION: "INFORMATION REQUEST"}
+_INTENT_PATTERNS = [
+    (APPOINTMENT, r"\b(appointment|appt|schedule|book|meet(ing)?|visit|tour|come (by|in|out)|stop by|"
+                  r"set up a time|a time to|available|availability|this week|next week)\b"),
+    (PRICING, r"\b(price|prices|pricing|cost|costs|how much|payment|payments|afford|financ\w*|plan options|discount)\b"),
+    (INFORMATION, r"\b(more info|information|details|brochure|guide|packet|flyer|send (me|it|the|over)|"
+                  r"what (does|is|are)|how does|include|includes|explain|learn more)\b"),
+]
 SLA_BREACH_LABEL = "HOT RESPONSE — NOT YET HANDLED"
 
 _HOT_PATTERNS = [
@@ -52,6 +64,9 @@ _OPT_OUT_PHRASES = (r"\b(remove me|take me off|unsubscribe me|opt me out|do not 
 # the family - for a funeral home a bereaved reply is the most important one.
 _BAD_DATA_PATTERNS = (r"\b(wrong (number|person|email|address)|this is not (him|her|me)|not (him|her)|"
                       r"no one (here )?by that name|don'?t know (who|what) (this|you|that)|who is this)\b")
+# Of those, the ones about the PERSON (not the number/address on file).
+_WRONG_PERSON_PATTERNS = (r"\b(wrong person|this is not (him|her|me)|not (him|her)|no one (here )?by that name|"
+                          r"(he|she) (doesn'?t|does not) live here|you have the wrong|not the right person)\b")
 _BEREAVEMENT = r"\b(passed away|passed on|died|deceased|funeral for|lost my (husband|wife|mother|father|son|daughter))\b"
 _LOW_PATTERNS = r"^\s*(ok(ay)?|k|thanks?( you)?|ok thanks?|thank you|thx|got it|received|👍|🙏)[\s.!]*$"
 
@@ -68,8 +83,10 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
     bereaved = bool(re.search(_BEREAVEMENT, text))
     if re.search(_STOP_WORDS, text):
         return {"class": OPT_OUT, "reasons": ["asked to stop"]}
+    if re.search(_WRONG_PERSON_PATTERNS, text) and not hot:
+        return {"class": WRONG_PERSON, "reasons": ["says we have the wrong person"]}
     if re.search(_BAD_DATA_PATTERNS, text) and not hot:
-        return {"class": BAD_DATA, "reasons": ["says it is the wrong person / number"]}
+        return {"class": BAD_DATA, "reasons": ["says the number / address is wrong"]}
     weak = {"interested", "requests follow-up"}
     if hot and re.search(_OPT_OUT_PHRASES, text) and set(hot) <= weak:
         return {"class": OPT_OUT, "reasons": ["opted out or not interested"]}
@@ -92,12 +109,54 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
             "reasons": ["engaged reply" if len(text.split()) >= 4 else "short reply"]}
 
 
+def intents(body: str) -> List[str]:
+    text = (body or "").strip().lower()
+    return [k for k, pat in _INTENT_PATTERNS if re.search(pat, text)]
+
+
+def suggested_reply(cls: str, found: List[str], *, first_name: Optional[str], contact: Optional[str],
+                    location: Optional[str], channel: str, bereaved: bool = False) -> Optional[str]:
+    """A DRAFT for the person to edit and send. Never sent by EvoSys. Asks the
+    family to reply - never to call."""
+    if cls in (OPT_OUT, LOW):
+        return None
+    name = (first_name or "").strip().title()
+    hi = "Hi %s," % name if name else "Hello,"
+    who = contact or "I"
+    if cls == WRONG_PERSON:
+        core = "thank you for letting us know. We'll update our records and you won't hear from us again."
+    elif cls == BAD_DATA:
+        core = "thank you for letting us know. We'll correct our records."
+    elif bereaved:
+        core = ("I'm so sorry for your loss. I'm here to help with whatever you need - just reply "
+                "and tell me what would help most right now.")
+    else:
+        parts = []
+        if APPOINTMENT in found:
+            parts.append("I'd be glad to set a time with you. What day and time work best for you?")
+        if PRICING in found:
+            parts.append("I'm happy to go over pricing and options with you%s." % (
+                " at %s" % location if location else ""))
+        if INFORMATION in found:
+            parts.append("I'll send that information over for you.")
+        if not parts:
+            parts.append("thank you for your message - I'll get back to you with an answer shortly."
+                         if cls == ACTIVE else "thank you - I'd be glad to help.")
+        core = " ".join(parts)
+    body = "%s %s" % (hi, core)
+    sign = ("- %s, %s" % (contact, location)) if (contact and location) else ""
+    if channel == "sms":
+        return ("%s %s" % (body, sign)).strip()
+    return "%s\n\n%s\n%s" % (body, contact or "", location or "")
+
+
 RECOMMENDED = {
     HOT: "Reply personally now - they asked for something. Offer a time or send what they asked for.",
     ACTIVE: "Answer their question and keep the conversation going.",
     LOW: "No action needed beyond a courtesy reply if appropriate.",
     OPT_OUT: "Do not contact again. Automation has been stopped for this person.",
     BAD_DATA: "Fix the contact record in Data Review before any further outreach.",
+    WRONG_PERSON: "Wrong person: the contact is held in Data Review; confirm the right person before anything else.",
 }
 
 
@@ -197,7 +256,8 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
             from app.services.email_service import send_email_via_provider
             from app.services.public_identity import sending_identity_for_org
             import html as _html
-            label = {"hot": "HOT RESPONSE", "sla_breach": "HOT RESPONSE - NOT YET HANDLED"}.get(kind, "Response")
+            label = {"hot": "HOT RESPONSE", "sla_breach": "HOT RESPONSE - NOT YET HANDLED",
+                     "mailbox_reconnect": "ACTION NEEDED - reply mailbox disconnected"}.get(kind, "Response")
             link = _app_link(response_id)
             body = "<p>%s</p>" % _html.escape(message)
             if link:
@@ -280,15 +340,30 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
         try:
             stop_cadence_for_lead(db, lead.id, CadenceStatus.STOPPED_DNC)
         except Exception:
-            pass
+            log.exception("cadence stop failed for lead %s", lead.id)
+        # stop_cadence_for_lead only acts on an ACTIVE cadence, and the reply
+        # has just paused it - an opt-out must END it, paused or not.
+        from app.models.models import CadenceState
+        st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+        if st is not None and str(getattr(st.status, "value", st.status)) in ("active", "paused"):
+            st.status = CadenceStatus.STOPPED_DNC.value
+            from datetime import timezone as _tz
+            st.completed_at = datetime.now(_tz.utc)
         resp.closed_at = now
         if channel == "email":
             lead.allow_email = False          # an email opt-out of record
-    if cls == BAD_DATA and rec is not None:
+    found = intents(body)
+    resp.intents = json.dumps(found) if found else None
+    resp.suggested_reply = suggested_reply(
+        cls, found, first_name=lead.first_name, contact=prog.primary_contact_name,
+        location=(prof.official_name if prof else (alias_prof.official_name if alias_prof else None)),
+        channel=channel, bereaved="bereavement mentioned" in " ".join(result.get("reasons") or []))
+    if cls in (BAD_DATA, WRONG_PERSON) and rec is not None:
         rec.needs_data_review = True
         flags = json.loads(rec.data_note_flags or "[]")
-        if "WRONG PERSON (reply)" not in flags:
-            flags.append("WRONG PERSON (reply)")
+        flag = "WRONG PERSON (reply)" if cls == WRONG_PERSON else "WRONG NUMBER / ADDRESS (reply)"
+        if flag not in flags:
+            flags.append(flag)
         rec.data_note_flags = json.dumps(flags)
     db.add(resp)
     db.flush()
@@ -300,8 +375,8 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
         _alert(db, prog, resp, lead, ACTIVE, msg, management=False, external=True)
     elif cls == LOW:
         _alert(db, prog, resp, lead, LOW, msg, management=False, external=False)
-    elif cls == BAD_DATA:
-        _alert(db, prog, resp, lead, BAD_DATA, msg, management=False, external=False)
+    elif cls in (BAD_DATA, WRONG_PERSON):
+        _alert(db, prog, resp, lead, cls, msg, management=False, external=False)
     db.commit()
     return resp
 
@@ -407,3 +482,31 @@ def record_unmatched(db: Session, prof, *, alias: str, sender: Optional[str], su
         db.add(ProgramAlert(organization_id=prog.organization_id, response_id=None, kind="unmatched_reply",
                             audience=audience, channel="in_app", recipient=uid, delivered=True, message=msg))
     return row
+
+
+def mailbox_reconnect_alert(db: Session, address: str, error: str) -> int:
+    """The central mailbox lost its Microsoft sign-in. Every active program
+    depends on it for replies, so each program's admins get one in-app alert
+    (and management one staff email when staff alerts are on)."""
+    from app.models.program_models import OutreachProgram
+    progs = db.query(OutreachProgram).filter(OutreachProgram.is_active.is_(True)).all()
+    msg = ("⚠️ The reply mailbox %s needs to be reconnected - EvoSys cannot read family replies "
+           "until it is. Owner console → Email → Inbound mailboxes → Reconnect." % address)
+    n = 0
+    for prog in progs:
+        for u in _org_admin_users(db, prog.organization_id):
+            db.add(Notification(user_id=u.id, type=NotificationType.REPLY_RECEIVED, message=msg,
+                                link="/program?tab=health"))
+            db.add(ProgramAlert(organization_id=prog.organization_id, kind="mailbox_reconnect",
+                                audience="management", channel="in_app", recipient=u.id,
+                                delivered=True, message=msg, reason=(error or "")[:200]))
+            n += 1
+        if prog.staff_sms_alerts_enabled:
+            for m in _managers(prog):
+                if m.get("email"):
+                    ok, why = _deliver_staff_alert(db, prog, "email", m["email"], msg, kind="mailbox_reconnect")
+                    db.add(ProgramAlert(organization_id=prog.organization_id, kind="mailbox_reconnect",
+                                        audience="management", channel="email", recipient=m["email"],
+                                        delivered=ok, reason=why, message=msg))
+    db.commit()
+    return n

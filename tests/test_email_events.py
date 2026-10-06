@@ -16,12 +16,14 @@ from app.models.models import EmailMessage, Lead
 SECRET = base64.b64encode(b"test-webhook-secret-bytes").decode()
 
 
-def _signed(body: dict, secret=SECRET, ts=None):
+def _signed(body: dict, secret=SECRET, ts=None, event_id=None):
+    import uuid
+    eid = event_id or "msg_%s" % uuid.uuid4().hex[:12]
     raw = json.dumps(body).encode()
     ts = str(int(ts or time.time()))
-    sig = base64.b64encode(hmac.new(base64.b64decode(secret), ("msg_1.%s." % ts).encode() + raw,
+    sig = base64.b64encode(hmac.new(base64.b64decode(secret), ("%s.%s." % (eid, ts)).encode() + raw,
                                     hashlib.sha256).digest()).decode()
-    return raw, {"svix-id": "msg_1", "svix-timestamp": ts, "svix-signature": "v1,%s" % sig,
+    return raw, {"svix-id": eid, "svix-timestamp": ts, "svix-signature": "v1,%s" % sig,
                  "content-type": "application/json"}
 
 
@@ -100,3 +102,15 @@ def test_unsubscribe_link_is_signed_and_a_get_changes_nothing(client, db_session
     db_session.refresh(lead)
     assert lead.allow_email is False
     assert client.post("/email/unsubscribe/bogus").status_code == 404
+
+
+def test_a_redelivered_event_is_acknowledged_once(client, db_session, sent, monkeypatch):
+    from app.models.program_models import EmailProviderEvent
+    monkeypatch.setenv("RESEND_WEBHOOK_SECRET", "whsec_" + SECRET)
+    lead, msg = sent
+    raw, h = _signed({"type": "email.bounced", "data": {"email_id": msg.provider_message_id,
+                                                        "bounce": {"type": "hard"}}}, event_id="evt_same")
+    first = client.post("/email/events/resend", content=raw, headers=h).json()
+    again = client.post("/email/events/resend", content=raw, headers=h).json()
+    assert "bounced" in first["action"] and again == {"ok": True, "duplicate": True}
+    assert db_session.query(EmailProviderEvent).filter_by(event_id="evt_same").count() == 1

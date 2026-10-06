@@ -282,7 +282,7 @@ def test_opt_out_and_bad_data(program, sample_advisor):
                   last="Sampleton", email="shared@example.com")
     r = responses.on_inbound(db, b, "wrong person", "sms")
     rec = db.query(ProgramSourceRecord).filter_by(organization_id=org.id, source_lead_id="L004").one()
-    assert r.response_class == "bad_data" and rec.needs_data_review
+    assert r.response_class == "wrong_person" and rec.needs_data_review
 
 
 # ── API: dashboard, permissions, assets, preview ─────────────────────────────
@@ -1172,3 +1172,274 @@ def test_management_hot_email_has_a_clear_subject(program, monkeypatch):
                                        kind="hot", response_id="r1")
     assert ok and seen["subject"].startswith("HOT RESPONSE")
     assert "&lt;b&gt;" in seen["body"] and "https://app.example.com/program?tab=responses&amp;id=r1" in seen["body"]
+
+
+@pytest.mark.parametrize("text,cls,found", [
+    ("Yes, I would like more information and would like to schedule a time.", "hot",
+     ["appointment_intent", "information_request"]),
+    ("How much does a cemetery plot cost at your location?", "hot", ["pricing_question"]),
+    ("What does the veteran guide include?", "hot", ["information_request"]),
+    ("This is not him, you have the wrong person", "wrong_person", []),
+    ("Wrong number", "bad_data", []),
+])
+def test_classes_and_intents(text, cls, found):
+    assert responses.classify(text)["class"] == cls
+    assert responses.intents(text) == found
+
+
+def test_a_hot_reply_gets_intents_and_a_draft_that_is_never_sent(program, sample_advisor):
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    with patch("app.services.email_service.send_email_via_provider") as prov, \
+            patch("app.services.sms_service.Client") as tw:
+        r = responses.on_inbound(db, lead, "Yes, I would like more information and would like to schedule a time.",
+                                 "email")
+    assert not prov.called and not tw.called            # a draft, never sent
+    assert json.loads(r.intents) == ["appointment_intent", "information_request"]
+    assert r.suggested_reply.startswith("Hi Ollie, I'd be glad to set a time")
+    assert "Eastern Gate Memorial Gardens" in r.suggested_reply and "call" not in r.suggested_reply.lower()
+    assert responses.suggested_reply("opt_out", [], first_name="A", contact="K", location="L", channel="sms") is None
+
+
+# ── hardening: Outlook filing, mailbox reconnect, retries, booking stop, health ──
+
+class _FakeMover:
+    can_write = True
+
+    def __init__(self, results=None):
+        self.calls, self.results = [], list(results or [])
+
+    def __call__(self, gid, path):
+        self.calls.append((gid, path))
+        return self.results.pop(0) if self.results else (True, None)
+
+
+def test_processed_alias_reply_is_filed_in_its_location_folder_after_processing(program, sample_advisor):
+    from app.models.program_models import ProgramMailFiling
+    from app.services import inbound_mailbox_service as S
+    db, org, prog, _ = _alias_program(program)
+    prog.mailbox_folder_path = "Inbox/Customers Folder/SCI"
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    box = _central_box(db)
+    mover = _FakeMover()
+    S.poll_mailbox(db, box, fetch=lambda since: [
+        _graph_msg("f1", "ollie@example.com", "easterngate@evosyspro.live", "Yes please, schedule a time")],
+        mover=mover)
+    assert mover.calls == [("f1", "Inbox/Customers Folder/SCI/Eastern Gate Memorial Gardens")]
+    f = db.query(ProgramMailFiling).one()
+    assert f.status == "filed" and f.filed_at is not None
+    # processing happened before filing: the response exists
+    assert db.query(ProgramResponse).filter_by(lead_id=lead.id).count() == 1
+    # re-reading the moved message (same immutable id) neither re-processes nor re-files
+    S.poll_mailbox(db, box, fetch=lambda since: [
+        _graph_msg("f1", "ollie@example.com", "easterngate@evosyspro.live", "Yes please, schedule a time")],
+        mover=mover)
+    assert len(mover.calls) == 1 and db.query(ProgramResponse).filter_by(lead_id=lead.id).count() == 1
+
+
+def test_unmatched_mail_is_never_filed(program, sample_advisor):
+    from app.models.program_models import ProgramMailFiling
+    from app.services import inbound_mailbox_service as S
+    db, org, prog, _ = _alias_program(program)
+    prog.mailbox_folder_path = "Inbox/Customers Folder/SCI"
+    db.commit()
+    box = _central_box(db)
+    mover = _FakeMover()
+    S.poll_mailbox(db, box, fetch=lambda since: [
+        _graph_msg("n1", "stranger@example.org", "easterngate@evosyspro.live", "hello?")], mover=mover)
+    assert mover.calls == [] and db.query(ProgramMailFiling).count() == 0
+
+
+def test_a_failed_move_is_retried_then_files(program, sample_advisor):
+    from app.models.program_models import ProgramMailFiling
+    from app.services import inbound_mailbox_service as S
+    db, org, prog, _ = _alias_program(program)
+    prog.mailbox_folder_path = "Inbox/Customers Folder/SCI"
+    db.commit()
+    _lead_for(db, org, sample_advisor, "L001")
+    box = _central_box(db)
+    mover = _FakeMover([(False, "Graph move failed 503: busy"), (True, None)])
+    msgs = [_graph_msg("r1", "ollie@example.com", "easterngate@evosyspro.live", "Is the guide free?")]
+    S.poll_mailbox(db, box, fetch=lambda since: msgs, mover=mover)
+    f = db.query(ProgramMailFiling).one()
+    assert f.status in ("pending", "filed")        # first attempt failed, end-of-poll retry may file it
+    S.poll_mailbox(db, box, fetch=lambda since: [], mover=mover)
+    db.refresh(f)
+    assert f.status == "filed" and f.attempts == 2
+
+
+def test_a_read_only_mailbox_reads_but_reports_reconnect_for_filing(program, sample_advisor):
+    from app.models.program_models import ProgramMailFiling
+    from app.services.programs.mailfiling import GraphMover
+    from app.services import inbound_mailbox_service as S
+    db, org, prog, _ = _alias_program(program)
+    prog.mailbox_folder_path = "Inbox/Customers Folder/SCI"
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    box = _central_box(db)
+    S.poll_mailbox(db, box, fetch=lambda since: [
+        _graph_msg("ro1", "ollie@example.com", "easterngate@evosyspro.live", "Yes please")],
+        mover=GraphMover("tok", can_write=False))
+    assert db.query(ProgramResponse).filter_by(lead_id=lead.id).count() == 1          # still read + routed
+    f = db.query(ProgramMailFiling).one()
+    assert f.status == "skipped" and "Mail.ReadWrite" in f.last_error
+
+
+def test_mailbox_token_falls_back_to_read_only_instead_of_breaking(monkeypatch, db_session):
+    from types import SimpleNamespace
+    from app.services import inbound_mailbox_service as S
+    calls = []
+
+    def fake_refresh(box, scope):
+        calls.append(scope)
+        if "ReadWrite" in scope:
+            return SimpleNamespace(status_code=400, text="AADSTS65001 consent required", json=lambda: {},
+                                   raise_for_status=lambda: None)
+        return SimpleNamespace(status_code=200, text="", raise_for_status=lambda: None,
+                               json=lambda: {"access_token": "AT", "scope": "Mail.Read User.Read"})
+    monkeypatch.setattr(S, "_refresh", fake_refresh)
+    box = SimpleNamespace(refresh_token_encrypted="x")
+    tok, can_write = S._access_token_rw(box)
+    assert tok == "AT" and can_write is False and len(calls) == 2
+
+
+def test_mailbox_disconnect_alerts_once_per_outage(program, monkeypatch):
+    from app.models.program_models import ProgramAlert
+    from app.services import inbound_mailbox_service as S
+    db = program["db"]
+    box = _central_box(db)
+    box.refresh_token_encrypted = "x"
+    db.commit()
+
+    def refused(b):
+        raise S.MailboxAuthError("Microsoft refused the stored sign-in (400)")
+    monkeypatch.setattr(S, "_access_token_rw", refused)
+    S.poll_mailbox(db, box)
+    S.poll_mailbox(db, box)
+    alerts = db.query(ProgramAlert).filter_by(kind="mailbox_reconnect").all()
+    assert alerts and len({a.recipient for a in alerts}) == len(alerts)     # one per admin, not per poll
+    assert box.last_status == "auth_error"
+
+
+@pytest.mark.parametrize("text,kind", [
+    ("429 Too Many Requests", "transient"), ("503 Service Unavailable", "transient"),
+    ("ConnectError: connection refused", "transient"), ("Read timed out", "ambiguous"),
+    ("422 The from address domain is not verified", "permanent"),
+])
+def test_provider_errors_are_classified(text, kind):
+    from app.services.programs import email_touches as et
+    assert et.classify_provider_error(text) == kind
+
+
+def test_a_temporary_provider_failure_retries_with_backoff_then_sends(program, sample_advisor, monkeypatch):
+    from app.models.program_models import ProgramEmailTouch
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    outcomes = [{"success": False, "provider_message_id": None, "error": "429 Too Many Requests"},
+                {"success": True, "provider_message_id": "pm-ok"}]
+    with patch("app.services.email_service.send_email_via_provider", side_effect=lambda **kw: outcomes.pop(0)):
+        r1 = et.run(db, org.id, force_hours=True)
+        r2 = et.run(db, org.id, force_hours=True)                       # not yet - backoff
+        later = datetime.utcnow() + timedelta(minutes=15)
+        r3 = et.run(db, org.id, now=later, force_hours=True)
+    t = db.query(ProgramEmailTouch).filter_by(lead_id=lead.id).one()
+    assert r1["retry"] == 1 and r2["sent"] == 0 and r3["sent"] == 1
+    assert t.status == "sent" and t.attempts == 2
+
+
+def test_a_permanent_provider_failure_is_not_retried(program, sample_advisor, monkeypatch):
+    from app.models.program_models import ProgramEmailTouch
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    with patch("app.services.email_service.send_email_via_provider",
+               side_effect=lambda **kw: {"success": False, "provider_message_id": None,
+                                         "error": "422 domain is not verified"}) as prov:
+        et.run(db, org.id, force_hours=True)
+        et.run(db, org.id, now=datetime.utcnow() + timedelta(days=2), force_hours=True)
+    t = db.query(ProgramEmailTouch).filter_by(lead_id=lead.id).one()
+    assert t.status == "failed" and prov.call_count == 1
+
+
+def test_a_booked_appointment_stops_the_email_sequence(program, sample_advisor, monkeypatch):
+    from app.models.models import BookingLink
+    db, org, lead, et = _touch_ready(program, sample_advisor, monkeypatch)
+    db.add(BookingLink(lead_id=lead.id, user_id=sample_advisor.id, token="tok-booked-1", status="booked"))
+    db.commit()
+    sent = []
+    with _fake_provider(sent):
+        r = et.run(db, org.id, force_hours=True)
+    assert sent == [] and r["skipped"] == 1
+
+
+def test_health_snapshot_reports_every_block(client, program, sample_advisor, monkeypatch):
+    from app.services.programs import health
+    db, org, prog, _ = _alias_program(program)
+    monkeypatch.setattr(health, "_txt", lambda name: ["v=spf1 include:x ~all"] if name.startswith("send.")
+                        else (["p=MIGf"] if "domainkey" in name else ["v=DMARC1; p=quarantine"]))
+    health._DNS_CACHE.clear()
+    _central_box(db)
+    h = client.get("/program/health", headers=_h(db, program["admin"])).json()
+    for k in ("email_system", "sender_domain", "webhook", "mailbox", "aliases", "sms", "campaigns",
+              "held_contacts", "failed_sends", "bounces", "complaints", "unmatched_replies", "hot_responses",
+              "unhandled_hot", "response_time", "automation_errors", "outlook_filing", "last_successful", "decisions"):
+        assert k in h, k
+    assert h["sender_domain"]["status"] == "ok" and h["sms"]["status"] in ("warn", "fail")
+    assert h["overall"] in ("ok", "warn", "fail")
+
+
+def test_an_opt_out_ends_the_cadence_not_just_pauses_it(program, sample_advisor):
+    from app.models.models import CadenceState
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    responses.on_inbound(db, lead, "Please remove me, not interested.", "email")
+    st = db.query(CadenceState).filter_by(lead_id=lead.id).one()
+    assert str(getattr(st.status, "value", st.status)) == "stopped_dnc" and lead.allow_email is False
+
+
+# ── staging harness (owner-only, OFF unless STAGING_TEST_HARNESS=on) ─────────
+
+def _god(db):
+    u = User(email="owner-%s@example.com" % datetime.utcnow().strftime("%f"), password_hash=hash_password("Pass12345!"),
+             full_name="Owner", role="god_admin", is_active=True, must_change_password=False)
+    db.add(u)
+    db.commit()
+    return u
+
+
+def test_staging_harness_is_invisible_unless_switched_on(client, db_session, monkeypatch):
+    monkeypatch.delenv("STAGING_TEST_HARNESS", raising=False)
+    h = _h(db_session, _god(db_session))
+    assert client.get("/god/staging/sci/status", headers=h).status_code == 404
+    assert client.post("/god/staging/sci/send-test", headers=h, json={}).status_code == 404
+
+
+def test_staging_harness_seeds_and_refuses_a_second_send(client, db_session, monkeypatch):
+    from app.models.models import Platform
+    monkeypatch.setenv("STAGING_TEST_HARNESS", "on")
+    if not db_session.query(Platform).filter_by(slug="evosyspro").first():
+        db_session.add(Platform(id="plt-evosyspro-t", name="EvoSys Pro", slug="evosyspro",
+                                support_email="support@evosyspro.live"))
+        db_session.commit()
+    god = _god(db_session)
+    h = _h(db_session, god)
+    # no owner sign-in -> refused
+    assert client.post("/god/staging/sci/seed", json={"test_email": "t@example.com"}).status_code in (401, 403)
+    s = client.post("/god/staging/sci/seed", headers=h, json={"test_email": "tester@example.com",
+                                                              "mgmt_sms": "5405550123",
+                                                              "mgmt_email": "mgr@example.com"}).json()
+    assert s["locations"] == 39 and s["aliases_assigned"] == 39 and s["alias_mismatches"] == {}
+    sent = []
+
+    def fake(**kw):
+        sent.append(kw)
+        return {"success": True, "provider_message_id": "pm-1"}
+    with patch("app.services.email_service.send_email_via_provider", side_effect=fake):
+        first = client.post("/god/staging/sci/send-test", headers=h, json={})
+        second = client.post("/god/staging/sci/send-test", headers=h, json={})
+    assert first.status_code == 200 and second.status_code == 409 and len(sent) == 1
+    body = first.json()
+    assert body["to"] == "tester@example.com"
+    assert body["from_email"] == "easterngategardens@evosyspro.live" == body["reply_to"]
+    assert body["from_name"] == "Kerry Allan | Eastern Gate Memorial Gardens"
+    assert sent[0]["to_email"] == "tester@example.com"
+    st = client.get("/god/staging/sci/status", headers=h).json()
+    assert st["outbound"][0]["status"] == "sent" and st["campaign_touches"] == 0 and st["active_campaigns"] == []

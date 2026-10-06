@@ -26,9 +26,10 @@ const TABS = [
   { key: 'locations', label: 'Locations' },
   { key: 'campaigns', label: 'Campaigns' },
   { key: 'assets', label: 'Assets & Flyers' },
+  { key: 'health', label: 'Health' },
   { key: 'settings', label: 'Settings' },
 ]
-const CLASS_LABEL = { hot: 'HOT', active: 'ACTIVE', low: 'LOW', opt_out: 'OPT-OUT', bad_data: 'BAD DATA' }
+const CLASS_LABEL = { hot: 'HOT', active: 'ACTIVE', low: 'LOW', opt_out: 'OPT-OUT', bad_data: 'BAD DATA', wrong_person: 'WRONG PERSON' }
 const errText = e => e?.detail || e?.message || 'Request failed'
 const num = n => (typeof n === 'number' ? n.toLocaleString() : '—')
 const when = iso => {
@@ -108,6 +109,7 @@ export default function ProgramCenter() {
       {tab === 'locations' && <Locations isManager={isManager} selected={locationId} onChange={load} />}
       {tab === 'campaigns' && <Campaigns isManager={isManager} locationId={locationId} locations={data.locations} />}
       {tab === 'assets' && <Assets isManager={isManager} locations={data.locations} />}
+      {tab === 'health' && <Health />}
       {tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness} onChange={load} />}
     </div>
   )
@@ -376,7 +378,15 @@ function Responses({ locationId, onChange, navigate }) {
               <div className="pc-small pc-muted">{sel.channel === 'sms' ? 'Text reply' : 'Email reply'} · {sel.location || 'Location review'} · Lead ID {sel.source_lead_id || '—'} · {sel.campaign_family || 'no campaign'}</div>
               <p><strong>Summary.</strong> {sel.summary}</p>
               <div className="pc-pre">{sel.body}</div>
+              {sel.intents?.length > 0 && <p className="pc-small">{sel.intents.map(i => <span key={i.key} className="pc-badge" style={{ marginRight: 6 }}>{i.label}</span>)}</p>}
               <p><strong>Recommended next step.</strong> {sel.recommended_action}</p>
+              {sel.suggested_reply && (
+                <div>
+                  <div className="pc-small"><strong>Suggested reply</strong> <span className="pc-muted">- a draft; nothing is sent automatically</span>
+                    {' '}<button type="button" className="pc-linkbtn" onClick={() => { try { navigator.clipboard.writeText(sel.suggested_reply) } catch (e) { /* clipboard unavailable */ } }}>Copy</button></div>
+                  <div className="pc-pre">{sel.suggested_reply}</div>
+                </div>
+              )}
               <p className="pc-small pc-muted">Status: {sel.status}{sel.cadence_paused ? ' · cadence paused' : ''}{sel.sla_due_at ? ` · SLA due ${when(sel.sla_due_at)}` : ''}</p>
               <div className="pc-detail-actions">
                 <button type="button" className="pc-btn" onClick={() => mark(sel, 'opened')}>Mark opened</button>
@@ -513,7 +523,7 @@ function Review({ locationId, locations, isManager, initialQueue, onChange }) {
 const PROFILE_FIELDS = [
   ['official_name', 'Official location name'], ['website', 'Website'], ['facility_phone', 'Facility phone (not shown to families)'],
   ['manager_name', 'Manager'], ['address_line1', 'Address'], ['city', 'City'], ['state', 'State'], ['postal_code', 'ZIP'],
-  ['appointment_link', 'Appointment link'], ['email_alias', 'Location email address'],
+  ['appointment_link', 'Appointment link'], ['email_alias', 'Location email address'], ['mailbox_folder', 'Outlook folder name'],
   ['email_display_name', 'Email sender name (override)'], ['sms_identity_name', 'Text sign-off name (override)'],
 ]
 
@@ -539,7 +549,7 @@ function Locations({ isManager, selected, onChange }) {
       official_name: p.official_name || '', website: p.website || '', facility_phone: p.facility_phone || '',
       manager_name: p.manager_name || '', address_line1: p.address?.address_line1 || '', city: p.address?.city || '',
       state: p.address?.state || '', postal_code: p.address?.postal_code || '', appointment_link: p.appointment_link || '',
-      email_alias: p.email_alias || '',
+      email_alias: p.email_alias || '', mailbox_folder: p.mailbox_folder || '',
       email_display_name: '', sms_identity_name: '', advisor_names: (p.advisor_names || []).join(', '),
       logo_asset_id: '', hero_asset_id: '',
     })
@@ -609,6 +619,51 @@ function Locations({ isManager, selected, onChange }) {
   )
 }
 
+/* ── operations health ──────────────────────────────────────────────────── */
+
+const HEALTH_ROWS = [
+  ['email_system', 'Email system'], ['sender_domain', 'Sender domain (SPF / DKIM / DMARC)'], ['webhook', 'Delivery events (webhook)'],
+  ['mailbox', 'Reply mailbox connection'], ['aliases', 'Location email addresses'], ['outlook_filing', 'Outlook filing'],
+  ['sms', 'SMS'], ['campaigns', 'Campaigns'], ['held_contacts', 'Held contacts'], ['failed_sends', 'Failed sends'],
+  ['bounces', 'Bounces'], ['complaints', 'Complaints'], ['unmatched_replies', 'Unmatched replies'],
+  ['hot_responses', 'HOT responses (open)'], ['unhandled_hot', 'Unhandled HOT (past SLA)'], ['response_time', 'Kerry response time'],
+  ['automation_errors', 'Automation errors'],
+]
+const TONE = { ok: 'ok', warn: 'warn', fail: 'hot', off: 'low' }
+
+function Health() {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  const load = useCallback(() => { api.get('/program/health').then(x => { setD(x); setErr('') }).catch(e => setErr(errText(e))) }, [])
+  useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t) }, [load])
+  if (err) return <section className="pc-card"><div className="pc-alert" role="alert">{err}</div></section>
+  if (!d) return <section className="pc-card"><p className="pc-muted">Checking…</p></section>
+  const detail = b => b.detail ?? (b.count !== undefined ? `${b.count}` : b.open !== undefined ? `${b.open} open` : '')
+  return (
+    <>
+      <section className="pc-card">
+        <h2 style={{ margin: '0 0 6px' }}>System health <span className={`pc-badge ${TONE[d.overall]}`}>{d.overall === 'ok' ? 'all working' : d.overall === 'fail' ? 'needs attention' : 'check warnings'}</span></h2>
+        <p className="pc-small pc-muted" style={{ marginTop: 0 }}>Refreshes every minute · checked {when(d.generated_at)}</p>
+        {HEALTH_ROWS.map(([k, label]) => d[k] ? (
+          <div className="pc-row" key={k}>
+            <span>{label}</span>
+            <span className="pc-small" style={{ textAlign: 'right' }}><span className={`pc-badge ${TONE[d[k].status] || 'low'}`}>{d[k].status}</span> {detail(d[k])}</span>
+          </div>
+        ) : null)}
+        <div className="pc-row"><span>Last successful</span>
+          <span className="pc-small" style={{ textAlign: 'right' }}>inbound sync {when(d.last_successful.inbound_sync) || '—'} · email send {when(d.last_successful.email_send) || '—'} · webhook event {when(d.last_successful.webhook_event) || '—'}</span>
+        </div>
+      </section>
+      <section className="pc-card" style={{ marginTop: 14 }}>
+        <h2 style={{ margin: '0 0 6px' }}>Recent automated decisions</h2>
+        {d.decisions.length === 0 ? <p className="pc-empty">Nothing yet.</p> : d.decisions.map((x, i) => (
+          <div className="pc-row" key={i}><span className="pc-small">{x.kind.replace(/_/g, ' ')} · {x.text}</span><span className="pc-small pc-muted">{when(x.at)}</span></div>
+        ))}
+      </section>
+    </>
+  )
+}
+
 /* ── location email addresses ───────────────────────────────────────────── */
 
 function AliasSettings({ isManager, form, setForm, onChange }) {
@@ -644,6 +699,10 @@ function AliasSettings({ isManager, form, setForm, onChange }) {
         {isManager && <button type="button" className="pc-btn" onClick={assign}>Assign missing addresses</button>}
         {isManager && !st.confirmed_all && <button type="button" className="pc-btn" onClick={confirmAll}>Confirm addresses receive mail…</button>}
       </div>
+      <label className="pc-small" style={{ display: 'block', marginTop: 8 }}>Outlook folder for processed replies (each location's folder sits inside it; blank = don't file)
+        <input className="pc-input" disabled={!isManager} value={form.mailbox_folder_path} placeholder="Inbox/Customers Folder/SCI"
+          onChange={e => setForm(f => ({ ...f, mailbox_folder_path: e.target.value }))} />
+      </label>
       <p className="pc-small pc-muted">Saved with "Save settings" above.</p>
       <div className="pc-tablewrap">
         <table className="pc-table">
@@ -891,6 +950,7 @@ function Settings({ isManager, program, readiness, onChange }) {
     reply_instructions_email: program.reply_instructions_email || '',
     managers: (program.management_recipients || []).map(m => [m.name, m.email, m.phone].map(x => x || '').join(' | ')).join('\n'),
     staff_alerts_enabled: !!program.staff_alerts_enabled, alias_mode: program.alias_mode || 'from',
+    mailbox_folder_path: program.mailbox_folder_path || '',
   })
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
@@ -909,6 +969,7 @@ function Settings({ isManager, program, readiness, onChange }) {
         hot_sla_minutes: Number(form.hot_sla_minutes) || 15, reply_instructions_sms: form.reply_instructions_sms,
         reply_instructions_email: form.reply_instructions_email, management_recipients: managers,
         staff_alerts_enabled: form.staff_alerts_enabled, alias_mode: form.alias_mode,
+        mailbox_folder_path: form.mailbox_folder_path || null,
       })
       setMsg('Saved.'); onChange()
     } catch (e) { setErr(errText(e)) }

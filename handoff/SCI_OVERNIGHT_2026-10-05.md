@@ -279,6 +279,53 @@ reader incl. plus-addressing, cross-workspace isolation, unmatched replies,
 holds incl. location conflict, promotion skipping holds, management
 normalisation, HOT alerts on SMS+email, alert subject/escaping).
 
+## 5c. Production hardening + staging (2026-10-05 evening)
+
+Built on `sci-program`:
+* **Outlook filing** (`programs/mailfiling.py`): AFTER a location-alias reply
+  is read, routed, attached, classified, the sequence paused and alerts
+  fired, the original is moved to `<mailbox_folder_path>/<location folder>`
+  (SCI: `Inbox/Customers Folder/SCI/<location>`). Never before processing,
+  never for unmatched mail; a missing folder is reported, never created;
+  failed moves retried (5×) on later polls. Needs **Mail.ReadWrite** — the
+  reader now asks for it; a mailbox connected with Mail.Read keeps READING
+  (falls back) and reports "reconnect with Mail.ReadWrite to enable filing".
+* **Mailbox disconnect alert**: when Microsoft refuses the stored sign-in,
+  every program's admins get one in-app alert (and management one email when
+  staff alerts are on) per outage.
+* **Webhook redelivery protection**: every signed Resend event is stored once
+  by svix-id (`email_provider_events`); a redelivery is acknowledged and
+  ignored. Also the "last webhook event" health signal.
+* **Send failures**: temporary (429 / 5xx / connection refused) → retry at
+  10 min, 45 min, 3 h, then failed; permanent → failed (not retried);
+  timeout / connection reset → UNKNOWN (may have gone out, never auto-resent).
+* **Appointment stop**: a booked/confirmed booking ends the email sequence
+  (the SMS cadence already did). Opt-out now ENDS the cadence (it was left
+  paused — fixed).
+* **Response intelligence**: classes HOT / ACTIVE / LOW / OPT-OUT / BAD DATA /
+  WRONG PERSON plus intents APPOINTMENT INTENT / PRICING QUESTION /
+  INFORMATION REQUEST, a summary, a recommended action and a **suggested
+  reply draft** (location-aware, signed by Kerry, never asks to call). Drafts
+  are NEVER sent automatically. Classification is deterministic and
+  explainable (no AI provider call).
+* **Health tab** (Family Service Center → Health, managers): email system,
+  sender domain (SPF/DKIM/DMARC via DNS, cached 6 h), delivery-event webhook,
+  reply mailbox (incl. RECONNECT NEEDED), aliases, Outlook filing, SMS,
+  campaigns (active/paused, runner, caps, emergency stop), held contacts,
+  failed sends, bounces, complaints, unmatched replies, HOT open, unhandled
+  HOT past SLA, Kerry's response time, automation errors, last successful
+  inbound sync / email send / webhook event, and a feed of recent automated
+  decisions. Refreshes every minute.
+* **Staging**: `render-staging.yaml` (free plans, isolated DB, branch
+  `sci-program`), `CORS_EXTRA_ORIGINS` (unset in production),
+  `INBOUND_MAILBOX_INPROCESS_POLL` (staging only; production keeps its cron),
+  owner-only test harness `/god/staging/sci/*` that answers 404 unless
+  `STAGING_TEST_HARNESS=on` (never set in production): seed (SCI + 39
+  locations/aliases + ONE test contact + synthetic never-emailed contacts),
+  send-test (one real email, a second is refused), poll, status (the whole
+  chain), simulate (15 matrix cases with fake Graph messages / patched
+  provider; simulated HOT replies never send a real staff alert).
+
 ## 6. Exactly what remains before SCI production outreach can be turned on
 
 1. **Deploy this code** (it is on branch `sci-program`, not on `main`):

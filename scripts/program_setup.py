@@ -68,6 +68,7 @@ def main(argv=None):
     ap.add_argument("--hold-reviews", action="store_true",
                     help="with --stage: put every record still in a review state ON HOLD")
     ap.add_argument("--no-aliases", action="store_true", help="do not assign location email addresses")
+    ap.add_argument("--mail-folder", help='Outlook folder processed replies are filed under, e.g. "Inbox/Customers Folder/SCI"')
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args(argv)
 
@@ -127,6 +128,9 @@ def main(argv=None):
         if a.staff_alerts:
             prog.staff_sms_alerts_enabled = a.staff_alerts == "on"
             print("staff alerts:", a.staff_alerts)
+        if a.mail_folder:
+            prog.mailbox_folder_path = a.mail_folder.strip().strip("/")
+            print("Outlook filing under:", prog.mailbox_folder_path)
         db.flush()
         if not a.no_aliases:
             from app.services.programs import aliases
