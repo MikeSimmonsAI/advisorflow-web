@@ -1,10 +1,12 @@
 {
-  "relay_run_id": "overnight-test-step2-20261006-1438",
-  "parent_run_id": "overnight-test-step1-20261006-1435",
-  "project": "EvoSys / AdvisorFlow Control Room",
-  "status": "COMPLETED",
-  "branch": "sci-program",
-  "timestamp_ct": "2026-10-06 14:38 CT",
-  "issue": 1,
-  "status_comment_id": 6024041499
+ "relay_run_id": "mike-pkg-202610061454-sci-readiness",
+ "parent_run_id": "",
+ "project": "SCI POC Readiness Sprint",
+ "status": "MIKE_INPUT",
+ "kind": "mike_input",
+ "mode": "next_priority",
+ "branch": "sci-program",
+ "timestamp_ct": "2026-10-06 14:54 CT",
+ "issue": 1,
+ "status_comment_id": null
 }
