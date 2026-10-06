@@ -243,3 +243,51 @@ def test_booking_links_indexes_only_name_real_columns():
         if m:
             for c in m.group(1).split(","):
                 assert c.strip().split()[0] in cols, stmt
+
+
+# ── location numbers: inbound SMS ────────────────────────────────────────────
+
+def _location_number(db, org, name="Eastern Gate Memorial Gardens", e164="+12055550199"):
+    from app.models.program_models import LocationProfile
+    from app.models.telephony_models import PhoneNumber
+    prof = db.query(LocationProfile).filter_by(organization_id=org.id, official_name=name).one()
+    db.add(PhoneNumber(e164=e164, organization_id=org.id, workspace_id=prof.location_id, cap_sms=True,
+                       cap_voice_inbound=True, label=name))
+    db.commit()
+    return prof
+
+
+def test_a_reply_to_a_location_number_reaches_the_contact_at_that_location(program, sample_advisor,
+                                                                             twilio_webhook):
+    from app.models.program_models import ProgramResponse
+    db, org = program["db"], program["org"]
+    prof = _location_number(db, org)
+    lead = _lead_for(db, org, sample_advisor, "L001", phone="2145550101")
+    with patch("app.services.sms_service.Client") as tw, \
+            patch("app.services.programs.responses._deliver_staff_alert", return_value=(False, "test")):
+        r = twilio_webhook("/sms/webhook/inbound", data={
+            "From": "+12145550101", "To": "+12055550199", "Body": "Can I come by Tuesday to visit?",
+            "MessageSid": "SMloc1"})
+        assert r.status_code == 200
+        tw.assert_not_called()
+    resp = db.query(ProgramResponse).filter_by(lead_id=lead.id).one()
+    assert resp.location_id == prof.location_id and resp.reply_to_alias == "+12055550199"
+    assert resp.response_class == "hot" and resp.cadence_paused
+
+
+def test_an_unknown_texter_to_a_location_number_is_kept_for_review_not_attached(program, twilio_webhook):
+    from app.models.program_models import ProgramResponse, ProgramUnmatchedReply
+    db, org = program["db"], program["org"]
+    prof = _location_number(db, org)
+    r = twilio_webhook("/sms/webhook/inbound", data={
+        "From": "+13345550000", "To": "+12055550199", "Body": "Who is this? I got your letter",
+        "MessageSid": "SMloc2"})
+    assert r.status_code == 200
+    u = db.query(ProgramUnmatchedReply).filter_by(organization_id=org.id).one()
+    assert u.location_id == prof.location_id and u.from_address == "+13345550000"
+    assert db.query(ProgramResponse).count() == 0
+    # Twilio retries the same message: kept once
+    twilio_webhook("/sms/webhook/inbound", data={
+        "From": "+13345550000", "To": "+12055550199", "Body": "Who is this? I got your letter",
+        "MessageSid": "SMloc2"})
+    assert db.query(ProgramUnmatchedReply).filter_by(organization_id=org.id).count() == 1

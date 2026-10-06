@@ -383,6 +383,25 @@ async def inbound_webhook(
                 .first())
         org_id = _org.id if _org else None
 
+    # LOCATION NUMBERS (2026-10-06). A number registered in `phone_numbers`
+    # (one local number per location of a multi-location customer) is
+    # resolved here exactly as the voice webhook already resolves it. Before
+    # this, a reply to such a number matched no user/organization column and
+    # was DROPPED below. The number's workspace_id names the location, so the
+    # reply is attributed to the location the family actually wrote to.
+    called_location_id = None
+    try:
+        from app.services.number_resolution import resolve_owner_by_called_number
+        _owner = resolve_owner_by_called_number(db, To)
+        if _owner is not None and _owner.source == "phone_numbers" and _owner.record is not None \
+                and getattr(_owner.record, "cap_sms", False):
+            if org_id is None:
+                org_id = _owner.organization_id
+            if _owner.organization_id == org_id:
+                called_location_id = getattr(_owner.record, "workspace_id", None)
+    except Exception:                                       # noqa: BLE001
+        logger.exception("[sms_webhook] location-number lookup failed for %s", twilio_to)
+
     if org_id is None:
         # Nobody owns this Twilio number — misconfigured, or a number that
         # belongs to something else entirely. Return early rather than doing a
@@ -394,12 +413,14 @@ async def inbound_webhook(
         return _twiml_ack()
 
     process_inbound_sms(db, org_id=org_id, advisor=advisor, From=From, Body=Body,
-                        MessageSid=MessageSid)
+                        MessageSid=MessageSid, called_number=To,
+                        called_location_id=called_location_id)
     return _twiml_ack()
 
 
 def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: str,
-                        MessageSid: str) -> dict:
+                        MessageSid: str, called_number: Optional[str] = None,
+                        called_location_id: Optional[str] = None) -> dict:
     """Everything the inbound webhook does once it knows WHICH ORGANIZATION the
     message arrived for. Split out of `inbound_webhook` in Wholesale Phase 7.1
     so there is exactly one inbound path: the Twilio webhook calls it after the
@@ -421,6 +442,25 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         Lead.phone == lead_phone,
         Lead.organization_id == org_id,
     ).order_by(Lead.updated_at.desc()).first()
+
+    if not lead and called_location_id:
+        # A location number, an unknown sender: never attached to anyone, kept
+        # for a person in the program's unmatched queue with the location known.
+        try:
+            from app.models.program_models import LocationProfile
+            from app.services.programs import responses as _pr
+            _prof = (db.query(LocationProfile)
+                     .filter(LocationProfile.organization_id == org_id,
+                             LocationProfile.location_id == called_location_id).first())
+            if _prof is not None:
+                _pr.record_unmatched(db, _prof, alias=called_number or "", sender=From, subject=None,
+                                     body=Body, received_at=datetime.utcnow(),
+                                     mailbox_message_id="sms:%s" % MessageSid,
+                                     reason="text to a location number from a phone that matches no contact")
+                db.commit()
+        except Exception:                                   # noqa: BLE001
+            db.rollback()
+            logger.exception("[sms_webhook] unmatched location text not recorded")
 
     if not lead:
         # Unknown sender - nothing to route. A STOP is still honoured: the
@@ -600,7 +640,9 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
     from app.services.programs import responses as _program_responses
     _program_responses.safe_on_inbound(
         db, lead, Body, "sms", reply_id=reply.id,
-        reply_classification=classification.value if classification else None)
+        reply_classification=classification.value if classification else None,
+        **({"reply_to_alias": called_number, "alias_location_id": called_location_id}
+           if called_location_id else {}))
 
     # PHASE 7.1 (3/3) — the reply is committed; now EvoSense may read it.
     # After the commit on purpose: an EvoSense or AI failure can never lose the
