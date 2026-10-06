@@ -64,6 +64,18 @@ Contacts total: 535.
 
 Parkhill Cemetery (4161 Macon Rd) and Striffler-Hamby Mortuary (4071 Macon Rd) are adjacent but at different addresses, so they are kept as 2 campuses. If SCI confirms they are one campus, the count becomes 29.
 
+## Campus lock (relay run sci-readiness-campus-20261006-1512)
+
+Recomputed from `scripts/sci_campuses.csv` and `scripts/sci_location_aliases.csv`; locked by `tests/test_sci_campus_lock.py`.
+
+- **30 physical campuses / 39 entities** (9 shared pairs, 21 single). 30 standard local numbers would eventually be required. None purchased.
+- Every entity has its own alias; no two entities share one.
+- Contact counts above sum to **535**, matching the documented clean population. The 551-row source file (`SCI_Filtered_551_Leads.csv`) is not in the repo, so per-contact mapping was not re-run here. The held 10 rows / 9 contacts are excluded by `on_hold` in `campuses.plan`.
+- **Provisional / unverified (no address on file, nothing invented):**
+  - `Oaklawn Central Care Center` (9 contacts): kept as its own campus. The only link to Oak Lawn Funeral Home (Pensacola) is a similar public name. If SCI confirms the link, the count becomes 29 (28 together with a Parkhill/Striffler-Hamby merge).
+  - `Pine Crest Cemetery West` (16 contacts): kept separate from Pine Crest, Mobile.
+- Parkhill Cemetery (4161 Macon Rd) and Striffler-Hamby Mortuary (4071 Macon Rd) stay separate campuses.
+
 ## Carrier registration
 
 - **Target 10DLC classification:** use case **AGENTS_FRANCHISES**, Twilio's multi-office, one-local-number-per-office use case. It applies only once a registered Brand legitimately represents the multi-location sender. This is the TARGET, not a claim that it is approved today.
