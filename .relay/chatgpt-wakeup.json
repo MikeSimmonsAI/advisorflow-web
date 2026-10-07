@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "sci-product-verification-20261007-1722",
-  "parent_run_id": "platform-workspace-header-closure-20261007-1123",
-  "project": "SCI \u2014 executable product verification and desktop handoff",
+  "relay_run_id": "sci-synthetic-product-flows-20261007-1726",
+  "parent_run_id": "sci-product-verification-20261007-1722",
+  "project": "SCI \u2014 finish synthetic intake and appointment product coverage",
   "status": "COMPLETED",
   "branch": "sci-program",
-  "actions_run_id": "37695701923",
-  "timestamp_ct": "2026-10-07 17:24 CT",
+  "actions_run_id": "37696124299",
+  "timestamp_ct": "2026-10-07 17:28 CT",
   "issue": 1,
-  "status_comment_id": 6048095197
+  "status_comment_id": 6048154092
 }
