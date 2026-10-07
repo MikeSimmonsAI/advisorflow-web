@@ -282,5 +282,27 @@ check("css gives offer/document controls a token focus ring",
 check("css stacks the negotiation position at phone width",
       ".ws-page .ws-position { display: grid" in wcss)
 
+# 9. per-action keys for Closing / Sharing / Seller / Analysis ---------------
+deal_src = read(os.path.join(SRC, W + "WholesaleDeal.jsx"))
+closing_src = read(os.path.join(SRC, W + "wsClosing.jsx"))
+sharing_src = read(os.path.join(SRC, W + "wsSharing.jsx"))
+for key in ("closing:correction", "closing:close", "closing:lost", "closing:fee",
+            "closing:assign", "closing:contract", "closing:title"):
+    check("closing action keyed: " + key, key in closing_src)
+for key in ("sharing:save", "sharing:publish-", "sharing:create-link", "sharing:revoke-"):
+    check("sharing action keyed: " + key, key in sharing_src)
+for key in ("seller:attach", "seller:reply", "seller:edit", "seller:cadence", "seller:sms",
+            "analysis:save", "analysis:recalc"):
+    check("deal-room action keyed: " + key, key in deal_src)
+check("sharing buttons disable on their own key, not the whole panel",
+      "isBusy('sharing:save')" in sharing_src and "isBusy(`sharing:revoke-${link.id}`)" in sharing_src)
+check("closing save/assign/fee disable on their own key",
+      "isBusy(actionKey)" in closing_src and "isBusy('closing:assign')" in closing_src
+      and "isBusy('closing:fee')" in closing_src)
+check("sharing drops stale loads", "gen !== loadGen.current" in sharing_src)
+check("deal room passes isBusy to Closing and Sharing",
+      "<ClosingTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy}" in deal_src
+      and "busy={panelBusy(tab)} isBusy={isBusy} /> : null}\n      {tab === 'audit'" in deal_src)
+
 print("wholesale ux static: %d passed, %d failed" % (passed, failed))
 sys.exit(1 if failed else 0)

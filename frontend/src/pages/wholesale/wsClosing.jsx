@@ -114,7 +114,7 @@ function Line({ label, value, note, sign, strong, tone, terminal }) {
 }
 
 
-function Economics({ deal, act, busy }) {
+function Economics({ deal, act, busy, isBusy }) {
   const [correcting, setCorrecting] = useState(false)
   const [correction, setCorrection] = useState({
     reason: '', contract_price: '', buyer_price: '',
@@ -207,7 +207,7 @@ function Economics({ deal, act, busy }) {
               </p>
               <div className="ws-actions" style={{ marginTop: 10 }}>
                 <button className="btn btn--primary btn--sm"
-                        disabled={busy || correction.reason.trim().length < 8}
+                        disabled={isBusy('closing:correction') || correction.reason.trim().length < 8}
                         onClick={async () => {
                           const body = { reason: correction.reason.trim() }
                           ;['contract_price', 'buyer_price',
@@ -217,7 +217,7 @@ function Economics({ deal, act, busy }) {
                           const ok = await act(
                             () => api.post(
                               `/wholesale/deals/${deal.id}/economics-correction`, body),
-                            'Correction recorded.')
+                            'Correction recorded.', 'closing:correction')
                           if (ok) {
                             setCorrecting(false)
                             setCorrection({ reason: '', contract_price: '',
@@ -248,7 +248,7 @@ function Economics({ deal, act, busy }) {
 
 
 function FieldPanel({ title, note, fields, deal, endpoint, method, extra,
-                     act, busy, disabled, disabledNote }) {
+                     act, busy, isBusy, actionKey, disabled, disabledNote }) {
   const [draft, setDraft] = useState(() => draftFrom(deal, fields))
   const clean = JSON.stringify(draft) === JSON.stringify(draftFrom(deal, fields))
 
@@ -273,11 +273,11 @@ function FieldPanel({ title, note, fields, deal, endpoint, method, extra,
       </div>
       {extra ? extra({ draft, setDraft, disabled }) : null}
       <div className="ws-actions" style={{ marginTop: 12 }}>
-        <button className="btn btn--primary" disabled={busy || clean || disabled}
+        <button className="btn btn--primary" disabled={isBusy(actionKey) || clean || disabled}
                 onClick={() => act(
                   () => (method === 'post' ? api.post : api.patch)(
                     endpoint, payloadFrom(draft)),
-                  'Saved.')}>
+                  'Saved.', actionKey)}>
           Save
         </button>
         <button className="btn btn--secondary" disabled={busy || clean}
@@ -416,7 +416,7 @@ function Ending({ deal, act, busy }) {
                             note: note || null,
                           }), fee === ''
                             ? 'Closed. Payment is still outstanding.'
-                            : 'Deal closed and the fee recorded.')
+                            : 'Deal closed and the fee recorded.', 'closing:close')
                         if (ok) setMode(null)
                       }}>
                 {fee === '' ? 'Close — payment pending' : 'Close and record the fee'}
@@ -459,7 +459,7 @@ function Ending({ deal, act, busy }) {
                         const ok = await act(
                           () => api.post(`/wholesale/deals/${deal.id}/lost`,
                                          { reason, detail: detail || null }),
-                          'Deal marked lost.')
+                          'Deal marked lost.', 'closing:lost')
                         if (ok) setMode(null)
                       }}>
                 Mark it lost
@@ -487,7 +487,7 @@ function Ending({ deal, act, busy }) {
  * rather than smoothed away, because that difference is the only number
  * anybody argues about after a closing.
  */
-function Payment({ deal, act, busy }) {
+function Payment({ deal, act, busy, isBusy }) {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({
     amount: '', collected_date: '', method: '', reference: '', note: '',
@@ -625,7 +625,7 @@ function Payment({ deal, act, busy }) {
             <button className="btn btn--secondary" disabled={busy}
                     onClick={() => setOpen(false)}>Cancel</button>
             <button className="btn btn--primary"
-                    disabled={busy || form.amount.trim() === '' || amountInvalid}
+                    disabled={isBusy('closing:fee') || form.amount.trim() === '' || amountInvalid}
                     onClick={async () => {
                       const done = await act(
                         () => api.post(`/wholesale/deals/${deal.id}/fee-collected`, {
@@ -634,7 +634,7 @@ function Payment({ deal, act, busy }) {
                           method: form.method || null,
                           reference: form.reference || null,
                           note: form.note || null,
-                        }), 'Collected fee recorded.')
+                        }), 'Collected fee recorded.', 'closing:fee')
                       if (done) setOpen(false)
                     }}>
               Record it
@@ -655,7 +655,7 @@ function Payment({ deal, act, busy }) {
 }
 
 
-export function ClosingWorkspace({ deal, matches, act, busy }) {
+export function ClosingWorkspace({ deal, matches, act, busy, isBusy = () => false }) {
   const [assign, setAssign] = useState({
     buyer_id: deal.assigned_buyer_id ?? '',
     buyer_price: deal.buyer_price ?? '',
@@ -664,9 +664,9 @@ export function ClosingWorkspace({ deal, matches, act, busy }) {
 
   return (
     <>
-      <Economics deal={deal} act={act} busy={busy} />
+      <Economics deal={deal} act={act} busy={busy} isBusy={isBusy} />
 
-      <Payment deal={deal} act={act} busy={busy} />
+      <Payment deal={deal} act={act} busy={busy} isBusy={isBusy} />
 
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">Assignment</div>
@@ -718,7 +718,7 @@ export function ClosingWorkspace({ deal, matches, act, busy }) {
         </div>
         <div className="ws-actions" style={{ marginTop: 12 }}>
           <button className="btn btn--primary"
-                  disabled={busy || deal.economics_locked || !assign.buyer_id
+                  disabled={isBusy('closing:assign') || deal.economics_locked || !assign.buyer_id
                             || assign.buyer_price === ''}
                   onClick={() => act(
                     () => api.post(`/wholesale/deals/${deal.id}/assign`, {
@@ -726,7 +726,7 @@ export function ClosingWorkspace({ deal, matches, act, busy }) {
                       buyer_price: Number(assign.buyer_price),
                       assignment_fee: assign.assignment_fee === ''
                         ? null : Number(assign.assignment_fee),
-                    }), 'Assignment recorded.')}>
+                    }), 'Assignment recorded.', 'closing:assign')}>
             Save assignment
           </button>
         </div>
@@ -735,7 +735,7 @@ export function ClosingWorkspace({ deal, matches, act, busy }) {
       <FieldPanel
         title="The contract" fields={CONTRACT_FIELDS} deal={deal}
         endpoint={`/wholesale/deals/${deal.id}/contract`} method="patch"
-        act={act} busy={busy}
+        act={act} busy={busy} isBusy={isBusy} actionKey="closing:contract"
         disabled={deal.economics_locked}
         disabledNote="Closed, so the contract price is fixed. Use the correction above."
         note={'"Signed" is two events and an option period runs from the later '
@@ -745,7 +745,7 @@ export function ClosingWorkspace({ deal, matches, act, busy }) {
       <FieldPanel
         title="Title and closing" fields={TITLE_FIELDS} deal={deal}
         endpoint={`/wholesale/deals/${deal.id}/title`} method="patch"
-        act={act} busy={busy}
+        act={act} busy={busy} isBusy={isBusy} actionKey="closing:title"
         note="What the title company asks for, and where the closing happens."
         extra={({ draft, setDraft, disabled }) => (
           <>

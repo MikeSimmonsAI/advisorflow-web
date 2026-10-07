@@ -16,13 +16,14 @@
  * not send anything, because sending is what the gated disposition path is
  * for, and a second outbound surface here would be a second place to audit.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { Empty, ErrorBox, errText, fmtMoney, fmtWhen, Note, Why } from './wsShared'
 
 const ORIGIN = typeof window !== 'undefined' ? window.location.origin : ''
 
-export function SharingWorkspace({ deal, buyers, act, busy }) {
+export function SharingWorkspace({ deal, buyers, act, busy, isBusy = () => false }) {
+  const loadGen = useRef(0)
   const [state, setState] = useState(null)
   const [activity, setActivity] = useState([])
   const [error, setError] = useState(null)
@@ -35,15 +36,17 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
 
   const load = useCallback(async () => {
     setError(null)
+    const gen = ++loadGen.current
     try {
       const [pub, act2] = await Promise.all([
         api.get(`/wholesale/deals/${deal.id}/publication`),
         api.get(`/wholesale/deals/${deal.id}/share-activity`),
       ])
+      if (gen !== loadGen.current) return   // a newer load owns the screen
       setState(pub)
       setActivity(act2.activity || [])
       setForm({})
-    } catch (e) { setError(errText(e)) }
+    } catch (e) { if (gen === loadGen.current) setError(errText(e)) }
   }, [deal.id])
 
   useEffect(() => { load() }, [load])
@@ -60,7 +63,7 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
   async function save() {
     const okSaved = await act(
       () => api.patch(`/wholesale/deals/${deal.id}/publication`, form),
-      'Saved. Nothing is shared until you publish.')
+      'Saved. Nothing is shared until you publish.', 'sharing:save')
     if (okSaved) await load()
   }
 
@@ -68,7 +71,8 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
     const okSet = await act(
       () => api.post(`/wholesale/deals/${deal.id}/publication/state`,
                      { audience, published }),
-      published ? 'Room published.' : 'Room closed. Existing links stop working.')
+      published ? 'Room published.' : 'Room closed. Existing links stop working.',
+      `sharing:publish-${audience}`)
     if (okSet) await load()
   }
 
@@ -79,7 +83,7 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
         buyer_id: newLink.audience === 'buyer' ? newLink.buyer_id || null : null,
         expires_in_days: newLink.expires_in_days === ''
           ? null : Number(newLink.expires_in_days),
-      }), 'Link created.')
+      }), 'Link created.', 'sharing:create-link')
     if (okMade) {
       setNewLink((n) => ({ ...n, recipient_name: '', recipient_email: '' }))
       await load()
@@ -89,7 +93,7 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
   async function revoke(link) {
     const okRev = await act(
       () => api.post(`/wholesale/share-links/${link.id}/revoke`, {}),
-      'Link revoked.')
+      'Link revoked.', `sharing:revoke-${link.id}`)
     if (okRev) await load()
   }
 
@@ -184,15 +188,15 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
           </div>
 
           <div className="ws-actions" style={{ marginTop: 14 }}>
-            <button className="btn btn--primary" disabled={busy || !dirty}
+            <button className="btn btn--primary" disabled={isBusy('sharing:save') || !dirty}
                     onClick={save}>Save</button>
             {b.published ? (
-              <button className="btn btn--secondary" disabled={busy}
+              <button className="btn btn--secondary" disabled={isBusy('sharing:publish-buyer')}
                       onClick={() => setPublished('buyer', false)}>
                 Close the room
               </button>
             ) : (
-              <button className="btn btn--secondary" disabled={busy}
+              <button className="btn btn--secondary" disabled={isBusy('sharing:publish-buyer')}
                       onClick={() => setPublished('buyer', true)}>
                 Publish the investor room
               </button>
@@ -249,15 +253,15 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
           </div>
 
           <div className="ws-actions" style={{ marginTop: 14 }}>
-            <button className="btn btn--primary" disabled={busy || !dirty}
+            <button className="btn btn--primary" disabled={isBusy('sharing:save') || !dirty}
                     onClick={save}>Save</button>
             {s.published ? (
-              <button className="btn btn--secondary" disabled={busy}
+              <button className="btn btn--secondary" disabled={isBusy('sharing:publish-seller')}
                       onClick={() => setPublished('seller', false)}>
                 Close the page
               </button>
             ) : (
-              <button className="btn btn--secondary" disabled={busy}
+              <button className="btn btn--secondary" disabled={isBusy('sharing:publish-seller')}
                       onClick={() => setPublished('seller', true)}>
                 Publish the seller page
               </button>
@@ -313,7 +317,7 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
         </div>
         <div className="ws-actions" style={{ marginTop: 12 }}>
           <button className="btn btn--primary" disabled={
-            busy || (newLink.audience === 'buyer' && !newLink.buyer_id)}
+            isBusy('sharing:create-link') || (newLink.audience === 'buyer' && !newLink.buyer_id)}
                   onClick={createLink}>Create a link</button>
         </div>
 
@@ -362,7 +366,7 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
                         </button>
                         {link.active ? (
                           <button className="btn btn--secondary btn--sm ws-btn-delete"
-                                  disabled={busy}
+                                  disabled={isBusy(`sharing:revoke-${link.id}`)}
                                   onClick={() => revoke(link)}>Revoke</button>
                         ) : null}
                       </span>

@@ -214,16 +214,16 @@ export default function WholesaleDeal() {
 
       {tab === 'overview' ? <Overview room={room} goTo={setTab} reload={load} /> : null}
       {tab === 'ops' ? <DealOpsPanel dealId={deal.id} /> : null}
-      {tab === 'seller' ? <SellerTab room={room} act={act} busy={panelBusy(tab)} /> : null}
-      {tab === 'analysis' ? <AnalysisTab room={room} act={act} busy={panelBusy(tab)} /> : null}
+      {tab === 'seller' ? <SellerTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
+      {tab === 'analysis' ? <AnalysisTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'offer' ? <OfferTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'funding' ? <><DistributionNotice distribution={distribution} kind="funding" /><FundingWorkspace deal={room.deal} /></> : null}
       {tab === 'documents' ? <DocumentsTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'buyers' ? <><DistributionNotice distribution={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /></> : null}
-      {tab === 'closing' ? <ClosingTab room={room} act={act} busy={panelBusy(tab)} /> : null}
+      {tab === 'closing' ? <ClosingTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'sharing'
         ? <SharingWorkspace deal={deal} buyers={room.buyer_matches}
-                            act={act} busy={panelBusy(tab)} /> : null}
+                            act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'audit' ? <AuditTab room={room} /> : null}
     </EvoApp>
   )
@@ -416,7 +416,7 @@ function Overview({ room, goTo, reload }) {
 }
 
 
-function SellerTab({ room, act, busy }) {
+function SellerTab({ room, act, busy, isBusy }) {
   const { seller, deal, property } = room
   const [message, setMessage] = useState('')
   const [compose, setCompose] = useState('send')
@@ -446,10 +446,10 @@ function SellerTab({ room, act, busy }) {
           ))}
         </div>
         <div className="ws-actions" style={{ marginTop: 12 }}>
-          <button className="btn btn--primary" disabled={busy}
+          <button className="btn btn--primary" disabled={isBusy('seller:attach')}
                   onClick={() => act(
                     () => api.post(`/wholesale/properties/${property.id}/seller`, form),
-                    'Owner attached.')}>
+                    'Owner attached.', 'seller:attach')}>
             Attach owner
           </button>
         </div>
@@ -556,7 +556,7 @@ function SellerTab({ room, act, busy }) {
                 suppression list, the consent record and the delivery receipt
                 all apply.
               </Note>
-              <OutreachForm dealId={deal.id} seller={seller} act={act} busy={busy} />
+              <OutreachForm dealId={deal.id} seller={seller} act={act} busy={isBusy('seller:sms')} />
               <Why label="What happens to a message that cannot be sent">
                 <p className="ws-comp__sub">
                   A sandbox record and a contact who has opted out are both
@@ -581,13 +581,13 @@ function SellerTab({ room, act, busy }) {
                         placeholder="What did they say?"
                         className="ws-input" />
               <div className="ws-actions" style={{ marginTop: 10 }}>
-                <button className="btn btn--primary" disabled={busy || !message.trim()}
+                <button className="btn btn--primary" disabled={isBusy('seller:reply') || !message.trim()}
                         onClick={() => act(
                           async () => {
                             await api.post(`/wholesale/deals/${deal.id}/seller-reply`,
                                            { message, mode: 'manual' })
                             setMessage('')
-                          }, 'Reply read and qualification updated.')}>
+                          }, 'Reply read and qualification updated.', 'seller:reply')}>
                   Read and qualify
                 </button>
                 <span className="ws-pill is-muted">Manual entry</span>
@@ -612,11 +612,11 @@ function SellerTab({ room, act, busy }) {
         {/* 0. CORRECT WHAT WE KNOW. The owner's contact details and answers,
             editable - an inquiry's typo or a wrong number is fixed here, not
             by re-entering the person. */}
-        <SellerEditor seller={seller} act={act} busy={busy} />
+        <SellerEditor seller={seller} act={act} busy={isBusy('seller:edit')} />
         <SellerIntelPanel profileId={seller.id} />
         {/* 4. THE CADENCE and 5. THE PERMISSIONS. Both are settings for the
             conversation rather than part of it, so they sit beside it. */}
-        <CadencePanel dealId={deal.id} cadence={room.cadence} act={act} busy={busy} />
+        <CadencePanel dealId={deal.id} cadence={room.cadence} act={act} busy={isBusy('seller:cadence')} />
 
         <div className="panel ws-panel">
           <div className="panel-title ws-panel-title">Contact permissions</div>
@@ -705,7 +705,7 @@ function SellerEditor({ seller, act, busy }) {
         if (e?.detail?.errors) setErrs(e.detail.errors)
         throw e
       }
-    }, 'Seller details saved.')
+    }, 'Seller details saved.', 'seller:edit')
     if (okSaved) {
       setOpen(false); setNote('')
       if (consentNote) setMsg(consentNote)
@@ -790,7 +790,8 @@ function CadencePanel({ dealId, cadence, act, busy }) {
   function go(action) {
     return () => act(
       () => api.post(`/wholesale/deals/${dealId}/cadence`, { action }),
-      `Cadence ${action === 'stop' ? 'stopped' : action + 'ed'}.`)
+      `Cadence ${action === 'stop' ? 'stopped' : action + 'ed'}.`,
+      'seller:cadence')
   }
 
   return (
@@ -886,7 +887,7 @@ function OutreachForm({ dealId, seller, act, busy }) {
                   await api.post(`/wholesale/deals/${dealId}/outreach`,
                                  { message: text, channel: 'sms' })
                   setText('')
-                }, 'Message sent.')}>
+                }, 'Message sent.', 'seller:sms')}>
           Send SMS
         </button>
         {!seller?.phone
@@ -898,7 +899,7 @@ function OutreachForm({ dealId, seller, act, busy }) {
 }
 
 
-function AnalysisTab({ room, act, busy }) {
+function AnalysisTab({ room, act, busy, isBusy }) {
   const { deal, analysis, comps, arv_calculation: arvCalc } = room
   const [form, setForm] = useState({
     arv: deal.arv ?? '', repair_estimate: deal.repair_estimate ?? '',
@@ -961,7 +962,7 @@ function AnalysisTab({ room, act, busy }) {
                     onChange={(e) => set('analysis_notes', e.target.value)} />
         </div>
         <div className="ws-actions" style={{ marginTop: 12 }}>
-          <button className="btn btn--primary" disabled={busy}
+          <button className="btn btn--primary" disabled={isBusy('analysis:save')}
                   onClick={() => act(() => {
                     const payload = {}
                     Object.entries(form).forEach(([k, v]) => {
@@ -969,13 +970,13 @@ function AnalysisTab({ room, act, busy }) {
                       payload[k] = k === 'analysis_notes' ? v : Number(v)
                     })
                     return api.patch(`/wholesale/deals/${deal.id}/analysis`, payload)
-                  }, 'Analysis updated.')}>
+                  }, 'Analysis updated.', 'analysis:save')}>
             Save assumptions
           </button>
-          <button className="btn btn--secondary" disabled={busy}
+          <button className="btn btn--secondary" disabled={isBusy('analysis:recalc')}
                   onClick={() => act(
                     () => api.post(`/wholesale/deals/${deal.id}/analysis/recalculate`),
-                    'Recalculated.')}>
+                    'Recalculated.', 'analysis:recalc')}>
             Recalculate from comps
           </button>
         </div>
@@ -1487,14 +1488,14 @@ function BuyersTab({ room, act, busy, isBusy }) {
 }
 
 
-function ClosingTab({ room, act, busy }) {
+function ClosingTab({ room, act, busy, isBusy }) {
   // The ledger, the contract dates, title, the closing and the two ways a deal
   // ends. Lifted out whole: this tab was four disconnected forms and no
   // arithmetic, and the one subtraction a wholesaler's business turns on was
   // left for the reader to do in their head.
   return (
     <ClosingWorkspace deal={room.deal} matches={room.buyer_matches || []}
-                      act={act} busy={busy} />
+                      act={act} busy={busy} isBusy={isBusy} />
   )
 }
 
