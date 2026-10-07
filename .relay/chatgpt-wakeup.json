@@ -1,10 +1,10 @@
 {
-  "relay_run_id": "sci-program-facelift-retry-20261006-1933",
-  "parent_run_id": "sci-program-facelift-20261006-1924",
+  "relay_run_id": "sci-program-facelift-verify-20261006-1935",
+  "parent_run_id": "sci-program-facelift-retry-20261006-1933",
   "project": "SCI POC Readiness Sprint",
-  "status": "COMPLETED",
+  "status": "BLOCKED",
   "branch": "sci-program",
-  "timestamp_ct": "2026-10-06 19:34 CT",
+  "timestamp_ct": "2026-10-06 19:36 CT",
   "issue": 1,
-  "status_comment_id": 6028178986
+  "status_comment_id": 6028214206
 }
