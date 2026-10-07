@@ -333,16 +333,34 @@ def _store_reply(db: Session, lead, body: str, received_at: datetime, message_id
         return find_duplicate_email_reply(db, lead.id, body, received_at, message_id), False
     if lead.status in (None, "", "new", "sent"):
         lead.status = "replied"
-    if lead.assigned_to_id:
-        name = " ".join(p for p in (lead.first_name, lead.last_name) if p) or "A lead"
-        from app.models.models import NotificationType
-        notif = Notification(user_id=lead.assigned_to_id, type=NotificationType.REPLY_RECEIVED,
+    # Pause outreach now, not at the next cadence run (which would otherwise
+    # still be free to send a touch in between). Sends nothing.
+    from app.services.cadence_service import stop_cadence_for_lead
+    stop_cadence_for_lead(db, lead.id, "stopped_replied")
+    name = " ".join(p for p in (lead.first_name, lead.last_name) if p) or "A lead"
+    from app.models.models import NotificationType
+    from app.services.web_push_service import enqueue_for_notification
+    for user_id in handoff_user_ids(db, lead):
+        notif = Notification(user_id=user_id, type=NotificationType.REPLY_RECEIVED,
                              message=f"{name} replied by email: {body[:140]}", lead_id=lead.id)
         db.add(notif)
         # Web push outbox row (generic title, no content); never raises.
-        from app.services.web_push_service import enqueue_for_notification
         enqueue_for_notification(db, notif, organization_id=lead.organization_id)
     return reply, True
+
+
+def handoff_user_ids(db: Session, lead) -> List[str]:
+    """Who is told about a reply. The lead's advisor; when the lead has none (an
+    imported / intake lead nobody has claimed yet) the active org_admin users of
+    the LEAD'S OWN workspace - never another tenant's. Before this, an unassigned
+    lead's reply was stored but notified nobody, so it sat unseen."""
+    if lead.assigned_to_id:
+        return [lead.assigned_to_id]
+    from app.models.models import User
+    rows = (db.query(User.id).filter(User.organization_id == lead.organization_id,
+                                     User.role == "org_admin",
+                                     User.is_active.isnot(False)).all())
+    return [r[0] for r in rows]
 
 
 def _maybe_hand_to_ai(db: Session, lead, reply) -> None:
