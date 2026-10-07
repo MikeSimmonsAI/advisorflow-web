@@ -4,8 +4,9 @@
   "project": "Core platform \u2014 close direct workspace-header and denied-switch defects",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37651662805",
-  "timestamp_ct": "2026-10-07 11:26 CT",
+  "timestamp_ct": "2026-10-07T17:55:40.954550+00:00",
   "issue": 1,
-  "status_comment_id": 6042161605
+  "status_comment_id": 6042161605,
+  "watchdog_retry": true,
+  "watchdog_retry_utc": "2026-10-07T17:55:40.954561+00:00"
 }
