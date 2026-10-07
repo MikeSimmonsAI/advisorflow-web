@@ -29,3 +29,38 @@ def inbound_reply_event(reply) -> dict:
         "timestamp": getattr(reply, "received_at", None),
         "is_hot": getattr(reply, "is_hot", None),
     }
+
+
+_ACTIVITY_TYPE = {"sms": "sms_reply", "email": "email_reply"}
+_ACTIVITY_LABEL = {"sms": "Reply received", "email": "Email reply received"}
+_ACTIVITY_HOT_LABEL = {"sms": "\U0001F525 Hot reply received",
+                       "email": "\U0001F525 Hot email reply received"}
+
+
+def reply_activity_event(reply, fmt=lambda v: v) -> dict:
+    """Event for the `/leads/{id}/activity` log ({id,type,ts,label,body,meta}).
+
+    Channel comes from the same `reply_channel` as /timeline and /history, so
+    the three read paths cannot drift. Unknown/null source keeps the legacy
+    SMS shape (type sms_reply, label "Reply received"); no provider is
+    invented. `fmt` formats datetimes (the router passes its UTC formatter).
+    New field meta.channel; meta.source is unchanged (raw stored value).
+    """
+    channel = reply_channel(reply)
+    label = (_ACTIVITY_HOT_LABEL if getattr(reply, "is_hot", None) else _ACTIVITY_LABEL)[channel]
+    classification = getattr(reply, "classification", None)
+    return {
+        "id": f"reply-{getattr(reply, 'id', None)}",
+        "type": _ACTIVITY_TYPE[channel],
+        "ts": fmt(getattr(reply, "received_at", None)),
+        "label": label,
+        "body": getattr(reply, "body", None),
+        "meta": {
+            "is_hot": getattr(reply, "is_hot", None),
+            "hot_reason": getattr(reply, "hot_reason", None),
+            "classification": str(classification) if classification else None,
+            "reviewed_at": fmt(getattr(reply, "reviewed_at", None)),
+            "source": getattr(reply, "source", None),
+            "channel": channel,
+        },
+    }

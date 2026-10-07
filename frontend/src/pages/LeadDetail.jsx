@@ -1630,6 +1630,7 @@ export default function LeadDetail() {
                         lead_created:      { bg: 'rgba(100,100,255,0.08)', border: 'rgba(100,100,255,0.25)', icon: '👤', color: '#6464ff' },
                         sms_sent:          { bg: 'rgba(30,200,168,0.07)', border: 'rgba(30,200,168,0.25)', icon: '📤', color: '#1ec8a8' },
                         sms_reply:         { bg: ev.meta?.is_hot ? 'rgba(255,80,80,0.10)' : 'rgba(255,200,30,0.08)', border: ev.meta?.is_hot ? 'rgba(255,80,80,0.4)' : 'rgba(255,200,30,0.30)', icon: ev.meta?.is_hot ? '🔥' : '💬', color: ev.meta?.is_hot ? '#ff5050' : '#c8a020' },
+                        email_reply:       { bg: ev.meta?.is_hot ? 'rgba(255,80,80,0.10)' : 'rgba(80,160,255,0.08)', border: ev.meta?.is_hot ? 'rgba(255,80,80,0.4)' : 'rgba(80,160,255,0.30)', icon: ev.meta?.is_hot ? '🔥' : '📨', color: ev.meta?.is_hot ? '#ff5050' : '#50a0ff' },
                         email_sent:        { bg: 'rgba(80,160,255,0.08)', border: 'rgba(80,160,255,0.25)', icon: '📧', color: '#50a0ff' },
                         booking_booked:    { bg: 'rgba(30,240,130,0.10)', border: 'rgba(30,240,130,0.35)', icon: '📅', color: '#1ef082' },
                         booking_confirmed: { bg: 'rgba(30,240,130,0.10)', border: 'rgba(30,240,130,0.35)', icon: '✅', color: '#1ef082' },

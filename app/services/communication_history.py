@@ -49,6 +49,8 @@ from app.models.models import (
     VoiceCall,
 )
 
+from app.services.reply_timeline import reply_channel
+
 # Event kinds. Deliberately coarse: a consumer wants to render a bubble, a
 # system note or a call, and the `channel` says which pipe it used.
 OUTBOUND = "outbound"
@@ -135,7 +137,7 @@ def fetch(db: Session, lead_id: str, *, limit: int = DEFAULT_LIMIT,
                    Reply.received_at, before) \
         .order_by(desc(Reply.received_at)).limit(per_source).all()
     for r in rows:
-        channel = (r.source or "sms")
+        channel = reply_channel(r)
         if want is not None and channel not in want:
             continue
         events.append(_event(
