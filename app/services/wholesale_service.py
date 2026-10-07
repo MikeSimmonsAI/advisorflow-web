@@ -889,6 +889,13 @@ def apply_seller_reply(db: Session, org_id: str, deal: WholesaleDeal,
                                    wholesale_ai.INTENT_WRONG_PERSON):
         _set_stage_unchecked(db, deal, pipeline.STAGE_DEAD)
         deal.lost_reason = reading.get("intent")
+        if reading.get("intent") == wholesale_ai.INTENT_WRONG_PERSON:
+            # A WRONG NUMBER IS NOT TEXTED AGAIN. Closing the deal alone leaves
+            # the number contactable from a re-import, another deal or a bulk
+            # path. It goes on this organization's suppression list (the one
+            # every send gate reads) with a reason an operator can read; other
+            # tenants are untouched and the lead is not marked DNC.
+            suppression_note = _suppress_wrong_number(db, org_id, deal, lead, message_text)
     elif outcome in SI.NURTURE_OUTCOMES or reading.get("intent") == wholesale_ai.INTENT_MAYBE_LATER:
         # NOT NOW IS NOT DEAD. The seller is kept, with the reason and a date
         # to come back; nothing is sent by this, and a later opt-out still wins.
@@ -1127,6 +1134,31 @@ def control_cadence(db: Session, org_id: str, deal: WholesaleDeal, action: str,
               after={"state": getattr(state, "status", None),
                      "touch": getattr(state, "current_touch_number", None)})
     return cadence_status(db, org_id, deal)
+
+
+def _suppress_wrong_number(db: Session, org_id: str, deal: WholesaleDeal,
+                           lead: Optional[Lead], message_text: str) -> Optional[str]:
+    """Suppress a number the recipient says is not the seller's. Idempotent."""
+    if lead is None or not lead.phone:
+        return None
+    from app.models.models import SuppressionSource
+    from app.services import compliance_service
+    reason = "Wrong number reported by recipient"
+    note = None
+    try:
+        if compliance_service.usable_us_phone(lead.phone):
+            compliance_service.add_suppression_entry(
+                db, org_id, lead.phone, reason, source=SuppressionSource.REPLY_STOP)
+            note = "Wrong number: %s suppressed for this workspace." % lead.phone
+    except Exception as exc:                                    # noqa: BLE001
+        log.warning("wholesale: wrong-number suppression failed: %s", exc)
+    if note:
+        log_event(db, org_id, "seller.wrong_number", actor_type=ACTOR_SYSTEM,
+                  actor_label="seller reply reader", deal_id=deal.id,
+                  summary="Recipient says this is the wrong number. The number is "
+                          "suppressed and outreach stopped.",
+                  details={"quote": (message_text or "")[:200]})
+    return note
 
 
 def stop_cadence_quietly(db: Session, org_id: str, deal: WholesaleDeal,
