@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "ai-workforce-integrated-truth-20261007-1033",
-  "parent_run_id": "ai-workforce-truth-recovery-retry-20261007-1028",
-  "project": "AI Workforce \u2014 integrated lifecycle truth and operator recovery",
+  "relay_run_id": "ai-workforce-run-evidence-20261007-1038",
+  "parent_run_id": "ai-workforce-integrated-truth-20261007-1033",
+  "project": "AI Workforce \u2014 real run evidence and history",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37644879342",
-  "timestamp_ct": "2026-10-07 10:36 CT",
+  "actions_run_id": "37645542317",
+  "timestamp_ct": "2026-10-07 10:42 CT",
   "issue": 1,
-  "status_comment_id": 6041253745
+  "status_comment_id": 6041360640
 }
