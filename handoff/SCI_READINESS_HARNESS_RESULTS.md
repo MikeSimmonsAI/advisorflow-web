@@ -1,6 +1,6 @@
 # SCI readiness harness: executed results
 
-Executed 147 scenarios: **147 PASS, 0 FAIL**. Stdlib only; real decision modules; does not replace dependency-backed pytest or DB integration suites.
+Executed 164 scenarios: **164 PASS, 0 FAIL**. Stdlib only; real decision modules; does not replace dependency-backed pytest or DB integration suites.
 
 | # | Group | Scenario | Result |
 |---|---|---|---|
@@ -151,3 +151,20 @@ Executed 147 scenarios: **147 PASS, 0 FAIL**. Stdlib only; real decision modules
 | 145 | webhook-sim | simulation and signature module have no send/network/DB imports | PASS |
 | 146 | webhook-sim | webhook_proof run_all: all PASS, zero outbound | PASS |
 | 147 | webhook-sim | Launch Readiness run_all carries webhook_proof and verdict blocks on its failure | PASS |
+| 148 | webhook-url | proxy reconstruction: forwarded proto+host, host-only https, configured base, raw URL, deduped | PASS |
+| 149 | webhook-url | comma-chained forwarded headers use the first hop only | PASS |
+| 150 | webhook-url | signature signed over https verifies behind an http-reporting proxy; http-signed does not match wrong host | PASS |
+| 151 | webhook-url | twilio_security and voice guard fail closed in source (no pass-through return on missing token/signature) | PASS |
+| 152 | cross-org | voice guard: tenant-signed request cannot act on another org; no-org tenant fails closed | PASS |
+| 153 | cross-org | voice guard verifies the tenant-token signature before returning a verified request; platform fallback present | PASS |
+| 154 | no-auto-send | voice/sms webhook guards and signature modules import no send/AI surface | PASS |
+| 155 | inbound-email | STOP typed in an email still suppresses after clean_body strips HTML/quotes | PASS |
+| 156 | inbound-email | quoted 'Reply STOP' in our own text does not suppress a genuine reply | PASS |
+| 157 | inbound-email | clean_body: None/empty are safe and output is capped at 4000 | PASS |
+| 158 | inbound-email | subject normalization strips RE/FWD/FW/AW/SV (stacked, numbered, any case) | PASS |
+| 159 | inbound-email | recipients_of: null/blank/missing recipients are skipped; To+Cc lower-cased | PASS |
+| 160 | inbound-email | mailbox service has no send/Twilio/SMTP import surface; no_lead/ambiguous paths return no lead | PASS |
+| 161 | inbound-email | empty/None reply body is not an opt-out and not HOT | PASS |
+| 162 | controlled-readiness | evidence is synthetic, no-send and carries no secret-shaped values | PASS |
+| 163 | inbound-email | route(): no workspaces / no matching lead fails closed with a fake session | PASS |
+| 164 | inbound-email | shared mailbox: two tenants emailed the same address is ambiguous; subject beats recency | PASS |

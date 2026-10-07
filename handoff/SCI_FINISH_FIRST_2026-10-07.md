@@ -66,3 +66,18 @@ First-login checklist corrections (source: `frontend/src/App.jsx` lines 486, 675
 - Manager 403 list (`/admin/users`, `/org-settings/*`, `/god/*`) was not re-inspected here; still per `SCI_MANAGER_ROLE_RESULTS.md`.
 
 Still UNVERIFIED: pytest/DB/FastAPI route tests, frontend install/build, deployed or authenticated staging, mailbox provider, Michael's login. Verdicts unchanged. Rollback: revert this run's commit; code baseline 088eb42.
+
+## Persist finalizer (relay sci-persist-finalizer-20261006-2202)
+
+Recreated the ten inbound-email / readiness-evidence scenarios stranded by the failed push of the earlier run. Harness: 164 executed, 164 PASS, 0 FAIL (was 154). Groups `inbound-email` and `controlled-readiness`. `inbound_mailbox_service` is loaded with httpx, sqlalchemy and the ORM models stubbed (restored afterwards), and `route()` runs against a fake session.
+
+- STOP typed in an email still suppresses after `clean_body`; a quoted "Reply STOP" does not suppress a genuine reply.
+- `clean_body` handles None/empty and caps at 4000.
+- RE/FW/FWD/AW/SV subject normalization (stacked, numbered, any case).
+- `recipients_of` skips null/blank recipients.
+- Mailbox service has no send/Twilio/SMTP imports; `no_lead` and `ambiguous` paths return no lead.
+- Empty/None reply is neither opt-out nor HOT.
+- Controlled-readiness evidence: synthetic, nothing sent, no secret-shaped values, fixed result shape.
+- `route()` fails closed (`no_lead`, `ambiguous`) with a fake session; shared-mailbox ambiguity fails closed and subject beats recency.
+
+Defects found: none. No application code changed. Rollback: revert this commit; baseline d7c5f35.

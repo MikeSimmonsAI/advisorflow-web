@@ -525,6 +525,192 @@ def _():
         eq({i for i in imps if any(b in i for b in ("sms_service", "email_service", "openai", "ai_gateway", "smtplib"))}, set())
 
 
+# ── Persisted finalizer coverage: inbound email decisions (dependency-free) ──
+import contextlib   # noqa: E402
+import datetime as _dt   # noqa: E402
+import types       # noqa: E402
+
+
+@contextlib.contextmanager
+def _mailbox_stubs():
+    """Stub httpx / sqlalchemy / ORM models so the pure mailbox functions import. Restored on exit."""
+    names = ("httpx", "sqlalchemy", "sqlalchemy.orm", "app.models", "app.models.models",
+             "app.models.inbound_mailbox_models", "_mbx_stub")
+    saved = {n: sys.modules.get(n) for n in names}
+
+    class Col:
+        def in_(self, _v):
+            return None
+
+    def model(*cols):
+        return type("M", (), {c: Col() for c in cols})
+    sa = types.ModuleType("sqlalchemy")
+    sa.func = types.SimpleNamespace(lower=lambda x: x)
+    orm = types.ModuleType("sqlalchemy.orm")
+    orm.Session = object
+    sa.orm = orm
+    pkg = types.ModuleType("app.models")
+    pkg.__path__ = []
+    mm = types.ModuleType("app.models.models")
+    mm.Lead = model("id", "organization_id", "email")
+    mm.EmailMessage = model("lead_id", "sent_at", "subject")
+    im = types.ModuleType("app.models.inbound_mailbox_models")
+    im.InboundMailbox = im.InboundMailboxMessage = object
+    stubs = {"httpx": types.ModuleType("httpx"), "sqlalchemy": sa, "sqlalchemy.orm": orm,
+             "app.models": pkg, "app.models.models": mm, "app.models.inbound_mailbox_models": im}
+    sys.modules.update(stubs)
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "_mbx_stub", os.path.join(ROOT, "app/services/inbound_mailbox_service.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        yield mod, mm
+    finally:
+        for n, v in saved.items():
+            if v is None:
+                sys.modules.pop(n, None)
+            else:
+                sys.modules[n] = v
+
+
+class _FakeQuery:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def filter(self, *a):
+        return self
+
+    def all(self):
+        return list(self.rows)
+
+
+class _FakeDB:
+    def __init__(self, mm, leads, emails):
+        self.mm, self.leads, self.emails = mm, leads, emails
+
+    def query(self, *cols):
+        return _FakeQuery(self.leads if cols and cols[0] is self.mm.Lead else self.emails)
+
+
+def _lead(i, org, email="jane@x.invalid"):
+    return types.SimpleNamespace(id=i, organization_id=org, email=email)
+
+
+_T0 = _dt.datetime(2026, 1, 1)
+_DAY = _dt.timedelta(days=1)
+
+
+@scenario("inbound-email", "STOP typed in an email still suppresses after clean_body strips HTML/quotes")
+def _():
+    with _mailbox_stubs() as (mod, _mm):
+        for raw in ("<p>STOP</p>\n<div>On Mon, A wrote:</div>", "Stop\r\n\r\n> earlier text", "<div>Unsubscribe</div>"):
+            cleaned = mod.clean_body(raw)
+            eq(op.contains_hard_stop_language(cleaned), True)
+            eq(rr.classify(cleaned)["class"], rr.OPT_OUT)
+
+
+@scenario("inbound-email", "quoted 'Reply STOP' in our own text does not suppress a genuine reply")
+def _():
+    with _mailbox_stubs() as (mod, _mm):
+        raw = "Yes, please call me Tuesday.\n\nOn Mon, Sales wrote:\nReply STOP to opt out of texts"
+        cleaned = mod.clean_body(raw)
+        eq(cleaned, "Yes, please call me Tuesday.")
+        eq(op.contains_hard_stop_language(cleaned), False)
+        assert rr.classify(cleaned)["class"] != rr.OPT_OUT
+
+
+@scenario("inbound-email", "clean_body: None/empty are safe and output is capped at 4000")
+def _():
+    with _mailbox_stubs() as (mod, _mm):
+        eq((mod.clean_body(None), mod.clean_body(""), mod.clean_body("   \n ")), ("", "", ""))
+        eq(len(mod.clean_body("a" * 9000)), 4000)
+        eq(len(mod.clean_body("a" * 4000)), 4000)
+
+
+@scenario("inbound-email", "subject normalization strips RE/FWD/FW/AW/SV (stacked, numbered, any case)")
+def _():
+    with _mailbox_stubs() as (mod, _mm):
+        n = mod._norm_subject
+        for s in ("Hello World", "RE: Hello World", "re: FWD: hello  world", "AW: Hello World",
+                  "SV: Hello World", "Fw: Re[2]: Hello World", "  RE:RE: hello world "):
+            eq(n(s), "hello world")
+        eq((n(None), n(""), n("RE:")), ("", "", ""))
+
+
+@scenario("inbound-email", "recipients_of: null/blank/missing recipients are skipped; To+Cc lower-cased")
+def _():
+    with _mailbox_stubs() as (mod, _mm):
+        eq(mod.recipients_of({}), [])
+        eq(mod.recipients_of({"toRecipients": None, "ccRecipients": None}), [])
+        m = {"toRecipients": [None, {}, {"emailAddress": None}, {"emailAddress": {"address": "  "}},
+                              {"emailAddress": {"address": " A@X.Invalid "}}],
+             "ccRecipients": [{"emailAddress": {"address": "B@Y.invalid"}}]}
+        eq(mod.recipients_of(m), ["a@x.invalid", "b@y.invalid"])
+
+
+@scenario("inbound-email", "mailbox service has no send/Twilio/SMTP import surface; no_lead/ambiguous paths return no lead")
+def _():
+    imps = _imports_of("app/services/inbound_mailbox_service.py")
+    eq({i for i in imps if any(b in i for b in ("twilio", "sms_service", "email_service", "smtplib",
+                                                  "openai", "ai_gateway"))}, set())
+    src = open(os.path.join(ROOT, "app/services/inbound_mailbox_service.py"), encoding="utf-8").read()
+    for outcome in ('"no_lead"', '"ambiguous"'):
+        assert "return None, " + outcome in src, outcome
+
+
+@scenario("inbound-email", "empty/None reply body is not an opt-out and not HOT")
+def _():
+    for t in (None, "", "   ", "(Replied with no text.)"):
+        c = rr.classify(t)["class"]
+        assert c not in (rr.OPT_OUT, rr.HOT), (t, c)
+        eq(op.contains_hard_stop_language(t), False)
+
+
+@scenario("controlled-readiness", "evidence is synthetic, no-send and carries no secret-shaped values")
+def _():
+    import re as _re
+    out = rc.run_all()
+    eq((out["synthetic_only"], out["sent"], out["webhook_proof"]["sent"], out["webhook_proof"]["outbound"]), (True, 0, 0, 0))
+    blob = repr(out)
+    assert not _re.search(r"\bAC[0-9a-f]{32}\b|\bSK[0-9a-f]{32}\b|sk-[A-Za-z0-9]{20,}|Bearer\s+\S+", blob), "secret-shaped value"
+    for r in out["results"]:
+        eq(set(r), {"key", "label", "status", "error", "next_action"})
+        assert r["status"] in ("PASS", "FAIL")
+
+
+@scenario("inbound-email", "route(): no workspaces / no matching lead fails closed with a fake session")
+def _():
+    with _mailbox_stubs() as (mod, mm):
+        eq(mod.route(_FakeDB(mm, [], []), [], "jane@x.invalid")[:2], (None, "no_lead"))
+        eq(mod.route(_FakeDB(mm, [], []), ["o1"], "jane@x.invalid")[:2], (None, "no_lead"))
+        # shared mailbox, lead exists but nobody ever emailed them: not attached
+        db = _FakeDB(mm, [_lead("L1", "o1")], [])
+        eq(mod.route(db, ["o1", "o2"], "jane@x.invalid")[:2], (None, "no_lead"))
+        # single org, two leads, none emailed: ambiguous, attached to nobody
+        db = _FakeDB(mm, [_lead("L1", "o1"), _lead("L2", "o1")], [])
+        eq(mod.route(db, ["o1"], "jane@x.invalid")[:2], (None, "ambiguous"))
+
+
+@scenario("inbound-email", "shared mailbox: two tenants emailed the same address is ambiguous; subject beats recency")
+def _():
+    with _mailbox_stubs() as (mod, mm):
+        leads = [_lead("LA", "orgA"), _lead("LB", "orgB")]
+        emails = [("LA", _T0, "Spring Open House"), ("LB", _T0 + 2 * _DAY, "Summer Plan")]
+        db = _FakeDB(mm, leads, emails)
+        # no subject / unknown subject: never pick on recency alone
+        eq(mod.route(db, ["orgA", "orgB"], "jane@x.invalid")[:2], (None, "ambiguous"))
+        eq(mod.route(db, ["orgA", "orgB"], "jane@x.invalid", "Re: Something else")[:2], (None, "ambiguous"))
+        # reply to A's older email: subject wins over B's newer send
+        lead, outcome, _d = mod.route(db, ["orgA", "orgB"], "jane@x.invalid", "RE: Spring Open House")
+        eq((lead.id, outcome), ("LA", "matched"))
+        lead, outcome, _d = mod.route(db, ["orgA", "orgB"], "jane@x.invalid", "AW: summer plan")
+        eq((lead.id, outcome), ("LB", "matched"))
+        # same subject in both tenants stays ambiguous
+        both = _FakeDB(mm, leads, [("LA", _T0, "Hello"), ("LB", _T0 + _DAY, "Hello")])
+        eq(mod.route(both, ["orgA", "orgB"], "jane@x.invalid", "Re: Hello")[:2], (None, "ambiguous"))
+
+
 # ── runner ───────────────────────────────────────────────────────────────────
 
 def run(md_path=None):

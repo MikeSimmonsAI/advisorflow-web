@@ -1,7 +1,7 @@
 # SCI readiness: stdlib harness (workaround, not a replacement)
 
 `python3 -I scripts/sci_readiness_harness.py --md handoff/SCI_READINESS_HARNESS_RESULTS.md`
-runs 116 deterministic scenarios against the real decision modules, with no
+runs 164 deterministic scenarios against the real decision modules, with no
 pytest, FastAPI, SQLAlchemy or network. Per-scenario results:
 `handoff/SCI_READINESS_HARNESS_RESULTS.md`.
 
