@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "sci-public-booking-closure-20261007-1738",
-  "parent_run_id": "sci-public-booking-guards-20261007-1734",
-  "project": "SCI \u2014 public booking replay/terminal-state closure and dead-router cleanup",
+  "relay_run_id": "sci-safe-source-exit-20261007-1742",
+  "parent_run_id": "sci-public-booking-closure-20261007-1738",
+  "project": "SCI \u2014 final safe-source cleanup and exit gate",
   "status": "COMPLETED",
   "branch": "sci-program",
-  "actions_run_id": "37697415759",
-  "timestamp_ct": "2026-10-07 17:41 CT",
+  "actions_run_id": "37697876942",
+  "timestamp_ct": "2026-10-07 17:43 CT",
   "issue": 1,
-  "status_comment_id": 6048339962
+  "status_comment_id": 6048368831
 }
