@@ -154,12 +154,11 @@ def decide(event: Dict, comments: Iterable[Dict], *, issue: int, actors: List[st
                                   for a in acks(comments, automation).values()):
         return False, "parent_run_id %s already produced a directive (one review -> one directive)" \
             % p["parent_run_id"], {"run_id": run_id}
-    br = p["branch"]
-    if not br:
+    project = (p["fields"].get("PROJECT") or "").strip()\n    if not project or project == "-":\n        return False, "directive names no valid PROJECT", {"run_id": run_id}\n    br = p["branch"]\n    if not br:
         return False, "directive names no BRANCH", {"run_id": run_id}
     if not allowed_branch(br, branches):
         return False, "branch %r is not an allowed relay branch" % br, {"run_id": run_id}
-    return True, "ok", {"run_id": run_id, "branch": br, "project": p["fields"].get("PROJECT", ""),
+    return True, "ok", {"run_id": run_id, "branch": br, "project": project,
                         "comment_id": c.get("id"), "parent_run_id": p["parent_run_id"] or ""}
 
 
@@ -236,9 +235,7 @@ def needs_fallback(run_id: str, comments: Iterable[Dict], status_actors: List[st
 
 # ── ChatGPT wake-up signal ───────────────────────────────────────────────────
 
-def signal_payload(info: Dict, ct: str, issue: int) -> Dict:
-    """The ONLY content of .relay/chatgpt-wakeup.json - no secrets, no customer data."""
-    return {"relay_run_id": info["run_id"], "parent_run_id": info.get("parent_run_id") or "",
+def signal_payload(info: Dict, ct: str, issue: int) -> Dict:\n    """The ONLY content of .relay/chatgpt-wakeup.json - no secrets, no customer data."""\n    project = (info.get("project") or "").strip()\n    if not project or project == "-":\n        raise ValueError("refusing wake-up payload without a valid project")\n    return {"relay_run_id": info["run_id"], "parent_run_id": info.get("parent_run_id") or "",
             "project": info.get("project") or "", "status": info["status"], "branch": info["branch"],
             "actions_run_id": info.get("actions_run_id") or "", "timestamp_ct": ct,
             "issue": issue, "status_comment_id": info.get("comment_id")}
