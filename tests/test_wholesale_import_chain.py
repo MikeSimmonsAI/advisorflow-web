@@ -87,7 +87,10 @@ def test_messy_csv_to_no_send_disposition_preview(client, db_session, tenants, m
     # ── mapping is persisted server-side; reload loses no field ───────────────
     first = _get(client, h, bid)
     headers = first["headers"]
-    saved = first["mapping"]
+    # The suggestion carries a `confidence` note; the SAVED mapping is only
+    # {kind, target} (engine.save_mapping), so compare in the saved shape.
+    saved = {h: {"kind": m["kind"], "target": m["target"]}
+             for h, m in first["mapping"].items()}
     assert set(saved) == set(headers), "every uploaded column keeps a mapping entry"
     assert len(headers) == 8
     r = client.put("/intake/batches/%s/mapping" % bid, headers=h, json={"mapping": saved})
@@ -105,7 +108,13 @@ def test_messy_csv_to_no_send_disposition_preview(client, db_session, tenants, m
     assert analyzed["workflow"] == {"step": 3, "analyzed": True, "classified": False}
 
     vals = client.get("/intake/batches/%s/classification-values" % bid, headers=h).json()
-    vmap = {v["value"]: v["classification"] for v in vals["values"]}
+    # The operator's explicit Classify choice. The suggestion for "Seller Lead"
+    # is cold_prospect (creates_lead=True) and commit then DOES create leads for
+    # READY rows; this chain covers the contacts-only path, so the operator
+    # picks the non-opportunity class `contact` for every value.
+    assert vals["column"] == "Segment"
+    assert any(v["value"] == "Seller Lead" for v in vals["values"])
+    vmap = {v["value"]: "contact" for v in vals["values"]}
     r = client.put("/intake/batches/%s/mapping" % bid, headers=h,
                    json={"classification": {"value_map": vmap, "fallback": "contact"}})
     assert r.status_code == 200, r.text
@@ -224,7 +233,9 @@ def test_messy_csv_to_no_send_disposition_preview(client, db_session, tenants, m
     prev = ok(client.post("/wholesale/deals/%s/disposition/preview" % deal_id, headers=h,
                           json={"buyer_ids": [fits["id"]], "channel": "email"}))
     assert prev["recipients"] == 1
-    assert "ava" not in str(prev).lower() or "Ava" not in prev.get("body", "")
+    blob = str(prev).lower()
+    for seller_fact in ("ava.ready@example.com", "214-555-0201", "2145550201"):
+        assert seller_fact not in blob, "seller identity leaked into the buyer sheet"
 
     # ── boundary 4: nothing was sent, and nothing excluded is outreach-eligible
     assert fake.calls == []
