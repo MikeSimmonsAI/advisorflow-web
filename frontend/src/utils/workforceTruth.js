@@ -110,3 +110,30 @@ const SECRET_RE = /(sk|ghp|gho|pk|rk|xox[bap])[-_][A-Za-z0-9_-]{8,}|bearer\s+[A-
 export function redact (text) {
   return typeof text === 'string' ? text.replace(SECRET_RE, '[redacted]') : ''
 }
+
+/** Run-evidence polling cadence. "Live" is only claimed while fresh. */
+export const POLL_INTERVAL_MS = 20000
+export const POLL_STALE_AFTER_MS = POLL_INTERVAL_MS * 3
+
+/** lastOkAt = ms timestamp of the last SUCCESSFUL refresh (null = never). */
+export function pollFreshness (lastOkAt, nowMs = Date.now()) {
+  if (typeof lastOkAt !== 'number' || Number.isNaN(lastOkAt)) return { live: false, ageSeconds: null }
+  const age = Math.max(0, nowMs - lastOkAt)
+  return { live: age <= POLL_STALE_AFTER_MS, ageSeconds: Math.floor(age / 1000) }
+}
+
+/** Heartbeat age in whole seconds, or null when none was recorded. */
+export function heartbeatAgeSeconds (iso, nowMs = Date.now()) {
+  const t = Date.parse(iso || '')
+  return Number.isNaN(t) ? null : Math.max(0, Math.floor((nowMs - t) / 1000))
+}
+
+/** Overlap guard: tryStart() is false while a refresh is in flight. */
+export function createRefreshGate () {
+  let busy = false
+  return {
+    tryStart () { if (busy) return false; busy = true; return true },
+    done () { busy = false },
+    get busy () { return busy },
+  }
+}

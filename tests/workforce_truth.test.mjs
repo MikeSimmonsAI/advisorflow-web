@@ -61,3 +61,28 @@ test('evidence labels honest; secrets redacted', () => {
   const out = t.redact('key ghp_abcdefghijklmnop and password=hunter2 ok')
   assert.ok(!out.includes('ghp_abc') && !out.includes('hunter2'))
 })
+
+test('poll freshness: live only while the last successful refresh is recent', () => {
+  assert.equal(t.pollFreshness(null).live, false)
+  assert.equal(t.pollFreshness(undefined, 5).live, false)
+  const now = 1000000
+  const f = t.pollFreshness(now - 20000, now)
+  assert.equal(f.live, true)
+  assert.equal(f.ageSeconds, 20)
+  assert.equal(t.pollFreshness(now - t.POLL_STALE_AFTER_MS, now).live, true)
+  assert.equal(t.pollFreshness(now - t.POLL_STALE_AFTER_MS - 1, now).live, false)
+  assert.equal(t.POLL_INTERVAL_MS, 20000)
+})
+test('heartbeat age is null without a heartbeat', () => {
+  assert.equal(t.heartbeatAgeSeconds(null), null)
+  assert.equal(t.heartbeatAgeSeconds('nope'), null)
+  assert.equal(t.heartbeatAgeSeconds('2026-10-07T16:00:00Z', Date.parse('2026-10-07T16:00:30Z')), 30)
+})
+test('refresh gate prevents overlapping refreshes', () => {
+  const g = t.createRefreshGate()
+  assert.equal(g.tryStart(), true)
+  assert.equal(g.tryStart(), false)
+  assert.equal(g.busy, true)
+  g.done()
+  assert.equal(g.tryStart(), true)
+})

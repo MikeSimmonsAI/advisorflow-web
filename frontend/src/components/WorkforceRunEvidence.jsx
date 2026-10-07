@@ -6,14 +6,20 @@
  * Fields the server did not send are omitted, not filled in. Percent is shown
  * only when the server supplies `progress_percent` (it does not today).
  *
+ * Liveness: heartbeat/stage/lease are shown only when the server recorded them.
+ * Polls every 20 s while mounted and the tab is visible (never overlapping)
+ * plus a manual "Check status now". "Live" is claimed only while the last
+ * successful refresh is recent; otherwise the view says updates are stale.
+ *
  * Refresh failure keeps the last-good rows and marks them possibly stale.
  * A response for a previous employee/scope is discarded.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import {
-  applyRefresh, createSequencer, evidenceLabel, evidencedPercent,
-  lifecycleLabel, redact, selectActiveRun, supportCode, workerDisplayState,
+  POLL_INTERVAL_MS, applyRefresh, createRefreshGate, createSequencer,
+  evidenceLabel, evidencedPercent, heartbeatAgeSeconds, lifecycleLabel,
+  pollFreshness, redact, selectActiveRun, supportCode, workerDisplayState,
 } from '../utils/workforceTruth'
 import { formatCT, formatMinutes } from '../utils/relayControlRoom'
 
@@ -40,8 +46,8 @@ function Row ({ run, active }) {
         {run.task_label ? <span>Task: {run.task_label}</span> : null}
         {run.simulated ? <span>Simulation</span> : null}
         {run.superseded_by ? <span>Superseded by {run.superseded_by}</span> : null}
-        {run.stale && run.stale_after_seconds
-          ? <span>No end recorded after {Math.round(run.stale_after_seconds / 60)} min — may be hung</span> : null}
+        {run.stale
+          ? <span>{run.stale_reason || 'May be hung'}{run.liveness_source === 'started_at_legacy' ? ' — inferred from start time only' : ''}</span> : null}
         {pct != null ? <span>{pct}%</span> : null}
       </div>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12,
@@ -49,6 +55,11 @@ function Row ({ run, active }) {
         <span>Run {run.run_id}</span>
         {run.started_at ? <span>Started {formatCT(run.started_at)}</span> : null}
         {mins != null ? <span>Elapsed {formatMinutes(mins)}</span> : null}
+        {run.last_heartbeat_at
+          ? <span>Last heartbeat {formatCT(run.last_heartbeat_at)} ({heartbeatAgeSeconds(run.last_heartbeat_at)} s ago)</span>
+          : (active && !run.terminal ? <span>No heartbeat recorded</span> : null)}
+        {run.stage ? <span>Stage: {redact(run.stage)}</span> : null}
+        {run.lease_seconds ? <span>Lease {run.lease_seconds} s</span> : null}
         {run.updated_at ? <span>Last update {formatCT(run.updated_at)}</span> : null}
         {run.evidence?.kind ? <span>Evidence: {evidenceLabel(run.evidence.kind)}</span> : null}
         {run.trigger ? <span>Source: {run.trigger}</span> : null}
@@ -73,9 +84,13 @@ export default function WorkforceRunEvidence ({ employeeId = null, title = 'Run 
   const scope = useRef(employeeId)
   const lastGood = useRef(null)
   const mounted = useRef(true)
+  const gate = useRef(createRefreshGate()).current
+  const [lastOkAt, setLastOkAt] = useState(null)
+  const [tick, setTick] = useState(Date.now())
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
   const load = useCallback(async () => {
+    if (!gate.tryStart()) return          // never overlap refreshes
     const token = seq.begin()
     const startedFor = employeeId
     setLoading(true)
@@ -88,23 +103,37 @@ export default function WorkforceRunEvidence ({ employeeId = null, title = 'Run 
     } catch (e) {
       outcome = { ok: false, code: supportCode(e), message: e?.message || 'Could not load run activity.' }
     }
+    if (seq.isCurrent(token)) gate.done()   // a superseded load must not free the newer one's gate
     if (!mounted.current || !seq.isCurrent(token) || scope.current !== startedFor) return
+    if (outcome.ok) setLastOkAt(outcome.at)
     const next = applyRefresh(lastGood.current, outcome)
     lastGood.current = next
     setPayload(next.data); setStale(next.stale); setCode(outcome.code || null)
     setErr(next.error ? next.error
       + (next.stale ? ' Showing the last run activity loaded; it may be out of date.' : '') : '')
     setLoading(false)
-  }, [employeeId, seq])
+  }, [employeeId, seq, gate])
 
   useEffect(() => {
     scope.current = employeeId
     lastGood.current = null
-    setPayload(null); setStale(false); setErr('')
+    setPayload(null); setStale(false); setErr(''); setLastOkAt(null)
+    gate.done()                           // an employee switch discards any in-flight refresh
     load()
-  }, [employeeId, load])
+  }, [employeeId, load, gate])
+
+  // Safe polling: only while mounted and the tab is visible; cleared on unmount.
+  useEffect(() => {
+    const id = setInterval(() => {
+      setTick(Date.now())
+      if (typeof document !== 'undefined' && document.hidden) return
+      load()
+    }, POLL_INTERVAL_MS)
+    return () => clearInterval(id)
+  }, [load])
 
   const { current, history } = pickRuns(payload)
+  const fresh = pollFreshness(lastOkAt, tick)
   const display = workerDisplayState({ state: null }, current)
 
   return (
@@ -123,9 +152,11 @@ export default function WorkforceRunEvidence ({ employeeId = null, title = 'Run 
             {current
               ? <>Current run: <strong>{lifecycleLabel(display)}</strong>{stale ? ' (may be out of date)' : ''}</>
               : 'No run is recorded as active.'}
+            {' '}<span>{fresh.live ? `· live (checked ${fresh.ageSeconds ?? 0} s ago)` : '· updates stale — not confirmed live'}</span>
             {payload.as_of ? <span style={{ color: 'var(--text-secondary)' }}> · as of {formatCT(payload.as_of)}</span> : null}
           </div>
           {current ? <ul style={{ padding: 0 }}><Row run={current} active /></ul> : null}
+          <button className="btn btn--ghost" onClick={load} disabled={loading}>Check status now</button>
           <h4>History</h4>
           {history.length
             ? <ul style={{ padding: 0 }}>{history.map(r => <Row key={r.run_id} run={r} />)}</ul>
