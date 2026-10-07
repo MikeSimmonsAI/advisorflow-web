@@ -161,6 +161,15 @@ check("buyer board row buttons name the buyer",
 check("buyers list does not claim 'No cash buyers yet' after a failed load",
       "loadFailed" in buyers and "!buyers.length && !loadFailed" in buyers)
 
+check("board disables Select for a buyer who passed",
+      "|| passed}" in board and "['passed', 'rejected'].includes(row.status)" in board)
+check("board proof-of-funds toggle exposes aria-expanded and no bare 'Close'",
+      "aria-expanded={pofOpen}" in board and "'Close'" not in board)
+check("board selection confirm is an alertdialog",
+      'role="alertdialog"' in board)
+check("import result separates rejected (alert) from skipped (status)",
+      "result.rejected" in buyers and 'role="alert"' in buyers and 'role="status"' in buyers)
+
 # 5. light-theme / mobile hooks ---------------------------------------------
 css = read(os.path.join(SRC, "components/wholesale-shell.css"))
 check("shell css has a mobile breakpoint", "@media" in css and "max-width" in css)

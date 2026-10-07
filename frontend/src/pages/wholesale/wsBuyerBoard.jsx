@@ -441,7 +441,8 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
           destructive act even though nothing is destroyed — and the question
           names the fee it implies rather than only the buyer. */}
       {confirming ? (
-        <div className="ws-confirm ws-confirm--decision">
+        <div className="ws-confirm ws-confirm--decision" role="alertdialog"
+             aria-label="Confirm buyer selection">
           <span className="ws-confirm__text">
             Select <strong>{confirming.buyer_name || 'this buyer'}</strong> at{' '}
             <strong>{fmtMoney(confirming.offer_amount)}</strong>?
@@ -480,6 +481,8 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
 function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
                    onSelect }) {
   const [pofOpen, setPofOpen] = useState(false)
+  // The server refuses to select a buyer who passed; say so before the click.
+  const passed = ['passed', 'rejected'].includes(row.status)
 
   return (
     <>
@@ -550,8 +553,10 @@ function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
               </button>
             ) : null}
             <button className="btn btn--secondary btn--sm"
+                    aria-expanded={pofOpen}
+                    aria-label={`${pofOpen ? 'Hide' : (row.pof_file_id ? 'Replace' : 'Attach')} proof of funds for ${row.buyer_name || 'this buyer'}`}
                     onClick={() => setPofOpen((v) => !v)}>
-              {pofOpen ? 'Close' : (row.pof_file_id ? 'Replace' : 'Attach')}
+              {pofOpen ? 'Hide' : (row.pof_file_id ? 'Replace' : 'Attach')}
             </button>
           </div>
         </td>
@@ -578,9 +583,11 @@ function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
                     }, 'Resent.')}>Resend</button>
             {row.is_selected ? null : (
               <button className="btn btn--primary btn--sm"
-                      disabled={busy || row.do_not_contact}
+                      disabled={busy || row.do_not_contact || passed}
                       title={row.do_not_contact
-                        ? 'This buyer has opted out of contact.' : undefined}
+                        ? 'This buyer has opted out of contact.'
+                        : (passed ? 'This buyer passed. Record a new response first.'
+                                  : undefined)}
                       aria-label={`Select ${row.buyer_name || 'this buyer'}`}
                       onClick={onSelect}>Select</button>
             )}
