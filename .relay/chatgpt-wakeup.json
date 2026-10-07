@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "ai-workforce-heartbeat-visibility-20261007-1049",
-  "parent_run_id": "ai-workforce-heartbeat-checkpoints-20261007-1043",
-  "project": "AI Workforce \u2014 observable heartbeat transactions and exit assessment",
+  "relay_run_id": "ai-workforce-narrow-defect-sweep-20261007-1055",
+  "parent_run_id": "ai-workforce-heartbeat-visibility-20261007-1049",
+  "project": "AI Workforce \u2014 final narrow source defect sweep",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37647064508",
-  "timestamp_ct": "2026-10-07 10:53 CT",
+  "actions_run_id": "37647881612",
+  "timestamp_ct": "2026-10-07 10:57 CT",
   "issue": 1,
-  "status_comment_id": 6041572020
+  "status_comment_id": 6041637932
 }
