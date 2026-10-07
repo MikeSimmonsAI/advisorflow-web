@@ -19,7 +19,7 @@
  *   GET  /ai-workforce-intelligence/quality
  *   POST /ai-workforce-intelligence/employees/{deploymentId}/pause|resume
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
@@ -51,8 +51,12 @@ export default function AIWorkforceEmployee () {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
+  const busyRef = useRef(false)
+  const loadSeq = useRef(0)
+  const cardRef = useRef(null)
 
   const load = useCallback(async () => {
+    const token = ++loadSeq.current
     setLoading(true); setErr('')
     try {
       const [a, b, c] = await Promise.all([
@@ -60,13 +64,18 @@ export default function AIWorkforceEmployee () {
         api.get(`/ai-workforce-intelligence/attention?employee_id=${employeeId}`),
         api.get('/ai-workforce-intelligence/quality'),
       ])
+      if (token !== loadSeq.current) return  // newer load (or employee) wins
+      cardRef.current = a
       setCard(a)
       setAttention(b.items || [])
       setQuality((c.employees || {})[employeeId] || null)
     } catch (e) {
-      setErr(e?.message || 'Could not load this AI employee.')
+      if (token !== loadSeq.current) return
+      // last-good card is kept on screen; say so rather than blanking it
+      setErr((e?.message || 'Could not load this AI employee.')
+        + (cardRef.current ? ' Showing the last information loaded; it may be out of date.' : ''))
     } finally {
-      setLoading(false)
+      if (token === loadSeq.current) setLoading(false)
     }
   }, [employeeId])
   useEffect(() => { load() }, [load])
@@ -78,6 +87,8 @@ export default function AIWorkforceEmployee () {
              + 'paused or resumed from here.')
       return
     }
+    if (busyRef.current) return  // synchronous duplicate protection
+    busyRef.current = true
     setBusy(true); setErr('')
     try {
       const res = await api.post(
@@ -86,11 +97,12 @@ export default function AIWorkforceEmployee () {
       if (res?.result?.state && what === 'resume') {
         window.alert(
           'Resumed. Its entitlement and readiness were re-checked; it is now '
-          + `'${res.state}'.`)
+          + `'${res.result.state}'.`)
       }
     } catch (e) {
       setErr(e?.detail?.message || e?.message || 'That did not go through.')
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
@@ -122,7 +134,7 @@ export default function AIWorkforceEmployee () {
       }
     >
       {err ? (
-        <div className="panel panel--error">
+        <div className="panel panel--error" role="alert">
           {err}{!c ? ' It may have been removed, or it belongs to another workspace.' : ''}
         </div>
       ) : null}

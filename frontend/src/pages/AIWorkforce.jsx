@@ -29,9 +29,10 @@
  *   PATCH  /ai-workforce/deployments/:id/configuration
  *   POST   /ai-workforce/deployments/:id/activation | pause | resume | retire
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
+import { applyRefresh, createActionGuard, createSequencer, supportCode } from '../utils/workforceTruth'
 import '../styles/shared.css'
 import '../styles/aiWorkforce.css'
 
@@ -232,29 +233,47 @@ export default function AIWorkforce () {
   const [detail, setDetail] = useState(null)
   const [answers, setAnswers] = useState({})
   const [problems, setProblems] = useState([])
+  const [stale, setStale] = useState(false)
+  const [code, setCode] = useState(null)
+  // Synchronous guards live in refs: React state is not updated until the next
+  // render, so a double click would otherwise start the action twice.
+  const guard = useRef(createActionGuard()).current
+  const loadSeq = useRef(createSequencer()).current
+  const openSeq = useRef(createSequencer()).current
+  const lastGood = useRef(null)
 
   const load = useCallback(async () => {
-    setLoading(true); setErr('')
+    const token = loadSeq.begin()
+    setLoading(true); setErr(''); setCode(null)
+    let outcome
     try {
-      setData(await api.get('/ai-workforce/overview'))
+      outcome = { ok: true, data: await api.get('/ai-workforce/overview'), at: Date.now() }
     } catch (e) {
-      setErr(e?.message || 'Could not load your AI workforce.')
-    } finally {
-      setLoading(false)
+      outcome = { ok: false, message: e?.message || 'Could not load your AI workforce.', code: supportCode(e) }
     }
-  }, [])
+    if (!loadSeq.isCurrent(token)) return  // a newer refresh owns the screen
+    // A failed refresh keeps the last good data and marks it possibly stale.
+    const next = applyRefresh(lastGood.current, outcome)
+    lastGood.current = next
+    setData(next.data); setStale(next.stale)
+    setErr(next.error); setCode(outcome.code || null)
+    setLoading(false)
+  }, [loadSeq])
   useEffect(() => { load() }, [load])
 
   const openDeployment = useCallback(async (id) => {
+    const token = openSeq.begin()
     setOpenId(id); setDetail(null); setProblems([]); setErr('')
     try {
       const d = await api.get(`/ai-workforce/deployments/${id}`)
+      if (!openSeq.isCurrent(token)) return  // stale response: user opened another
       setDetail(d)
       setAnswers(d.configuration || {})
     } catch (e) {
+      if (!openSeq.isCurrent(token)) return
       setErr(e?.message || 'Could not open that AI employee.')
     }
-  }, [])
+  }, [openSeq])
 
   const workforce = data?.workforce || []
   const available = useMemo(
@@ -263,6 +282,8 @@ export default function AIWorkforce () {
     () => (data?.available || []).filter(c => !c.can_hire && !c.held), [data])
 
   async function hire (templateKey, name) {
+    const lock = `hire:${templateKey}`
+    if (!guard.tryAcquire(lock)) return
     setBusy(true); setErr('')
     try {
       // THE IDEMPOTENCY KEY IS THE BROWSER'S. A retry after a dropped
@@ -277,12 +298,13 @@ export default function AIWorkforce () {
     } catch (e) {
       setErr(readError(e, 'That AI employee could not be added.'))
     } finally {
+      guard.release(lock)
       setBusy(false)
     }
   }
 
   async function saveConfiguration () {
-    if (!openId) return
+    if (!openId || !guard.tryAcquire('save')) return
     setBusy(true); setErr(''); setProblems([])
     try {
       const out = await api.patch(
@@ -299,12 +321,13 @@ export default function AIWorkforce () {
       if (e?.detail?.problems) setProblems(e.detail.problems)
       setErr(readError(e, 'That setup could not be saved.'))
     } finally {
+      guard.release('save')
       setBusy(false)
     }
   }
 
   async function act (path, body) {
-    if (!openId) return
+    if (!openId || !guard.tryAcquire(`act:${path}`)) return
     setBusy(true); setErr('')
     try {
       await api.post(`/ai-workforce/deployments/${openId}/${path}`, body || {})
@@ -313,6 +336,7 @@ export default function AIWorkforce () {
     } catch (e) {
       setErr(readError(e, 'That could not be done.'))
     } finally {
+      guard.release(`act:${path}`)
       setBusy(false)
     }
   }
@@ -333,12 +357,25 @@ export default function AIWorkforce () {
       action={<button className="btn btn--secondary btn--sm" onClick={load} disabled={loading}>Refresh</button>}
     >
       {err && (
-        <div className="panel panel--error">
-          <p style={{ margin: 0, color: 'var(--signal-red)', fontSize: 13 }}>{err}</p>
+        <div className="panel panel--error" role="alert">
+          <p style={{ margin: 0, color: 'var(--signal-red)', fontSize: 13 }}>
+            {err}{code ? ` (support code ${code})` : ''}
+          </p>
+          <button className="btn btn--secondary btn--sm" style={{ marginTop: 8 }}
+                  onClick={load} disabled={loading} autoFocus>
+            Try again
+          </button>
+        </div>
+      )}
+      {stale && (
+        <div className="panel" role="status" style={{ marginBottom: 12 }}>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
+            Showing the last information we loaded. It may be out of date because the latest refresh failed.
+          </p>
         </div>
       )}
 
-      <div className="panel" style={{ marginBottom: 18 }}>
+      <div className="panel" style={{ marginBottom: 18 }} role="status" aria-live="polite">
         <p style={{ margin: 0, fontSize: 14 }}>
           {data?.status_line || (loading ? 'Loading…' : '')}
         </p>

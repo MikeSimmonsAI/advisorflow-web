@@ -116,7 +116,9 @@ def _status_line(resolved, employees: List[Dict]) -> str:
         return ("Your AI team is watching and recording what it would do. "
                 "Nobody is contacted.")
     live = sum(1 for e in employees if e["running"])
-    return "%d of %d AI employees are working." % (live, len(employees))
+    # `running` is permission to run (activation state), not evidence that work
+    # is in progress, so the line must not claim they are "working".
+    return "%d of %d AI employees are switched on." % (live, len(employees))
 
 
 @router.get("/catalogue")
