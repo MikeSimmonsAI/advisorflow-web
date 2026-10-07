@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-disposition-queue-followup-20261007-0842",
-  "parent_run_id": "wholesale-offer-document-truth-retry-20261007-0835",
-  "project": "EvoSys Wholesale Overnight \u2014 disposition, queue, follow-up, and remaining action scoping",
-  "status": "BLOCKED",
+  "relay_run_id": "wholesale-queue-followup-resume-retry-20261007-0937",
+  "parent_run_id": "wholesale-disposition-queue-followup-20261007-0842",
+  "project": "EvoSys Wholesale Overnight \u2014 disposition, queue, and follow-up resume retry",
+  "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37630637144",
-  "timestamp_ct": "2026-10-07 08:44 CT",
+  "actions_run_id": "37638083011",
+  "timestamp_ct": "2026-10-07 09:38 CT",
   "issue": 1,
-  "status_comment_id": 6039282977
+  "status_comment_id": 6040305788
 }
