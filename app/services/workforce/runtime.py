@@ -122,7 +122,10 @@ def _watch_rollback(db: Session, run) -> None:
                     pass
 
         def _on_rollback(session, *_a):
-            _done(session)
+            # Mid-run rollback: keep listening so a later rollback after a
+            # 'completed' finalize is still corrected (commit removes us).
+            if getattr(run, "status", None) != "running":
+                _done(session)
             run_telemetry.correct_after_rollback(run)
 
         def _on_commit(session, *_a):

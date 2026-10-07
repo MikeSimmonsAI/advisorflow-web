@@ -88,6 +88,7 @@ class RunHandle:
         self.ended_at = None
         self.last_heartbeat_at = started_at
         self.current_stage = "started"
+        self.caller_rolled_back = False
         self.iterations = 0
         self.tool_calls = 0
         self.denied_tool_calls = 0
@@ -212,6 +213,11 @@ def finalize(h: RunHandle, status: str, *, summary: str = "",
     t = _now()
     if h.last_heartbeat_at and t < h.last_heartbeat_at:
         t = h.last_heartbeat_at
+    if status == "completed" and h.caller_rolled_back:
+        # The caller rolled back while the run was live: the work did not
+        # persist, so 'completed' would be a false success claim.
+        status = "failed"
+        error = "caller transaction rolled back; work not persisted"
     vals = _counter_values(h)
     vals.update(status=status, ended_at=t, last_heartbeat_at=t,
                 current_stage=status, duration_ms=duration_ms,
@@ -229,7 +235,13 @@ def correct_after_rollback(h: RunHandle) -> bool:
     """The caller's transaction rolled back AFTER this run was finalized as
     completed: the business work did not persist, so 'completed' is false.
     Narrow, explicit supersede: only completed -> failed, same org."""
-    if h is None or h.status != "completed":
+    if h is None:
+        return False
+    if h.status == "running":
+        # Rolled back mid-run: remember it so finalize cannot claim completed.
+        h.caller_rolled_back = True
+        return False
+    if h.status != "completed":
         return False
     t = _now()
     ok = _guarded_update(

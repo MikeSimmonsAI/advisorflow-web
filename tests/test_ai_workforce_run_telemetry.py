@@ -248,7 +248,6 @@ class Finalize(Base):
 
     def test_rollback_correction_only_completed_to_failed(self):
         h = RT.start(**self.kw)
-        self.assertFalse(RT.correct_after_rollback(h))     # still running
         RT.finalize(h, "completed")
         self.assertTrue(RT.correct_after_rollback(h))
         self.assertEqual(self.row(h)["status"], "failed")
@@ -257,6 +256,24 @@ class Finalize(Base):
         RT.finalize(h2, "failed", error="real")
         self.assertFalse(RT.correct_after_rollback(h2))
         self.assertEqual(self.row(h2)["error"], "real")
+
+    def test_midrun_rollback_cannot_finalize_completed(self):
+        h = RT.start(**self.kw)
+        self.assertFalse(RT.correct_after_rollback(h))     # rolled back live
+        self.assertTrue(h.caller_rolled_back)
+        self.assertTrue(RT.finalize(h, "completed", summary="done"))
+        r = self.row(h)
+        self.assertEqual((r["status"], r["current_stage"]), ("failed", "failed"))
+        self.assertIn("rolled back", r["error"])
+
+    def test_midrun_rollback_does_not_alter_failed_or_clean_runs(self):
+        h = RT.start(**self.kw)
+        RT.correct_after_rollback(h)
+        RT.finalize(h, "failed", error="real")
+        self.assertEqual(self.row(h)["error"], "real")
+        h2 = RT.start(**self.kw)
+        RT.finalize(h2, "completed")
+        self.assertEqual(self.row(h2)["status"], "completed")
 
 
 class NoCallerCoupling(Base):
