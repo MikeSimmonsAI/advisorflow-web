@@ -28,8 +28,10 @@ def check(label, cond):
 
 
 rows = [
-    {"phone": "(555) 010-0101", "email": "A.Seller@Example.com ", "addr": "12 Oak St.", "name": "Jane  Doe"},
-    {"phone": "555-010-0102", "email": "b@example.com", "addr": "9 Elm Ave", "name": "Bob Roe"},
+    # Valid NANP numbers: 555-010-xxxx normalizes to None (invalid area code),
+    # which made the phone checks below vacuous (None == None).
+    {"phone": "(212) 555-0101", "email": "A.Seller@Example.com ", "addr": "12 Oak St.", "name": "Jane  Doe"},
+    {"phone": "212-555-0102", "email": "b@example.com", "addr": "9 Elm Ave", "name": "Bob Roe"},
 ]
 
 
@@ -42,7 +44,9 @@ second = [keys(dict(r)) for r in rows]
 check("re-import yields identical normalized keys", first == second)
 check("distinct rows yield distinct keys", first[0] != first[1])
 check("exact re-import adds zero new unique keys", len(set(first + second)) == len(first))
-check("formatting variants of one phone match", N.phone("555.010.0101")[0] == N.phone("(555) 010-0101")[0])
+check("fixture phones are real keys (non-vacuous)", all(k[0] for k in first))
+check("formatting variants of one phone match",
+      N.phone("212.555.0101")[0] is not None and N.phone("212.555.0101")[0] == N.phone("(212) 555-0101")[0])
 check("email case/whitespace variants match", N.email(" X@Y.COM ")[0] == N.email("x@y.com")[0])
 check("blank phone is not a key", N.phone("")[0] is None)
 
