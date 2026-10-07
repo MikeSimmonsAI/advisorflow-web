@@ -277,6 +277,16 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
       const data = await res.json()
       detail = data.detail || detail
     } catch {}
+    // The server refused the SELECTED workspace (membership removed or never
+    // held). Drop the selection and everything cached for it so no stale id is
+    // re-sent and no prior-workspace state stays on screen; the old tenant is
+    // not restored - the caller lands on /auth/my-contexts to choose again.
+    if (res.status === 403 && detail === 'That workspace is not available to this account.') {
+      clearBranding()
+      clearWorkspaceLocation()
+      resetInFlightGets()
+      clearWorkspaceContext()
+    }
     // `detail` is a string on almost every route, but FastAPI lets it be an
     // object and a few routes use that to return structured refusals - the
     // Checkpoint 6 launch route returns a message plus a list of warnings.

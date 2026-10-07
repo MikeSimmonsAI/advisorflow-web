@@ -204,14 +204,13 @@ def test_a_member_of_one_customer_cannot_borrow_anothers_entitlement(
     """Membership in B (feature OFF), header asserting A (feature ON).
 
     The security property is that A's entitlement is never evaluated for this
-    caller. The unauthorized selection is discarded by `workspace_access`, so
-    the request resolves to the caller's own tenant and is refused on B's
-    allow-list — it does not become an A request.
+    caller. The unauthorized selection now fails closed in get_current_user
+    (403) instead of silently resolving to the caller's own tenant.
     """
     u = _member(db_session, _user(db_session, role="org_admin",
                                   org_id=world["b"].id), world["b"])
     r = client.get(GATED, headers=_h(db_session, u, workspace=world["a"].id))
-    assert r.status_code == 402, (
+    assert r.status_code == 403, (
         "an unauthorized selection reached another customer's entitlement: %s"
         % r.text)
 

@@ -361,6 +361,27 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             # before any mutation, so nothing here is written back.
             user.organization_id = None
 
+    # ── SELECTED WORKSPACE MUST BE HELD, OR THE REQUEST FAILS CLOSED ─────────
+    # An X-Workspace-Id the caller holds no membership in (never held, or
+    # removed since) used to be discarded silently, answering the request from
+    # the home tenant while the client still believed it was in the target.
+    # /auth/* stays reachable so a client can re-ask which workspaces it holds
+    # and recover. god uses X-Org-Override, not this header.
+    if user.role != "god_admin" and not request.url.path.startswith("/auth/"):
+        _requested_ws = request.headers.get("X-Workspace-Id")
+        if _requested_ws:
+            from app.services import workspace_access as _wa
+            from app.services import workspace_selection as _ws
+            if _ws.selection_verdict(
+                    _requested_ws, _wa.workspace_org_ids(user, db),
+                    getattr(user, "organization_id", None)) == _ws.DENIED:
+                _log.warning(
+                    "AUTHZ DENIED user=%s endpoint=%s workspace=%s reason=%s",
+                    user.id, request.url.path, _requested_ws,
+                    "X-Workspace-Id names a workspace the caller does not hold")
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                    detail=_ws.DENIED_DETAIL)
+
     # ── EXECUTIVE OBSERVATION CONTEXT ────────────────────────────────────────
     # A brand_executive may send X-Executive-Observe to enter a customer org's
     # data in strict read-only mode.
