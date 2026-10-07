@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "atlantis-activity-label-exit-20261007-1829",
-  "parent_run_id": "atlantis-conversation-visibility-20261007-1826",
-  "project": "Atlantis Light & Power \u2014 channel-accurate activity labels and source exit",
+  "relay_run_id": "countryside-intake-conversation-20261007-1830",
+  "parent_run_id": "atlantis-activity-label-exit-20261007-1829",
+  "project": "CountrySide \u2014 tenant-safe intake-to-conversation closure",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37702278175",
-  "timestamp_ct": "2026-10-07 18:28 CT",
+  "actions_run_id": "37702593532",
+  "timestamp_ct": "2026-10-07 18:31 CT",
   "issue": 1,
-  "status_comment_id": 6048924518
+  "status_comment_id": 6048962064
 }
