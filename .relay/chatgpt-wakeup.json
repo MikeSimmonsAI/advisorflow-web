@@ -1,12 +1,11 @@
 {
-  "relay_run_id": "wholesale-board-responsive-state-proof-20261007-0526",
-  "parent_run_id": "wholesale-selection-state-consistency-20261007-0432",
+  "relay_run_id": "wholesale-offer-docs-settings-ux-20261007-0633",
+  "parent_run_id": "wholesale-board-responsive-state-proof-20261007-0526",
   "project": "-",
   "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "timestamp_ct": "2026-10-07T11:22:01.502095+00:00",
+  "actions_run_id": "37614982792",
+  "timestamp_ct": "2026-10-07 06:36 CT",
   "issue": 1,
-  "status_comment_id": 6036039909,
-  "watchdog_retry": true,
-  "watchdog_retry_utc": "2026-10-07T11:22:01.502108+00:00"
+  "status_comment_id": 6037079799
 }
