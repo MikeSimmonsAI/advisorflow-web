@@ -97,3 +97,114 @@ export function findById(rows, id) {
   if (!rows || id === null || id === undefined) return null
   return rows.find((r) => r.id === id) || null
 }
+
+/* ── Single-record loads (Command's board) ────────────────────────────────────
+ * Same rules as the list: newest request wins, a failed refresh keeps the last
+ * good data and marks it possibly out of date. */
+export function initialRecord() {
+  return { data: null, error: '', supportCode: '', loading: true, latest: 0, failedRefresh: false }
+}
+export function recordStarted(state) {
+  return { ...state, latest: state.latest + 1, loading: true, error: '', supportCode: '', failedRefresh: false }
+}
+export function recordSucceeded(state, gen, data) {
+  if (gen !== state.latest) return state
+  return { ...state, data: data ?? null, loading: false, error: '', supportCode: '', failedRefresh: false }
+}
+export function recordFailed(state, gen, message, code) {
+  if (gen !== state.latest) return state
+  return { ...state, loading: false, error: message || 'Something went wrong.',
+           supportCode: code || '', failedRefresh: state.data !== null }
+}
+export function recordView(state) {
+  if (state.data === null) return state.loading ? 'loading' : 'error'
+  if (state.loading) return 'refreshing'
+  return state.failedRefresh ? 'stale' : 'ready'
+}
+
+/* Deterministic order: primary key, then id, so equal rows never swap places.
+ * Rows with no value for the key always sort last. */
+export function sortByKeyThenId(rows, keyFn, dir = 1, idFn = (r) => r.id) {
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0)
+  const blank = (k) => k === null || k === undefined || k === ''
+  return [...(rows || [])].sort((a, b) => {
+    const ka = keyFn(a), kb = keyFn(b)
+    if (blank(ka) !== blank(kb)) return blank(ka) ? 1 : -1
+    return (blank(ka) ? 0 : dir * cmp(ka, kb)) || cmp(String(idFn(a)), String(idFn(b)))
+  })
+}
+
+/* ── Exceptions ───────────────────────────────────────────────────────────── */
+const EXC_STATUS = { open: 'Open', assigned: 'Assigned', in_progress: 'In progress',
+  escalated: 'Escalated to owner', resolved: 'Resolved', unable_to_verify: 'Unable to verify',
+  needs_more_info: 'Needs more info' }
+/* Operator wording for an exception status; an unrecognised one reads "Status unknown", not the raw enum. */
+export function exceptionStatusLabel(s) {
+  return EXC_STATUS[s] || 'Status unknown'
+}
+/* Anything but Complete needs a note; say so before the round trip. */
+export function resolveBlockedReason(outcome, note) {
+  if (outcome === 'complete') return ''
+  return String(note ?? '').trim() ? '' : 'Add a note first — it is required for this outcome.'
+}
+/* The sweep result: an unreadable response is not "nothing new". */
+export function sweepSummary(r) {
+  const raised = r && typeof r.raised === 'object' && r.raised ? r.raised : null
+  if (!raised) return 'The check finished, but the result was not readable. Refresh the list to see what is there.'
+  const n = Object.values(raised).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0)
+  return n ? `${n} new exception${n === 1 ? '' : 's'} raised.` : 'Nothing new — the queue is up to date.'
+}
+
+/* ── Funding partners ─────────────────────────────────────────────────────── */
+const PARTNER_NUM = [['min_loan', 'Min loan', 0, null], ['max_loan', 'Max loan', 0, null],
+  ['max_ltv_pct', 'Max LTV %', 0, 100], ['max_ltc_pct', 'Max LTC %', 0, 100],
+  ['min_credit_score', 'Min credit score', 300, 850], ['typical_close_days', 'Typical close (days)', 0, null]]
+const hasText = (v) => String(v ?? '').trim() !== ''
+/* Field-level problems for the partner form: { field: message }. Blank numbers are fine (sent as
+ * null); text that is not a number is rejected, not silently saved as NaN. */
+export function validatePartner(f) {
+  const errs = {}
+  if (!hasText(f.name)) errs.name = 'Enter the company or name.'
+  for (const [k, label, lo, hi] of PARTNER_NUM) {
+    if (!hasText(f[k])) continue
+    const n = Number(String(f[k]).trim())
+    if (!Number.isFinite(n)) errs[k] = `${label} must be a number.`
+    else if (n < lo || (hi !== null && n > hi))
+      errs[k] = hi === null ? `${label} cannot be below ${lo}.` : `${label} must be between ${lo} and ${hi}.`
+  }
+  if (!errs.min_loan && !errs.max_loan && hasText(f.min_loan) && hasText(f.max_loan) && Number(f.min_loan) > Number(f.max_loan))
+    errs.max_loan = 'Max loan is below min loan.'
+  return errs
+}
+/* Why Save is unavailable, or ''. */
+export function partnerSaveBlockedReason(f, busy) {
+  if (busy) return 'A save is already in progress.'
+  return Object.values(validatePartner(f))[0] || ''
+}
+/* Track record, honestly: no record object = unknown; zero submissions = none sent. */
+export function trackRecordText(t) {
+  if (!t || typeof t !== 'object') return 'Track record not available'
+  if (!t.deals_submitted) return 'no deals sent yet'
+  return `${knownCount(t.deals_submitted)} sent · ${knownCount(t.approvals)} approved · ${knownCount(t.funded)} funded · ${knownCount(t.declines)} declined`
+}
+
+/* ── Command: per-deal rooms ──────────────────────────────────────────────────
+ * rooms[id] is a room object (loaded), null (that fetch failed), or absent (not yet loaded). */
+export function roomsLoadState(rooms, ids) {
+  let failed = 0, pending = 0
+  for (const id of ids) {
+    if (!(id in rooms)) pending++
+    else if (rooms[id] === null) failed++
+  }
+  return { failed, pending, loaded: ids.length - failed - pending, complete: failed === 0 && pending === 0 }
+}
+/* Total across rooms; unknown ('—') when any room failed or is pending, never a partial sum
+ * shown as a total. No deals is a genuine 0. */
+export function roomTotal(rooms, ids, countFn) {
+  if (!ids.length) return 0
+  if (!roomsLoadState(rooms, ids).complete) return '—'
+  return ids.reduce((n, id) => n + countFn(rooms[id]), 0)
+}
+export function roomIdsToLoad(deals, max = 10) {
+  return (deals || []).slice(0, max).map((d) => d.deal_id)
+}

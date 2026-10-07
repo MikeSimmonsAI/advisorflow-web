@@ -92,7 +92,7 @@ def list_partners(include_inactive: bool = False, db: Session = Depends(get_db),
     q = db.query(WholesaleFundingPartner).filter(WholesaleFundingPartner.organization_id == org_id)
     if not include_inactive:
         q = q.filter(WholesaleFundingPartner.is_active.is_(True))
-    rows = q.order_by(WholesaleFundingPartner.name).all()
+    rows = q.order_by(WholesaleFundingPartner.name, WholesaleFundingPartner.id).all()
     stats = FD.partner_stats(db, org_id, [p.id for p in rows])
     return {"partners": [FD.partner_json(p, stats.get(p.id)) for p in rows], "disclaimer": FD.DISCLAIMER}
 

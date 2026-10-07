@@ -20,10 +20,14 @@
  * database, never production) sandbox records are included by default -
  * reviewing sandbox data is the point there - and the toggle says so.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { errText } from './wsShared'
+import {
+  initialRecord, knownCount, recordFailed, recordStarted, recordSucceeded, recordView, roomIdsToLoad,
+  roomsLoadState, roomTotal, sortByKeyThenId, supportCode,
+} from './wsListState'
 import { AuthImage } from './wsFiles'
 import MorningCommand from './wsMorning'
 import {
@@ -74,37 +78,74 @@ export default function WholesaleCommand({ focus }) {
   const navigate = useNavigate()
   const env = useEnvironment()
   const [includeTest, setIncludeTest] = useState(null)
-  const [board, setBoard] = useState(null)
-  const [ops, setOps] = useState(null)
-  const [rooms, setRooms] = useState({})
-  const [error, setError] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [rec, setRec] = useState(initialRecord)
+  const [rooms, setRooms] = useState({})              // deal id -> last good room
+  const [roomFailed, setRoomFailed] = useState({})    // deal id -> true when the latest fetch failed
+  const [roomsTick, setRoomsTick] = useState(0)
   const [tab, setTab] = useState('pipeline')
+  const latest = useRef(0)                            // mirrors rec.latest so a response can be checked synchronously
 
   // Local review includes sandbox records by default; production never does.
   useEffect(() => { if (env && includeTest === null) setIncludeTest(!!env.local_review) }, [env, includeTest])
 
   const load = useCallback(async () => {
     if (includeTest === null) return
-    setLoading(true); setError(null)
+    const gen = latest.current + 1
+    latest.current = gen
+    setRec((prev) => recordStarted({ ...prev, latest: gen - 1 }))
     try {
       const q = includeTest ? '?include_test=true' : ''
       const [counts, work] = await Promise.all([
         api.get('/wholesale/dashboard' + q), api.get('/wholesale/operating-board' + q)])
-      setBoard(counts); setOps(work)
-    } catch (e) { setError(errText(e)) } finally { setLoading(false) }
+      if (gen === latest.current) setRec((prev) => recordSucceeded(prev, gen, { board: counts, ops: work }))
+    } catch (e) {
+      if (gen === latest.current) setRec((prev) => recordFailed(prev, gen, errText(e), supportCode(e)))
+    }
   }, [includeTest])
   useEffect(() => { load() }, [load])
 
+  // Sandbox on/off is a different dataset: do not show one's figures under the other's label.
+  function changeSandbox(v) {
+    setRec((prev) => ({ ...initialRecord(), latest: prev.latest }))
+    setRooms({}); setRoomFailed({})
+    setIncludeTest(v)
+  }
+
+  const view = recordView(rec)
+  const board = rec.data ? rec.data.board : null
+  const rawOps = rec.data ? rec.data.ops : null
+  const ops = useMemo(() => (rawOps ? {
+    ...rawOps,
+    active_deals: rawOps.active_deals || [], needs_attention: rawOps.needs_attention || [],
+    upcoming_closings: rawOps.upcoming_closings || [], headline: rawOps.headline || {},
+  } : null), [rawOps])
+  const loading = view === 'refreshing'
+
   const dispoDeals = useMemo(() => (ops ? ops.active_deals.filter((d) => DISPO_STAGES.includes(d.stage)) : []), [ops])
-  // Dispositions reads each deal's room (matches + outreach). At most ten.
+  const roomIds = useMemo(() => roomIdsToLoad(dispoDeals), [dispoDeals])
+  // Dispositions reads each deal's room (matches + outreach). At most ten. A room that fails to
+  // load keeps its last good copy (flagged) or reads as unknown; it is never counted as empty.
   useEffect(() => {
-    if (focus !== 'dispositions' || !dispoDeals.length) return
+    if (focus !== 'dispositions' || !roomIds.length) return
     let alive = true
-    Promise.all(dispoDeals.slice(0, 10).map((d) => api.get(`/wholesale/deals/${d.deal_id}`).then((r) => [d.deal_id, r]).catch(() => [d.deal_id, null])))
-      .then((pairs) => { if (alive) setRooms(Object.fromEntries(pairs)) })
+    Promise.all(roomIds.map((id) => api.get(`/wholesale/deals/${id}`).then((r) => [id, r]).catch(() => [id, undefined])))
+      .then((pairs) => {
+        if (!alive) return
+        setRooms((prev) => {
+          const next = { ...prev }
+          pairs.forEach(([id, r]) => { if (r) next[id] = r })
+          return next
+        })
+        setRoomFailed(Object.fromEntries(pairs.filter(([, r]) => !r).map(([id]) => [id, true])))
+      })
     return () => { alive = false }
-  }, [focus, dispoDeals])
+  }, [focus, roomIds, roomsTick])
+  // What the totals may rely on: a good copy if there is one, null if the fetch failed with none.
+  const roomView = useMemo(() => {
+    const o = {}
+    roomIds.forEach((id) => { if (rooms[id]) o[id] = rooms[id]; else if (roomFailed[id]) o[id] = null })
+    return o
+  }, [rooms, roomFailed, roomIds])
 
   const world = 'operations'
   const title = focus === 'closing' ? 'Contracts & Closing' : focus === 'dispositions' ? 'Dispositions' : 'Deal Operations'
@@ -113,14 +154,38 @@ export default function WholesaleCommand({ focus }) {
       : 'What is in motion, what needs you, what is closing, and the money it is expected to bring.'
   const sandboxToggle = (
     <label className="evo-btn evo-btn--ghost" style={{ cursor: 'pointer' }} title="Sandbox records are excluded from a real workspace's numbers unless you include them.">
-      <input type="checkbox" checked={!!includeTest} onChange={(e) => setIncludeTest(e.target.checked)} style={{ margin: 0 }} />
+      <input type="checkbox" checked={!!includeTest} onChange={(e) => changeSandbox(e.target.checked)} style={{ margin: 0 }} />
       Include sandbox records
     </label>
   )
 
   if (!ops) {
-    return <EvoApp world={world}>{error ? <Alert>{error}</Alert> : <PageSkeleton />}</EvoApp>
+    if (view === 'error') {
+      return (
+        <EvoApp world={world}>
+          <div className="evo-alert evo-alert--warn" role="alert">
+            <p style={{ margin: '0 0 8px' }}>Deal operations could not be loaded: {rec.error}
+              {rec.supportCode ? <> (support code {rec.supportCode})</> : null}. Nothing has been changed.</p>
+            <button type="button" className="evo-btn evo-btn--secondary" onClick={load} autoFocus>Try again</button>
+          </div>
+        </EvoApp>
+      )
+    }
+    return <EvoApp world={world}><PageSkeleton /></EvoApp>
   }
+  const recovery = (
+    <>
+      {view === 'stale' ? (
+        <div className="evo-alert evo-alert--warn" role="alert">
+          Deal operations could not be refreshed: {rec.error}
+          {rec.supportCode ? <> (support code {rec.supportCode})</> : null}.
+          {' '}The figures and deals below were loaded earlier and may be out of date.
+          {' '}<button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={load}>Try again</button>
+        </div>
+      ) : null}
+      <p className="evo-sr" role="status">{loading ? 'Refreshing deal operations.' : ''}</p>
+    </>
+  )
 
   const h = ops.headline
   const HERO = {
@@ -134,16 +199,21 @@ export default function WholesaleCommand({ focus }) {
   const head = (
     <>
       <Hero scene={HERO.scene} eyebrow={HERO.eyebrow} title={HERO.title} sub={HERO.sub} quote={HERO.quote}
-            meta={[{ label: <>As of <b>{new Date(ops.as_of).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</b></> },
+            meta={[ops.as_of ? { label: <>As of <b>{new Date(ops.as_of).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</b></> } : null,
                    ops.include_test ? { label: 'Including sandbox records', tone: 'paused' } : null]}
             actions={<Link className="evo-btn evo-btn--primary" to="/wholesale/properties?add=1">+ New Deal</Link>} />
       <div className="evo-toolbar evo-toolbar--end">{sandboxToggle}</div>
     </>
   )
 
-  if (focus === 'closing') return <EvoApp world={world}>{head}<Alert>{error}</Alert><ClosingView ops={ops} navigate={navigate} /></EvoApp>
+  if (focus === 'closing') return <EvoApp world={world}>{head}{recovery}<ClosingView ops={ops} navigate={navigate} /></EvoApp>
   if (focus === 'dispositions') {
-    return <EvoApp world={world}>{head}<Alert>{error}</Alert><DispositionsView deals={dispoDeals} rooms={rooms} navigate={navigate} /></EvoApp>
+    return (
+      <EvoApp world={world}>{head}{recovery}
+        <DispositionsView deals={dispoDeals} rooms={rooms} roomView={roomView} roomFailed={roomFailed} roomIds={roomIds}
+                          onRetry={() => setRoomsTick((n) => n + 1)} navigate={navigate} />
+      </EvoApp>
+    )
   }
 
   const stages = ops.pipeline || []
@@ -152,16 +222,16 @@ export default function WholesaleCommand({ focus }) {
   return (
     <EvoApp world={world}>
       {head}
-      <Alert>{error}</Alert>
+      {recovery}
       <MorningCommand includeTest={!!includeTest} dealSteps={ops ? ops.attention_total : 0} />
       <Metrics label="Deal operations">
         <Metric label="Active deals" value={h.active_deals} tone="primary" />
         <Metric label="Under contract" value={h.under_contract} tone="success" />
         <Metric label="Awaiting approval" value={h.awaiting_approval} tone="warning" attention={h.awaiting_approval > 0} />
         <Metric label="Closing in 30 days" value={h.closing_30_days} tone="info" />
-        <Metric label="Expected pipeline value" value={moneyK(h.pipeline_value)} tone="primary"
-                sub={`Fee expected on ${h.active_deals} open deal${h.active_deals === 1 ? '' : 's'} · not revenue`} />
-        <Metric label="Fees collected" value={moneyK(h.fees_collected)} tone="success" sub="Recorded by a person at close" />
+        <Metric label="Expected pipeline value" value={h.pipeline_value == null ? null : moneyK(h.pipeline_value)} tone="primary"
+                sub={`Fee expected on ${knownCount(h.active_deals)} open deal${h.active_deals === 1 ? '' : 's'} · not revenue`} />
+        <Metric label="Fees collected" value={h.fees_collected == null ? null : moneyK(h.fees_collected)} tone="success" sub="Recorded by a person at close" />
       </Metrics>
 
       <div className="evo-cols">
@@ -222,7 +292,7 @@ export default function WholesaleCommand({ focus }) {
                           const st = byKey[k]
                           return (
                             <Link key={k} className={`evo-stage${st.count ? '' : ' is-empty'}`} to={`/wholesale/properties?stage=${k}`}>
-                              <span className="evo-stage__n">{st.count}</span>
+                              <span className="evo-stage__n">{knownCount(st.count)}</span>
                               <span className="evo-stage__l">{st.label}</span>
                               <span className="evo-stage__v">{st.value ? moneyK(st.value) : '—'}</span>
                             </Link>
@@ -317,7 +387,6 @@ export default function WholesaleCommand({ focus }) {
           ) : null}
         </aside>
       </div>
-      {loading ? <span className="evo-sr" role="status">Refreshing</span> : null}
     </EvoApp>
   )
 }
@@ -333,18 +402,21 @@ const CLOSING_TABS = [
 
 function ClosingView({ ops, navigate }) {
   const [tab, setTab] = useState('all')
-  const inContract = ops.active_deals.filter((d) => CLOSING_STAGES.includes(d.stage))
-    .sort((a, b) => (a.closing_date || '9').localeCompare(b.closing_date || '9'))
+  const inContract = sortByKeyThenId(ops.active_deals.filter((d) => CLOSING_STAGES.includes(d.stage)),
+    (d) => d.closing_date, 1, (d) => d.deal_id)
   const deals = inContract.filter((d) => CLOSING_TABS.find(([k]) => k === tab)[2].includes(d.stage))
-  const fees = inContract.reduce((n, d) => n + (d.expected_fee || 0), 0)
+  // A deal with no recorded fee adds nothing and is said so; if none has one the total is unknown, not $0.
+  const priced = inContract.filter((d) => typeof d.expected_fee === 'number')
+  const fees = priced.length ? priced.reduce((n, d) => n + d.expected_fee, 0) : null
   return (
     <>
       <Metrics label="Contracts and closing">
         <Metric label="In contract" value={inContract.length} tone="success" />
         <Metric label="Closing in 30 days" value={ops.headline.closing_30_days} tone="info" />
         <Metric label="Awaiting approval" value={ops.headline.awaiting_approval} tone="warning" attention={ops.headline.awaiting_approval > 0} />
-        <Metric label="Assignment fees expected" value={money(fees)} tone="primary" sub="expected, not collected" />
-        <Metric label="Fees collected" value={money(ops.headline.fees_collected)} tone="success" />
+        <Metric label="Assignment fees expected" value={fees === null ? null : money(fees)} tone="primary"
+                sub={priced.length < inContract.length ? `expected, not collected · ${inContract.length - priced.length} deal(s) have no fee recorded` : 'expected, not collected'} />
+        <Metric label="Fees collected" value={ops.headline.fees_collected == null ? null : money(ops.headline.fees_collected)} tone="success" />
       </Metrics>
       <Panel flush>
         <div style={{ padding: '4px 16px 0' }}>
@@ -390,14 +462,36 @@ function ClosingView({ ops, navigate }) {
   )
 }
 
-function DispositionsView({ deals, rooms, navigate }) {
+function DispositionsView({ deals, rooms, roomView, roomFailed, roomIds, onRetry, navigate }) {
+  const st = roomsLoadState(roomView, roomIds)
+  const matchN = (r) => ((r && r.buyer_matches) || []).filter((m) => !m.disqualified).length
+  const outN = (r) => ((r && r.buyer_outreach) || []).length
+  const offerN = (r) => ((r && r.buyer_outreach) || []).filter((o) => o.offer_amount).length
+  const total = (fn) => roomTotal(roomView, roomIds, (r) => fn(r))
+  const failedStale = roomIds.filter((id) => roomFailed[id] && rooms[id]).length
   return (
     <>
+      {st.failed ? (
+        <div className="evo-alert evo-alert--warn" role="alert">
+          Buyer details could not be loaded for {st.failed} of {roomIds.length} deal{roomIds.length === 1 ? '' : 's'}, so the totals
+          below show — instead of a number.{' '}
+          <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={onRetry}>Try again</button>
+        </div>
+      ) : null}
+      {failedStale ? (
+        <div className="evo-alert evo-alert--warn" role="alert">
+          Buyer details for {failedStale} deal{failedStale === 1 ? '' : 's'} could not be refreshed and may be out of date.{' '}
+          <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={onRetry}>Try again</button>
+        </div>
+      ) : null}
+      {deals.length > roomIds.length ? (
+        <p className="evo-muted evo-small" role="note">Buyer figures cover the first {roomIds.length} of {deals.length} deals in disposition.</p>
+      ) : null}
       <Metrics label="Dispositions">
         <Metric label="In disposition" value={deals.length} tone="violet" />
-        <Metric label="Buyers matched" value={Object.values(rooms).reduce((n, r) => n + ((r && r.buyer_matches) || []).filter((m) => !m.disqualified).length, 0)} tone="info" />
-        <Metric label="Buyers contacted" value={Object.values(rooms).reduce((n, r) => n + ((r && r.buyer_outreach) || []).length, 0)} tone="primary" />
-        <Metric label="Buyer offers" value={Object.values(rooms).reduce((n, r) => n + ((r && r.buyer_outreach) || []).filter((o) => o.offer_amount).length, 0)} tone="success" />
+        <Metric label="Buyers matched" value={total(matchN)} tone="info" />
+        <Metric label="Buyers contacted" value={total(outN)} tone="primary" />
+        <Metric label="Buyer offers" value={total(offerN)} tone="success" />
       </Metrics>
       {!deals.length ? (
         <Panel><Empty title="Nothing in disposition" action={<Link className="evo-btn evo-btn--secondary" to="/wholesale/buyers">Cash buyers</Link>}>
@@ -406,6 +500,7 @@ function DispositionsView({ deals, rooms, navigate }) {
         <div className="evo-stack">
           {deals.map((d) => {
             const r = rooms[d.deal_id]
+            const failed = !!roomFailed[d.deal_id] && !r
             const matches = r ? (r.buyer_matches || []).filter((m) => !m.disqualified) : null
             const out = r ? r.buyer_outreach || [] : null
             const offers = out ? out.filter((o) => o.offer_amount) : null
@@ -419,9 +514,9 @@ function DispositionsView({ deals, rooms, navigate }) {
                   <Status status={d.stage} label={d.stage_label} />
                 </div>
                 <div className="evo-strat__results" role="group" aria-label="Disposition flow">
-                  <div><b>{matches ? matches.length : '…'}</b><span>Matched buyers</span></div>
-                  <div><b>{out ? out.length : '…'}</b><span>Contacted</span></div>
-                  <div className={offers && offers.length ? 'is-attention' : ''}><b>{offers ? offers.length : '…'}</b><span>Offers</span></div>
+                  <div><b>{matches ? matches.length : failed ? '—' : '…'}</b><span>Matched buyers</span></div>
+                  <div><b>{out ? out.length : failed ? '—' : '…'}</b><span>Contacted</span></div>
+                  <div className={offers && offers.length ? 'is-attention' : ''}><b>{offers ? offers.length : failed ? '—' : '…'}</b><span>Offers</span></div>
                   <div><b>{selected ? 'Yes' : d.buyer_price ? 'Priced' : '—'}</b><span>Buyer selected</span></div>
                 </div>
                 {matches && matches.length ? (

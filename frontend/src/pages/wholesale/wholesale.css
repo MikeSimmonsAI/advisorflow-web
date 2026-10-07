@@ -2022,3 +2022,28 @@
   .ws-page .ws-offer-entry .ws-input { width: 100%; box-sizing: border-box; }
   .ws-page .ws-actions--wrap { flex-wrap: wrap; }
 }
+
+/* ── Exceptions and Funding Partners: recovery, focus, narrow widths ─────────
+   Tokens only, so the light theme inherits its own contrast. */
+.ws-page .ws-exc__item { padding: 16px; list-style: none; margin-bottom: 12px; }
+.ws-page .ws-exc__head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ws-page .ws-exc__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.ws-page .ws-exc__actions button[disabled] { cursor: not-allowed; }
+.ws-page .ws-fp__wrap { overflow-x: auto; }
+.ws-page .ws-fp__actions { white-space: nowrap; }
+.ws-page .ws-fp__err { display: block; color: var(--signal-red, var(--text-primary)); font-weight: 600; font-size: 12px; margin-top: 2px; }
+.ws-page .ws-exc__item button:focus-visible,
+.ws-page .ws-exc__item select:focus-visible,
+.ws-page .ws-exc__item textarea:focus-visible,
+.ws-page .ws-fp button:focus-visible,
+.ws-page .ws-fp__form input:focus-visible,
+.ws-page .ws-fp__form textarea:focus-visible,
+.ws-page .ws-fp__form button:focus-visible,
+.ws-page .ws-tab:focus-visible {
+  outline: 2px solid var(--signal-blue); outline-offset: 2px;
+}
+@media (max-width: 720px) {
+  .ws-page .ws-exc__actions .btn { flex: 1 1 100%; }
+  .ws-page .ws-fp__actions { white-space: normal; }
+  .ws-page .ws-fp__form { grid-template-columns: 1fr; }
+}
