@@ -283,6 +283,17 @@ def site_demo_request(platform_slug: str, payload: SitePayload,
         lead_id=result.get("lead_id"))
     notify = {"internal": False, "customer": False}
     try:
+        # In-app only, to the destination workspace's own org_admins.
+        from app.models.models import Lead as _Lead
+        from app.services.intake_admin_signal import notify_workspace_admins
+        _lead = db.query(_Lead).filter(_Lead.id == result["lead_id"]).first()
+        if _lead is not None:
+            notify_workspace_admins(db, _lead, submission_id)
+    except Exception:
+        db.rollback()
+        log.exception("site demo workspace signal failed for lead %s",
+                      result.get("lead_id"))
+    try:
         from app.models.models import Lead
         from app.services.public_demo_notifications import notify_demo_request
         lead = db.query(Lead).filter(Lead.id == result["lead_id"]).first()
