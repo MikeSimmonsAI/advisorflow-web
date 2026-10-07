@@ -105,3 +105,38 @@ def test_unknown_sender_attaches_nowhere_and_pauses_nothing(db_session, world):
     assert db_session.query(InboundMailboxMessage).one().outcome == "no_lead"
     assert db_session.query(Reply).count() == 0 and db_session.query(Notification).count() == 0
     assert {c.status for c in db_session.query(CadenceState).all()} == {"active"}
+
+
+# -- Conversation visibility + manager scope (real route, synthetic, zero sends) --
+def _hdr(db_session, user):
+    from app.services.auth_service import create_access_token
+    return {"Authorization": "Bearer " + create_access_token(user, db_session)}
+
+
+def test_stored_email_reply_is_visible_in_the_conversation_route(db_session, world, client):
+    S.poll_mailbox(db_session, world.box, fetch=lambda since: [_msg()])
+    r = client.get("/leads/%s/timeline" % world.lead.id, headers=_hdr(db_session, world.atl_admin))
+    assert r.status_code == 200
+    inbound = [e for e in r.json()["events"] if e["type"] == "inbound"]
+    assert len(inbound) == 1
+    assert inbound[0]["channel"] == "email" and inbound[0]["body"] == "Yes, call me."
+    assert inbound[0]["id"] and inbound[0]["timestamp"]
+    assert world.sent == []
+
+
+def test_manager_scope_missing_and_cross_tenant_are_indistinguishable(db_session, world, client):
+    S.poll_mailbox(db_session, world.box, fetch=lambda since: [_msg()])
+    h = _hdr(db_session, world.atl_admin)
+    cross = client.get("/leads/%s/timeline" % world.twin.id, headers=h)
+    missing = client.get("/leads/%s/timeline" % uuid.uuid4(), headers=h)
+    assert cross.status_code == missing.status_code
+    assert cross.json() == missing.json()
+    assert "Yes, call me." not in cross.text
+    other = client.get("/leads/%s/timeline" % world.lead.id, headers=_hdr(db_session, world.twin_admin))
+    assert other.status_code == missing.status_code and "Yes, call me." not in other.text
+
+
+def test_manager_gets_no_god_or_platform_billing_access(db_session, world, client):
+    h = _hdr(db_session, world.atl_admin)
+    for path in ("/god/billing", "/god/organizations"):
+        assert client.get(path, headers=h).status_code in (401, 403, 404)
