@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-e2e-product-20261007-1754",
-  "parent_run_id": "control-room-live-progress-20261007-1745",
-  "project": "Wholesale \u2014 end-to-end synthetic product closure",
-  "status": "COMPLETED",
+  "relay_run_id": "wholesale-import-chain-20261007-1805",
+  "parent_run_id": "wholesale-e2e-product-20261007-1754",
+  "project": "Wholesale \u2014 executable messy CSV to buyer preview chain",
+  "status": "BLOCKED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37699099881",
-  "timestamp_ct": "2026-10-07 18:03 CT",
+  "actions_run_id": "37700174006",
+  "timestamp_ct": "2026-10-07 18:07 CT",
   "issue": 1,
-  "status_comment_id": 6048625301
+  "status_comment_id": 6048666203
 }
