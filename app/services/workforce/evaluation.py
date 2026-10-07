@@ -150,6 +150,10 @@ def run(db: Session, *, suite_key: str = "full",
 
 
 def _verdict(report: Dict, critical_failures: List[Dict]) -> str:
+    if not report.get("total"):
+        # ZERO SCENARIOS RAN. 0 failed of 0 is not "PASSED"; an unknown suite,
+        # an empty filter or an upstream error must not read as a green result.
+        return "NOT RUN — no scenarios were executed"
     if critical_failures:
         return "BLOCKED — a critical dimension failed"
     if report["failed"]:

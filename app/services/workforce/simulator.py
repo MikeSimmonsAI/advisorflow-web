@@ -2044,16 +2044,24 @@ def run_scale(db: Session, *, leads: int = 2000, employees: int = 3,
               .filter(AIToolExecution.organization_id == w.org.id,
                       AIToolExecution.decision == "denied").count())
 
-    # NOTHING MAY HAVE LEFT THE BUILDING. Asserted rather than assumed: if the
-    # simulated adapters ever stopped being installed, this is the number that
-    # would say so.
+    # NOTHING MAY HAVE LEFT THE BUILDING. MEASURED, not hard-coded: the real
+    # adapters persist a Message / EmailMessage row per send and the simulated
+    # ones never do, so a row against this synthetic organization's leads is a
+    # real send. If the simulated adapters ever stopped being installed, this
+    # is the number that would say so.
+    from app.models.models import EmailMessage, Message
+    org_lead_ids = db.query(Lead.id).filter(Lead.organization_id == w.org.id)
+    real_sends = (
+        db.query(Message).filter(Message.lead_id.in_(org_lead_ids)).count()
+        + db.query(EmailMessage).filter(
+            EmailMessage.lead_id.in_(org_lead_ids)).count())
     return {
         "leads": leads,
         "employees": len(workers),
         "work_items": sum(counts.values()),
         "runs": ran,
         "simulated_sends": sends,
-        "real_sends": 0,
+        "real_sends": real_sends,
         "tool_executions": execs,
         "tool_denials": denied,
         "states": {k: v for k, v in counts.items() if v},
