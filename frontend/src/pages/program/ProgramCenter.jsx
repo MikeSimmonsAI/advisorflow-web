@@ -69,6 +69,9 @@ export default function ProgramCenter() {
   if (!data) return <div className="pc"><p className="pc-muted">Loading…</p></div>
   const prog = data.program
   const att = data.attention
+  const readyItems = data.readiness?.items || []
+  const readyAll = readyItems.length > 0 && readyItems.every(i => i.ok)
+  const reviewCount = (att.data_review || 0) + (att.location_review || 0) + (att.duplicate_review || 0)
 
   return (
     <div className="pc">
@@ -79,6 +82,18 @@ export default function ProgramCenter() {
             <p className="pc-eyebrow">Company workspace</p>
             <h1 className="pc-title">{prog.hero_title || prog.name}</h1>
             <p className="pc-subtitle">{prog.hero_subtitle || 'Family Service Lead & Communication Center'}</p>
+            <div className="pc-chips">
+              <span className={`pc-chip ${readyAll ? 'ok' : 'warn'}`}>
+                {readyAll ? 'Production checks passing' : `Staging · ${readyItems.filter(i => !i.ok).length} readiness check(s) open`}
+              </span>
+              <span className="pc-chip">Nothing on this page sends to a family</span>
+              {prog.primary_contact_name && (
+                <span className="pc-chip">
+                  Families hear from {prog.primary_contact_name}{prog.primary_contact_title ? `, ${prog.primary_contact_title}` : ''}
+                  {data.selected_location ? ` | ${data.selected_location.official_name}` : ''}
+                </span>
+              )}
+            </div>
           </div>
         </div>
         <div className="pc-select">
@@ -98,6 +113,7 @@ export default function ProgramCenter() {
             onClick={() => setParam('tab', t.key === 'dashboard' ? '' : t.key)}>
             {t.label}
             {t.key === 'responses' && att.hot_responses > 0 && <span className="pc-badge hot">{att.hot_responses}</span>}
+            {t.key === 'review' && reviewCount > 0 && <span className="pc-badge warn" aria-label={`${reviewCount} records to review`}>{reviewCount}</span>}
           </button>
         ))}
       </nav>
@@ -123,50 +139,78 @@ function Dashboard({ data, go }) {
   const att = data.attention
   const total = m.leads || 0
   const sel = data.selected_location
+  const primaryMetrics = [
+    { label: 'HOT', value: m.hot_responses, hot: m.hot_responses > 0 },
+    { label: 'New Responses', value: m.new_responses, amber: m.new_responses > 0 },
+    { label: 'Follow-ups due', value: att.follow_ups_due, amber: att.follow_ups_due > 0 },
+  ]
   const metrics = [
     { label: 'Leads', value: m.leads },
     { label: 'Contacts', value: m.contacts },
     { label: 'Locations', value: m.locations },
     { label: 'Qualified', value: m.qualified },
-    { label: 'New Responses', value: m.new_responses },
-    { label: 'Hot Responses', value: m.hot_responses, hot: m.hot_responses > 0 },
   ]
+  // Action Center order: HOT, SLA, new replies, follow-ups, data review, unmatched, holds.
   const attention = [
     { label: 'Hot Responses', value: att.hot_responses, tone: 'hot', to: ['tab', 'responses'] },
+    { label: 'Unhandled Hot Leads (past SLA)', value: att.unhandled_hot, tone: 'hot', to: ['tab', 'responses'] },
     { label: 'New SMS Replies', value: att.new_sms_replies, to: ['tab', 'responses'] },
     { label: 'New Email Replies', value: att.new_email_replies, to: ['tab', 'responses'] },
     { label: 'Follow-Ups Due', value: att.follow_ups_due, tone: 'amber', to: ['tab', 'responses'] },
-    { label: 'Unhandled Hot Leads (past SLA)', value: att.unhandled_hot, tone: 'hot', to: ['tab', 'responses'] },
     { label: 'Data Review', value: att.data_review, tone: 'amber', to: ['tab', 'review'], queue: 'data_review' },
     { label: 'Location Review', value: att.location_review, tone: 'amber', to: ['tab', 'review'], queue: 'location_review' },
     { label: 'Duplicate Review', value: att.duplicate_review, to: ['tab', 'review'], queue: 'duplicate_review' },
-    { label: 'On Hold (excluded)', value: att.on_hold || 0, to: ['tab', 'review'], queue: 'on_hold' },
     { label: 'Unmatched Email Replies', value: att.unmatched_replies || 0, to: ['tab', 'responses'] },
+    { label: 'On Hold (excluded)', value: att.on_hold || 0, to: ['tab', 'review'], queue: 'on_hold' },
   ]
   const openReview = queue => { go('queue', queue); go('tab', 'review') }
   const a = data.automation
+  const urgent = (att.hot_responses || 0) + (att.unhandled_hot || 0)
+  const waiting = (att.new_sms_replies || 0) + (att.new_email_replies || 0) + (att.follow_ups_due || 0) + (att.unmatched_replies || 0)
+  const open = attention.filter(x => x.value > 0).length
+  // Locations that need eyes: HOT first, then unanswered volume. Real rows only.
+  const watch = (data.location_performance || [])
+    .filter(r => !r.is_review_bucket && (r.hot > 0 || r.new_responses > 0))
+    .sort((x, y) => (y.hot - x.hot) || (y.new_responses - x.new_responses))
+    .slice(0, 5)
 
   return (
     <>
+      <section className={`pc-summary${urgent > 0 ? ' urgent' : ''}`} aria-label="Needs attention summary">
+        <strong>{urgent > 0 ? `${num(urgent)} urgent item(s) need you now.` : open > 0 ? 'Nothing urgent.' : 'All clear.'}</strong>{' '}
+        <span>
+          {waiting > 0 ? `${num(waiting)} repl${waiting === 1 ? 'y or follow-up is' : 'ies and follow-ups are'} waiting. ` : ''}
+          {open > 0 ? `${open} of ${attention.length} action categories have items.` : 'No open action categories.'}
+        </span>
+      </section>
+
+      <div className="pc-actions">
+        <button type="button" className="pc-action primary" onClick={() => go('tab', 'review')}>Work Leads</button>
+        <button type="button" className="pc-action" onClick={() => go('tab', 'responses')}>Responses</button>
+        <button type="button" className="pc-action" onClick={() => go('tab', 'responses')}>Hot Leads</button>
+        <a className="pc-action" href="/availability">Appointments</a>
+      </div>
+
+      <section className="pc-metrics-primary" aria-label="Priority numbers">
+        {primaryMetrics.map(x => (
+          <div key={x.label} className={`pc-metric big${x.hot ? ' hot' : ''}${x.amber ? ' amber' : ''}`}>
+            <div className="pc-metric-label">{x.label}</div>
+            <div className="pc-metric-value">{num(x.value)}</div>
+          </div>
+        ))}
+      </section>
       <section className="pc-metrics" aria-label="Key numbers">
         {metrics.map(x => (
-          <div key={x.label} className={`pc-metric${x.hot ? ' hot' : ''}`}>
+          <div key={x.label} className="pc-metric">
             <div className="pc-metric-label">{x.label}</div>
             <div className="pc-metric-value">{num(x.value)}</div>
           </div>
         ))}
       </section>
 
-      <div className="pc-actions">
-        <button type="button" className="pc-action primary" onClick={() => go('tab', 'review')}>Work Leads</button>
-        <button type="button" className="pc-action" onClick={() => go('tab', 'responses')}>Open Responses</button>
-        <button type="button" className="pc-action" onClick={() => go('tab', 'responses')}>Hot Leads</button>
-        <a className="pc-action" href="/availability">Appointments</a>
-      </div>
-
       <div className="pc-grid">
         <section className="pc-card" aria-labelledby="pc-att">
-          <h2 id="pc-att">Needs My Attention</h2>
+          <h2 id="pc-att">Action Center</h2>
           {attention.map(x => (
             <div className="pc-row" key={x.label}>
               <button type="button" className="pc-link"
@@ -214,6 +258,20 @@ function Dashboard({ data, go }) {
           )}
         </section>
       </div>
+
+      <section className="pc-card" style={{ marginTop: 14 }} aria-labelledby="pc-watch">
+        <h2 id="pc-watch">Location Watch</h2>
+        {watch.length === 0 ? <p className="pc-empty">No location has HOT or new responses right now.</p> : (
+          <div className="pc-watch">
+            {watch.map(r => (
+              <button key={r.location_id} type="button" className={`pc-watchitem${r.hot > 0 ? ' hot' : ''}`} onClick={() => go('location', r.location_id)}>
+                <strong>{r.name}</strong>
+                <span className="pc-small">{num(r.hot)} HOT · {num(r.new_responses)} new · {num(r.leads)} leads</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="pc-grid-2">
         <section className="pc-card" aria-labelledby="pc-locperf">
@@ -273,10 +331,13 @@ function Dashboard({ data, go }) {
         </section>
         <section className="pc-card" aria-labelledby="pc-auto">
           <h2 id="pc-auto">Automation Health</h2>
+          <p className="pc-small" style={{ marginTop: 0 }}>
+            <span className={`pc-badge ${a.active_campaign_families === 0 ? 'low' : 'ok'}`}>{a.active_campaign_families === 0 ? 'Sending off' : 'Campaign on'}</span>
+          </p>
           <div className="pc-health">
             <div><div className="v">{num(a.active_cadences)}</div><div className="pc-small pc-muted">Active cadences</div></div>
             <div><div className="v">{num(a.paused_cadences)}</div><div className="pc-small pc-muted">Paused by a reply</div></div>
-            <div><div className="v">{num(a.review_needed)}</div><div className="pc-small pc-muted">Review needed</div></div>
+            <div><div className={`v${a.review_needed > 0 ? ' amber' : ''}`}>{num(a.review_needed)}</div><div className="pc-small pc-muted">Review needed</div></div>
             <div><div className="v">{num(a.suppressed)}</div><div className="pc-small pc-muted">Opted out</div></div>
           </div>
           <div className="pc-note">
@@ -295,20 +356,25 @@ function Reporting({ r }) {
   const e = r.email
   const s = r.sms
   const rt = r.response_time_minutes
-  const cells = [
-    ['Emails sent', e.sent], ['Delivered', e.delivered == null ? 'not tracked' : e.delivered], ['Bounced', e.bounced],
-    ['Failed', e.failed], ['Opened', e.opened], ['Email replies', e.replied], ['Unsubscribed', e.unsubscribed],
-    ['Texts sent', s.sent], ['Texts delivered', s.delivered], ['Text replies', s.replied], ['Appointments', r.appointments],
-    ['Response time (median)', rt.median == null ? '—' : `${rt.median} min`],
+  const groups = [
+    ['Email', [['Sent', e.sent], ['Delivered', e.delivered == null ? 'not tracked' : e.delivered], ['Bounced', e.bounced],
+      ['Failed', e.failed], ['Opened', e.opened], ['Replies', e.replied], ['Unsubscribed', e.unsubscribed]]],
+    ['Text', [['Sent', s.sent], ['Delivered', s.delivered], ['Replies', s.replied]]],
+    ['Outcomes', [['Appointments', r.appointments], ['Response time (median)', rt.median == null ? '—' : `${rt.median} min`]]],
   ]
   return (
     <section className="pc-card" style={{ marginTop: 14 }} aria-labelledby="pc-rep">
       <h2 id="pc-rep">Delivery & Response Reporting</h2>
-      <div className="pc-health" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
-        {cells.map(([k, v]) => (
-          <div key={k}><div className="v" style={{ fontSize: typeof v === 'string' ? 14 : 22 }}>{typeof v === 'number' ? num(v) : v}</div><div className="pc-small pc-muted">{k}</div></div>
-        ))}
-      </div>
+      {groups.map(([title, cells]) => (
+        <div key={title} className="pc-repgroup">
+          <h3 className="pc-reptitle">{title}</h3>
+          <div className="pc-health pc-health-fit">
+            {cells.map(([k, v]) => (
+              <div key={k}><div className="v" style={{ fontSize: typeof v === 'string' ? 14 : 22 }}>{typeof v === 'number' ? num(v) : v}</div><div className="pc-small pc-muted">{k}</div></div>
+            ))}
+          </div>
+        </div>
+      ))}
       <div className="pc-note">{e.note} Sent is never counted as delivered.</div>
     </section>
   )
