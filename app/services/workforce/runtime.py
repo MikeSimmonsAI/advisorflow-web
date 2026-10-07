@@ -533,7 +533,9 @@ def execute(db: Session, employee: AIEmployee, item: AIWorkItem, *,
         except Exception:                                    # noqa: BLE001
             _log.exception("workforce runtime: could not record the failure")
         return {"ran": True, "run_id": run.id, "work_item_id": item.id,
-                "state": item.state, "error": str(exc)[:200],
+                "state": item.state,
+                "error": run_evidence.redact(str(exc), 200)
+                or type(exc).__name__,
                 "ended_because": "error"}
 
 

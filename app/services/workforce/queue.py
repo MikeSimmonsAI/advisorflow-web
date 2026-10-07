@@ -395,8 +395,12 @@ def record_failure(db: Session, item: AIWorkItem, reason: str, *,
     against a provider that is down is how an API bill is run up overnight
     (section 35), so failures both slow down AND stop.
     """
+    # The reason lands in the work-item timeline a customer can read. Exception
+    # text can carry credentials, provider URLs, emails or phone numbers.
+    from app.services.workforce import run_evidence
+    reason = run_evidence.redact(reason, 200) or "unspecified error"
     item.consecutive_failures = int(item.consecutive_failures or 0) + 1
-    idx = min(item.consecutive_failures - 1, len(C.RETRY_BACKOFF_SECONDS) - 1)
+    idx =min(item.consecutive_failures - 1, len(C.RETRY_BACKOFF_SECONDS) - 1)
     delay = C.RETRY_BACKOFF_SECONDS[idx]
     item.next_action_at = datetime.utcnow() + timedelta(seconds=delay)
     item.updated_at = datetime.utcnow()
