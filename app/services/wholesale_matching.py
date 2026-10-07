@@ -212,10 +212,14 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
     if not strategies:
         add("strategy", None, "This buy box names no strategy.")
     else:
-        add("strategy", True, "Buyer strategy: %s. Recorded for context — a deal "
-            "does not carry a strategy of its own."
-            % ", ".join(_label(s) for s in strategies),
-            weight=WEIGHTS["strategy"], partial=1.0)
+        # CONTEXT, NOT A SCORE. A deal carries no strategy of its own, so there
+        # is nothing to match; counting it as a hit handed every buyer free
+        # points and let a buyer who named only a strategy rank 100 on every
+        # deal. It is reported with matched=None so it moves neither side of
+        # the fraction.
+        add("strategy", None, "Buyer strategy: %s. Recorded for context only — a "
+            "deal does not carry a strategy of its own, so it is not scored."
+            % ", ".join(_label(s) for s in strategies))
 
     # ── Size and age ────────────────────────────────────────────────────────
     _range_factor(add, "beds", getattr(box, "min_beds", None), getattr(box, "max_beds", None),
@@ -259,6 +263,12 @@ def score_buy_box(deal: Any, prop: Any, box: Any,
                 % (float(spread), float(min_spread)))
 
     score = int(round(100 * earned / available)) if available else 0
+    if not available:
+        # INSUFFICIENT DATA is not a perfect or a failing fit; say so.
+        factors.append({"dimension": "buy_box", "matched": None, "weight": 0,
+                        "detail": "This buy box constrains nothing that can be "
+                                  "scored, so there is not enough information to "
+                                  "rank this buyer for the deal."})
 
     disqualified_reason = None
     if geo_disqualified:
@@ -342,7 +352,14 @@ def match_deal_to_buyers(deal: Any, prop: Any, buyers: Sequence[Any],
             "disqualified_reason": scored["disqualified_reason"],
         })
 
-    results.sort(key=lambda r: (not r["disqualified"], r["score"]), reverse=True)
+    # Qualified before disqualified, then best score first, then a stable total
+    # order (name, id) so the same inputs rank identically whatever order the
+    # database returned them in.
+    results.sort(key=lambda r: (
+        bool(r["disqualified"]), -r["score"],
+        _norm(getattr(r["buyer"], "company_name", None)
+              or getattr(r["buyer"], "contact_name", None)),
+        str(getattr(r["buyer"], "id", ""))))
     return results
 
 

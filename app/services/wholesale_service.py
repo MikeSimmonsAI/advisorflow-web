@@ -1514,7 +1514,8 @@ def recompute_matches(db: Session, org_id: str, deal: WholesaleDeal,
     70 on these dimensions" has to survive somebody later editing the buy box.
     """
     prop = db.query(WholesaleProperty).filter(
-        WholesaleProperty.id == deal.property_id).first()
+        WholesaleProperty.id == deal.property_id,
+        WholesaleProperty.organization_id == org_id).first()
     buyers = (db.query(WholesaleBuyer)
               .filter(WholesaleBuyer.organization_id == org_id,
                       WholesaleBuyer.is_active.is_(True))

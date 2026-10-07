@@ -2839,8 +2839,10 @@ def list_approvals(db: Session = Depends(get_db),
     rows = query.order_by(WholesaleApproval.created_at.desc()).limit(limit).all()
 
     deals = {d.id: d for d in db.query(WholesaleDeal).filter(
+        WholesaleDeal.organization_id == org_id,
         WholesaleDeal.id.in_([r.deal_id for r in rows] or [""])).all()}
     props = {p.id: p for p in db.query(WholesaleProperty).filter(
+        WholesaleProperty.organization_id == org_id,
         WholesaleProperty.id.in_([d.property_id for d in deals.values()] or [""])).all()}
 
     out = []
