@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "atlantis-conversation-visibility-20261007-1826",
-  "parent_run_id": "atlantis-inbound-lead-closure-20261007-1821",
-  "project": "Atlantis Light & Power \u2014 intake-to-conversation visibility and manager scope closure",
+  "relay_run_id": "atlantis-activity-label-exit-20261007-1829",
+  "parent_run_id": "atlantis-conversation-visibility-20261007-1826",
+  "project": "Atlantis Light & Power \u2014 channel-accurate activity labels and source exit",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37701987108",
-  "timestamp_ct": "2026-10-07 18:25 CT",
+  "actions_run_id": "37702278175",
+  "timestamp_ct": "2026-10-07 18:28 CT",
   "issue": 1,
-  "status_comment_id": 6048887011
+  "status_comment_id": 6048924518
 }
