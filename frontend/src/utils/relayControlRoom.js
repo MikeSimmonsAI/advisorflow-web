@@ -63,6 +63,49 @@ export function leaseText(worker) {
   return `${LEASE_MINUTES}-minute lease (${Math.max(0, LEASE_MINUTES - el)} min left)`
 }
 
+// Lease status from the server-provided expiry, evaluated against the live clock so the
+// card flips to STALE/HUNG even between polls. Terminal cards never go stale.
+export function leaseStatus(worker, nowMs = Date.now()) {
+  if (!worker || !worker.lease_expires_at || (worker.state !== 'active' && worker.state !== 'queued')) {
+    return { expired: false, minutesLeft: null }
+  }
+  const left = Math.ceil((Date.parse(worker.lease_expires_at) - nowMs) / 60000)
+  return { expired: left <= 0, minutesLeft: Math.max(0, left) }
+}
+
+// A card still claiming Working whose lease has lapsed on the live clock must say STALE/HUNG.
+export function isLapsed(worker, nowMs = Date.now()) {
+  return !!worker && worker.state === 'active' && worker.display === 'Working' && leaseStatus(worker, nowMs).expired
+}
+
+export const FETCH_TIMEOUT_MS = 15000
+
+// Poll + manual refresh controller (injected fetch/timers, so node-testable).
+// Every call performs a NEW request (unique URL, never joins an older one); a manual
+// refresh is never blocked by a poll in flight or a hung request; only the newest request
+// may write state, so a slow older reply cannot overwrite a newer one.
+export function createRefresher({ fetchState, onLoading, onState, onError, timeoutMs = FETCH_TIMEOUT_MS,
+  setTimer = setTimeout, clearTimer = clearTimeout }) {
+  let latest = 0
+  return async function refresh(manual = false) {
+    const mine = ++latest
+    onLoading(true, manual)
+    let timer
+    const timeout = new Promise((_, rej) => {
+      timer = setTimer(() => rej(new Error('Timed out waiting for relay status')), timeoutMs)
+    })
+    try {
+      const s = await Promise.race([fetchState(stateUrl(), { cache: 'no-store' }), timeout])
+      if (mine === latest) onState(s)
+    } catch (e) {
+      if (mine === latest) onError(failedState(e && e.message))
+    } finally {
+      clearTimer(timer)
+      if (mine === latest) onLoading(false, manual)
+    }
+  }
+}
+
 export function actionsRunText(worker) {
   return worker && worker.actions_run_id ? String(worker.actions_run_id) : 'not mapped'
 }

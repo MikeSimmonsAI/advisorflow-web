@@ -5,10 +5,10 @@
  * only facts the relay has actually reported. A failed fetch clears the active
  * state; the page never keeps showing a stale "Working".
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api/client'
 import {
-  POLL_MS, stateUrl, failedState, headline, isWorking, liveElapsedMinutes,
+  POLL_MS, failedState, headline, isWorking, liveElapsedMinutes, createRefresher, isLapsed,
   formatCT, formatMinutes, leaseText, actionsRunText,
 } from '../../utils/relayControlRoom'
 
@@ -27,11 +27,13 @@ function Row({ k, v }) {
 
 function Worker({ worker, generatedAt, tick }) {
   const elapsed = liveElapsedMinutes(worker, generatedAt, tick)
-  const bad = worker.health === 'STALE/HUNG' || worker.state === 'mismatch'
+  // Between polls the lease can lapse: flag it from the live clock, never keep saying Working.
+  const lapsed = isLapsed(worker, tick)
+  const bad = lapsed || worker.health === 'STALE/HUNG' || worker.health === 'STALE' || worker.state === 'mismatch'
   return (
     <div style={card} data-testid="relay-worker">
       <div style={{ fontSize: 20, fontWeight: 600, color: bad ? 'var(--gm-red)' : 'var(--gm-teal)' }}>
-        {worker.display}
+        {lapsed ? 'STALE/HUNG' : worker.display}
       </div>
       {worker.state === 'idle' || worker.state === 'unavailable' ? null : (
         <div style={{ marginTop: 8 }}>
@@ -43,7 +45,7 @@ function Worker({ worker, generatedAt, tick }) {
           <Row k="Stage" v={worker.stage} />
           <Row k="Started" v={formatCT(worker.started_at)} />
           <Row k="Elapsed" v={formatMinutes(elapsed)} />
-          <Row k="Lease" v={leaseText(worker)} />
+          <Row k="Lease" v={leaseText({ ...worker, elapsed_min: elapsed })} />
           <Row k="Last update" v={formatCT(worker.last_update_at)} />
           <Row k="Checkpoint" v={worker.checkpoint_sha
             ? `${worker.checkpoint_sha}${worker.checkpoint_age_min != null ? ` (${formatMinutes(worker.checkpoint_age_min)} ago)` : ''}`
@@ -61,36 +63,35 @@ export default function GodRelayControlRoom() {
   const [loading, setLoading] = useState(false)
   const [tick, setTick] = useState(Date.now())
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const s = await api.get(stateUrl())
-      setState(s)
-    } catch (e) {
-      setState(failedState(e && e.message))   // clears any stale active worker
-    } finally {
-      setLoading(false)
-      setTick(Date.now())
-    }
-  }, [])
+  const [lastChecked, setLastChecked] = useState(null)
+  const refresh = useMemo(() => createRefresher({
+    fetchState: (url, opts) => api.get(url, opts),
+    onLoading: setLoading,
+    onState: (s) => { setState(s); setLastChecked(Date.now()); setTick(Date.now()) },
+    onError: (s) => { setState(s); setLastChecked(Date.now()); setTick(Date.now()) },  // clears any stale active worker
+  }), [])
+  const load = useCallback(() => refresh(true), [refresh])
 
   useEffect(() => {
-    load()
-    const poll = setInterval(load, POLL_MS)
+    refresh(false)
+    const poll = setInterval(() => refresh(false), POLL_MS)
     const clock = setInterval(() => setTick(Date.now()), 15000)
     return () => { clearInterval(poll); clearInterval(clock) }
-  }, [load])
+  }, [refresh])
 
   const s = state || failedState('Loading…')
   return (
     <div style={{ maxWidth: 900 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>Relay Control Room</h2>
-        <button type="button" onClick={load} disabled={loading}>
+        <button type="button" onClick={load} aria-busy={loading}>
           {loading ? 'Checking…' : 'Check status now'}
         </button>
       </div>
-      <div style={label}>{isWorking(s) ? 'Worker active' : headline(s)} · refreshes every {POLL_MS / 1000}s</div>
+      <div style={label}>
+        {isWorking(s) ? 'Worker active' : headline(s)} · refreshes every {POLL_MS / 1000}s
+        {lastChecked ? ` · last checked ${formatCT(new Date(lastChecked).toISOString())}` : ''}
+      </div>
 
       {!s.available ? (
         <div style={{ ...card, color: 'var(--gm-red)' }} role="alert">
@@ -114,9 +115,11 @@ export default function GodRelayControlRoom() {
         {(s.history || []).length === 0 ? <div style={label}>No history.</div> : null}
         {(s.history || []).map(h => (
           <div key={h.relay_run_id} style={{ padding: '6px 0', borderTop: '1px solid var(--gm-card-line)' }}>
-            <div><b>{h.display}</b> · {h.project} · {h.branch} · <span style={label}>{h.relay_run_id}</span></div>
+            <div><b style={{ color: h.state === 'terminal' && h.result === 'COMPLETED' ? 'var(--gm-teal)'
+              : h.state === 'terminal' || h.state === 'mismatch' ? 'var(--gm-red)' : 'var(--gm-dim)' }}>{h.display}</b> · {h.project} · {h.branch} · <span style={label}>{h.relay_run_id}</span></div>
             <div style={label}>
-              {formatCT(h.last_update_at)} · {formatMinutes(h.elapsed_min)}
+              {formatCT(h.last_update_at)} · took {formatMinutes(h.elapsed_min)}
+              {h.result ? ` · result ${h.result}` : ''}
               {h.checkpoint_sha ? ` · ${h.checkpoint_sha}` : ''}
               {h.superseded_by ? ` · superseded by ${h.superseded_by}` : ''}
             </div>

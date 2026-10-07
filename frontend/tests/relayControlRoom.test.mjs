@@ -3,7 +3,42 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   POLL_MS, stateUrl, failedState, isWorking, headline, liveElapsedMinutes, actionsRunText, leaseText,
+  createRefresher, leaseStatus,
 } from '../src/utils/relayControlRoom.js'
+
+test('manual refresh issues a fresh request even while a poll is in flight; stale reply dropped', async () => {
+  const urls = []
+  const resolvers = []
+  const seen = []
+  const refresh = createRefresher({
+    fetchState: (url) => { urls.push(url); return new Promise(r => resolvers.push(r)) },
+    onLoading: () => {}, onState: s => seen.push(s.id), onError: () => seen.push('err'),
+  })
+  const poll = refresh(false)
+  const manual = refresh(true)
+  assert.equal(urls.length, 2)
+  assert.notEqual(urls[0], urls[1])
+  resolvers[1]({ id: 'newer' }); await manual
+  resolvers[0]({ id: 'older' }); await poll
+  assert.deepEqual(seen, ['newer'])
+})
+
+test('hung request times out into an error state and loading clears', async () => {
+  const log = []
+  const refresh = createRefresher({
+    fetchState: () => new Promise(() => {}), timeoutMs: 5,
+    onLoading: (v) => log.push(v), onState: () => log.push('state'), onError: s => log.push(s.available),
+  })
+  await refresh(true)
+  assert.deepEqual(log, [true, false, false])
+})
+
+test('lease expires from server expiry against live clock; terminal never stale', () => {
+  const w = { state: 'active', lease_expires_at: '2026-10-07T23:00:00Z' }
+  assert.equal(leaseStatus(w, Date.parse('2026-10-07T22:50:00Z')).minutesLeft, 10)
+  assert.equal(leaseStatus(w, Date.parse('2026-10-07T23:01:00Z')).expired, true)
+  assert.equal(leaseStatus({ ...w, state: 'terminal' }, Date.parse('2026-10-08T00:00:00Z')).expired, false)
+})
 
 test('polls every 20 seconds', () => assert.equal(POLL_MS, 20000))
 

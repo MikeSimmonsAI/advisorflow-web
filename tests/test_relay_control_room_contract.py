@@ -215,17 +215,24 @@ class UiContract(unittest.TestCase):
     def test_authoritative_endpoint_cache_busted(self):
         self.assertIn("/god/relay/state?_=", self.util)
         self.assertIn("_seq += 1", self.util)
-        self.assertIn("api.get(stateUrl())", self.page)
+        # every request (poll and manual) goes through the refresher: new URL + no-store, never reused
+        self.assertIn("fetchState(stateUrl(), { cache: 'no-store' })", self.util)
+        self.assertIn("api.get(url, opts)", self.page)
         self.assertNotRegex(self.page, r"fetch\(|axios|github\.com")
 
     def test_polls_every_20_seconds(self):
         self.assertIn("export const POLL_MS = 20000", self.util)
-        self.assertIn("setInterval(load, POLL_MS)", self.page)
+        self.assertIn("setInterval(() => refresh(false), POLL_MS)", self.page)
         self.assertIn("clearInterval(poll)", self.page)
 
+    def test_manual_check_is_never_disabled_by_a_pending_request(self):
+        self.assertNotIn("disabled={loading}", self.page)
+        self.assertIn("refresh(true)", self.page)
+
     def test_fetch_failure_clears_active_state(self):
-        m = re.search(r"catch \(e\) \{(.*?)\}\s*finally", self.page, re.S)
-        self.assertIn("setState(failedState(", m.group(1))
+        # createRefresher routes every failure/timeout to onError(failedState(...))
+        self.assertIn("onError(failedState(", self.util)
+        self.assertIn("onError: (s) => { setState(s)", self.page)
         fs = re.search(r"export function failedState.*?\n\}", self.util, re.S).group(0)
         for tok in ("available: false", "state: 'unavailable'", "queued_behind: []", "history: []"):
             self.assertIn(tok, fs)

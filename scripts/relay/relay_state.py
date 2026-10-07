@@ -24,13 +24,16 @@ from __future__ import annotations
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import relay_guard as g  # noqa: E402
 
 LEASE_MINUTES = 30
+# The guard only accepts four STATUS values; the display additionally retires a run
+# on CANCELLED / SKIPPED so such a card can never stay "Working".
+VIEW_TERMINAL = g.TERMINAL_STATUSES + ("CANCELLED", "SKIPPED")
 STAGES = ("Queued", "Accepted", "Working", "Commit/Push", "Deploy/Verify", "Reviewed/Complete")
 _SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
 
@@ -54,6 +57,19 @@ def _f(fields: Dict[str, str], *keys: str) -> str:
         if v and v != "-":
             return v
     return ""
+
+
+def _view_status(body: str) -> Optional[str]:
+    """Trusted-shape STATUS of a status comment for display: guard values plus CANCELLED/SKIPPED."""
+    st = g.status_of(body)
+    if st:
+        return st
+    p = g.parse(body)
+    if p["kind"] != g.STATUS:
+        return None
+    raw = (p["fields"].get("STATUS") or "").strip().upper()
+    first = re.split(r"[\s(,;|]+", raw)[0] if raw else ""
+    return first if first in ("CANCELLED", "SKIPPED") else None
 
 
 def _sha(text: str) -> str:
@@ -98,12 +114,12 @@ def build(comments: Iterable[Dict], runs: Optional[Iterable[Dict]], now: datetim
             get(rid)["ack"] = c
             get(rid)["order"] = get(rid)["order"] or cid
         elif p["kind"] == g.STATUS and login in status_actors and rid in ackmap:
-            st = g.status_of(c.get("body") or "")
+            st = _view_status(c.get("body") or "")
             ack = ackmap[rid]
             if st is None or p["branch"] != ack.get("branch"):
                 continue
             r = get(rid)
-            if st in g.TERMINAL_STATUSES:
+            if st in VIEW_TERMINAL:
                 r["terminal"] = r["terminal"] or (st, c)       # first terminal wins, like the guard
             elif r["terminal"] is None:
                 r["updates"].append(c)
@@ -145,6 +161,9 @@ def build(comments: Iterable[Dict], runs: Optional[Iterable[Dict]], now: datetim
             "since_update_min": _mins(last_update, now),
             "result_summary": _f(fields, "COMPLETED"),
             "blocked_reason": _f(fields, "BLOCKERS", "APPROVAL REQUIRED") if status in ("BLOCKED", "APPROVAL_REQUIRED") else "",
+            "result": status or "",
+            "lease_minutes": LEASE_MINUTES,
+            "lease_expires_at": (started + timedelta(minutes=LEASE_MINUTES)).isoformat() if started else None,
             "next_action": _f(fields, "NEXT RECOMMENDED ACTION"),
         }
         return out
@@ -173,6 +192,12 @@ def build(comments: Iterable[Dict], runs: Optional[Iterable[Dict]], now: datetim
         elif rid in children:
             cd.update(state="superseded", display="SUPERSEDED", superseded_by=children[rid])
             history.append(cd)
+        elif run and run.get("status") == "completed" and run.get("conclusion") in ("cancelled", "skipped"):
+            # Actions evidence only (no trusted relay terminal): retire the card, labelled as such.
+            word = run["conclusion"].upper()
+            cd.update(state="terminal", display=word, status=word, result=word,
+                      health="Actions run %s; no relay terminal status was posted" % run["conclusion"])
+            history.append(cd)
         elif run and run.get("status") == "completed":
             # Actions finished but relay never reported terminal: mismatch, NOT working.
             cd.update(state="mismatch", display="RELAY_STATE_MISMATCH",
@@ -180,7 +205,10 @@ def build(comments: Iterable[Dict], runs: Optional[Iterable[Dict]], now: datetim
                              % (run.get("conclusion") or "completed"))
             history.append(cd)
         elif not r["ack"]:
-            cd.update(state="queued", display="Queued", stage="Queued")
+            cd.update(state="queued", display="Queued", stage="Queued", health="ok")
+            if cd["elapsed_min"] is not None and cd["elapsed_min"] > LEASE_MINUTES:
+                cd.update(health="STALE", display="Queued - STALE",
+                          health_detail="directive not accepted after %d min (lease %d)" % (cd["elapsed_min"], LEASE_MINUTES))
             active.append((r, cd))
         else:
             cd.update(state="active", display="Working")
@@ -194,7 +222,9 @@ def build(comments: Iterable[Dict], runs: Optional[Iterable[Dict]], now: datetim
                 cd["health"] = "ok"
             active.append((r, cd))
 
-    active.sort(key=lambda t: t[0]["order"], reverse=True)
+    # An accepted run outranks any queued directive (a queued one is not running); within
+    # each group the newest by comment-id chronology wins. Older work never displaces newer.
+    active.sort(key=lambda t: (1 if t[0]["ack"] else 0, t[0]["order"]), reverse=True)
     history.sort(key=lambda c: c["last_update_at"] or "", reverse=True)
     primary = active[0][1] if active else None
     queued_behind = [c for _, c in active[1:]]
