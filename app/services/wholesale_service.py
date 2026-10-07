@@ -1645,7 +1645,8 @@ def queue_buyer_outreach(db: Session, org_id: str, deal: WholesaleDeal,
         WholesaleBuyerOutreach.organization_id == org_id).all()}
 
     rows: List[WholesaleBuyerOutreach] = []
-    for buyer_id in buyer_ids:
+    # The same buyer listed twice must not become two rows (and two sends).
+    for buyer_id in list(dict.fromkeys(buyer_ids)):
         buyer = (db.query(WholesaleBuyer)
                  .filter(WholesaleBuyer.id == buyer_id,
                          WholesaleBuyer.organization_id == org_id).first())
@@ -1657,6 +1658,7 @@ def queue_buyer_outreach(db: Session, org_id: str, deal: WholesaleDeal,
                 organization_id=org_id, deal_id=deal.id, buyer_id=buyer.id,
                 attempts=0)
             db.add(row)
+            existing[buyer.id] = row
         row.channel = channel
         row.subject = composed["subject"]
         row.body = composed["body"]

@@ -38,6 +38,7 @@ from app.services import wholesale_analysis as analysis
 from app.services import wholesale_service as svc
 from app.services.wholesale_matching import buyer_standing
 from app.services import wholesale_buyer_contacts as BC
+from app.services import wholesale_import_identity as ident
 from app.services.entitlements import require_feature
 from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
@@ -652,7 +653,12 @@ async def import_buyers(request: Request, file: UploadFile = File(...),
             unmapped.append(header)
 
     source = "csv:%s" % (list_name or file.filename or "import")
-    created, boxes_created, skipped = 0, 0, []
+    created, boxes_created, skipped, rejected = 0, 0, [], []
+    # Retry safety: the org's existing buyers (any state) by normalised
+    # email/phone, plus what this file has already claimed. Org-scoped.
+    index = ident.build_index(db.query(WholesaleBuyer).filter(
+        WholesaleBuyer.organization_id == org_id).all())
+    seen_in_file: Dict[Any, int] = {}
 
     for i, row in enumerate(reader, start=2):
         data: Dict[str, Any] = {"source": source,
@@ -689,9 +695,20 @@ async def import_buyers(request: Request, file: UploadFile = File(...),
                                                 "could not be sent a deal"})
             continue
 
+        verdict = ident.decide(data.get("email"), data.get("phone"), index,
+                               seen_in_file, i)
+        if verdict["action"] == ident.REJECT:
+            rejected.append({"row": i, "reason": verdict["reason"]})
+            continue
+        if verdict["action"] == ident.SKIP:
+            skipped.append({"row": i, "reason": verdict["reason"],
+                            "existing_buyer_id": verdict.get("buyer_id")})
+            continue
+
         buyer = WholesaleBuyer(organization_id=org_id, **data)
         db.add(buyer)
         db.flush()
+        ident.claim(data.get("email"), data.get("phone"), seen_in_file, i)
         created += 1
 
         if box:
@@ -724,7 +741,8 @@ async def import_buyers(request: Request, file: UploadFile = File(...),
                   actor_user_id=user.id,
                   summary="%d buyer(s) imported, %d buy box(es) created"
                           % (created, boxes_created),
-                  after={"source": source, "skipped": len(skipped)})
+                  after={"source": source, "skipped": len(skipped),
+                         "rejected": len(rejected)})
     db.commit()
     new_ids = [b.id for b in db.query(WholesaleBuyer).filter(
         WholesaleBuyer.organization_id == org_id, WholesaleBuyer.source == source,
@@ -733,7 +751,9 @@ async def import_buyers(request: Request, file: UploadFile = File(...),
         WholesaleBuyer.organization_id == org_id, WholesaleBuyer.id.in_(new_ids or [""])).all(),
         user) if created else {}
     return {"created": created, "buy_boxes_created": boxes_created,
-            "skipped": skipped, "unmapped_columns": unmapped, "source": source,
+            "skipped": skipped, "rejected": rejected,
+            "skipped_count": len(skipped), "rejected_count": len(rejected),
+            "unmapped_columns": unmapped, "source": source,
             "contacts": linked}
 
 
@@ -875,6 +895,11 @@ def send_disposition(deal_id: str, payload: DispositionIn, request: Request,
     buyers = {b.id: b for b in db.query(WholesaleBuyer).filter(
         WholesaleBuyer.organization_id == org_id,
         WholesaleBuyer.id.in_([r.buyer_id for r in rows] or [""])).all()}
+    # Ids that are not this organization's buyers are reported, never dropped
+    # silently: the person pressing Send should see nothing went to them.
+    queued_ids = {r.buyer_id for r in rows}
+    unknown = [bid for bid in dict.fromkeys(payload.buyer_ids)
+               if bid not in queued_ids]
 
     results = []
     for row in rows:
@@ -910,7 +935,10 @@ def send_disposition(deal_id: str, payload: DispositionIn, request: Request,
     return {"sent": len(sent), "failed": len(results) - len(sent),
             "channel": payload.channel, "results": results,
             "blocked": [{"buyer_id": r["buyer_id"], "reason": r["reason"]}
-                        for r in results if not r["sent"]]}
+                        for r in results if not r["sent"]]
+                       + [{"buyer_id": bid, "reason": "That buyer was not found "
+                           "in this organization, so nothing was sent."}
+                          for bid in unknown]}
 
 
 @router.post("/outreach/{outreach_id}/resend")
@@ -981,6 +1009,9 @@ def update_outreach(outreach_id: str, payload: OutreachUpdateIn, request: Reques
     if payload.response_note is not None:
         row.response_note = payload.response_note
     if payload.offer_amount is not None:
+        if payload.offer_amount < 0:
+            raise HTTPException(status_code=400,
+                                detail="An offer amount cannot be negative.")
         row.offer_amount = analysis.money(payload.offer_amount)
     if payload.status == "sent" and row.sent_at is None:
         row.sent_at = datetime.utcnow()
@@ -1221,11 +1252,23 @@ def select_buyer(deal_id: str, payload: SelectBuyerIn, request: Request,
     buyer = (db.query(WholesaleBuyer)
              .filter(WholesaleBuyer.id == row.buyer_id,
                      WholesaleBuyer.organization_id == org_id).first())
-    if buyer is not None and buyer.do_not_contact:
+    if buyer is None:
+        raise HTTPException(status_code=404,
+                            detail="That buyer no longer exists in this organization.")
+    if buyer.do_not_contact:
         raise HTTPException(
             status_code=409,
             detail="That buyer has opted out. Selecting them would mean "
                    "working a deal with somebody who asked not to be contacted.")
+    if not buyer.is_active:
+        raise HTTPException(status_code=409,
+                            detail="That buyer is marked inactive, so they cannot "
+                                   "be selected for this deal.")
+    if row.status in ("passed", "rejected"):
+        raise HTTPException(
+            status_code=409,
+            detail="That buyer passed on this deal (status: %s). Record a new "
+                   "response from them before selecting them." % row.status)
 
     # One selected buyer per deal.
     (db.query(WholesaleBuyerOutreach)
@@ -1305,6 +1348,9 @@ def record_response(outreach_id: str, payload: ResponseIn, request: Request,
 
     if "offer_amount" in data:
         amount = analysis.money(data["offer_amount"])
+        if amount is not None and amount < 0:
+            raise HTTPException(status_code=400,
+                                detail="An offer amount cannot be negative.")
         row.offer_amount = amount
         # An amount IS a response. Recording one without moving the status
         # leaves a board that shows an offer nobody has noticed.

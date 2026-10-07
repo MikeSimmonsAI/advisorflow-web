@@ -42,6 +42,7 @@ const REFUSAL_LABELS = {
   suppressed: 'On opt-out list',
   no_address: 'No contact on file',
   already_sent: 'Already sent',
+  recently_sent: 'Sent moments ago',
   not_enabled: 'Sending is off',
   bad_channel: 'Channel not supported',
   blocked: 'Blocked',

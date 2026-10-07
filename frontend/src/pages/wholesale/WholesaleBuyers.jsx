@@ -501,15 +501,27 @@ function BuyerImport({ onDone, onClose }) {
                       '/wholesale/buyers/import' + (isTest ? '?is_test=true' : ''), fd)
                     setResult(data)
                     onDone(`${data.created} buyer(s) imported, `
-                           + `${data.buy_boxes_created} buy box(es) created.`)
+                           + `${data.buy_boxes_created} buy box(es) created, `
+                           + `${(data.skipped || []).length} skipped, `
+                           + `${(data.rejected || []).length} rejected.`)
                   } catch (e) { setError(errText(e)) } finally { setBusy(false) }
                 }}>
           {busy ? 'Importing…' : 'Import'}
         </button>
       </div>
+      {result && result.rejected && result.rejected.length ? (
+        <div className="ws-warn" role="alert" style={{ marginTop: 12 }}>
+          <strong>{result.rejected.length} row(s) rejected (ambiguous match):</strong>
+          <ul style={{ margin: '6px 0 0 18px' }}>
+            {result.rejected.slice(0, 20).map((s, i) => (
+              <li key={i}>Row {s.row}: {s.reason}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {result && result.skipped && result.skipped.length ? (
-        <div className="ws-warn" style={{ marginTop: 12 }}>
-          <strong>{result.skipped.length} row(s) could not be used:</strong>
+        <div className="ws-warn" role="status" style={{ marginTop: 12 }}>
+          <strong>{result.skipped.length} row(s) skipped:</strong>
           <ul style={{ margin: '6px 0 0 18px' }}>
             {result.skipped.slice(0, 20).map((s, i) => (
               <li key={i}>Row {s.row}: {s.reason}</li>
