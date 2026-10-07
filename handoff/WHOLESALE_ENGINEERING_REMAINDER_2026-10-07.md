@@ -1,5 +1,21 @@
 # Engineering remainder — Wholesale, 2026-10-07
 
+## Update (relay wholesale-ai-comms-safety-20261007-0002)
+
+SYNTHETIC LOGIC evidence only (`python3 scripts/wholesale_ai_comms_proof.py`, 33/33):
+
+- `wholesale_ai._deterministic_read`: "Who is this?" no longer maps to wrong_person
+  (which auto-killed the deal); it now routes to a person. Bare "end"/"quit" count
+  as STOP only as the whole message, so "we can end up closing in 30 days" no
+  longer writes a real DNC suppression. STOP phrases, "quit texting me", etc. still do.
+- `apply_seller_reply`: seller Lead lookup is now scoped to the org.
+- Compose/history: the wholesale module has no compose path; AI compose is
+  `/ai-conversation/preview` (Leads.jsx reads `reply`, already fixed). Not re-proven
+  against a DB or live provider.
+- Still unproven (needs pytest/DB): wrong-person does not suppress the phone
+  (deal goes dead and cadence stops, but the number is not suppressed);
+  idempotency, capacity gates and meaningful-reply cadence pause were not re-proven.
+
 Safe, executable next packets:
 1. With pytest installed: run tests/test_wholesale_*.py and tests/test_universal_intake*.py; confirm 470 test functions / 487 baseline still pass.
 2. DB-integration re-import test: import synthetic CSV, re-import, assert zero new contacts/properties (extends scripts/wholesale_stdlib_proof.py, which only proves key determinism).

@@ -302,9 +302,14 @@ def _parse(raw: Optional[str]) -> Optional[Dict[str, Any]]:
 # a field from context.
 
 _OPT_OUT = re.compile(
-    r"\b(stop|stopall|unsubscribe|quit|cancel|end|opt\s*out|"
+    r"\b(stop|stopall|unsubscribe|cancel|opt\s*out|"
+    r"quit (text|contact|call|messag)\w*|"
     r"remove me|take me off|do not (text|contact|call)|don'?t (text|contact|call) me)\b",
     re.I)
+# "end" and "quit" are carrier opt-out keywords, but only as the whole message.
+# Inside a sentence ("we can end up closing in 30 days") they are ordinary words,
+# and treating them as STOP would write a real DNC suppression on a live seller.
+_OPT_OUT_BARE = re.compile(r"^\W*(end|quit|stop all|optout)\W*$", re.I)
 _NOT_INTERESTED = re.compile(
     r"\b(not interested|no thanks?|no thank you|not selling|never selling|"
     r"not for sale|leave me alone)\b", re.I)
@@ -312,7 +317,7 @@ _ALREADY_SOLD = re.compile(
     r"\b(already sold|it sold|we sold|sold it|sold last|under contract with|"
     r"no longer own|don'?t own)\b", re.I)
 _WRONG_PERSON = re.compile(
-    r"\b(wrong (number|person)|who is this|you have the wrong|"
+    r"\b(wrong (number|person)|you have the wrong|"
     r"that'?s not me|i don'?t own)\b", re.I)
 _INTERESTED = re.compile(
     r"\b(interested|tell me more|how much|what.{0,12}offer|make an offer|"
@@ -351,7 +356,9 @@ def _deterministic_read(text: str) -> Dict[str, Any]:
     out["needs_human_reason"] = None
     matched: List[str] = []
 
-    if _OPT_OUT.search(text):
+    # "Who is this?" is deliberately NOT wrong-person: a real owner asks it, and
+    # wrong-person kills the deal. With no match it routes to a person instead.
+    if _OPT_OUT.search(text) or _OPT_OUT_BARE.match(text):
         out["intent"] = INTENT_DO_NOT_CONTACT
         out["confidence"] = 95
         out["summary"] = "The owner asked not to be contacted again."

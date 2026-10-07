@@ -781,7 +781,8 @@ def apply_seller_reply(db: Session, org_id: str, deal: WholesaleDeal,
                                    "nothing to qualify. Attach an owner first.")
 
     settings = resolve_settings(db, org_id, commit=False)
-    lead = db.query(Lead).filter(Lead.id == profile.lead_id).first()
+    lead = db.query(Lead).filter(Lead.id == profile.lead_id,
+                                 Lead.organization_id == org_id).first()
 
     # THE MESSAGE ITSELF GOES ON THE RECORD.
     #
