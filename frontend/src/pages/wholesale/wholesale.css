@@ -1962,3 +1962,39 @@
 .ws-page .ws-val-comp { padding: 6px 0; border-bottom: 1px solid var(--border-subtle); }
 .ws-page .ws-val-repair { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
 .ws-page .ws-val-repair select { width: 100%; }
+
+/* ── Buyer board: keyboard focus, narrow widths, light theme ─────────────────
+   Tokens only, so the light theme inherits its own contrast. The board used to
+   scroll sideways at phone width with Actions — the point of the screen — in the
+   last column off-screen; below 720px each buyer is a stacked card and every
+   action is on screen. */
+.ws-page .ws-dispo button:focus-visible,
+.ws-page .ws-dispo a:focus-visible,
+.ws-page .ws-dispo select:focus-visible,
+.ws-page .ws-confirm button:focus-visible,
+.ws-page .ws-respond button:focus-visible,
+.ws-page .ws-respond select:focus-visible,
+.ws-page .ws-respond input:focus-visible {
+  outline: 2px solid var(--signal-blue); outline-offset: 2px;
+}
+.ws-page .ws-blocked, .ws-page .ws-spread.is-down { font-weight: 600; }
+@media (max-width: 720px) {
+  .ws-page .ws-dispo { white-space: normal; }
+  .ws-page .ws-dispo thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .ws-page .ws-dispo, .ws-page .ws-dispo tbody, .ws-page .ws-dispo tr,
+  .ws-page .ws-dispo td { display: block; width: 100%; box-sizing: border-box; }
+  .ws-page .ws-dispo td[data-label] {
+    min-width: 0 !important; text-align: left; white-space: normal;
+  }
+  .ws-page .ws-dispo td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-secondary); margin-bottom: 2px;
+  }
+  .ws-page .ws-dispo__row { border-top: 1px solid var(--border-subtle); padding: 8px 0; }
+  .ws-page .ws-dispo .ws-input--inline { min-width: 0; width: 100%; }
+  .ws-page .ws-confirm { flex-direction: column; align-items: stretch; }
+}

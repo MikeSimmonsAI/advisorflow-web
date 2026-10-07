@@ -148,7 +148,8 @@ check("buyer import file input has an id tied to its label",
 board = read(os.path.join(SRC, "pages/wholesale/wsBuyerBoard.jsx"))
 check("buyer board load failure offers Try again", "Try again" in board)
 check("buyer board keeps rows and warns when only a refresh fails",
-      "error && !board" in board and "may be out of date" in board)
+      "boardView(state)" in board and "view === 'error'" in board
+      and "may be out of date" in board and "loadFailed(s, gen" in board)
 check("buyer board error/loading are announced (role alert/status)",
       'role="alert"' in board and 'role="status"' in board)
 check("buyer board offer amount is validated, not coerced to NaN",
@@ -162,13 +163,39 @@ check("buyers list does not claim 'No cash buyers yet' after a failed load",
       "loadFailed" in buyers and "!buyers.length && !loadFailed" in buyers)
 
 check("board disables Select for a buyer who passed",
-      "|| passed}" in board and "['passed', 'rejected'].includes(row.status)" in board)
+      "selectDisabledReason(row)" in board
+      and "disabled={busy || Boolean(selectBlocked)}" in board)
 check("board proof-of-funds toggle exposes aria-expanded and no bare 'Close'",
       "aria-expanded={pofOpen}" in board and "'Close'" not in board)
 check("board selection confirm is an alertdialog",
       'role="alertdialog"' in board)
 check("import result separates rejected (alert) from skipped (status)",
       "result.rejected" in buyers and 'role="alert"' in buyers and 'role="status"' in buyers)
+
+# 4b. board runtime state / responsive / keyboard (static source) -----------
+state_src = read(os.path.join(SRC, "pages/wholesale/wsBoardState.js"))
+wcss = read(os.path.join(SRC, "pages/wholesale/wholesale.css"))
+check("board state module is pure (no imports)", not re.search(r"^import ", state_src, re.M))
+check("board refresh is generation-guarded", "if (gen !== state.latest) return state" in state_src)
+check("board mutations use a synchronous in-flight latch", "inFlight.current.run" in board)
+check("board shows a refreshing status while keeping rows",
+      "Refreshing" in board and 'role="status"' in board)
+check("board response form offers only server-accepted statuses",
+      "allowedResponseStatuses(row)" in board)
+check("board confirm closes on Escape and returns focus",
+      "Escape" in board and "selectTrigger.current" in board)
+check("board refusals keep stable code beside words",
+      board.count("describeRefusal(") >= 2 and "resendOutcome(r)" in board)
+check("board cells carry data-labels for stacked mobile layout",
+      board.count("data-label=") >= 7)
+check("css stacks the board at phone width without hiding Actions",
+      "@media (max-width: 720px)" in wcss and "attr(data-label)" in wcss
+      and ".ws-dispo thead" in wcss)
+check("css gives board controls a visible focus ring from tokens",
+      ".ws-dispo button:focus-visible" in wcss
+      and "outline: 2px solid var(--signal-blue)" in wcss)
+check("board never submits status 'selected' from the response form",
+      "status: 'selected'" not in board)
 
 # 5. light-theme / mobile hooks ---------------------------------------------
 css = read(os.path.join(SRC, "components/wholesale-shell.css"))
