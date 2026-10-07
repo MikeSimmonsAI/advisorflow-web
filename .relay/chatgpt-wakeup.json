@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-buyer-route-board-states-20261007-0234",
-  "parent_run_id": "wholesale-buyer-settings-gate21-20261007-0134",
+  "relay_run_id": "wholesale-import-outreach-idempotency-20261007-0328",
+  "parent_run_id": "wholesale-buyer-route-board-states-20261007-0234",
   "project": "-",
   "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37588230457",
-  "timestamp_ct": "2026-10-07 02:37 CT",
+  "actions_run_id": "37594093335",
+  "timestamp_ct": "2026-10-07 03:33 CT",
   "issue": 1,
-  "status_comment_id": 6033284786
+  "status_comment_id": 6034147618
 }
