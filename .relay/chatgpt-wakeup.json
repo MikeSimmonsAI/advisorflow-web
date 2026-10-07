@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "ai-workforce-run-evidence-20261007-1038",
-  "parent_run_id": "ai-workforce-integrated-truth-20261007-1033",
-  "project": "AI Workforce \u2014 real run evidence and history",
+  "relay_run_id": "ai-workforce-heartbeat-checkpoints-20261007-1043",
+  "parent_run_id": "ai-workforce-run-evidence-20261007-1038",
+  "project": "AI Workforce \u2014 persisted heartbeat and checkpoint truth",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37645542317",
-  "timestamp_ct": "2026-10-07 10:42 CT",
+  "actions_run_id": "37646277764",
+  "timestamp_ct": "2026-10-07 10:47 CT",
   "issue": 1,
-  "status_comment_id": 6041360640
+  "status_comment_id": 6041464300
 }
