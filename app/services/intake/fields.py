@@ -302,6 +302,28 @@ def validate_mapping(headers: List[str], mapping: Dict[str, dict]) -> List[str]:
     return problems
 
 
+def clean_mapping(headers: List[str], mapping: Optional[dict]) -> Dict[str, dict]:
+    """The mapping restricted to THIS file's headers. Keys for headers the file
+    does not have (a different file/schema) are dropped, never carried over."""
+    mapping = mapping or {}
+    clean: Dict[str, dict] = {}
+    for h in headers:
+        m = mapping.get(h) or {"kind": KIND_SOURCE, "target": N.slug(h)}
+        kind, tgt = m.get("kind"), m.get("target")
+        if kind in (KIND_CUSTOM, KIND_VERTICAL, KIND_SOURCE) and not tgt:
+            tgt = N.slug(h)
+        clean[h] = {"kind": kind, "target": tgt}
+    return clean
+
+
+def drop_stale_confirmation(old_mapping: Optional[dict], new_mapping: dict, cfg: dict) -> dict:
+    """A Classify confirmation belongs to the mapping it was made under. If the
+    mapping changed, that step is no longer done (returns a new dict)."""
+    if (old_mapping or {}) != new_mapping and cfg.get("confirmed_at"):
+        return {k: v for k, v in cfg.items() if k != "confirmed_at"}
+    return cfg
+
+
 def registry_payload() -> List[dict]:
     return [{"key": f.key, "label": f.label, "group": f.group, "help": f.help,
              "multi": f.multi} for f in STANDARD_FIELDS]

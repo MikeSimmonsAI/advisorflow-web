@@ -56,6 +56,7 @@ from app.services.intake import commit as CM
 from app.services.intake import context as CTX
 from app.services.intake import engine as ENG
 from app.services.intake import fields as F
+from app.services.intake import workflow as WF
 from app.services.intake import rollback as RB
 from app.services.platform_owner import require_tenant_context
 
@@ -88,30 +89,8 @@ def _batch_or_404(db: Session, ctx, batch_id: str) -> ImportBatch:
     return b
 
 
-_DONE = ("committing", "committed", "partially_committed", "rolled_back",
-         "partially_rolled_back")
-
-
-def _workflow(status: str, analyzed: bool, classified: bool) -> dict:
-    """Where this batch is in the 7-step wizard, decided HERE from persisted
-    state, so a refresh, a Back, or opening it from the ledger lands on the
-    same step. Steps: 1 Upload, 2 Map, 3 Analyze, 4 Classify, 5 Review
-    Problems, 6 Approve, 7 Results."""
-    if status in _DONE:
-        step = 7
-    elif status == "staged":
-        step = 6
-    elif status in ("processing", "interrupted"):
-        # The wizard shows progress on whichever step asked for the run; the
-        # step it resumes on afterwards is the one below.
-        step = 5 if classified else 3
-    elif status in ("mapping", "uploading") or (status == "failed" and not analyzed):
-        step = 4 if (classified and analyzed) else 2
-    elif analyzed:
-        step = 5 if classified else 3
-    else:
-        step = 2
-    return {"step": step, "analyzed": analyzed, "classified": classified}
+_DONE = WF.DONE
+_workflow = WF.workflow  # pure resume-step decision; see services/intake/workflow.py
 
 
 def _batch_payload(db: Session, b: ImportBatch, detail: bool = False) -> dict:

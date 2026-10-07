@@ -375,19 +375,19 @@ def save_mapping(db: Session, batch: ImportBatch, *, mapping: Optional[dict] = N
     headers = json.loads(batch.headers_json or "[]")
     problems: List[str] = []
     if mapping is not None:
-        clean = {}
-        for h in headers:
-            m = mapping.get(h) or {"kind": F.KIND_SOURCE, "target": N.slug(h)}
-            kind = m.get("kind")
-            tgt = m.get("target")
-            if kind in (F.KIND_CUSTOM, F.KIND_VERTICAL, F.KIND_SOURCE) and not tgt:
-                tgt = N.slug(h)
-            clean[h] = {"kind": kind, "target": tgt}
+        clean = F.clean_mapping(headers, mapping)
         problems = F.validate_mapping(headers, clean)
         if problems:
             return problems
+        old_mapping = json.loads(batch.mapping_json or "{}")
         batch.mapping_json = json.dumps(clean)
         cfg = json.loads(batch.classification_json or "{}")
+        # A changed mapping invalidates the earlier Classify confirmation, so a
+        # reload resumes at Map/Analyze rather than skipping to Classify/Review.
+        kept = F.drop_stale_confirmation(old_mapping, clean, cfg)
+        if kept is not cfg:
+            cfg = kept
+            batch.classification_json = json.dumps(cfg)
         col = next((h for h in headers if clean[h]["kind"] == F.KIND_STANDARD
                     and clean[h]["target"] == "classification"), None)
         if col != cfg.get("column"):
