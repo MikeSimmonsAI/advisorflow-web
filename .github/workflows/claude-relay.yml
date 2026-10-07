@@ -128,7 +128,7 @@ jobs:
             FINISH by posting exactly ONE comment: `gh issue comment 1 --body-file <file>`.
             The file's first line is "[RELAY:CLAUDE_STATUS]", then:
               relay_run_id: ${{ steps.guard.outputs.run_id }}
-              STATUS: <exactly one of WORKING, COMPLETED, BLOCKED, APPROVAL_REQUIRED>
+              STATUS: <exactly one of COMPLETED, BLOCKED, APPROVAL_REQUIRED>
               PROJECT:
               BRANCH: ${{ steps.guard.outputs.branch }}
               START TIME CT: ${{ steps.guard.outputs.started_ct }}
@@ -143,6 +143,11 @@ jobs:
               NEXT RECOMMENDED ACTION:
               PRODUCTION IMPACT:
               DO NOT TOUCH CONFIRMATION:
+            This is your FINAL status comment for this work slice. Never use STATUS: WORKING here.
+            If safe backlog remains after this slice but the assigned checkpoint completed, use
+            STATUS: COMPLETED and name the next safe task in NEXT RECOMMENDED ACTION.
+            Use STATUS: BLOCKED only when this slice cannot complete its assigned checkpoint because
+            of a real blocker, not merely because more backlog remains.
             Never include "[RELAY:DIRECTIVE]" in your comment.
 
       - name: Push committed checkpoint to guarded branch
