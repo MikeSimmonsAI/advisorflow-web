@@ -3037,7 +3037,25 @@ def close_deal(deal_id: str, payload: CloseIn, request: Request,
     """
     org_id = svc.write_org_id(db, user)
     deal = svc.get_deal(db, org_id, deal_id)
+    # CLOSING HAPPENS ONCE. A second POST used to overwrite closed_at, the fee,
+    # its payment reference and funded_at with no trace of what they were, and a
+    # dead deal could be "closed" back to life. The fee that lands after a
+    # closing goes through /fee-collected, which keeps the variance.
+    if deal.stage == pipeline.STAGE_DEAD:
+        raise HTTPException(
+            status_code=409,
+            detail="This deal is marked dead, so it cannot be closed. Move it "
+                   "out of Dead first if it is back on.")
+    if deal.stage == pipeline.STAGE_CLOSED or deal.closed_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This deal is already closed. Record a fee that arrived "
+                   "later with Fee collected, or change the money with an "
+                   "economics correction.")
     fee = analysis.money(payload.wholesale_fee_collected)
+    if fee is not None and fee < 0:
+        raise HTTPException(status_code=400,
+                            detail="The fee collected cannot be negative.")
     if fee is not None:
         deal.wholesale_fee_collected = fee
         deal.fee_collected_at = datetime.utcnow()
@@ -3090,6 +3108,9 @@ def record_fee_collected(deal_id: str, payload: FeeCollectedIn, request: Request
     if amount is None:
         raise HTTPException(status_code=400,
                             detail="Enter the amount that was collected.")
+    if amount < 0:
+        raise HTTPException(status_code=400,
+                            detail="The amount collected cannot be negative.")
 
     expected = analysis.money(deal.assignment_fee)
     before = {"wholesale_fee_collected": _num(deal.wholesale_fee_collected)}
