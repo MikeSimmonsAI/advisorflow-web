@@ -137,3 +137,18 @@ export function createRefreshGate () {
     get busy () { return busy },
   }
 }
+
+/**
+ * The dark-launch line. "Nothing can reach anybody" is a claim about zero, so
+ * it needs a server-evidenced zero: a missing/failed/non-numeric count is
+ * Unknown, never a green zero.
+ */
+export function darkLaunchStatus (dark) {
+  const n = dark && dark.employees_that_could_execute
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) {
+    return { known: false, couldExecute: null, tone: 'off', label: 'Unknown — status not loaded' }
+  }
+  return n === 0
+    ? { known: true, couldExecute: 0, tone: 'ok', label: 'Dark — nothing can reach anybody' }
+    : { known: true, couldExecute: n, tone: 'warn', label: `${n} could reach people` }
+}

@@ -86,3 +86,14 @@ test('refresh gate prevents overlapping refreshes', () => {
   g.done()
   assert.equal(g.tryStart(), true)
 })
+test('dark-launch zero is claimed only when the server evidenced a zero', () => {
+  for (const d of [undefined, null, {}, { employees_that_could_execute: null },
+    { employees_that_could_execute: '0' }, { employees_that_could_execute: NaN }]) {
+    const r = t.darkLaunchStatus(d)
+    assert.equal(r.known, false); assert.equal(r.couldExecute, null)
+    assert.ok(!/nothing can reach/i.test(r.label))
+  }
+  assert.equal(t.darkLaunchStatus({ employees_that_could_execute: 0 }).tone, 'ok')
+  const w = t.darkLaunchStatus({ employees_that_could_execute: 3 })
+  assert.equal(w.tone, 'warn'); assert.equal(w.couldExecute, 3)
+})

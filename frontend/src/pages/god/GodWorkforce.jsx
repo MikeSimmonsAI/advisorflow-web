@@ -19,11 +19,12 @@
  *   PUT  /god/workforce/activation
  *   POST /god/workforce/evaluation/run
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import GodStyles from './GodStyles'
 import { T } from './godTheme'
+import { createActionGuard, createSequencer, darkLaunchStatus } from '../../utils/workforceTruth'
 
 const TABS = ['Overview', 'Activation', 'Employees', 'Tools', 'Evaluation',
   'Customers', 'Health']
@@ -79,7 +80,13 @@ export default function GodWorkforce () {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
 
+  // Latest-wins: an older load() resolving late must not overwrite a newer one.
+  // Mutations hold a synchronous lock so a double click cannot send twice.
+  const seq = useRef(createSequencer())
+  const guard = useRef(createActionGuard())
+
   const load = useCallback(async () => {
+    const token = seq.current.begin()
     setLoading(true); setErr('')
     try {
       const [a, b, c, d, e, f, g] = await Promise.all([
@@ -91,19 +98,23 @@ export default function GodWorkforce () {
         api.get('/god/workforce/customers'),
         api.get('/god/workforce/evaluation/suites'),
       ])
+      if (!seq.current.isCurrent(token)) return
       setOverview(a); setTools(b); setTemplates(c); setProviders(d)
       setHealth(e); setCustomers(f.customers || []); setSuites(g.suites || [])
       const h = await api.get('/god/workforce/evaluation/history')
+      if (!seq.current.isCurrent(token)) return
       setHistory(h.runs || [])
     } catch (ex) {
+      if (!seq.current.isCurrent(token)) return
       setErr(ex?.message || 'Could not load the AI workforce console.')
     } finally {
-      setLoading(false)
+      if (seq.current.isCurrent(token)) setLoading(false)
     }
   }, [])
   useEffect(() => { load() }, [load])
 
   async function setStage (scopeType, scopeId, state) {
+    if (!guard.current.tryAcquire('activation')) return
     setBusy(true); setErr('')
     try {
       await api.put('/god/workforce/activation', {
@@ -113,10 +124,11 @@ export default function GodWorkforce () {
       await load()
     } catch (ex) {
       setErr(ex?.message || 'That activation change was refused.')
-    } finally { setBusy(false) }
+    } finally { guard.current.release('activation'); setBusy(false) }
   }
 
   async function setKill (scopeType, scopeId, engaged) {
+    if (!guard.current.tryAcquire('activation')) return
     setBusy(true); setErr('')
     try {
       await api.put('/god/workforce/activation', {
@@ -127,10 +139,11 @@ export default function GodWorkforce () {
       await load()
     } catch (ex) {
       setErr(ex?.message || 'That change was refused.')
-    } finally { setBusy(false) }
+    } finally { guard.current.release('activation'); setBusy(false) }
   }
 
   async function runSuite (key) {
+    if (!guard.current.tryAcquire('evaluation')) return
     setBusy(true); setErr(''); setEvalResult(null)
     try {
       const out = await api.post('/god/workforce/evaluation/run', { suite: key })
@@ -139,11 +152,12 @@ export default function GodWorkforce () {
       setHistory(h.runs || [])
     } catch (ex) {
       setErr(ex?.message || 'The evaluation could not be run.')
-    } finally { setBusy(false) }
+    } finally { guard.current.release('evaluation'); setBusy(false) }
   }
 
   const dark = overview?.dark_launch || {}
-  const couldExecute = dark.employees_that_could_execute ?? 0
+  const darkStatus = darkLaunchStatus(dark)
+  const couldExecute = darkStatus.couldExecute
 
   return (
     <div className="gm-scope" style={{ minHeight: '100%' }}>
@@ -175,12 +189,11 @@ export default function GodWorkforce () {
         {/* ── THE ONE LINE THAT MATTERS DURING A DARK LAUNCH ─────────── */}
         <div className="gm-card" style={{
           marginBottom: 18,
-          borderColor: couldExecute ? 'var(--gm-pill-amber-bd)' : 'var(--gm-pill-teal-bd)',
+          borderColor: !darkStatus.known ? undefined
+            : couldExecute ? 'var(--gm-pill-amber-bd)' : 'var(--gm-pill-teal-bd)',
         }}>
           <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Pill tone={couldExecute ? 'warn' : 'ok'}>
-              {couldExecute ? `${couldExecute} could reach people` : 'Dark — nothing can reach anybody'}
-            </Pill>
+            <Pill tone={darkStatus.tone}>{darkStatus.label}</Pill>
             <span style={{ color: 'var(--gm-blue)', fontSize: 12 }}>
               platform stage <strong style={{ color: 'var(--gm-head)' }}>{dark.platform_stage || '—'}</strong>
               {dark.kill_switch ? ' · KILL SWITCH ENGAGED' : ''}
@@ -195,9 +208,9 @@ export default function GodWorkforce () {
         <div className="gm-stats" style={{ marginBottom: 18 }}>
           <Stat k="EMPLOYEES" v={dark.employees_total ?? '—'} s="across every customer" />
           <Stat k="CUSTOMERS" v={dark.customers_with_employees ?? '—'} s="with an AI team" />
-          <Stat k="COULD EXECUTE" v={couldExecute}
+          <Stat k="COULD EXECUTE" v={couldExecute ?? '—'}
                 s="employees whose stage reaches people"
-                tone={couldExecute ? T.amber : T.green} />
+                tone={!darkStatus.known ? undefined : couldExecute ? T.amber : T.green} />
           <Stat k="JOBS" v={overview?.templates ?? '—'} s="in the library" />
           <Stat k="TOOLS" v={overview?.tools ?? '—'} s="registered" />
           <Stat k="OUTWARD TOOLS" v={(overview?.executing_tools || []).length}
