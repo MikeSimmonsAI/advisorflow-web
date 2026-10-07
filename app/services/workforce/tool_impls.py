@@ -391,7 +391,8 @@ def memory_remember(ctx, args, auth) -> Dict:
     scope_id = ""
     if scope == wf_memory.SCOPE_LEAD:
         scope_id = getattr(ctx.work_item, "subject_id", "") or ""
-    source = (args.get("source") or wf_memory.SOURCE_EMPLOYEE)
+    # The model may not claim human or platform provenance for what it writes.
+    source = wf_memory.model_source(args.get("source"))
     row = wf_memory.remember(ctx.db, ctx.employee, args.get("key"),
                              args.get("value"), scope=scope, scope_id=scope_id,
                              source=source)

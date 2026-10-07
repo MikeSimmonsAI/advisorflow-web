@@ -59,6 +59,12 @@ SOURCE_HUMAN = "set_by_human"
 SOURCE_PLATFORM = "platform"
 SOURCES = (SOURCE_CONTACT, SOURCE_EMPLOYEE, SOURCE_HUMAN, SOURCE_PLATFORM)
 
+# Provenance a MODEL may claim when it writes memory through a tool. A model
+# that could claim `set_by_human` or `platform` would launder an injected or
+# merely guessed claim into the unfenced "trusted_memory" block as if a person
+# on the customer's team had recorded it. Those two are written only by code.
+MODEL_WRITABLE_SOURCES = (SOURCE_CONTACT, SOURCE_EMPLOYEE)
+
 MAX_VALUE_CHARS = 1000
 MAX_RECALL_ITEMS = 40
 
@@ -111,6 +117,11 @@ def wrap_untrusted(kind: str, text: Optional[str], *,
 
 
 # ── MEMORY ──────────────────────────────────────────────────────────────────
+
+def model_source(requested: Optional[str]) -> str:
+    """The provenance to store for a model-supplied `source` argument."""
+    return requested if requested in MODEL_WRITABLE_SOURCES else SOURCE_EMPLOYEE
+
 
 def remember(db: Session, employee: AIEmployee, key: str, value: str, *,
              scope: str = SCOPE_LEAD, scope_id: str = "",
