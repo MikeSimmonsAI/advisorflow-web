@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "platform-workspace-scope-equivalence-20261007-1120",
-  "parent_run_id": "platform-normal-workspace-access-20261007-1114",
-  "project": "Core platform \u2014 workspace scope equivalence and switch failure safety",
+  "relay_run_id": "platform-workspace-header-closure-20261007-1123",
+  "parent_run_id": "platform-workspace-scope-equivalence-20261007-1120",
+  "project": "Core platform \u2014 close direct workspace-header and denied-switch defects",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37651174946",
-  "timestamp_ct": "2026-10-07 11:22 CT",
+  "actions_run_id": "37651662805",
+  "timestamp_ct": "2026-10-07 11:26 CT",
   "issue": 1,
-  "status_comment_id": 6042086425
+  "status_comment_id": 6042161605
 }
