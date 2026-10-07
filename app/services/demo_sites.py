@@ -199,7 +199,8 @@ def create(db: Session, opp: Opportunity, actor, *, title: str, html: str,
     # historical token still opens its own historical HTML.
     if slug:
         holder = slug_owner(db, opp.brand_sales_org_id, slug)
-        if holder is not None and holder.opportunity_id != opp.id:
+        if (holder is not None and holder.opportunity_id != opp.id
+                and holder.is_live(now)):
             return {"ok": False,
                     "error": "The link name '%s' is already in use by another "
                              "deal for this brand." % slug}
@@ -246,6 +247,22 @@ def revoke(db: Session, demo: DemoSite, now=None) -> None:
     demo.slug = None
 
 
+def pick_slug_row(rows, now=None):
+    """The one live row a name points at, or None. Never a guess.
+
+    The unique index is per brand, so an unscoped lookup (host not recognised)
+    can see the same name held by two brands. Picking `.first()` would open one
+    brand's prospect demo on another's address; two live holders is ambiguous
+    and resolves to nothing. Dead rows are ignored rather than shadowing a
+    live one.
+    """
+    now = now or datetime.utcnow()
+    live = [r for r in rows if r.is_live(now)]
+    if len(live) != 1:
+        return None
+    return live[0]
+
+
 def resolve(db: Session, token: str, now=None, brand_sales_org_id=None) -> Optional[DemoSite]:
     """Token OR vanity slug -> demo, or None. Records the view as a side effect.
 
@@ -276,7 +293,7 @@ def resolve(db: Session, token: str, now=None, brand_sales_org_id=None) -> Optio
             q = db.query(DemoSite).filter(DemoSite.slug == slug)
             if brand_sales_org_id:
                 q = q.filter(DemoSite.brand_sales_org_id == brand_sales_org_id)
-            row = q.first()
+            row = pick_slug_row(q.all(), now)
     if row is None or not row.is_live(now):
         return None
     row.view_count = int(row.view_count or 0) + 1

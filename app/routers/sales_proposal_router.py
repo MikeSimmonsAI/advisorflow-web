@@ -870,6 +870,9 @@ def publish_demo_site(opportunity_id: str, body: DemoSiteIn,
     ident = brand_identity_for_brand(db, opp.brand_sales_org_id)
     base = ident.get("app_base_url") or PUBLIC_BASE_URL
     url = _demos.public_url(base, demo.token)
+    # What the rep copies is the readable address when there is one; opp.demo_url
+    # keeps the token form so revoke can still match it.
+    share_url = _demos.public_url(base, demo.slug or demo.token)
 
     # Only the product walkthrough is "this deal's demo". A website concept is
     # an optional add-on being illustrated, and marking the demo ready because
@@ -883,7 +886,7 @@ def publish_demo_site(opportunity_id: str, body: DemoSiteIn,
 
     db.commit()
     db.refresh(demo)
-    return {"demo": _demos.out(demo, base), "url": url}
+    return {"demo": _demos.out(demo, base), "url": share_url, "token_url": url}
 
 
 @router.get("/sales/opportunities/{opportunity_id}/demo-sites")
