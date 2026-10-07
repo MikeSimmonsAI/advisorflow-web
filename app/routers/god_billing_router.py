@@ -849,10 +849,11 @@ def set_customer_entitlements(organization_id: str, body: EntitlementSnapshotIn,
         # recorded as an entitlement that grants nothing and is never noticed.
         features = _ent.normalize_keys(features)
 
-    for field in plan_limits.SNAPSHOT_DIMENSIONS:
-        if field in data and data[field] is not None and int(data[field]) < 0:
-            raise HTTPException(status_code=400,
-                                detail="%s cannot be negative." % field)
+    from app.services import capacity_rules
+    problems = capacity_rules.validate_snapshot_ceilings(
+        data, unlimited, plan_limits.SNAPSHOT_DIMENSIONS)
+    if problems:
+        raise HTTPException(status_code=400, detail=" ".join(problems))
 
     before = plan_limits.entitlement_state(db, org)
 

@@ -511,6 +511,9 @@ export default function Billing() {
       limit: cur.limit ?? null,
       unlimited: cur.unlimited !== false && (cur.limit === null || cur.limit === undefined),
       pendingLimit: pend?.limit ?? null,
+      source: cur.source || null,
+      planKey: cur.plan_key || null,
+      reason: cur.reason || null,
     };
   }) : [];
 
@@ -758,6 +761,16 @@ export default function Billing() {
                     <div style={{ height: 6, background: '#2a2a4a', borderRadius: 3, overflow: 'hidden' }}>
                       <div style={{ width: `${pct}%`, height: '100%', background: bar }} />
                     </div>
+                  )}
+                  {/* Where the ceiling comes from, and the exact reason when
+                      full. Same server decision that holds the lead. */}
+                  <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
+                    {row.source === 'tenant_override'
+                      ? 'Ceiling: explicit agreement override'
+                      : row.planKey ? `Ceiling: ${row.planKey} plan` : null}
+                  </div>
+                  {row.reason && (
+                    <div style={{ fontSize: 12, color: '#ef4444', marginTop: 4 }}>{row.reason}</div>
                   )}
                   {/* What a scheduled downgrade will reduce this to. Shown as a
                       preview, never applied early — they paid for the tier they

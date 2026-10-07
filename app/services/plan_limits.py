@@ -609,18 +609,28 @@ def check(db: Session, org: Optional[Organization], key: str,
     "You have reached your plan's limit of 2 users" is actionable; "forbidden"
     is not.
     """
+    from app.services import capacity_rules
     limit = limit_for(db, org, key)
+    plan_key = getattr(effective_plan(db, org), "key", None)
+    source = limit_source(db, org, key)
     if limit is None or org is None:
-        return {"allowed": True, "limit": None, "used": None, "unlimited": True}
+        return {**capacity_rules.decide(None, 0, adding, source, plan_key),
+                "used": None}
+    return capacity_rules.decide(limit, usage_for(db, org, key), adding,
+                                 source, plan_key,
+                                 purchased_capacity(db, org, key))
 
-    used = usage_for(db, org, key)
-    return {
-        "allowed": (used + adding) <= limit,
-        "limit": limit,
-        "used": used,
-        "adding": adding,
-        "unlimited": False,
-    }
+
+def limit_source(db: Session, org: Optional[Organization], key: str) -> str:
+    """Where the ceiling limit_for() returns came from: an explicit tenant
+    override (entitlement snapshot) or the catalogue plan. Mirrors limit_for's
+    snapshot-first rule so the UI reason matches the enforced number."""
+    from app.services import capacity_rules
+    snap = current_snapshot(db, org)
+    if snap is not None and (key in _snapshot_unlimited(snap)
+                             or getattr(snap, key, None) is not None):
+        return capacity_rules.SOURCE_OVERRIDE
+    return capacity_rules.SOURCE_CATALOGUE
 
 
 def _authorize_bypass(db: Session, org: Optional[Organization], key: str,

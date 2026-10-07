@@ -130,6 +130,9 @@ def capacity_error_detail(db: Session, org: Optional[Organization]) -> dict:
         "current": check.get("used"),
         "limit": check.get("limit"),
         "held": held_count(db, getattr(org, "id", None)),
+        "source": check.get("source"),
+        "plan": check.get("plan_key"),
+        "reason": check.get("reason"),
         "message": ("This plan includes up to %s leads and %s are in use. "
                     "Upgrade the plan to add more."
                     % (check.get("limit"), check.get("used"))),
