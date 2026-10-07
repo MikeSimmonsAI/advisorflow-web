@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-suppression-idempotency-20261007-0007",
-  "parent_run_id": "wholesale-ai-comms-safety-20261007-0002",
-  "project": "EvoSys Wholesale Overnight \u2014 suppression, idempotency, capacity, and cadence safety",
-  "status": "COMPLETED",
+  "relay_run_id": "wholesale-full-baseline-buyers-ux-20261007-0016",
+  "parent_run_id": "wholesale-suppression-idempotency-20261007-0007",
+  "project": "EvoSys Wholesale Overnight \u2014 full baseline, send-path proof, buyers, closing, and UX",
+  "status": "BLOCKED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37574789233",
-  "timestamp_ct": "2026-10-07 00:15 CT",
+  "actions_run_id": "37575500528",
+  "timestamp_ct": "2026-10-07 00:18 CT",
   "issue": 1,
-  "status_comment_id": 6031446388
+  "status_comment_id": 6031484109
 }
