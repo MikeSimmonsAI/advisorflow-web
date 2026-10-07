@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.models.models import Lead, Reply, User, BookingLink, PipelineConversation, EmailMessage, Organization
-from app.services import ai_gateway
+from app.services import ai_gateway, compose_result
 from app.services.ai_gateway import BACKGROUND, MANUAL
 from app.services.sms_service import BOOKING_BASE_URL, create_booking_link
 from app.services.platform_utils import get_brand_name
@@ -560,6 +560,14 @@ PROVIDER_LEVEL_ERRORS = frozenset({
 })
 
 
+class ComposeFailure(Exception):
+    """The model answered but gave nothing safe to show (empty / refusal)."""
+
+    def __init__(self, kind):
+        super().__init__(kind)
+        self.kind = kind
+
+
 def generate_touch_email(
     db: Session,
     lead: Lead,
@@ -644,13 +652,20 @@ def generate_touch_email(
             max_tokens=400,
         )
         raw = response.choices[0].message.content.strip()
-        clean = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
-        data = json.loads(clean)
+        parsed = compose_result.parse_compose_output(raw)
+        if parsed["status"] in ("empty", "refusal"):
+            raise ComposeFailure("refusal" if parsed["status"] == "refusal" else "empty_generation")
+        try:
+            data = json.loads(raw.strip().strip("`").removeprefix("json").strip())
+            if not isinstance(data, dict):
+                data = {}
+        except ValueError:
+            data = {}
         return {
-            "subject": data.get("subject", f"Following up, {lead.first_name or 'there'}"),
-            "body": data.get("body", ""),
-            "should_stop": bool(data.get("should_stop", False)),
-            "stop_reason": data.get("stop_reason", ""),
+            "subject": parsed["subject"] or f"Following up, {lead.first_name or 'there'}",
+            "body": parsed["body"],
+            "should_stop": parsed["should_stop"],
+            "stop_reason": parsed["stop_reason"],
             "escalate": bool(data.get("escalate", False)),
             "escalate_reason": data.get("escalate_reason", ""),
             "confidence": data.get("confidence", 80),
@@ -672,14 +687,16 @@ def generate_touch_email(
         # makes it diagnosable. The full message stays in the log deliberately:
         # OpenAI's auth errors quote a fragment of the key back, and that does
         # not belong in an API response a browser can read.
-        logger.error("generate_touch_email error (%s): %s", type(e).__name__, e)
+        kind = e.kind if isinstance(e, ComposeFailure) else type(e).__name__
+        logger.error("generate_touch_email error (%s): %s", kind, e)
         return {
             "subject": f"Following up, {lead.first_name or 'there'}",
             "body": f"Hi {lead.first_name or 'there'}, I wanted to follow up regarding your {appt_label}. I'd love to connect at your convenience.",
             "should_stop": False,
             "escalate": False,
             "source": "fallback",
-            "error_kind": type(e).__name__,
+            "error_kind": kind,
+            **{k: v for k, v in compose_result.describe_failure(kind).items() if k != "error_kind"},
             # THE FLAG THE AUTOMATED SENDER READS.
             #
             # `source` was already "fallback" and nothing acted on it. This is
@@ -692,7 +709,7 @@ def generate_touch_email(
             # for one lead says nothing about the next; an account with no
             # credit, a rejected key or an unreachable API says the same thing
             # to every lead in the pass. See PROVIDER_LEVEL_ERRORS.
-            "provider_unavailable": type(e).__name__ in PROVIDER_LEVEL_ERRORS,
+            "provider_unavailable": kind in PROVIDER_LEVEL_ERRORS,
             "touch_number": touch_number,
         }
 
@@ -1587,5 +1604,8 @@ def generate_auto_reply(
         # substituted. The caller uses it to say WHY instead of presenting the
         # fallback as a successful generation.
         "error_kind": result.get("error_kind"),
+        "error_message": result.get("error_message"),
+        "retryable": result.get("retryable"),
+        "action": result.get("action"),
         "booking_url": booking_url,
     }

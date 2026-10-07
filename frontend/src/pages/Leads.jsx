@@ -645,7 +645,7 @@ function ClassicLeads() {
         // the AI's work.
         if (result.source === 'fallback') {
           setBulkAiError(
-            `The AI did not respond${result.error_kind ? ` (${result.error_kind})` : ''} — this is a generic fallback message, not a generated one. Edit it before sending.`
+            `${result.error_message || 'The AI did not respond'}${result.action ? ` ${result.action}` : ''} This is a generic fallback message, not a generated one. Edit it before sending.`
           )
         }
       } else if (result.should_stop) {
@@ -655,7 +655,7 @@ function ClassicLeads() {
           : 'AI stopped for this lead and did not draft a message.')
       } else {
         setBulkAiError(
-          `AI returned an empty message${result.error_kind ? ` (${result.error_kind})` : ''}.`
+          `${result.error_message || 'The AI returned no usable text for this lead.'}${result.action ? ` ${result.action}` : ''}`
         )
       }
     } catch (err) {
@@ -1811,7 +1811,7 @@ function ClassicLeads() {
                               : r.action === 'skipped_fallback' ? `AI failed${r.error_kind ? ` (${r.error_kind})` : ''}: `
                               : r.action === 'blocked' ? 'Blocked: '
                               : 'Error: '}
-                            {r.reason || 'Unknown reason'}
+                            {r.reason || 'Unknown reason'}{r.action ? ` ${r.action}` : ''}
                           </li>
                         ))}
                         {problems.length > 5 && <li>…and {problems.length - 5} more</li>}

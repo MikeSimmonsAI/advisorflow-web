@@ -298,7 +298,9 @@ def generate_batch_replies(
                 results.append({
                     "lead_id": lead.id, "action": "skipped_fallback",
                     "error_kind": ai_result.get("error_kind") or "empty_generation",
-                    "reason": "AI generation failed; the fallback text was not sent.",
+                    "reason": ai_result.get("error_message") or "AI generation failed; the fallback text was not sent.",
+                    "retryable": ai_result.get("retryable", True),
+                    "action": ai_result.get("action"),
                     "reply": "",
                 })
                 continue
