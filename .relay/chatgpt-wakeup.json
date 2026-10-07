@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-evosense-sharing-recovery-20261007-1002",
-  "parent_run_id": "wholesale-settings-ops-recovery-20261007-0956",
-  "project": "EvoSys Wholesale Overnight \u2014 EvoSense and sharing recovery",
+  "relay_run_id": "ai-workforce-truth-recovery-retry-20261007-1028",
+  "parent_run_id": "ai-workforce-truth-recovery-20261007-1007",
+  "project": "AI Workforce \u2014 truthful lifecycle and recovery retry",
   "status": "COMPLETED",
-  "branch": "wholesale-nightly",
-  "actions_run_id": "37641732200",
-  "timestamp_ct": "2026-10-07 10:05 CT",
+  "branch": "platform-dev",
+  "actions_run_id": "37644228201",
+  "timestamp_ct": "2026-10-07 10:31 CT",
   "issue": 1,
-  "status_comment_id": 6040812508
+  "status_comment_id": 6041154131
 }
