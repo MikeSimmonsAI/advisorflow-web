@@ -167,6 +167,26 @@ def _parse_starts_at(raw: str) -> Optional[datetime]:
     return dt.replace(tzinfo=None)
 
 
+_LIVE_STATUSES = ("booked", "confirmed")
+
+
+def _live_booking(db: Session, lead: Lead):
+    return (db.query(BookingLink)
+            .filter(BookingLink.lead_id == lead.id,
+                    BookingLink.status.in_(_LIVE_STATUSES),
+                    BookingLink.booked_time.isnot(None))
+            .order_by(BookingLink.booked_time.asc()).first())
+
+
+def _already_booked(existing) -> Dict:
+    return {"booking_id": existing.id, "already_booked": True,
+            "booked_time": existing.booked_time.isoformat()
+            if existing.booked_time else None,
+            "advisor_id": existing.user_id,
+            "confirmation_pending": False,
+            "message": "This record already has an appointment."}
+
+
 def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
               advisor: Optional[User] = None, appt_label: Optional[str] = None,
               now: Optional[datetime] = None) -> Dict:
@@ -178,6 +198,16 @@ def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
     have booked it.
     """
     now = now or datetime.utcnow()
+    lead_org = getattr(lead, "organization_id", None)
+    if lead_org is not None and str(lead_org) != str(employee.organization_id):
+        raise ValueError("No such record.")          # cross-tenant: never book
+    # IDEMPOTENCY FIRST. The re-read below counts this record's own live
+    # booking as a busy slot, so a retry of the very call that succeeded would
+    # otherwise be refused as "no longer available" instead of returning the
+    # appointment that already exists.
+    existing = _live_booking(db, lead)
+    if existing is not None:
+        return _already_booked(existing)
     advisor = advisor or resolve_advisor(db, lead, employee)
     if advisor is None:
         raise ValueError("No advisor is configured to take this appointment.")
@@ -210,18 +240,9 @@ def book_slot(db: Session, *, employee, lead: Lead, starts_at: str,
     # covers the different shape: two DIFFERENT runs, minutes apart, each
     # deciding to book. The record already has a live appointment, so the
     # answer is the existing one rather than a new row.
-    existing = (db.query(BookingLink)
-                .filter(BookingLink.lead_id == lead.id,
-                        BookingLink.status.in_(("booked", "confirmed")),
-                        BookingLink.booked_time.isnot(None))
-                .order_by(BookingLink.booked_time.asc()).first())
+    existing = _live_booking(db, lead)      # re-check after the slow reads
     if existing is not None:
-        return {"booking_id": existing.id, "already_booked": True,
-                "booked_time": existing.booked_time.isoformat()
-                if existing.booked_time else None,
-                "advisor_id": existing.user_id,
-                "confirmation_pending": False,
-                "message": "This record already has an appointment."}
+        return _already_booked(existing)
 
     from app.services import tenant_scheduling
     from app.services.sms_service import _encode_booking_token
@@ -299,7 +320,11 @@ def reschedule(db: Session, *, employee, lead: Lead, booking_link_id: str,
                        BookingLink.lead_id == lead.id).first())
     if booking is None:
         raise ValueError("No such appointment on this record.")
-    advisor = db.query(User).filter(User.id == booking.user_id).first()
+    # A cancelled / expired / pending link is not an appointment; moving it
+    # would silently revive it as "booked".
+    if booking.status not in _LIVE_STATUSES:
+        raise ValueError("That appointment is no longer active.")
+    advisor =db.query(User).filter(User.id == booking.user_id).first()
     if advisor is None or str(advisor.organization_id) != str(employee.organization_id):
         raise ValueError("The advisor for that appointment could not be resolved.")
 
