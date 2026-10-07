@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-exceptions-funding-command-recovery-20261007-0950",
-  "parent_run_id": "wholesale-buyers-properties-recovery-20261007-0945",
-  "project": "EvoSys Wholesale Overnight \u2014 exceptions, funding partners, and command recovery",
+  "relay_run_id": "wholesale-settings-ops-recovery-20261007-0956",
+  "parent_run_id": "wholesale-exceptions-funding-command-recovery-20261007-0950",
+  "project": "EvoSys Wholesale Overnight \u2014 settings and operations recovery",
   "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37639875833",
-  "timestamp_ct": "2026-10-07 09:54 CT",
+  "actions_run_id": "37640763968",
+  "timestamp_ct": "2026-10-07 10:00 CT",
   "issue": 1,
-  "status_comment_id": 6040602821
+  "status_comment_id": 6040715571
 }
