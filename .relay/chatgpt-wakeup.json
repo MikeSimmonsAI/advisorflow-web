@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "platform-normal-workspace-access-20261007-1114",
-  "parent_run_id": "ai-workforce-simulator-complete-read-20261007-1110",
-  "project": "Core platform \u2014 normal-account workspace access and landing truth",
+  "relay_run_id": "platform-workspace-scope-equivalence-20261007-1120",
+  "parent_run_id": "platform-normal-workspace-access-20261007-1114",
+  "project": "Core platform \u2014 workspace scope equivalence and switch failure safety",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37650510697",
-  "timestamp_ct": "2026-10-07 11:18 CT",
+  "actions_run_id": "37651174946",
+  "timestamp_ct": "2026-10-07 11:22 CT",
   "issue": 1,
-  "status_comment_id": 6042014112
+  "status_comment_id": 6042086425
 }
