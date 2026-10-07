@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-import-chain-20261007-1805",
-  "parent_run_id": "wholesale-e2e-product-20261007-1754",
-  "project": "Wholesale \u2014 executable messy CSV to buyer preview chain",
-  "status": "BLOCKED",
+  "relay_run_id": "wholesale-import-chain-checkpoint-20261007-1812",
+  "parent_run_id": "wholesale-import-chain-20261007-1805",
+  "project": "Wholesale \u2014 persist the mapped import-to-preview chain despite runner provisioning",
+  "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37700174006",
-  "timestamp_ct": "2026-10-07 18:07 CT",
+  "actions_run_id": "37700544046",
+  "timestamp_ct": "2026-10-07 18:11 CT",
   "issue": 1,
-  "status_comment_id": 6048666203
+  "status_comment_id": 6048722876
 }
