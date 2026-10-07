@@ -58,4 +58,12 @@ Evidence: SYNTHETIC LOGIC / STATIC SOURCE. pytest, fastapi and sqlalchemy are no
 - Limits: no mobile-width or light-theme rendering (no frontend build/browser); the audit read source and CSS breakpoints only. Run `pytest tests/test_wholesale_regression_20261007.py tests/test_wholesale_disposition.py tests/test_wholesale_workflow.py tests/test_wholesale_matching.py` once the toolchain exists (gate: full-toolchain).
 - OWNER GATE unchanged: whether close must require contract/title, and whether funding must require closed status. No policy changed.
 
+## Update — relay wholesale-buyer-settings-gate21-20261007-0134
+Evidence: STATIC SOURCE / SYNTHETIC LOGIC. No browser, DB integration, deployed, or provider run.
+- UX DEFECTS FIXED (WholesaleBuyers.jsx, source only): add-buyer, buy-box and edit forms had bare `<label>` elements with no `htmlFor`, so those inputs had no accessible name; same for the import file input and the preferred-channel and rehab-tolerance selects. All now have matching ids. The preferred-channel select showed raw keys (`sms`, `phone`); now "Email / Text message / Phone call". WholesaleSettings.jsx and wsBuyerBoard.jsx were checked: no unassociated labels.
+- GATE 21 test repaired (tests/test_import_intelligence.py): the old case checked app/migrations and app/patches, so it never touched the real file. Replaced by a guard on app/migrate_add_import_tables.py itself (must stay unparseable-or-absent; no reference from main.py, registry.py, render.yaml, alembic.ini, requirements.txt or alembic/), plus a static check that registry.py imports app.models.import_models and main.py calls create_all. These 2 new static assertions were EXECUTED stdlib-only: 2/2 pass. The file was not run, rebuilt or deleted. The original DB-backed create_all case is unchanged and UNEXECUTED.
+- scripts/wholesale_ux_static_check.py 171 -> 189 checks (label association on 3 screens, worded channel options, import file id): 189/189 pass. Re-run: send paths 55/55, buyer matching 32/32, closing 49/49, tenant audit 251 queries 0 unreviewed.
+- Not done: no new backend defect found beyond the prior tenant audit, so no backend change and no new DB-backed cases. Mobile-width and light-theme remain source/CSS-breakpoint level only.
+- OWNER GATES unchanged: closing/title policy, funding/closed policy, deletion of the dead migration file.
+
 SAFE WHOLESALE WORK REMAINS

@@ -128,6 +128,22 @@ for label_for in sorted(set(re.findall(r'htmlFor="([^"]+)"', closing))):
     check("closing label for=%s has an input" % label_for,
           re.search(r'id="%s"' % re.escape(label_for), closing) is not None)
 
+# 4f. every Wholesale form label is programmatically tied to its control -----
+# A bare <label>text</label> next to an input gives the control no accessible
+# name. Allowed: htmlFor=, a label that wraps its control, or an sr-only span.
+for sub in ("WholesaleBuyers.jsx", "WholesaleSettings.jsx", "wsBuyerBoard.jsx"):
+    txt = read(os.path.join(SRC, "pages/wholesale", sub))
+    bare = re.findall(r"<label>[^<]*(?:\{[^}]*\})?[^<]*</label>", txt)
+    check("%s has no bare unassociated <label> (%s)" % (sub, bare[:2]), not bare)
+    for f in sorted(set(re.findall(r'htmlFor="([^"]+)"', txt))):
+        check("%s label for=%s has an input id" % (sub, f),
+              re.search(r'id="%s"' % re.escape(f), txt) is not None)
+buyers = read(os.path.join(SRC, "pages/wholesale/WholesaleBuyers.jsx"))
+check("buyer channel select shows worded options, not sms/phone keys",
+      "Text message" in buyers and ">{c}</option>" not in buyers)
+check("buyer import file input has an id tied to its label",
+      'htmlFor="bi-file"' in buyers and 'id="bi-file"' in buyers)
+
 # 5. light-theme / mobile hooks ---------------------------------------------
 css = read(os.path.join(SRC, "components/wholesale-shell.css"))
 check("shell css has a mobile breakpoint", "@media" in css and "max-width" in css)

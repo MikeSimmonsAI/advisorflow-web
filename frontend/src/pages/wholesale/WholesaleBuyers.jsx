@@ -236,15 +236,15 @@ function AddBuyer({ onDone, onClose }) {
           ['reliability_rating', 'Reliability 1-5'], ['source', 'Source']].map(
           ([key, label]) => (
             <div className="ws-field" key={key}>
-              <label>{label}</label>
-              <input value={form[key]} onChange={(e) => set(key, e.target.value)} />
+              <label htmlFor={`bf-${key}`}>{label}</label>
+              <input id={`bf-${key}`} value={form[key]} onChange={(e) => set(key, e.target.value)} />
             </div>
           ))}
         <div className="ws-field">
-          <label>Preferred channel</label>
-          <select value={form.preferred_channel}
+          <label htmlFor="bf-preferred_channel">Preferred channel</label>
+          <select id="bf-preferred_channel" value={form.preferred_channel}
                   onChange={(e) => set('preferred_channel', e.target.value)}>
-            {['email', 'sms', 'phone'].map((c) => <option key={c} value={c}>{c}</option>)}
+            {[['email', 'Email'], ['sms', 'Text message'], ['phone', 'Phone call']].map(([c, t]) => <option key={c} value={c}>{t}</option>)}
           </select>
         </div>
       </div>
@@ -400,13 +400,13 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
           ['min_year_built', 'Built after'], ['min_spread', 'Min spread']].map(
           ([key, label]) => (
             <div className="ws-field" key={key}>
-              <label>{label}</label>
-              <input value={form[key]} onChange={(e) => set(key, e.target.value)} />
+              <label htmlFor={`bb-${key}`}>{label}</label>
+              <input id={`bb-${key}`} value={form[key]} onChange={(e) => set(key, e.target.value)} />
             </div>
           ))}
         <div className="ws-field">
-          <label>Rehab tolerance</label>
-          <select value={form.rehab_tolerance}
+          <label htmlFor="bb-rehab_tolerance">Rehab tolerance</label>
+          <select id="bb-rehab_tolerance" value={form.rehab_tolerance}
                   onChange={(e) => set('rehab_tolerance', e.target.value)}>
             <option value="">No limit stated</option>
             {REHAB.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
@@ -473,8 +473,8 @@ function BuyerImport({ onDone, onClose }) {
       <ErrorBox error={error} />
       <div className="ws-grid">
         <div className="ws-field">
-          <label>File</label>
-          <input type="file" accept=".csv,text/csv"
+          <label htmlFor="bi-file">File</label>
+          <input id="bi-file" type="file" accept=".csv,text/csv"
                  onChange={(e) => setFile(e.target.files[0])} />
         </div>
       </div>
