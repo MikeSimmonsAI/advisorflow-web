@@ -156,7 +156,12 @@ export default function WorkforceRunEvidence ({ employeeId = null, title = 'Run 
             {payload.as_of ? <span style={{ color: 'var(--text-secondary)' }}> · as of {formatCT(payload.as_of)}</span> : null}
           </div>
           {current ? <ul style={{ padding: 0 }}><Row run={current} active /></ul> : null}
-          <button className="btn btn--ghost" onClick={load} disabled={loading}>Check status now</button>
+          <button className="btn btn--ghost" onClick={load} disabled={loading} aria-busy={loading}>
+            {loading ? 'Checking…' : 'Check status now'}
+          </button>
+          <span style={{ fontSize: 12, marginLeft: 8, color: 'var(--text-secondary)' }}>
+            {lastOkAt ? `Last successful refresh ${formatCT(new Date(lastOkAt).toISOString())}` : 'No successful refresh yet'}
+          </span>
           <h4>History</h4>
           {history.length
             ? <ul style={{ padding: 0 }}>{history.map(r => <Row key={r.run_id} run={r} />)}</ul>

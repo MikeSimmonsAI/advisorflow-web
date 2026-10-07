@@ -305,5 +305,15 @@ class RuntimeWiring(unittest.TestCase):
         self.assertNotIn("def start(db", src)
 
 
+class UiManualRefresh(unittest.TestCase):
+    jsx = open(os.path.join(ROOT, "frontend", "src", "components",
+                            "WorkforceRunEvidence.jsx"), encoding="utf-8").read()
+
+    def test_manual_refresh_shows_checking_and_last_success(self):
+        self.assertIn("'Checking…'", self.jsx)
+        self.assertIn("Last successful refresh", self.jsx)
+        self.assertIn("gate.tryStart()", self.jsx)       # no overlap
+
+
 if __name__ == "__main__":
     unittest.main()
