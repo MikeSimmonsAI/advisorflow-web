@@ -37,6 +37,8 @@ import './ds/evo-pages.css'
 import {
   clearOutcome, createActionTracker, describeError, outcomesFor, panelOf, setOutcome,
 } from './wsActionState'
+import { contractTruth, missingPrerequisites, CONTRACT_STATUS_LABEL } from './wsDocState'
+import { currentBuyer, fundsTruth, matchEvidence, sortMatches } from './wsOfferState'
 
 const TABS = [
   ['overview', 'Overview'],
@@ -114,6 +116,7 @@ export default function WholesaleDeal() {
     }
   }
   const panelBusy = (panel) => pendingKeys.some((k) => panelOf(k) === panel)
+  const isBusy = (key) => pendingKeys.includes(key)
   const shown = outcomesFor(outcomes, tab)
 
   if (error && !room) return <EvoApp world="operations"><ErrorBox error={error} /></EvoApp>
@@ -213,10 +216,10 @@ export default function WholesaleDeal() {
       {tab === 'ops' ? <DealOpsPanel dealId={deal.id} /> : null}
       {tab === 'seller' ? <SellerTab room={room} act={act} busy={panelBusy(tab)} /> : null}
       {tab === 'analysis' ? <AnalysisTab room={room} act={act} busy={panelBusy(tab)} /> : null}
-      {tab === 'offer' ? <OfferTab room={room} act={act} busy={panelBusy(tab)} /> : null}
+      {tab === 'offer' ? <OfferTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'funding' ? <><DistributionNotice distribution={distribution} kind="funding" /><FundingWorkspace deal={room.deal} /></> : null}
-      {tab === 'documents' ? <DocumentsTab room={room} act={act} busy={panelBusy(tab)} /> : null}
-      {tab === 'buyers' ? <><DistributionNotice distribution={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={panelBusy(tab)} /></> : null}
+      {tab === 'documents' ? <DocumentsTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
+      {tab === 'buyers' ? <><DistributionNotice distribution={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /></> : null}
       {tab === 'closing' ? <ClosingTab room={room} act={act} busy={panelBusy(tab)} /> : null}
       {tab === 'sharing'
         ? <SharingWorkspace deal={deal} buyers={room.buyer_matches}
@@ -992,7 +995,7 @@ function AnalysisTab({ room, act, busy }) {
 }
 
 
-function OfferTab({ room, act, busy }) {
+function OfferTab({ room, act, busy, isBusy }) {
   const { deal, approvals, analysis } = room
   const [amount, setAmount] = useState(analysis.max_allowable_offer ?? '')
   const [reasoning, setReasoning] = useState('')
@@ -1007,7 +1010,7 @@ function OfferTab({ room, act, busy }) {
           sides stand. The approval machinery below it is a separate question
           and was being read as the whole of the offer story. */}
       <NegotiationLedger deal={deal} offers={room.offers || []}
-                         analysis={analysis} act={act} busy={busy} />
+                         analysis={analysis} act={act} busy={busy} isBusy={isBusy} />
 
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">Ask for approval</div>
@@ -1041,7 +1044,7 @@ function OfferTab({ room, act, busy }) {
               <div className={`ws-approval ${isNext ? 'is-next' : ''}`} key={kind}>
                 <button
                   className={`btn ${isNext ? 'btn--primary' : 'btn--secondary'}`}
-                  disabled={busy}
+                  disabled={isBusy(`offer:approval:${kind}`)}
                   onClick={() => act(
                     () => api.post(`/wholesale/deals/${deal.id}/approvals`, {
                       kind,
@@ -1050,7 +1053,7 @@ function OfferTab({ room, act, busy }) {
                       // Only ever true once the operator has read the gap
                       // below and pressed the button again.
                       acknowledge_missing: acknowledged === kind,
-                    }), `${kind} approval requested.`)}>
+                    }), `${kind} approval requested.`, `offer:approval:${kind}`)}>
                   Request {kind} approval
                 </button>
                 {state.approved ? (
@@ -1136,26 +1139,28 @@ function OfferTab({ room, act, busy }) {
 }
 
 
-function DocumentsTab({ room, act, busy }) {
+function DocumentsTab({ room, act, busy, isBusy }) {
   const { deal } = room
 
   return (
     <>
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">Contract</div>
-        <ContractForm deal={deal} act={act} busy={busy} />
+        <ContractForm deal={deal} documents={room.documents} act={act} busy={isBusy('documents:contract')} />
       </div>
 
       {/* The drawer IS the panel. It used to be wrapped in a second one whose
           only content was a paragraph explaining the design, which made every
           document sit inside two nested boxes under an essay. */}
-      <DocumentDrawer room={room} act={act} busy={busy} />
+      <DocumentDrawer room={room} act={act} busy={busy} isBusy={isBusy} />
     </>
   )
 }
 
 
-function ContractForm({ deal, act, busy }) {
+function ContractForm({ deal, documents, act, busy }) {
+  const truth = contractTruth(deal, documents)
+  const gaps = missingPrerequisites(deal, documents)
   const [form, setForm] = useState({
     contract_price: deal.contract_price ?? '',
     contract_status: deal.contract_status ?? 'none',
@@ -1164,6 +1169,15 @@ function ContractForm({ deal, act, busy }) {
   })
   return (
     <>
+      <p className="ws-comp__sub" role="status">
+        Contract: <strong>{truth.label}</strong>
+      </p>
+      {truth.warning ? <div className="ws-warn" role="status">{truth.warning}</div> : null}
+      {gaps.length ? (
+        <ul className="ws-comp__sub" aria-label="Missing before this contract is complete">
+          {gaps.map((g) => <li key={g}>{g}</li>)}
+        </ul>
+      ) : null}
       <div className="ws-grid">
         <div className="ws-field">
           <label htmlFor="ct-price">Contract price</label>
@@ -1174,8 +1188,12 @@ function ContractForm({ deal, act, busy }) {
           <label htmlFor="ct-status">Status</label>
           <select id="ct-status" value={form.contract_status}
                   onChange={(e) => setForm((f) => ({ ...f, contract_status: e.target.value }))}>
-            {['none', 'preparing', 'sent', 'signed', 'cancelled'].map(
-              (s) => <option key={s} value={s}>{s}</option>)}
+            {Object.entries(CONTRACT_STATUS_LABEL).map(
+              ([k, label]) => <option key={k} value={k}>{label}</option>)}
+            {form.contract_status && !CONTRACT_STATUS_LABEL[form.contract_status]
+              ? <option value={form.contract_status} disabled>
+                  {String(form.contract_status).replace(/_/g, ' ')} (reference: {form.contract_status})
+                </option> : null}
           </select>
         </div>
         <div className="ws-field">
@@ -1198,7 +1216,7 @@ function ContractForm({ deal, act, busy }) {
                     contract_status: form.contract_status,
                     inspection_deadline: form.inspection_deadline || null,
                     close_of_escrow_target: form.close_of_escrow_target || null,
-                  }), 'Contract updated.')}>
+                  }), 'Contract updated.', 'documents:contract')}>
           Save contract
         </button>
       </div>
@@ -1220,8 +1238,10 @@ function ContractForm({ deal, act, busy }) {
  * they close, and what they have done here before. Nothing is ranked or
  * recommended beyond the score the matcher already computed.
  */
-function MatchRow({ m, chosen, onToggle }) {
+function MatchRow({ m, chosen, onToggle, isCurrent }) {
   const a = m.activity
+  const funds = fundsTruth(m)
+  const evidence = matchEvidence(m)
   const excluded = m.disqualified || m.do_not_contact
   return (
     <>
@@ -1244,7 +1264,12 @@ function MatchRow({ m, chosen, onToggle }) {
             <div className="ws-comp__sub ws-blocked">{m.disqualified_reason}</div>
           ) : null}
         </td>
-        <td className="ws-num"><Score value={m.score} /></td>
+        <td className="ws-num">
+          {typeof m.score === 'number' && evidence.enough
+            ? <Score value={m.score} />
+            : <span className="ws-muted">Insufficient evidence</span>}
+          <div className="ws-comp__sub">{evidence.text}</div>
+        </td>
         <td>
           {m.geography || <span className="ws-muted">anywhere — no geography set</span>}
           {m.max_price !== null && m.max_price !== undefined ? (
@@ -1252,9 +1277,10 @@ function MatchRow({ m, chosen, onToggle }) {
           ) : null}
         </td>
         <td>
-          {m.proof_of_funds_on_file
-            ? <span className="ws-pill is-ok">Funds on file</span>
-            : <span className="ws-pill is-muted">No funds on file</span>}
+          <span className={`ws-pill ${funds.key === 'on_file' ? 'is-ok' : 'is-muted'}`}>
+            {funds.label}
+          </span>
+          {isCurrent ? <div className="ws-comp__sub">Currently selected buyer</div> : null}
         </td>
         <td className="ws-num">
           {m.typical_close_days ? `${m.typical_close_days} days` : '—'}
@@ -1296,8 +1322,10 @@ function MatchRow({ m, chosen, onToggle }) {
 }
 
 
-function BuyersTab({ room, act, busy }) {
-  const { deal, buyer_matches: matches, analysis } = room
+function BuyersTab({ room, act, busy, isBusy }) {
+  const { deal, analysis } = room
+  const matches = sortMatches(room.buyer_matches || [])
+  const current = currentBuyer(deal, matches)
   const [chosen, setChosen] = useState({})
   const [askingPrice, setAskingPrice] = useState(analysis.buyer_price
                                                  ?? analysis.contract_price ?? '')
@@ -1311,13 +1339,14 @@ function BuyersTab({ room, act, busy }) {
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">
           <span>Matched buyers ({matches.length})</span>
-          <button className="btn btn--secondary btn--sm" disabled={busy}
+          <button className="btn btn--secondary btn--sm" disabled={isBusy('buyers:match')}
                   onClick={() => act(
                     () => api.post(`/wholesale/deals/${deal.id}/match-buyers`),
-                    'Buyers rescored.')}>
+                    'Buyers rescored.', 'buyers:match')}>
             Run matching
           </button>
         </div>
+        <p className="ws-comp__sub" role="status">{current.text}</p>
         <Note>
           Tick the buyers to send to. Nothing goes out until you press Send.
         </Note>
@@ -1337,6 +1366,7 @@ function BuyersTab({ room, act, busy }) {
             <tbody>
               {matches.map((m) => (
                 <MatchRow key={m.id} m={m} chosen={!!chosen[m.buyer_id]}
+                          isCurrent={current.state === 'selected' && String(current.id) === String(m.buyer_id)}
                           onToggle={(v) => setChosen(
                             (c) => ({ ...c, [m.buyer_id]: v }))} />
               ))}
@@ -1379,17 +1409,17 @@ function BuyersTab({ room, act, busy }) {
           </div>
         </div>
         <div className="ws-actions" style={{ marginTop: 12 }}>
-          <button className="btn btn--secondary" disabled={busy || !selected.length}
+          <button className="btn btn--secondary" disabled={isBusy('buyers:preview') || !selected.length}
                   onClick={() => act(async () => {
                     setPreview(await api.post(
                       `/wholesale/deals/${deal.id}/disposition/preview`, {
                         buyer_ids: selected,
                         asking_price: askingPrice === '' ? null : Number(askingPrice),
                       }))
-                  })}>
+                  }, null, 'buyers:preview')}>
             Preview the deal sheet
           </button>
-          <button className="btn btn--primary" disabled={busy || !selected.length}
+          <button className="btn btn--primary" disabled={isBusy('buyers:send') || !selected.length}
                   onClick={() => act(async () => {
                     const result = await api.post(
                       `/wholesale/deals/${deal.id}/disposition`, {
@@ -1399,7 +1429,7 @@ function BuyersTab({ room, act, busy }) {
                       })
                     setChosen({})
                     setOutcome(result)
-                  }, null)}>
+                  }, null, 'buyers:send')}>
             Send to {selected.length || 0} buyer(s)
           </button>
         </div>

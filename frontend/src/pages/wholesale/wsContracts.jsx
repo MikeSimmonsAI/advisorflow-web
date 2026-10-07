@@ -17,7 +17,7 @@
  *   generated Texas wholesale agreement. That is a lawyer's work and the
  *   product does not pretend otherwise.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { errText, fmtLabel, Note, Why } from './wsShared'
 import { openFile } from './wsFiles'
@@ -27,18 +27,32 @@ export function ContractDesk({ deal, act, busy }) {
   const [error, setError] = useState(null)
   const [copied, setCopied] = useState(false)
 
+  const gen = useRef(0)
+
+  // Newest load wins; a failed refresh keeps the last good sheet and says so.
   const load = useCallback(async () => {
+    const mine = ++gen.current
     try {
-      setSheet(await api.get(`/wholesale/deals/${deal.id}/fill-sheet`))
+      const next = await api.get(`/wholesale/deals/${deal.id}/fill-sheet`)
+      if (mine !== gen.current) return
+      setError(null)
+      setSheet(next)
     } catch (e) {
+      if (mine !== gen.current) return
       setError(errText(e))
     }
   }, [deal.id])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { setSheet(null); load() }, [load])
 
-  if (error) return <div className="ws-error">{error}</div>
-  if (!sheet) return null
+  if (!sheet) {
+    return error ? (
+      <div className="ws-error" role="alert">
+        The papering sheet could not be loaded: {error}
+        <div><button className="btn btn--secondary btn--sm" onClick={load}>Try again</button></div>
+      </div>
+    ) : <p className="ws-comp__sub" role="status">Loading the papering sheet…</p>
+  }
 
   const sum = sheet.summary || { total: 0, complete: 0, needs_review: 0, missing: 0 }
 
@@ -57,10 +71,11 @@ export function ContractDesk({ deal, act, busy }) {
   async function copy() {
     try {
       await navigator.clipboard.writeText(asText())
+      setError(null)
       setCopied(true)
       setTimeout(() => setCopied(false), 2500)
     } catch {
-      setError('This browser would not let the page write to the clipboard. '
+      setError('Copy failed: this browser would not let the page write to the clipboard. '
                + 'Select the sheet and copy it instead.')
     }
   }
@@ -82,6 +97,8 @@ export function ContractDesk({ deal, act, busy }) {
         </span>
       </div>
 
+      {error ? <div className="ws-error" role="alert">{error}
+        <button className="btn btn--secondary btn--sm" onClick={load}>Try again</button></div> : null}
       <Note>
         Pick your own form, then carry these facts into it. Nothing here writes
         contract language.
@@ -96,6 +113,7 @@ export function ContractDesk({ deal, act, busy }) {
             <button className="btn btn--secondary btn--sm" onClick={copy}
                     disabled={busy}>
               {copied ? 'Copied' : 'Copy the sheet'}
+              <span className="ws-vis-hidden" role="status">{copied ? ' to the clipboard' : ''}</span>
             </button>
           </span>
         </div>

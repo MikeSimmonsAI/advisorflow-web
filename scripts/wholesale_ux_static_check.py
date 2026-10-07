@@ -212,5 +212,51 @@ check("deal room announces outcomes", 'role="status"' in deal and 'role="alert"'
 check("deal room errors keep reference code", "describeError(errText(e))" in deal)
 check("action state module is pure (no imports)", not re.search(r"^import ", astate, re.M))
 
+# 7. offer / document / contract truth ---------------------------------------
+W = "pages/wholesale/"
+offers_src = read(os.path.join(SRC, W + "wsOffers.jsx"))
+docs_src = read(os.path.join(SRC, W + "wsDocuments.jsx"))
+contracts_src = read(os.path.join(SRC, W + "wsContracts.jsx"))
+ostate = read(os.path.join(SRC, W + "wsOfferState.js"))
+dstate = read(os.path.join(SRC, W + "wsDocState.js"))
+check("offer state module is pure (no imports)", not re.search(r"^import ", ostate, re.M))
+check("doc state module is pure (no imports)", not re.search(r"^import ", dstate, re.M))
+check("ledger formats money through the pure helper, not fmtMoney",
+      "amountText(" in offers_src and "fmtMoney" not in offers_src)
+check("ledger orders offers deterministically", "sortOffers(" in offers_src)
+check("ledger record button has its own action key and blocks bad amounts",
+      "ACT_RECORD" in offers_src and "amountBad" in offers_src)
+check("ledger status select is keyed per offer", "actStatus(o.id)" in offers_src)
+check("ledger explains amount problems with a status line",
+      'id="ws-offer-amount-hint"' in offers_src and 'role="status"' in offers_src)
+check("ledger shows unknown statuses with a reference code",
+      "offerStatusText(" in offers_src and "(reference: " in ostate)
+check("buyer match shows funds as three states and insufficient evidence",
+      "fundsTruth(m)" in deal and "Insufficient evidence" in deal and "matchEvidence(m)" in deal)
+check("buyer tab names the selected buyer and sorts without recommending",
+      "currentBuyer(deal, matches)" in deal and "sortMatches(" in deal
+      and "recommended:" not in ostate and "best:" not in ostate)
+check("deal room exposes per-action busy to child panels",
+      "isBusy={isBusy}" in deal and "const isBusy = (key)" in deal)
+check("offer approvals, match, preview and send have independent keys",
+      all(k in deal for k in ("offer:approval:${kind}", "'buyers:match'", "'buyers:preview'", "'buyers:send'", "'documents:contract'")))
+check("document rows key every action per document",
+      all(k in docs_src for k in ("documents:edit:${doc.id}", "documents:move:${doc.id}",
+                                  "documents:sig:${doc.id}", "documents:buyer:${doc.id}",
+                                  "documents:owner:${doc.id}")))
+check("documents drawer has no whole-drawer busy lock on rows", "busy={busy}" not in docs_src.split("function DocumentDrawer")[1].split("return (")[1])
+check("signed is offered only with an executed copy", "signatureOptions(doc)" in docs_src
+      and "key === 'signed' && !held" in dstate)
+check("document status comes from docTruth, not raw status", "docTruth(doc)" in docs_src)
+check("contract form shows truth, warning and missing prerequisites",
+      "contractTruth(deal, documents)" in deal and "missingPrerequisites(deal, documents)" in deal)
+check("contract status select uses words, not raw keys",
+      "CONTRACT_STATUS_LABEL" in deal and "(s) => <option key={s} value={s}>{s}</option>" not in deal)
+check("papering sheet has loading, alert, retry and stale-load guard",
+      "Loading the papering sheet" in contracts_src and 'role="alert"' in contracts_src
+      and "Try again" in contracts_src and "gen.current" in contracts_src)
+check("signature capability failure is announced, not swallowed",
+      "Signature capability could not be checked" in docs_src and ".catch(() => {})" not in docs_src)
+
 print("wholesale ux static: %d passed, %d failed" % (passed, failed))
 sys.exit(1 if failed else 0)

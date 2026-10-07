@@ -20,26 +20,18 @@
  */
 import { useMemo, useState } from 'react'
 import { api } from '../../api/client'
-import { fmtMoney, fmtWhen, Note, Why } from './wsShared'
+import { fmtWhen, Note, Why } from './wsShared'
+import {
+  OFFER_STATUS_LABEL, SELLER, US, amountText, classifyAmount, offerPosition,
+  offerStatusText, sortOffers,
+} from './wsOfferState'
 
-const US = 'us'
-const SELLER = 'seller'
+const ACT_RECORD = 'offer:record'
+const actStatus = (id) => `offer:status:${id}`
 
 /* The vocabulary the server accepts, in the order a negotiation runs through
- * it. Kept as pairs so the screen never prints a stored key. */
-const STATUSES = [
-  ['draft', 'Draft — written down, not presented'],
-  ['approval_pending', 'Waiting on an approval'],
-  ['approved', 'Approved internally'],
-  ['presented', 'Presented to the seller'],
-  ['countered', 'Countered'],
-  ['accepted', 'Accepted'],
-  ['rejected', 'Rejected'],
-  ['expired', 'Expired'],
-  ['withdrawn', 'Withdrawn'],
-]
-
-const STATUS_LABEL = Object.fromEntries(STATUSES)
+ * it. The words live in wsOfferState so the screen never prints a stored key. */
+const STATUSES = Object.entries(OFFER_STATUS_LABEL)
 
 function tone(status) {
   if (status === 'accepted') return 'is-ok'
@@ -49,30 +41,34 @@ function tone(status) {
 }
 
 
-export function NegotiationLedger({ deal, offers, analysis, act, busy }) {
+export function NegotiationLedger({ deal, offers: rawOffers, analysis, act, busy, isBusy }) {
+  const offers = useMemo(() => sortOffers(rawOffers || []), [rawOffers])
+  const pending = (key) => (isBusy ? isBusy(key) : !!busy)
   const [direction, setDirection] = useState(US)
   const [amount, setAmount] = useState('')
   const [notes, setNotes] = useState('')
   const [note, setNote] = useState(null)
 
   const mao = analysis?.max_allowable_offer ?? null
-  const typed = amount === '' ? null : Number(amount)
-  const overMao = typed !== null && !Number.isNaN(typed)
-                  && mao !== null && typed > mao && direction === US
+  const typedKind = amount.trim() === '' ? 'missing' : classifyAmount(amount.trim()).kind
+  const typed = typedKind === 'ok' || typedKind === 'zero' ? Number(amount) : null
+  const overMao = typed !== null && mao !== null && typed > mao && direction === US
+  const amountBad = typedKind === 'invalid' || typedKind === 'zero'
 
-  const position = useMemo(() => {
-    const ours = [...offers].reverse().find((o) => o.direction === US)
-    const theirs = [...offers].reverse().find((o) => o.direction === SELLER)
-    const gap = (ours && theirs && ours.amount !== null && theirs.amount !== null)
-      ? Number(theirs.amount) - Number(ours.amount) : null
-    return { ours, theirs, gap }
-  }, [offers])
+  const position = useMemo(() => offerPosition(offers), [offers])
 
   return (
     <div className="panel ws-panel">
       <div className="panel-title ws-panel-title">
         <span>The negotiation ({offers.length})</span>
       </div>
+      {position.accepted ? (
+        <div className="ws-good" role="status">
+          Accepted at {amountText(position.accepted.amount)}
+          {position.accepted.responded_at ? ` on ${fmtWhen(position.accepted.responded_at)}` : ''}.
+          Acceptance is recorded here only; it is not a signed contract.
+        </div>
+      ) : null}
       <Note>
         Every move, in order, with the maximum allowable offer as it stood at the
         time.
@@ -89,36 +85,34 @@ export function NegotiationLedger({ deal, offers, analysis, act, busy }) {
       <div className="ws-position">
         <div className="ws-position__side">
           <span className="ws-k">Our last offer</span>
-          <strong>{position.ours ? fmtMoney(position.ours.amount) : '—'}</strong>
+          <strong>{position.ours ? amountText(position.ours.amount) : '—'}</strong>
           <span className="ws-position__sub">
             {position.ours
-              ? `${STATUS_LABEL[position.ours.status] || position.ours.status} · ${fmtWhen(position.ours.created_at)}`
+              ? `${offerStatusText(position.ours.status)} · ${fmtWhen(position.ours.created_at) || 'date not recorded'}`
               : 'nothing offered yet'}
           </span>
         </div>
         <div className="ws-position__gap">
           <span className="ws-k">Gap</span>
           <strong className={position.gap !== null && position.gap > 0 ? 'is-apart' : ''}>
-            {position.gap === null ? '—' : fmtMoney(Math.abs(position.gap))}
+            {position.gap === null ? '—' : amountText(Math.abs(position.gap))}
           </strong>
           <span className="ws-position__sub">
-            {position.gap === null ? 'needs a number from both sides'
-              : (position.gap > 0 ? 'they are asking more than we offered'
-                                  : 'their number is at or below ours')}
+            {position.gapNote}
           </span>
         </div>
         <div className="ws-position__side">
           <span className="ws-k">Their last counter</span>
-          <strong>{position.theirs ? fmtMoney(position.theirs.amount) : '—'}</strong>
+          <strong>{position.theirs ? amountText(position.theirs.amount) : '—'}</strong>
           <span className="ws-position__sub">
             {position.theirs
-              ? fmtWhen(position.theirs.created_at)
+              ? (fmtWhen(position.theirs.created_at) || 'date not recorded')
               : 'they have not countered'}
           </span>
         </div>
         <div className="ws-position__side">
           <span className="ws-k">Maximum allowable offer</span>
-          <strong>{fmtMoney(mao)}</strong>
+          <strong>{mao === null ? '—' : amountText(mao)}</strong>
           <span className="ws-position__sub">
             {mao === null ? 'not calculable yet — see Analysis'
                           : 'the most we can pay and keep the fee intact'}
@@ -152,18 +146,21 @@ export function NegotiationLedger({ deal, offers, analysis, act, busy }) {
                  placeholder="What was said, and by whom" />
         </div>
         <div className="ws-actions">
-          <button className="btn btn--primary" disabled={busy || amount === ''}
+          <button className="btn btn--primary"
+                  disabled={pending(ACT_RECORD) || amount.trim() === '' || amountBad}
+                  aria-describedby="ws-offer-amount-hint"
                   onClick={async () => {
                     setNote(null)
                     const done = await act(async () => {
                       const res = await api.post(
                         `/wholesale/deals/${deal.id}/offers`,
-                        { amount: Number(amount), direction,
+                        { amount: Number(amount.trim()), direction,
                           notes: notes || null })
                       // The server says whether this number is inside the MAO.
                       // Kept verbatim rather than re-derived on this screen.
                       setNote(res && res.note ? res.note : null)
-                    }, direction === US ? 'Offer recorded.' : 'Counter recorded.')
+                    }, direction === US ? 'Offer recorded.' : 'Counter recorded.',
+                    ACT_RECORD)
                     if (done) { setAmount(''); setNotes('') }
                   }}>
             Record {direction === US ? 'our offer' : 'their counter'}
@@ -171,10 +168,17 @@ export function NegotiationLedger({ deal, offers, analysis, act, busy }) {
         </div>
       </div>
 
+      <p id="ws-offer-amount-hint" className="ws-comp__sub" role="status">
+        {amount.trim() === '' ? 'Enter an amount to record a move.'
+          : typedKind === 'invalid' ? 'That is not a valid amount — use digits only, not negative.'
+          : typedKind === 'zero' ? 'Zero is not recorded as an offer.'
+          : pending(ACT_RECORD) ? 'Recording…' : ''}
+      </p>
+
       {/* Before it is recorded, not after. */}
       {overMao ? (
         <div className="ws-warn">
-          {fmtMoney(typed)} is above the maximum allowable offer of {fmtMoney(mao)}.
+          {amountText(typed)} is above the maximum allowable offer of {amountText(mao)}.
           You can still record it — a wholesaler may knowingly go over — but it
           will need an approval before the deal can move to Offer Sent.
         </div>
@@ -197,7 +201,8 @@ export function NegotiationLedger({ deal, offers, analysis, act, busy }) {
             </thead>
             <tbody>
               {offers.map((o) => {
-                const over = (o.mao_at_time !== null && o.amount !== null
+                const over = (classifyAmount(o.mao_at_time).kind === 'ok'
+                              && classifyAmount(o.amount).kind === 'ok'
                               && o.direction === US
                               && Number(o.amount) > Number(o.mao_at_time))
                 return (
@@ -212,13 +217,13 @@ export function NegotiationLedger({ deal, offers, analysis, act, busy }) {
                       </span>
                     </td>
                     <td className="ws-num">
-                      {fmtMoney(o.amount)}
+                      {amountText(o.amount)}
                       {over ? <span className="ws-delta is-over">over MAO</span> : null}
                     </td>
                     <td className="ws-num">
-                      {o.mao_at_time === null
+                      {classifyAmount(o.mao_at_time).kind === 'missing'
                         ? <span className="ws-muted">not calculable then</span>
-                        : fmtMoney(o.mao_at_time)}
+                        : amountText(o.mao_at_time)}
                     </td>
                     <td>
                       <label className="ws-vis-hidden"
@@ -227,21 +232,24 @@ export function NegotiationLedger({ deal, offers, analysis, act, busy }) {
                       </label>
                       <select id={`ws-offer-status-${o.id}`}
                               className={`ws-input ws-input--inline ws-statusedit ${tone(o.status)}`}
-                              value={o.status} disabled={busy}
+                              value={o.status || ''} disabled={pending(actStatus(o.id))}
                               onChange={(e) => act(
                                 () => api.patch(`/wholesale/offers/${o.id}`,
                                                 { status: e.target.value }),
-                                'Offer status updated.')}>
+                                'Offer status updated.', actStatus(o.id))}>
+                        {!OFFER_STATUS_LABEL[o.status]
+                          ? <option value={o.status || ''} disabled>{offerStatusText(o.status)}</option>
+                          : null}
                         {STATUSES.map(([key, label]) => (
                           <option key={key} value={key}>{label}</option>
                         ))}
                       </select>
                     </td>
                     <td>
-                      {fmtWhen(o.created_at)}
+                      {fmtWhen(o.created_at) || 'date not recorded'}
                       <div className="ws-comp__sub">
                         {o.created_by_actor === 'user' ? 'by a person'
-                          : (o.created_by_actor || 'unknown')}
+                          : (o.created_by_actor || 'recorder not stated')}
                         {o.presented_at ? ` · presented ${fmtWhen(o.presented_at)}` : ''}
                         {o.responded_at ? ` · answered ${fmtWhen(o.responded_at)}` : ''}
                       </div>

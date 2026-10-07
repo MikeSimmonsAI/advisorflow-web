@@ -24,6 +24,7 @@ import { api } from '../../api/client'
 import { errText, fmtDate, fmtLabel, fmtWhen, Note, Why } from './wsShared'
 import { UploadZone, ConfirmDelete, openFile } from './wsFiles'
 import { ContractDesk } from './wsContracts'
+import { DOC_STATUS_LABEL, docTruth, signatureOptions } from './wsDocState'
 
 /* Filing categories, not legal templates. This module ships no state-specific
  * form and generates none — these are labels on a drawer. */
@@ -37,47 +38,7 @@ export const DOC_TYPES = [
  * transaction rather than like whatever was uploaded last. */
 const ORDER = DOC_TYPES.reduce((acc, t, i) => ({ ...acc, [t]: i }), {})
 
-/* The server sends `status_label` on every row; this map is only for the
- * "move to" options, which are bare keys. Both come from the same table in
- * app/services/wholesale_esign.py. */
-const STATUS_LABEL = {
-  draft: 'Draft',
-  ready_for_review: 'Ready for review',
-  approved: 'Approved',
-  sent: 'Sent',
-  viewed: 'Opened by the other party',
-  signed: 'Signed',
-  declined: 'Declined',
-  voided: 'Voided',
-  superseded: 'Superseded',
-}
-
-const SIGNATURE_STATES = [
-  ['none', 'Not sent'],
-  ['out_for_signature', 'Out for signature'],
-  ['partially_signed', 'Partially signed'],
-  ['signed', 'Signed'],
-  ['declined', 'Declined'],
-]
-const SIGNATURE_LABEL = Object.fromEntries(SIGNATURE_STATES)
-
-function sigTone(state) {
-  if (state === 'signed') return 'is-ok'
-  if (state === 'declined') return 'is-dnc'
-  if (['out_for_signature', 'partially_signed'].includes(state)) return 'is-warn'
-  return 'is-muted'
-}
-
-/* Phase 5. The tone follows the LIFECYCLE key the server sends, not the raw
- * stored value — `status` still carries the pre-lifecycle vocabulary on older
- * rows, and a screen that pattern-matched on it drew "needed" and "draft" as
- * two different things when they are one. */
-function statusTone(key) {
-  if (key === 'signed') return 'is-ok'
-  if (key === 'declined' || key === 'voided') return 'is-dnc'
-  if (key === 'sent' || key === 'viewed') return 'is-warn'
-  return 'is-muted'
-}
+const STATUS_LABEL = DOC_STATUS_LABEL
 
 function size(bytes) {
   if (!bytes && bytes !== 0) return ''
@@ -118,7 +79,13 @@ function Held({ doc }) {
 }
 
 
-function Row({ doc, busy, act, capability, onAttach, onDelete }) {
+function Row({ doc, isBusy, act, capability, onAttach, onDelete }) {
+  const truth = docTruth(doc)
+  const kEdit = `documents:edit:${doc.id}`
+  const kMove = `documents:move:${doc.id}`
+  const kSig = `documents:sig:${doc.id}`
+  const kBuyer = `documents:buyer:${doc.id}`
+  const kOwner = `documents:owner:${doc.id}`
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState({ title: doc.title || '',
                                        doc_type: doc.doc_type })
@@ -152,13 +119,13 @@ function Row({ doc, busy, act, capability, onAttach, onDelete }) {
               </div>
             </div>
             <div className="ws-actions" style={{ marginTop: 10 }}>
-              <button className="btn btn--primary btn--sm" disabled={busy}
+              <button className="btn btn--primary btn--sm" disabled={isBusy(kEdit)}
                       onClick={async () => {
                         if (await act(
                           () => api.patch(`/wholesale/documents/${doc.id}`, {
                             doc_type: draft.doc_type,
                             title: draft.title || null,
-                          }), 'Document saved.')) setEditing(false)
+                          }), 'Document saved.', kEdit)) setEditing(false)
                       }}>Save</button>
               <button className="btn btn--secondary btn--sm"
                       onClick={() => setEditing(false)}>Cancel</button>
@@ -179,9 +146,10 @@ function Row({ doc, busy, act, capability, onAttach, onDelete }) {
       </td>
       <td><Held doc={doc} /></td>
       <td>
-        <span className={`ws-pill ${statusTone(doc.status_key)}`}>
-          {doc.status_label || fmtLabel(doc.status, 'No status')}
-        </span>
+        <span className={`ws-pill ${truth.tone}`}>{truth.label}</span>
+        {truth.warning ? (
+          <div className="ws-comp__sub ws-doc__warn" role="status">{truth.warning}</div>
+        ) : null}
         {/* Only the moves the server would actually accept are offered. The
             list comes from the server with the row, so this control cannot
             drift from what the lifecycle allows. */}
@@ -192,12 +160,12 @@ function Row({ doc, busy, act, capability, onAttach, onDelete }) {
             </label>
             <select id={`st-${doc.id}`} value=""
                     className="ws-input ws-input--inline ws-statusedit"
-                    disabled={busy}
+                    disabled={isBusy(kMove)}
                     onChange={(e) => {
                       if (!e.target.value) return
                       act(() => api.post(
                         `/wholesale/documents/${doc.id}/status`,
-                        { status: e.target.value }), 'Document moved on.')
+                        { status: e.target.value }), 'Document moved on.', kMove)
                     }}>
               <option value="">Move to…</option>
               {doc.allowed_next.map((k) => (
@@ -217,15 +185,18 @@ function Row({ doc, busy, act, capability, onAttach, onDelete }) {
         <div className="ws-doc__sig">
           <label htmlFor={`sig-${doc.id}`}>Signatures</label>
           <select id={`sig-${doc.id}`}
-                  className={`ws-input ws-input--inline ws-statusedit ${sigTone(doc.signature_status)}`}
-                  value={SIGNATURE_LABEL[doc.signature_status] ? doc.signature_status : 'none'}
-                  disabled={busy}
+                  className={`ws-input ws-input--inline ws-statusedit ${truth.tone}`}
+                  value={doc.signature_status || 'none'}
+                  disabled={isBusy(kSig)}
                   onChange={(e) => act(
                     () => api.patch(`/wholesale/documents/${doc.id}`, {
                       doc_type: doc.doc_type, signature_status: e.target.value,
-                    }), 'Signature state recorded.')}>
-            {SIGNATURE_STATES.map(([k, label]) => (
-              <option key={k} value={k}>{label}</option>
+                    }), 'Signature state recorded.', kSig)}>
+            {signatureOptions(doc).map((o) => (
+              <option key={o.key} value={o.key} disabled={o.disabled}
+                      title={o.reason || undefined}>
+                {o.label}{o.reason ? ` — ${o.reason}` : ''}
+              </option>
             ))}
           </select>
           {doc.signature_provider ? (
@@ -239,25 +210,25 @@ function Row({ doc, busy, act, capability, onAttach, onDelete }) {
           person decides each one. The server reads these same columns. */}
       <td>
         <label className="ws-checkbox ws-doc__share">
-          <input type="checkbox" disabled={busy}
+          <input type="checkbox" disabled={isBusy(kBuyer)}
                  checked={!!doc.buyer_visible}
                  onChange={(e) => act(
                    () => api.patch(`/wholesale/documents/${doc.id}`, {
                      doc_type: doc.doc_type,
                      buyer_visible: e.target.checked,
                    }), e.target.checked ? 'Shared with investors.'
-                                        : 'Hidden from investors.')} />
+                                        : 'Hidden from investors.', kBuyer)} />
           Investors
         </label>
         <label className="ws-checkbox ws-doc__share">
-          <input type="checkbox" disabled={busy}
+          <input type="checkbox" disabled={isBusy(kOwner)}
                  checked={!!doc.seller_visible}
                  onChange={(e) => act(
                    () => api.patch(`/wholesale/documents/${doc.id}`, {
                      doc_type: doc.doc_type,
                      seller_visible: e.target.checked,
                    }), e.target.checked ? 'Shared with the owner.'
-                                        : 'Hidden from the owner.')} />
+                                        : 'Hidden from the owner.', kOwner)} />
           Owner
         </label>
         {doc.viewed_at ? (
@@ -303,7 +274,8 @@ function Row({ doc, busy, act, capability, onAttach, onDelete }) {
 }
 
 
-export function DocumentDrawer({ room, act, busy }) {
+export function DocumentDrawer({ room, act, busy, isBusy: isBusyProp }) {
+  const isBusy = isBusyProp || (() => !!busy)
   const { deal, documents } = room
   const capability = room.file_storage
   const [docType, setDocType] = useState('purchase_contract')
@@ -314,7 +286,8 @@ export function DocumentDrawer({ room, act, busy }) {
   const rows = [...(documents || [])].sort(
     (a, b) => (ORDER[a.doc_type] ?? 99) - (ORDER[b.doc_type] ?? 99))
   const held = rows.filter((d) => d.stored_file).length
-  const signed = rows.filter((d) => d.signature_status === 'signed').length
+  const signed = rows.filter((d) => docTruth(d).key === 'signed').length
+  const unverified = rows.filter((d) => docTruth(d).key === 'signed_unverified').length
 
   async function upload(files) {
     const fd = new FormData()
@@ -324,7 +297,7 @@ export function DocumentDrawer({ room, act, busy }) {
     if (target) fd.append('document_id', target.id)
     const ok = await act(
       () => api.upload(`/wholesale/deals/${deal.id}/documents/upload`, fd),
-      target ? 'File attached.' : 'Document uploaded.')
+      target ? 'File attached.' : 'Document uploaded.', 'documents:upload')
     if (ok) { setTitle(''); setTarget(null) }
   }
 
@@ -333,13 +306,13 @@ export function DocumentDrawer({ room, act, busy }) {
     {/* The contract step comes BEFORE the drawer, because picking a form and
         gathering the facts is what happens first; the drawer is where the
         result lands. */}
-    <ContractDesk deal={deal} act={act} busy={busy} />
+    <ContractDesk deal={deal} act={act} busy={isBusy('documents:copy')} />
 
     <div className="panel ws-panel">
       <div className="panel-title ws-panel-title">
         <span>Documents ({rows.length})</span>
         <span className="ws-doc__counts">
-          {held} with a file · {signed} signed
+          {held} with a file · {signed} signed with an executed copy{unverified ? ` · ${unverified} marked signed without a copy` : ''}
         </span>
       </div>
 
@@ -359,7 +332,7 @@ export function DocumentDrawer({ room, act, busy }) {
             </thead>
             <tbody>
               {rows.map((d) => (
-                <Row key={d.id} doc={d} busy={busy} act={act}
+                <Row key={d.id} doc={d} isBusy={isBusy} act={act}
                      capability={capability}
                      onAttach={setTarget} onDelete={setConfirming} />
               ))}
@@ -371,14 +344,14 @@ export function DocumentDrawer({ room, act, busy }) {
       )}
 
       {confirming ? (
-        <ConfirmDelete busy={busy}
+        <ConfirmDelete busy={isBusy('documents:delete')}
                        what={`${confirming.title || fmtLabel(confirming.doc_type)}`
                              + (confirming.stored_file ? ' and the file held with it' : '')}
                        onCancel={() => setConfirming(null)}
                        onConfirm={async () => {
                          if (await act(
                            () => api.delete(`/wholesale/documents/${confirming.id}`),
-                           'Document deleted.')) setConfirming(null)
+                           'Document deleted.', 'documents:delete')) setConfirming(null)
                        }} />
       ) : null}
 
@@ -418,7 +391,7 @@ export function DocumentDrawer({ room, act, busy }) {
             </div>
           </div>
         )}
-        <UploadZone capability={capability} busy={busy} onFiles={upload}
+        <UploadZone capability={capability} busy={isBusy('documents:upload')} onFiles={upload}
                     accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp"
                     label={target ? 'Choose file' : 'Upload document'} />
       </div>
@@ -440,16 +413,25 @@ export function DocumentDrawer({ room, act, busy }) {
  * fake feature this module exists not to ship. */
 function SignatureCapability() {
   const [cap, setCap] = useState(null)
+  const [failed, setFailed] = useState(false)
 
   useEffect(() => {
     let live = true
     api.get('/wholesale/documents/lifecycle')
       .then((d) => { if (live) setCap(d.signature) })
-      .catch(() => {})
+      .catch(() => { if (live) setFailed(true) })
     return () => { live = false }
   }, [])
 
-  if (!cap) return null
+  if (failed) {
+    return (
+      <div className="ws-warn" role="alert">
+        Signature capability could not be checked, so whether a provider is
+        connected is unknown. No send-for-signature control is shown.
+      </div>
+    )
+  }
+  if (!cap) return <p className="ws-comp__sub" role="status">Checking signature capability…</p>
   if (cap.electronic_signature) {
     return (
       <Note>
