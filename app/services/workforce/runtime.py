@@ -49,6 +49,7 @@ from app.services.workforce import performance
 from app.services.workforce import policy as wf_policy
 from app.services.workforce import queue as wf_queue
 from app.services.workforce import run_evidence
+from app.services.workforce import run_telemetry
 from app.services.workforce import tools as wf_tools
 
 _log = logging.getLogger(__name__)
@@ -72,6 +73,19 @@ def _now() -> datetime:
 def _start_run(db: Session, employee: AIEmployee, item: Optional[AIWorkItem],
                *, objective: str, mode: str, trigger: str,
                lease_seconds: Optional[int] = None) -> AIEmployeeRun:
+    # PREFERRED: create the row in its own transaction so it is observable
+    # while the run is live. The caller's session is not touched.
+    handle = run_telemetry.start(
+        organization_id=employee.organization_id, employee_id=employee.id,
+        work_item_id=getattr(item, "id", None), objective=objective,
+        mode=mode, trigger=trigger, capability=model_router.PLAN,
+        lease_seconds=lease_seconds)
+    if handle is not None:
+        performance.bump(db, employee, "runs")
+        return handle
+    # FALLBACK (telemetry transaction unavailable, e.g. the caller's
+    # uncommitted work item is not visible to another session): the old
+    # in-session row. `independent` is False: visible only on caller commit.
     t = _now()
     run = AIEmployeeRun(
         organization_id=employee.organization_id, employee_id=employee.id,
@@ -86,6 +100,41 @@ def _start_run(db: Session, employee: AIEmployee, item: Optional[AIWorkItem],
     return run
 
 
+def _is_independent(run) -> bool:
+    return bool(getattr(run, "independent", False))
+
+
+def _watch_rollback(db: Session, run) -> None:
+    """If the caller's transaction rolls back, the work did not persist: an
+    already-final 'completed' becomes 'failed' (never the reverse). One-shot;
+    removes itself on the caller's commit or rollback. Never raises."""
+    if not _is_independent(run):
+        return
+    try:
+        from sqlalchemy import event
+
+        def _done(session, *_a):
+            for name, fn in (("after_rollback", _on_rollback),
+                             ("after_commit", _on_commit)):
+                try:
+                    event.remove(db, name, fn)
+                except Exception:                            # noqa: BLE001
+                    pass
+
+        def _on_rollback(session, *_a):
+            _done(session)
+            run_telemetry.correct_after_rollback(run)
+
+        def _on_commit(session, *_a):
+            _done(session)
+
+        event.listen(db, "after_rollback", _on_rollback)
+        event.listen(db, "after_commit", _on_commit)
+    except Exception:                                        # noqa: BLE001
+        _log.warning("workforce runtime: rollback watch not installed",
+                     exc_info=True)
+
+
 def _heartbeat(db: Session, run: AIEmployeeRun, stage: str) -> bool:
     """Refresh liveness at a real execution boundary. NEVER raises.
 
@@ -93,11 +142,14 @@ def _heartbeat(db: Session, run: AIEmployeeRun, stage: str) -> bool:
     terminal row is never revived; `stage` is redacted and bounded before it is
     stored. The write is a SAVEPOINT flush: a failure rolls back only the
     heartbeat, is logged, and the run carries on (no retry of the work, no
-    success claimed). NOTE: the runtime never commits; the heartbeat is
-    visible to other sessions only when the caller commits.
+    success claimed). Independent runs write through run_telemetry (own
+    transaction, visible immediately); fallback runs write through the caller
+    session and are visible only when the caller commits.
     """
     if run is None or run.status != "running" or run.ended_at is not None:
         return False
+    if _is_independent(run):
+        return run_telemetry.heartbeat(run, stage)
     try:
         with db.begin_nested():
             run.last_heartbeat_at = _now()
@@ -113,6 +165,12 @@ def _heartbeat(db: Session, run: AIEmployeeRun, stage: str) -> bool:
 def _finish_run(db: Session, run: AIEmployeeRun, status: str, *,
                 summary: str = "", abort_reason: Optional[str] = None,
                 error: Optional[str] = None, started: float = 0.0) -> None:
+    if _is_independent(run):
+        run_telemetry.finalize(
+            run, status, summary=summary, abort_reason=abort_reason,
+            error=error,
+            duration_ms=int((_time.time() - started) * 1000) if started else None)
+        return
     t = _now()
     run.status = status
     run.ended_at = t
@@ -295,6 +353,7 @@ def execute(db: Session, employee: AIEmployee, item: AIWorkItem, *,
     run = _start_run(db, employee, item, objective=objective,
                      mode=resolved.state, trigger=trigger,
                      lease_seconds=max_seconds)
+    _watch_rollback(db, run)
 
     ctx = wf_tools.ToolContext(db, employee, policy=pol, work_item=item,
                                run=run, claim_token=claim_token,

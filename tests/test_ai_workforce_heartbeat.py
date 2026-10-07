@@ -125,7 +125,7 @@ def _load_writers():
     """Extract the three writer functions from runtime.py and bind stubs."""
     src = _read("app", "services", "workforce", "runtime.py")
     tree = ast.parse(src)
-    want = {"_now", "_start_run", "_heartbeat", "_finish_run"}
+    want = {"_now", "_start_run", "_heartbeat", "_finish_run", "_is_independent"}
     body = [n for n in tree.body
             if isinstance(n, ast.FunctionDef) and n.name in want]
     consts = [n for n in tree.body if isinstance(n, ast.Assign)
@@ -139,6 +139,7 @@ def _load_writers():
         "AIEmployee": object, "AIWorkItem": object, "Session": object,
         "model_router": SimpleNamespace(PLAN="plan"),
         "performance": SimpleNamespace(bump=lambda *a, **k: bumps.append(a)),
+        "run_telemetry": SimpleNamespace(start=lambda **k: None),  # fallback path
         "run_evidence": RE, "_time": __import__("time"),
         "_log": SimpleNamespace(warning=lambda *a, **k: None),
     }
