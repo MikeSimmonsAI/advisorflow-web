@@ -23,6 +23,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
+import WorkforceRunEvidence from '../components/WorkforceRunEvidence'
 import { applyRefresh, createActionGuard, createSequencer, supportCode } from '../utils/workforceTruth'
 import '../styles/shared.css'
 import '../styles/aiWorkforce.css'
@@ -202,6 +203,8 @@ export default function AIWorkforceEmployee () {
                             marginTop: 6 }}>{c.deployment.note}</div>
             ) : null}
           </div>
+
+          <WorkforceRunEvidence employeeId={employeeId} title="Current run and history" />
 
           <h3>Outcomes</h3>
           <div className="panel" style={{ padding: 0, overflowX: 'auto',

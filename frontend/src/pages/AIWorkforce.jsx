@@ -32,6 +32,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
+import WorkforceRunEvidence from '../components/WorkforceRunEvidence'
 import { applyRefresh, createActionGuard, createSequencer, supportCode } from '../utils/workforceTruth'
 import '../styles/shared.css'
 import '../styles/aiWorkforce.css'
@@ -559,6 +560,7 @@ export default function AIWorkforce () {
           </>
         )}
       </div>
+      <WorkforceRunEvidence title="Recent run activity" />
     </PageShell>
   )
 }

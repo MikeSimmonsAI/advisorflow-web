@@ -40,6 +40,7 @@ from app.services.workforce import handoff as wf_handoff
 from app.services.workforce import performance as wf_performance
 from app.services.workforce import queue as wf_queue
 from app.services.workforce import registry as wf_registry
+from app.services.workforce import run_evidence
 from app.services.workforce import service as wf_service
 from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
 
@@ -288,6 +289,52 @@ def get_handoffs(request: Request, db: Session = Depends(get_db),
     rows = wf_handoff.open_for_org(db, org_id, employee_id=employee_id)
     return {"organization_id": org_id,
             "handoffs": [wf_handoff.as_dict(r) for r in rows]}
+
+
+@router.get("/runs")
+def get_runs(request: Request, db: Session = Depends(get_db),
+             user: User = Depends(require_tenant_user),
+             employee_id: Optional[str] = Query(None),
+             limit: int = Query(run_evidence.LIST_LIMIT_DEFAULT, ge=1,
+                                le=run_evidence.LIST_LIMIT_MAX)
+             ) -> Dict[str, Any]:
+    """Evidenced runs from `ai_employee_runs`: `current` + `history`.
+
+    `employee_id` of another organization matches nothing — the same empty
+    answer as an id that does not exist.
+    """
+    org_id = _org_id(user, db, request)
+    out = run_evidence.list_runs(db, organization_id=org_id,
+                                 employee_id=employee_id, limit=limit)
+    out["organization_id"] = org_id
+    return out
+
+
+@router.get("/employees/{employee_id}/runs")
+def get_employee_runs(employee_id: str, request: Request,
+                      db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user),
+                      limit: int = Query(run_evidence.LIST_LIMIT_DEFAULT,
+                                         ge=1, le=run_evidence.LIST_LIMIT_MAX)
+                      ) -> Dict[str, Any]:
+    org_id = _org_id(user, db, request)
+    emp = _employee(db, org_id, employee_id)
+    out = run_evidence.list_runs(db, organization_id=org_id,
+                                 employee_id=emp.id, limit=limit)
+    out["organization_id"] = org_id
+    out["employee_id"] = emp.id
+    return out
+
+
+@router.get("/runs/{run_id}")
+def get_run(run_id: str, request: Request, db: Session = Depends(get_db),
+            user: User = Depends(require_tenant_user)) -> Dict[str, Any]:
+    org_id = _org_id(user, db, request)
+    run = run_evidence.get_run(db, organization_id=org_id, run_id=run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No such run.")
+    return {"organization_id": org_id, "run": run}
 
 
 @router.get("/performance")

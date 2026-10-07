@@ -97,14 +97,15 @@ export function supportCode (err) {
 
 const EVIDENCE = {
   committed: 'Committed code', tested: 'Executed tests', deployed: 'Deployment proof',
-  blocked: 'Blocked', unverified: 'Unverified claim',
+  blocked: 'Blocked', run_record: 'Persisted run record',
+  unverified: 'Unverified claim',
 }
 /** Evidence kinds rendered distinctly; anything else is an unverified claim. */
 export function evidenceLabel (kind) {
   return EVIDENCE[typeof kind === 'string' ? kind.toLowerCase() : ''] || EVIDENCE.unverified
 }
 
-const SECRET_RE = /(sk|ghp|gho|pk|rk|xox[bap])[-_][A-Za-z0-9_-]{8,}|bearer\s+[A-Za-z0-9._-]{12,}|authorization\s*[:=]\s*\S+|(api[_-]?key|secret|token|password)\s*[:=]\s*\S+/gi
+const SECRET_RE = /(sk|ghp|gho|pk|rk|xox[bap])[-_][A-Za-z0-9_-]{8,}|bearer\s+[A-Za-z0-9._-]{12,}|authorization\s*[:=]\s*(?:bearer\s+)?\S+|(api[_-]?key|secret|token|password)\s*[:=]\s*\S+/gi
 /** Redact credential-shaped text before it is rendered. */
 export function redact (text) {
   return typeof text === 'string' ? text.replace(SECRET_RE, '[redacted]') : ''
