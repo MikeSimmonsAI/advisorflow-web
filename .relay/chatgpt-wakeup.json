@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "control-room-live-progress-20261007-1745",
-  "parent_run_id": "sci-safe-source-exit-20261007-1742",
-  "project": "Control Room \u2014 truthful live task/progress indicator",
+  "relay_run_id": "wholesale-e2e-product-20261007-1754",
+  "parent_run_id": "control-room-live-progress-20261007-1745",
+  "project": "Wholesale \u2014 end-to-end synthetic product closure",
   "status": "COMPLETED",
-  "branch": "platform-dev",
-  "actions_run_id": "37698107633",
-  "timestamp_ct": "2026-10-07 17:52 CT",
+  "branch": "wholesale-nightly",
+  "actions_run_id": "37699099881",
+  "timestamp_ct": "2026-10-07 18:03 CT",
   "issue": 1,
-  "status_comment_id": 6048486717
+  "status_comment_id": 6048625301
 }
