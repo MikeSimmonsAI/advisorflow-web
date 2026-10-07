@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "countryside-intake-admin-signal-20261007-1833",
-  "parent_run_id": "countryside-intake-conversation-20261007-1830",
-  "project": "CountrySide \u2014 tenant-visible intake and source exit",
+  "relay_run_id": "vanity-demo-link-integrity-20261007-1836",
+  "parent_run_id": "countryside-intake-admin-signal-20261007-1833",
+  "project": "EvoSys Pro \u2014 vanity demo link publish/revoke integrity",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37702882802",
-  "timestamp_ct": "2026-10-07 18:34 CT",
+  "actions_run_id": "37703149878",
+  "timestamp_ct": "2026-10-07 18:38 CT",
   "issue": 1,
-  "status_comment_id": 6048995696
+  "status_comment_id": 6049038300
 }
