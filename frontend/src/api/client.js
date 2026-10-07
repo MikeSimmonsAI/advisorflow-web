@@ -111,6 +111,9 @@ function withQuery(path, params) {
 // so the rule can be executed under plain node. See api/httpErrors.js.
 import { httpErrorKind as _httpErrorKind,
          fallbackHttpMessage as _fallbackHttpMessage } from './httpErrors'
+// WHAT TO DO WHEN THE SELECTED WORKSPACE IS REFUSED - see api/workspaceDenial.js.
+import { applyWorkspaceDenial as _applyWorkspaceDenial,
+         isStaleWorkspaceResponse as _isStaleWorkspaceResponse } from './workspaceDenial'
 
 async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   const token = getToken()
@@ -255,6 +258,14 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
   }
 
 
+  // A reply to a request made FOR a workspace that is no longer the selected
+  // one (switched away, or cleared by a denial) is dropped, never rendered.
+  if (_isStaleWorkspaceResponse(wsId, getWorkspaceContext(), path)) {
+    const stale = new Error('That workspace is no longer selected.')
+    stale.kind = 'stale-workspace'
+    throw stale
+  }
+
   if (res.status === 401) {
     // Retry once after 2 s before giving up. Absorbs cold-start/token-race 401s.
     if (attempt === 0) {
@@ -281,12 +292,8 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
     // held). Drop the selection and everything cached for it so no stale id is
     // re-sent and no prior-workspace state stays on screen; the old tenant is
     // not restored - the caller lands on /auth/my-contexts to choose again.
-    if (res.status === 403 && detail === 'That workspace is not available to this account.') {
-      clearBranding()
-      clearWorkspaceLocation()
-      resetInFlightGets()
-      clearWorkspaceContext()
-    }
+    _applyWorkspaceDenial(res.status, detail, {
+      clearBranding, clearWorkspaceLocation, resetInFlightGets, clearWorkspaceContext })
     // `detail` is a string on almost every route, but FastAPI lets it be an
     // object and a few routes use that to return structured refusals - the
     // Checkpoint 6 launch route returns a message plus a list of warnings.
