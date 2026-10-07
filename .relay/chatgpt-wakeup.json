@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "atlantis-inbound-lead-closure-20261007-1821",
-  "parent_run_id": "wholesale-chain-contract-hardening-20261007-1816",
-  "project": "Atlantis Light & Power \u2014 inbound reply and lead-routing product closure",
+  "relay_run_id": "atlantis-conversation-visibility-20261007-1826",
+  "parent_run_id": "atlantis-inbound-lead-closure-20261007-1821",
+  "project": "Atlantis Light & Power \u2014 intake-to-conversation visibility and manager scope closure",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37701499840",
-  "timestamp_ct": "2026-10-07 18:22 CT",
+  "actions_run_id": "37701987108",
+  "timestamp_ct": "2026-10-07 18:25 CT",
   "issue": 1,
-  "status_comment_id": 6048853479
+  "status_comment_id": 6048887011
 }
