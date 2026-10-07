@@ -180,10 +180,12 @@ jobs:
         run: |
           after=$(gh api repos/$GITHUB_REPOSITORY/git/ref/heads/main --jq .object.sha)
           if [ -n "$BEFORE" ] && [ "$after" != "$BEFORE" ]; then
+            # A main-branch move does not mutate this run's checked-out worker branch.
+            # Record it as diagnostic evidence only. Do NOT manufacture an owner
+            # approval gate merely because a safe PR merged concurrently.
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            gh issue comment 1 --repo "$GITHUB_REPOSITORY" --body "[RELAY:APPROVAL_REQUIRED]
-          relay_run_id: ${{ steps.guard.outputs.run_id }}
-          ALERT: main moved during this relay run ($BEFORE -> $after). Inspect before anything else."
+            echo "Main moved during relay run: $BEFORE -> $after" >> "$GITHUB_STEP_SUMMARY"
+            echo "Worker branch remains isolated at $RELAY_PUSH_BRANCH." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - id: finalize
