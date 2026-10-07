@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "sci-safe-source-exit-20261007-1742",
-  "parent_run_id": "sci-public-booking-closure-20261007-1738",
-  "project": "SCI \u2014 final safe-source cleanup and exit gate",
+  "relay_run_id": "control-room-live-progress-20261007-1745",
+  "parent_run_id": "sci-safe-source-exit-20261007-1742",
+  "project": "Control Room \u2014 truthful live task/progress indicator",
   "status": "COMPLETED",
-  "branch": "sci-program",
-  "actions_run_id": "37697876942",
-  "timestamp_ct": "2026-10-07 17:43 CT",
+  "branch": "platform-dev",
+  "actions_run_id": "37698107633",
+  "timestamp_ct": "2026-10-07 17:52 CT",
   "issue": 1,
-  "status_comment_id": 6048368831
+  "status_comment_id": 6048486717
 }
