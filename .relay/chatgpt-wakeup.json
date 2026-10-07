@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "sci-synthetic-product-flows-20261007-1726",
-  "parent_run_id": "sci-product-verification-20261007-1722",
-  "project": "SCI \u2014 finish synthetic intake and appointment product coverage",
+  "relay_run_id": "sci-inbound-booking-20261007-1729",
+  "parent_run_id": "sci-synthetic-product-flows-20261007-1726",
+  "project": "SCI \u2014 inbound reply routing and booking confirmation product proof",
   "status": "COMPLETED",
   "branch": "sci-program",
-  "actions_run_id": "37696124299",
-  "timestamp_ct": "2026-10-07 17:28 CT",
+  "actions_run_id": "37696569881",
+  "timestamp_ct": "2026-10-07 17:33 CT",
   "issue": 1,
-  "status_comment_id": 6048154092
+  "status_comment_id": 6048229602
 }
