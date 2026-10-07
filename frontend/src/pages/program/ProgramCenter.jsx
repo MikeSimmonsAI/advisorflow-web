@@ -26,6 +26,7 @@ const TABS = [
   { key: 'locations', label: 'Locations' },
   { key: 'campaigns', label: 'Campaigns' },
   { key: 'assets', label: 'Assets & Flyers' },
+  { key: 'launch', label: 'Launch Readiness' },
   { key: 'health', label: 'Health' },
   { key: 'settings', label: 'Settings' },
 ]
@@ -125,6 +126,7 @@ export default function ProgramCenter() {
       {tab === 'locations' && <Locations isManager={isManager} selected={locationId} onChange={load} />}
       {tab === 'campaigns' && <Campaigns isManager={isManager} locationId={locationId} locations={data.locations} />}
       {tab === 'assets' && <Assets isManager={isManager} locations={data.locations} />}
+      {tab === 'launch' && <Launch isManager={isManager} onChange={load} />}
       {tab === 'health' && <Health />}
       {tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness} onChange={load} />}
     </div>
@@ -174,8 +176,16 @@ function Dashboard({ data, go }) {
     .sort((x, y) => (y.hot - x.hot) || (y.new_responses - x.new_responses))
     .slice(0, 5)
 
+  const rt = data.readiness_test
   return (
     <>
+      {rt && (
+        <section className="pc-summary" aria-label="Launch readiness">
+          <strong>Staging build: <span className={`pc-badge ${VERDICT_TONE[rt.status] || 'low'}`}>{rt.status}</span></strong>{' '}
+          <span>{rt.reason} </span>
+          <button type="button" className="pc-btn" onClick={() => go('tab', 'launch')}>Open Launch Readiness</button>
+        </section>
+      )}
       <section className={`pc-summary${urgent > 0 ? ' urgent' : ''}`} aria-label="Needs attention summary">
         <strong>{urgent > 0 ? `${num(urgent)} urgent item(s) need you now.` : open > 0 ? 'Nothing urgent.' : 'All clear.'}</strong>{' '}
         <span>
@@ -700,6 +710,13 @@ const HEALTH_ROWS = [
   ['hot_responses', 'HOT responses (open)'], ['unhandled_hot', 'Unhandled HOT (past SLA)'], ['response_time', 'Kerry response time'],
   ['automation_errors', 'Automation errors'],
 ]
+const VERDICT_TONE = { READY: 'ok', CONDITIONAL: 'warn', BLOCKED: 'hot' }
+const GATE_GROUPS = [
+  ['verified', 'Verified', 'Done and proven. Nothing to do.'],
+  ['test_now', 'Test now', 'You can do these today on staging; no real customer is involved.'],
+  ['external', 'External blocker', 'Waiting on something outside the code. Safe development continues meanwhile.'],
+  ['approval', 'Mike approval', 'Needs your decision. Nothing proceeds past these without it.'],
+]
 const TONE = { ok: 'ok', warn: 'warn', fail: 'hot', off: 'low' }
 
 function Health() {
@@ -732,6 +749,58 @@ function Health() {
           <div className="pc-row" key={i}><span className="pc-small">{x.kind.replace(/_/g, ' ')} · {x.text}</span><span className="pc-small pc-muted">{when(x.at)}</span></div>
         ))}
       </section>
+    </>
+  )
+}
+
+/* ── launch readiness / controlled test ─────────────────────────────────── */
+
+function Launch({ isManager, onChange }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(() => { api.get('/program/readiness-test').then(x => { setD(x); setErr('') }).catch(e => setErr(errText(e))) }, [])
+  useEffect(() => { load() }, [load])
+  async function run() {
+    setBusy(true); setErr('')
+    try { setD(await api.post('/program/readiness-test/run', {})); onChange && onChange() } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
+  }
+  if (!d) return <section className="pc-card">{err ? <div className="pc-alert" role="alert">{err}</div> : <p className="pc-muted">Loading…</p>}</section>
+  const last = d.last_run
+  return (
+    <>
+      <section className="pc-card">
+        <h2 style={{ margin: '0 0 6px' }}>Controlled test <span className={`pc-badge ${VERDICT_TONE[d.verdict.status]}`}>{d.verdict.status}</span></h2>
+        <p className="pc-small" style={{ marginTop: 0 }}>{d.verdict.reason}</p>
+        <p className="pc-small pc-muted">{d.note}</p>
+        {isManager && <button type="button" className="pc-btn primary" disabled={busy} onClick={run}>{busy ? 'Running…' : 'Run controlled readiness test'}</button>}
+        {err && <div className="pc-alert" role="alert" style={{ marginTop: 10 }}>{err}</div>}
+        {last && (
+          <div style={{ marginTop: 12 }}>
+            <p><strong>{last.pass_count} PASS · {last.fail_count} FAIL</strong> <span className="pc-small pc-muted">at {when(last.ran_at)} · {last.sent} messages sent</span></p>
+            {last.failed_gate && <div className="pc-alert" role="alert">Failed gate: {last.failed_gate}</div>}
+            <p className="pc-small">Next action: {last.next_action}</p>
+            {last.results.map(r => (
+              <div className="pc-row" key={r.key}>
+                <span>{r.label}{r.error && <span className="pc-small pc-muted"> — {r.error}</span>}</span>
+                <span><span className={`pc-badge ${r.status === 'PASS' ? 'ok' : 'hot'}`}>{r.status}</span></span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="pc-card" style={{ marginTop: 14 }}>
+        <h2 style={{ margin: '0 0 6px' }}>Why NO-GO?</h2>
+        <p className="pc-small pc-muted" style={{ marginTop: 0 }}>Real customer contact stays off until each of these clears.</p>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>{d.why_no_go.map(w => <li key={w} className="pc-small">{w}</li>)}</ul>
+      </section>
+      {GATE_GROUPS.map(([k, title, hint]) => (
+        <section className="pc-card" style={{ marginTop: 14 }} key={k}>
+          <h2 style={{ margin: '0 0 6px' }}>{title} <span className="pc-badge low">{d.groups[k].length}</span></h2>
+          <p className="pc-small pc-muted" style={{ marginTop: 0 }}>{hint}</p>
+          {d.groups[k].map(g => <div className="pc-row" key={g.key}><span className="pc-small">{g.text}</span><span className="pc-small pc-muted">{g.key}</span></div>)}
+        </section>
+      ))}
     </>
   )
 }

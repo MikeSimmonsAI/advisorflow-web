@@ -30,7 +30,7 @@ from app.models.program_models import (
     ProgramAlert, ProgramAsset, ProgramResponse, ProgramSourceRecord,
 )
 from app.services import lead_scope
-from app.services.programs import identity, importer, responses, setup
+from app.services.programs import identity, importer, readiness_check, responses, setup
 
 router = APIRouter(prefix="/program", tags=["program"])
 public_router = APIRouter(tags=["program-public"])
@@ -463,6 +463,7 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
         },
         "reporting": _reporting(db, recs, resps),
         "readiness": readiness(db, prog),
+        "readiness_test": _readiness_summary(org_id),
     }
 
 
@@ -956,6 +957,33 @@ def clear_review(record_id: str, body: ClearReviewIn, db: Session = Depends(get_
     db.commit()
     return {"id": rec.id, "needs_data_review": rec.needs_data_review,
             "duplicate_review_reason": rec.duplicate_review_reason}
+
+
+# ── controlled test console (synthetic only, nothing is sent) ────────────────
+
+_LAST_READINESS_RUN: dict = {}      # org id -> latest run; in memory, reset on restart
+
+
+def _readiness_summary(org_id: str) -> dict:
+    last = _LAST_READINESS_RUN.get(org_id)
+    v = readiness_check.verdict(last)
+    return {**v, "pass_count": last["pass_count"] if last else None,
+            "fail_count": last["fail_count"] if last else None, "ran_at": last["ran_at"] if last else None}
+
+
+@router.get("/readiness-test")
+def readiness_test_console(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    prog = _program(db, user)
+    return readiness_check.console(_LAST_READINESS_RUN.get(prog.organization_id))
+
+
+@router.post("/readiness-test/run")
+def run_readiness_test(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Run every synthetic check. No database rows read, no message, call or
+    provider request. Managers only."""
+    prog = _program(db, user)
+    _LAST_READINESS_RUN[prog.organization_id] = readiness_check.run_all()
+    return readiness_check.console(_LAST_READINESS_RUN[prog.organization_id])
 
 
 # ── operations health ────────────────────────────────────────────────────────

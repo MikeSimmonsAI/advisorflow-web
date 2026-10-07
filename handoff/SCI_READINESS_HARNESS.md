@@ -21,3 +21,13 @@ instead of BAD_DATA.
 - all DB-backed integration: webhook -> Reply/ProgramResponse rows, CadenceState
   writes, PhoneNumber pool rows, Twilio signature guard, unique-index duplicate race,
   alert Notification rows, campuses.plan against a database.
+
+## Controlled Test console (relay sci-controlled-proof-console-20261006-1954)
+`app/services/programs/readiness_check.py` holds the ten synthetic checks and the
+launch-gate list (mirror of `SCI_GO_NO_GO_CHECKLIST.md`). Endpoints:
+`GET /program/readiness-test`, `POST /program/readiness-test/run` (manager only).
+UI: Program Center tab "Launch Readiness" plus a verdict banner on the Dashboard.
+The harness runs the same checks (group "console"; now 129 scenarios, all PASS).
+Results are held in memory per workspace and reset on restart: no existing audit
+table fits, so nothing is persisted. Synthetic data only; nothing is sent.
+The JSX was not build-checked here (no node_modules on the runner).

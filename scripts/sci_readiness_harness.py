@@ -28,6 +28,7 @@ sys.path.insert(0, ROOT)
 
 from app.services import optout_parser as op                      # noqa: E402
 from app.services.programs import alias_rules as ar               # noqa: E402
+from app.services.programs import readiness_check as rc           # noqa: E402
 from app.services.programs import regional_pools as rp            # noqa: E402
 from app.services.programs import reply_rules as rr               # noqa: E402
 
@@ -302,6 +303,38 @@ add("no-auto-send", "suggested reply is a DRAFT string; terminal lanes get none"
 add("no-auto-send", "draft never asks the family to call",
     lambda: eq("call" in rr.suggested_reply(rr.HOT, [rr.APPOINTMENT, rr.PRICING], first_name="P", contact="S",
                                             location="L", channel="sms").lower(), False))
+
+# ── Controlled Test console (app/services/programs/readiness_check.py) ───────
+# The console's ten synthetic checks are executed here too, so the harness and
+# the in-app "Run controlled readiness test" button can never disagree.
+for _k, _label, _fn, _fix in rc.CHECKS:
+    add("console", "console check: %s" % _label, _fn)
+
+
+@scenario("console", "console run_all reports 10 PASS / 0 FAIL, nothing sent, no failed gate")
+def _():
+    out = rc.run_all()
+    eq((out["pass_count"], out["fail_count"], out["failed_gate"], out["sent"]), (10, 0, None, 0))
+
+
+@scenario("console", "console reports the exact failed gate when a check breaks")
+def _():
+    def boom():
+        raise AssertionError("injected")
+    saved = rc.CHECKS[:]
+    rc.CHECKS[:] = [(k, l, boom if k == "oaklawn_hold" else f, x) for k, l, f, x in saved]
+    try:
+        out = rc.run_all()
+    finally:
+        rc.CHECKS[:] = saved
+    eq((out["fail_count"], out["failed_gate"]), (1, saved[6][1]))
+    eq(rc.verdict(out)["status"], "BLOCKED")
+
+
+@scenario("console", "verdict: not run = BLOCKED; all pass with external blockers = CONDITIONAL (never READY)")
+def _():
+    eq(rc.verdict(None)["status"], "BLOCKED")
+    eq(rc.verdict(rc.run_all())["status"], "CONDITIONAL")
 
 
 def _imports_of(path):

@@ -1,6 +1,6 @@
 # SCI readiness harness: executed results
 
-Executed 116 scenarios: **116 PASS, 0 FAIL**. Stdlib only; real decision modules; does not replace dependency-backed pytest or DB integration suites.
+Executed 129 scenarios: **129 PASS, 0 FAIL**. Stdlib only; real decision modules; does not replace dependency-backed pytest or DB integration suites.
 
 | # | Group | Scenario | Result |
 |---|---|---|---|
@@ -115,8 +115,21 @@ Executed 116 scenarios: **116 PASS, 0 FAIL**. Stdlib only; real decision modules
 | 109 | alerts | enabled + recipient configured -> allowed | PASS |
 | 110 | no-auto-send | suggested reply is a DRAFT string; terminal lanes get none | PASS |
 | 111 | no-auto-send | draft never asks the family to call | PASS |
-| 112 | no-auto-send | decision module has no send/network/DB imports: app/services/programs/reply_rules.py | PASS |
-| 113 | no-auto-send | decision module has no send/network/DB imports: app/services/optout_parser.py | PASS |
-| 114 | no-auto-send | decision module has no send/network/DB imports: app/services/programs/regional_pools.py | PASS |
-| 115 | no-auto-send | decision module has no send/network/DB imports: app/services/programs/alias_rules.py | PASS |
-| 116 | no-auto-send | responses.py reply path never calls a customer-send function | PASS |
+| 112 | console | console check: Synthetic HOT appointment reply is classified HOT | PASS |
+| 113 | console | console check: Synthetic ACTIVE information reply is classified ACTIVE | PASS |
+| 114 | console | console check: "STOP" is an opt-out and ends the cadence | PASS |
+| 115 | console | console check: "Can I stop by Friday?" is NOT an opt-out | PASS |
+| 116 | console | console check: Known contact routes to its own location | PASS |
+| 117 | console | console check: Unknown sender/caller goes to regional review (all six pools) | PASS |
+| 118 | console | console check: Oaklawn refuses/holds: no area code, no pool, no sender | PASS |
+| 119 | console | console check: 844 is overflow-only: never a pool or a sender | PASS |
+| 120 | console | console check: No AI auto-send: drafts only, decision modules have no send path | PASS |
+| 121 | console | console check: Meaningful reply pauses cadence (never resumes a stopped one) | PASS |
+| 122 | console | console run_all reports 10 PASS / 0 FAIL, nothing sent, no failed gate | PASS |
+| 123 | console | console reports the exact failed gate when a check breaks | PASS |
+| 124 | console | verdict: not run = BLOCKED; all pass with external blockers = CONDITIONAL (never READY) | PASS |
+| 125 | no-auto-send | decision module has no send/network/DB imports: app/services/programs/reply_rules.py | PASS |
+| 126 | no-auto-send | decision module has no send/network/DB imports: app/services/optout_parser.py | PASS |
+| 127 | no-auto-send | decision module has no send/network/DB imports: app/services/programs/regional_pools.py | PASS |
+| 128 | no-auto-send | decision module has no send/network/DB imports: app/services/programs/alias_rules.py | PASS |
+| 129 | no-auto-send | responses.py reply path never calls a customer-send function | PASS |
