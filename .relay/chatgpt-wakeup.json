@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "ai-workforce-heartbeat-checkpoints-20261007-1043",
-  "parent_run_id": "ai-workforce-run-evidence-20261007-1038",
-  "project": "AI Workforce \u2014 persisted heartbeat and checkpoint truth",
+  "relay_run_id": "ai-workforce-heartbeat-visibility-20261007-1049",
+  "parent_run_id": "ai-workforce-heartbeat-checkpoints-20261007-1043",
+  "project": "AI Workforce \u2014 observable heartbeat transactions and exit assessment",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37646277764",
-  "timestamp_ct": "2026-10-07 10:47 CT",
+  "actions_run_id": "37647064508",
+  "timestamp_ct": "2026-10-07 10:53 CT",
   "issue": 1,
-  "status_comment_id": 6041464300
+  "status_comment_id": 6041572020
 }
