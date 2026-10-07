@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "ai-workforce-simulator-complete-read-20261007-1110",
-  "parent_run_id": "ai-workforce-booking-simulator-closure-20261007-1107",
-  "project": "AI Workforce \u2014 complete simulator invariant review",
+  "relay_run_id": "platform-normal-workspace-access-20261007-1114",
+  "parent_run_id": "ai-workforce-simulator-complete-read-20261007-1110",
+  "project": "Core platform \u2014 normal-account workspace access and landing truth",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37649942134",
-  "timestamp_ct": "2026-10-07 11:13 CT",
+  "actions_run_id": "37650510697",
+  "timestamp_ct": "2026-10-07 11:18 CT",
   "issue": 1,
-  "status_comment_id": 6041925100
+  "status_comment_id": 6042014112
 }
