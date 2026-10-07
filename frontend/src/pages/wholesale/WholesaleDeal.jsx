@@ -220,9 +220,9 @@ export default function WholesaleDeal() {
       {tab === 'seller' ? <SellerTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'analysis' ? <AnalysisTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'offer' ? <OfferTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
-      {tab === 'funding' ? <><DistributionNotice distribution={distribution} kind="funding" /><FundingWorkspace deal={room.deal} /></> : null}
+      {tab === 'funding' ? <><DistributionNotice state={distribution} kind="funding" /><FundingWorkspace deal={room.deal} /></> : null}
       {tab === 'documents' ? <DocumentsTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
-      {tab === 'buyers' ? <><DistributionNotice distribution={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /></> : null}
+      {tab === 'buyers' ? <><DistributionNotice state={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /></> : null}
       {tab === 'closing' ? <ClosingTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'sharing'
         ? <SharingWorkspace deal={deal} buyers={room.buyer_matches}

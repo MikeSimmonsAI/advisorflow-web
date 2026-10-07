@@ -9,10 +9,13 @@
  * check runs the same compliance gate as the call itself, and it says
  * "Provider/config required" when no voice number or callback phone is set.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api } from '../../../api/client'
 import { Alert, Panel, Tag } from '../ds/ds'
 import { errText, fmtWhen } from '../wsShared'
+import { useRecord } from '../wsRecordHook'
+import RecoveryNote from '../wsRecoveryNote'
+import { distributionLabel } from '../wsListState'
 import CallButton from '../../../components/telephony/CallButton'
 import './ops.css'
 
@@ -31,35 +34,64 @@ export function TemperaturePill({ temperature }) {
   )
 }
 
+/* The seller's temperature. A failed read says so (with retry); it never leaves
+ * the chip blank as if the seller had no temperature, and a lead change never
+ * shows the previous lead's value. */
 export function LeadTemperatureChip({ leadId }) {
-  const [temp, setTemp] = useState(null)
-  useEffect(() => {
-    if (!leadId) return
-    let live = true
-    api.get(`/wholesale/ops/leads/${leadId}/temperature`).then(t => { if (live) setTemp(t) }).catch(() => {})
-    return () => { live = false }
-  }, [leadId])
-  return <TemperaturePill temperature={temp} />
+  const { rec, view, reload } = useRecord(
+    () => api.get(`/wholesale/ops/leads/${leadId}/temperature`), String(leadId || ''), !!leadId)
+  if (!leadId || view === 'loading') return null
+  if (view === 'error') {
+    return (
+      <span role="alert" className="wso-small">
+        Temperature unavailable{rec.supportCode ? ` (support code ${rec.supportCode})` : ''}{' '}
+        <button type="button" className="wso-linkbtn" onClick={reload}>Try again</button>
+      </span>
+    )
+  }
+  return (
+    <>
+      <TemperaturePill temperature={rec.data} />
+      {view === 'stale' ? (
+        <span role="alert" className="wso-small wso-muted">
+          {' '}may be out of date{rec.supportCode ? ` (support code ${rec.supportCode})` : ''}{' '}
+          <button type="button" className="wso-linkbtn" onClick={reload}>Try again</button>
+        </span>
+      ) : null}
+    </>
+  )
 }
 
 /* Buyer / funding distribution status, read from the server's configuration. */
 export function useDistribution() {
-  const [dist, setDist] = useState(null)
-  useEffect(() => {
-    let live = true
-    api.get('/wholesale/ops/pilot').then(p => { if (live) setDist(p.distribution) }).catch(() => {})
-    return () => { live = false }
-  }, [])
-  return dist
+  const { rec, view, reload } = useRecord(async () => (await api.get('/wholesale/ops/pilot')).distribution ?? null)
+  return { data: rec.data, rec, view, reload }
 }
 
-export function DistributionNotice({ distribution, kind }) {
-  const d = distribution?.[kind]
+/* `state` is { data, rec, view, reload } (see useDistribution). Unknown is never
+ * shown as "OFF": a failed read says the status could not be confirmed. */
+export function DistributionNotice({ state, kind }) {
+  if (!state || state.view === 'loading') return null
+  const { data, rec, view, reload } = state
+  if (view === 'error') {
+    return (
+      <div className="wso-banner wso-banner--warn" role="alert">
+        <strong>{distributionLabel(null)}</strong> It could not be loaded: {rec.error}
+        {rec.supportCode ? ` (support code ${rec.supportCode})` : ''}. Do not assume it is off.{' '}
+        <button type="button" className="btn btn--secondary" onClick={reload}>Try again</button>
+      </div>
+    )
+  }
+  const d = data?.[kind]
   if (!d) return null
   return (
     <div className={`wso-banner${d.auto_distribution ? ' wso-banner--warn' : ''}`}>
-      <strong>Automatic distribution: {d.auto_distribution ? 'ON' : 'OFF'}.</strong>{' '}
+      <strong>{distributionLabel(d)}</strong>{' '}
       {d.flow?.join(' → ')}. {d.note}
+      {view === 'stale' ? (
+        <span role="alert"> This could not be refreshed and may be out of date{rec.supportCode ? ` (support code ${rec.supportCode})` : ''}.{' '}
+          <button type="button" className="btn btn--secondary" onClick={reload}>Try again</button></span>
+      ) : null}
     </div>
   )
 }
@@ -291,25 +323,24 @@ function NotesCard({ dealId, notes, reload }) {
   )
 }
 
+/* Newest request wins, last good data survives a failed refresh, and a different
+ * deal never shows the previous deal's data. */
 export function useDealOps(dealId) {
-  const [data, setData] = useState(null)
-  const [err, setErr] = useState('')
-  const load = useCallback(async () => {
-    if (!dealId) return
-    setErr('')
-    try { setData(await api.get(`/wholesale/ops/deals/${dealId}`)) }
-    catch (e) { setErr(errText(e)) }
-  }, [dealId])
-  useEffect(() => { load() }, [load])
-  return { data, err, load }
+  const { rec, view, reload } = useRecord(
+    () => api.get(`/wholesale/ops/deals/${dealId}`), String(dealId || ''), !!dealId)
+  return { data: rec.data, rec, view, load: reload }
 }
 
 export default function DealOpsPanel({ dealId }) {
-  const { data, err, load } = useDealOps(dealId)
-  if (err) return <Alert kind="warn">{err}</Alert>
-  if (!data) return <p className="wso-muted">Loading…</p>
+  const { data, rec, view, load } = useDealOps(dealId)
+  if (!data) {
+    return view === 'error'
+      ? <RecoveryNote what="Deal operations" rec={rec} view={view} onRetry={load} />
+      : <p className="wso-muted" role="status">Loading…</p>
+  }
   return (
     <div className="wso-grid">
+      <RecoveryNote what="Deal operations" rec={rec} view={view} onRetry={load} />
       {data.lead_id ? (
         <>
           {data.dnc ? <Alert kind="warn">This seller is Do Not Contact. Nothing will be sent or called on any channel.</Alert> : null}

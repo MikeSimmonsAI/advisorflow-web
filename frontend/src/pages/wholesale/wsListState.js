@@ -208,3 +208,32 @@ export function roomTotal(rooms, ids, countFn) {
 export function roomIdsToLoad(deals, max = 10) {
   return (deals || []).slice(0, max).map((d) => d.deal_id)
 }
+
+/* ── Settings / Operations ────────────────────────────────────────────────────
+ * Why a pilot save is unavailable, or ''. A strategy the server could not list
+ * must not be silently dropped from a pilot save. */
+export function pilotSaveBlockedReason(strategyView, busy) {
+  if (busy) return 'A save is already in progress.'
+  if (strategyView === 'loading') return 'Strategies are still loading.'
+  if (strategyView === 'error' || strategyView === 'stale')
+    return 'The strategy list could not be loaded, so the linked strategy cannot be confirmed. Load it again first.'
+  return ''
+}
+/* Options for a select backed by a list that may be missing or short: the id that is
+ * currently saved is always present, so the select never shows "none" for a real link. */
+export function withCurrentOption(items, currentId, label) {
+  const list = Array.isArray(items) ? items : []
+  if (currentId && !list.some((x) => String(x.id) === String(currentId)))
+    return [{ id: currentId, name: label, status: 'unknown', unavailable: true }, ...list]
+  return list
+}
+/* Distribution notice wording: unknown is stated, never read as "OFF". */
+export function distributionLabel(d) {
+  if (!d) return 'Automatic distribution status unavailable.'
+  return `Automatic distribution: ${d.auto_distribution ? 'ON' : 'OFF'}.`
+}
+/* SMS readiness: only a loaded status may say "Ready"; unknown is not "Not sending". */
+export function smsReadinessLabel(view, status) {
+  if (!status) return view === 'loading' ? 'Checking…' : 'Status unavailable'
+  return status.can_send ? 'Ready to send to opted-in sellers' : 'Not sending'
+}

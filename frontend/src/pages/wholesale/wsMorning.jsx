@@ -10,8 +10,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
-import { errText } from './wsShared'
-import { Alert, Empty, Metric, Metrics, Panel, ago, humanize, money } from './ds/ds'
+import { useRecord } from './wsRecordHook'
+import RecoveryNote from './wsRecoveryNote'
+import { Empty, Metric, Metrics, Panel, ago, humanize, money } from './ds/ds'
 
 function Count({ label, value, to, sub, tone, attention }) {
   const metric = <Metric label={label} value={value} sub={sub} tone={tone} attention={attention} />
@@ -53,26 +54,26 @@ function EvidenceDepth({ dd, cents }) {
 
 export default function MorningCommand({ includeTest, dealSteps = 0 }) {
   const navigate = useNavigate()
-  const [data, setData] = useState(null)
-  const [error, setError] = useState(null)
   const [open, setOpen] = useState(null)
+  // Newest request wins; a failed refresh keeps the last good board and says it may be
+  // out of date; switching the sandbox toggle starts clean so one scope never wears
+  // the other's numbers.
+  const { rec, view, reload } = useRecord(
+    () => api.get('/wholesale/command-center' + (includeTest ? '?include_test=true' : '')), includeTest ? 'test' : 'live')
+  const data = rec.data
+  useEffect(() => { setOpen(null) }, [includeTest])
 
-  useEffect(() => {
-    let alive = true
-    api.get('/wholesale/command-center' + (includeTest ? '?include_test=true' : ''))
-      .then((d) => { if (alive) setData(d) })
-      .catch((e) => { if (alive) setError(errText(e)) })
-    return () => { alive = false }
-  }, [includeTest])
-
-  if (error) return <Alert>{error}</Alert>
-  if (!data) return null
+  if (!data) {
+    if (view === 'error') return <RecoveryNote what="This morning's board" rec={rec} view={view} onRetry={reload} effect="Nothing is assumed to be handled." />
+    return <p className="evo-sr" role="status">Loading this morning's board.</p>
+  }
   const ny = data.needs_you
   const cents = (c) => (c === null || c === undefined ? null : money(c / 100))
   const moved = data.pipeline_movement
 
   return (
     <Panel title="This morning" count={ny.count} hint="Only what needs a person. Everything else is running.">
+      <RecoveryNote what="This morning's board" rec={rec} view={view} onRetry={reload} />
       {!ny.items.length ? (
         dealSteps > 0 ? (
           // Not "nothing needs you" while the deal board below lists work for a
@@ -87,8 +88,12 @@ export default function MorningCommand({ includeTest, dealSteps = 0 }) {
         )
       ) : (
         <ul className="evo-needlist" aria-label="Needs you">
-          {ny.items.map((i, n) => (
-            <li key={`${i.kind}-${i.deal_id || i.evosense_property_id || n}`}>
+          {ny.items.map((i, n) => {
+            // Expanded state follows the item, not its position, so a refresh that reorders
+            // the list cannot open someone else's evidence.
+            const itemKey = `${i.kind}-${i.deal_id || i.evosense_property_id || n}`
+            return (
+            <li key={itemKey}>
               <div className="evo-needrow" style={{ display: 'block' }}>
                 <button type="button" className="evo-linkbtn" style={{ textAlign: 'left', width: '100%' }}
                         onClick={() => (i.link ? navigate(i.link) : null)}>
@@ -98,10 +103,10 @@ export default function MorningCommand({ includeTest, dealSteps = 0 }) {
                 {i.evidence && i.evidence.length ? (
                   <>
                     <button type="button" className="evo-btn evo-btn--ghost" style={{ marginTop: 4 }}
-                            aria-expanded={open === n} onClick={() => setOpen(open === n ? null : n)}>
-                      {open === n ? 'Hide evidence' : `Evidence (${i.evidence.length})`}
+                            aria-expanded={open === itemKey} onClick={() => setOpen(open === itemKey ? null : itemKey)}>
+                      {open === itemKey ? 'Hide evidence' : `Evidence (${i.evidence.length})`}
                     </button>
-                    {open === n ? (
+                    {open === itemKey ? (
                       <ul className="evo-prop__sub" style={{ margin: '6px 0 0 18px' }}>
                         {i.evidence.map((e, k) => <li key={k}>{e}</li>)}
                       </ul>
@@ -110,7 +115,8 @@ export default function MorningCommand({ includeTest, dealSteps = 0 }) {
                 ) : null}
               </div>
             </li>
-          ))}
+            )
+          })}
         </ul>
       )}
 

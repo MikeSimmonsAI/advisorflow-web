@@ -413,5 +413,51 @@ check("recovery node test covers each new helper", all(x in rtest for x in (
     "recordFailed", "recordView", "sortByKeyThenId", "exceptionStatusLabel", "resolveBlockedReason", "sweepSummary",
     "validatePartner", "partnerSaveBlockedReason", "trackRecordText", "roomsLoadState", "roomTotal", "roomIdsToLoad")))
 
+# 14. settings / operations / morning recovery --------------------------------
+st = read(os.path.join(SRC, W + "WholesaleSettings.jsx"))
+dop = read(os.path.join(SRC, W + "ops/DealOpsPanel.jsx"))
+pc = read(os.path.join(SRC, W + "ops/PilotControls.jsx"))
+mor = read(os.path.join(SRC, W + "wsMorning.jsx"))
+deal = read(os.path.join(SRC, W + "WholesaleDeal.jsx"))
+hook = read(os.path.join(SRC, W + "wsRecordHook.js"))
+note = read(os.path.join(SRC, W + "wsRecoveryNote.jsx"))
+shell = read(os.path.join(SRC, "components/WholesaleShell.jsx"))
+sotest = read(os.path.join(ROOT, "tests/frontend/wsSettingsOpsState.test.mjs"))
+for name, src in (("settings", st), ("deal ops", dop), ("pilot controls", pc), ("morning", mor)):
+    check(name + " has no swallowed empty catch", ".catch(() => {})" not in src and "catch {" not in src)
+check("record hook drops stale responses and resets on key change", "++gen.current" in hook and "recordSucceeded(prev, g" in hook and "initialRecord()" in hook and "[key, enabled, run]" in hook)
+check("record hook ignores results after unmount", "alive.current" in hook)
+check("recovery note is an alert with retry, support code only when supplied, and stale wording",
+      'role="alert"' in note and "Try again" in note and "rec.supportCode ?" in note and "may be out of date" in note and 'role="status"' in note)
+check("settings assignee failure is visible, keeps saved assignee, has retry",
+      "useRecord(" in st and "withCurrentOption(rec.data, current" in st and "The list of people" in st)
+check("settings sms status failure is not 'Not sending'", "smsReadinessLabel(view, status)" in st and "The program status" in st)
+check("settings sms status refreshes after save without a duplicate mount load", "firstSave" in st and "[savedAt, reload]" in st)
+check("settings channel failure is visible and retry does not discard the draft",
+      "channelsErr" in st and "loadChannels" in st and "onClick={loadChannels}" in st and "channelGen" in st)
+check("deal ops temperature chip shows failure with retry and resets per lead",
+      "Temperature unavailable" in dop and "String(leadId || '')" in dop)
+check("deal ops distribution failure is not read as OFF", "distributionLabel(null)" in dop and "Do not assume it is off" in dop)
+check("deal ops distribution stale is marked", "may be out of date" in dop and "state.view" in dop)
+check("deal ops load keeps last good, no whole-panel error replacement", "RecoveryNote what=\"Deal operations\"" in dop and "if (err) return" not in dop)
+check("deal ops load is keyed by deal", "String(dealId || '')" in dop)
+check("deal page passes distribution state", "state={distribution}" in deal and "distribution={distribution}" not in deal)
+check("pilot strategies failure is visible with retry and pauses saving", "The strategy list" in pc and "pilotSaveBlockedReason(strR.view, busy)" in pc and "disabled={!!blockedReason}" in pc)
+check("pilot linked strategy survives a failed list", "withCurrentOption(strR.rec.data" in pc and "disabled={strR.view === 'loading' || strR.view === 'error'}" in pc)
+check("pilot save has a synchronous latch and keeps typed input on failure", "saving.current" in pc and "Nothing you typed was lost" in pc and "refill.current" in pc)
+check("pilot pause/stop stay usable when strategies fail", "disabled={busy} onClick={() => save({ status: 'paused' })}" in pc and "disabled={busy} onClick={() => save({ status: 'stopped' })}" in pc)
+check("pilot disabled reason is announced", 'id="wso-pilot-block"' in pc and 'role="status"' in pc)
+check("pilot skip-trace failure is not an endless Loading", "The skip-trace ledger" in pc and "No skip-trace figures are shown" in pc)
+check("pilot skip-trace figures unknown is a dash", "knownCount(led.attempts)" in pc and "knownCount(p.hits)" in pc and "value={led.attempts}" not in pc)
+check("pilot setErr no longer shared by skip load", ".then(setSkip)" not in pc)
+check("morning failure keeps last good and offers retry", "useRecord(" in mor and "RecoveryNote" in mor and "if (error) return" not in mor)
+check("morning scope switch starts clean", "includeTest ? 'test' : 'live'" in mor and "setOpen(null)" in mor)
+check("morning evidence expansion follows the item not its index", "open === itemKey" in mor and "open === n" not in mor)
+check("morning loading is announced", "Loading this morning" in mor and 'role="status"' in mor)
+check("shell environment lookup already fails safe to production (no change needed)", "treated as production" in read(os.path.join(SRC, "api/demo.js")) and ".catch(() =>" in read(os.path.join(SRC, "api/demo.js")))
+check("shell env indicator only shown when backend says local review", "!env.local_review" in shell)
+check("ops css has a focus ring for the inline retry button", ".wso-linkbtn:focus-visible" in read(os.path.join(SRC, W + "ops/ops.css")))
+check("settings/ops node test covers each new helper", all(x in sotest for x in ("pilotSaveBlockedReason", "withCurrentOption", "distributionLabel", "smsReadinessLabel", "recordFailed")))
+
 print("wholesale ux static: %d passed, %d failed" % (passed, failed))
 sys.exit(1 if failed else 0)

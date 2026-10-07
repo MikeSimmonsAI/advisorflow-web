@@ -51,6 +51,8 @@
 /* Callback Center: keyboard focus and phone width */
 .wso-bucket:focus-visible, .wso-item button:focus-visible, .wso-input:focus-visible {
   outline: 2px solid var(--evo-primary); outline-offset: 2px; }
+.wso-linkbtn { background: none; border: 0; padding: 0; color: var(--evo-primary); text-decoration: underline; cursor: pointer; font: inherit; }
+.wso-linkbtn:focus-visible { outline: 2px solid var(--evo-primary); outline-offset: 2px; }
 @media (max-width: 640px) {
   .wso-buckets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .wso-item .btn { flex: 1 1 100%; }
