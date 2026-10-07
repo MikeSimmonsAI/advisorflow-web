@@ -67,7 +67,7 @@ from app.deps import get_current_user, get_db
 from app.models.models import Organization, Platform, User
 from app.models.sales_models import (
     Membership, SCOPE_CUSTOMER_ORG, SCOPE_BRAND_SALES_ORG,
-    SCOPE_PLATFORM, ROLE_BRAND_EXECUTIVE,
+    SCOPE_PLATFORM, ROLE_BRAND_EXECUTIVE, BRAND_SALES_ROLES,
 )
 
 _log = logging.getLogger(__name__)
@@ -277,6 +277,11 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             "path": "/god",
         })
     for m in platform_memberships(user, db):
+        # Only the roles /sales actually admits (is_sales_member). A membership
+        # row with any other role must not render a Back Office entry that the
+        # route then refuses with 403.
+        if m.role not in BRAND_SALES_ROLES:
+            continue
         contexts.append({
             "type": "platform",
             "label": _brand_sales_label(db, m.scope_id),

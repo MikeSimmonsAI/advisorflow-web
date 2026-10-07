@@ -312,6 +312,7 @@ import { decideWorkspaceLanding, LANDING_ERROR, LANDING_NONE,
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
 import { roleOf, routeFeatureDenied } from './auth/workspaceAuthority'
+import { decideHomeDestination } from './auth/homeDestination'
 import { exitCustomer } from './pages/god/enterCustomer'
 
 function isAuthenticated() {
@@ -472,24 +473,11 @@ function HomeRedirect() {
   // anything, and the workspace it sends you to checks you on arrival.
   const { ctx } = useAuthorizedContexts()
   if (ctx) {
-    const def = ctx.default_context || {}
-    // Executive Suite — brand_executive grant. Highest routing priority because
-    // this is the primary context the person was invited into. The back-office
-    // switch lives inside the Executive Suite shell for users who also hold
-    // a sales grant.
-    if (def.type === 'executive') {
-      return <Navigate to="/executive" replace />
-    }
-    if (def.type === 'workspace' && def.organization_id) {
-      return <Navigate to={'/workspace/' + def.organization_id} replace />
-    }
-    if (def.type === 'workspace_selector') {
-      return <Navigate to="/workspaces" replace />
-    }
-    if (ctx.has_back_office && ctx.workspace_count === 0 &&
-        user?.role !== 'god_admin') {
-      return <Navigate to="/sales" replace />
-    }
+    // Pure decision in auth/homeDestination.js so a node test executes it. A
+    // dual-role person (sales + workspace) lands in the back office and
+    // switches into the workspace explicitly; before, they fell to tenant home.
+    const dest = decideHomeDestination(ctx, user)
+    if (dest.to) return <Navigate to={dest.to} replace />
     return <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>
   }
   if (user && user.role !== 'god_admin' && !user.organization_id) {
