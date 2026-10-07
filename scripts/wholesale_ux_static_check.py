@@ -304,5 +304,23 @@ check("deal room passes isBusy to Closing and Sharing",
       "<ClosingTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy}" in deal_src
       and "busy={panelBusy(tab)} isBusy={isBusy} /> : null}\n      {tab === 'audit'" in deal_src)
 
+# 10. callback queue / follow-up truth ---------------------------------------
+cc_src = read(os.path.join(SRC, W + "ops/CallbackCenter.jsx"))
+qs_src = read(os.path.join(SRC, W + "wsQueueState.js"))
+ops_css = read(os.path.join(SRC, W + "ops/ops.css"))
+check("callback center uses pure queue state", "from '../wsQueueState'" in cc_src)
+check("callback center sorts deterministically client-side", "sortQueue(" in cc_src)
+check("callback center keeps a synchronous in-flight latch", "inFlight.current" in cc_src)
+check("callback center drops stale loads", "gen === latest.current" in cc_src)
+check("callback center failures use role=alert with retry", 'role="alert"' in cc_src and "Try again" in cc_src)
+check("callback center keeps rows on failed refresh (stale state)", "'stale'" in qs_src and "failedRefresh" in qs_src)
+check("callback center never shows 0 for unknown count", "bucketCount(q, k)" in cc_src and "data.counts?.[k] ?? 0" not in cc_src)
+check("callback center no raw enum status shown", "{it.status}" not in cc_src)
+check("callback center exception rows cannot be completed as callbacks", "exceptionOnly" in cc_src)
+check("callback center can adopt a seller request", "from-exception/" in cc_src and "Start a callback" in cc_src)
+check("callback center keeps outcome note on failure", "Your note is kept" in cc_src)
+check("callback center focus ring and narrow layout", ".wso-bucket:focus-visible" in ops_css and "max-width: 640px" in ops_css)
+check("backend queue sort has id tiebreak", 'str(i["id"])' in read(os.path.join(ROOT, "app/services/wholesale_ops.py")))
+
 print("wholesale ux static: %d passed, %d failed" % (passed, failed))
 sys.exit(1 if failed else 0)
