@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "countryside-intake-conversation-20261007-1830",
-  "parent_run_id": "atlantis-activity-label-exit-20261007-1829",
-  "project": "CountrySide \u2014 tenant-safe intake-to-conversation closure",
+  "relay_run_id": "countryside-intake-admin-signal-20261007-1833",
+  "parent_run_id": "countryside-intake-conversation-20261007-1830",
+  "project": "CountrySide \u2014 tenant-visible intake and source exit",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37702593532",
-  "timestamp_ct": "2026-10-07 18:31 CT",
+  "actions_run_id": "37702882802",
+  "timestamp_ct": "2026-10-07 18:34 CT",
   "issue": 1,
-  "status_comment_id": 6048962064
+  "status_comment_id": 6048995696
 }
