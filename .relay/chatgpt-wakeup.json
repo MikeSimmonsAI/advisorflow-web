@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "universal-importer-resume-20261007-1852",
-  "parent_run_id": "dual-role-workspace-access-20261007-1849",
-  "project": "EvoSys Pro \u2014 Universal Importer alias and resume integrity",
+  "relay_run_id": "custom-plan-capacity-20261007-1855",
+  "parent_run_id": "universal-importer-resume-20261007-1852",
+  "project": "EvoSys Pro \u2014 custom plan switch and capacity truth",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37704577629",
-  "timestamp_ct": "2026-10-07 18:53 CT",
+  "actions_run_id": "37704919071",
+  "timestamp_ct": "2026-10-07 18:57 CT",
   "issue": 1,
-  "status_comment_id": 6049215532
+  "status_comment_id": 6049259145
 }
