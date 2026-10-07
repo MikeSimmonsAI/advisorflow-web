@@ -233,10 +233,10 @@ function DeliveryChip({ delivery }) {
 //
 // /leads/{id}/timeline returns the newest page (up to `limit` rows per channel)
 // plus has_more / next_before. Older pages are fetched with `before` and merged
-// in; timeline events carry no id, so they are deduplicated on a composite key.
+// in; events carry an id (type+channel+id so per-table ids cannot collide); id-less rows fall back to a composite key.
 function timelineEventKey(e) {
   if (!e) return ''
-  if (e.id != null) return `id|${e.channel || ''}|${e.id}`
+  if (e.id != null) return `id|${e.type || ''}|${e.channel || ''}|${e.id}`
   return [
     e.type || '', e.channel || '', e.timestamp || '',
     (e.subject || '').slice(0, 60), (e.body || e.body_preview || '').slice(0, 60),

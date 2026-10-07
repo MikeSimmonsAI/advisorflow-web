@@ -167,10 +167,13 @@ def get_lead_timeline(lead_id: str,
     from sqlalchemy import desc as _desc
     page_size = max(1, min(int(limit or 200), 500))
 
+    # A page never splits a timestamp (fetch_with_ties), so the strictly-older
+    # cursor cannot drop rows that share the boundary instant.
+    from app.services.history_paging import fetch_with_ties
+
     def _paged(query, column):
-        if before is not None:
-            query = query.filter(column < before)
-        return query.order_by(_desc(column)).limit(page_size).all()
+        return fetch_with_ties(query, column, page_size, before,
+                               lambda r: getattr(r, column.key))
 
     messages = _paged(db.query(Message).filter(Message.lead_id == lead_id),
                       Message.sent_at)
@@ -187,6 +190,7 @@ def get_lead_timeline(lead_id: str,
         # identical to a delivered one — the operator had no way to know the
         # family never got it. See app/services/message_state.py.
         events.append({
+            "id": m.id,
             "type": "outbound",
             "channel": "sms",
             "body": m.body,
@@ -206,6 +210,7 @@ def get_lead_timeline(lead_id: str,
         if len(plain_body) > 600:
             plain_body = plain_body[:600] + "\u2026"
         events.append({
+            "id": e.id,
             "type": "outbound",
             "channel": "email",
             "subject": e.subject,
@@ -290,7 +295,7 @@ def get_lead_timeline(lead_id: str,
     full_oldest = []
     for rows, col in ((messages, "sent_at"), (replies, "received_at"),
                       (email_messages, "sent_at")):
-        if len(rows) == page_size and getattr(rows[-1], col, None) is not None:
+        if len(rows) >= page_size and getattr(rows[-1], col, None) is not None:
             full_oldest.append(getattr(rows[-1], col))
     page_full = bool(full_oldest)
     next_before = max(full_oldest) if page_full else None

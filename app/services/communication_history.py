@@ -49,6 +49,7 @@ from app.models.models import (
     VoiceCall,
 )
 
+from app.services import history_paging
 from app.services.reply_timeline import reply_channel
 
 # Event kinds. Deliberately coarse: a consumer wants to render a bubble, a
@@ -80,8 +81,11 @@ def _event(kind, channel, ts, *, id, body=None, subject=None, status=None,
     }
 
 
-def _before(query, column, before):
-    return query.filter(column < before) if before else query
+def _page(query, column, per_source, before, value_of=None):
+    """Newest `per_source` rows older than `before`, never splitting a tie."""
+    return history_paging.fetch_with_ties(
+        query, column, per_source, before,
+        value_of or (lambda r: getattr(r, column.key)))
 
 
 def fetch(db: Session, lead_id: str, *, limit: int = DEFAULT_LIMIT,
@@ -104,9 +108,7 @@ def fetch(db: Session, lead_id: str, *, limit: int = DEFAULT_LIMIT,
 
     if want is None or "sms" in want:
         from app.services.message_state import describe as _describe
-        rows = _before(db.query(Message).filter(Message.lead_id == lead_id),
-                       Message.sent_at, before) \
-            .order_by(desc(Message.sent_at)).limit(per_source).all()
+        rows = _page(db.query(Message).filter(Message.lead_id == lead_id), Message.sent_at, per_source, before)
         for m in rows:
             events.append(_event(
                 OUTBOUND, "sms", m.sent_at, id=m.id, body=m.body,
@@ -117,9 +119,7 @@ def fetch(db: Session, lead_id: str, *, limit: int = DEFAULT_LIMIT,
                 meta={"delivery": _describe(m)}))
 
     if want is None or "email" in want:
-        rows = _before(db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id),
-                       EmailMessage.sent_at, before) \
-            .order_by(desc(EmailMessage.sent_at)).limit(per_source).all()
+        rows = _page(db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id), EmailMessage.sent_at, per_source, before)
         for e in rows:
             events.append(_event(
                 OUTBOUND, "email", e.sent_at, id=e.id, subject=e.subject,
@@ -133,22 +133,27 @@ def fetch(db: Session, lead_id: str, *, limit: int = DEFAULT_LIMIT,
 
     # INBOUND. `replies` carries both SMS and email inbound - its own `source`
     # column says which - so one query covers both directions of both channels.
-    rows = _before(db.query(Reply).filter(Reply.lead_id == lead_id),
-                   Reply.received_at, before) \
-        .order_by(desc(Reply.received_at)).limit(per_source).all()
+    #
+    # The channel filter is applied IN THE QUERY, before the LIMIT. Filtering
+    # after it meant `channel=email` fetched the newest N replies of both
+    # channels and kept the emails among them: a lead with 100 newer SMS
+    # replies showed no email replies and has_more=false, hiding the history.
+    # reply_channel() maps anything that is not "email" to "sms".
+    reply_q = db.query(Reply).filter(Reply.lead_id == lead_id)
+    if want is not None and ("email" in want) != ("sms" in want):
+        is_email = func.lower(func.trim(func.coalesce(Reply.source, ""))) == "email"
+        reply_q = reply_q.filter(is_email if "email" in want else ~is_email)
+    rows = _page(reply_q, Reply.received_at, per_source, before) \
+        if (want is None or "email" in want or "sms" in want) else []
     for r in rows:
         channel = reply_channel(r)
-        if want is not None and channel not in want:
-            continue
         events.append(_event(
             INBOUND, channel, r.received_at, id=r.id, body=r.body,
             status=r.classification,
             meta={"reviewed_at": getattr(r, "reviewed_at", None)}))
 
     if want is None or "voice" in want:
-        rows = _before(db.query(VoiceCall).filter(VoiceCall.lead_id == lead_id),
-                       VoiceCall.created_at, before) \
-            .order_by(desc(VoiceCall.created_at)).limit(per_source).all()
+        rows = _page(db.query(VoiceCall).filter(VoiceCall.lead_id == lead_id), VoiceCall.created_at, per_source, before)
         for c in rows:
             events.append(_event(
                 OUTBOUND if (c.direction or "outbound") == "outbound" else INBOUND,
@@ -178,10 +183,8 @@ def fetch(db: Session, lead_id: str, *, limit: int = DEFAULT_LIMIT,
         # for the one channel this module was written to make visible.
         _when = func.coalesce(CadenceTouchLog.attempted_at,
                               CadenceTouchLog.created_at)
-        rows = _before(
-            db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id == lead_id),
-            _when, before) \
-            .order_by(desc(_when)).limit(per_source).all()
+        rows = _page(db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id == lead_id), _when, per_source, before,
+                      lambda t: t.attempted_at or t.created_at)
         for t in rows:
             events.append(_event(
                 SYSTEM, "cadence", t.attempted_at or t.created_at, id=t.id,
@@ -196,9 +199,7 @@ def fetch(db: Session, lead_id: str, *, limit: int = DEFAULT_LIMIT,
     # read to explain - "they booked" is the answer to "why did the cadence
     # stop".
     if want is None or "appointment" in want:
-        rows = _before(db.query(BookingLink).filter(BookingLink.lead_id == lead_id),
-                       BookingLink.created_at, before) \
-            .order_by(desc(BookingLink.created_at)).limit(per_source).all()
+        rows = _page(db.query(BookingLink).filter(BookingLink.lead_id == lead_id), BookingLink.created_at, per_source, before)
         for b in rows:
             events.append(_event(
                 SYSTEM, "appointment", b.created_at, id=b.id, status=b.status,
@@ -207,29 +208,20 @@ def fetch(db: Session, lead_id: str, *, limit: int = DEFAULT_LIMIT,
                       "calendar_event_id": b.calendar_event_id,
                       "expires_at": b.expires_at}))
 
-        rows = _before(db.query(LeadOutcome).filter(LeadOutcome.lead_id == lead_id),
-                       LeadOutcome.created_at, before) \
-            .order_by(desc(LeadOutcome.created_at)).limit(per_source).all()
+        rows = _page(db.query(LeadOutcome).filter(LeadOutcome.lead_id == lead_id), LeadOutcome.created_at, per_source, before)
         for o in rows:
             events.append(_event(
                 SYSTEM, "outcome", o.created_at, id=o.id,
                 body=getattr(o, "notes", None),
                 meta={"recorded_by_id": getattr(o, "recorded_by_id", None)}))
 
-    # Newest first, with NULL timestamps last rather than crashing the sort.
-    events.sort(key=lambda e: (e["timestamp"] is None,
-                               e["timestamp"] or datetime.min), reverse=True)
-    # `reverse=True` would float the NULL group to the top, so pull it back.
-    dated = [e for e in events if e["timestamp"] is not None]
-    undated = [e for e in events if e["timestamp"] is None]
-    ordered = dated + undated
-
-    page = ordered[:limit]
-    has_more = len(ordered) > limit
-    next_before = None
-    if has_more:
-        last = page[-1]["timestamp"] if page else None
-        next_before = last
+    # Deterministic order; the page never ends inside a tie group, so the
+    # `before` cursor (strictly older) can neither drop nor repeat a boundary
+    # event. See app/services/history_paging.py.
+    paged = history_paging.paginate(events, limit)
+    page = paged["events"]
+    has_more = paged["has_more"]
+    next_before = paged["next_before"]
 
     return {
         "lead_id": lead_id,
