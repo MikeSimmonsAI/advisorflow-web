@@ -18,6 +18,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
+import { copyOutcome } from './wsListState'
 import { Empty, ErrorBox, errText, fmtMoney, fmtWhen, Note, Why } from './wsShared'
 
 const ORIGIN = typeof window !== 'undefined' ? window.location.origin : ''
@@ -33,6 +34,8 @@ export function SharingWorkspace({ deal, buyers, act, busy, isBusy = () => false
     expires_in_days: 30,
   })
   const [copied, setCopied] = useState(null)
+  const [copyFail, setCopyFail] = useState(null)   // { id, url } — kept visible for manual selection
+  const copyTimer = useRef(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -50,6 +53,7 @@ export function SharingWorkspace({ deal, buyers, act, busy, isBusy = () => false
   }, [deal.id])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   if (error && !state) return <ErrorBox error={error} />
   if (!state) return <Empty page>Loading…</Empty>
@@ -97,16 +101,32 @@ export function SharingWorkspace({ deal, buyers, act, busy, isBusy = () => false
     if (okRev) await load()
   }
 
-  function copy(link) {
+  async function copy(link) {
     const url = ORIGIN + link.url_path
-    if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {})
-    setCopied(link.id)
-    setTimeout(() => setCopied(null), 2000)
+    const r = await copyOutcome(navigator.clipboard && navigator.clipboard.writeText
+      ? (t) => navigator.clipboard.writeText(t) : null, url)
+    clearTimeout(copyTimer.current)
+    if (r.ok) {
+      setCopyFail(null)
+      setCopied(link.id)
+      copyTimer.current = setTimeout(() => setCopied(null), 2000)
+    } else {
+      setCopied(null)
+      setCopyFail({ id: link.id, url, reason: r.reason })
+    }
   }
 
   return (
     <>
       <ErrorBox error={error} />
+      {copyFail ? (
+        <div className="ws-error" role="alert">
+          Copy failed: {copyFail.reason} The link has not been copied. Select it below and copy it yourself.
+          <input readOnly aria-label="Link to copy manually" value={copyFail.url} style={{ width: '100%', marginTop: 6 }}
+                 onFocus={(e) => e.target.select()} />
+          <button type="button" className="btn btn--secondary btn--sm" onClick={() => setCopyFail(null)}>Dismiss</button>
+        </div>
+      ) : null}
 
       <div className="ws-two-col">
         {/* ── The investor room ────────────────────────────────────────── */}
@@ -363,6 +383,7 @@ export function SharingWorkspace({ deal, buyers, act, busy, isBusy = () => false
                         <button className="btn btn--secondary btn--sm"
                                 onClick={() => copy(link)}>
                           {copied === link.id ? 'Copied' : 'Copy'}
+                          <span className="ws-vis-hidden" role="status">{copied === link.id ? ' to the clipboard' : ''}</span>
                         </button>
                         {link.active ? (
                           <button className="btn btn--secondary btn--sm ws-btn-delete"

@@ -122,6 +122,25 @@ export function recordView(state) {
   return state.failedRefresh ? 'stale' : 'ready'
 }
 
+/* A control that acts on loaded evidence is paused (with this reason) while the evidence is
+ * missing or possibly out of date; '' means it may be used. A refresh in progress is not a block. */
+export function evidenceBlockedReason(label, view) {
+  if (view === 'ready' || view === 'refreshing') return ''
+  if (view === 'stale') return `${label} could not be refreshed, so what is shown may be out of date. This is paused until it loads.`
+  return `${label} is not available yet. This is paused until it loads.`
+}
+
+/* Clipboard outcome: only a resolved write is 'copied'; anything else keeps the text for manual copy. */
+export async function copyOutcome(writeText, text) {
+  try {
+    if (typeof writeText !== 'function') return { ok: false, reason: 'This browser does not let the page use the clipboard.' }
+    await writeText(text)
+    return { ok: true, reason: '' }
+  } catch {
+    return { ok: false, reason: 'This browser would not let the page write to the clipboard.' }
+  }
+}
+
 /* Deterministic order: primary key, then id, so equal rows never swap places.
  * Rows with no value for the key always sort last. */
 export function sortByKeyThenId(rows, keyFn, dir = 1, idFn = (r) => r.id) {

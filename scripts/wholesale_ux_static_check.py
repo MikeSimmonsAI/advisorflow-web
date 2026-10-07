@@ -459,5 +459,27 @@ check("shell env indicator only shown when backend says local review", "!env.loc
 check("ops css has a focus ring for the inline retry button", ".wso-linkbtn:focus-visible" in read(os.path.join(SRC, W + "ops/ops.css")))
 check("settings/ops node test covers each new helper", all(x in sotest for x in ("pilotSaveBlockedReason", "withCurrentOption", "distributionLabel", "smsReadinessLabel", "recordFailed")))
 
+# 15. EvoControls / sharing recovery -------------------------------------------
+evo = read(os.path.join(SRC, W + "evosense/EvoControls.jsx"))
+shr = read(os.path.join(SRC, W + "wsSharing.jsx"))
+ls = read(os.path.join(SRC, W + "wsListState.js"))
+estest = read(os.path.join(ROOT, "tests/frontend/wsEvoSharingState.test.mjs"))
+check("evo controls has no swallowed catch", ".catch(() => null)" not in evo and ".catch(() => {})" not in evo and "catch {" not in evo)
+check("evo command-center, sources and capabilities each have their own record",
+      all(x in evo for x in ("ccR = useRecord(", "regR = useRecord(", "capR = useRecord(", "/command-center", "/sources'", "/capabilities")))
+check("evo each source has its own retry note", all(x in evo for x in ('what="The source registry"', 'what="The capability registry"', 'what="Spend figures"', "onRetry={ccR.reload}", "onRetry={capR.reload}", "onRetry={regR.reload}")))
+check("evo failed spend is a dash, not zero", "spent ? cents(spent.today_cents) : null" in evo and "not $0" in evo and "?? 0" not in evo)
+check("evo failed capabilities are not shown as ready", "no capability is shown as ready or available" in evo)
+check("evo source controls pause with a visible reason", "!!regBlock" in evo and 'id="evo-reg-block"' in evo and "aria-describedby" in evo and "evidenceBlockedReason(" in evo)
+check("evo unrelated switches and budget stay usable when sources fail", "disabled={busy || (paused && !isAdmin)}" in evo and "disabled={busy || !isAdmin}>Save budget" in evo)
+check("evo main load drops stale responses and keeps typed input", "++loadGen.current" in evo and "gen !== loadGen.current" in evo and "filled.current" in evo)
+check("evo mutations share a synchronous same-action latch", "acting.current" in evo and "async function guarded(" in evo and "acting.current = true" in evo)
+check("evo registry refresh failure is not reported as a failed save", "regR.reload()" in evo and "setReg(" not in evo)
+check("sharing copy waits for the clipboard promise", "copyOutcome(" in shr and ".catch(() => {})" not in shr)
+check("sharing copy failure is an alert with manual-copy field", 'role="alert"' in shr and "Copy failed" in shr and "readOnly" in shr and "onFocus={(e) => e.target.select()}" in shr and "has not been copied" in shr)
+check("sharing copied state is announced and timer cleaned up", 'role="status"' in shr and "clearTimeout(copyTimer.current)" in shr)
+check("copy helper never reports ok on failure", "export async function copyOutcome" in ls and "ok: false" in ls and "export function evidenceBlockedReason" in ls)
+check("evo/sharing node test covers each helper", all(x in estest for x in ("evidenceBlockedReason", "copyOutcome", "rejected write", "stale is blocked")))
+
 print("wholesale ux static: %d passed, %d failed" % (passed, failed))
 sys.exit(1 if failed else 0)
