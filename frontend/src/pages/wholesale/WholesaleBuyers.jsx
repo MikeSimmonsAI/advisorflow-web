@@ -38,9 +38,10 @@ export default function WholesaleBuyers() {
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null)
+    setLoading(true); setError(null); setLoadFailed(false)
     try {
       const params = new URLSearchParams({ limit: '500', active_only: 'false', with_activity: 'true' })
       if (q) params.set('q', q)
@@ -49,7 +50,7 @@ export default function WholesaleBuyers() {
       setBuyers(data.buyers)
       setTotal(data.total)
     } catch (e) {
-      setError(errText(e))
+      setError(errText(e)); setLoadFailed(true)
     } finally {
       setLoading(false)
     }
@@ -125,7 +126,13 @@ export default function WholesaleBuyers() {
         </div>
 
         {loading && !buyers.length ? <div style={{ padding: 20 }}><Skeleton rows={4} height={30} /></div> : null}
-        {!loading && !buyers.length ? (
+        {!loading && !buyers.length && loadFailed ? (
+          <div style={{ padding: 20 }}>
+            <p className="evo-sr" role="status">The buyer list could not be loaded.</p>
+            <button type="button" className="evo-btn evo-btn--secondary" onClick={load}>Try again</button>
+          </div>
+        ) : null}
+        {!loading && !buyers.length && !loadFailed ? (
           <EvoEmpty title={q ? 'No buyer matches' : 'No cash buyers yet'}
                  action={!q ? <div className="evo-actionbar" style={{ justifyContent: 'center' }}>
                    <button type="button" className="evo-btn evo-btn--primary" onClick={() => setShowAdd(true)}>+ Add buyer</button>

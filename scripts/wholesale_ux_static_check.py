@@ -144,6 +144,23 @@ check("buyer channel select shows worded options, not sms/phone keys",
 check("buyer import file input has an id tied to its label",
       'htmlFor="bi-file"' in buyers and 'id="bi-file"' in buyers)
 
+# 6. buyer board / buyers list truthful states and accessible controls -------
+board = read(os.path.join(SRC, "pages/wholesale/wsBuyerBoard.jsx"))
+check("buyer board load failure offers Try again", "Try again" in board)
+check("buyer board keeps rows and warns when only a refresh fails",
+      "error && !board" in board and "may be out of date" in board)
+check("buyer board error/loading are announced (role alert/status)",
+      'role="alert"' in board and 'role="status"' in board)
+check("buyer board offer amount is validated, not coerced to NaN",
+      "offerInvalid" in board and "Number(draft.offer_amount)" not in board)
+check("buyer board resend is blocked for do-not-contact buyers",
+      "disabled={busy || row.do_not_contact}" in board)
+check("buyer board row buttons name the buyer",
+      "aria-label={`Select ${" in board and "aria-label={`Resend deal sheet to" in board
+      and "aria-label={`Record response from" in board)
+check("buyers list does not claim 'No cash buyers yet' after a failed load",
+      "loadFailed" in buyers and "!buyers.length && !loadFailed" in buyers)
+
 # 5. light-theme / mobile hooks ---------------------------------------------
 css = read(os.path.join(SRC, "components/wholesale-shell.css"))
 check("shell css has a mobile breakpoint", "@media" in css and "max-width" in css)

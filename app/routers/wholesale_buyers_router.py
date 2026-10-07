@@ -392,6 +392,26 @@ def update_buyer(buyer_id: str, payload: BuyerIn, request: Request,
     if "proof_of_funds_expires" in data:
         from app.routers.wholesale_router import _parse_date
         data["proof_of_funds_expires"] = _parse_date(data["proof_of_funds_expires"])
+    for key in ("typical_close_days", "past_deals_count"):
+        if data.get(key) is not None and data[key] < 0:
+            raise HTTPException(status_code=400,
+                                detail="%s cannot be negative." % key.replace("_", " ").capitalize())
+    if data.get("reliability_rating") is not None and not 0 <= data["reliability_rating"] <= 5:
+        raise HTTPException(status_code=400,
+                            detail="Reliability rating must be between 0 and 5.")
+    after_email = data["email"] if "email" in data else buyer.email
+    after_phone = data["phone"] if "phone" in data else buyer.phone
+    if (("email" in data or "phone" in data)
+            and not ((after_email or "").strip() or (after_phone or "").strip())):
+        raise HTTPException(
+            status_code=400,
+            detail="A buyer needs an email or a phone number — without one there "
+                   "is no way to send them a deal.")
+    after_name = ((data["company_name"] if "company_name" in data else buyer.company_name)
+                  or (data["contact_name"] if "contact_name" in data else buyer.contact_name))
+    if ("company_name" in data or "contact_name" in data) and not (after_name or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="A buyer needs a company name or a contact name.")
     identity = {k: data[k] for k in ("contact_name", "company_name", "email", "phone")
                 if k in data and data[k] != getattr(buyer, k)}
     for key, value in data.items():
@@ -459,7 +479,16 @@ def _apply_box(box: WholesaleBuyBox, data: Dict[str, Any]) -> None:
             setattr(box, key, value)
 
 
-def _validate_box(data: Dict[str, Any]) -> None:
+_BOX_RANGES = (("min_price", "max_price", "price"), ("min_beds", "max_beds", "bedroom count"),
+               ("min_sqft", "max_sqft", "square footage"),
+               ("min_year_built", "max_year_built", "year built"))
+_BOX_NONNEG = ("min_price", "max_price", "min_beds", "max_beds", "min_baths",
+               "min_sqft", "max_sqft", "min_year_built", "max_year_built", "min_spread")
+
+
+def _validate_box(data: Dict[str, Any], existing: Optional[WholesaleBuyBox] = None) -> None:
+    """`existing` is the stored box on PATCH, so a change to one end of a range
+    is checked against the end that is already saved."""
     if data.get("strategies"):
         bad = [s for s in data["strategies"] if str(s).lower() not in STRATEGIES]
         if bad:
@@ -470,11 +499,23 @@ def _validate_box(data: Dict[str, Any]) -> None:
         raise HTTPException(status_code=400,
                             detail="rehab_tolerance must be one of: %s"
                                    % ", ".join(REHAB_LEVELS))
-    lo, hi = data.get("min_price"), data.get("max_price")
-    if lo is not None and hi is not None and lo > hi:
-        raise HTTPException(status_code=400,
-                            detail="The minimum price is above the maximum price, so "
-                                   "nothing could ever match this buy box.")
+    for key in _BOX_NONNEG:
+        if data.get(key) is not None and data[key] < 0:
+            raise HTTPException(status_code=400,
+                                detail="%s cannot be negative." % key.replace("_", " ").capitalize())
+
+    def merged(key):
+        if key in data:
+            return data[key]
+        return getattr(existing, key, None) if existing is not None else None
+
+    for lo_key, hi_key, label in _BOX_RANGES:
+        lo, hi = merged(lo_key), merged(hi_key)
+        if lo is not None and hi is not None and lo > hi:
+            raise HTTPException(
+                status_code=400,
+                detail="The minimum %s is above the maximum %s, so nothing could "
+                       "ever match this buy box." % (label, label))
 
 
 @router.post("/buyers/{buyer_id}/buy-boxes")
@@ -511,7 +552,7 @@ def update_buy_box(box_id: str, payload: BuyBoxIn, request: Request,
     if box is None:
         raise HTTPException(status_code=404, detail="Buy box not found")
     data = payload.model_dump(exclude_unset=True)
-    _validate_box(data)
+    _validate_box(data, box)
     before = buy_box_json(box)
     _apply_box(box, data)
     db.flush()

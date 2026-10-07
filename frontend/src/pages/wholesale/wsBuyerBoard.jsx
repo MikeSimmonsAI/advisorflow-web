@@ -229,6 +229,8 @@ function ResponseForm({ row, busy, onSave, onCancel }) {
     target_close_date: row.target_close_date ?? '',
     response_note: row.response_note ?? '',
   })
+  const offerText = String(draft.offer_amount).replace(/[$,\s]/g, '')
+  const offerInvalid = offerText !== '' && !(Number.isFinite(Number(offerText)) && Number(offerText) >= 0)
 
   return (
     <div className="ws-respond">
@@ -250,9 +252,16 @@ function ResponseForm({ row, busy, onSave, onCancel }) {
           <label htmlFor={`resp-${row.outreach_id}-amount`}>Their offer</label>
           <input id={`resp-${row.outreach_id}-amount`} className="ws-input"
                  inputMode="decimal" value={draft.offer_amount}
+                 aria-invalid={offerInvalid || undefined}
+                 aria-describedby={offerInvalid ? `resp-${row.outreach_id}-amount-err` : undefined}
                  onChange={(e) => setDraft(
                    (d) => ({ ...d, offer_amount: e.target.value }))} />
         </div>
+        {offerInvalid ? (
+          <div className="ws-warn" role="alert" id={`resp-${row.outreach_id}-amount-err`}>
+            Their offer must be a dollar amount of zero or more.
+          </div>
+        ) : null}
         <div className="ws-field">
           <label htmlFor={`resp-${row.outreach_id}-close`}>Close by</label>
           <input id={`resp-${row.outreach_id}-close`} className="ws-input" type="date"
@@ -274,11 +283,10 @@ function ResponseForm({ row, busy, onSave, onCancel }) {
         nothing here waits for an integration to notice a reply.
       </p>
       <div className="ws-actions" style={{ marginTop: 10 }}>
-        <button className="btn btn--primary btn--sm" disabled={busy}
+        <button className="btn btn--primary btn--sm" disabled={busy || offerInvalid}
                 onClick={() => onSave({
                   status: draft.status,
-                  offer_amount: draft.offer_amount === ''
-                    ? null : Number(draft.offer_amount),
+                  offer_amount: offerText === '' ? null : Number(offerText),
                   target_close_date: draft.target_close_date || null,
                   response_note: draft.response_note || null,
                 })}>
@@ -317,11 +325,16 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
     return done
   }
 
-  if (error) {
+  if (error && !board) {
     return (
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">Buyer comparison</div>
-        <div className="ws-warn">{error}</div>
+        <div className="ws-warn" role="alert">
+          Could not load the buyer comparison: {error}
+        </div>
+        <div className="ws-actions" style={{ marginTop: 10 }}>
+          <button className="btn btn--secondary btn--sm" onClick={load}>Try again</button>
+        </div>
       </div>
     )
   }
@@ -329,7 +342,7 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
     return (
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">Buyer comparison</div>
-        <p className="ws-panel-note">Loading…</p>
+        <p className="ws-panel-note" role="status">Loading…</p>
       </div>
     )
   }
@@ -342,6 +355,12 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
       <div className="panel-title ws-panel-title">
         <span>Buyer comparison ({rows.length})</span>
       </div>
+      {error ? (
+        <div className="ws-warn" role="alert">
+          The list may be out of date — the last refresh failed: {error}{' '}
+          <button className="btn btn--secondary btn--sm" onClick={load}>Refresh</button>
+        </div>
+      ) : null}
       <Note>
         What each buyer offered, what we make on it, whether they can pay and how
         fast they close — in one row each.
@@ -545,8 +564,13 @@ function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
         <td>
           <span className="ws-actions ws-actions--wrap">
             <button className="btn btn--secondary btn--sm" disabled={busy}
+                    aria-label={`Record response from ${row.buyer_name || 'this buyer'}`}
                     onClick={onRespond}>Record response</button>
-            <button className="btn btn--secondary btn--sm" disabled={busy}
+            <button className="btn btn--secondary btn--sm"
+                    disabled={busy || row.do_not_contact}
+                    aria-label={`Resend deal sheet to ${row.buyer_name || 'this buyer'}`}
+                    title={row.do_not_contact
+                      ? 'This buyer has opted out of contact.' : undefined}
                     onClick={() => run(async () => {
                       const r = await api.post(
                         `/wholesale/outreach/${row.outreach_id}/resend`)
@@ -557,6 +581,7 @@ function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
                       disabled={busy || row.do_not_contact}
                       title={row.do_not_contact
                         ? 'This buyer has opted out of contact.' : undefined}
+                      aria-label={`Select ${row.buyer_name || 'this buyer'}`}
                       onClick={onSelect}>Select</button>
             )}
           </span>
