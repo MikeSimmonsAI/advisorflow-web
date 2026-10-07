@@ -32,7 +32,7 @@ jobs:
     env:
       RELAY_ISSUE: "1"
       RELAY_AUTHORIZED_ACTORS: MikeSimmonsAI
-      RELAY_ALLOWED_BRANCHES: ${{ vars.RELAY_ALLOWED_BRANCHES || 'sci-program' }}
+      RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev'
       RELAY_STATUS_ACTORS: ${{ vars.RELAY_STATUS_ACTORS || 'github-actions[bot],claude[bot]' }}
     steps:
       - uses: actions/checkout@v4
