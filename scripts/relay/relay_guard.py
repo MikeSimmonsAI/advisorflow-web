@@ -100,7 +100,8 @@ def acks(comments: Iterable[Dict], automation: List[str]) -> Dict[str, Dict]:
         p = parse(c.get("body") or "")
         if p["kind"] == ACK and p["run_id"] and _login(c) in automation and p["run_id"] not in out:
             out[p["run_id"]] = {"branch": p["branch"], "parent_run_id": p["parent_run_id"],
-                                "project": p["fields"].get("PROJECT") or _field_lc(c.get("body"), "project")}
+                                "project": p["fields"].get("PROJECT") or _field_lc(c.get("body"), "project"),
+                                "actions_run_id": _field_lc(c.get("body"), "actions_run_id")}
     return out
 
 
@@ -162,11 +163,12 @@ def decide(event: Dict, comments: Iterable[Dict], *, issue: int, actors: List[st
                         "comment_id": c.get("id"), "parent_run_id": p["parent_run_id"] or ""}
 
 
-def ack_body(info: Dict, ct: str) -> str:
-    return ("%s relay_run_id: %s\nparent_run_id: %s\nproject: %s\nbranch: %s\ntimestamp: %s\n"
+def ack_body(info: Dict, ct: str, actions_run_id: str = "") -> str:
+    run_line = "\nactions_run_id: %s" % actions_run_id if actions_run_id else ""
+    return ("%s relay_run_id: %s\nparent_run_id: %s\nproject: %s\nbranch: %s%s\ntimestamp: %s\n"
             "actor: claude-relay-action\nstatus: ACCEPTED (Claude is starting)"
             % (ACK, info["run_id"], info.get("parent_run_id") or "-", info.get("project") or "-",
-               info["branch"], ct))
+               info["branch"], run_line, ct))
 
 
 # ── Claude status ────────────────────────────────────────────────────────────
@@ -199,7 +201,7 @@ def validate_status(comment: Dict, comments: Iterable[Dict], *, issue: int, issu
             {"run_id": run_id}
     info = {"run_id": run_id, "status": st, "terminal": st in TERMINAL_STATUSES, "branch": br,
             "parent_run_id": ack.get("parent_run_id") or "", "project": ack.get("project") or "",
-            "comment_id": comment.get("id")}
+            "actions_run_id": ack.get("actions_run_id") or "", "comment_id": comment.get("id")}
     if info["terminal"]:
         for c in prior:
             if status_of(c.get("body") or "") in TERMINAL_STATUSES and \
@@ -232,7 +234,8 @@ def signal_payload(info: Dict, ct: str, issue: int) -> Dict:
     """The ONLY content of .relay/chatgpt-wakeup.json - no secrets, no customer data."""
     return {"relay_run_id": info["run_id"], "parent_run_id": info.get("parent_run_id") or "",
             "project": info.get("project") or "", "status": info["status"], "branch": info["branch"],
-            "timestamp_ct": ct, "issue": issue, "status_comment_id": info.get("comment_id")}
+            "actions_run_id": info.get("actions_run_id") or "", "timestamp_ct": ct,
+            "issue": issue, "status_comment_id": info.get("comment_id")}
 
 
 def should_signal(existing: Optional[Dict], payload: Dict) -> bool:
@@ -305,7 +308,8 @@ def main(argv: List[str]) -> int:
         print("relay guard: %s - %s" % ("RUN" if run else "SKIP", reason))
         if run:
             # Claim the run BEFORE Claude starts: a re-delivered event now sees the ACK.
-            _api("POST", "/issues/%d/comments" % issue, {"body": ack_body(info, ct_now())})
+            _api("POST", "/issues/%d/comments" % issue,
+                 {"body": ack_body(info, ct_now(), os.environ.get("GITHUB_RUN_ID", ""))})
             with open(os.path.join(os.environ.get("RUNNER_TEMP", "."), "relay-directive.md"),
                       "w", encoding="utf-8") as f:
                 f.write((event.get("comment") or {}).get("body") or "")
