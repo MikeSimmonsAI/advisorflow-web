@@ -1,10 +1,10 @@
 {
-  "relay_run_id": "wholesale-overnight-unblocked-20261006-2052",
-  "parent_run_id": "wholesale-overnight-20261006-2034",
-  "project": "EvoSys Wholesale Overnight \u2014 Unblocked Execution",
+  "relay_run_id": "sci-finish-first-20261006-2058",
+  "parent_run_id": "wholesale-overnight-unblocked-20261006-2052",
+  "project": "SCI POC Readiness Sprint \u2014 FINISH FIRST",
   "status": "BLOCKED",
-  "branch": "wholesale-nightly",
-  "timestamp_ct": "2026-10-06 20:54 CT",
+  "branch": "sci-program",
+  "timestamp_ct": "2026-10-06 20:58 CT",
   "issue": 1,
-  "status_comment_id": 6029209284
+  "status_comment_id": 6029263634
 }
