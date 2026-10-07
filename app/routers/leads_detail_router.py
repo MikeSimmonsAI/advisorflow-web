@@ -195,14 +195,9 @@ def get_lead_timeline(lead_id: str,
             "delivery": _describe_delivery(m),
             "delivery_status_at": iso_utc(getattr(m, "delivery_status_at", None)),
         })
+    from app.services.reply_timeline import inbound_reply_event
     for r in replies:
-        events.append({
-            "type": "inbound",
-            "channel": "sms",
-            "body": r.body,
-            "timestamp": r.received_at,
-            "is_hot": r.is_hot,
-        })
+        events.append(inbound_reply_event(r))
     for e in email_messages:
         import re as _re
         raw_html = e.body_html or ""
