@@ -1,0 +1,56 @@
+name: Relay handoff watchdog
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: relay-handoff-watchdog
+  cancel-in-progress: true
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: read
+      pull-requests: read
+    env:
+      RELAY_ISSUE: "1"
+      RELAY_AUTHORIZED_ACTORS: MikeSimmonsAI
+      RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev'
+      RELAY_STATUS_ACTORS: ${{ vars.RELAY_STATUS_ACTORS || 'github-actions[bot],claude[bot]' }}
+      HANDOFF_STALE_MINUTES: "10"
+    steps:
+      - name: Load relay watchdog
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/relay
+
+      - id: check
+        name: Detect missed handoff
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/relay/handoff_watchdog.py
+
+      - name: Re-signal ChatGPT through relay PR
+        if: steps.check.outputs.resignal == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.check.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          URL="https://github.com/${GITHUB_REPOSITORY}.git"
+          D="$RUNNER_TEMP/relay-signal-watchdog"
+          rm -rf "$D"
+          git -c "http.https://github.com/.extraheader=$AUTH" clone -q --depth 1 --branch relay-signal "$URL" "$D"
+          mkdir -p "$D/.relay"
+          cp "$RUNNER_TEMP/relay-watchdog.json" "$D/.relay/chatgpt-wakeup.json"
+          git -C "$D" add .relay/chatgpt-wakeup.json
+          git -C "$D" -c user.name="relay-handoff-watchdog" -c user.email="relay-watchdog@users.noreply.github.com"             commit -q -m "relay watchdog re-signal: $RUN_ID"
+          git -C "$D" -c "http.https://github.com/.extraheader=$AUTH" push -q origin HEAD:refs/heads/relay-signal
+          echo "Re-signalled missed handoff for $RUN_ID through PR #3."
