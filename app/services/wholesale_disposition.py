@@ -160,6 +160,17 @@ def preflight(db, org_id: str, deal: WholesaleDeal, buyer: WholesaleBuyer,
     if not getattr(buyer, "is_active", True):
         raise SendRefused("This buyer is marked inactive.", "inactive")
 
+    #    The organization's suppression list is keyed by phone, not by record
+    #    type: a number that replied STOP to this organization must not be
+    #    texted from the same Twilio identity because it is now filed as a
+    #    buyer. `_send_sms` calls Twilio directly, so this is its only check.
+    if channel == "sms" and getattr(buyer, "phone", None):
+        from app.services.compliance_service import is_phone_suppressed
+        if is_phone_suppressed(db, org_id, buyer.phone):
+            raise SendRefused(
+                "This phone number is on the opt-out list, so nothing was sent.",
+                "suppressed")
+
     # 3. SOMEWHERE TO SEND IT.
     if channel == "email" and not getattr(buyer, "email", None):
         raise SendRefused("No email address on file for this buyer.", "no_address")
