@@ -1,10 +1,10 @@
 {
-  "relay_run_id": "sci-overnight-finalizer-20261006-2109",
-  "parent_run_id": "sci-dependency-free-continuation-20261006-2059",
-  "project": "SCI POC Readiness Sprint \u2014 OVERNIGHT FINALIZER",
-  "status": "BLOCKED",
+  "relay_run_id": "sci-overnight-finalizer-pushfix-20261006-2118",
+  "parent_run_id": "sci-overnight-finalizer-20261006-2109",
+  "project": "SCI POC Readiness Sprint \u2014 FINALIZER AFTER RELAY PUSH FIX",
+  "status": "COMPLETED",
   "branch": "sci-program",
-  "timestamp_ct": "2026-10-06 21:13 CT",
+  "timestamp_ct": "2026-10-06 21:20 CT",
   "issue": 1,
-  "status_comment_id": 6029431766
+  "status_comment_id": 6029509666
 }
