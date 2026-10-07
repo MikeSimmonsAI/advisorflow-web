@@ -322,5 +322,22 @@ check("callback center keeps outcome note on failure", "Your note is kept" in cc
 check("callback center focus ring and narrow layout", ".wso-bucket:focus-visible" in ops_css and "max-width: 640px" in ops_css)
 check("backend queue sort has id tiebreak", 'str(i["id"])' in read(os.path.join(ROOT, "app/services/wholesale_ops.py")))
 
+# 11. disposition handoff / appointment truth --------------------------------
+ds_src = read(os.path.join(SRC, W + "wsDispositionState.js"))
+dtest = read(os.path.join(ROOT, "tests/frontend/wsDispositionState.test.mjs"))
+check("deal room uses pure disposition state", "from './wsDispositionState'" in deal_src)
+check("send validates before posting and focuses first invalid field", "validateSend(" in deal_src and "?.focus()" in deal_src)
+check("asking price no longer coerced with bare Number()", "Number(askingPrice)" not in deal_src)
+check("send and preview use their own keys", "'buyers:send'" in deal_src and "'buyers:preview'" in deal_src)
+check("send result counted from per-buyer rows", "summarizeOutcome(outcome.data)" in deal_src and "rows.length - sent" in ds_src)
+check("send result marked as earlier when inputs change", "outcomeCurrent" in deal_src and "previewCurrent" in deal_src)
+check("send result does not claim buyer response", "not a buyer response" in deal_src)
+check("send errors are role=alert", "role=\"alert\">{sendErrs" in deal_src)
+check("appointment validated before seller save", "validateAppointment(" in deal_src and "appt.firstInvalid" in deal_src)
+check("appointment display ties time to status", "appointmentSummary(" in deal_src)
+check("appointment unknown status shown as unknown", "'Unknown status'" in ds_src)
+check("seller editor errors announced and linked", "aria-describedby={errs[key]" in deal_src)
+check("disposition node test covers each helper", all(x in dtest for x in ("parseMoney", "validateSend", "summarizeOutcome", "validateAppointment", "isCurrentResult")))
+
 print("wholesale ux static: %d passed, %d failed" % (passed, failed))
 sys.exit(1 if failed else 0)

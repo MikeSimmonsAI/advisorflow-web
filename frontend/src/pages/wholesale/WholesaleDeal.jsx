@@ -31,6 +31,9 @@ import { SellerIntelPanel } from './wsIntel'
 import { ValuationPanel } from './wsValuation'
 import { DocumentDrawer } from './wsDocuments'
 import { SharingWorkspace } from './wsSharing'
+import {
+  appointmentSummary, isCurrentResult, sendInputKey, summarizeOutcome, validateAppointment, validateSend,
+} from './wsDispositionState'
 import DealOpsPanel, { DistributionNotice, LeadTemperatureChip, useDistribution } from './ops/DealOpsPanel'
 import { EvoApp, Hero, PageSkeleton, PropertyThumb, Ring, Status, Tag, humanize, money, shortDate } from './ds/ds'
 import './ds/evo-pages.css'
@@ -520,7 +523,7 @@ function SellerTab({ room, act, busy, isBusy }) {
             <KV label="Best callback time">{seller.best_callback_time}</KV>
             <KV label="Appointment">
               {seller.appointment_status
-                ? `${fmtLabel(seller.appointment_status, null)}${seller.appointment_at ? ' · ' + fmtWhen(seller.appointment_at) : ''}`
+                ? appointmentSummary(seller.appointment_status, seller.appointment_at, fmtWhen)
                 : null}
             </KV>
           </div>
@@ -690,8 +693,16 @@ function SellerEditor({ seller, act, busy }) {
       let v = typeof form[k] === 'string' ? form[k].trim() : form[k]
       if (v === '') v = null
       else if (k === 'asking_price') v = Number(String(v).replace(/[$,\s]/g, ''))
-      else if (k === 'appointment_at') v = new Date(v).toISOString().slice(0, 19)
+      else if (k === 'appointment_at') v = validateAppointment({ status: 'x', at: v }).iso
       body[k] = v
+    }
+    const appt = validateAppointment({
+      status: form.appointment_status || null, at: form.appointment_at })
+    if (!appt.ok) {
+      // Nothing is sent and nothing typed is lost; focus goes to the field.
+      setErrs(appt.errors); setMsg(null)
+      setTimeout(() => document.getElementById(`sed-${appt.firstInvalid}`)?.focus(), 0)
+      return
     }
     if (note.trim()) body.notes = note.trim()
     if (!Object.keys(body).length) { setOpen(false); return }
@@ -731,6 +742,7 @@ function SellerEditor({ seller, act, busy }) {
                 <label htmlFor={`sed-${key}`}>{label}</label>
                 {SELLER_SELECTS[key] ? (
                   <select id={`sed-${key}`} value={form[key] || ''}
+                          aria-invalid={errs[key] ? true : undefined}
                           onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}>
                     <option value="">— not stated —</option>
                     {SELLER_SELECTS[key].map((o) => <option key={o} value={o}>{humanize(o)}</option>)}
@@ -738,10 +750,12 @@ function SellerEditor({ seller, act, busy }) {
                 ) : (
                   <input id={`sed-${key}`} value={form[key] ?? ''}
                          type={key === 'appointment_at' ? 'datetime-local' : 'text'}
+                         aria-invalid={errs[key] ? true : undefined}
+                         aria-describedby={errs[key] ? `sed-${key}-err` : undefined}
                          inputMode={key === 'asking_price' ? 'decimal' : undefined}
                          onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))} />
                 )}
-                {errs[key] ? <span className="ws-field__err">{errs[key]}</span> : null}
+                {errs[key] ? <span className="ws-field__err" id={`sed-${key}-err`} role="alert">{errs[key]}</span> : null}
               </div>
             ))}
             <div className="ws-field" style={{ gridColumn: '1 / -1' }}>
@@ -1333,7 +1347,26 @@ function BuyersTab({ room, act, busy, isBusy }) {
   const [preview, setPreview] = useState(null)
   const [outcome, setOutcome] = useState(null)
   const [channel, setChannel] = useState('email')
+  const [sendErrs, setSendErrs] = useState({})
   const selected = Object.keys(chosen).filter((k) => chosen[k])
+  const channels = room.disposition_channels || [{ channel: 'email' }]
+  const inputKey = sendInputKey({ selected, askingPrice, channel })
+  // A preview or send result describes the inputs that produced it. Once the
+  // buyers, price or channel change it is history, not the current state.
+  const previewCurrent = preview && isCurrentResult(preview.key, inputKey)
+  const outcomeCurrent = outcome && isCurrentResult(outcome.key, inputKey)
+  const outcomeSummary = outcome ? summarizeOutcome(outcome.data) : null
+
+  // Validate first; on a problem say which field, focus it, send nothing.
+  function checked() {
+    const v = validateSend({ selected, askingPrice, channel, channels })
+    setSendErrs(v.errors)
+    if (!v.ok) {
+      setTimeout(() => document.getElementById(v.firstInvalid)?.focus(), 0)
+      return null
+    }
+    return v.body
+  }
 
   return (
     <>
@@ -1394,54 +1427,68 @@ function BuyersTab({ room, act, busy, isBusy }) {
         <div className="ws-grid">
           <div className="ws-field">
             <label htmlFor="dp-asking">Asking price for buyers</label>
-            <input id="dp-asking" value={askingPrice}
+            <input id="dp-asking" value={askingPrice} inputMode="decimal"
+                   aria-invalid={sendErrs['dp-asking'] ? true : undefined}
+                   aria-describedby={sendErrs['dp-asking'] ? 'dp-asking-err' : undefined}
                    onChange={(e) => setAskingPrice(e.target.value)} />
+            {sendErrs['dp-asking'] ? <span className="ws-field__err" id="dp-asking-err" role="alert">{sendErrs['dp-asking']}</span> : null}
           </div>
           <div className="ws-field">
             <label htmlFor="dp-channel">Channel</label>
             <select id="dp-channel" value={channel}
                     onChange={(e) => setChannel(e.target.value)}>
-              {(room.disposition_channels || [{ channel: 'email' }]).map((c) => (
+              {channels.map((c) => (
                 <option key={c.channel} value={c.channel}>
                   {c.channel}{c.enabled === false ? ' (not enabled)' : ''}
                 </option>
               ))}
             </select>
+            {sendErrs['dp-channel'] ? <span className="ws-field__err" role="alert">{sendErrs['dp-channel']}</span> : null}
           </div>
         </div>
-        <div className="ws-actions" style={{ marginTop: 12 }}>
-          <button className="btn btn--secondary" disabled={isBusy('buyers:preview') || !selected.length}
-                  onClick={() => act(async () => {
-                    setPreview(await api.post(
-                      `/wholesale/deals/${deal.id}/disposition/preview`, {
-                        buyer_ids: selected,
-                        asking_price: askingPrice === '' ? null : Number(askingPrice),
-                      }))
-                  }, null, 'buyers:preview')}>
-            Preview the deal sheet
+        <div id="dp-buyers" tabIndex={-1} className="ws-actions" style={{ marginTop: 12 }}>
+          <button className="btn btn--secondary" disabled={isBusy('buyers:preview')}
+                  onClick={() => {
+                    const body = checked()
+                    if (!body) return
+                    const key = inputKey
+                    act(async () => {
+                      const data = await api.post(
+                        `/wholesale/deals/${deal.id}/disposition/preview`,
+                        { buyer_ids: body.buyer_ids, asking_price: body.asking_price })
+                      setPreview({ key, ...data })
+                    }, null, 'buyers:preview')
+                  }}>
+            {isBusy('buyers:preview') ? 'Building preview…' : 'Preview the deal sheet'}
           </button>
-          <button className="btn btn--primary" disabled={isBusy('buyers:send') || !selected.length}
-                  onClick={() => act(async () => {
-                    const result = await api.post(
-                      `/wholesale/deals/${deal.id}/disposition`, {
-                        buyer_ids: selected,
-                        asking_price: askingPrice === '' ? null : Number(askingPrice),
-                        channel,
-                      })
-                    setChosen({})
-                    setOutcome(result)
-                  }, null, 'buyers:send')}>
-            Send to {selected.length || 0} buyer(s)
+          <button className="btn btn--primary" disabled={isBusy('buyers:send')}
+                  onClick={() => {
+                    const body = checked()
+                    if (!body) return
+                    const key = inputKey
+                    // A failed send keeps the ticks, price and channel so it
+                    // can be retried as-is; only a returned result clears them.
+                    act(async () => {
+                      const data = await api.post(
+                        `/wholesale/deals/${deal.id}/disposition`, body)
+                      setChosen({})
+                      setOutcome({ key, data })
+                    }, null, 'buyers:send')
+                  }}>
+            {isBusy('buyers:send') ? 'Sending…' : `Send to ${selected.length || 0} buyer(s)`}
           </button>
         </div>
+        {sendErrs['dp-buyers'] ? <div className="ws-field__err" role="alert">{sendErrs['dp-buyers']}</div> : null}
 
         {/* WHAT ACTUALLY HAPPENED, PER BUYER. Not a toast saying "done" —
             a send that was refused and a send that succeeded look identical in
             a toast, and the difference is the whole point. */}
         {outcome ? (
           <div style={{ marginTop: 14 }}>
-            <div className={outcome.sent ? 'ws-good' : 'ws-warn'}>
-              {outcome.sent} sent, {outcome.failed} not sent.
+            <div className={outcomeSummary.tone === 'good' ? 'ws-good' : 'ws-warn'} role="status">
+              {outcomeSummary.text}
+              {!outcomeCurrent ? ' This is the result of an earlier send — the buyers, price or channel have changed since.' : ''}
+              {' '}A send only means the message left this system; it is not a buyer response.
             </div>
             <div className="ws-scroll">
             <table className="ws-table">
@@ -1449,7 +1496,7 @@ function BuyersTab({ room, act, busy, isBusy }) {
                 <tr><th>Buyer</th><th>Result</th><th>Detail</th></tr>
               </thead>
               <tbody>
-                {outcome.results.map((r) => (
+                {(outcome.data.results || []).map((r) => (
                   <tr key={r.buyer_id}>
                     <td>{r.buyer_name}</td>
                     <td>
@@ -1473,6 +1520,7 @@ function BuyersTab({ room, act, busy, isBusy }) {
 
         {preview ? (
           <div style={{ marginTop: 14 }}>
+            {!previewCurrent ? <div className="ws-warn">This preview is out of date — preview again.</div> : null}
             <div className="ws-notice">{preview.note}</div>
             <div className="mono ws-mono">{preview.subject}{'\n\n'}{preview.body}</div>
           </div>
