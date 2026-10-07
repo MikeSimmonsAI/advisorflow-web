@@ -1306,7 +1306,9 @@ def s_repeated_identical_call_is_stopped(db: Session) -> Dict:
     calls = len([r for r in w.executions(tool_key="lead.get")])
     return _result("the identical call runs once",
                    "the identical call ran %d time(s)" % calls,
-                   passed=(calls <= 1), ended=out.get("ended_because"))
+                   # EXACTLY once: zero means the run never executed the call
+                   # at all, which is not evidence the repeat was stopped.
+                   passed=(calls == 1), ended=out.get("ended_because"))
 
 
 def s_tool_call_budget_enforced(db: Session) -> Dict:
@@ -1645,6 +1647,12 @@ def s_message_bodies_are_not_stored_in_the_ledger(db: Session) -> Dict:
                         {"lead_id": lead.id, "body": secret})
     rows = w.executions(tool_key="conversation.send_sms")
     leaked = any(secret in (r.arguments or "") for r in rows)
+    if not rows:
+        # No ledger row means nothing was inspected; absence of the body in an
+        # empty ledger is not proof it is redacted.
+        return _result("the body is not in the tool ledger",
+                       "no ledger row was written, so nothing was checked",
+                       passed=False)
     return _result("the body is not in the tool ledger",
                    ("the body is not in the tool ledger" if not leaked
                     else "the body was stored verbatim"))
