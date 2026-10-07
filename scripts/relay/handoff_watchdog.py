@@ -21,6 +21,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 from relay_guard import (
+    ACK,
     DIRECTIVE,
     REVIEW,
     TERMINAL_STATUSES,
@@ -64,6 +65,44 @@ def age_minutes(comment: dict) -> float:
     return (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
 
 
+def latest_unfinished_ack(comments, automation, stale_minutes: int):
+    """Return an ACK that exceeded its execution lease without any terminal status.
+
+    The relay job has a 30-minute Claude timeout and a 45-minute job timeout.  A
+    50-minute default here leaves a buffer for checkout/finalize before an
+    independent watchdog declares the run abandoned.
+    """
+    terminal_runs = {
+        parse(c.get("body") or "").get("run_id")
+        for c in comments
+        if status_of(c.get("body") or "") in TERMINAL_STATUSES
+    }
+    for c in reversed(comments):
+        p = parse(c.get("body") or "")
+        if p["kind"] != ACK or _login(c) not in automation or not p.get("run_id"):
+            continue
+        if p["run_id"] in terminal_runs:
+            continue
+        if age_minutes(c) >= stale_minutes:
+            return c, p
+        return None, None
+    return None, None
+
+
+def stalled_status_body(ack_comment: dict, info: dict) -> str:
+    """Trusted synthetic terminal status for a run whose workflow vanished."""
+    rid = info["run_id"]
+    project = (info.get("fields") or {}).get("PROJECT") or "unknown"
+    branch = info.get("branch") or "unknown"
+    age = age_minutes(ack_comment)
+    return (f"[RELAY:CLAUDE_STATUS]\\nrelay_run_id: {rid}\\nSTATUS: BLOCKED\\n"
+            f"PROJECT: {project}\\nBRANCH: {branch}\\n"
+            f"COMPLETED: watchdog detected an abandoned relay run after {age:.1f} minutes without a terminal status\\n"
+            "BLOCKERS: relay execution lease expired without finalize/status\\n"
+            "NEXT RECOMMENDED ACTION: resume the same objective with a new relay_run_id from the last committed checkpoint\\n"
+            "PRODUCTION IMPACT: none\\nDO NOT TOUCH CONFIRMATION: production untouched")
+
+
 def handled_after(comments, terminal_comment, run_id: str) -> bool:
     tid = int(terminal_comment.get("id") or 0)
     for c in comments:
@@ -80,6 +119,7 @@ def handled_after(comments, terminal_comment, run_id: str) -> bool:
 def main() -> int:
     issue = int(os.environ.get("RELAY_ISSUE") or 1)
     threshold = int(os.environ.get("HANDOFF_STALE_MINUTES") or 10)
+    run_stale = int(os.environ.get("RUN_STALE_MINUTES") or 50)
     branches = _csv("RELAY_ALLOWED_BRANCHES", "sci-program,wholesale-nightly,platform-dev")
     automation = _csv("RELAY_STATUS_ACTORS", DEFAULT_AUTOMATION)
     actors = _csv("RELAY_AUTHORIZED_ACTORS", "MikeSimmonsAI")

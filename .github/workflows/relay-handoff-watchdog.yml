@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      issues: read
+      issues: write
       pull-requests: read
     env:
       RELAY_ISSUE: "1"
@@ -24,6 +24,7 @@ jobs:
       RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev'
       RELAY_STATUS_ACTORS: ${{ vars.RELAY_STATUS_ACTORS || 'github-actions[bot],claude[bot]' }}
       HANDOFF_STALE_MINUTES: "10"
+      RUN_STALE_MINUTES: "50"
     steps:
       - name: Load relay watchdog
         uses: actions/checkout@v4
