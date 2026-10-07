@@ -192,7 +192,9 @@ def test_sending_twice_does_not_mail_the_buyer_twice(
 
 
 def test_resend_is_the_deliberate_way_past_that_guard(
-        client, auth_headers, live_deal, enabled, monkeypatch):
+        client, auth_headers, live_deal, enabled, monkeypatch, db_session):
+    from datetime import datetime, timedelta
+    from app.models.wholesale_models import WholesaleBuyerOutreach
     from app.services import email_service
 
     fake = FakeProvider()
@@ -202,6 +204,12 @@ def test_resend_is_the_deliberate_way_past_that_guard(
                            headers=auth_headers,
                            json={"buyer_ids": [live_deal["buyer"]["id"]]}))
     outreach_id = first["results"][0]["outreach_id"]
+
+    # A resend seconds after a send is the double-click the cooldown refuses
+    # (covered separately); age the send past it so this is a deliberate resend.
+    row = db_session.query(WholesaleBuyerOutreach).filter_by(id=outreach_id).one()
+    row.sent_at = datetime.utcnow() - timedelta(minutes=5)
+    db_session.commit()
 
     again = ok(client.post("/wholesale/outreach/%s/resend" % outreach_id,
                            headers=auth_headers))

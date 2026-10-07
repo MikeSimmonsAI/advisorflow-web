@@ -90,7 +90,8 @@ def test_a_suppressed_buyer_phone_is_refused_before_any_provider_is_touched(
     monkeypatch.setenv(disposition.SMS_ENV, "true")
 
     org_id = db_session.query(_U).first().organization_id
-    db_session.add(SuppressionEntry(organization_id=org_id, phone="+12145558099",
+    # Stored the way compliance_router/dedup_service store it: 11 digits, no "+".
+    db_session.add(SuppressionEntry(organization_id=org_id, phone="12145558099",
                                     reason="replied STOP",
                                     source=SuppressionSource.REPLY_STOP))
     db_session.commit()
@@ -111,7 +112,7 @@ def test_suppression_does_not_block_the_email_channel(
     from app.models.models import User as _U
 
     org_id = db_session.query(_U).first().organization_id
-    db_session.add(SuppressionEntry(organization_id=org_id, phone="+12145558099",
+    db_session.add(SuppressionEntry(organization_id=org_id, phone="12145558099",
                                     reason="replied STOP",
                                     source=SuppressionSource.REPLY_STOP))
     db_session.commit()

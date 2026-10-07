@@ -6,7 +6,7 @@ generic response/update calls must not bypass the rule or cross tenants.
 """
 from app.models.wholesale_models import WholesaleBuyerOutreach, WholesaleEvent
 from tests.test_wholesale_cross_tenant import other_headers, other_org  # noqa: F401
-from tests.test_wholesale_workflow import ok, with_buyers  # noqa: F401  (fixtures)
+from tests.test_wholesale_workflow import deal, ok, with_buyers  # noqa: F401  (fixtures)
 
 
 def _offer(client, headers, outreach_id, amount):
