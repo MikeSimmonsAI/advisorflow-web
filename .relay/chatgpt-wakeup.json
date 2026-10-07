@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-import-chain-checkpoint-20261007-1812",
-  "parent_run_id": "wholesale-import-chain-20261007-1805",
-  "project": "Wholesale \u2014 persist the mapped import-to-preview chain despite runner provisioning",
+  "relay_run_id": "wholesale-chain-contract-hardening-20261007-1816",
+  "parent_run_id": "wholesale-import-chain-checkpoint-20261007-1812",
+  "project": "Wholesale \u2014 harden the committed import-to-preview chain against real route contracts",
   "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37700544046",
-  "timestamp_ct": "2026-10-07 18:11 CT",
+  "actions_run_id": "37700957117",
+  "timestamp_ct": "2026-10-07 18:17 CT",
   "issue": 1,
-  "status_comment_id": 6048722876
+  "status_comment_id": 6048790525
 }
