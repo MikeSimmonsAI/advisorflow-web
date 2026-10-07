@@ -584,10 +584,19 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
     except Exception:
         pass  # never let a classification failure break the Twilio webhook response
 
-    if is_hot and lead.assigned_to:
+    if is_hot:
+        # Assigned advisor, else the lead's own workspace org_admins (an
+        # unclaimed website-intake lead used to notify nobody).
         from app.services.notification_service import notify_hot_reply
+        from app.services.reply_handoff import reply_recipients, workspace_org_admins
         try:
-            notify_hot_reply(db, lead.assigned_to, lead, reply)
+            for _target in reply_recipients(
+                    lead.assigned_to,
+                    lambda: workspace_org_admins(db, lead.organization_id)):
+                try:
+                    notify_hot_reply(db, _target, lead, reply)
+                except Exception:
+                    db.rollback()  # one failed alert must not block the others
         except Exception:
             pass  # never let a notification failure break the Twilio webhook response
 
