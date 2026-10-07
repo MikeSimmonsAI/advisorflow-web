@@ -1,6 +1,6 @@
 # SCI readiness harness: executed results
 
-Executed 129 scenarios: **129 PASS, 0 FAIL**. Stdlib only; real decision modules; does not replace dependency-backed pytest or DB integration suites.
+Executed 147 scenarios: **147 PASS, 0 FAIL**. Stdlib only; real decision modules; does not replace dependency-backed pytest or DB integration suites.
 
 | # | Group | Scenario | Result |
 |---|---|---|---|
@@ -133,3 +133,21 @@ Executed 129 scenarios: **129 PASS, 0 FAIL**. Stdlib only; real decision modules
 | 127 | no-auto-send | decision module has no send/network/DB imports: app/services/programs/regional_pools.py | PASS |
 | 128 | no-auto-send | decision module has no send/network/DB imports: app/services/programs/alias_rules.py | PASS |
 | 129 | no-auto-send | responses.py reply path never calls a customer-send function | PASS |
+| 130 | webhook-sim | webhook sim: Valid signed SMS is accepted | PASS |
+| 131 | webhook-sim | webhook sim: Invalid-signature SMS is rejected (403, zero side effects) | PASS |
+| 132 | webhook-sim | webhook sim: Valid signed voice event is accepted | PASS |
+| 133 | webhook-sim | webhook sim: Invalid-signature voice event is rejected (403) | PASS |
+| 134 | webhook-sim | webhook sim: Known synthetic contact routes to its own location in the 205 pool | PASS |
+| 135 | webhook-sim | webhook sim: Unknown sender routes to regional review | PASS |
+| 136 | webhook-sim | webhook sim: Unknown caller routes to regional review | PASS |
+| 137 | webhook-sim | webhook sim: Wrong-number reply is classified bad data and stays in review | PASS |
+| 138 | webhook-sim | webhook sim: Oaklawn text is held/refused: no location, no pool route, nothing sent | PASS |
+| 139 | webhook-sim | webhook sim: 844 backup is overflow-only: never a pool, location or sender | PASS |
+| 140 | webhook-sim | webhook sim: No AI auto-send: HOT inbound pauses cadence and sends nothing | PASS |
+| 141 | webhook-sim | webhook sim: Voice event with no recording/transcription is handled safely | PASS |
+| 142 | webhook-sim | webhook sim: Zero outbound activity across every simulated request | PASS |
+| 143 | webhook-sim | signature primitive matches an independent HMAC-SHA1 computation | PASS |
+| 144 | webhook-sim | twilio_security delegates to the shared pure signature module | PASS |
+| 145 | webhook-sim | simulation and signature module have no send/network/DB imports | PASS |
+| 146 | webhook-sim | webhook_proof run_all: all PASS, zero outbound | PASS |
+| 147 | webhook-sim | Launch Readiness run_all carries webhook_proof and verdict blocks on its failure | PASS |

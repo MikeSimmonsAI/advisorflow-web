@@ -18,6 +18,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from app.services import optout_parser as op
 from app.services.programs import regional_pools as rp
+from app.services.programs import webhook_simulation as ws
 from app.services.programs import reply_rules as rr
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -162,7 +163,9 @@ def run_all(now: Optional[datetime] = None) -> Dict:
             results.append({"key": key, "label": label, "status": "FAIL",
                             "error": "%s: %s" % (type(exc).__name__, exc), "next_action": fix})
     failed = [r for r in results if r["status"] == "FAIL"]
+    proof = ws.run_all(ts)          # signed SMS/voice simulation, run-local synthetic token
     return {
+        "webhook_proof": proof,
         "ran_at": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "pass_count": len(results) - len(failed),
         "fail_count": len(failed),
@@ -184,11 +187,11 @@ LAUNCH_GATES: List[Dict] = [
     {"group": "verified", "key": "A5", "text": "HOT/ACTIVE/LOW, cadence pause on reply, no auto-send of drafts."},
     {"group": "verified", "key": "A7", "text": "116-scenario stdlib harness passes."},
     {"group": "verified", "key": "A11", "text": "Inbound HOT email proven on staging (alert, cadence pause, no auto-send)."},
+    {"group": "verified", "key": "T4", "text": "Signed inbound SMS/voice simulation passes (pure helper, synthetic token; the real FastAPI route + DB test is still open under B1)."},
     {"group": "verified", "key": "A13", "text": "Real customer messaging is OFF; campaigns refuse to send."},
     {"group": "test_now", "key": "T1", "text": "Run the controlled readiness test (button above): ten synthetic checks, no sends."},
     {"group": "test_now", "key": "T2", "text": "Mailbox health on staging (B7): confirm the Health tab shows inbound sync working."},
     {"group": "test_now", "key": "T3", "text": "Inbound email from Mike's approved test address to a location alias."},
-    {"group": "test_now", "key": "T4", "text": "Signed inbound SMS/voice simulation against staging webhooks (no real number needed)."},
     {"group": "external", "key": "C2", "text": "Six Twilio numbers (205, 334, 850, 251, 706, 318) are not provisioned."},
     {"group": "external", "key": "C3", "text": "A2P / carrier path for real outbound SMS is unresolved."},
     {"group": "external", "key": "B1", "text": "Dependency-backed pytest and DB integration are not green (not run on the relay runner)."},
@@ -221,6 +224,8 @@ def verdict(last: Optional[Dict]) -> Dict:
         return {"status": "BLOCKED", "reason": "The controlled readiness test has not been run yet. Press Run."}
     if last["fail_count"]:
         return {"status": "BLOCKED", "reason": "Failed gate: %s." % last["failed_gate"]}
+    if last.get("webhook_proof", {}).get("fail_count"):
+        return {"status": "BLOCKED", "reason": "Failed webhook proof: %s." % last["webhook_proof"]["failed_gate"]}
     if external:
         return {"status": "CONDITIONAL",
                 "reason": "Synthetic checks pass (%d/%d). Staging-only testing is fine; real customer contact is still NO-GO."

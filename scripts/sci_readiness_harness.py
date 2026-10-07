@@ -31,6 +31,8 @@ from app.services.programs import alias_rules as ar               # noqa: E402
 from app.services.programs import readiness_check as rc           # noqa: E402
 from app.services.programs import regional_pools as rp            # noqa: E402
 from app.services.programs import reply_rules as rr               # noqa: E402
+from app.services.programs import webhook_simulation as ws        # noqa: E402
+from app.utils import twilio_signature as tsig                    # noqa: E402
 
 with open(os.path.join(ROOT, "scripts", "sci_campuses.csv"), encoding="utf-8") as _f:
     ROWS = list(csv.DictReader(_f))
@@ -371,6 +373,55 @@ def _():
              for n in ast.walk(tree) if isinstance(n, ast.Call)}
     assert not (calls & {"send_sms", "send_message", "send_sms_via_provider", "send_to_lead"}), calls
     assert "staff_alert_gate" in calls and "_deliver_staff_alert" in calls
+
+
+# ── Signed inbound SMS / voice webhook simulation (gate T4) ──────────────────
+# Real signature primitives (app/utils/twilio_signature.py, shared with the
+# FastAPI guard) plus real routing/reply rules; run-local synthetic token.
+for _k, _label, _fn in ws._scenarios(ws.new_token()):
+    add("webhook-sim", "webhook sim: %s" % _label, _fn)
+
+
+@scenario("webhook-sim", "signature primitive matches an independent HMAC-SHA1 computation")
+def _():
+    import base64
+    import hashlib
+    import hmac
+    tok, url, params = "run-local-" + ws.new_token(), "https://staging.synthetic.invalid/x", {"B": "2", "A": "1"}
+    want = base64.b64encode(hmac.new(tok.encode(), (url + "A1B2").encode(), hashlib.sha1).digest()).decode()
+    eq(tsig.compute_signature(tok, url, params), want)
+    eq(tsig.signature_matches("", [url], params, want), False)
+    eq(tsig.signature_matches(tok, [url], params, ""), False)
+
+
+@scenario("webhook-sim", "twilio_security delegates to the shared pure signature module")
+def _():
+    src = open(os.path.join(ROOT, "app/utils/twilio_security.py"), encoding="utf-8").read()
+    assert "from app.utils.twilio_signature import" in src
+
+
+@scenario("webhook-sim", "simulation and signature module have no send/network/DB imports")
+def _():
+    # "twilio_signature" is the pure helper itself (name contains "twilio"); allow only that import
+    imps = _imports_of("app/services/programs/webhook_simulation.py") - {"app.utils.twilio_signature"}
+    eq({i for i in imps if any(b in i for b in ("twilio", "sms_service", "requests", "httpx", "sqlalchemy",
+                                                  "smtplib", "socket", "openai", "ai_gateway", "fastapi"))}, set())
+    _no_send_surface("app/utils/twilio_signature.py")
+
+
+@scenario("webhook-sim", "webhook_proof run_all: all PASS, zero outbound")
+def _():
+    out = ws.run_all()
+    eq((out["fail_count"], out["failed_gate"], out["sent"], out["outbound"]), (0, None, 0, 0))
+    assert out["pass_count"] >= 12
+
+
+@scenario("webhook-sim", "Launch Readiness run_all carries webhook_proof and verdict blocks on its failure")
+def _():
+    out = rc.run_all()
+    eq(out["webhook_proof"]["fail_count"], 0)
+    bad = dict(out, webhook_proof=dict(out["webhook_proof"], fail_count=1, failed_gate="x"))
+    eq(rc.verdict(bad)["status"], "BLOCKED")
 
 
 # ── runner ───────────────────────────────────────────────────────────────────

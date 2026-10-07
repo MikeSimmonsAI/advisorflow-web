@@ -780,7 +780,12 @@ function Launch({ isManager, onChange }) {
             <p><strong>{last.pass_count} PASS · {last.fail_count} FAIL</strong> <span className="pc-small pc-muted">at {when(last.ran_at)} · {last.sent} messages sent</span></p>
             {last.failed_gate && <div className="pc-alert" role="alert">Failed gate: {last.failed_gate}</div>}
             <p className="pc-small">Next action: {last.next_action}</p>
-            {last.results.map(r => (
+            {last.webhook_proof && (
+              <p><strong>Signed webhook proof: {last.webhook_proof.pass_count} PASS · {last.webhook_proof.fail_count} FAIL</strong>{' '}
+                <span className="pc-small pc-muted">at {when(last.webhook_proof.ran_at)} · {last.webhook_proof.outbound} outbound</span>
+                {last.webhook_proof.failed_gate && <span className="pc-alert" role="alert"> Failed gate: {last.webhook_proof.failed_gate}</span>}</p>
+            )}
+            {(last.webhook_proof ? [...last.results, ...last.webhook_proof.results] : last.results).map(r => (
               <div className="pc-row" key={r.key}>
                 <span>{r.label}{r.error && <span className="pc-small pc-muted"> — {r.error}</span>}</span>
                 <span><span className={`pc-badge ${r.status === 'PASS' ? 'ok' : 'hot'}`}>{r.status}</span></span>
