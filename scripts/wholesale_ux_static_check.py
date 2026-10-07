@@ -160,7 +160,7 @@ check("buyer board row buttons name the buyer",
       "aria-label={`Select ${" in board and "aria-label={`Resend deal sheet to" in board
       and "aria-label={`Record response from" in board)
 check("buyers list does not claim 'No cash buyers yet' after a failed load",
-      "loadFailed" in buyers and "!buyers.length && !loadFailed" in buyers)
+      "view === 'empty'" in buyers and "view === 'error'" in buyers and "listView(list)" in buyers)
 
 check("board disables Select for a buyer who passed",
       "selectDisabledReason(row)" in board
@@ -338,6 +338,33 @@ check("appointment display ties time to status", "appointmentSummary(" in deal_s
 check("appointment unknown status shown as unknown", "'Unknown status'" in ds_src)
 check("seller editor errors announced and linked", "aria-describedby={errs[key]" in deal_src)
 check("disposition node test covers each helper", all(x in dtest for x in ("parseMoney", "validateSend", "summarizeOutcome", "validateAppointment", "isCurrentResult")))
+
+# 12. buyers / properties recovery states ------------------------------------
+ls_src = read(os.path.join(SRC, W + "wsListState.js"))
+props_src = read(os.path.join(SRC, W + "WholesaleProperties.jsx"))
+ltest = read(os.path.join(ROOT, "tests/frontend/wsListState.test.mjs"))
+for name, src in (("buyers", buyers), ("properties", props_src)):
+    check(name + " uses pure list state", "from './wsListState'" in src)
+    check(name + " drops stale loads", "gen === latest.current" in src or "gen !== latest.current" in src)
+    check(name + " failed refresh keeps rows and says they may be out of date", "may be out of date" in src and "view === 'stale'" in src)
+    check(name + " load failure is role=alert with retry and support code", "view === 'error'" in src and "support code" in src and "Try again" in src)
+    check(name + " retry takes focus and has a disabled reason", "autoFocus" in src and "retryDisabledReason(list)" in src)
+    check(name + " refresh announced politely", "role=\"status\"" in src and "Refreshing" in src)
+    check(name + " search is trimmed before sending", "cleanQuery(q)" in src)
+    check(name + " unknown total is not shown as 0", "knownCount(total)" in src)
+    check(name + " truncated page says so", "truncationNote(list)" in src)
+check("buyers no failed-load error clobbers rows", "setBuyers(" not in buyers and "setLoadFailed" not in buyers)
+check("buyers drawers cannot dereference a vanished row", "findById(buyers, editing)" in buyers and "findById(buyers, expanded)" in buyers)
+check("buyers same-action duplicates blocked synchronously", buyers.count("saving.current") >= 12 and "busyLatch.current" in buyers)
+check("buyers opted-out status never reads as active", "buyerStatusLabel(" in buyers and "'Opted out'" in ls_src)
+check("buyers verified-only filter has its own empty state", "No verified buyers in this list" in buyers)
+check("properties enrich only visible selected rows", "rows.filter((p) => selected[p.id])" in props_src and "hiddenChosen" in props_src)
+check("properties enrich latch is synchronous", "busyLatch.current" in props_src)
+check("properties summary failure keeps last figures and says so", "boardFailed" in props_src and ".catch(() => undefined)" in props_src)
+check("backend buyers/properties lists tiebreak by id",
+      "WholesaleBuyer.id.asc()" in read(os.path.join(ROOT, "app/routers/wholesale_buyers_router.py"))
+      and "WholesaleProperty.id.asc()" in read(os.path.join(ROOT, "app/routers/wholesale_router.py")))
+check("list state node test covers each helper", all(x in ltest for x in ("loadSucceeded", "loadFailed", "listView", "supportCode", "knownCount", "truncationNote", "buyerStatusLabel", "isVerifiedBuyer", "findById", "cleanQuery")))
 
 print("wholesale ux static: %d passed, %d failed" % (passed, failed))
 sys.exit(1 if failed else 0)

@@ -5,7 +5,7 @@
  * guess: a note cannot be matched against, and a buyer list stored as notes is a
  * contact list, not a disposition tool.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import '../../styles/shared.css'
 import './wholesale.css'
@@ -14,6 +14,11 @@ import {
   fmtWhen, Note, Standing, Why,
 } from './wsShared'
 import { ConfirmDelete } from './wsFiles'
+import {
+  activeBuyerCount, buyerStatusLabel, cleanQuery, findById, initialList, isVerifiedBuyer,
+  knownCount, listView, loadFailed, loadStarted, loadSucceeded, retryDisabledReason,
+  supportCode, truncationNote,
+} from './wsListState'
 import { Alert, Drawer, Empty as EvoEmpty, EvoApp, Hero, Metric, Metrics, Panel, Skeleton, Tag } from './ds/ds'
 import './ds/evo-pages.css'
 
@@ -24,12 +29,10 @@ const PROPERTY_TYPES = ['single_family', 'duplex', 'triplex', 'fourplex',
                         'commercial', 'other']
 
 export default function WholesaleBuyers() {
-  const [buyers, setBuyers] = useState([])
+  const [list, setList] = useState(initialList)
   const [verifiedOnly, setVerifiedOnly] = useState(false)
-  const [total, setTotal] = useState(0)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
-  const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
   const [includeTest, setIncludeTest] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
@@ -38,34 +41,42 @@ export default function WholesaleBuyers() {
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [loadFailed, setLoadFailed] = useState(false)
+  const busyLatch = useRef(false)   // synchronous: two clicks in one tick see it
+  const latest = useRef(0)          // mirrors list.latest so a response can be checked synchronously
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null); setLoadFailed(false)
+    const gen = latest.current + 1
+    latest.current = gen
+    setList((prev) => loadStarted({ ...prev, latest: gen - 1 }))
     try {
       const params = new URLSearchParams({ limit: '500', active_only: 'false', with_activity: 'true' })
-      if (q) params.set('q', q)
+      if (cleanQuery(q)) params.set('q', cleanQuery(q))
       if (includeTest) params.set('include_test', 'true')
       const data = await api.get('/wholesale/buyers?' + params.toString())
-      setBuyers(data.buyers)
-      setTotal(data.total)
+      if (gen === latest.current) setList((prev) => loadSucceeded(prev, gen, data.buyers, data.total))
     } catch (e) {
-      setError(errText(e)); setLoadFailed(true)
-    } finally {
-      setLoading(false)
+      if (gen === latest.current) setList((prev) => loadFailed(prev, gen, errText(e), supportCode(e)))
     }
   }, [q, includeTest])
 
   useEffect(() => { load() }, [load])
 
-  const active = buyers.filter((b) => b.is_active && !b.do_not_contact).length
+  const buyers = list.rows || []
+  const total = list.total
+  const view = listView(list)
+  // Counts are of the rows loaded here; before any load they are unknown, not 0.
+  const known = list.rows !== null
+  const active = activeBuyerCount(buyers)
   const verified = buyers.filter((b) => b.cash_verified).length
   const pof = buyers.filter((b) => b.proof_of_funds_on_file).length
   const boxes = buyers.reduce((n, b) => n + (b.buy_boxes || []).length, 0)
+  const shown = buyers.filter((b) => !verifiedOnly || isVerifiedBuyer(b))
   // Buyers not yet in the shared contact database (sandbox buyers never are).
   const unlinked = buyers.filter((b) => !b.org_contact_id && !b.is_test && (b.email || b.phone)).length
 
   async function linkContacts() {
+    if (busyLatch.current) return
+    busyLatch.current = true
     setBusy(true); setError(null); setNotice(null)
     try {
       const r = await api.post('/wholesale/buyers/link-contacts?dry_run=false', {})
@@ -78,6 +89,7 @@ export default function WholesaleBuyers() {
     } catch (e) {
       setError(errText(e))
     } finally {
+      busyLatch.current = false
       setBusy(false)
     }
   }
@@ -98,13 +110,23 @@ export default function WholesaleBuyers() {
             </>} />
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>
+      {view === 'stale' ? (
+        <div className="evo-alert evo-alert--warn" role="alert">
+          The buyer list could not be refreshed: {list.error}
+          {list.supportCode ? <> (support code {list.supportCode})</> : null}.
+          {' '}The buyers below were loaded earlier and may be out of date.
+          {' '}<button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={load}
+                      disabled={!!retryDisabledReason(list)} title={retryDisabledReason(list) || undefined}>Try again</button>
+        </div>
+      ) : null}
+      <p className="evo-sr" role="status">{view === 'refreshing' ? 'Refreshing buyers.' : ''}</p>
 
       <Metrics label="Buyer summary">
-        <Metric label="Total buyers" value={loading && !buyers.length ? null : total} tone="primary" />
-        <Metric label="Active" value={loading && !buyers.length ? null : active} tone="success" sub="not opted out" />
-        <Metric label="Verified cash" value={loading && !buyers.length ? null : verified} tone="success" />
-        <Metric label="POF on file" value={loading && !buyers.length ? null : pof} tone="info" />
-        <Metric label="Buy boxes" value={loading && !buyers.length ? null : boxes} tone="violet"
+        <Metric label="Total buyers" value={known ? knownCount(total) : null} tone="primary" />
+        <Metric label="Active" value={known ? active : null} tone="success" sub="not opted out" />
+        <Metric label="Verified cash" value={known ? verified : null} tone="success" />
+        <Metric label="POF on file" value={known ? pof : null} tone="info" />
+        <Metric label="Buy boxes" value={known ? boxes : null} tone="violet"
                 sub={buyers.some((b) => !(b.buy_boxes || []).length) ? 'some buyers have none' : null} />
       </Metrics>
 
@@ -125,14 +147,18 @@ export default function WholesaleBuyers() {
           </label>
         </div>
 
-        {loading && !buyers.length ? <div style={{ padding: 20 }}><Skeleton rows={4} height={30} /></div> : null}
-        {!loading && !buyers.length && loadFailed ? (
-          <div style={{ padding: 20 }}>
-            <p className="evo-sr" role="status">The buyer list could not be loaded.</p>
-            <button type="button" className="evo-btn evo-btn--secondary" onClick={load}>Try again</button>
+        {view === 'loading' ? <div style={{ padding: 20 }}><Skeleton rows={4} height={30} /></div> : null}
+        {view === 'error' ? (
+          <div style={{ padding: 20 }} role="alert">
+            <p>The buyer list could not be loaded: {list.error}
+              {list.supportCode ? <> (support code {list.supportCode})</> : null}</p>
+            <p className="evo-muted evo-small">{q ? 'Your search is kept.' : 'Nothing has been changed.'}</p>
+            <button type="button" className="evo-btn evo-btn--secondary" onClick={load}
+                    disabled={!!retryDisabledReason(list)} title={retryDisabledReason(list) || undefined}
+                    autoFocus>Try again</button>
           </div>
         ) : null}
-        {!loading && !buyers.length && !loadFailed ? (
+        {view === 'empty' ? (
           <EvoEmpty title={q ? 'No buyer matches' : 'No cash buyers yet'}
                  action={!q ? <div className="evo-actionbar" style={{ justifyContent: 'center' }}>
                    <button type="button" className="evo-btn evo-btn--primary" onClick={() => setShowAdd(true)}>+ Add buyer</button>
@@ -141,10 +167,15 @@ export default function WholesaleBuyers() {
           </EvoEmpty>
         ) : null}
 
-        {buyers.length ? (
+        {buyers.length && !shown.length ? (
+          <EvoEmpty title="No verified buyers in this list">
+            Verified only is on. Turn it off to see all {buyers.length} loaded buyers.
+          </EvoEmpty>
+        ) : null}
+        {shown.length ? (
           <div className="evo-table-wrap">
             <table className="evo-table evo-table--cards">
-              <caption className="evo-sr">{total} cash buyers</caption>
+              <caption className="evo-sr">{knownCount(total)} cash buyers{verifiedOnly ? `, ${shown.length} verified shown` : ''}</caption>
               <thead>
                 <tr>
                   <th scope="col">Buyer</th><th scope="col">Buys in</th><th scope="col">Funds</th>
@@ -153,15 +184,15 @@ export default function WholesaleBuyers() {
                 </tr>
               </thead>
               <tbody>
-                {buyers.filter((b) => !verifiedOnly || b.cash_verified || b.proof_of_funds_on_file).map((b) => (
+                {shown.map((b) => (
                   <tr key={b.id}>
                     <td className="is-lead" data-label="">
                       <span className="evo-strong" style={{ fontSize: 14 }}>{b.display_name}</span>
                       <span className="evo-prop__sub">{b.email || 'no email'} · {b.phone || 'no phone'}</span>
                       {(b.do_not_contact || !b.is_active || b.org_contact_id) ? (
                         <span className="evo-chips" style={{ marginTop: 5 }}>
-                          {b.do_not_contact ? <Tag kind="danger">Opted out</Tag> : null}
-                          {!b.is_active ? <Tag>Inactive</Tag> : null}
+                          {b.do_not_contact ? <Tag kind="danger">{buyerStatusLabel({ do_not_contact: true })}</Tag> : null}
+                          {!b.is_active ? <Tag>{buyerStatusLabel({ is_active: false })}</Tag> : null}
                           {b.org_contact_id ? <Tag title="In your shared contacts as a partner - never a lead">In contacts</Tag> : null}
                         </span>
                       ) : null}
@@ -181,7 +212,7 @@ export default function WholesaleBuyers() {
                     <td data-label="" className="is-right">
                       <span className="evo-actionbar" style={{ justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
                         <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={() => setExpanded(b.id)}>
-                          Buy boxes ({b.buy_boxes.length})</button>
+                          Buy boxes ({(b.buy_boxes || []).length})</button>
                         <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setEditing(b.id)}>Edit</button>
                         <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" aria-label={`Delete ${b.display_name}`}
                                 onClick={() => setDeleting(b)}>Delete</button>
@@ -193,6 +224,7 @@ export default function WholesaleBuyers() {
             </table>
           </div>
         ) : null}
+        {truncationNote(list) ? <div className="evo-pager"><span>{truncationNote(list)}</span></div> : null}
       </Panel>
 
       {deleting ? (
@@ -200,6 +232,8 @@ export default function WholesaleBuyers() {
                        what={`${deleting.display_name} and every buy box on them`}
                        onCancel={() => setDeleting(null)}
                        onConfirm={async () => {
+                         if (busyLatch.current) return
+                         busyLatch.current = true
                          setBusy(true); setError(null)
                          try {
                            await api.delete(`/wholesale/buyers/${deleting.id}`)
@@ -208,14 +242,14 @@ export default function WholesaleBuyers() {
                            await load()
                          } catch (e) {
                            setError(errText(e))
-                         } finally { setBusy(false) }
+                         } finally { busyLatch.current = false; setBusy(false) }
                        }} />
       ) : null}
 
       {showAdd ? <AddBuyer onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); setNotice('Buyer added. Give them a buy box so they appear in matches.'); load() }} /> : null}
       {showImport ? <BuyerImport onClose={() => setShowImport(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
-      {editing ? <EditBuyer buyer={buyers.find((b) => b.id === editing)} onDone={() => { setEditing(null); load() }} /> : null}
-      {expanded ? <BuyBoxes buyer={buyers.find((b) => b.id === expanded)} onChanged={load} onClose={() => setExpanded(null)} /> : null}
+      {editing && findById(buyers, editing) ? <EditBuyer key={editing} buyer={findById(buyers, editing)} onDone={() => { setEditing(null); load() }} /> : null}
+      {expanded && findById(buyers, expanded) ? <BuyBoxes key={expanded} buyer={findById(buyers, expanded)} onChanged={load} onClose={() => setExpanded(null)} /> : null}
     </EvoApp>
   )
 }
@@ -230,6 +264,7 @@ function AddBuyer({ onDone, onClose }) {
   })
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  const saving = useRef(false)
 
   function set(key, value) { setForm((f) => ({ ...f, [key]: value })) }
 
@@ -275,6 +310,8 @@ function AddBuyer({ onDone, onClose }) {
       <div className="ws-actions" style={{ marginTop: 12 }}>
         <button className="btn btn--primary" disabled={busy}
                 onClick={async () => {
+                  if (saving.current) return
+                  saving.current = true
                   setBusy(true); setError(null)
                   try {
                     const payload = {}
@@ -285,7 +322,7 @@ function AddBuyer({ onDone, onClose }) {
                     })
                     await api.post('/wholesale/buyers', payload)
                     onDone()
-                  } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+                  } catch (e) { setError(errText(e)) } finally { saving.current = false; setBusy(false) }
                 }}>
           {busy ? 'Saving…' : 'Add buyer'}
         </button>
@@ -305,6 +342,8 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
 
+  const saving = useRef(false)
+
   if (!buyer) return null
 
   function set(key, value) { setForm((f) => ({ ...f, [key]: value })) }
@@ -318,6 +357,8 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
   }
 
   async function save() {
+    if (saving.current) return
+    saving.current = true
     setBusy(true); setError(null)
     try {
       const payload = { label: form.label || null }
@@ -339,7 +380,7 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
                 markets: '', property_types: [], strategies: [], min_price: '',
                 max_price: '', min_beds: '', min_sqft: '', max_sqft: '',
                 min_year_built: '', rehab_tolerance: '', min_spread: '' })
-    } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+    } catch (e) { setError(errText(e)) } finally { saving.current = false; setBusy(false) }
   }
 
   return (
@@ -385,11 +426,13 @@ function BuyBoxes({ buyer, onChanged, onClose }) {
                 <td>
                   <button className="btn btn--secondary btn--sm" disabled={busy}
                           onClick={async () => {
-                            setBusy(true)
+                            if (saving.current) return
+                            saving.current = true
+                            setBusy(true); setError(null)
                             try {
                               await api.delete(`/wholesale/buy-boxes/${b.id}`)
                               onChanged()
-                            } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+                            } catch (e) { setError(errText(e)) } finally { saving.current = false; setBusy(false) }
                           }}>Remove</button>
                 </td>
               </tr>
@@ -463,6 +506,7 @@ function BuyerImport({ onDone, onClose }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
+  const saving = useRef(false)
 
   return (
     <Drawer open onClose={onClose} title="Import buyers" sub="CSV file · buyers and their buy boxes">
@@ -493,6 +537,8 @@ function BuyerImport({ onDone, onClose }) {
       <div className="ws-actions" style={{ marginTop: 12 }}>
         <button className="btn btn--primary" disabled={!file || busy}
                 onClick={async () => {
+                  if (saving.current) return
+                  saving.current = true
                   setBusy(true); setError(null); setResult(null)
                   try {
                     const fd = new FormData()
@@ -504,7 +550,7 @@ function BuyerImport({ onDone, onClose }) {
                            + `${data.buy_boxes_created} buy box(es) created, `
                            + `${(data.skipped || []).length} skipped, `
                            + `${(data.rejected || []).length} rejected.`)
-                  } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+                  } catch (e) { setError(errText(e)) } finally { saving.current = false; setBusy(false) }
                 }}>
           {busy ? 'Importing…' : 'Import'}
         </button>
@@ -644,13 +690,14 @@ const EDIT_FIELDS = [
 
 function EditBuyer({ buyer, onDone }) {
   const initial = () => EDIT_FIELDS.reduce(
-    (acc, [k]) => ({ ...acc, [k]: buyer[k] ?? '' }),
-    { notes: buyer.notes ?? '', do_not_contact: !!buyer.do_not_contact,
-      is_active: buyer.is_active !== false,
-      proof_of_funds_on_file: !!buyer.proof_of_funds_on_file })
+    (acc, [k]) => ({ ...acc, [k]: buyer?.[k] ?? '' }),
+    { notes: buyer?.notes ?? '', do_not_contact: !!buyer?.do_not_contact,
+      is_active: buyer?.is_active !== false,
+      proof_of_funds_on_file: !!buyer?.proof_of_funds_on_file })
   const [form, setForm] = useState(initial)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  const saving = useRef(false)
   const clean = JSON.stringify(form) === JSON.stringify(initial())
 
   if (!buyer) return null
@@ -694,6 +741,8 @@ function EditBuyer({ buyer, onDone }) {
       <div className="ws-actions" style={{ marginTop: 12 }}>
         <button className="btn btn--primary" disabled={busy || clean}
                 onClick={async () => {
+                  if (saving.current) return
+                  saving.current = true
                   setBusy(true); setError(null)
                   try {
                     const body = {}
@@ -709,9 +758,9 @@ function EditBuyer({ buyer, onDone }) {
                     onDone()
                   } catch (e) {
                     setError(errText(e))
-                  } finally { setBusy(false) }
+                  } finally { saving.current = false; setBusy(false) }
                 }}>
-          Save buyer
+          {busy ? 'Saving…' : 'Save buyer'}
         </button>
         <button className="btn btn--secondary" disabled={busy} onClick={onDone}>
           Cancel

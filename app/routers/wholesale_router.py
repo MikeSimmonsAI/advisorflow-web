@@ -943,7 +943,8 @@ def list_properties(db: Session = Depends(get_db),
     if with_next_action and limit > 50:
         limit = 50
     total = query.count()
-    rows = (query.order_by(WholesaleProperty.created_at.desc())
+    # id tiebreak: equal created_at must not reorder rows between pages/refreshes.
+    rows = (query.order_by(WholesaleProperty.created_at.desc(), WholesaleProperty.id.asc())
             .offset(offset).limit(limit).all())
 
     prop_ids = [r.id for r in rows] or [""]

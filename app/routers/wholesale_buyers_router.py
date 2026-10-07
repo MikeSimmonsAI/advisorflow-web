@@ -264,7 +264,8 @@ def list_buyers(db: Session = Depends(get_db),
                              (WholesaleBuyer.contact_name.ilike(like)) |
                              (WholesaleBuyer.email.ilike(like)))
     total = query.count()
-    rows = (query.order_by(WholesaleBuyer.created_at.desc())
+    # id tiebreak: equal created_at must not reorder rows between pages/refreshes.
+    rows = (query.order_by(WholesaleBuyer.created_at.desc(), WholesaleBuyer.id.asc())
             .offset(offset).limit(limit).all())
     boxes: Dict[str, List[WholesaleBuyBox]] = {}
     for box in db.query(WholesaleBuyBox).filter(

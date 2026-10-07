@@ -9,13 +9,17 @@
  * and promote them. With no data provider connected the first two are not a
  * fallback, they ARE the intake, and the screen says so.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import { AuthImage } from './wsFiles'
 import '../../styles/shared.css'
 import './wholesale.css'
 import { errText, fmtDate, fmtLabel, fmtMoney, fmtNum, Note, Why } from './wsShared'
+import {
+  cleanQuery, initialList, knownCount, listView, loadFailed, loadStarted, loadSucceeded,
+  retryDisabledReason, supportCode, truncationNote,
+} from './wsListState'
 import {
   Alert, Drawer, Empty, EvoApp, Hero, Metric, Metrics, Panel, PropertyThumb, Skeleton, Status, Tag,
   useEnvironment,
@@ -35,51 +39,62 @@ export default function WholesaleProperties() {
   const navigate = useNavigate()
   const env = useEnvironment()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [rows, setRows] = useState([])
-  const [total, setTotal] = useState(0)
+  const [list, setList] = useState(initialList)
   const [board, setBoard] = useState(null)
+  const [boardFailed, setBoardFailed] = useState(false)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
-  const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
   const [includeTest, setIncludeTest] = useState(true)
   const [showAdd, setShowAdd] = useState(searchParams.get('add') === '1')
   const [showImport, setShowImport] = useState(false)
   const [selected, setSelected] = useState({})
   const [busy, setBusy] = useState(false)
+  const busyLatch = useRef(false)   // synchronous: two clicks in one tick see it
+  const latest = useRef(0)          // mirrors list.latest so a response can be checked synchronously
 
   const stageFilter = searchParams.get('stage') || ''
   const [bandFilter, setBandFilter] = useState('')
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null)
+    const gen = latest.current + 1
+    latest.current = gen
+    setList((prev) => loadStarted({ ...prev, latest: gen - 1 }))
     try {
       // The stage filter is applied by the SERVER, so the count above the
       // table always agrees with the rows under it.
       const params = new URLSearchParams({ limit: '50', with_next_action: 'true' })
-      if (q) params.set('q', q)
+      if (cleanQuery(q)) params.set('q', cleanQuery(q))
       if (includeTest) params.set('include_test', 'true')
       if (stageFilter) params.set('stage', stageFilter)
       if (bandFilter) params.set('band', bandFilter)
+      // The summary strip is secondary: if it fails the list still shows, the
+      // last good figures are kept, and the strip says they may be out of date.
       const [data, counts] = await Promise.all([
         api.get('/wholesale/properties?' + params.toString()),
-        api.get('/wholesale/dashboard' + (includeTest ? '?include_test=true' : '')).catch(() => null)])
-      setRows(data.properties)
-      setTotal(data.total)
-      setBoard(counts)
+        api.get('/wholesale/dashboard' + (includeTest ? '?include_test=true' : '')).catch(() => undefined)])
+      if (gen !== latest.current) return
+      setList((prev) => loadSucceeded(prev, gen, data.properties, data.total))
+      if (counts === undefined) setBoardFailed(true)
+      else { setBoard(counts); setBoardFailed(false) }
     } catch (e) {
-      setError(errText(e))
-    } finally {
-      setLoading(false)
+      if (gen === latest.current) setList((prev) => loadFailed(prev, gen, errText(e), supportCode(e)))
     }
   }, [q, includeTest, stageFilter, bandFilter])
 
   useEffect(() => { load() }, [load])
 
-  const chosen = Object.keys(selected).filter((k) => selected[k])
+  const rows = list.rows || []
+  const total = list.total
+  const view = listView(list)
+  // Only rows visible now can be enriched; a ticked row hidden by a new
+  // search/filter must not be sent without the operator seeing it.
+  const chosen = rows.filter((p) => selected[p.id]).map((p) => p.id)
+  const hiddenChosen = Object.keys(selected).filter((k) => selected[k]).length - chosen.length
 
   async function runEnrichment() {
-    if (!chosen.length) return
+    if (!chosen.length || busyLatch.current) return
+    busyLatch.current = true
     setBusy(true); setError(null); setNotice(null)
     try {
       const result = await api.post('/wholesale/enrichment/run', { property_ids: chosen })
@@ -98,6 +113,7 @@ export default function WholesaleProperties() {
     } catch (e) {
       setError(errText(e))
     } finally {
+      busyLatch.current = false
       setBusy(false)
     }
   }
@@ -112,16 +128,27 @@ export default function WholesaleProperties() {
       <Hero scene="aerial" eyebrow="Property Workspace" title="Properties"
             sub="Our pipeline, one property at a time. A property needs only an address, a parcel number or an owner — everything else can arrive later."
             quote="Every property is a potential opportunity."
-            meta={[{ label: <><b>{board ? board.properties_imported : total}</b> properties</> }]}
+            meta={(board || typeof total === 'number') ? [{ label: <><b>{board ? board.properties_imported : total}</b> properties</> }] : []}
             actions={<>
               <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowImport(true)}>Import list</button>
               <button type="button" className="evo-btn evo-btn--primary" onClick={() => setShowAdd(true)}>+ Add property</button>
             </>} />
       <Alert>{error}</Alert>
       <Alert kind="info">{notice}</Alert>
+      {view === 'stale' ? (
+        <div className="evo-alert evo-alert--warn" role="alert">
+          The property list could not be refreshed: {list.error}
+          {list.supportCode ? <> (support code {list.supportCode})</> : null}.
+          {' '}The properties below were loaded earlier and may be out of date.
+          {' '}<button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={load}
+                      disabled={!!retryDisabledReason(list)} title={retryDisabledReason(list) || undefined}>Try again</button>
+        </div>
+      ) : null}
+      {boardFailed && board ? <div className="evo-alert evo-alert--warn" role="status">Summary figures could not be refreshed and may be out of date.</div> : null}
+      <p className="evo-sr" role="status">{view === 'refreshing' ? 'Refreshing properties.' : ''}</p>
 
       <Metrics label="Properties summary">
-        <Metric label="Properties" value={board ? board.properties_imported : total} tone="primary" />
+        <Metric label="Properties" value={board ? board.properties_imported : (list.rows ? knownCount(total) : null)} tone="primary" />
         <Metric label="Sellers identified" value={board ? board.sellers_identified : null} tone="info" />
         <Metric label="Sellers qualified" value={board ? board.sellers_qualified : null} tone="success" />
         <Metric label="Offers made" value={board ? board.offers_made : null} tone="warning" />
@@ -145,9 +172,11 @@ export default function WholesaleProperties() {
             <input type="checkbox" checked={includeTest} onChange={(e) => setIncludeTest(e.target.checked)} style={{ margin: 0 }} />
             Sandbox records
           </label>
-          <button type="button" className="evo-btn evo-btn--secondary" disabled={!chosen.length || busy} onClick={runEnrichment}>
+          <button type="button" className="evo-btn evo-btn--secondary" disabled={!chosen.length || busy} onClick={runEnrichment}
+                  title={!chosen.length ? 'Tick at least one property first.' : busy ? 'Enrichment is already running.' : undefined}>
             {busy ? 'Working…' : chosen.length ? `Enrich ${chosen.length} selected` : 'Enrich selected'}
           </button>
+          {hiddenChosen > 0 ? <span className="evo-muted evo-small" role="status">{hiddenChosen} selected row(s) are hidden by the current search or filter and will not be enriched.</span> : null}
         </div>
         {stageFilter ? (
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--evo-line)', display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -156,8 +185,18 @@ export default function WholesaleProperties() {
           </div>
         ) : null}
 
-        {loading && !rows.length ? <div style={{ padding: 20 }}><Skeleton rows={5} height={30} /></div> : null}
-        {!loading && !rows.length ? (
+        {view === 'loading' ? <div style={{ padding: 20 }}><Skeleton rows={5} height={30} /></div> : null}
+        {view === 'error' ? (
+          <div style={{ padding: 20 }} role="alert">
+            <p>The property list could not be loaded: {list.error}
+              {list.supportCode ? <> (support code {list.supportCode})</> : null}</p>
+            <p className="evo-muted evo-small">{stageFilter || q || bandFilter ? 'Your search and filters are kept.' : 'Nothing has been changed.'}</p>
+            <button type="button" className="evo-btn evo-btn--secondary" onClick={load}
+                    disabled={!!retryDisabledReason(list)} title={retryDisabledReason(list) || undefined}
+                    autoFocus>Try again</button>
+          </div>
+        ) : null}
+        {view === 'empty' ? (
           <Empty title={stageFilter || q || bandFilter ? 'Nothing matches' : 'No properties yet'}
                  action={!(stageFilter || q || bandFilter) ? (
                    <div className="evo-actionbar" style={{ justifyContent: 'center' }}>
@@ -172,7 +211,7 @@ export default function WholesaleProperties() {
         {rows.length ? (
           <div className="evo-table-wrap">
             <table className="evo-table evo-table--cards">
-              <caption className="evo-sr">{total} properties</caption>
+              <caption className="evo-sr">{knownCount(total)} properties</caption>
               <thead>
                 <tr>
                   <th scope="col" style={{ width: 36 }}><span className="evo-sr">Select</span></th>
@@ -239,7 +278,8 @@ export default function WholesaleProperties() {
             </table>
           </div>
         ) : null}
-        {rows.length ? <div className="evo-pager"><span>{rows.length} of {total} propert{total === 1 ? 'y' : 'ies'}</span></div> : null}
+        {rows.length ? <div className="evo-pager"><span>{rows.length} of {knownCount(total)} propert{total === 1 ? 'y' : 'ies'}</span>
+          {truncationNote(list) ? <span> · {truncationNote(list)}</span> : null}</div> : null}
       </Panel>
 
       <AddProperty open={showAdd} onClose={closeAdd} onDone={() => { closeAdd(); setNotice('Property added.'); load() }} />
