@@ -149,9 +149,14 @@ jobs:
         if: always() && steps.guard.outputs.run == 'true'
         env:
           BRANCH: ${{ steps.guard.outputs.branch }}
+          RELAY_PUSH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Claude is intentionally not allowed to push. The workflow owns the push so
-          # Claude Code's interactive permission layer cannot strand a valid commit.
+          # Claude Code may replace/revoke checkout auth during its post-step cleanup.
+          # Reinstall an ephemeral Actions-token auth header for this guarded push only.
+          auth=$(printf 'x-access-token:%s' "$RELAY_PUSH_TOKEN" | base64 -w0)
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $auth"
+
+          # Claude is intentionally not allowed to push. The workflow owns the push.
           # The pre-push hook installed above still refuses every ref except this branch.
           git fetch origin "$BRANCH"
           local_sha=$(git rev-parse HEAD)
@@ -162,6 +167,9 @@ jobs:
           else
             echo "No committed checkpoint to push"
           fi
+
+          # Remove the temporary auth header immediately after the push attempt.
+          git config --local --unset-all http.https://github.com/.extraheader || true
 
       - name: Main watchdog
         id: watchdog
