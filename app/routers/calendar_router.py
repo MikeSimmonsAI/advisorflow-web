@@ -260,6 +260,14 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
         # SAME time. That returns the earlier outcome and touches nothing. A
         # request naming a DIFFERENT time is a reschedule and still runs, which
         # is the behaviour that existed before.
+        # Terminal states stay terminal: a late or replayed webhook must not
+        # reactivate a cancelled/expired link (it would re-create the calendar
+        # event and text the family about an appointment that was cancelled).
+        if (booking.status or "") in ("cancelled", "expired"):
+            logger.warning("booking-confirmed: booking=%s is %s - refusing",
+                           booking.id, booking.status)
+            raise HTTPException(status_code=409,
+                                detail="Booking is %s and cannot be confirmed" % booking.status)
         _already = (booking.status or "") in ("booked", "confirmed")
         _same_slot = False
         if _already and booking.booked_time and slot_display:

@@ -74,7 +74,9 @@ Use a local SQLite or throwaway DB, never a hosted one.
 - [ ] Script steps 2-8 all pass; fix failures on `sci-program`
 - [ ] Synthetic flows file passes (login, workspace isolation, suppression)
 - [ ] `python -m pytest tests/test_sci_inbound_booking_flows.py tests/test_calendar_router.py tests/test_inbound_mailbox.py -q` passes (inbound routing + booking-confirm; the script's synthetic step should also run this file)
-- [ ] Next gap: the public booking path (`public_booking_router`) confirmation + no-send, and `/calendar/booking-confirmed` webhook repeat safety (same unguarded pattern; not yet tested)
+- [ ] Webhook (`POST /calendar/booking-confirmed`, Vercel app; token-authorized): added a 409 terminal-state guard for cancelled/expired links (previously re-booked them and re-sent). Same-slot replay was already idempotent. Different-slot repeat is still a deliberate reschedule (documented in the route). Three new tests at the end of `tests/test_sci_inbound_booking_flows.py` (`test_webhook_*`), **UNEXECUTED**, run by step 3 of `scripts/sci_desktop_verify.ps1`. First-confirmation path (MS/Google/Twilio/email adapters) is not covered.
+- [ ] Public booking (`public_booking_router` `POST /public/{slug}/book`): already has an idempotency key (`BOOK_IDEMPOTENT`) in the service; existing tests are in `tests/test_public_booking_api.py`. Terminal-state/replay behaviour there was not re-traced this slice: next safe task.
+- [ ] Root `calendar_router.py`: a stale copy. `app/main.py` mounts `app.routers.calendar_router`; no bare `import calendar_router` exists, only path-string references (install_files.bat copies from app/routers; probes read app/routers). Likely dead, but deletion was blocked by tooling in this run, so it is left in place: `git rm calendar_router.py` is a safe follow-up (tests/conftest puts the repo root on sys.path, so confirm nothing imports it bare first).
 - [ ] Browser walk of the Launch Readiness tab
 - [ ] Staging and provider evidence (owner-gated: Twilio/A2P, carrier, spend, real contacts)
 

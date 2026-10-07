@@ -255,3 +255,42 @@ def test_other_workspace_cannot_cancel_a_confirmed_booking(client, db_session, b
     db_session.refresh(w.booking)
     assert w.booking.status == "confirmed"
     assert w.sent == sent_before
+
+
+# ── Vercel booking app webhook: POST /calendar/booking-confirmed ────────
+# Token-authorized, no login. These cases return before any calendar/SMS/email
+# adapter is reached, so nothing can leave the process. (The first-confirmation
+# path also calls Microsoft/Google/Twilio/email adapters and is not covered here.)
+
+def _webhook(client, token, slot="2026-11-03T15:00"):
+    return client.post("/calendar/booking-confirmed", json={"booking_token": token, "slot_display": slot})
+
+
+def test_webhook_exact_replay_is_idempotent_and_mutates_nothing(client, db_session, booking_world):
+    w = booking_world
+    w.booking.status = "booked"
+    w.booking.booked_time = datetime(2026, 11, 3, 15, 0)
+    db_session.commit()
+    r = _webhook(client, w.booking.token)
+    assert r.status_code == 200 and r.json()["idempotent_replay"] is True
+    assert r.json()["booking_id"] == w.booking.id
+    db_session.refresh(w.booking)
+    assert w.booking.status == "booked" and w.booking.booked_time.isoformat() == "2026-11-03T15:00:00"
+    assert w.cal.inserted == [] and w.sent == []
+
+
+def test_webhook_cannot_revive_cancelled_or_expired_booking(client, db_session, booking_world):
+    w = booking_world
+    for terminal in ("cancelled", "expired"):
+        w.booking.status = terminal
+        db_session.commit()
+        assert _webhook(client, w.booking.token).status_code == 409
+        db_session.refresh(w.booking)
+        db_session.refresh(w.lead)
+        assert w.booking.status == terminal and w.booking.calendar_event_id is None
+        assert _status(w.lead) != "booked"
+        assert w.cal.inserted == [] and w.sent == []
+
+
+def test_webhook_requires_booking_token(client):
+    assert client.post("/calendar/booking-confirmed", json={"slot_display": "2026-11-03T15:00"}).status_code == 400
