@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-queue-followup-resume-retry-20261007-0937",
-  "parent_run_id": "wholesale-disposition-queue-followup-20261007-0842",
-  "project": "EvoSys Wholesale Overnight \u2014 disposition, queue, and follow-up resume retry",
+  "relay_run_id": "wholesale-disposition-appointment-truth-20261007-0941",
+  "parent_run_id": "wholesale-queue-followup-resume-retry-20261007-0937",
+  "project": "EvoSys Wholesale Overnight \u2014 disposition handoff and appointment truth",
   "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37638083011",
-  "timestamp_ct": "2026-10-07 09:38 CT",
+  "actions_run_id": "37638641584",
+  "timestamp_ct": "2026-10-07 09:43 CT",
   "issue": 1,
-  "status_comment_id": 6040305788
+  "status_comment_id": 6040387553
 }
