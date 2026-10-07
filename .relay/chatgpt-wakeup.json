@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-continue-after-protocol-fix-20261006-2359",
-  "parent_run_id": "wholesale-resume-after-control-room-20261006-2356",
-  "project": "EvoSys Wholesale Overnight \u2014 continue from persisted checkpoint",
+  "relay_run_id": "wholesale-ai-comms-safety-20261007-0002",
+  "parent_run_id": "wholesale-continue-after-protocol-fix-20261006-2359",
+  "project": "EvoSys Wholesale Overnight \u2014 AI compose/history and seller communications safety",
   "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37574122425",
-  "timestamp_ct": "2026-10-07 00:02 CT",
+  "actions_run_id": "37574459441",
+  "timestamp_ct": "2026-10-07 00:06 CT",
   "issue": 1,
-  "status_comment_id": 6031290716
+  "status_comment_id": 6031332936
 }
