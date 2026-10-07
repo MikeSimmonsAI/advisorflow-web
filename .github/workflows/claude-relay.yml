@@ -28,7 +28,7 @@ jobs:
       !contains(github.event.comment.body, '[RELAY:CLAUDE_STATUS]') &&
       !contains(github.event.comment.body, '[RELAY:ACK]')
     runs-on: ubuntu-latest
-    timeout-minutes: 130
+    timeout-minutes: 45
     permissions:
       contents: write        # push to the ALLOWED working branch only (see push guard below)
       issues: write          # ACK, fallback status
@@ -89,7 +89,7 @@ jobs:
         id: claude
         if: steps.guard.outputs.run == 'true'
         continue-on-error: true          # a crash/timeout must still produce a terminal status
-        timeout-minutes: 110
+        timeout-minutes: 30
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -118,6 +118,11 @@ jobs:
               messaging real customers without Mike's GO, unapproved spending, destructive data
               changes, irreversible infrastructure, legal/carrier attestations, credentials Mike
               must enter) and report STATUS: APPROVAL_REQUIRED.
+            - This relay uses a 30-minute execution lease to bound true hangs. Treat the run as a
+              work slice: checkpoint valuable work early and push a safe commit by about minute 20
+              whenever there are changes worth preserving. Do not wait until the final minute to
+              commit/push. If the lease expires, finalize will emit a terminal status and the relay
+              will continue from the pushed checkpoint in a new run.
 
             FINISH by posting exactly ONE comment: `gh issue comment 1 --body-file <file>`.
             The file's first line is "[RELAY:CLAUDE_STATUS]", then:
