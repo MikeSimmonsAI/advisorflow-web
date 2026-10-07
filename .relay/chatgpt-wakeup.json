@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-ai-comms-safety-20261007-0002",
-  "parent_run_id": "wholesale-continue-after-protocol-fix-20261006-2359",
-  "project": "EvoSys Wholesale Overnight \u2014 AI compose/history and seller communications safety",
+  "relay_run_id": "wholesale-suppression-idempotency-20261007-0007",
+  "parent_run_id": "wholesale-ai-comms-safety-20261007-0002",
+  "project": "EvoSys Wholesale Overnight \u2014 suppression, idempotency, capacity, and cadence safety",
   "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37574459441",
-  "timestamp_ct": "2026-10-07 00:06 CT",
+  "actions_run_id": "37574789233",
+  "timestamp_ct": "2026-10-07 00:15 CT",
   "issue": 1,
-  "status_comment_id": 6031332936
+  "status_comment_id": 6031446388
 }
