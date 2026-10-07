@@ -21,11 +21,12 @@
  *   GET  /workforce/catalogue
  *   POST /workforce/team
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { readAuthority } from '../auth/workspaceAuthority'
 import PageShell from '../components/PageShell'
+import { applyRefresh, createActionGuard, createSequencer } from '../utils/workforceTruth'
 import '../styles/shared.css'
 import '../styles/aiWorkforce.css'
 
@@ -42,7 +43,7 @@ const STAGE_WORDS = {
   simulation: 'Simulation',
   shadow: 'Watching',
   controlled: 'Controlled launch',
-  active: 'Working',
+  active: 'Switched on',
 }
 
 function StageBadge ({ state, killed }) {
@@ -55,7 +56,7 @@ function QueueChips ({ queue }) {
   const order = ['working', 'waiting', 'needs_review', 'qualified',
     'appointments', 'handoffs', 'closed', 'paused']
   const labels = {
-    working: 'Working',
+    working: 'Assigned',
     waiting: 'Waiting',
     needs_review: 'Needs review',
     qualified: 'Qualified',
@@ -86,22 +87,36 @@ export default function AITeam () {
   const [loading, setLoading] = useState(true)
   const [hiring, setHiring] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [stale, setStale] = useState(false)
+  const guard = useRef(createActionGuard()).current
+  const loadSeq = useRef(createSequencer()).current
+  const lastGood = useRef(null)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
   const load = useCallback(async () => {
+    const token = loadSeq.begin()
     setLoading(true); setErr('')
+    let outcome
     try {
       const [a, b] = await Promise.all([
         api.get('/workforce/team'),
         api.get('/workforce/catalogue'),
       ])
-      setTeam(a)
-      setCatalogue(b.available || [])
+      outcome = { ok: true, data: { team: a, catalogue: b.available || [] }, at: Date.now() }
     } catch (e) {
-      setErr(e?.message || 'Could not load your AI team.')
-    } finally {
-      setLoading(false)
+      outcome = { ok: false, message: e?.message || 'Could not load your AI team.' }
     }
-  }, [])
+    if (!mounted.current || !loadSeq.isCurrent(token)) return
+    // Failed refresh keeps the last-good team on screen, flagged possibly stale.
+    const next = applyRefresh(lastGood.current, outcome)
+    lastGood.current = next
+    setTeam(next.data ? next.data.team : null)
+    setCatalogue(next.data ? next.data.catalogue : [])
+    setStale(next.stale)
+    setErr(next.error + (next.stale ? ' Showing the last information loaded; it may be out of date.' : ''))
+    setLoading(false)
+  }, [loadSeq])
   useEffect(() => { load() }, [load])
 
   const available = useMemo(
@@ -110,15 +125,19 @@ export default function AITeam () {
     () => catalogue.filter(c => !c.available), [catalogue])
 
   async function hire (templateKey, name) {
+    const key = `hire:${templateKey}`
+    if (!guard.tryAcquire(key)) return  // synchronous duplicate-hire protection
     setBusy(true); setErr('')
     try {
       await api.post('/workforce/team', { template_key: templateKey, name })
+      if (!mounted.current) return
       setHiring(null)
       await load()
     } catch (e) {
-      setErr(e?.message || 'That employee could not be added.')
+      if (mounted.current) setErr(e?.message || 'That employee could not be added.')
     } finally {
-      setBusy(false)
+      guard.release(key)
+      if (mounted.current) setBusy(false)
     }
   }
 

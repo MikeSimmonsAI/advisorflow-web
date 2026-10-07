@@ -119,8 +119,14 @@ def snapshot(db: Session, scope: Scope, *,
                                   calculation="rows in ai_employees"),
             "deployments": _classed(len(deployments), C.EV_FACT,
                                     calculation="non-retired deployments"),
-            "working": _classed(len(live), C.EV_FACT,
-                                calculation="deployments in a live state"),
+            "switched_on": _classed(
+                len(live), C.EV_FACT,
+                note="Allowed to run. Not evidence that work is in progress.",
+                calculation="deployments in a live state"),
+            "working": _classed(
+                None, C.EV_UNKNOWN,
+                note=("No runtime evidence of work in progress is recorded "
+                      "here. Unknown, not zero.")),
             "paused": _classed(
                 sum(1 for d in deployments if d.state == C.DEPLOY_PAUSED),
                 C.EV_FACT),
@@ -217,14 +223,14 @@ def _status_statement(deployments, live, attention) -> str:
     if not deployments:
         return "No AI employees have been hired."
     if not live:
-        return ("%d AI employees are set up and none of them is working."
+        return ("%d AI employees are set up and none of them is switched on."
                 % len(deployments))
     critical = attention["by_severity"].get(C.SEV_CRITICAL, 0)
     if critical:
-        return ("%d of %d AI employees are working, and %d thing%s cannot "
-                "wait." % (len(live), len(deployments), critical,
+        return ("%d of %d AI employees are switched on, and %d thing%s "
+                "cannot wait." % (len(live), len(deployments), critical,
                            "" if critical == 1 else "s"))
-    return ("%d of %d AI employees are working."
+    return ("%d of %d AI employees are switched on."
             % (len(live), len(deployments)))
 
 

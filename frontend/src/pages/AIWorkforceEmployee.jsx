@@ -23,6 +23,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
+import { applyRefresh, createActionGuard, createSequencer, supportCode } from '../utils/workforceTruth'
 import '../styles/shared.css'
 import '../styles/aiWorkforce.css'
 
@@ -51,34 +52,53 @@ export default function AIWorkforceEmployee () {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
-  const busyRef = useRef(false)
-  const loadSeq = useRef(0)
-  const cardRef = useRef(null)
+  const [stale, setStale] = useState(false)
+  const [code, setCode] = useState(null)
+  // Synchronous per-action guard and latest-wins sequencer. Both are keyed to
+  // the employee on screen so a slow response for a previous employee can
+  // neither repaint nor act on the current one.
+  const guard = useRef(createActionGuard()).current
+  const loadSeq = useRef(createSequencer()).current
+  const scopeRef = useRef(employeeId)
+  const lastGood = useRef(null)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
   const load = useCallback(async () => {
-    const token = ++loadSeq.current
-    setLoading(true); setErr('')
+    const token = loadSeq.begin()
+    setLoading(true); setErr(''); setCode(null)
+    let outcome
     try {
       const [a, b, c] = await Promise.all([
         api.get(`/ai-workforce-intelligence/scorecards/${employeeId}`),
         api.get(`/ai-workforce-intelligence/attention?employee_id=${employeeId}`),
         api.get('/ai-workforce-intelligence/quality'),
       ])
-      if (token !== loadSeq.current) return  // newer load (or employee) wins
-      cardRef.current = a
-      setCard(a)
-      setAttention(b.items || [])
-      setQuality((c.employees || {})[employeeId] || null)
+      outcome = { ok: true, at: Date.now(), data: { card: a, attention: b.items || [],
+        quality: (c.employees || {})[employeeId] || null } }
     } catch (e) {
-      if (token !== loadSeq.current) return
-      // last-good card is kept on screen; say so rather than blanking it
-      setErr((e?.message || 'Could not load this AI employee.')
-        + (cardRef.current ? ' Showing the last information loaded; it may be out of date.' : ''))
-    } finally {
-      if (token === loadSeq.current) setLoading(false)
+      outcome = { ok: false, code: supportCode(e),
+        message: e?.message || 'Could not load this AI employee.' }
     }
-  }, [employeeId])
-  useEffect(() => { load() }, [load])
+    if (!mounted.current || !loadSeq.isCurrent(token) || scopeRef.current !== employeeId) return
+    const next = applyRefresh(lastGood.current, outcome)
+    lastGood.current = next
+    setCard(next.data ? next.data.card : null)
+    setAttention(next.data ? next.data.attention : [])
+    setQuality(next.data ? next.data.quality : null)
+    setStale(next.stale); setCode(outcome.code || null)
+    setErr(next.error ? next.error
+      + (next.stale ? ' Showing the last information loaded; it may be out of date.' : '') : '')
+    setLoading(false)
+  }, [employeeId, loadSeq])
+  // A different employee must never inherit the previous one's card, attention
+  // items, quality or last-good copy.
+  useEffect(() => {
+    scopeRef.current = employeeId
+    lastGood.current = null
+    setCard(null); setAttention([]); setQuality(null); setStale(false)
+    load()
+  }, [employeeId, load])
 
   async function control (what) {
     const deploymentId = card?.card?.deployment?.id
@@ -87,12 +107,14 @@ export default function AIWorkforceEmployee () {
              + 'paused or resumed from here.')
       return
     }
-    if (busyRef.current) return  // synchronous duplicate protection
-    busyRef.current = true
+    const key = `${what}:${deploymentId}`
+    if (!guard.tryAcquire(key)) return  // synchronous duplicate protection
+    const startedFor = employeeId
     setBusy(true); setErr('')
     try {
       const res = await api.post(
         `/ai-workforce-intelligence/employees/${deploymentId}/${what}`, {})
+      if (!mounted.current || scopeRef.current !== startedFor) return
       await load()
       if (res?.result?.state && what === 'resume') {
         window.alert(
@@ -100,10 +122,13 @@ export default function AIWorkforceEmployee () {
           + `'${res.result.state}'.`)
       }
     } catch (e) {
-      setErr(e?.detail?.message || e?.message || 'That did not go through.')
+      if (mounted.current && scopeRef.current === startedFor) {
+        setErr(e?.detail?.message || e?.message || 'That did not go through.')
+        setCode(supportCode(e))
+      }
     } finally {
-      busyRef.current = false
-      setBusy(false)
+      guard.release(key)
+      if (mounted.current) setBusy(false)
     }
   }
 
@@ -135,7 +160,7 @@ export default function AIWorkforceEmployee () {
     >
       {err ? (
         <div className="panel panel--error" role="alert">
-          {err}{!c ? ' It may have been removed, or it belongs to another workspace.' : ''}
+          {err}{code ? ` (support code ${code})` : ''}{!c && !stale ? ' It may have been removed, or it belongs to another workspace.' : ''}
         </div>
       ) : null}
       {loading ? <div className="panel">Loading…</div> : null}
@@ -166,7 +191,7 @@ export default function AIWorkforceEmployee () {
           <div className="panel" style={{ padding: 14, marginBottom: 12 }}>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap',
                           fontSize: 13 }}>
-              <span>Open work: {c.activity?.open_work_items ?? 0}</span>
+              <span>Open work: {Number.isFinite(c.activity?.open_work_items) ? c.activity.open_work_items : 'Unknown'}</span>
               <span>Deployment: {c.deployment?.state || '—'}</span>
               <span>Entitlement: {c.deployment?.commercial_state || '—'}</span>
               <span>Readiness: {c.deployment?.readiness_state || '—'}</span>

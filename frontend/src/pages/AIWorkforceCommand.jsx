@@ -29,10 +29,11 @@
  *   GET  /ai-workforce-intelligence/handoffs
  *   POST /ai-workforce-intelligence/refresh
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import PageShell from '../components/PageShell'
+import { applyRefresh, createActionGuard, createSequencer, supportCode } from '../utils/workforceTruth'
 import '../styles/shared.css'
 import '../styles/aiWorkforce.css'
 
@@ -262,21 +263,37 @@ export default function AIWorkforceCommand () {
   const [freshness, setFreshness] = useState(null)
   const [extra, setExtra] = useState({})
   const [err, setErr] = useState('')
+  const [code, setCode] = useState(null)
+  const [stale, setStale] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  // Synchronous per-action guard (state is not visible until next render) and
+  // a latest-wins sequencer so a slow older refresh cannot overwrite newer data.
+  const guard = useRef(createActionGuard()).current
+  const loadSeq = useRef(createSequencer()).current
+  const lastGood = useRef(null)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
   const load = useCallback(async () => {
-    setLoading(true); setErr('')
+    const token = loadSeq.begin()
+    setLoading(true); setErr(''); setCode(null)
+    let outcome
     try {
       const res = await api.get('/ai-workforce-intelligence/overview')
-      setOverview(res.data || res)
-      setFreshness(res.freshness || null)
+      outcome = { ok: true, data: { overview: res.data || res, freshness: res.freshness || null }, at: Date.now() }
     } catch (e) {
-      setErr(e?.message || 'Could not load AI Workforce Command.')
-    } finally {
-      setLoading(false)
+      outcome = { ok: false, message: e?.message || 'Could not load AI Workforce Command.', code: supportCode(e) }
     }
-  }, [])
+    if (!mounted.current || !loadSeq.isCurrent(token)) return
+    // A failed refresh keeps last-good numbers on screen, flagged possibly stale.
+    const next = applyRefresh(lastGood.current, outcome)
+    lastGood.current = next
+    setOverview(next.data ? next.data.overview : null)
+    setFreshness(next.data ? next.data.freshness : null)
+    setStale(next.stale); setErr(next.error); setCode(outcome.code || null)
+    setLoading(false)
+  }, [loadSeq])
   useEffect(() => { load() }, [load])
 
   // EACH TAB FETCHES ITS OWN DETAIL. The overview carries the headline and
@@ -308,49 +325,46 @@ export default function AIWorkforceCommand () {
 
   const readOnly = !!overview?.read_only
 
-  async function refresh () {
+  // Runs one action under a synchronous per-key lock. Other actions (other
+  // items, other kinds) stay usable; only an identical in-flight one is dropped.
+  async function runAction (key, fn, fallback) {
+    if (!guard.tryAcquire(key)) return
     setBusy(true); setErr('')
     try {
-      await api.post('/ai-workforce-intelligence/refresh', {})
-      setExtra({})
-      await load()
+      await fn()
     } catch (e) {
-      setErr(e?.message || 'Could not recompute.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function act (item, what) {
-    setBusy(true); setErr('')
-    try {
-      await api.post(
-        `/ai-workforce-intelligence/attention/${item.id}/${what}`, {})
-      await load()
-    } catch (e) {
-      setErr(e?.detail?.message || e?.message || 'That did not go through.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function escalate (item) {
-    setBusy(true); setErr('')
-    try {
-      const res = await api.post(
-        `/ai-workforce-intelligence/exceptions/${item.id}/escalate`, {})
-      setErr('')
-      setExtra({})
-      await load()
-      if (res?.ticket_number) {
-        window.alert(`Support ticket ${res.ticket_number} opened.`)
+      if (mounted.current) {
+        setErr(e?.detail?.message || e?.message || fallback)
+        setCode(supportCode(e))
       }
-    } catch (e) {
-      setErr(e?.detail?.message || e?.message || 'Could not escalate.')
     } finally {
-      setBusy(false)
+      guard.release(key)
+      if (mounted.current) setBusy(false)
     }
   }
+
+  const refresh = () => runAction('refresh', async () => {
+    await api.post('/ai-workforce-intelligence/refresh', {})
+    if (!mounted.current) return
+    setExtra({})
+    await load()
+  }, 'Could not recompute.')
+
+  const act = (item, what) => runAction(`act:${item.id}:${what}`, async () => {
+    await api.post(`/ai-workforce-intelligence/attention/${item.id}/${what}`, {})
+    if (mounted.current) await load()
+  }, 'That did not go through.')
+
+  const escalate = item => runAction(`escalate:${item.id}`, async () => {
+    const res = await api.post(
+      `/ai-workforce-intelligence/exceptions/${item.id}/escalate`, {})
+    if (!mounted.current) return
+    setExtra({})
+    await load()
+    if (res?.ticket_number) {
+      window.alert(`Support ticket ${res.ticket_number} opened.`)
+    }
+  }, 'Could not escalate.')
 
   const attention = overview?.attention
   const critical = attention?.by_severity?.critical || 0
@@ -369,7 +383,16 @@ export default function AIWorkforceCommand () {
         </div>
       }
     >
-      {err ? <div className="panel panel--error">{err}</div> : null}
+      {stale ? (
+        <div className="panel" role="status">
+          Could not refresh. These figures are the last ones loaded and may be out of date.
+        </div>
+      ) : null}
+      {err ? (
+        <div className="panel panel--error" role="alert">
+          {err}{code ? ` (support code ${code})` : ''}
+        </div>
+      ) : null}
       {loading ? <div className="panel">Loading…</div> : null}
 
       <nav className="wf-tabs" aria-label="Workforce Command sections">
@@ -431,7 +454,8 @@ function Overview ({ data, onAct, busy, readOnly }) {
   return (
     <>
       <div className="wf-stat-grid">
-        <Stat label="Working" entry={{ value: data.workforce?.working }} />
+        <Stat label="Switched on" entry={{ value: data.workforce?.switched_on }}
+              hint="Allowed to run — not evidence that work is in progress" />
         <Stat label="Needs a person"
               entry={{ value: waiting.needs_a_person }} />
         <Stat label="Work queued" entry={{ value: waiting.work_queued }} />

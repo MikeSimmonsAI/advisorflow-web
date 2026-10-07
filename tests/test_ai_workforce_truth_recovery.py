@@ -36,8 +36,8 @@ class ActionSafety(unittest.TestCase):
         self.assertEqual(PAGE.count("guard.release("), 3)
 
     def test_employee_page_has_ref_lock_and_releases_it(self):
-        self.assertIn("busyRef.current = true", EMP)
-        self.assertIn("busyRef.current = false", EMP)
+        self.assertIn("guard.tryAcquire(key)", EMP)
+        self.assertIn("guard.release(key)", EMP)
 
     def test_resume_message_reads_real_field(self):
         self.assertNotIn("${res.state}", EMP)
@@ -48,7 +48,7 @@ class StaleAndRecovery(unittest.TestCase):
     def test_stale_responses_are_dropped(self):
         self.assertIn("loadSeq.isCurrent(token)", PAGE)
         self.assertIn("openSeq.isCurrent(token)", PAGE)
-        self.assertIn("token !== loadSeq.current", EMP)
+        self.assertIn("loadSeq.isCurrent(token)", EMP)
 
     def test_failed_refresh_keeps_last_good_and_flags_stale(self):
         self.assertIn("applyRefresh(lastGood.current, outcome)", PAGE)

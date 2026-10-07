@@ -155,7 +155,10 @@ def _workforce_block(employees, deployments, work, threads) -> Dict[str, Any]:
     return {
         "employees": len(employees),
         "deployments": len(deployments),
-        "working": len(live),
+        # Permission/activation only. There is no runtime-evidence feed here,
+        # so no "working" count is claimed; the figure is "switched on".
+        "switched_on": len(live),
+        "working": None,
         "paused": len(paused),
         "stopped": len(suspended),
         "by_activation_stage": _count(e.activation_state for e in employees),
@@ -176,9 +179,10 @@ def _workforce_statement(deployments, live, suspended) -> str:
         return ("%d of your AI employees are stopped because of their account "
                 "standing." % len(suspended))
     if not live:
-        return ("You have %d AI employee%s set up. None of them is working."
+        return ("You have %d AI employee%s set up. None of them is switched on."
                 % (len(deployments), "" if len(deployments) == 1 else "s"))
-    return ("%d of your %d AI employees %s working."
+    return ("%d of your %d AI employees %s switched on. Switched on means "
+            "allowed to run; it is not evidence that work is in progress."
             % (len(live), len(deployments),
                "is" if len(live) == 1 else "are"))
 
@@ -236,8 +240,9 @@ def _employee_rows(employees, deployments, per_employee,
             "deployment_state": getattr(dep, "state", None),
             "commercial_state": getattr(dep, "commercial_state", None),
             "readiness_state": getattr(dep, "readiness_state", None),
-            "working": bool(dep is not None
-                            and dep.state in C.DEPLOY_LIVE_STATES),
+            "switched_on": bool(dep is not None
+                                and dep.state in C.DEPLOY_LIVE_STATES),
+            "working": None,
             "attention_items": attention_counts.get(emp.id, 0),
             "worst_severity": worst.get(emp.id),
             "appointments": (values.get("appointments_booked")
