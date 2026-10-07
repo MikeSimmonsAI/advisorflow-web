@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "sci-inbound-booking-20261007-1729",
-  "parent_run_id": "sci-synthetic-product-flows-20261007-1726",
-  "project": "SCI \u2014 inbound reply routing and booking confirmation product proof",
+  "relay_run_id": "sci-public-booking-guards-20261007-1734",
+  "parent_run_id": "sci-inbound-booking-20261007-1729",
+  "project": "SCI \u2014 close public and Vercel booking repeat/terminal-state defects",
   "status": "COMPLETED",
   "branch": "sci-program",
-  "actions_run_id": "37696569881",
-  "timestamp_ct": "2026-10-07 17:33 CT",
+  "actions_run_id": "37697006688",
+  "timestamp_ct": "2026-10-07 17:37 CT",
   "issue": 1,
-  "status_comment_id": 6048229602
+  "status_comment_id": 6048283060
 }
