@@ -672,7 +672,10 @@ def accept_handoff(handoff_id: str, request: Request,
                    AIHandoff.organization_id == org_id).first())
     if row is None:
         raise HTTPException(status_code=404, detail="No such handoff.")
-    wf_handoff.accept(db, row, user)
+    try:
+        wf_handoff.accept(db, row, user)
+    except wf_handoff.HandoffStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     db.commit()
     return wf_handoff.as_dict(row)
 

@@ -290,8 +290,15 @@ def _accept_handoff(db, scope, *, user, target_id, reason, payload,
                     origin_kind, origin_id):
     row = _load_handoff(db, scope, target_id)
     from app.services.workforce import handoff as wf_handoff
+    before = row.status
     try:
         wf_handoff.accept(db, row, user)
+    except wf_handoff.HandoffStateError as exc:
+        # NOT a success: nothing was accepted, and nothing is recorded as done.
+        return {"performed": False, "action": C.M_ACCEPT_HANDOFF,
+                "status": row.status, "already_final": True,
+                "detail": str(exc),
+                "performed_by": C.ACTION_AUTHORITY[C.M_ACCEPT_HANDOFF]}
     except PermissionError as exc:
         # T6 CHECKS TENANCY ITSELF and refuses. T9 does not catch that and
         # retry with a wider scope - it records the refusal and passes it on.
@@ -302,6 +309,10 @@ def _accept_handoff(db, scope, *, user, target_id, reason, payload,
                 refusal_code=C.R_TENANT_MISMATCH, detail={"error": str(exc)},
                 origin_kind=origin_kind, origin_id=origin_id)
         raise ActionRefused(C.R_TENANT_MISMATCH, str(exc))
+    if before == row.status:
+        return {"performed": False, "action": C.M_ACCEPT_HANDOFF,
+                "status": row.status, "already_final": True,
+                "performed_by": C.ACTION_AUTHORITY[C.M_ACCEPT_HANDOFF]}
     _record(db, scope=scope, action=C.M_ACCEPT_HANDOFF,
             organization_id=row.organization_id, outcome=C.OUTCOME_PERFORMED,
             user=user, target_kind="handoff", target_id=row.id,
@@ -316,6 +327,7 @@ def _resolve_handoff(db, scope, *, user, target_id, reason, payload,
                      origin_kind, origin_id):
     row = _load_handoff(db, scope, target_id)
     from app.services.workforce import handoff as wf_handoff
+    before = row.status
     try:
         wf_handoff.resolve(db, row, user, note=reason)
     except PermissionError as exc:
@@ -326,6 +338,10 @@ def _resolve_handoff(db, scope, *, user, target_id, reason, payload,
                 refusal_code=C.R_TENANT_MISMATCH, detail={"error": str(exc)},
                 origin_kind=origin_kind, origin_id=origin_id)
         raise ActionRefused(C.R_TENANT_MISMATCH, str(exc))
+    if before == "resolved":
+        return {"performed": False, "action": C.M_RESOLVE_HANDOFF,
+                "status": row.status, "already_final": True,
+                "performed_by": C.ACTION_AUTHORITY[C.M_RESOLVE_HANDOFF]}
     _record(db, scope=scope, action=C.M_RESOLVE_HANDOFF,
             organization_id=row.organization_id, outcome=C.OUTCOME_PERFORMED,
             user=user, target_kind="handoff", target_id=row.id,

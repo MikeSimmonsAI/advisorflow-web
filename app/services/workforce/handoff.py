@@ -159,11 +159,27 @@ def create(db: Session, *, employee: AIEmployee, lead: Optional[Lead],
     return row
 
 
+class HandoffStateError(ValueError):
+    """The handoff is not in a state this action can honestly apply to."""
+
+
 def accept(db: Session, handoff: AIHandoff, user: User) -> AIHandoff:
-    """A person takes it. Tenancy is checked here, not assumed by the caller."""
+    """A person takes it. Tenancy is checked here, not assumed by the caller.
+
+    A RESOLVED HANDOFF STAYS RESOLVED: accepting it must not reopen finished
+    work as "accepted" (it would reappear in `open_for_org`). A repeat accept
+    by the same person changes nothing; a second person cannot silently take
+    it over from the first.
+    """
     if str(handoff.organization_id) != str(user.organization_id) \
             and getattr(user, "role", None) != "god_admin":
         raise PermissionError("That handoff belongs to another organization.")
+    if handoff.status == "resolved":
+        raise HandoffStateError("That handoff is already resolved.")
+    if handoff.status == "accepted":
+        if handoff.accepted_by == user.id:
+            return handoff
+        raise HandoffStateError("That handoff has already been accepted.")
     handoff.status = "accepted"
     handoff.accepted_by = user.id
     handoff.accepted_at = datetime.utcnow()
@@ -176,6 +192,9 @@ def resolve(db: Session, handoff: AIHandoff, user: User,
     if str(handoff.organization_id) != str(user.organization_id) \
             and getattr(user, "role", None) != "god_admin":
         raise PermissionError("That handoff belongs to another organization.")
+    if handoff.status == "resolved":
+        # Repeat submit: keep the first resolution time and note.
+        return handoff
     handoff.status = "resolved"
     handoff.resolved_at = datetime.utcnow()
     handoff.resolution_note = (note or "")[:2000] or None
