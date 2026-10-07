@@ -1,10 +1,10 @@
 {
-  "relay_run_id": "control-room-meter-20261006-2322",
-  "parent_run_id": "sci-persist-finalizer-20261006-2202",
-  "project": "Control Room Task Meter \u2014 truthful live relay progress",
+  "relay_run_id": "control-room-meter-wiring-20261006-2334",
+  "parent_run_id": "control-room-meter-20261006-2322",
+  "project": "Control Room Task Meter \u2014 wire the truthful state into a real visible surface",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "timestamp_ct": "2026-10-06 23:24 CT",
+  "timestamp_ct": "2026-10-06 23:39 CT",
   "issue": 1,
-  "status_comment_id": 6030889077
+  "status_comment_id": 6031044016
 }
