@@ -258,5 +258,29 @@ check("papering sheet has loading, alert, retry and stale-load guard",
 check("signature capability failure is announced, not swallowed",
       "Signature capability could not be checked" in docs_src and ".catch(() => {})" not in docs_src)
 
+# 8. dialog / settings accessibility ----------------------------------------
+files_src = read(os.path.join(SRC, W + "wsFiles.jsx"))
+settings_src = read(os.path.join(SRC, W + "WholesaleSettings.jsx"))
+confirm = files_src.split("export function ConfirmDelete")[1].split("\n}\n")[0]
+check("delete confirm is an alertdialog with a labelled question",
+      'role="alertdialog"' in confirm and "aria-labelledby" in confirm)
+check("delete confirm closes on Escape (not while busy)", "'Escape'" in confirm and "!busy" in confirm)
+check("delete confirm focuses Cancel and returns focus to the opener",
+      "cancelRef.current.focus()" in confirm and "el.focus()" in confirm)
+check("delete confirm announces pending", 'role="status"' in confirm)
+check("settings save is latched synchronously", "saving.current" in settings_src)
+check("settings save failure keeps the draft and says so",
+      "your changes are still here" in settings_src)
+check("settings load failure offers retry", "Try again" in settings_src)
+check("settings drops stale loads", "gen !== loadGen.current" in settings_src)
+check("settings save button states why it is disabled", "ws-save-reason" in settings_src)
+check("css repeats the sr-only class unscoped for Settings",
+      re.search(r"^\.ws-vis-hidden \{", wcss, re.M) is not None)
+check("css gives offer/document controls a token focus ring",
+      ".ws-page .ws-offer-entry button:focus-visible" in wcss
+      and ".ws-page .ws-docs select:focus-visible" in wcss)
+check("css stacks the negotiation position at phone width",
+      ".ws-page .ws-position { display: grid" in wcss)
+
 print("wholesale ux static: %d passed, %d failed" % (passed, failed))
 sys.exit(1 if failed else 0)

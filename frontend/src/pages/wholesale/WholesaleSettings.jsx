@@ -5,7 +5,7 @@
  * is a platform truth. The "70% rule" in particular is a number this customer
  * sets; the code does not know it.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import '../../styles/shared.css'
 import './wholesale.css'
@@ -88,11 +88,15 @@ export default function WholesaleSettings() {
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
   const [busy, setBusy] = useState(false)
+  const saving = useRef(false)
+  const loadGen = useRef(0)
 
   const load = useCallback(async () => {
     setError(null)
+    const gen = ++loadGen.current
     try {
       const data = await api.get('/wholesale/settings')
+      if (gen !== loadGen.current) return
       setSettings(data)
       setDraft({})
       // A separate read because it answers a different question: the settings
@@ -105,6 +109,7 @@ export default function WholesaleSettings() {
         setChannels([])
       }
     } catch (e) {
+      if (gen !== loadGen.current) return
       setError(errText(e))
     }
   }, [])
@@ -117,6 +122,10 @@ export default function WholesaleSettings() {
   }
 
   async function save() {
+    // Synchronous latch: two clicks in one tick must not send two PATCHes.
+    if (saving.current) return
+    saving.current = true
+    loadGen.current += 1      // a load still in flight must not overwrite this save
     setBusy(true); setError(null); setNotice(null)
     try {
       const payload = {}
@@ -138,14 +147,21 @@ export default function WholesaleSettings() {
       setDraft({})
       setNotice('Settings saved.')
     } catch (e) {
-      setError(errText(e))
+      // The draft is kept so nothing typed is lost; Save changes retries it.
+      setError(`Settings were not saved — your changes are still here, so you can try again. ${errText(e)}`)
     } finally {
+      saving.current = false
       setBusy(false)
     }
   }
 
   if (!settings) {
-    return <EvoApp world="settings">{error ? <Alert>{error}</Alert> : <PageSkeleton />}</EvoApp>
+    return <EvoApp world="settings">{error ? (
+      <>
+        <Alert>{error}</Alert>
+        <button type="button" className="evo-btn evo-btn--secondary" onClick={load}>Try again</button>
+      </>
+    ) : <PageSkeleton />}</EvoApp>
   }
 
   const dirty = Object.keys(draft).length > 0
@@ -157,7 +173,10 @@ export default function WholesaleSettings() {
                 actions={<>
                   {dirty ? <span className="evo-status is-attention">Unsaved changes</span> : null}
                   <button type="button" className="evo-btn evo-btn--primary" disabled={!dirty || busy}
-                          onClick={save}>{busy ? 'Saving…' : 'Save changes'}</button>
+                          onClick={save} aria-describedby="ws-save-reason">{busy ? 'Saving…' : 'Save changes'}</button>
+                  <span id="ws-save-reason" className="ws-vis-hidden">
+                    {busy ? 'Saving in progress.' : !dirty ? 'Nothing to save — no changes yet.' : ''}
+                  </span>
                 </>} />
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>

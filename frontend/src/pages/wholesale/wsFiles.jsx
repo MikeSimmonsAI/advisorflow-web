@@ -15,7 +15,7 @@
  *    used anywhere in this module any more, because it cannot be told apart
  *    from "exclude", "unlink" or "archive".
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { api, API_BASE, fetchObjectUrl } from '../../api/client'
 import { errText } from './wsShared'
 
@@ -158,17 +158,33 @@ export function UploadZone({ capability, accept, label, busy, onFiles,
  * will be deleted and that it cannot be undone, and the confirming button
  * carries the verb rather than the word "OK". */
 export function ConfirmDelete({ what, busy, onCancel, onConfirm }) {
+  const cancelRef = useRef(null)
+  const opener = useRef(null)
+  const uid = useId()
+  // Focus lands on Cancel (the safe choice) and returns to whatever opened the
+  // question, so a keyboard user is never dropped at the top of the page.
+  useEffect(() => {
+    opener.current = document.activeElement
+    if (cancelRef.current) cancelRef.current.focus()
+    return () => {
+      const el = opener.current
+      if (el && el.isConnected && typeof el.focus === 'function') el.focus()
+    }
+  }, [])
   return (
-    <div className="ws-confirm">
-      <span className="ws-confirm__text">
+    <div className="ws-confirm" role="alertdialog" aria-labelledby={`${uid}-q`}
+         aria-busy={busy ? 'true' : undefined}
+         onKeyDown={(e) => { if (e.key === 'Escape' && !busy) { e.stopPropagation(); onCancel() } }}>
+      <span className="ws-confirm__text" id={`${uid}-q`}>
         Delete <strong>{what}</strong>? This cannot be undone.
       </span>
       <span className="ws-actions">
-        <button className="btn btn--secondary btn--sm" disabled={busy}
+        <button ref={cancelRef} className="btn btn--secondary btn--sm" disabled={busy}
                 onClick={onCancel}>Cancel</button>
         <button className="btn btn--danger btn--sm" disabled={busy}
                 onClick={onConfirm}>{busy ? 'Deleting…' : 'Delete'}</button>
       </span>
+      {busy ? <span className="ws-vis-hidden" role="status">Deleting…</span> : null}
     </div>
   )
 }

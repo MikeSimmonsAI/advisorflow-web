@@ -1998,3 +1998,27 @@
   .ws-page .ws-dispo .ws-input--inline { min-width: 0; width: 100%; }
   .ws-page .ws-confirm { flex-direction: column; align-items: stretch; }
 }
+
+/* ── Offers, documents, confirm dialogs, settings: focus and narrow width ──
+   Tokens only, so the light theme follows. The screen-reader-only class is
+   repeated unscoped because the Settings page is not inside .ws-page. */
+.ws-vis-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+.ws-page .ws-offer-entry button:focus-visible,
+.ws-page .ws-offer-entry input:focus-visible,
+.ws-page .ws-docs button:focus-visible,
+.ws-page .ws-docs select:focus-visible,
+.ws-page .ws-docs input:focus-visible,
+.ws-page .ws-matches input:focus-visible,
+.ws-page .ws-template button:focus-visible {
+  outline: 2px solid var(--signal-blue); outline-offset: 2px;
+}
+.ws-page .ws-doc__warn { color: var(--signal-amber, var(--text-primary)); }
+@media (max-width: 720px) {
+  .ws-page .ws-position { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .ws-page .ws-offer-entry { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .ws-page .ws-offer-entry .ws-input { width: 100%; box-sizing: border-box; }
+  .ws-page .ws-actions--wrap { flex-wrap: wrap; }
+}
