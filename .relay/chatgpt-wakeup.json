@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-offer-docs-settings-ux-20261007-0633",
-  "parent_run_id": "wholesale-board-responsive-state-proof-20261007-0526",
-  "project": "-",
+  "relay_run_id": "wholesale-offer-document-truth-retry-20261007-0835",
+  "parent_run_id": "wholesale-offer-docs-settings-ux-20261007-0633",
+  "project": "EvoSys Wholesale Overnight \u2014 offer and document state truth retry",
   "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37614982792",
-  "timestamp_ct": "2026-10-07 06:36 CT",
+  "actions_run_id": "37629692260",
+  "timestamp_ct": "2026-10-07 08:40 CT",
   "issue": 1,
-  "status_comment_id": 6037079799
+  "status_comment_id": 6039196462
 }
