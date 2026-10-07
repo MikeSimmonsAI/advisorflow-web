@@ -1,12 +1,11 @@
 {
-  "relay_run_id": "platform-workspace-header-closure-20261007-1123",
-  "parent_run_id": "platform-workspace-scope-equivalence-20261007-1120",
-  "project": "Core platform \u2014 close direct workspace-header and denied-switch defects",
+  "relay_run_id": "sci-product-verification-20261007-1722",
+  "parent_run_id": "platform-workspace-header-closure-20261007-1123",
+  "project": "SCI \u2014 executable product verification and desktop handoff",
   "status": "COMPLETED",
-  "branch": "platform-dev",
-  "timestamp_ct": "2026-10-07T17:55:40.954550+00:00",
+  "branch": "sci-program",
+  "actions_run_id": "37695701923",
+  "timestamp_ct": "2026-10-07 17:24 CT",
   "issue": 1,
-  "status_comment_id": 6042161605,
-  "watchdog_retry": true,
-  "watchdog_retry_utc": "2026-10-07T17:55:40.954561+00:00"
+  "status_comment_id": 6048095197
 }
