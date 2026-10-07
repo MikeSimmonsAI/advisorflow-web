@@ -149,7 +149,11 @@ jobs:
         if: always() && steps.guard.outputs.run == 'true'
         env:
           BRANCH: ${{ steps.guard.outputs.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # claude-code-action removes checkout's stored Git credential. Restore the
+          # job-scoped Actions credential before fetching/pushing the guarded branch.
+          gh auth setup-git
           # Claude is intentionally not allowed to push. The workflow owns the push so
           # Claude Code's interactive permission layer cannot strand a valid commit.
           # The pre-push hook installed above still refuses every ref except this branch.
