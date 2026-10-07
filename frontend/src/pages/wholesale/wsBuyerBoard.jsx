@@ -86,7 +86,7 @@ const RESPONSE_LABEL = Object.fromEntries(RESPONSE_STATUSES)
 const POF_LABEL = POF_MEANING
 
 function statusTone(status) {
-  if (['interested', 'offer_submitted', 'replied'].includes(status)) return 'is-ok'
+  if (['interested', 'offer_submitted', 'replied', 'selected'].includes(status)) return 'is-ok'
   if (['passed', 'rejected', 'no_response', 'failed', 'blocked'].includes(status)) return 'is-dnc'
   if (['sent', 'delivered', 'opened'].includes(status)) return 'is-warn'
   return 'is-muted'
@@ -224,7 +224,10 @@ function WhatTheySent({ row }) {
 
 function ResponseForm({ row, busy, onSave, onCancel }) {
   const [draft, setDraft] = useState({
-    status: row.status && RESPONSE_LABEL[row.status] ? row.status : 'replied',
+    // A selected row keeps its status server-side; do not default it to
+    // "replied", which the server refuses for the current selection.
+    status: row.status && RESPONSE_LABEL[row.status] ? row.status
+      : (row.is_selected ? 'offer_submitted' : 'replied'),
     offer_amount: row.offer_amount ?? '',
     target_close_date: row.target_close_date ?? '',
     response_note: row.response_note ?? '',
@@ -463,9 +466,17 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
             <button className="btn btn--primary btn--sm" disabled={busy}
                     onClick={async () => {
                       const ok = await run(
-                        () => api.post(`/wholesale/deals/${dealId}/select-buyer`,
-                                       { outreach_id: confirming.outreach_id }),
-                        'Buyer selected.')
+                        async () => {
+                          const r = await api.post(
+                            `/wholesale/deals/${dealId}/select-buyer`,
+                            { outreach_id: confirming.outreach_id })
+                          if (r && r.already_selected) {
+                            throw new Error('That buyer was already selected. Nothing changed.')
+                          }
+                        },
+                        (rows.find((x) => x.is_selected && x.outreach_id !== confirming.outreach_id)
+                          ? 'Buyer selected. The previous selection was released and kept in the history.'
+                          : 'Buyer selected.'))
                       if (ok) setConfirming(null)
                     }}>
               Select this buyer

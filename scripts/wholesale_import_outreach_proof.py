@@ -106,7 +106,9 @@ check("import returns rejected + counts",
 check("select-buyer 404 on missing buyer",
       "buyer is None:\n        raise HTTPException(status_code=404" in r)
 check("select-buyer refuses inactive/passed",
-      "marked inactive, so they cannot" in r and 'row.status in ("passed", "rejected")' in r)
+      "sel.check_select(" in r
+      and "marked inactive, so they cannot" in src("app/services/wholesale_selection.py")
+      and '("passed", "rejected")' in src("app/services/wholesale_selection.py"))
 check("negative offer guarded in both routes",
       r.count("An offer amount cannot be negative.") == 2)
 check("disposition reports unknown buyers", "unknown = [bid" in r and "was not found" in r)

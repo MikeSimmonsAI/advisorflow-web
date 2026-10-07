@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import (APIRouter, Depends, File, HTTPException, Query, Request,
                      UploadFile)
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.deps import (get_db, require_not_observation, require_tenant_or_observer,
@@ -36,6 +37,7 @@ from app.models.wholesale_models import (
 )
 from app.services import wholesale_analysis as analysis
 from app.services import wholesale_service as svc
+from app.services import wholesale_selection as sel
 from app.services.wholesale_matching import buyer_standing
 from app.services import wholesale_buyer_contacts as BC
 from app.services import wholesale_import_identity as ident
@@ -978,6 +980,40 @@ def resend_outreach(outreach_id: str, request: Request,
     return {**outcome, "attempts": row.attempts}
 
 
+def _refusal_detail(code, label):
+    """Stable operator-visible refusal: human label plus a machine code."""
+    return "%s [%s]" % (label, code)
+
+
+def _apply_status_write(db, org_id, user, row, new_status):
+    """Gate a generic status write through the pure selection rules.
+
+    A refusal raises before anything is mutated. A selected buyer who passes
+    releases the selection (flag, deal assignment) with an audit event.
+    """
+    decision, code, label = sel.check_status_write(
+        row.status, bool(row.is_selected), new_status)
+    if decision == "refuse":
+        raise HTTPException(status_code=409, detail=_refusal_detail(code, label))
+    if decision in ("noop", "keep"):
+        return
+    if decision == "release":
+        deal = svc.get_deal(db, org_id, row.deal_id)
+        was = row.status
+        row.is_selected = False
+        if deal.assigned_buyer_id == row.buyer_id:
+            deal.assigned_buyer_id = None
+        svc.log_event(db, org_id, "buyer.selection_released",
+                      actor_type=ACTOR_USER, actor_user_id=user.id,
+                      deal_id=row.deal_id,
+                      summary="Selected buyer %s: selection released" % new_status,
+                      before={"outreach_id": row.id, "status": was,
+                              "is_selected": True},
+                      after={"outreach_id": row.id, "status": new_status,
+                             "is_selected": False})
+    row.status = new_status
+
+
 class OutreachUpdateIn(BaseModel):
     status: str
     response_note: Optional[str] = None
@@ -1005,7 +1041,7 @@ def update_outreach(outreach_id: str, payload: OutreachUpdateIn, request: Reques
         raise HTTPException(status_code=400,
                             detail="status must be one of: %s" % ", ".join(OUTREACH_STATUSES))
     before = row.status
-    row.status = payload.status
+    _apply_status_write(db, org_id, user, row, payload.status)
     if payload.response_note is not None:
         row.response_note = payload.response_note
     if payload.offer_amount is not None:
@@ -1255,27 +1291,44 @@ def select_buyer(deal_id: str, payload: SelectBuyerIn, request: Request,
     if buyer is None:
         raise HTTPException(status_code=404,
                             detail="That buyer no longer exists in this organization.")
-    if buyer.do_not_contact:
-        raise HTTPException(
-            status_code=409,
-            detail="That buyer has opted out. Selecting them would mean "
-                   "working a deal with somebody who asked not to be contacted.")
-    if not buyer.is_active:
-        raise HTTPException(status_code=409,
-                            detail="That buyer is marked inactive, so they cannot "
-                                   "be selected for this deal.")
-    if row.status in ("passed", "rejected"):
-        raise HTTPException(
-            status_code=409,
-            detail="That buyer passed on this deal (status: %s). Record a new "
-                   "response from them before selecting them." % row.status)
+    decision, code, label = sel.check_select(
+        row.status, bool(row.is_selected), bool(buyer.do_not_contact),
+        bool(buyer.is_active))
+    if decision == "refuse":
+        raise HTTPException(status_code=409, detail=_refusal_detail(code, label))
+    if decision == "noop" and deal.assigned_buyer_id == row.buyer_id:
+        # Retry of an applied selection: no second event, timestamp untouched.
+        return {"deal_id": deal_id, "selected_buyer_id": row.buyer_id,
+                "buyer_price": _num(deal.buyer_price),
+                "assignment_fee": _num(deal.assignment_fee),
+                "already_selected": True, "replaced_outreach_ids": []}
 
-    # One selected buyer per deal.
-    (db.query(WholesaleBuyerOutreach)
-     .filter(WholesaleBuyerOutreach.organization_id == org_id,
-             WholesaleBuyerOutreach.deal_id == deal_id,
-             WholesaleBuyerOutreach.id != row.id)
-     .update({"is_selected": False}, synchronize_session=False))
+    # One selected buyer per deal. A replaced buyer must not keep the status
+    # "selected": return them to the status their own evidence supports and
+    # leave an audit row per replacement.
+    replaced = (db.query(WholesaleBuyerOutreach)
+                .filter(WholesaleBuyerOutreach.organization_id == org_id,
+                        WholesaleBuyerOutreach.deal_id == deal_id,
+                        WholesaleBuyerOutreach.id != row.id)
+                .filter(or_(WholesaleBuyerOutreach.is_selected.is_(True),
+                            WholesaleBuyerOutreach.status == "selected"))
+                .with_for_update().all())
+    replaced_ids = []
+    for old in replaced:
+        was = old.status
+        old.is_selected = False
+        if was == "selected":
+            old.status = sel.replaced_status(old.offer_amount)
+        replaced_ids.append(old.id)
+        svc.log_event(db, org_id, "buyer.selection_replaced",
+                      actor_type=ACTOR_USER, actor_user_id=user.id,
+                      deal_id=deal_id,
+                      summary="Selection moved away from buyer %s" % old.buyer_id,
+                      before={"outreach_id": old.id, "status": was,
+                              "is_selected": True},
+                      after={"outreach_id": old.id, "status": old.status,
+                             "is_selected": False,
+                             "replaced_by_outreach_id": row.id})
 
     row.is_selected = True
     row.status = "selected"
@@ -1303,7 +1356,8 @@ def select_buyer(deal_id: str, payload: SelectBuyerIn, request: Request,
     return {"deal_id": deal_id, "selected_buyer_id": row.buyer_id,
             "buyer_price": float(offer) if offer is not None else None,
             "assignment_fee": (float(deal.assignment_fee)
-                               if deal.assignment_fee is not None else None)}
+                               if deal.assignment_fee is not None else None),
+            "already_selected": False, "replaced_outreach_ids": replaced_ids}
 
 
 class ResponseIn(BaseModel):
@@ -1341,7 +1395,7 @@ def record_response(outreach_id: str, payload: ResponseIn, request: Request,
             raise HTTPException(
                 status_code=400,
                 detail="Status must be one of: %s." % ", ".join(BUYER_RESPONSE_STATUSES))
-        row.status = value
+        _apply_status_write(db, org_id, user, row, value)
         if value in ("replied", "interested", "needs_info", "offer_submitted",
                      "passed", "rejected") and row.replied_at is None:
             row.replied_at = datetime.utcnow()
@@ -1360,9 +1414,10 @@ def record_response(outreach_id: str, payload: ResponseIn, request: Request,
         # because they were suppressed - and who then phoned in an offer is the
         # exact case this endpoint exists for. Leaving them on "failed" would
         # hide a live offer behind a delivery problem.
-        if amount is not None and row.status in ("queued", "sent", "delivered",
-                                                 "opened", "replied", "failed",
-                                                 "blocked", "not_contacted"):
+        if amount is not None and sel.offer_may_set_status(
+                row.status, bool(row.is_selected)) and row.status in (
+                "queued", "sent", "delivered", "opened", "replied", "failed",
+                "blocked", "not_contacted"):
             row.status = "offer_submitted"
             row.replied_at = row.replied_at or datetime.utcnow()
 
