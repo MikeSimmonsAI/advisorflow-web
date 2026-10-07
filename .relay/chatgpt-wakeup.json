@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "sci-public-booking-guards-20261007-1734",
-  "parent_run_id": "sci-inbound-booking-20261007-1729",
-  "project": "SCI \u2014 close public and Vercel booking repeat/terminal-state defects",
+  "relay_run_id": "sci-public-booking-closure-20261007-1738",
+  "parent_run_id": "sci-public-booking-guards-20261007-1734",
+  "project": "SCI \u2014 public booking replay/terminal-state closure and dead-router cleanup",
   "status": "COMPLETED",
   "branch": "sci-program",
-  "actions_run_id": "37697006688",
-  "timestamp_ct": "2026-10-07 17:37 CT",
+  "actions_run_id": "37697415759",
+  "timestamp_ct": "2026-10-07 17:41 CT",
   "issue": 1,
-  "status_comment_id": 6048283060
+  "status_comment_id": 6048339962
 }
