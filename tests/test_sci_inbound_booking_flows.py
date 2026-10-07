@@ -259,8 +259,9 @@ def test_other_workspace_cannot_cancel_a_confirmed_booking(client, db_session, b
 
 # ── Vercel booking app webhook: POST /calendar/booking-confirmed ────────
 # Token-authorized, no login. These cases return before any calendar/SMS/email
-# adapter is reached, so nothing can leave the process. (The first-confirmation
-# path also calls Microsoft/Google/Twilio/email adapters and is not covered here.)
+# adapter is reached, so nothing can leave the process. The first-confirmation
+# path is covered by test_webhook_first_confirmation_* at the end of this file,
+# with the Google calendar client, advisor email and lead-SMS client faked.
 
 def _webhook(client, token, slot="2026-11-03T15:00"):
     return client.post("/calendar/booking-confirmed", json={"booking_token": token, "slot_display": slot})
@@ -294,3 +295,48 @@ def test_webhook_cannot_revive_cancelled_or_expired_booking(client, db_session, 
 
 def test_webhook_requires_booking_token(client):
     assert client.post("/calendar/booking-confirmed", json={"slot_display": "2026-11-03T15:00"}).status_code == 400
+
+
+@pytest.fixture()
+def webhook_world(db_session, booking_world, monkeypatch):
+    """First-confirmation adapters, all deterministic: Google calendar (the
+    FakeCalendar already patched in), advisor notification email, lead SMS
+    client. Advisor Twilio and Resend stay unconfigured and therefore skip."""
+    from app.routers import calendar_router
+    from app.services import sms_service
+    w = booking_world
+    w.advisor.google_oauth_refresh_token_encrypted = "synthetic-not-a-secret"
+    w.advisor.microsoft_365_connected = False
+    w.advisor.twilio_account_sid = None
+    db_session.commit()
+    w.advisor_emails, w.lead_sms = [], []
+
+    class _Msgs:
+        def create(self, body, from_, to):
+            w.lead_sms.append((from_, to))
+
+    monkeypatch.setattr(calendar_router, "_send_booking_notification_email",
+                        lambda advisor, lead, label, slot, db=None: w.advisor_emails.append(lead.id))
+    monkeypatch.setattr(sms_service, "_resolve_twilio_creds",
+                        lambda advisor, db: (SimpleNamespace(messages=_Msgs()), "+15550000001", None))
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    return w
+
+
+def test_webhook_first_confirmation_is_one_event_one_transition_one_handoff(client, db_session, webhook_world):
+    w = webhook_world
+    r = _webhook(client, w.booking.token)
+    assert r.status_code == 200, r.text
+    assert "idempotent_replay" not in r.json()
+    db_session.refresh(w.booking)
+    db_session.refresh(w.lead)
+    assert w.booking.status == "booked" and _status(w.lead) == "booked"
+    assert w.booking.booked_time.isoformat() == "2026-11-03T15:00:00"
+    assert len(w.cal.inserted) == 1
+    assert w.advisor_emails == [w.lead.id]
+    assert w.lead_sms == [("+15550000001", w.lead.phone)]
+
+    # An exact replay afterwards adds nothing.
+    again = _webhook(client, w.booking.token)
+    assert again.json()["idempotent_replay"] is True
+    assert len(w.cal.inserted) == 1 and len(w.advisor_emails) == 1 and len(w.lead_sms) == 1
