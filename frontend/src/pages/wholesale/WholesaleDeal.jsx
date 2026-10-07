@@ -10,7 +10,7 @@
  * fails with no explanation are the two ways this kind of tool loses somebody's
  * trust.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import '../../styles/shared.css'
@@ -34,6 +34,9 @@ import { SharingWorkspace } from './wsSharing'
 import DealOpsPanel, { DistributionNotice, LeadTemperatureChip, useDistribution } from './ops/DealOpsPanel'
 import { EvoApp, Hero, PageSkeleton, PropertyThumb, Ring, Status, Tag, humanize, money, shortDate } from './ds/ds'
 import './ds/evo-pages.css'
+import {
+  clearOutcome, createActionTracker, describeError, outcomesFor, panelOf, setOutcome,
+} from './wsActionState'
 
 const TABS = [
   ['overview', 'Overview'],
@@ -61,37 +64,57 @@ export default function WholesaleDeal() {
   const [tab, setTab] = useState('overview')
   const distribution = useDistribution()
   const [error, setError] = useState(null)
-  const [notice, setNotice] = useState(null)
-  const [busy, setBusy] = useState(false)
+  const [outcomes, setOutcomes] = useState({})
+  const [pendingKeys, setPendingKeys] = useState([])
+  const tracker = useRef(null)
+  if (!tracker.current) tracker.current = createActionTracker()
+  const tabRef = useRef('overview')
+  tabRef.current = tab
 
+  // Only the newest load may replace the room: a slow refresh that started
+  // before a save must not put the pre-save numbers back on screen.
   const load = useCallback(async () => {
-    setError(null)
+    const gen = tracker.current.nextLoad()
     try {
-      setRoom(await api.get(`/wholesale/deals/${dealId}`))
+      const fresh = await api.get(`/wholesale/deals/${dealId}`)
+      if (!tracker.current.isCurrentLoad(gen)) return
+      setError(null)
+      setRoom(fresh)
     } catch (e) {
+      if (!tracker.current.isCurrentLoad(gen)) return
       setError(errText(e))
     }
   }, [dealId])
 
   useEffect(() => { load() }, [load])
 
-  async function act(fn, successMessage) {
-    setBusy(true); setError(null); setNotice(null)
+  // `key` is "panel:action". Default is the open tab, so a panel is busy only
+  // while ITS mutation runs; other panels stay usable. The same key cannot be
+  // started twice (checked synchronously, before any re-render).
+  async function act(fn, successMessage, key) {
+    const k = key || `${tabRef.current}:act`
+    const panel = panelOf(k)
+    if (!tracker.current.begin(k)) return false
+    setPendingKeys(tracker.current.pendingKeys())
+    setOutcomes((o) => clearOutcome(o, panel))
     try {
       await fn()
-      if (successMessage) setNotice(successMessage)
+      if (successMessage) setOutcomes((o) => setOutcome(o, panel, 'ok', successMessage))
       await load()
       return true
     } catch (e) {
-      setError(errText(e))
+      setOutcomes((o) => setOutcome(o, panel, 'error', describeError(errText(e))))
       // Reported, not thrown. The caller uses the answer to decide whether to
       // close its editor: a form that closes on a failed save discards what
       // the person typed and leaves an error about a form they cannot see.
       return false
     } finally {
-      setBusy(false)
+      tracker.current.end(k)
+      setPendingKeys(tracker.current.pendingKeys())
     }
   }
+  const panelBusy = (panel) => pendingKeys.some((k) => panelOf(k) === panel)
+  const shown = outcomesFor(outcomes, tab)
 
   if (error && !room) return <EvoApp world="operations"><ErrorBox error={error} /></EvoApp>
   if (!room) return <EvoApp world="operations"><PageSkeleton /></EvoApp>
@@ -128,10 +151,10 @@ export default function WholesaleDeal() {
         actions={
           <span className="evo-herostage">
             <label htmlFor="ws-stage-select">Stage</label>
-            <select id="ws-stage-select" value={deal.stage} disabled={busy}
+            <select id="ws-stage-select" value={deal.stage} disabled={panelBusy('stage')}
                     onChange={(e) => act(
                       () => api.post(`/wholesale/deals/${dealId}/stage`, { stage: e.target.value }),
-                      'Stage updated.')}>
+                      'Stage updated.', 'stage:set')}>
               {stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           </span>
@@ -163,8 +186,10 @@ export default function WholesaleDeal() {
         </div>
       </section>
 
-      <ErrorBox error={error} />
-      {notice ? <div className="ws-good">{notice}</div> : null}
+      {error ? <div role="alert"><ErrorBox error={error} /></div> : null}
+      {shown.map((o) => (o.kind === 'error'
+        ? <div key="e" role="alert" className="ws-error">{o.text}</div>
+        : <div key="o" role="status" className="ws-good">{o.text}</div>))}
 
       {/* ── THE DEAL SUMMARY HEADER ───────────────────────────────────────
           Fifteen questions, no clicks: what is it worth, what can we pay,
@@ -186,16 +211,16 @@ export default function WholesaleDeal() {
 
       {tab === 'overview' ? <Overview room={room} goTo={setTab} reload={load} /> : null}
       {tab === 'ops' ? <DealOpsPanel dealId={deal.id} /> : null}
-      {tab === 'seller' ? <SellerTab room={room} act={act} busy={busy} /> : null}
-      {tab === 'analysis' ? <AnalysisTab room={room} act={act} busy={busy} /> : null}
-      {tab === 'offer' ? <OfferTab room={room} act={act} busy={busy} /> : null}
+      {tab === 'seller' ? <SellerTab room={room} act={act} busy={panelBusy(tab)} /> : null}
+      {tab === 'analysis' ? <AnalysisTab room={room} act={act} busy={panelBusy(tab)} /> : null}
+      {tab === 'offer' ? <OfferTab room={room} act={act} busy={panelBusy(tab)} /> : null}
       {tab === 'funding' ? <><DistributionNotice distribution={distribution} kind="funding" /><FundingWorkspace deal={room.deal} /></> : null}
-      {tab === 'documents' ? <DocumentsTab room={room} act={act} busy={busy} /> : null}
-      {tab === 'buyers' ? <><DistributionNotice distribution={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={busy} /></> : null}
-      {tab === 'closing' ? <ClosingTab room={room} act={act} busy={busy} /> : null}
+      {tab === 'documents' ? <DocumentsTab room={room} act={act} busy={panelBusy(tab)} /> : null}
+      {tab === 'buyers' ? <><DistributionNotice distribution={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={panelBusy(tab)} /></> : null}
+      {tab === 'closing' ? <ClosingTab room={room} act={act} busy={panelBusy(tab)} /> : null}
       {tab === 'sharing'
         ? <SharingWorkspace deal={deal} buyers={room.buyer_matches}
-                            act={act} busy={busy} /> : null}
+                            act={act} busy={panelBusy(tab)} /> : null}
       {tab === 'audit' ? <AuditTab room={room} /> : null}
     </EvoApp>
   )

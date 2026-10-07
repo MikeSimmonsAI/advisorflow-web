@@ -201,5 +201,16 @@ check("board never submits status 'selected' from the response form",
 css = read(os.path.join(SRC, "components/wholesale-shell.css"))
 check("shell css has a mobile breakpoint", "@media" in css and "max-width" in css)
 
+# 6. deal-room action scoping ------------------------------------------------
+deal = read(os.path.join(SRC, "pages/wholesale/WholesaleDeal.jsx"))
+astate = read(os.path.join(SRC, "pages/wholesale/wsActionState.js"))
+check("deal room has no page-wide busy state", "setBusy" not in deal)
+check("deal room scopes pending per panel", "panelBusy(tab)" in deal and "createActionTracker" in deal)
+check("deal room blocks duplicate mutation synchronously", "tracker.current.begin(k)" in deal)
+check("deal room drops stale loads", "isCurrentLoad(gen)" in deal)
+check("deal room announces outcomes", 'role="status"' in deal and 'role="alert"' in deal)
+check("deal room errors keep reference code", "describeError(errText(e))" in deal)
+check("action state module is pure (no imports)", not re.search(r"^import ", astate, re.M))
+
 print("wholesale ux static: %d passed, %d failed" % (passed, failed))
 sys.exit(1 if failed else 0)
