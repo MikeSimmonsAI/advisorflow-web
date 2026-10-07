@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime
 
-from app.deps import get_db, get_current_user
+from app.deps import get_db, get_current_user, require_tenant_user
 from app.models.models import (
     Lead, Message, Reply, BookingLink, LeadOutcome,
     CadenceState, EmailMessage, User, VoiceCall
@@ -40,7 +40,7 @@ def _fmt(dt: Optional[datetime]) -> Optional[str]:
 def get_lead_timeline(
     lead_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_tenant_user),
 ):
     """
     Full activity log for a lead — all event types in one sorted feed.
@@ -48,9 +48,7 @@ def get_lead_timeline(
     Each event: { id, type, ts, label, body, meta }.
     """
     # Scope check — advisor sees only their org's leads
-    lead = authorized_lead_query(db, current_user).filter(Lead.id == lead_id).first()
-    if not lead:
-        raise HTTPException(404, "Lead not found")
+    lead = load_lead_in_scope(db, current_user, lead_id)
 
     events = []
 
@@ -96,26 +94,11 @@ def get_lead_timeline(
             },
         })
 
-    # ── Inbound SMS (Reply) ──────────────────────────────────────────────
+    # ── Inbound replies (SMS or email, per Reply.source) ─────────────────
+    from app.services.reply_timeline import reply_activity_event
     replies = db.query(Reply).filter(Reply.lead_id == lead_id).all()
     for r in replies:
-        label = "Reply received"
-        if r.is_hot:
-            label = "🔥 Hot reply received"
-        events.append({
-            "id": f"reply-{r.id}",
-            "type": "sms_reply",
-            "ts": _fmt(r.received_at),
-            "label": label,
-            "body": r.body,
-            "meta": {
-                "is_hot": r.is_hot,
-                "hot_reason": r.hot_reason,
-                "classification": str(r.classification) if r.classification else None,
-                "reviewed_at": _fmt(r.reviewed_at),
-                "source": r.source,
-            },
-        })
+        events.append(reply_activity_event(r, _fmt))
 
     # ── Outbound Email (EmailMessage) ────────────────────────────────────
     for e in emails:
