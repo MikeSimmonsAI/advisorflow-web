@@ -131,7 +131,7 @@ def build(comments: Iterable[Dict], runs: Optional[Iterable[Dict]], now: datetim
         last_update = _ts(src.get("created_at"))
         run = runs_by_rid.get(rid)
         commits = _f(fields, "COMMITS")
-        sha = _sha(commits) or (run or {}).get("head_sha", "")[:7]
+        sha = _sha(commits) or ((run or {}).get("head_sha") or "")[:7]
         sha_age = _mins(_ts((run or {}).get("updated_at")), now) if sha and run else None
         status = term[0] if term else None
         out = {

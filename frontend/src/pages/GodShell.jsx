@@ -242,6 +242,8 @@ const NAV = [
   { label: 'System Health',    path: '/god#platform-health',  icon: 'monitor'  },
   { label: 'Background Jobs',    path: '/god/diagnostics/job-runs', icon: 'activity',
     hint: 'Run history for cadence, AI, and review loops' },
+  { label: 'Relay Control Room', path: '/god/relay',            icon: 'cpu',
+    hint: 'Live, evidence-only state of the automatic agent relay' },
   // Moved from LEADS & AUTOMATION: it is a read-only diagnostic (who may be
   // contacted on each channel, and why not). Lead Intelligence links to it.
   { label: 'Qualification Diagnostic', path: '/god/diagnostics/qualification', icon: 'filter',

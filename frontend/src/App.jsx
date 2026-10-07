@@ -222,6 +222,7 @@ const QualificationDiagnostic = lazyPage(() => import('./pages/god/Qualification
 const GodTwilioDiagnostics = lazyPage(() => import('./pages/god/GodTwilioDiagnostics'))
 const GodEmailDiagnostics = lazyPage(() => import('./pages/god/GodEmailDiagnostics'))
 const GodJobRuns = lazyPage(() => import('./pages/god/GodJobRuns'))
+const GodRelayControlRoom = lazyPage(() => import('./pages/god/GodRelayControlRoom'))
 const GodLeadBrowser = lazyPage(() => import('./pages/god/GodLeadBrowser'))
 const LeadIntelligence = lazyPage(() => import('./pages/god/LeadIntelligence'))
 const FeatureEntitlements = lazyPage(() => import('./pages/god/FeatureEntitlements'))
@@ -1309,6 +1310,7 @@ export default function App() {
         <Route path="/god/diagnostics/twilio"    element={<GodRoute><GodModeLayout><GodTwilioDiagnostics /></GodModeLayout></GodRoute>} />
         <Route path="/god/diagnostics/email"     element={<GodRoute><GodModeLayout><GodEmailDiagnostics /></GodModeLayout></GodRoute>} />
         <Route path="/god/diagnostics/job-runs"  element={<GodRoute><GodModeLayout><GodJobRuns /></GodModeLayout></GodRoute>} />
+        <Route path="/god/relay"                 element={<GodRoute><GodModeLayout><GodRelayControlRoom /></GodModeLayout></GodRoute>} />
         <Route path="/god/voice"                 element={<GodRoute><GodModeLayout><GodVoiceConfig /></GodModeLayout></GodRoute>} />
         {/* REPORT-02: platform revenue history — registered BEFORE /god/* catch-all */}
         <Route path="/god/revenue-history"       element={<GodRoute><GodModeLayout><GodRevenueHistory /></GodModeLayout></GodRoute>} />

@@ -41,6 +41,12 @@ def build(comments, runs=None, now_min=10):
 
 
 class RelayStateTests(unittest.TestCase):
+    def test_actions_run_with_null_head_sha(self):
+        runs = [{"id": 7, "relay_run_id": "a", "status": "in_progress", "head_sha": None,
+                 "updated_at": at(2)}]
+        w = build([directive("a", 0), ack("a", 1)], runs)["worker"]
+        self.assertEqual((w["actions_run_id"], w["checkpoint_sha"]), (7, ""))
+
     def test_no_active_worker_is_idle(self):
         out = build([directive("a", 0), ack("a", 1), status("a", "COMPLETED", 5)])
         self.assertEqual(out["worker"]["state"], "idle")
