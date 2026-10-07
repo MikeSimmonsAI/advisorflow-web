@@ -31,4 +31,10 @@ Safe, executable next packets:
 - Not yet done: DB-integration re-import, Step-3 frontend loop re-proof, seller comms safety dependency-free tests, buyer flows, UX audit. Leads.jsx bulk AI generate already reads `reply` (root cause of "AI returned no message"); wholesale_ai.py compose/history still to inspect.
 - Run: python3 -I scripts/wholesale_stdlib_proof.py ; python3 -I scripts/wholesale_matching_proof.py
 
+## Update — relay wholesale-suppression-idempotency-20261007-0007
+- DEFECT FIXED: a wrong-person reply killed the deal and stopped the cadence but left the phone contactable (re-import, other deal, bulk path). apply_seller_reply now writes an org-scoped suppression entry (reason "Wrong number reported by recipient", idempotent, audit event seller.wrong_number); lead is not marked DNC; other tenants untouched.
+- pytest/DB environment is installable (pip install -r requirements.txt pytest). NEW tests/test_wholesale_comms_safety.py: 8 pass (REAL service logic, in-memory SQLite, stubbed provider): wrong-number suppression + cadence stop + replay idempotency + send-boundary refusal for 4 sources; tenant isolation; repeated STOP x3 gives one suppression row, DNC, cadence stopped_dnc, 5 send sources refused; noise after STOP does not resume; wrong-number suppression holds over repeated cadence runs; capacity hold survives 4 retries with provider never reached; replayed cadence touch sent once; reply stops cadence before next step.
+- Regression: 183 passed across comms-safety, cadence engine, wholesale cadence/sms program/flow/guards/seller progress/cross-tenant. Full 487-test baseline not re-run.
+- Not proven: bulk-path and AI-compose bypass beyond the shared send_sms boundary; live provider; deployed auth.
+
 SAFE WHOLESALE WORK REMAINS
