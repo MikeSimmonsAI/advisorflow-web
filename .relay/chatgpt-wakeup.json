@@ -1,10 +1,10 @@
 {
-  "relay_run_id": "sci-finish-first-20261006-2058",
-  "parent_run_id": "wholesale-overnight-unblocked-20261006-2052",
-  "project": "SCI POC Readiness Sprint \u2014 FINISH FIRST",
+  "relay_run_id": "sci-dependency-free-continuation-20261006-2059",
+  "parent_run_id": "sci-finish-first-20261006-2058",
+  "project": "SCI POC Readiness Sprint \u2014 Dependency-Free Continuation",
   "status": "BLOCKED",
   "branch": "sci-program",
-  "timestamp_ct": "2026-10-06 20:58 CT",
+  "timestamp_ct": "2026-10-06 21:02 CT",
   "issue": 1,
-  "status_comment_id": 6029263634
+  "status_comment_id": 6029304636
 }
