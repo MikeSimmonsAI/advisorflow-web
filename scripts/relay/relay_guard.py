@@ -212,11 +212,17 @@ def validate_status(comment: Dict, comments: Iterable[Dict], *, issue: int, issu
 
 def fallback_status(run_id: str, branch: str, started_ct: str, now_ct: str, outcome: str) -> str:
     """The terminal status the workflow posts when Claude ended without one."""
+    if (outcome or "").lower() == "success":
+        blocker = ("Claude action ended successfully but did not post a required terminal status "
+                   "(COMPLETED, BLOCKED, or APPROVAL_REQUIRED). This is a relay protocol failure, "
+                   "not evidence of a product blocker.")
+    else:
+        blocker = "Claude relay action ended before normal completion (step outcome: %s)." % (outcome or "unknown")
     return ("%s\nrelay_run_id: %s\nSTATUS: BLOCKED\nPROJECT: -\nBRANCH: %s\nSTART TIME CT: %s\n"
-            "CURRENT TIME CT: %s\nCOMPLETED: -\nBLOCKERS: Claude relay action failed before normal completion "
-            "(step outcome: %s).\nNEXT RECOMMENDED ACTION: inspect the workflow run/log and resume the same objective "
-            "with a new relay_run_id.\nPRODUCTION IMPACT: none\nDO NOT TOUCH CONFIRMATION: main and production untouched"
-            % (STATUS, run_id, branch, started_ct, now_ct, outcome or "unknown"))
+            "CURRENT TIME CT: %s\nCOMPLETED: -\nBLOCKERS: %s\n"
+            "NEXT RECOMMENDED ACTION: resume the same objective with a new relay_run_id and require a terminal status.\n"
+            "PRODUCTION IMPACT: none\nDO NOT TOUCH CONFIRMATION: main and production untouched"
+            % (STATUS, run_id, branch, started_ct, now_ct, blocker))
 
 
 def needs_fallback(run_id: str, comments: Iterable[Dict], status_actors: List[str]) -> bool:
