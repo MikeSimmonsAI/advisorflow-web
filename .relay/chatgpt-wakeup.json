@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "conversation-history-compose-20261007-1840",
-  "parent_run_id": "vanity-demo-link-integrity-20261007-1836",
-  "project": "EvoSys Pro \u2014 complete conversation history and AI compose reliability",
+  "relay_run_id": "conversation-history-complete-20261007-1844",
+  "parent_run_id": "conversation-history-compose-20261007-1840",
+  "project": "EvoSys Pro \u2014 mixed-channel conversation history closure",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37703484332",
-  "timestamp_ct": "2026-10-07 18:42 CT",
+  "actions_run_id": "37703866660",
+  "timestamp_ct": "2026-10-07 18:46 CT",
   "issue": 1,
-  "status_comment_id": 6049086034
+  "status_comment_id": 6049135850
 }
