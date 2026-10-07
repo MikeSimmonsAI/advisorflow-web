@@ -23,25 +23,33 @@
  */
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { fetchMyContexts, setWorkspaceContext, clearWorkspaceContext,
+import { fetchMyContexts, switchWorkspace, clearWorkspaceContext,
          getWorkspaceContext, setBrandContext, getBrandContext } from '../api/client'
+import { switchTargets } from '../auth/workspaceLanding'
 
-export default function ContextSwitcher({ current = 'back_office' }) {
+// `workspacesOnly`: render only the switch between this person's customer
+// workspaces (used beside WorkspaceAdminMenu, which already owns Back Office).
+export default function ContextSwitcher({ current = 'back_office', workspacesOnly = false }) {
   const [contexts, setContexts] = useState(null)
+  // 'loading' | 'ready' | 'error'. A failed load is NOT "no workspaces": it
+  // keeps its own state so it can say so and offer a retry.
+  const [phase, setPhase] = useState('loading')
+  const [attempt, setAttempt] = useState(0)
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
   const boxRef = useRef(null)
 
   useEffect(function () {
     let live = true
-    fetchMyContexts()
-      .then(function (data) { if (live) setContexts(data) })
-      // A failure here renders NOTHING rather than guessing. A switcher that
-      // falls back to a locally-derived list is exactly the thing this
-      // component exists to not be.
-      .catch(function () { if (live) setContexts(null) })
+    setPhase('loading')
+    fetchMyContexts({ force: attempt > 0 })
+      .then(function (data) { if (live) { setContexts(data); setPhase('ready') } })
+      // A failure never falls back to a locally-derived list - that is exactly
+      // the thing this component exists to not be. It also does not pose as
+      // "no workspaces": it says the list is unavailable and offers a retry.
+      .catch(function () { if (live) { setContexts(null); setPhase('error') } })
     return function () { live = false }
-  }, [])
+  }, [attempt])
 
   useEffect(function () {
     function onDocClick(e) {
@@ -51,11 +59,20 @@ export default function ContextSwitcher({ current = 'back_office' }) {
     return function () { document.removeEventListener('mousedown', onDocClick) }
   }, [])
 
+  if (phase === 'error') {
+    return (
+      <button type="button" className="ctx-switch-btn" role="alert"
+              title="Your workspace list could not be loaded. Click to retry."
+              onClick={function () { setAttempt(attempt + 1) }}>
+        Workspaces unavailable - retry
+      </button>
+    )
+  }
   if (!contexts) return null
 
   const workspaces    = contexts.workspace_contexts || []
   const executives    = contexts.executive_contexts || []
-  const hasBackOffice = !!contexts.has_back_office
+  const hasBackOffice = !!contexts.has_back_office && !workspacesOnly
   const hasExecutive  = executives.length > 0
 
   function enterWorkspace(ws) {
@@ -63,7 +80,7 @@ export default function ContextSwitcher({ current = 'back_office' }) {
     // The selection is stored FIRST so the very next request already carries
     // the header - otherwise the workspace screen's first load would resolve
     // against the previous context and render the wrong tenant for one frame.
-    setWorkspaceContext(ws.organization_id)
+    switchWorkspace(ws.organization_id)
     navigate('/workspace/' + ws.organization_id)
   }
 
@@ -91,12 +108,48 @@ export default function ContextSwitcher({ current = 'back_office' }) {
 
   // ── INSIDE A WORKSPACE ───────────────────────────────────────────────────
   if (current === 'workspace') {
-    if (!hasBackOffice) return null           // a customer's own staff stay put
+    // OTHER workspaces this person holds, from the server's list only. A
+    // customer manager with several memberships and no back office used to get
+    // nothing here and could not move without editing the URL.
+    const others = switchTargets(contexts, getWorkspaceContext())
+    if (!hasBackOffice && others.length === 0) return null   // a customer's own staff stay put
+    if (others.length === 0) {
+      return (
+        <button type="button" className="ctx-switch-btn" onClick={backToOffice}
+                title="Return to the sales back office">
+          ← Back Office
+        </button>
+      )
+    }
     return (
-      <button type="button" className="ctx-switch-btn" onClick={backToOffice}
-              title="Return to the sales back office">
-        ← Back Office
-      </button>
+      <div className="ctx-switch-wrap" ref={boxRef}>
+        <button type="button" className="ctx-switch-btn"
+                aria-haspopup="menu" aria-expanded={open}
+                onClick={function () { setOpen(!open) }}>
+          Switch Workspace <span className="ctx-switch-caret">▾</span>
+        </button>
+        {open && (
+          <div className="ctx-switch-menu" role="menu">
+            {hasBackOffice && (
+              <button type="button" role="menuitem" className="ctx-switch-item"
+                      onClick={backToOffice}>
+                <span className="ctx-switch-item-name">← Back Office</span>
+              </button>
+            )}
+            <div className="ctx-switch-menu-head">Workspaces</div>
+            {others.map(function (ws) {
+              return (
+                <button key={ws.organization_id} type="button" role="menuitem"
+                        className="ctx-switch-item"
+                        onClick={function () { enterWorkspace(ws) }}>
+                  <span className="ctx-switch-item-name">{ws.organization_name}</span>
+                  <span className="ctx-switch-item-role">{ws.role}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
     )
   }
 

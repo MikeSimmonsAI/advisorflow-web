@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation } from '../api/client'
+import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation, getWorkspaceContext } from '../api/client'
 import { isManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
 import { detectTheme, shellTheme, shellThemeSource, productName, BRAND_CONFIG, THEMES } from '../theme.js'
@@ -472,6 +472,10 @@ export default function Layout({ children }) {
   // module off changes what the page may show, so a location switch remounts.
   const workspaceKey = [branding?.organization_id || '',
                         orgContext?.orgId || '',
+                        // The SELECTED workspace remounts the page too: branding
+                        // lags a switch by one fetch, and keying on it alone let
+                        // the previous workspace's page state survive that gap.
+                        getWorkspaceContext() || '',
                         activeLocationId(branding) || ''].join('|')
 
   // WHICH LOCATION THIS PERSON IS WORKING IN. Workspace (location) feature
@@ -1165,7 +1169,7 @@ export default function Layout({ children }) {
                 </select>
               </label>
             )}
-            {vertical ? <WorkspaceAdminMenu /> : <ContextSwitcher current="workspace" />}
+            {vertical ? <><WorkspaceAdminMenu /><ContextSwitcher current="workspace" workspacesOnly /></> : <ContextSwitcher current="workspace" />}
             <NotificationBell />
             {inWholesale && <WholesaleUser user={user} photo={profilePhoto} />}
           </div>

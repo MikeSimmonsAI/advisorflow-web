@@ -305,7 +305,10 @@ import AIWorkforceEmployee from './pages/AIWorkforceEmployee'
 const GodAIWorkforceBuilder = lazyPage(() => import('./pages/god/GodAIWorkforceBuilder'))
 import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
          api, fetchMyContexts, setWorkspaceContext, getWorkspaceContext,
-         clearWorkspaceContext, getBranding } from './api/client'
+         clearWorkspaceContext, getBranding, switchWorkspace, clearBranding,
+         resetInFlightGets } from './api/client'
+import { decideWorkspaceLanding, LANDING_ERROR, LANDING_NONE,
+         LANDING_SINGLE } from './auth/workspaceLanding'
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
 import { roleOf, routeFeatureDenied } from './auth/workspaceAuthority'
@@ -620,7 +623,9 @@ function WorkspaceRoute() {
     // requests, and that burst would carry the previous workspace's header -
     // a wrong-numbers bug, which is worse than an error because it looks fine.
     // Idempotent and guarded, so it is a write at most once per entry.
-    if (getWorkspaceContext() !== organizationId) setWorkspaceContext(organizationId)
+    // switchWorkspace also drops the previous workspace's cached branding,
+    // location and coalesced reads, so none of it renders under this one.
+    if (getWorkspaceContext() !== organizationId) switchWorkspace(organizationId)
     // ProtectedRoute already wraps its children in Layout + ContextBanner; the
     // second banner this used to add was the same banner drawn twice.
     return <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>
@@ -629,7 +634,13 @@ function WorkspaceRoute() {
   if (decision.state === DENIED) {
     // A refused workspace must not leave its id selected - every later request
     // would keep asking for a door the server has closed.
-    if (getWorkspaceContext() === organizationId) clearWorkspaceContext()
+    // Its cached entitlements and coalesced reads go with it: a removed
+    // membership must not leave that customer's data on the screen or in cache.
+    if (getWorkspaceContext() === organizationId) {
+      clearWorkspaceContext()
+      clearBranding()
+      resetInFlightGets()
+    }
     return (
       <Layout>
         <Unauthorized
@@ -668,14 +679,42 @@ function WorkspaceRoute() {
  * office, so there is no header to hang a switcher on yet.
  */
 function WorkspaceSelector() {
-  const { ctx } = useAuthorizedContexts()
+  const { phase, ctx, retry } = useAuthorizedContexts()
   const navigate = useNavigate()
   if (!isAuthenticated()) return <Navigate to="/login" replace />
-  if (!ctx) return null
-  const workspaces = ctx.workspace_contexts || []
-  if (workspaces.length === 1) {
-    return <Navigate to={'/workspace/' + workspaces[0].organization_id} replace />
+  const landing = decideWorkspaceLanding(phase, ctx)
+  // Unknown renders nothing definite: not an empty list, not "no access".
+  if (landing.kind === 'loading') return null
+  if (landing.kind === LANDING_ERROR) {
+    return (
+      <div style={{ maxWidth: 520, margin: '12vh auto', padding: '0 24px' }} role="alert">
+        <h1 style={{ fontSize: 22, marginBottom: 4 }}>We couldn't load your workspaces</h1>
+        <p style={{ opacity: 0.65, marginTop: 0, fontSize: 14 }}>
+          This is a connection or server problem, not a decision about your
+          access. Nothing has been changed.
+        </p>
+        <button type="button" className="btn btn--ghost" onClick={retry}>Try again</button>
+      </div>
+    )
   }
+  if (landing.kind === LANDING_NONE) {
+    return (
+      <div style={{ maxWidth: 520, margin: '12vh auto', padding: '0 24px' }}>
+        <h1 style={{ fontSize: 22, marginBottom: 4 }}>No workspace access yet</h1>
+        <p style={{ opacity: 0.65, marginTop: 0, fontSize: 14 }}>
+          You're signed in, but this account isn't a member of any workspace.
+          Ask an administrator of the organization you work with to invite you.
+        </p>
+        {(landing.hasBackOffice || landing.hasExecutive) && (
+          <Navigate to="/" replace />
+        )}
+      </div>
+    )
+  }
+  if (landing.kind === LANDING_SINGLE) {
+    return <Navigate to={'/workspace/' + landing.workspace.organization_id} replace />
+  }
+  const workspaces = landing.workspaces
   return (
     <div style={{ maxWidth: 520, margin: '12vh auto', padding: '0 24px' }}>
       <h1 style={{ fontSize: 22, marginBottom: 4 }}>Choose a workspace</h1>
@@ -687,7 +726,7 @@ function WorkspaceSelector() {
           <button
             key={w.organization_id}
             onClick={() => {
-              setWorkspaceContext(w.organization_id)
+              switchWorkspace(w.organization_id)
               navigate('/workspace/' + w.organization_id)
             }}
             style={{

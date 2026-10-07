@@ -11,6 +11,7 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflo
 // survive the rename without being logged out.
 
 import { orgOverrideFor } from '../auth/routeAuthority'
+import { isStaleForWorkspace } from '../auth/workspaceLanding'
 import { applyWorkspaceTheme } from '../theme.js'
 const KEY_TOKEN    = 'af_token'
 const KEY_USER     = 'af_user'
@@ -586,6 +587,12 @@ export function stopRefreshLoop() {
  */
 export async function fetchAndStoreBranding({ applyTheme = true,
                                               asCustomer = null } = {}) {
+  // THE WORKSPACE THIS ANSWER WAS ASKED FOR. If the person switches workspace
+  // while it is in flight, the answer is the previous workspace's and must not
+  // overwrite the cache or repaint the page. (`asCustomer` is the operator's
+  // explicit entry call, scoped by its own argument, so it is exempt.)
+  const askedFor = getWorkspaceContext()
+  const superseded = () => !asCustomer && isStaleForWorkspace(askedFor, getWorkspaceContext())
   try {
     // Primary source: per-org branding set by god_admin in Command Center.
     //
@@ -594,6 +601,7 @@ export async function fetchAndStoreBranding({ applyTheme = true,
     // entering a customer reads this while still standing on /god. See the
     // `asCustomer` block in request().
     const data = await api.get('/branding/org', { skipRedirect: true, asCustomer })
+    if (superseded()) return getBranding()
     const branding = {
       brand_name: data.brand_name || null,
       brand_logo_url: data.brand_logo_url || null,
@@ -634,6 +642,7 @@ export async function fetchAndStoreBranding({ applyTheme = true,
     // Fall back to org-settings for backward compat
     try {
       const data = await api.get('/org-settings/', { skipRedirect: true, asCustomer })
+      if (superseded()) return getBranding()
       const branding = {
         brand_name: data.brand_name || data.name || null,
         brand_logo_url: data.brand_logo_url || null,
@@ -818,6 +827,25 @@ export function getWorkspaceContext() {
 
 export function clearWorkspaceContext() {
   localStorage.removeItem(WORKSPACE_CONTEXT_KEY)
+}
+
+/**
+ * MOVE TO A DIFFERENT CUSTOMER WORKSPACE WITHOUT CARRYING THE LAST ONE ALONG.
+ *
+ * Setting the id alone left the previous workspace's cached branding (an
+ * allow-list), its selected location and any coalesced in-flight reads in
+ * place, so the first frames of the new workspace rendered the old one's
+ * entitlements. Everything workspace-scoped is dropped here, then the new id is
+ * stored first so the very next request carries it. A no-op when the target is
+ * already selected. Still only a selection: the server re-checks membership.
+ */
+export function switchWorkspace(organizationId) {
+  if (!organizationId) return
+  if (getWorkspaceContext() === organizationId) return
+  clearBranding()
+  clearWorkspaceLocation()
+  resetInFlightGets()
+  setWorkspaceContext(organizationId)
 }
 
 // THE SERVER BUILDS THIS LIST. The browser renders it and invents nothing:
