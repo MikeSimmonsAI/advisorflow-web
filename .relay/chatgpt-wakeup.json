@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "wholesale-dependency-free-buyers-ux-20261007-0018",
-  "parent_run_id": "wholesale-full-baseline-buyers-ux-20261007-0016",
-  "project": "EvoSys Wholesale Overnight \u2014 dependency-free buyers, closing, send paths, and UX",
+  "relay_run_id": "wholesale-regression-ux-proof-20261007-0025",
+  "parent_run_id": "wholesale-dependency-free-buyers-ux-20261007-0018",
+  "project": "EvoSys Wholesale Overnight \u2014 regression tests, operator UX, and migration safety",
   "status": "COMPLETED",
   "branch": "wholesale-nightly",
-  "actions_run_id": "37575712595",
-  "timestamp_ct": "2026-10-07 00:24 CT",
+  "actions_run_id": "37576336405",
+  "timestamp_ct": "2026-10-07 00:30 CT",
   "issue": 1,
-  "status_comment_id": 6031571862
+  "status_comment_id": 6031637576
 }
