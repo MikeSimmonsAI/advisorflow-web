@@ -424,6 +424,107 @@ def _():
     eq(rc.verdict(bad)["status"], "BLOCKED")
 
 
+# ── Dependency-free gap coverage (continuation run) ─────────────────────────
+@scenario("webhook-url", "proxy reconstruction: forwarded proto+host, host-only https, configured base, raw URL, deduped")
+def _():
+    h = {"x-forwarded-proto": "https", "x-forwarded-host": "api.example.invalid", "host": "10.0.0.1:10000"}
+    got = tsig.candidate_urls("/sms/in", "a=1", h, "https://base.example.invalid/", "http://10.0.0.1:10000/sms/in?a=1")
+    eq(got, ["https://api.example.invalid/sms/in?a=1", "https://base.example.invalid/sms/in?a=1",
+             "http://10.0.0.1:10000/sms/in?a=1"])
+    eq(tsig.candidate_urls("/x", "", {"host": "h.invalid"}, None, "http://h.invalid/x"),
+       ["https://h.invalid/x", "http://h.invalid/x"])
+
+
+@scenario("webhook-url", "comma-chained forwarded headers use the first hop only")
+def _():
+    h = {"x-forwarded-proto": "https, http", "x-forwarded-host": "a.invalid, b.invalid"}
+    eq(tsig.candidate_urls("/p", "", h, None, "http://z/p")[0], "https://a.invalid/p")
+
+
+@scenario("webhook-url", "signature signed over https verifies behind an http-reporting proxy; http-signed does not match wrong host")
+def _():
+    tok, params = "run-local-" + ws.new_token(), {"From": "+12055550111", "Body": "hi"}
+    h = {"x-forwarded-proto": "https", "x-forwarded-host": "api.example.invalid"}
+    cands = tsig.candidate_urls("/sms/in", "", h, None, "http://10.0.0.1/sms/in")
+    good = tsig.compute_signature(tok, "https://api.example.invalid/sms/in", params)
+    eq(tsig.signature_matches(tok, cands, params, good), True)
+    evil = tsig.compute_signature(tok, "https://attacker.invalid/sms/in", params)
+    eq(tsig.signature_matches(tok, cands, params, evil), False)
+    eq(tsig.signature_matches(tok, cands, dict(params, Body="x"), good), False)
+    eq(tsig.signature_matches("other-" + tok, cands, params, good), False)
+
+
+@scenario("webhook-url", "twilio_security and voice guard fail closed in source (no pass-through return on missing token/signature)")
+def _():
+    src = open(os.path.join(ROOT, "app/utils/twilio_security.py"), encoding="utf-8").read()
+    tree = ast.parse(src)
+    for fn in tree.body:
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name in (
+                "verify_signature_or_403", "validate_twilio_webhook"):
+            for node in ast.walk(fn):
+                if isinstance(node, ast.If) and ast.unparse(node.test) in ("not auth_token", "not token", "not twilio_sig"):
+                    kinds = [type(b).__name__ for b in node.body]
+                    assert kinds and kinds[-1] == "Raise", (fn.name, ast.unparse(node.test), kinds)
+
+
+def _load_voice_guard():
+    """Import telephony_webhook_guard with fastapi stubbed (no real dependency)."""
+    import importlib.util
+    import types
+
+    class HTTPException(Exception):
+        def __init__(self, status_code, detail=None):
+            self.status_code, self.detail = status_code, detail
+    saved = {k: sys.modules.get(k) for k in ("fastapi",)}
+    stub = types.ModuleType("fastapi")
+    stub.HTTPException, stub.Request = HTTPException, object
+    sys.modules["fastapi"] = stub
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "_tg_stub", os.path.join(ROOT, "app/services/telephony_webhook_guard.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        if saved["fastapi"] is None:
+            sys.modules.pop("fastapi", None)
+        else:
+            sys.modules["fastapi"] = saved["fastapi"]
+    return mod, HTTPException
+
+
+@scenario("cross-org", "voice guard: tenant-signed request cannot act on another org; no-org tenant fails closed")
+def _():
+    mod, HTTPException = _load_voice_guard()
+    V = mod.VerifiedVoiceRequest
+    mod.assert_org_matches(V({}, "AC1", "org-A", False), "org-A")
+    mod.assert_org_matches(V({}, "AC1", "org-A", False), None)
+    mod.assert_org_matches(V({}, "ACp", None, True), "org-B")
+
+    def denied(v, org):
+        try:
+            mod.assert_org_matches(v, org)
+        except HTTPException as e:
+            return e.status_code
+        return None
+    eq(denied(V({}, "AC1", "org-A", False), "org-B"), 403)
+    eq(denied(V({}, "AC1", None, False), "org-B"), 403)
+    eq(denied(V({}, "AC1", "", False), "org-B"), 403)
+
+
+@scenario("cross-org", "voice guard verifies the tenant-token signature before returning a verified request; platform fallback present")
+def _():
+    src = open(os.path.join(ROOT, "app/services/telephony_webhook_guard.py"), encoding="utf-8").read()
+    assert src.index("verify_signature_or_403(request, resolved.auth_token") < src.index("return VerifiedVoiceRequest(params, account_sid, org_id")
+    assert "await validate_twilio_webhook(request)" in src
+
+
+@scenario("no-auto-send", "voice/sms webhook guards and signature modules import no send/AI surface")
+def _():
+    for p in ("app/services/telephony_webhook_guard.py", "app/utils/twilio_security.py"):
+        imps = _imports_of(p)
+        eq({i for i in imps if any(b in i for b in ("sms_service", "email_service", "openai", "ai_gateway", "smtplib"))}, set())
+
+
 # ── runner ───────────────────────────────────────────────────────────────────
 
 def run(md_path=None):

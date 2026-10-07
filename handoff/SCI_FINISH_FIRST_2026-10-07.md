@@ -48,3 +48,21 @@ Rollback: this run changed docs only. Revert this file's commit; code baseline i
 ## What Mike can do next with SCI
 
 Nothing new is proven tonight beyond the 147/147 harness. Mike can have Michael do the first staging login using the checklist above, and can approve or decline the spend and attestation gates. To unblock engineering, either allow dependency install and network on the relay runner or run the listed commands on a prepared machine, then re-issue this directive.
+
+## Continuation run sci-dependency-free-continuation-20261006-2059 (static + stdlib only)
+
+Newly proven (source inspection plus `python3 -I scripts/sci_readiness_harness.py`): 154 executed, 154 PASS, 0 FAIL (was 147). Seven scenarios added in groups `webhook-url`, `cross-org`, `no-auto-send`:
+
+- Proxy URL reconstruction (`candidate_urls`): forwarded proto+host, host-only https, configured base, raw URL, de-duplication, first hop of comma-chained headers. A signature over an attacker host, tampered params or a wrong token does not verify behind an http-reporting proxy.
+- `twilio_security` rejects with `Raise` on missing token or missing signature (AST check, no pass-through).
+- Voice guard `assert_org_matches` (loaded with fastapi stubbed): tenant-signed request cannot act on another org; tenant account with no org fails closed; platform token is trusted platform-wide as designed.
+- Guards import no SMS/email/AI/SMTP surface.
+
+Defects found: none. No application code changed.
+
+First-login checklist corrections (source: `frontend/src/App.jsx` lines 486, 675-680, 1214; `Layout.jsx:67`; `program_router.py:972-986`):
+- `/sci` is the SCI front door, not the workspace itself. It selects the SCI workspace for a user whose context list contains it, then opens Program Center at `/program` (nav label Family Service Center). Step 3 should read: go to `/sci`; expect to be taken to `/program`.
+- Launch Readiness tab reads `GET /program/readiness-test` (manager or observer). Pressing run is `POST /program/readiness-test/run`, manager only. Both match the frontend calls.
+- Manager 403 list (`/admin/users`, `/org-settings/*`, `/god/*`) was not re-inspected here; still per `SCI_MANAGER_ROLE_RESULTS.md`.
+
+Still UNVERIFIED: pytest/DB/FastAPI route tests, frontend install/build, deployed or authenticated staging, mailbox provider, Michael's login. Verdicts unchanged. Rollback: revert this run's commit; code baseline 088eb42.
