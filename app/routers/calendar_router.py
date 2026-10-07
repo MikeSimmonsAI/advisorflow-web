@@ -884,6 +884,20 @@ def confirm_booking(req: BookingConfirmRequest, db: Session = Depends(get_db)):
     if not booking:
         raise HTTPException(status_code=404, detail="Booking link not found or expired")
 
+    # Terminal states stay terminal: a cancelled/expired link must not be
+    # silently re-booked by a late or replayed request.
+    if booking.status in ("cancelled", "expired"):
+        raise HTTPException(status_code=409, detail="Booking is %s and cannot be confirmed" % booking.status)
+    # A repeat of an already-confirmed request must not insert a second calendar
+    # event (orphaning the first) or resend the confirmation messages.
+    if booking.status in ("booked", "confirmed") and booking.calendar_event_id:
+        same_time = (booking.booked_time is not None
+                     and booking.booked_time == req.booked_datetime.replace(tzinfo=None))
+        if not same_time:
+            raise HTTPException(status_code=409, detail="Booking is already confirmed for a different time")
+        return {"success": True, "event_id": booking.calendar_event_id, "event_link": None,
+                "already_confirmed": True}
+
     result = create_calendar_event_for_booking(db, booking, req.booked_datetime, req.duration_minutes)
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["error"])

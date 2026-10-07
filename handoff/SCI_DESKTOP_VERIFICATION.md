@@ -13,6 +13,19 @@ commit that adds this file (see `git log -1`).
   as 11 digits) but remain unexecuted. It now has 7 tests: login/token, uniform refusal,
   token required, suppression idempotent + normalised, invalid phone 422, suppression
   workspace isolation, booking-cancel persistence + repeat request + no send.
+- `tests/test_sci_inbound_booking_flows.py` (new, **never executed**) has 7 tests:
+  `test_poll_now_routes_a_reply_to_the_emailed_workspace_only_and_replays_safely`,
+  `test_poll_now_is_platform_owner_only`,
+  `test_confirm_booking_persists_and_hands_off_without_sending`,
+  `test_confirm_booking_repeat_is_idempotent_and_never_double_books`,
+  `test_confirm_booking_cannot_revive_a_cancelled_booking`,
+  `test_confirm_booking_without_a_connected_calendar_changes_nothing`,
+  `test_other_workspace_cannot_cancel_a_confirmed_booking`. Only the Graph fetch and the
+  Google calendar client are faked. **Product defect fixed with it:** `POST
+  /calendar/confirm-booking` (app/routers/calendar_router.py) had no repeat or terminal-state
+  guard (a repeat inserted a second calendar event and resent confirmations; a cancelled
+  booking could be re-booked). It now returns 409 for cancelled/expired links, the existing
+  event for a same-time repeat, and 409 for a different-time repeat.
 - `scripts/sci_desktop_verify.ps1` was reworked (own venv `.venv-sci-verify`, provider and
   DB variables scrubbed, dependent steps BLOCKED not passed, output redacted); it has not
   been run or even PowerShell-parsed on the relay (pwsh execution was not permitted).
@@ -60,7 +73,8 @@ Use a local SQLite or throwaway DB, never a hosted one.
 ## Outstanding checklist
 - [ ] Script steps 2-8 all pass; fix failures on `sci-program`
 - [ ] Synthetic flows file passes (login, workspace isolation, suppression)
-- [ ] Remaining gap: email reply routing to the right workspace as one synthetic flow (test_inbound_mailbox.py covers parts); a real-service booking-confirm test that does not mock the calendar provider
+- [ ] `python -m pytest tests/test_sci_inbound_booking_flows.py tests/test_calendar_router.py tests/test_inbound_mailbox.py -q` passes (inbound routing + booking-confirm; the script's synthetic step should also run this file)
+- [ ] Next gap: the public booking path (`public_booking_router`) confirmation + no-send, and `/calendar/booking-confirmed` webhook repeat safety (same unguarded pattern; not yet tested)
 - [ ] Browser walk of the Launch Readiness tab
 - [ ] Staging and provider evidence (owner-gated: Twilio/A2P, carrier, spend, real contacts)
 
