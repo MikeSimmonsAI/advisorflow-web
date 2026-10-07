@@ -48,6 +48,7 @@ from app.services.workforce import model_router
 from app.services.workforce import performance
 from app.services.workforce import policy as wf_policy
 from app.services.workforce import queue as wf_queue
+from app.services.workforce import run_evidence
 from app.services.workforce import tools as wf_tools
 
 _log = logging.getLogger(__name__)
@@ -61,28 +62,66 @@ def _lead_for(db: Session, item: AIWorkItem) -> Optional[Lead]:
                     Lead.organization_id == item.organization_id).first())
 
 
+STAGE_MAX = 80
+
+
+def _now() -> datetime:
+    return datetime.utcnow()
+
+
 def _start_run(db: Session, employee: AIEmployee, item: Optional[AIWorkItem],
-               *, objective: str, mode: str, trigger: str) -> AIEmployeeRun:
+               *, objective: str, mode: str, trigger: str,
+               lease_seconds: Optional[int] = None) -> AIEmployeeRun:
+    t = _now()
     run = AIEmployeeRun(
         organization_id=employee.organization_id, employee_id=employee.id,
         work_item_id=getattr(item, "id", None), objective=objective[:2000],
         trigger=trigger, mode=mode, status="running",
-        model_capability=model_router.PLAN)
+        model_capability=model_router.PLAN,
+        started_at=t, last_heartbeat_at=t, current_stage="started",
+        lease_seconds=int(lease_seconds) if lease_seconds else None)
     db.add(run)
     db.flush()
     performance.bump(db, employee, "runs")
     return run
 
 
+def _heartbeat(db: Session, run: AIEmployeeRun, stage: str) -> bool:
+    """Refresh liveness at a real execution boundary. NEVER raises.
+
+    Policy: only a run still `running` with no `ended_at` is touched, so a
+    terminal row is never revived; `stage` is redacted and bounded before it is
+    stored. The write is a SAVEPOINT flush: a failure rolls back only the
+    heartbeat, is logged, and the run carries on (no retry of the work, no
+    success claimed). NOTE: the runtime never commits; the heartbeat is
+    visible to other sessions only when the caller commits.
+    """
+    if run is None or run.status != "running" or run.ended_at is not None:
+        return False
+    try:
+        with db.begin_nested():
+            run.last_heartbeat_at = _now()
+            run.current_stage = run_evidence.redact(stage, STAGE_MAX)
+            db.flush()
+        return True
+    except Exception:                                        # noqa: BLE001
+        _log.warning("workforce runtime: heartbeat not recorded for run %s",
+                     getattr(run, "id", "?"), exc_info=True)
+        return False
+
+
 def _finish_run(db: Session, run: AIEmployeeRun, status: str, *,
                 summary: str = "", abort_reason: Optional[str] = None,
                 error: Optional[str] = None, started: float = 0.0) -> None:
+    t = _now()
     run.status = status
-    run.ended_at = datetime.utcnow()
+    run.ended_at = t
+    run.last_heartbeat_at = t
+    run.current_stage = status
     run.duration_ms = int((_time.time() - started) * 1000) if started else None
-    run.summary = (summary or "")[:4000] or None
-    run.abort_reason = (abort_reason or "")[:255] or None
-    run.error = (error or "")[:255] or None
+    run.summary = run_evidence.redact(summary or "", 4000)
+    run.abort_reason = run_evidence.redact(abort_reason or "", 255)
+    run.error = run_evidence.redact(error or "", 255)
     db.flush()
 
 
@@ -254,7 +293,8 @@ def execute(db: Session, employee: AIEmployee, item: AIWorkItem, *,
                  or (pol.template.default_objective if pol.template else "")
                  or "work this record toward a legitimate outcome")
     run = _start_run(db, employee, item, objective=objective,
-                     mode=resolved.state, trigger=trigger)
+                     mode=resolved.state, trigger=trigger,
+                     lease_seconds=max_seconds)
 
     ctx = wf_tools.ToolContext(db, employee, policy=pol, work_item=item,
                                run=run, claim_token=claim_token,
@@ -275,6 +315,7 @@ def execute(db: Session, employee: AIEmployee, item: AIWorkItem, *,
                     "iterations": 0, "observations": [],
                     "ended_because": "eligibility"}
 
+        _heartbeat(db, run, "eligibility checked")
         if item.state == C.ELIGIBLE:
             wf_queue.transition(db, item, C.WORKING, reason="run started",
                                 actor_kind=C.ACTOR_AI_EMPLOYEE,
@@ -302,6 +343,7 @@ def execute(db: Session, employee: AIEmployee, item: AIWorkItem, *,
                 ended_because = "stopped"
                 break
 
+            _heartbeat(db, run, "planning turn %d" % (turn + 1))
             context = _build_context(db, employee, item, lead, objective,
                                      observations)
             proposal = model_router.plan(model_router.PLAN, context,
@@ -347,7 +389,10 @@ def execute(db: Session, employee: AIEmployee, item: AIWorkItem, *,
                 continue
             seen.add(signature)
 
+            _heartbeat(db, run, "running tool %s" % proposal.tool)
             result = wf_tools.invoke(ctx, proposal.tool, proposal.arguments)
+            _heartbeat(db, run, "tool %s %s" % (
+                proposal.tool, "done" if result.ok else "refused"))
             # THE OBSERVATION CARRIES THE STRUCTURED RESULT, not only a
             # rendering of it. A planner that is handed "availability_status:
             # ok, 12 slots" as a truncated string cannot then book one of them,

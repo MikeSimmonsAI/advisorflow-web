@@ -393,6 +393,15 @@ class AIEmployeeRun(Base):
     summary = Column(Text, nullable=True)
     error = Column(String, nullable=True)
 
+    # LIVENESS EVIDENCE (additive, nullable; old rows keep NULL = "unknown").
+    # Written ONLY by runtime._start_run / _heartbeat at real execution
+    # boundaries. `lease_seconds` is the wall-clock bound the run was started
+    # with (execute(max_seconds=...)); no heartbeat for longer than that means
+    # the writer is gone. No progress/ETA column exists because nothing writes one.
+    last_heartbeat_at = Column(DateTime, nullable=True)
+    current_stage = Column(String, nullable=True)   # short, redacted, bounded
+    lease_seconds = Column(Integer, nullable=True)
+
 
 class AIToolExecution(Base):
     """Every attempt to use a tool — INCLUDING THE REFUSALS.

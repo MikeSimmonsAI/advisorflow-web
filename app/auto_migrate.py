@@ -1468,6 +1468,10 @@ COLUMNS_TO_ADD = [
     ("leads", "pipeline_lost_at", "TIMESTAMP"),
     ("leads", "pipeline_lost_reason", "VARCHAR"),
     ("leads", "enrolled_at", "TIMESTAMP"),
+    # ── AI Workforce run liveness (2026-10-07): heartbeat / stage / lease ──
+    ("ai_employee_runs", "last_heartbeat_at", "TIMESTAMP"),
+    ("ai_employee_runs", "current_stage", "VARCHAR"),
+    ("ai_employee_runs", "lease_seconds", "INTEGER"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.

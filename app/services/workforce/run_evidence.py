@@ -34,10 +34,16 @@ STATE_MAP = {
 TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "skipped"})
 ACTIVE_STATES = frozenset({"queued", "accepted", "running"})
 
-# A run whose only evidence is "started, never ended" is called stale only
-# after this long. runtime.DEFAULT_RUN_SECONDS is 120; 15 minutes is far past
-# any bounded run, so crossing it means the writer died without finishing.
+# LEGACY FALLBACK ONLY: a run with NO recorded heartbeat (rows written before
+# liveness columns existed) whose only evidence is "started, never ended" is
+# called stale after this long. It is an inference and is labelled as one.
 STALE_AFTER = timedelta(minutes=15)
+# A run WITH a heartbeat is stale when the last heartbeat is older than its
+# recorded lease_seconds, else this default (= constants.DEFAULT_RUN_SECONDS).
+DEFAULT_LEASE_SECONDS = 120
+LIVENESS_HEARTBEAT = "heartbeat"
+LIVENESS_LEGACY = "started_at_legacy"
+STAGE_MAX = 80
 
 SUMMARY_MAX = 280
 LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX = 50, 200
@@ -82,6 +88,46 @@ def _iso(dt: Optional[datetime]) -> Optional[str]:
     return None if dt is None else dt.isoformat() + "Z"   # DB stores naive UTC
 
 
+def assess_liveness(*, state: str, started: Optional[datetime],
+                    ended: Optional[datetime],
+                    heartbeat: Optional[datetime],
+                    lease_seconds: Optional[int],
+                    now: datetime) -> Dict[str, Any]:
+    """Is an active run still alive? Returns stale / source / reason / lease.
+
+    Terminal (or ended) runs are never stale. With a heartbeat, staleness is
+    now - heartbeat > lease (recorded, else default); a fresh heartbeat
+    prevents a hung verdict however old started_at is. With NO heartbeat the
+    legacy started_at rule applies and `source` says so. Nothing recorded and
+    nothing to infer from -> not stale, source None (honestly unknown).
+    """
+    out = {"stale": False, "source": None, "reason": None,
+           "stale_after_seconds": None, "lease_seconds": None}
+    if is_terminal(state) or ended is not None or state != "running":
+        return out
+    lease = None
+    if isinstance(lease_seconds, int) and lease_seconds > 0:
+        lease = lease_seconds
+        out["lease_seconds"] = lease
+    if heartbeat is not None:
+        eff = lease or DEFAULT_LEASE_SECONDS
+        out["source"] = LIVENESS_HEARTBEAT
+        age = (now - heartbeat).total_seconds()
+        if age > eff:
+            out.update(stale=True, stale_after_seconds=eff,
+                       reason="No heartbeat for %d s (lease %d s%s)"
+                       % (int(age), eff, "" if lease else ", default"))
+        return out
+    if started is not None:
+        out["source"] = LIVENESS_LEGACY
+        if now - started > STALE_AFTER:
+            secs = int(STALE_AFTER.total_seconds())
+            out.update(stale=True, stale_after_seconds=secs,
+                       reason="No heartbeat recorded; started over %d min ago "
+                              "with no end (legacy inference)" % (secs // 60))
+    return out
+
+
 def shape_run(run: Any, *, job_label: Optional[str] = None,
               now: Optional[datetime] = None,
               superseded_by: Optional[str] = None) -> Dict[str, Any]:
@@ -93,16 +139,23 @@ def shape_run(run: Any, *, job_label: Optional[str] = None,
 
     if is_terminal(state):
         superseded_by = None      # terminal history is never rewritten
-    stale = False
-    if (state == "running" and ended is None and started is not None
-            and now - started > STALE_AFTER):
-        stale = True
+    heartbeat = _naive_utc(getattr(run, "last_heartbeat_at", None))
+    lease_raw = getattr(run, "lease_seconds", None)
+    live = assess_liveness(
+        state=state, started=started, ended=ended, heartbeat=heartbeat,
+        lease_seconds=lease_raw if isinstance(lease_raw, int) else None,
+        now=now)
+    stale = live["stale"]
     if state == "stale":
         stale = True
     # A newer run on the same work item exists, so this one can no longer be
     # the live one. Reported as stale evidence, not as an invented outcome.
     if superseded_by and state in ACTIVE_STATES:
         stale = True
+        live["reason"] = live["reason"] or (
+            "A later run on the same work item exists")
+    if state == "stale" and not live["reason"]:
+        live["reason"] = "Recorded as stale by the source"
 
     out: Dict[str, Any] = {
         "run_id": run.id,
@@ -113,16 +166,22 @@ def shape_run(run: Any, *, job_label: Optional[str] = None,
         "source_state": getattr(run, "status", None),
         "terminal": is_terminal(state),
         "stale": stale,
-        "stale_after_seconds": (int(STALE_AFTER.total_seconds())
-                                if stale else None),
+        "stale_after_seconds": live["stale_after_seconds"],
+        "stale_reason": live["reason"],
         "superseded_by": superseded_by,
         "mode": getattr(run, "mode", None),
         "simulated": getattr(run, "mode", None) == "simulation",
         "trigger": getattr(run, "trigger", None),
         "started_at": _iso(started),
-        "updated_at": _iso(ended or started),
+        "updated_at": _iso(ended or heartbeat or started),
         "ended_at": _iso(ended),
         "evidence": {"kind": "run_record", "source": "ai_employee_runs"},
+        "last_heartbeat_at": _iso(heartbeat),
+        "stage": (redact(getattr(run, "current_stage", None), STAGE_MAX)
+                  if isinstance(getattr(run, "current_stage", None), str)
+                  else None),
+        "lease_seconds": live["lease_seconds"],
+        "liveness_source": live["source"],
         "checkpoint_summary": redact(getattr(run, "summary", None)),
         "ended_because": redact(getattr(run, "abort_reason", None), 120),
         "failure_summary": redact(getattr(run, "error", None), 160),
@@ -154,7 +213,8 @@ def apply_lineage(shaped: List[Dict[str, Any]]) -> None:
                     > (r.get("started_at") or "")):
                 r["superseded_by"] = later["run_id"]
                 r["stale"] = True
-                r["stale_after_seconds"] = int(STALE_AFTER.total_seconds())
+                r["stale_reason"] = r.get("stale_reason") or (
+                    "A later run on the same work item exists")
 
 
 def split_current_history(shaped: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
