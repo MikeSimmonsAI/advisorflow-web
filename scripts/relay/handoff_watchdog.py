@@ -21,6 +21,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 from relay_guard import (
+    ACK,
     DIRECTIVE,
     REVIEW,
     TERMINAL_STATUSES,
@@ -117,7 +118,8 @@ def handled_after(comments, terminal_comment, run_id: str) -> bool:
 
 def main() -> int:
     issue = int(os.environ.get("RELAY_ISSUE") or 1)
-    threshold = int(os.environ.get("HANDOFF_STALE_MINUTES") or 10)\n    run_stale = int(os.environ.get("RUN_STALE_MINUTES") or 50)
+    threshold = int(os.environ.get("HANDOFF_STALE_MINUTES") or 10)
+    run_stale = int(os.environ.get("RUN_STALE_MINUTES") or 50)
     branches = _csv("RELAY_ALLOWED_BRANCHES", "sci-program,wholesale-nightly,platform-dev")
     automation = _csv("RELAY_STATUS_ACTORS", DEFAULT_AUTOMATION)
     actors = _csv("RELAY_AUTHORIZED_ACTORS", "MikeSimmonsAI")
