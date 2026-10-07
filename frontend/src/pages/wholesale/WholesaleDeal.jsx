@@ -17,7 +17,7 @@ import '../../styles/shared.css'
 import './wholesale.css'
 import {
   Band, Empty, ErrorBox, Factors, Score, Sourced, Steps, Warnings,
-  errText, fmtBool, fmtDate, fmtLabel, fmtMoney, fmtNum, fmtWhen, Note, Reads, Standing, Why,
+  errText, fmtBool, fmtDate, fmtLabel, fmtMoney, fmtNum, fmtWhen, Note, Reads, refusalLabel, Standing, Why,
 } from './wsShared'
 import { AuthImage } from './wsFiles'
 import { PropertyWorkspace } from './wsProperty'
@@ -1398,7 +1398,7 @@ function BuyersTab({ room, act, busy }) {
                     <td>{r.buyer_name}</td>
                     <td>
                       <span className={`ws-pill ${r.sent ? 'is-ok' : 'is-dnc'}`}>
-                        {r.sent ? 'sent' : r.code}
+                        {r.sent ? 'Sent' : refusalLabel(r.code)}
                       </span>
                     </td>
                     <td className="ws-muted">

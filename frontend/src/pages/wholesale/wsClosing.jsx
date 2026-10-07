@@ -299,7 +299,10 @@ function Ending({ deal, act, busy }) {
   const [detail, setDetail] = useState('')
 
   const closed = !!deal.closed_at
-  const dead = deal.deal_result === 'closed_lost'
+  // The server refuses to close a deal in Dead (409), so do not offer it.
+  const dead = deal.deal_result === 'closed_lost' || deal.stage === 'dead'
+  // Money is never negative; the server says 400, this just stops the click.
+  const feeInvalid = fee !== '' && !(Number(fee) >= 0)
 
   if (closed) {
     return (
@@ -361,7 +364,14 @@ function Ending({ deal, act, busy }) {
               </label>
               <input id="ws-close-fee" className="ws-input" inputMode="decimal"
                      placeholder="Not collected yet"
+                     aria-invalid={feeInvalid || undefined}
+                     aria-describedby={feeInvalid ? 'ws-close-fee-err' : undefined}
                      value={fee} onChange={(e) => setFee(e.target.value)} />
+              {feeInvalid ? (
+                <span id="ws-close-fee-err" role="alert" className="ws-warn">
+                  Enter a number that is zero or more.
+                </span>
+              ) : null}
             </div>
             <div className="ws-field">
               <label htmlFor="ws-close-date">Closing date</label>
@@ -396,7 +406,7 @@ function Ending({ deal, act, busy }) {
             <span className="ws-actions">
               <button className="btn btn--secondary btn--sm" disabled={busy}
                       onClick={() => setMode(null)}>Cancel</button>
-              <button className="btn btn--primary btn--sm" disabled={busy}
+              <button className="btn btn--primary btn--sm" disabled={busy || feeInvalid}
                       onClick={async () => {
                         const ok = await act(
                           () => api.post(`/wholesale/deals/${deal.id}/close`, {
@@ -483,6 +493,7 @@ function Payment({ deal, act, busy }) {
     amount: '', collected_date: '', method: '', reference: '', note: '',
   })
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }))
+  const amountInvalid = form.amount.trim() !== '' && !(Number(form.amount) >= 0)
 
   const state = deal.payment_state || 'not_closed'
   const checklist = deal.closing_checklist || { missing: [], complete: true }
@@ -573,8 +584,15 @@ function Payment({ deal, act, busy }) {
             <div className="ws-field">
               <label htmlFor="pay-amt">Amount collected</label>
               <input id="pay-amt" className="ws-input" inputMode="decimal"
+                     aria-invalid={amountInvalid || undefined}
+                     aria-describedby={amountInvalid ? 'pay-amt-err' : undefined}
                      value={form.amount}
                      onChange={(e) => set('amount', e.target.value)} />
+              {amountInvalid ? (
+                <span id="pay-amt-err" role="alert" className="ws-warn">
+                  Enter a number that is zero or more.
+                </span>
+              ) : null}
             </div>
             <div className="ws-field">
               <label htmlFor="pay-date">Date it landed</label>
@@ -607,7 +625,7 @@ function Payment({ deal, act, busy }) {
             <button className="btn btn--secondary" disabled={busy}
                     onClick={() => setOpen(false)}>Cancel</button>
             <button className="btn btn--primary"
-                    disabled={busy || form.amount.trim() === ''}
+                    disabled={busy || form.amount.trim() === '' || amountInvalid}
                     onClick={async () => {
                       const done = await act(
                         () => api.post(`/wholesale/deals/${deal.id}/fee-collected`, {

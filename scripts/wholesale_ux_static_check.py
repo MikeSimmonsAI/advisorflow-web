@@ -97,6 +97,37 @@ check("disposition result shows the server's per-buyer reason",
 check("disposition surfaces blocked/failed outcomes",
       re.search(r"blocked|Not sent|failed", deal_jsx) is not None)
 
+# 4b. send refusal codes are worded, not shown raw -------------------------
+shared = read(os.path.join(SRC, "pages/wholesale/wsShared.jsx"))
+disp_py = read(os.path.join(ROOT, "app/services/wholesale_disposition.py"))
+codes = set(re.findall(r'SendRefused\([^()]*?,\s*"([a-z_]+)"\s*\)', disp_py, re.S))
+codes |= set(re.findall(r'"code":\s*"([a-z_]+)"', disp_py))
+codes.discard("sent")  # success, not a refusal
+check("found send refusal codes (got %s)" % sorted(codes), len(codes) >= 6)
+for code in sorted(codes):
+    check("refusal code %r has a plain-language label" % code,
+          re.search(r"\b%s:\s*'" % code, shared) is not None)
+check("disposition result renders refusalLabel(), not the bare code",
+      "refusalLabel(r.code)" in deal_jsx and ": r.code}" not in deal_jsx)
+
+# 4c. buyer-match factors are readable without colour or glyph --------------
+check("match factor marks carry an accessible name",
+      re.search(r"aria-label=\{f\.matched", shared) is not None)
+
+# 4d. closing screen mirrors the server rules --------------------------------
+closing = read(os.path.join(SRC, "pages/wholesale/wsClosing.jsx"))
+check("closing does not offer Close on a deal in Dead (server answers 409)",
+      "deal.stage === 'dead'" in closing)
+check("close fee input blocks and explains a negative value",
+      "feeInvalid" in closing and "ws-close-fee-err" in closing)
+check("collected-amount input blocks and explains a negative value",
+      "amountInvalid" in closing and "pay-amt-err" in closing)
+
+# 4e. every labelled form control in closing has a matching input id ---------
+for label_for in sorted(set(re.findall(r'htmlFor="([^"]+)"', closing))):
+    check("closing label for=%s has an input" % label_for,
+          re.search(r'id="%s"' % re.escape(label_for), closing) is not None)
+
 # 5. light-theme / mobile hooks ---------------------------------------------
 css = read(os.path.join(SRC, "components/wholesale-shell.css"))
 check("shell css has a mobile breakpoint", "@media" in css and "max-width" in css)

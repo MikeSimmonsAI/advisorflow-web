@@ -33,6 +33,26 @@ export function fmtLabel(value, blank = '—') {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
+/* The send path answers with a short machine code per buyer. A person reads
+ * the words, never the code (the full sentence is beside it). */
+const REFUSAL_LABELS = {
+  sandbox: 'Sandbox record',
+  opted_out: 'Opted out',
+  inactive: 'Inactive buyer',
+  suppressed: 'On opt-out list',
+  no_address: 'No contact on file',
+  already_sent: 'Already sent',
+  not_enabled: 'Sending is off',
+  bad_channel: 'Channel not supported',
+  blocked: 'Blocked',
+  provider_error: 'Provider error',
+  refused: 'Not sent',
+}
+
+export function refusalLabel(code) {
+  return REFUSAL_LABELS[code] || fmtLabel(code, 'Not sent')
+}
+
 export function fmtLabels(values, blank = '—') {
   if (!Array.isArray(values) || !values.length) return blank
   return values.map((v) => fmtLabel(v, '')).filter(Boolean).join(', ') || blank
@@ -92,7 +112,10 @@ export function Factors({ factors }) {
       {factors.map((f, i) => (
         <li key={i}>
           <span className={`ws-f-mark ${f.matched === true ? 'ws-f-yes'
-            : f.matched === false ? 'ws-f-no' : 'ws-f-na'}`}>
+            : f.matched === false ? 'ws-f-no' : 'ws-f-na'}`}
+                role="img"
+                aria-label={f.matched === true ? 'Matched'
+                  : f.matched === false ? 'Did not match' : 'Not scored'}>
             {f.matched === true ? '✓' : f.matched === false ? '✕' : '–'}
           </span>
           <span>{f.detail}</span>
