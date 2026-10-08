@@ -79,6 +79,8 @@ const REP_ONLY_NAV = [
 const MANAGER_NAV = [
   { to: '/sales/manager',       label: 'Team Command',      icon: '◎',
     permission: 'view_team_pipeline', end: true },
+  { to: '/sales/approvals',     label: 'Approval Queue',    icon: '✔',
+    permission: 'view_team_pipeline' },
   { to: '/sales/calendar',      label: 'Team Calendar',     icon: '▤',
     permission: 'view_team_pipeline' },
   { to: '/sales/team-pipeline', label: 'Team Pipeline',     icon: '⇉',

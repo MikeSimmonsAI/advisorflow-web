@@ -132,6 +132,72 @@ def decide_approval(request_id: str, body: dict,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# APPROVAL QUEUE (truthful read + versioned decision)
+#
+# `/approvals/queue` is ONE read decision (approval_queue_truth.decide_queue):
+# pending items only, brand-scoped, oldest first, each with a precise blocker
+# when it cannot be answered. Unlike the legacy `/approvals` it performs NO
+# write (no sweep), so a GET never changes state.
+#
+# `/approvals/{id}/decision` requires `expected_version` (409 on mismatch),
+# locks the row, writes nothing on refusal, and treats the same manager's
+# repeat of the same answer as a replay. No send, charge or provider call.
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/approvals/queue")
+def approvals_queue(brand_sales_org_id: str = Query(None),
+                    db: Session = Depends(get_db),
+                    user: User = Depends(require_sales_manager)):
+    from app.models.models import PROPOSAL_EDITABLE_STATUSES
+    from app.services import approval_queue_gather as _g, approval_queue_truth as _t
+    org = _resolve_context(user, db, brand_sales_org_id)
+    if not is_sales_manager(user, db, org.id):
+        raise HTTPException(status_code=403,
+                            detail="Sales manager access required for this brand.")
+    return _t.decide_queue(brand_sales_org_id=org.id, requests=_g.build(db, org.id),
+                           viewer_is_manager=True,
+                           editable_statuses=PROPOSAL_EDITABLE_STATUSES)
+
+
+@router.post("/approvals/{request_id}/decision")
+def decide_approval_versioned(request_id: str, body: dict,
+                              db: Session = Depends(get_db),
+                              user: User = Depends(require_sales_manager)):
+    from app.models.models import PROPOSAL_EDITABLE_STATUSES
+    from app.services import approval_queue_gather as _g, approval_queue_truth as _t
+    if not isinstance(body.get("approve"), bool):
+        raise HTTPException(status_code=400, detail="approve must be true or false.")
+    req = _g.one(db, request_id, lock=True)       # row lock: one decider at a time
+    facts = _g.facts_for(db, [req], _g.user_names(db, [req]))[0] if req else None
+    mgr = bool(req) and (is_god(user) or is_sales_manager(user, db, req.brand_sales_org_id))
+    plan = _t.plan_decision(request=facts,
+                            brand_sales_org_id=req.brand_sales_org_id if req else "",
+                            actor_id=user.id, actor_is_manager=mgr,
+                            approve=body["approve"],
+                            expected_version=body.get("expected_version"),
+                            editable_statuses=PROPOSAL_EDITABLE_STATUSES)
+    out = plan["outcome"]
+    if out == _t.O_NOT_FOUND:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Request not found")
+    if out == _t.O_CONFLICT:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=plan["error"])
+    if out == _t.O_REFUSED:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=plan["error"])
+    if out == _t.O_REPLAY:
+        return {"ok": True, "replay": True, "request_id": req.id, "status": req.status}
+    res = _appr.decide(db, req, user, approve=body["approve"], note=body.get("note"))
+    if not res.get("ok"):
+        db.rollback()                 # refusal leaves no partial write
+        raise HTTPException(status_code=400, detail=res.get("error"))
+    db.commit()
+    return {"ok": True, "replay": False, "applied": res.get("applied", False),
+            "request_id": req.id, "status": req.status}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # PIPELINE FINANCIAL PROJECTION
 #
 # A MANAGER SCREEN, GATED TWICE. `require_sales_manager` proves the caller runs

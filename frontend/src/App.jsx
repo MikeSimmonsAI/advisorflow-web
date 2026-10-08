@@ -199,6 +199,7 @@ const MyDay = lazyPage(() => import('./pages/sales/MyDay'))
 const SellCatalogue = lazyPage(() => import('./pages/sales/SellCatalogue'))
 const MyPipeline = lazyPage(() => import('./pages/sales/MyPipeline'))
 const ManagerCommand = lazyPage(() => import('./pages/sales/ManagerCommand'))
+const ApprovalQueue = lazyPage(() => import('./pages/sales/ApprovalQueue'))
 // Compensation Command Center (management) and My Compensation (a rep's own).
 // Two screens because they are two authorities, not one screen with a flag.
 const SalesShell = lazyPage(() => import('./pages/sales/SalesShell'))
@@ -1038,6 +1039,7 @@ export default function App() {
             own data, never somebody else's. The nav hides them; the server
             enforces them. Those are two different jobs and both are done. */}
         <Route path="/sales/manager" element={<SalesRoute><ManagerCommand /></SalesRoute>} />
+        <Route path="/sales/approvals" element={<SalesRoute><ApprovalQueue /></SalesRoute>} />
         {/* Compensation. SalesRoute is convenience only — /sales/compensation/*
             is gated server-side by manager scope, and settlement by platform
             finance authority, so a rep who types either URL gets a 403 rather
