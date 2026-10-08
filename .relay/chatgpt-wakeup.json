@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "local-invoice-draft-core-20261008-0013",
-  "parent_run_id": "proposal-pricing-ui-integrity-20261008-0008",
-  "project": "EvoSys Pro \u2014 local invoice draft and approval-ready core",
+  "relay_run_id": "local-invoice-draft-ui-20261008-0019",
+  "parent_run_id": "local-invoice-draft-core-20261008-0013",
+  "project": "EvoSys Pro \u2014 local invoice draft workspace UI",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37731308762",
-  "timestamp_ct": "2026-10-08 00:18 CT",
+  "actions_run_id": "37731793005",
+  "timestamp_ct": "2026-10-08 00:22 CT",
   "issue": 1,
-  "status_comment_id": 6052890320
+  "status_comment_id": 6052947116
 }
