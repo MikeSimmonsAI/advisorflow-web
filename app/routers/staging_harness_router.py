@@ -12,6 +12,8 @@ support@evosyspro.live mailbox - without a shell on the staging host.
     POST /god/staging/sci/poll          read the reply mailbox now
     GET  /god/staging/sci/status        the whole chain for the test contact
     POST /god/staging/sci/simulate/{c}  matrix cases that must not touch real mail
+    GET  /god/staging/sci/pool-numbers  the six regional pools: provisioned rows + webhook targets
+    POST /god/staging/sci/pool-numbers  record purchased pool numbers (dry run unless apply=true)
 
 In production STAGING_TEST_HARNESS is never set and every route answers 404.
 Nothing here can email anyone but the test contact; simulations use
@@ -573,7 +575,9 @@ def simulate(case: str, db: Session = Depends(get_db), god: User = Depends(requi
                 "alert_kinds": sorted({a.kind for a in db.query(ProgramAlert).filter(ProgramAlert.response_id == r.id)})}
     if case == "sms_round_trip":
         return _sms_round_trip(db, org, prog, prof)
-    raise HTTPException(status_code=404, detail="Unknown case. Cases: sms_round_trip, normal, active, opt_out, wrong_person, "
+    if case == "pool_round_trip":
+        return _pool_round_trip(db, org, prof)
+    raise HTTPException(status_code=404, detail="Unknown case. Cases: sms_round_trip, pool_round_trip, normal, active, opt_out, wrong_person, "
                         "unknown_sender, wrong_alias, duplicate_inbound, duplicate_outbound, missing_location, "
                         "held_contact, flyer_missing, resend_temporary_failure, mailbox_temporary_failure, "
                         "bounce, sla_escalation")
@@ -631,3 +635,156 @@ def _sms_round_trip(db, org, prog, prof):
                                                              "status": unknown.status},
         "campus_report": [r for r in campuses.plan(db, org.id) if r["campus"] == gardens.campus_key],
     }
+
+
+# ── Regional pool numbers (six local numbers, one per area code) ─────────────
+#
+# A pool number is shared by every campus in its area code and names NO
+# location: workspace_id stays NULL and label is "pool:<pool id>"
+# (app/services/programs/regional_pools.py). Known senders route by contact to
+# their own entity; unknown senders go to the regional review queue.
+
+FICTIONAL_POOL_NUMBER = "+12055550199"   # 555-01xx: reserved for fiction, never routable
+
+
+def _pool_round_trip(db, org, prof):
+    """Inbound text on a SHARED REGIONAL number, through the real inbound handler
+    (process_inbound_sms with called_pool_id, exactly what the Twilio webhook
+    passes for a "pool:" number). No row is created, nothing is sent, alerts are
+    recorded but not delivered. Proves: a known contact texting a pool number is
+    attached to ITS OWN location; an unknown sender goes to the regional review
+    queue with no location; a STOP from an unknown sender is suppressed."""
+    from app.models.models import Reply
+    from app.routers.sms_router import process_inbound_sms
+    from app.services.programs import regional_pools as rp
+    pool = rp.POOLS["205"]
+    home = prof["Eastern Gate Memorial Funeral Home"]
+    lead = db.query(Lead).filter(Lead.organization_id == org.id, Lead.email == "sim.campus@example.com").one()
+    before = db.query(Reply).filter(Reply.lead_id == lead.id).count()
+    sid = "SMpool%s" % uuid.uuid4().hex[:10]
+    stranger, stopper = "+12055550988", "+12055550977"
+    with mock.patch("app.services.programs.responses._deliver_staff_alert",
+                    side_effect=lambda *a, **k: (False, "simulation - not sent")):
+        known = process_inbound_sms(db, org_id=org.id, advisor=None, From="+12055550101",
+                                    Body="Got your text - what times are open next week?", MessageSid=sid,
+                                    called_number=FICTIONAL_POOL_NUMBER, called_location_id=None,
+                                    called_pool_id=pool["pool_id"])
+        unknown = process_inbound_sms(db, org_id=org.id, advisor=None, From=stranger,
+                                      Body="Who is this?", MessageSid=sid + "u",
+                                      called_number=FICTIONAL_POOL_NUMBER, called_location_id=None,
+                                      called_pool_id=pool["pool_id"])
+        stop = process_inbound_sms(db, org_id=org.id, advisor=None, From=stopper,
+                                   Body="STOP", MessageSid=sid + "s",
+                                   called_number=FICTIONAL_POOL_NUMBER, called_location_id=None,
+                                   called_pool_id=pool["pool_id"])
+    resp = (db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id)
+            .order_by(ProgramResponse.created_at.desc()).first())
+    u = (db.query(ProgramUnmatchedReply).filter(ProgramUnmatchedReply.organization_id == org.id,
+                                                ProgramUnmatchedReply.from_address == stranger)
+         .order_by(ProgramUnmatchedReply.created_at.desc()).first())
+    from app.services.compliance_service import is_phone_suppressed
+    stop_suppressed = bool(is_phone_suppressed(db, org.id, stopper))
+    return {
+        "pool": pool,
+        "known_sender": {"result": known,
+                         "reply_attached": db.query(Reply).filter(Reply.lead_id == lead.id).count() - before,
+                         "location_is_contacts_own": bool(resp and resp.location_id == home.location_id),
+                         "class": resp.response_class if resp else None},
+        "unknown_sender": {"result": unknown,
+                           "queued": None if u is None else {"location_id": u.location_id, "alias": u.alias,
+                                                             "status": u.status}},
+        "stop_from_unknown": {"result": stop, "suppressed": stop_suppressed},
+        "sent": 0,
+    }
+
+
+class PoolNumberIn(BaseModel):
+    e164: str
+    sid: Optional[str] = None
+
+
+class PoolNumbersIn(BaseModel):
+    numbers: dict           # area code -> {"e164": "+1...", "sid": "PN..."}
+    apply: bool = False     # dry run unless explicitly true
+
+
+def _pool_targets():
+    base = (os.environ.get("API_BASE_URL") or "").rstrip("/")
+    return {"sms_url": base + "/sms/webhook/inbound", "voice_url": base + "/voice/inbound",
+            "method": "POST", "base_configured": bool(base)}
+
+
+def _staging_only():
+    if (os.environ.get("APP_ENV") or "").strip().lower() != "staging":
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+@router.get("/pool-numbers")
+def pool_numbers(db: Session = Depends(get_db), god: User = Depends(require_god)):
+    _on()
+    _staging_only()
+    from app.models.telephony_models import PhoneNumber
+    from app.services.programs import regional_pools as rp
+    org = _org(db)
+    rows = (db.query(PhoneNumber).filter(PhoneNumber.organization_id == org.id,
+                                         PhoneNumber.label.like(rp.POOL_LABEL_PREFIX + "%")).all())
+    by_pool = {}
+    for r in rows:
+        by_pool.setdefault(r.label[len(rp.POOL_LABEL_PREFIX):], []).append(
+            {"e164": r.e164, "active": r.is_active, "workspace_id": r.workspace_id,
+             "cap_sms": r.cap_sms, "cap_voice_inbound": r.cap_voice_inbound, "cap_voicemail": r.cap_voicemail})
+    return {"targets": _pool_targets(), "backup_toll_free": rp.BACKUP_TOLL_FREE,
+            "pools": [{"area_code": ac, **p, "numbers": by_pool.get(p["pool_id"], []),
+                       "status": "provisioned" if by_pool.get(p["pool_id"]) else "not provisioned"}
+                      for ac, p in rp.POOLS.items()]}
+
+
+def _plan_pool_numbers(db, org, numbers: dict):
+    """Validate every requested pool number; returns (plan, errors). Pure checks + reads."""
+    from app.models.telephony_models import PhoneNumber
+    from app.services.programs import regional_pools as rp
+    plan, errors = [], []
+    for ac, raw in (numbers or {}).items():
+        item = raw if isinstance(raw, dict) else {"e164": raw}
+        e164 = "".join(ch for ch in str(item.get("e164") or "") if ch.isdigit() or ch == "+")
+        pool = rp.pool_for_area_code(str(ac))
+        if pool is None:
+            errors.append({"area_code": ac, "error": "not one of the six SCI pool area codes"})
+            continue
+        if not (e164.startswith("+1") and len(e164) == 12 and e164[2:5] == str(ac)):
+            errors.append({"area_code": ac, "error": "%r is not a +1 %s number" % (e164, ac)})
+            continue
+        if e164 == rp.BACKUP_TOLL_FREE or "555" == e164[5:8]:
+            errors.append({"area_code": ac, "error": "backup toll-free or a fictional 555 number cannot be a pool number"})
+            continue
+        existing = db.query(PhoneNumber).filter(PhoneNumber.e164 == e164).first()
+        label = rp.POOL_LABEL_PREFIX + pool["pool_id"]
+        if existing is not None and (existing.organization_id != org.id or (existing.label or "") != label):
+            errors.append({"area_code": ac, "error": "%s already exists for another org or purpose" % e164})
+            continue
+        plan.append({"area_code": ac, "e164": e164, "sid": item.get("sid"), "pool_id": pool["pool_id"],
+                     "label": label, "action": "unchanged" if existing is not None else "create"})
+    return plan, errors
+
+
+@router.post("/pool-numbers")
+def set_pool_numbers(body: PoolNumbersIn, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Record PURCHASED pool numbers on staging. Never buys, never calls Twilio,
+    never sets workspace_id. Refuses the whole request if any entry is invalid."""
+    _on()
+    _staging_only()
+    from app.models.telephony_models import PhoneNumber
+    org = _org(db)
+    plan, errors = _plan_pool_numbers(db, org, body.numbers)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors, "nothing_written": True})
+    if not body.apply:
+        return {"dry_run": True, "plan": plan, "targets": _pool_targets()}
+    for it in plan:
+        if it["action"] == "create":
+            db.add(PhoneNumber(e164=it["e164"], provider="twilio", provider_sid=it["sid"],
+                               organization_id=org.id, workspace_id=None, label=it["label"],
+                               cap_sms=True, cap_voice_inbound=True, cap_voicemail=True,
+                               cap_voice_outbound=False, is_active=True, created_by_id=god.id))
+    db.commit()
+    return {"dry_run": False, "plan": plan, "targets": _pool_targets()}
