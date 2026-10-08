@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "compensation-stage-filter-stability-20261008-0033",
-  "parent_run_id": "compensation-projection-discovery-20261008-0029",
-  "project": "EvoSys Pro \u2014 compensation stage-filter stability",
+  "relay_run_id": "manager-deal-approval-queue-20261008-0037",
+  "parent_run_id": "compensation-stage-filter-stability-20261008-0033",
+  "project": "EvoSys Pro \u2014 manager deal and pricing approval queue",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37733044797",
-  "timestamp_ct": "2026-10-08 00:36 CT",
+  "actions_run_id": "37733363276",
+  "timestamp_ct": "2026-10-08 00:42 CT",
   "issue": 1,
-  "status_comment_id": 6053124796
+  "status_comment_id": 6053199043
 }
