@@ -138,7 +138,7 @@ class Board(unittest.TestCase):
 
 class RouterContract(unittest.TestCase):
     def test_every_route_god_guarded_and_wired(self):
-        with open(os.path.join(ROOT, "app", "routers", "god_launch_board_router.py")) as f:
+        with open(os.path.join(ROOT, "app", "routers", "god_launch_board_router.py"), encoding="utf-8") as f:
             src = f.read()
         routes = [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)
                   and any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
@@ -147,7 +147,7 @@ class RouterContract(unittest.TestCase):
         self.assertEqual(len(routes), 3)
         for fn in routes:
             self.assertIn("require_god", ast.dump(fn.args), fn.name)
-        with open(os.path.join(ROOT, "app", "main.py")) as f:
+        with open(os.path.join(ROOT, "app", "main.py"), encoding="utf-8") as f:
             self.assertIn("god_launch_board_router", f.read())
 
 
