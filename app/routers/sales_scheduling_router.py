@@ -1121,6 +1121,21 @@ def _push_appointment(db: Session, appt: SalesAppointment, user: User,
     return {"sync": sync_report, "invite": invite_report, "meeting": meeting_report}
 
 
+CALENDAR_EVENT_CAP = 500
+
+
+def _capped_rows(q):
+    """Deterministic page of appointments plus an honest truncation flag.
+
+    Total order is (starts_at, id): two meetings at the same instant must not
+    swap places between requests. One extra row is fetched purely to learn
+    whether the cap omitted anything; it is never returned.
+    """
+    rows = (q.order_by(SalesAppointment.starts_at.asc(), SalesAppointment.id.asc())
+            .limit(CALENDAR_EVENT_CAP + 1).all())
+    return rows[:CALENDAR_EVENT_CAP], len(rows) > CALENDAR_EVENT_CAP
+
+
 @router.get("/appointments")
 def list_appointments(brand_sales_org_id: Optional[str] = Query(None),
                       date_from: Optional[date] = Query(None),
@@ -1149,12 +1164,13 @@ def list_appointments(brand_sales_org_id: Optional[str] = Query(None),
     if not include_cancelled:
         q = q.filter(SalesAppointment.status != APPT_CANCELLED)
 
-    rows = q.order_by(SalesAppointment.starts_at.asc()).limit(500).all()
+    rows, truncated = _capped_rows(q)
     return {"brand_sales_org": {"id": org.id, "name": org.name, "timezone": tz},
             "scope": scope,
             "is_manager": is_sales_manager(user, db, org.id),
             "appointments": [_appt_out(db, a, user) for a in rows],
-            "total": len(rows)}
+            "total": len(rows),
+            "truncated": truncated, "limit": CALENDAR_EVENT_CAP}
 
 
 def _load_appt(db: Session, appt_id: str, user: User) -> SalesAppointment:
@@ -1560,7 +1576,7 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
     if location:
         q = q.filter(SalesAppointment.location.ilike("%" + location + "%"))
 
-    rows = q.order_by(SalesAppointment.starts_at.asc()).limit(500).all()
+    rows, truncated = _capped_rows(q)
 
     # The member filter is applied on participants, which is a join this query
     # deliberately avoids: an appointment matches if ANY selected person is on
@@ -1668,6 +1684,8 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
         "is_manager": manager,
         "appointments": appts,
         "total": len(appts),
+        # True when the cap omitted later events: the list is NOT complete.
+        "truncated": truncated, "limit": CALENDAR_EVENT_CAP,
         "people": people,
         "agenda_today": agenda,
         "attention": attention,

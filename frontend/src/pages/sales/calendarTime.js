@@ -307,7 +307,7 @@ export function placeSpan(startMin, endMin, opts) {
  */
 export function assignLanes(items) {
   const sorted = [...items].sort((a, b) =>
-    (a.startMin - b.startMin) || (b.endMin - a.endMin))
+    (a.startMin - b.startMin) || (b.endMin - a.endMin) || compareIds(a, b))
   const laneEnds = []
   sorted.forEach(it => {
     let lane = laneEnds.findIndex(end => end <= it.startMin)
@@ -367,3 +367,70 @@ export const AV_LEGEND = [
   { kind: 'pto',      label: 'PTO / Time Off' },
   { kind: 'external', label: 'External Calendar (Busy)' },
 ]
+
+// ── deterministic ordering ──────────────────────────────────────────────────
+
+/** Stable tie-break key: the appointment id (matches the server's `id ASC`). */
+function idOf(it) {
+  const v = it && (it.id ?? it.appt?.id)
+  return v == null ? '' : String(v)
+}
+
+function compareIds(a, b) {
+  const x = idOf(a), y = idOf(b)
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
+/** Same total order as the server: starts_at, then id. */
+export function compareAppts(a, b) {
+  const x = String(a?.starts_at || ''), y = String(b?.starts_at || '')
+  return x < y ? -1 : x > y ? 1 : compareIds(a, b)
+}
+
+// ── persisted view state ────────────────────────────────────────────────────
+
+export const CAL_VIEWS = ['day', 'week', 'month', 'agenda']
+export const NARROW_PX = 760
+export const CAL_STATE_KEY = 'af_team_calendar_state'
+
+/** Narrow screens default to Day; desktop keeps Week. */
+export function defaultView(width) {
+  return Number(width) > 0 && Number(width) <= NARROW_PX ? 'day' : 'week'
+}
+
+/** Validate a stored value: unknown views / malformed days are discarded. */
+export function parseViewState(raw) {
+  let o = raw
+  if (typeof raw === 'string') {
+    try { o = JSON.parse(raw) } catch { return {} }
+  }
+  if (!o || typeof o !== 'object') return {}
+  const out = {}
+  if (CAL_VIEWS.includes(o.view)) out.view = o.view
+  if (typeof o.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.day)
+      && ymd(dayFromYmd(o.day)) === o.day) out.day = o.day
+  return out
+}
+
+/** Initial { view, anchor }: validated saved state, else width-based default. */
+export function initialViewState(raw, width, today = new Date()) {
+  const s = parseViewState(raw)
+  return {
+    view: s.view || defaultView(width),
+    anchor: s.day ? dayFromYmd(s.day) : today,
+  }
+}
+
+export function serializeViewState(view, anchor) {
+  return JSON.stringify({ view, day: ymd(anchor) })
+}
+
+/** Client-safe storage access: blocked/private storage never throws. */
+export function loadViewState(storage = globalThis.localStorage) {
+  try { return storage ? storage.getItem(CAL_STATE_KEY) : null } catch { return null }
+}
+
+export function saveViewState(view, anchor, storage = globalThis.localStorage) {
+  try { if (storage) storage.setItem(CAL_STATE_KEY, serializeViewState(view, anchor)) }
+  catch { /* private mode */ }
+}

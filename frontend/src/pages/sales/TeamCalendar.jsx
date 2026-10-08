@@ -42,7 +42,8 @@ import {
   ymd, addDays, dayFromYmd, startOfWeek, startOfMonth, monthGridRange,
   sameDay, wallTime, wallMinutes, hourLabel, dayName, monthName, rangeLabel,
   placeSpan, assignLanes, zoneMinutes, zoneYmd, apptKind, CAL_LEGEND,
-  spanTouchesDay, clampToDay,
+  spanTouchesDay, clampToDay, compareAppts,
+  initialViewState, loadViewState, saveViewState,
 } from './calendarTime'
 
 // The visible band. 7am–8pm covers a selling day with room either side; the
@@ -394,8 +395,12 @@ function MiniMonth({ anchor, selected, appts, onPick }) {
 
 export default function TeamCalendar() {
   const nav = useNavigate()
-  const [view, setView] = useState('week')
-  const [anchor, setAnchor] = useState(() => new Date())
+  // View and day survive a refresh (validated); phones default to Day.
+  const initial = useMemo(() => initialViewState(
+    loadViewState(), typeof window !== 'undefined' ? window.innerWidth : 0), [])
+  const [view, setView] = useState(initial.view)
+  const [anchor, setAnchor] = useState(initial.anchor)
+  useEffect(() => { saveViewState(view, anchor) }, [view, anchor])
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -455,7 +460,7 @@ export default function TeamCalendar() {
   const people = data?.people || []
 
   const appts = useMemo(() => {
-    let rows = data?.appointments || []
+    let rows = [...(data?.appointments || [])].sort(compareAppts)
     if (search.trim()) {
       // Client-side because it is a "find the one I'm thinking of" filter over
       // an already-loaded window, not a query. Sending it to the server would
@@ -593,6 +598,14 @@ export default function TeamCalendar() {
       {/* THE HONESTY BANNER. Rendered only when somebody's outside calendar
           could not actually be read, because "free" and "we could not check"
           must never look the same on a screen people book from. */}
+      {data?.truncated && (
+        <div className="cal-unverified" role="alert">
+          <span aria-hidden="true">⚠</span>
+          <span><b>Calendar incomplete.</b> Only the first {data.limit || 500} meetings
+            in this range are shown. Narrow the dates or filters to see the rest.</span>
+        </div>
+      )}
+
       {ext && !ext.complete && ext.note && showExternal && (
         <div className="cal-unverified">
           <span aria-hidden="true">⚠</span>
