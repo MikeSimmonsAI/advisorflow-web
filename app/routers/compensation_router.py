@@ -255,6 +255,41 @@ def compensation_ledger(brand_sales_org_id: Optional[str] = Query(None),
     }
 
 
+@router.get("/projection")
+def compensation_projection(brand_sales_org_id: Optional[str] = Query(None),
+                            payee_user_id: Optional[str] = Query(None),
+                            stage: Optional[str] = Query(None),
+                            db: Session = Depends(get_db),
+                            user: User = Depends(require_sales_member)):
+    """Read-only truth projection: earned / pending / forecast / excluded.
+
+    Scope comes from the caller's authority, never from a parameter. A seller
+    is forced to their own share; management totals need manager / view
+    authority over THAT brand. Any other brand is a 403.
+    """
+    from app.services import compensation_projection_gather as gather
+    from app.services import compensation_projection_truth as truth
+    from app.services.sales_access import sales_org_ids
+
+    member = list(sales_org_ids(user, db))
+    management = [b for b in ledger.visible_brand_ids(db, user)
+                  if _may_view_brand(db, user, b)]
+    try:
+        sc = truth.resolve_scope(
+            user_id=user.id, requested_brand=brand_sales_org_id,
+            requested_payee=payee_user_id,
+            management_brand_ids=management, member_brand_ids=member)
+        return {**gather.build(db, sc["brand_sales_org_id"],
+                               payee_user_id=sc["payee_user_id"], stage=stage),
+                "scope": sc["scope"]}
+    except truth.ScopeRefused as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    except truth.ProjectionInputError as e:
+        # Contradictory or malformed stored facts: refuse, never approximate.
+        raise HTTPException(status_code=422,
+                            detail="Projection refused: %s" % e)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # RECORDING A COLLECTED PAYMENT — the only thing that creates money owed
 # ═══════════════════════════════════════════════════════════════════════════

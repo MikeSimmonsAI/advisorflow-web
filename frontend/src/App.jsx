@@ -204,6 +204,7 @@ const ManagerCommand = lazyPage(() => import('./pages/sales/ManagerCommand'))
 const SalesShell = lazyPage(() => import('./pages/sales/SalesShell'))
 import CompensationCommand from './pages/sales/CompensationCommand'
 const MyCompensation = lazyPage(() => import('./pages/sales/MyCompensation'))
+const CompensationProjection = lazyPage(() => import('./pages/sales/CompensationProjection'))
 const OpportunityDetail = lazyPage(() => import('./pages/sales/OpportunityDetail'))
 const MyAvailability = lazyPage(() => import('./pages/sales/MyAvailability'))
 const TeamAvailability = lazyPage(() => import('./pages/sales/TeamAvailability'))
@@ -1044,6 +1045,7 @@ export default function App() {
             and takes no payee parameter at all. */}
         <Route path="/sales/compensation" element={<SalesRoute><SalesShell><CompensationCommand embedded /></SalesShell></SalesRoute>} />
         <Route path="/sales/my-compensation" element={<SalesRoute><MyCompensation /></SalesRoute>} />
+        <Route path="/sales/compensation-projection" element={<SalesRoute><CompensationProjection /></SalesRoute>} />
         <Route path="/sales/calendar" element={<SalesRoute><TeamCalendar /></SalesRoute>} />
         <Route path="/sales/team-pipeline" element={<SalesRoute><MyPipeline scope="team" /></SalesRoute>} />
         <Route path="/sales/proposals" element={<SalesRoute><TeamProposals /></SalesRoute>} />
