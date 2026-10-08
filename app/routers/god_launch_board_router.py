@@ -4,18 +4,20 @@
     POST /god/launch-board/projects                add (lands in backlog, unapproved)
     POST /god/launch-board/projects/{id}/{action}  lane|priority|approve|revoke|evidence|task|product
 
-God-only (require_god). Mutates only the board file; never triggers a relay run,
+God-only (require_god). Mutates only the launch-board tables (durable DB store; the file adapter is explicit
+local/test use via LAUNCH_BOARD_BACKEND=file); never triggers a relay run,
 messages anyone, or touches production.
 """
 # No `from __future__ import annotations` in a router module (see god_access_router).
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel
 
 from app.deps import require_god
 from app.models.models import User
 from app.services import launch_board as lb
+from app.services import launch_board_store as store
 from app.services import relay_control_room as rcr
 
 router = APIRouter(prefix="/god/launch-board", tags=["God Mode — Launch Board"])
@@ -35,15 +37,21 @@ class ActionIn(BaseModel):
     ref: str = ""
     summary: str = ""
     complete: Optional[bool] = None
+    expected_version: Optional[int] = None   # refuse if the project moved on since it was loaded
 
 
 def _actor(u: User) -> str:
     return getattr(u, "email", None) or str(getattr(u, "id", "god"))
 
 
-def _run(fn):
+def _run(fn, request_key: Optional[str] = None, expected=None):
+    """400 rule refusal, 409 stale/replay-conflict, 503 store unavailable or not migrated."""
     try:
-        return lb.mutate(fn)
+        return store.get_store().mutate(fn, request_key=request_key or None, expected=expected)
+    except store.StaleError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except store.StorageError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except lb.BoardError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -53,21 +61,24 @@ def board(response: Response, _god: User = Depends(require_god)):
     for k, v in rcr.NO_CACHE_HEADERS.items():
         response.headers[k] = v
     try:
-        out = lb.view(lb.load())
-        out["storage"] = lb.storage_status()
+        out = lb.view(store.get_store().load())
+        out["storage"] = store.storage_status()
         return out
-    except lb.BoardError as e:
+    except lb.BoardError as e:   # includes StorageError: fail closed, show the reason
         raise HTTPException(status_code=503, detail=str(e))
 
 
 @router.post("/projects")
-def add(body: ProjectIn, god: User = Depends(require_god)):
-    p = _run(lambda b: lb.add_project(b, body.name, body.summary, _actor(god), body.priority))
-    return {"id": p["id"]}
+def add(body: ProjectIn, god: User = Depends(require_god),
+        idempotency_key: Optional[str] = Header(default=None, max_length=120)):
+    pid, replayed = _run(lambda b: lb.add_project(b, body.name, body.summary, _actor(god), body.priority)["id"],
+                         idempotency_key)
+    return {"id": pid, "replayed": replayed}
 
 
 @router.post("/projects/{pid}/{action}")
-def act(pid: int, action: str, body: ActionIn, god: User = Depends(require_god)):
+def act(pid: int, action: str, body: ActionIn, god: User = Depends(require_god),
+        idempotency_key: Optional[str] = Header(default=None, max_length=120)):
     a = _actor(god)
     ops = {
         "lane": lambda b: lb.set_lane(b, pid, body.lane or "", a),
@@ -80,5 +91,6 @@ def act(pid: int, action: str, body: ActionIn, god: User = Depends(require_god))
     }
     if action not in ops:
         raise HTTPException(status_code=404, detail="unknown action")
-    _run(ops[action])
-    return {"ok": True}
+    _, replayed = _run(ops[action], idempotency_key,
+                       {pid: body.expected_version} if body.expected_version is not None else None)
+    return {"ok": True, "replayed": replayed}

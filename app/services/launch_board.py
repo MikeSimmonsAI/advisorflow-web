@@ -37,7 +37,7 @@ def default_path() -> str:
 
 
 def storage_status() -> Dict:
-    """Whether the board file sits on an operator-chosen path (LAUNCH_BOARD_PATH, e.g. a
+    """FILE ADAPTER ONLY (the app reports launch_board_store.storage_status()). Whether the board file sits on an operator-chosen path (LAUNCH_BOARD_PATH, e.g. a
     persistent disk). Unset means the repo-relative default, wiped on redeploy."""
     configured = bool(os.environ.get("LAUNCH_BOARD_PATH"))
     return {"configured_path": configured, "durable": configured,
@@ -199,6 +199,7 @@ def view(board: Dict, live: Optional[Dict] = None) -> Dict:
     lanes: Dict[str, List[Dict]] = dict((l, []) for l in LANES)
     for p in sorted(board["projects"], key=lambda x: (x["priority"], x["id"])):
         row = dict((k, p[k]) for k in _ROW_KEYS)
+        row["version"] = p.get("version")   # optimistic-concurrency token (DB store only)
         row["working_status"] = live.get(p["name"], "no live evidence")
         row["product_state"] = product_state(p)
         row["product_complete"] = row["product_state"] == "complete"
