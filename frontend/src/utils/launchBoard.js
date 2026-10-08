@@ -98,3 +98,31 @@ export function buildAction(action, input = {}) {
     default: return null
   }
 }
+
+// ── Write protection (expected_version + Idempotency-Key) ─────────────────────
+// Every write carries the version of the project as the page last loaded it, so a
+// change made elsewhere since then is refused (409) instead of silently overwritten,
+// and a unique Idempotency-Key, so a double click or a retried request is applied
+// once. A key is minted per user action and reused only for that action's retry.
+let _keySeq = 0
+export function newRequestKey(now = Date.now(), rand = Math.random) {
+  _keySeq += 1
+  const r = Math.floor(rand() * 1e9).toString(36)
+  return `lb-${now.toString(36)}-${_keySeq}-${r}`.slice(0, 120)
+}
+
+/** Adds expected_version when the project carries a version (DB store). */
+export function withExpectedVersion(body, project) {
+  if (!body) return body
+  const v = project && Number.isInteger(project.version) ? project.version : null
+  return v == null ? body : { ...body, expected_version: v }
+}
+
+export function writeHeaders(key) {
+  return { headers: { 'Idempotency-Key': key } }
+}
+
+/** A 409 means the board moved on: reload, never claim success. */
+export function isStale(e) {
+  return !!e && (e.status === 409 || e.statusCode === 409)
+}

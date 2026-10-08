@@ -499,6 +499,9 @@ BROWSER_HEADERS = [
     "X-Org-Override", "X-Brand-Override",
     WORKSPACE_HEADER,
     WORKSPACE_LOCATION_HEADER,   # X-Workspace-Location (workspace-level entitlements)
+    # Replay protection on god-only writes (Control Room launch board). Unlisted, the
+    # cross-origin preflight fails and the browser never sends the write at all.
+    "Idempotency-Key",
     # The device-description headers per-device sessions read. A NATIVE app is
     # not subject to CORS and would work without them being listed — which is
     # exactly why they are listed. The moment the web client adopts one, an

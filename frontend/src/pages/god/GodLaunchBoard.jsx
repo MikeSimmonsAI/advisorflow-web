@@ -4,13 +4,16 @@
  * Talks to the god-only /god/launch-board API. Projects are data: add, edit
  * priority, approve, move lanes without a deploy. Nothing here starts a relay
  * run. Failed calls show the error; success is shown only after the server
- * accepted the change AND the board was reloaded.
+ * accepted the change AND the board was reloaded. Every write sends the project's
+ * expected_version (a change made elsewhere is refused with 409 and the board is
+ * reloaded) and an Idempotency-Key (a double click or retry is applied once).
  */
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api/client'
 import {
   LANES, LANE_LABELS, EVIDENCE_KINDS, EVIDENCE_STATES, BOARD_URL, failedBoard, normalizeBoard, errorText,
   laneCounts, launchGates, gatesSummary, statusLines, liveStatusFor, productText, laneActions, buildAction,
+  newRequestKey, withExpectedVersion, writeHeaders, isStale,
 } from '../../utils/launchBoard'
 
 const card = { background: 'var(--gm-card-bg, var(--gm-pill-blue-bg))', border: '1px solid var(--gm-card-line)',
@@ -39,15 +42,15 @@ function Project({ p, live, busy, onAct }) {
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         {p.approved
-          ? <button type="button" disabled={busy} onClick={() => onAct(p.id, 'revoke', {})}>Revoke approval</button>
-          : <button type="button" disabled={busy} onClick={() => onAct(p.id, 'approve', {})}>Approve for queue</button>}
+          ? <button type="button" disabled={busy} onClick={() => onAct(p, 'revoke', {})}>Revoke approval</button>
+          : <button type="button" disabled={busy} onClick={() => onAct(p, 'approve', {})}>Approve for queue</button>}
         {laneActions(p).map(l => (
-          <button type="button" key={l} disabled={busy} onClick={() => onAct(p.id, 'lane', { lane: l })}>
+          <button type="button" key={l} disabled={busy} onClick={() => onAct(p, 'lane', { lane: l })}>
             {l === 'archived' ? 'Archive' : `Move to ${LANE_LABELS[l]}`}
           </button>
         ))}
         <input aria-label="Priority" size={3} value={prio} onChange={e => setPrio(e.target.value)} />
-        <button type="button" disabled={busy} onClick={() => onAct(p.id, 'priority', { priority: prio })}>Set priority</button>
+        <button type="button" disabled={busy} onClick={() => onAct(p, 'priority', { priority: prio })}>Set priority</button>
         <button type="button" onClick={() => setOpen(o => !o)}>{open ? 'Hide details' : 'Details'}</button>
       </div>
       {open ? (
@@ -66,14 +69,14 @@ function Project({ p, live, busy, onAct }) {
             </select>
             <input aria-label="Evidence reference" placeholder="commit / run URL / test id" value={ev.ref}
               onChange={e => setEv({ ...ev, ref: e.target.value })} />
-            <button type="button" disabled={busy} onClick={() => onAct(p.id, 'evidence', ev)}>Record evidence</button>
+            <button type="button" disabled={busy} onClick={() => onAct(p, 'evidence', ev)}>Record evidence</button>
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             <input aria-label="Completed task" placeholder="task completed (does not complete the product)" value={task}
               onChange={e => setTask(e.target.value)} />
-            <button type="button" disabled={busy} onClick={() => { onAct(p.id, 'task', { summary: task }); setTask('') }}>Log task</button>
+            <button type="button" disabled={busy} onClick={() => { onAct(p, 'task', { summary: task }); setTask('') }}>Log task</button>
             <button type="button" disabled={busy}
-              onClick={() => onAct(p.id, 'product', { complete: p.product_state !== 'complete' })}>
+              onClick={() => onAct(p, 'product', { complete: p.product_state !== 'complete' })}>
               {p.product_state === 'complete' ? 'Unmark product complete' : 'Mark product complete'}
             </button>
           </div>
@@ -100,15 +103,23 @@ export default function GodLaunchBoard({ relayState, working }) {
   }, [])
   useEffect(() => { reload() }, [reload])
 
-  const act = useCallback(async (pid, action, input) => {
-    const body = buildAction(action, input)
+  const act = useCallback(async (project, action, input) => {
+    const pid = project.id
+    const body = withExpectedVersion(buildAction(action, input), project)
     if (!body) { setMsg({ kind: 'error', text: 'Not sent: the input is incomplete (evidence needs a reference).' }); return }
     setBusy(true)
     try {
-      await api.post(`${BOARD_URL}/projects/${pid}/${action}`, body)
+      await api.post(`${BOARD_URL}/projects/${pid}/${action}`, body, writeHeaders(newRequestKey()))
       await reload()
       setMsg({ kind: 'ok', text: `Saved: ${action}` })
-    } catch (e) { setMsg({ kind: 'error', text: `Not saved — ${errorText(e)}` }) }
+    } catch (e) {
+      if (isStale(e)) {
+        await reload()
+        setMsg({ kind: 'error', text: 'Not saved — this project changed since the board was loaded. The board has been reloaded; check it and try again.' })
+      } else {
+        setMsg({ kind: 'error', text: `Not saved — ${errorText(e)}` })
+      }
+    }
     finally { setBusy(false) }
   }, [reload])
 
@@ -123,7 +134,7 @@ export default function GodLaunchBoard({ relayState, working }) {
     }
     setBusy(true)
     try {
-      await api.post(`${BOARD_URL}/projects`, body)
+      await api.post(`${BOARD_URL}/projects`, body, writeHeaders(newRequestKey()))
       setForm({ name: '', summary: '', priority: '' })
       await reload()
       setLane('backlog')

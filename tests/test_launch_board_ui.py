@@ -141,5 +141,38 @@ class Storage(unittest.TestCase):
         self.assertIsNone(s["warning"])
 
 
+class WriteProtection(unittest.TestCase):
+    """Every board write sends expected_version + a unique Idempotency-Key; 409 reloads."""
+
+    def test_helpers(self):
+        o = run_js("""
+out.k1 = m.newRequestKey(1000, () => 0.5); out.k2 = m.newRequestKey(1000, () => 0.5)
+out.v = m.withExpectedVersion({ lane: 'active' }, { id: 1, version: 3 })
+out.nov = m.withExpectedVersion({ lane: 'active' }, { id: 1 })
+out.none = m.withExpectedVersion(null, { version: 3 })
+out.h = m.writeHeaders('abc')
+out.s409 = m.isStale({ status: 409 }); out.s400 = m.isStale({ status: 400 }); out.snull = m.isStale(null)""")
+        self.assertNotEqual(o["k1"], o["k2"])
+        self.assertTrue(o["k1"].startswith("lb-") and len(o["k1"]) <= 120)
+        self.assertEqual(o["v"], {"lane": "active", "expected_version": 3})
+        self.assertEqual(o["nov"], {"lane": "active"})
+        self.assertIsNone(o["none"])
+        self.assertEqual(o["h"], {"headers": {"Idempotency-Key": "abc"}})
+        self.assertEqual((o["s409"], o["s400"], o["snull"]), (True, False, False))
+
+    def test_board_sends_version_and_key_and_reloads_on_409(self):
+        s = read("frontend", "src", "pages", "god", "GodLaunchBoard.jsx")
+        self.assertIn("withExpectedVersion(buildAction(action, input), project)", s)
+        self.assertEqual(s.count("writeHeaders(newRequestKey())"), 2)   # every write: actions + add
+        stale = s[s.index("if (isStale(e))"):]
+        self.assertLess(stale.index("await reload()"), stale.index("Not saved"))
+
+    def test_client_and_cors_carry_the_header(self):
+        c = read("frontend", "src", "api", "client.js")
+        self.assertIn("post: (path, body, opts = {})", c)
+        from app.main import BROWSER_HEADERS
+        self.assertIn("Idempotency-Key", BROWSER_HEADERS)
+
+
 if __name__ == "__main__":
     unittest.main()
