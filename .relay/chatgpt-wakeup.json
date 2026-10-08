@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "human-dialer-sender-integrity-20261007-1859",
-  "parent_run_id": "custom-plan-capacity-20261007-1855",
-  "project": "EvoSys Pro \u2014 Human Dialer and voice sender integrity",
-  "status": "COMPLETED",
+  "relay_run_id": "shared-calendar-mobile-integrity-20261007-1903",
+  "parent_run_id": "human-dialer-sender-integrity-20261007-1859",
+  "project": "EvoSys Pro \u2014 shared calendar mobile integrity",
+  "status": "BLOCKED",
   "branch": "platform-dev",
-  "actions_run_id": "37705251370",
-  "timestamp_ct": "2026-10-07 19:01 CT",
+  "actions_run_id": "37705636013",
+  "timestamp_ct": "2026-10-07 19:05 CT",
   "issue": 1,
-  "status_comment_id": 6049304158
+  "status_comment_id": 6049347129
 }
