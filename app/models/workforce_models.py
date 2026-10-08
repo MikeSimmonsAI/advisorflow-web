@@ -309,6 +309,29 @@ class AIWorkItem(Base):
     outcome_detail = Column(String, nullable=True)
     terminal_at = Column(DateTime, nullable=True)
 
+    # DURABLE OPTIMISTIC VERSION. Bumped by every state transition inside the
+    # same transaction as the write. NULL (legacy row) reads as 0.
+    row_version = Column(Integer, nullable=True)
+
+    # DELIVERY EVIDENCE. All NULLABLE and independent: NULL means "not
+    # recorded" (rendered unavailable), never false / 0 / passed. `done` needs
+    # all four phase flags explicitly True.
+    source_complete = Column(Boolean, nullable=True)
+    tests_complete = Column(Boolean, nullable=True)
+    deployed = Column(Boolean, nullable=True)
+    live_verified = Column(Boolean, nullable=True)
+    evidence_commit_sha = Column(String, nullable=True)
+    evidence_test_command = Column(String, nullable=True)
+    evidence_test_result = Column(String, nullable=True)
+    evidence_test_count = Column(Integer, nullable=True)
+    evidence_deploy_ref = Column(String, nullable=True)
+    evidence_deploy_status = Column(String, nullable=True)
+    evidence_live_ref = Column(String, nullable=True)
+    evidence_live_status = Column(String, nullable=True)
+    evidence_checkpoint_summary = Column(String, nullable=True)
+    evidence_source = Column(String, nullable=True)
+    evidence_recorded_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

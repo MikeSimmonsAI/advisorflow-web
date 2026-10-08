@@ -218,6 +218,7 @@ def transition(db: Session, item: AIWorkItem, to_state: str, *,
     item.state = to_state
     item.state_reason = (reason or "")[:255] or None
     item.updated_at = datetime.utcnow()
+    item.row_version = (item.row_version or 0) + 1
 
     if to_state in C.TERMINAL_STATES:
         item.terminal_at = datetime.utcnow()

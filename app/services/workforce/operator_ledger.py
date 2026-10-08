@@ -84,20 +84,90 @@ def operator_state(source_state: Any) -> str:
 
 
 def version_token(item: Any) -> str:
-    """Optimistic-concurrency token from persisted columns (no migration).
+    """Optimistic-concurrency token.
 
-    Changes whenever state, attempts, priority or updated_at changes, so a
-    decision made against a stale view is detectable.
+    Persisted rows use the durable monotonic `row_version` ("v<N>", bumped by
+    every transition in the same transaction). A legacy row whose column is
+    NULL falls back to a hash of persisted columns, prefixed "legacy-" so the
+    two forms can never collide; its first successful write moves it to v1.
     """
+    rv = getattr(item, "row_version", None)
+    if isinstance(rv, int) and not isinstance(rv, bool):
+        return "v%d" % rv
     raw = "|".join(str(x) for x in (
         getattr(item, "id", None), getattr(item, "state", None),
         getattr(item, "attempts", None), getattr(item, "priority", None),
         _iso(getattr(item, "updated_at", None))))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return "legacy-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def phases_unavailable(reason: str) -> Dict[str, Any]:
     return {p: {"status": "unavailable", "reason": reason} for p in PHASES}
+
+
+_NOT_RECORDED = "Not recorded"
+
+
+def _text(v: Any) -> Optional[str]:
+    return v.strip() if isinstance(v, str) and v.strip() else None
+
+
+def _phase(flag: Any, detail: Dict[str, Any], at: Optional[str]) -> Dict[str, Any]:
+    """True -> passed, False -> failed, anything else (None, 0, "yes") -> unavailable.
+
+    Only a real bool counts: a truthy string or integer is not evidence.
+    """
+    if flag is True:
+        return {"status": "passed", "at": at, **detail}
+    if flag is False:
+        return {"status": "failed", "at": at, **detail}
+    return {"status": "unavailable", "reason": _NOT_RECORDED}
+
+
+def persisted_evidence(item: Any) -> Dict[str, Any]:
+    """Shape the evidence columns of an AI work item.
+
+    Each of phases/commit/tests/deploy/live is independent; a missing column
+    (legacy row or partial population) is `unavailable`, never false, 0,
+    passed, deployed or done.
+    """
+    at = _iso(getattr(item, "evidence_recorded_at", None))
+    sha = _text(getattr(item, "evidence_commit_sha", None))
+    cmd = _text(getattr(item, "evidence_test_command", None))
+    res = _text(getattr(item, "evidence_test_result", None))
+    cnt = getattr(item, "evidence_test_count", None)
+    cnt = cnt if isinstance(cnt, int) and not isinstance(cnt, bool) else None
+    dref = _text(getattr(item, "evidence_deploy_ref", None))
+    dst = _text(getattr(item, "evidence_deploy_status", None))
+    lref = _text(getattr(item, "evidence_live_ref", None))
+    lst = _text(getattr(item, "evidence_live_status", None))
+    ckpt = _text(getattr(item, "evidence_checkpoint_summary", None))
+    src = _text(getattr(item, "evidence_source", None))
+    phases = {
+        "source_complete": _phase(getattr(item, "source_complete", None),
+                                  {"commit": sha}, at),
+        "tests_complete": _phase(getattr(item, "tests_complete", None),
+                                 {"command": cmd, "result": res, "count": cnt}, at),
+        "deployed": _phase(getattr(item, "deployed", None),
+                           {"ref": dref, "deploy_status": dst}, at),
+        "live_verified": _phase(getattr(item, "live_verified", None),
+                                {"ref": lref, "live_status": lst}, at),
+    }
+    commit = ({"status": "available", "sha": sha, "at": at} if sha
+              else UNAVAILABLE)
+    tests = ({"status": "available", "command": cmd, "result": res,
+              "count": cnt, "at": at} if (cmd or res or cnt is not None)
+             else UNAVAILABLE)
+    deploy = ({"status": "available", "ref": dref, "deploy_status": dst,
+               "at": at} if (dref or dst) else UNAVAILABLE)
+    live = ({"status": "available", "ref": lref, "live_status": lst,
+             "at": at} if (lref or lst) else UNAVAILABLE)
+    checkpoint = ({"status": "available",
+                   "summary": run_evidence.redact(ckpt, 300), "at": at}
+                  if ckpt else None)
+    return {"phases": phases, "commit": commit, "tests": tests,
+            "deploy": deploy, "live": live, "checkpoint": checkpoint,
+            "source": src, "recorded_at": at}
 
 
 def done_claim(phases: Dict[str, Any]) -> bool:
@@ -141,7 +211,10 @@ def shape_work_item(item: Any, *, employee: Any = None, runs: Iterable[Any] = ()
                   if last and last.get("checkpoint_summary") else
                   {"status": "unavailable",
                    "reason": "No run recorded a checkpoint"})
-    phases = phases_unavailable("Not recorded for AI work items")
+    ev = persisted_evidence(item)
+    phases = ev["phases"]
+    if checkpoint["status"] == "unavailable" and ev["checkpoint"]:
+        checkpoint = ev["checkpoint"]
     objective = getattr(employee, "objective", None) if employee else None
     entry: Dict[str, Any] = {
         "kind": "work_item",
@@ -174,8 +247,11 @@ def shape_work_item(item: Any, *, employee: Any = None, runs: Iterable[Any] = ()
                     if reason and op in ("blocked", "review_required",
                                          "failed", "cancelled") else None),
         "outcome": getattr(item, "outcome", None),
-        "commit": UNAVAILABLE, "tests": UNAVAILABLE, "deploy": UNAVAILABLE,
-        "evidence": {"kind": "work_item_record", "source": "ai_work_items"},
+        "commit": ev["commit"], "tests": ev["tests"], "deploy": ev["deploy"],
+        "live": ev["live"],
+        "evidence": {"kind": "work_item_record", "source": "ai_work_items",
+                     "recorded_by": ev["source"],
+                     "recorded_at": ev["recorded_at"]},
         "phases": phases,
         "done": done_claim(phases),
         "version": version_token(item),

@@ -708,15 +708,23 @@ def review_work_item(item_id: str, payload: ReviewRequest, request: Request,
     sitting there. That is enforced by the transition table, not by this route.
     """
     org_id = _org_id(user, db, request)
-    item = (db.query(AIWorkItem)
-            .filter(AIWorkItem.id == item_id,
-                    AIWorkItem.organization_id == org_id).first())
-    if item is None:
-        raise HTTPException(status_code=404, detail="No such queue item.")
     target = _REVIEW_DECISIONS.get((payload.decision or "").strip())
     if target is None:
         raise HTTPException(status_code=400,
                             detail="Unknown review decision.")
+    if not payload.expected_version:
+        raise HTTPException(status_code=400,
+                            detail="expected_version is required.")
+    # ROW LOCK: concurrent decisions serialise here (SELECT ... FOR UPDATE on
+    # PostgreSQL; a no-op on SQLite). The version is read AFTER the lock, so a
+    # stale view is judged against the committed row, not a pre-lock snapshot.
+    item = (db.query(AIWorkItem)
+            .filter(AIWorkItem.id == item_id,
+                    AIWorkItem.organization_id == org_id)
+            .with_for_update().first())
+    if item is None:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="No such queue item.")
     state, reason = target
     plan = operator_ledger.plan_review(
         current_state=item.state,
@@ -724,17 +732,21 @@ def review_work_item(item_id: str, payload: ReviewRequest, request: Request,
         target_state=state, expected_version=payload.expected_version,
         reachable=wf_queue.path_between(item.state, state) is not None)
     if plan["outcome"] == "version_required":
+        db.rollback()
         raise HTTPException(status_code=400,
                             detail="expected_version is required.")
     if plan["outcome"] == "replay":
+        db.rollback()  # no write; release the row lock
         return {"item_id": item.id, "state": item.state,
                 "state_label": _state_label(item.state), "replayed": True,
                 "version": operator_ledger.version_token(item)}
     if plan["outcome"] == "conflict":
+        db.rollback()
         raise HTTPException(
             status_code=409,
             detail="This item changed since you loaded it. Reload and retry.")
     if plan["outcome"] == "illegal":
+        db.rollback()
         raise HTTPException(
             status_code=409,
             detail="That decision is not allowed from the current state.")

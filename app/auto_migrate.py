@@ -1472,6 +1472,23 @@ COLUMNS_TO_ADD = [
     ("ai_employee_runs", "last_heartbeat_at", "TIMESTAMP"),
     ("ai_employee_runs", "current_stage", "VARCHAR"),
     ("ai_employee_runs", "lease_seconds", "INTEGER"),
+    # ── AI Workforce durable evidence + row_version (2026-10-08) ──
+    ("ai_work_items", "row_version", "INTEGER"),
+    ("ai_work_items", "source_complete", "BOOLEAN"),
+    ("ai_work_items", "tests_complete", "BOOLEAN"),
+    ("ai_work_items", "deployed", "BOOLEAN"),
+    ("ai_work_items", "live_verified", "BOOLEAN"),
+    ("ai_work_items", "evidence_commit_sha", "VARCHAR"),
+    ("ai_work_items", "evidence_test_command", "VARCHAR"),
+    ("ai_work_items", "evidence_test_result", "VARCHAR"),
+    ("ai_work_items", "evidence_test_count", "INTEGER"),
+    ("ai_work_items", "evidence_deploy_ref", "VARCHAR"),
+    ("ai_work_items", "evidence_deploy_status", "VARCHAR"),
+    ("ai_work_items", "evidence_live_ref", "VARCHAR"),
+    ("ai_work_items", "evidence_live_status", "VARCHAR"),
+    ("ai_work_items", "evidence_checkpoint_summary", "VARCHAR"),
+    ("ai_work_items", "evidence_source", "VARCHAR"),
+    ("ai_work_items", "evidence_recorded_at", "TIMESTAMP"),
 ]
 
 # New whole tables to create — uses CREATE TABLE IF NOT EXISTS so safe on every boot.
