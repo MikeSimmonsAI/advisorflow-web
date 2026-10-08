@@ -14,8 +14,8 @@ import { api } from '../../api/client'
 import GodLaunchBoard from './GodLaunchBoard'
 import {
   POLL_MS, failedState, headline, isWorking, liveElapsedMinutes, createRefresher, isLapsed,
-  formatCT, formatMinutes, leaseText, actionsRunText, upNext, blockers, recommendation, isCheckStale,
-  runOutcomesToday, lastFinished,
+  formatCT, formatMinutes, leaseText, actionsRunText, recommendation, isCheckStale,
+  runOutcomesToday, lastFinished, upNextSplit, currentBlockers, olderBlockerCount, workerView,
 } from '../../utils/relayControlRoom'
 
 const card = { background: 'var(--gm-card-bg, var(--god-card, #fff))', border: '1px solid var(--gm-card-line, #e5e7eb)',
@@ -47,6 +47,12 @@ function Worker({ worker, generatedAt, tick, last }) {
         {lapsed ? 'STALE/HUNG' : worker.state === 'idle' ? 'IDLE' : worker.display}
       </div>
       {worker.state === 'idle' ? <div style={label}>{worker.display}</div> : null}
+      {worker.queuedHead ? (
+        <div style={{ ...label, marginTop: 4 }}>
+          Next directive waiting to be accepted: {worker.queuedHead.relay_run_id}
+          {worker.queuedHead.health && worker.queuedHead.health !== 'ok' ? ` (${worker.queuedHead.health_detail || worker.queuedHead.health})` : ''}
+        </div>
+      ) : null}
       {idle ? null : (
         <div style={{ marginTop: 8 }}>
           <Row k="Project" v={worker.project} />
@@ -105,8 +111,9 @@ export default function GodRelayControlRoom({ onManualRefresh }) {
   }, [refresh])
 
   const s = state || failedState('Loading…')
-  const next = upNext(s)
-  const blocks = blockers(s)
+  const { fresh: next, stale: neverStarted } = upNextSplit(s)  // fresh queued directives only; never-accepted ones listed apart
+  const blocks = currentBlockers(s, tick)
+  const olderBlocks = olderBlockerCount(s, tick)
   const outcomes = runOutcomesToday(s, tick)
   return (
     <div data-testid="relay-control-room">
@@ -133,7 +140,7 @@ export default function GodRelayControlRoom({ onManualRefresh }) {
       ) : null}
 
       <div style={{ ...grid, marginBottom: 16 }}>
-        <Worker worker={s.worker} generatedAt={s.generated_at} tick={tick} last={lastFinished(s)} />
+        <Worker worker={workerView(s)} generatedAt={s.generated_at} tick={tick} last={lastFinished(s)} />
 
         <div style={{ ...card, marginBottom: 0 }} data-testid="relay-up-next">
           <div style={head}>UP NEXT <span style={{ ...label, textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>(approved relay directives only)</span></div>
@@ -147,6 +154,14 @@ export default function GodRelayControlRoom({ onManualRefresh }) {
               <div style={label}>{u.relay_run_id}</div>
             </div>
           ))}
+          {neverStarted.length ? (
+            <details style={{ marginTop: 8 }} data-testid="relay-never-started">
+              <summary style={label}>{neverStarted.length} older directive{neverStarted.length === 1 ? '' : 's'} never accepted (past the lease) — not scheduled to run</summary>
+              {neverStarted.map(u => (
+                <div key={u.relay_run_id} style={{ ...label, paddingTop: 4 }}>{u.project || 'No project named'} · {u.relay_run_id} · last update {formatCT(u.last_update_at)}</div>
+              ))}
+            </details>
+          ) : null}
           {(s.queued_behind || []).filter(q => q.state !== 'queued').map(q => (
             <div key={q.relay_run_id} style={{ ...label, paddingTop: 6 }}>Also open: {q.display} — {q.project} ({q.relay_run_id})</div>
           ))}
@@ -154,7 +169,7 @@ export default function GodRelayControlRoom({ onManualRefresh }) {
 
         <div style={{ ...card, marginBottom: 0 }} data-testid="relay-blockers">
           <div style={head}>Needs Mike / blockers</div>
-          {blocks.length === 0 ? <div style={{ fontWeight: 600 }}>Nothing blocked.</div> : null}
+          {blocks.length === 0 ? <div style={{ fontWeight: 600 }}>Nothing blocked in the last 24 hours.</div> : null}
           {blocks.map(b => (
             <div key={`${b.relay_run_id}-${b.kind}`} style={{ padding: '6px 0', borderTop: '1px solid var(--gm-card-line, #e5e7eb)' }}>
               <div style={{ fontWeight: 700, color: b.kind === 'APPROVAL_REQUIRED' ? 'var(--gm-red, #b91c1c)' : undefined }}>
@@ -164,6 +179,7 @@ export default function GodRelayControlRoom({ onManualRefresh }) {
               <div style={label}>{b.relay_run_id || ''}</div>
             </div>
           ))}
+          {olderBlocks > 0 ? <div style={{ ...label, marginTop: 8 }}>{olderBlocks} older blocked run{olderBlocks === 1 ? '' : 's'} — see Technical log</div> : null}
         </div>
       </div>
 

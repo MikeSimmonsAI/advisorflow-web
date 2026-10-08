@@ -77,3 +77,34 @@ test('unmapped Actions run ID is shown honestly; lease is 30 minutes', () => {
   assert.equal(actionsRunText({ actions_run_id: 42 }), '42')
   assert.match(leaseText({ elapsed_min: 10 }), /30-minute lease \(20 min left\)/)
 })
+
+import { upNextSplit, currentBlockers, olderBlockerCount, workerView, runOutcomesToday } from '../src/utils/relayControlRoom.js'
+
+test('first screen: queued head is not a worker; stale queued and old blockers leave the live view', () => {
+  const now = Date.parse('2026-10-08T15:45:00Z')
+  const s = {
+    available: true,
+    worker: { state: 'queued', display: 'Queued - STALE', relay_run_id: 'q1', health: 'STALE', last_update_at: '2026-10-08T14:03:00Z' },
+    queued_behind: [
+      { state: 'queued', display: 'Queued', relay_run_id: 'q2', health: 'ok', last_update_at: '2026-10-08T15:40:00Z' },
+      { state: 'queued', display: 'Queued - STALE', relay_run_id: 'q3', health: 'STALE', last_update_at: '2026-10-06T20:41:00Z' },
+    ],
+    history: [
+      { state: 'terminal', result: 'BLOCKED', relay_run_id: 'b-new', blocked_reason: 'x', last_update_at: '2026-10-08T12:00:00Z' },
+      { state: 'terminal', result: 'BLOCKED', relay_run_id: 'b-old', blocked_reason: 'y', last_update_at: '2026-10-06T12:00:00Z' },
+      { state: 'terminal', result: 'COMPLETED', relay_run_id: 'c1', last_update_at: '2026-10-08T14:01:00Z' },
+    ],
+  }
+  const w = workerView(s)
+  assert.equal(w.state, 'idle')
+  assert.equal(w.queuedHead.relay_run_id, 'q1')
+  const split = upNextSplit(s)
+  assert.deepEqual(split.fresh.map(u => u.relay_run_id), ['q2'])
+  assert.deepEqual(split.stale.map(u => u.relay_run_id).sort(), ['q1', 'q3'])
+  assert.deepEqual(currentBlockers(s, now).map(b => b.relay_run_id), ['b-new'])
+  assert.equal(olderBlockerCount(s, now), 1)
+  const o = runOutcomesToday(s, now)
+  assert.equal(o.completed, 1); assert.equal(o.blocked, 1)
+  // an accepted worker is still shown as the worker
+  assert.equal(workerView({ ...s, worker: { state: 'active', display: 'Working' } }).state, 'active')
+})

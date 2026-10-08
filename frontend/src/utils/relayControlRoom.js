@@ -222,3 +222,49 @@ export function lastFinished(state) {
   if (!state || !state.available) return null
   return (state.history || []).find(h => h && h.state === 'terminal') || null
 }
+
+// ── Live-screen filters (issue #21 follow-up, after the first staging check) ──
+// The relay keeps every directive it ever saw. On the first screen only CURRENT facts
+// belong: queued directives past the lease were never accepted by any worker, and old
+// BLOCKED runs are history. Both stay available, counted, under the technical log.
+export const RECENT_HOURS = 24
+
+function ageHours(iso, nowMs) {
+  const t = iso ? Date.parse(iso) : NaN
+  return Number.isFinite(t) ? (nowMs - t) / 3600000 : Infinity
+}
+
+// UP NEXT split into what can still start (fresh) and what never started (stale).
+export function upNextSplit(state) {
+  const all = upNext(state)
+  return { fresh: all.filter(u => !u.stale), stale: all.filter(u => u.stale) }
+}
+
+// Blockers that are still current: worker health problems now, plus BLOCKED /
+// APPROVAL_REQUIRED / mismatch runs reported in the last RECENT_HOURS.
+export function currentBlockers(state, nowMs = Date.now(), hours = RECENT_HOURS) {
+  const w = (state && state.worker) || {}
+  return blockers(state).filter(b => {
+    if (b.relay_run_id && b.relay_run_id === w.relay_run_id && (w.health === 'STALE/HUNG' || w.health === 'STALE' || w.state === 'mismatch')) {
+      return w.state !== 'queued'   // a queued directive is not a worker; it is listed under UP NEXT (stale)
+    }
+    const h = ((state && state.history) || []).find(x => x.relay_run_id === b.relay_run_id)
+    return h ? ageHours(h.last_update_at, nowMs) <= hours : true
+  })
+}
+
+export function olderBlockerCount(state, nowMs = Date.now(), hours = RECENT_HOURS) {
+  const w = (state && state.worker) || {}
+  const queuedSelf = (b) => w.state === 'queued' && b.relay_run_id === w.relay_run_id
+  return blockers(state).filter(b => !queuedSelf(b)).length - currentBlockers(state, nowMs, hours).length
+}
+
+// Only an accepted run is a worker. A queued directive at the head of the list is NOT
+// "currently working": nobody has picked it up.
+export function workerView(state) {
+  const w = state && state.worker
+  if (w && w.state === 'queued') {
+    return { state: 'idle', display: 'Idle - no worker has accepted the queued directive', queuedHead: w }
+  }
+  return w || { state: 'unavailable', display: 'Relay status unavailable' }
+}
