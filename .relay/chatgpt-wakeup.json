@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "local-invoice-draft-ui-20261008-0019",
-  "parent_run_id": "local-invoice-draft-core-20261008-0013",
-  "project": "EvoSys Pro \u2014 local invoice draft workspace UI",
+  "relay_run_id": "compensation-projection-truth-20261008-0023",
+  "parent_run_id": "local-invoice-draft-ui-20261008-0019",
+  "project": "EvoSys Pro \u2014 commission and payroll projection truth",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37731793005",
-  "timestamp_ct": "2026-10-08 00:22 CT",
+  "actions_run_id": "37732169979",
+  "timestamp_ct": "2026-10-08 00:28 CT",
   "issue": 1,
-  "status_comment_id": 6052947116
+  "status_comment_id": 6053022951
 }
