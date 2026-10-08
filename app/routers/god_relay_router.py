@@ -1,6 +1,8 @@
 """Control Room API: the ChatGPT <-> Claude relay, for god_admin only.
 
 GET  /god/relay/state      normalized relay status, timeline, queue (read-only)
+GET  /god/relay/worker     evidence-only worker / UP NEXT state (read-only, never cached;
+                           scripts/relay/relay_state.py via app/services/relay_control_room.py)
 POST /god/relay/direction  Mike's raw direction -> audit comment + ChatGPT wake-up
 
 Mike's text is recorded as a human-input event for ChatGPT Work to review. It is
@@ -12,13 +14,14 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 from app.deps import require_god
 from app.models.models import User
 from app.services import relay_control as rc
 from app.services import relay_overnight as ov
+from app.services import relay_control_room as rcr
 
 router = APIRouter(prefix="/god/relay", tags=["god-relay"])
 log = logging.getLogger(__name__)
@@ -83,6 +86,16 @@ def relay_state(refresh: bool = False, user: User = Depends(require_god)):
                 "home": ov.home_summary({"task": "", "actor": "Idle", "status": "Idle"}, [], [],
                                         {"status": "None", "package": None})}
     return {**base, "available": True, "error": None, **rc.snapshot(snap_comments)}
+
+
+@router.get("/worker")
+def relay_worker(response: Response, user: User = Depends(require_god)):
+    """Who is working right now, what is queued, what is blocked - from trusted relay
+    evidence only. Fails closed: any GitHub failure returns `available: false` (HTTP
+    200) and never a cached or guessed worker. GET only; mutates nothing."""
+    for k, v in rcr.NO_CACHE_HEADERS.items():
+        response.headers[k] = v
+    return rcr.get_state()
 
 
 @router.post("/package/review")

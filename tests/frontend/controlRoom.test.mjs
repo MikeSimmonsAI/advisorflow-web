@@ -116,11 +116,15 @@ for (const e of [{ environment: 'production' }, { environment: 'demo' }, null, u
 const banner = src('components/StagingBanner.jsx')
 ok(banner.includes('fetchEnvironment') && banner.includes('stagingBanner') && !/hostname|location/.test(banner), 'banner asks the backend, not the URL')
 ok(/import StagingBanner/.test(app) && app.indexOf('<StagingBanner />') > app.indexOf('<DemoBanner />') && app.indexOf('<StagingBanner />') < app.indexOf('<Routes>'), 'banner sits above every route')
-for (const t of ['home-summary', 'completed-work', 'suggested-next', 'overnight-package', 'morning-summary', 'monitoring-notice', 'package-safety'])
+for (const t of ['completed-work', 'suggested-next', 'overnight-package', 'morning-summary', 'monitoring-notice', 'package-safety'])
   ok(page.includes(`data-testid="${t}"`), 'section ' + t)
 ok(page.includes("'/god/relay/package'") && page.includes("'/god/relay/package/review'"))
 ok(!page.includes('RELAY:DIRECTIVE') && !/ghp_|github_pat|Authorization/.test(page + banner), 'no directive or credential in browser code')
 ok(page.includes('Start Overnight Package') && page.includes('never to Claude') && page.includes('Give Direction stays available'))
 ok(page.includes('Add to overnight package') && page.includes('Add to queue') && page.includes('Dismiss'))
 ok(!/setInterval\([^)]*queueSuggestion|useEffect\([^)]*queueSuggestion/.test(page), 'suggestions never execute on their own')
+// Issue #21: the first screen is the evidence-only relay panel; no "Completed today"
+// home summary (it counted blocked/deferred runs) and no "Suggested next" heading.
+ok(page.includes("import GodRelayControlRoom from './GodRelayControlRoom'") && page.includes('<GodRelayControlRoom onManualRefresh='), 'relay panel first')
+ok(!page.includes('data-testid="home-summary"') && !page.includes('Suggested next') && !page.includes('Status updated from the relay'), 'no misleading summary or false success')
 console.log(`controlRoom: ${n} passed`)

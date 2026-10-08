@@ -1,16 +1,24 @@
 /**
  * Control Room — one screen for the ChatGPT <-> Claude relay.
  *
- * Reads GET /god/relay/state (polled + Refresh now). Give Direction posts
- * Mike's words to /god/relay/direction, which records them for ChatGPT Work to
- * review. It never reaches Claude directly. Light theme; reads --god-* tokens.
+ * First screen (issue #21): GodRelayControlRoom reads GET /god/relay/worker,
+ * the evidence-only relay state - CURRENTLY WORKING, UP NEXT (approved relay
+ * directives only), NEEDS MIKE / blockers - and the project launch board.
+ * Its "Check status now" (Refresh now) never reports success for a failed check.
+ *
+ * Below it: Give Direction posts Mike's words to /god/relay/direction, which
+ * records them for ChatGPT Work to review. It never reaches Claude directly.
+ * The older relay snapshot (GET /god/relay/state) feeds Give Direction, the
+ * NEEDS MIKE gate, the overnight package and the collapsed history.
+ * Light theme; reads --god-* tokens.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
+import GodRelayControlRoom from './GodRelayControlRoom'
 import {
   POLL_MS, toneFor, showNeedsMike, KIND_LABEL, timelineNewestFirst,
   makeSubmitGuard, directionDisabledReason, errorMessage,
-  homeCards, COMPLETED_FILTERS, filterCompleted, dismissSuggestion, loadDismissed, visibleSuggestions,
+  COMPLETED_FILTERS, filterCompleted, dismissSuggestion, loadDismissed, visibleSuggestions,
   suggestionActions, emptyPackage, addObjective, moveObjective, removeObjective, renamePackage,
   savePackageDraft, loadPackageDraft, packageState, canStartPackage, packageSequence, objectivesForServer,
   monitoringView, MAX_OBJECTIVES,
@@ -146,20 +154,6 @@ function Timeline({ events }) {
   )
 }
 
-function HomeSummary({ home }) {
-  return (
-    <div className="cards" data-testid="home-summary">
-      {homeCards(home).map((c) => (
-        <div key={c.key} className={'hc ' + c.tone} data-testid={'home-' + c.key}>
-          <div className="lbl">{c.label}</div>
-          <div className="v">{c.value}</div>
-          {c.sub && <div className="s">{c.sub}</div>}
-        </div>
-      ))}
-    </div>
-  )
-}
-
 function MonitoringNotice({ m }) {
   const v = monitoringView(m)
   if (!v) return null
@@ -200,7 +194,8 @@ function CompletedWork({ items }) {
 function SuggestedNext({ items, dismissed, onDismiss, onPackage, onQueue, blocked }) {
   const rows = visibleSuggestions(items, dismissed)
   return (
-    <div className="card" data-testid="suggested-next"><h2>Suggested next</h2>
+    <div className="card" data-testid="suggested-next"><h2>Suggested actions — ideas, not scheduled</h2>
+      <div className="evd" style={{ marginBottom: 6 }}>Nothing here is queued or approved. Only UP NEXT is scheduled work.</div>
       {!rows.length && <div className="evd">No suggestions right now. They appear only when a finished or blocked run points somewhere.</div>}
       {rows.map((s) => {
         const a = suggestionActions(s, !!blocked)
@@ -367,12 +362,9 @@ export default function ControlRoom() {
   const [loadErr, setLoadErr] = useState(null)
   const [busy, setBusy] = useState(false)
   const [answered, setAnswered] = useState(null)
-  const [tick, setTick] = useState(0)
   const [pkg, setPkgState] = useState(() => loadPackageDraft(window.localStorage))
   const [dismissed, setDismissed] = useState(() => loadDismissed(window.localStorage))
   const [notice, setNotice] = useState(null)
-  const [checking, setChecking] = useState(false)
-  const [lastChecked, setLastChecked] = useState(null)
 
   const setPkg = (p) => { setPkgState(p); savePackageDraft(window.localStorage, p) }
   const addSuggestion = (s) => { setPkg(addObjective(pkg, s.suggestion, 'suggested')); setNotice('Added to the overnight package draft.') }
@@ -380,30 +372,21 @@ export default function ControlRoom() {
   const queueSuggestion = async (s) => {
     try {
       await api.post('/god/relay/direction', { text: s.suggestion, mode: 'after_current' })
-      setNotice('Added to the queue. ChatGPT will review it first.'); load(true)
+      setNotice('Sent to ChatGPT for review. It is not queued until ChatGPT issues a directive.'); load(true)
     } catch (e) { setLoadErr(errorMessage(e)) }
   }
 
+  // Older relay snapshot (Give Direction, NEEDS MIKE gate, package, history). A failure
+  // is shown as a failure; it never produces a success message.
   const load = useCallback(async (refresh = false) => {
     try {
       setData(await api.get('/god/relay/state' + (refresh ? '?refresh=true' : '')))
       setLoadErr(null)
     } catch (e) { setLoadErr(errorMessage(e)) }
   }, [])
+  const refreshNow = useCallback(() => { load(true) }, [load])
 
   useEffect(() => { load() ; const t = setInterval(() => load(), POLL_MS); return () => clearInterval(t) }, [load])
-
-  const checkStatusNow = async () => {
-    setChecking(true)
-    try {
-      await load(true)
-      setLastChecked(new Date())
-      setNotice('Status updated from the relay right now.')
-    } finally {
-      setChecking(false)
-    }
-  }
-  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t) }, [])
 
   const choose = async (c) => {
     setBusy(true)
@@ -413,60 +396,56 @@ export default function ControlRoom() {
     } catch (e) { setLoadErr(errorMessage(e)) } finally { setBusy(false) }
   }
 
-  if (!data) return <div className="cr"><style>{CSS}</style><h1>Control Room</h1><div className="sub">{loadErr || 'Loading…'}</div></div>
-  const q = data.queue || {}
+  const q = (data && data.queue) || {}
   return (
-    <div className="cr" data-tick={tick}>
+    <div className="cr">
       <style>{CSS}</style>
       <h1>Control Room</h1>
-      <div className="sub">ChatGPT and Claude, in one place. Staging view; updates itself every {POLL_MS / 1000}s.</div>
-      <div className="bar">
-        <button className="btn status" onClick={checkStatusNow} disabled={checking} data-testid="check-status-now">
-          {checking ? 'Checking status…' : 'Check status now'}
-        </button>
-        <span className="evd">
-          Current: {data.state?.status || 'Unknown'}
-          {data.state?.actor ? ` · ${data.state.actor}` : ''}
-          {lastChecked ? ` · checked ${lastChecked.toLocaleTimeString()}` : (data.state?.last_update_ct ? ` · last update ${data.state.last_update_ct}` : '')}
-        </span>
-        {data.notify && <span className="evd">Email alerts: {data.notify.recipients_configured ? `${data.notify.recipients_configured} recipient(s) set, off in staging` : 'no recipients set'}</span>}
-      </div>
-      <MonitoringNotice m={data.monitoring} />
-      {(loadErr || (!data.available && !monitoringView(data.monitoring))) && <div className="err">{loadErr || data.error}</div>}
+      <div className="sub">What is running, what is next, what needs you. Staging view; updates itself every {POLL_MS / 1000}s.</div>
+
+      {data && showNeedsMike(data) && <NeedsMike gate={data.needs_mike} onChoose={choose} busy={busy}
+                                                 disabled={!!directionDisabledReason(data)} />}
+
+      <GodRelayControlRoom onManualRefresh={refreshNow} />
+
+      {loadErr && <div className="err" role="alert" data-testid="relay-snapshot-error">Relay conversation could not be loaded: {loadErr}</div>}
+      {data && <MonitoringNotice m={data.monitoring} />}
       {notice && <div className="ok">{notice}</div>}
       {answered && <div className="ok">Your answer ({answered}) went to ChatGPT.</div>}
 
-      {showNeedsMike(data) && <NeedsMike gate={data.needs_mike} onChoose={choose} busy={busy}
-                                         disabled={!!directionDisabledReason(data)} />}
-      <HomeSummary home={data.home} />
-      <StatusHeader s={data.state} />
-
-      {(data.notifications || []).length > 0 && (
-        <div className="card"><h2>What just happened</h2>
-          {data.notifications.slice().reverse().map((n, i) => <div className="note" key={i}>{n.text}</div>)}
-        </div>)}
-
-      <div className="cols">
-        <div>
-          <Composer data={data} onSent={() => load(true)} />
-          <OvernightPackage pkg={pkg} setPkg={setPkg} overnight={data.overnight}
-                            blocked={directionDisabledReason(data)} onStarted={() => load(true)} />
-          <SuggestedNext items={data.suggested_next} dismissed={dismissed} blocked={directionDisabledReason(data)}
-                         onDismiss={(id) => setDismissed(dismissSuggestion(window.localStorage, id))}
-                         onPackage={addSuggestion} onQueue={queueSuggestion} />
-          <CompletedWork items={data.completed_work} />
-          <div className="card"><h2>Timeline</h2><Timeline events={data.events} /></div>
+      {data ? (
+        <div className="cols">
+          <div>
+            <Composer data={data} onSent={() => load(true)} />
+          </div>
+          <div className="card" data-testid="queue"><h2>Waiting for ChatGPT review</h2>
+            <div className="evd" style={{ marginBottom: 6 }}>Your directions are not scheduled until ChatGPT turns them into a directive (then they appear in UP NEXT).</div>
+            {(q.queued || []).length
+              ? q.queued.map((d, i) => <div className="q" key={d.input_id || i}>{i + 1}. {d.text}<span className="tag">{d.mode_label}</span></div>)
+              : <div className="q">Nothing waiting.</div>}
+          </div>
         </div>
-        <div className="card" data-testid="queue"><h2>Active queue</h2>
-          <div className="lbl">Current objective</div><div className="q">{q.current || 'Nothing running'}</div>
-          <div className="lbl">Queued directions</div>
-          {(q.queued || []).length ? q.queued.map((d, i) => <div className="q" key={d.input_id || i}>{i + 1}. {d.text}<span className="tag">{d.mode_label}</span></div>) : <div className="q">None</div>}
-          <div className="lbl">Completed today</div>
-          {(q.completed_today || []).length ? q.completed_today.map((d, i) => <div className="q" key={i}>✓ {d.title}</div>) : <div className="q">None yet</div>}
-          <div className="lbl">Blocked / approval</div>
-          {(q.attention || []).length ? q.attention.map((d, i) => <div className="q" key={i}>{d.title}</div>) : <div className="q">None</div>}
-        </div>
-      </div>
+      ) : (!loadErr && <div className="sub">Loading relay conversation…</div>)}
+
+      {data && (
+        <details className="card" data-testid="more-tools">
+          <summary><b>Suggested actions, overnight package and relay conversation</b> <span className="evd">(expand)</span></summary>
+          <div style={{ marginTop: 12 }}>
+            <SuggestedNext items={data.suggested_next} dismissed={dismissed} blocked={directionDisabledReason(data)}
+                           onDismiss={(id) => setDismissed(dismissSuggestion(window.localStorage, id))}
+                           onPackage={addSuggestion} onQueue={queueSuggestion} />
+            <OvernightPackage pkg={pkg} setPkg={setPkg} overnight={data.overnight}
+                              blocked={directionDisabledReason(data)} onStarted={() => load(true)} />
+            <CompletedWork items={data.completed_work} />
+            <div className="card"><h2>Relay conversation summary</h2><StatusHeader s={data.state} /></div>
+            {(data.notifications || []).length > 0 && (
+              <div className="card"><h2>What just happened</h2>
+                {data.notifications.slice().reverse().map((n, i) => <div className="note" key={i}>{n.text}</div>)}
+              </div>)}
+            <div className="card"><h2>Timeline</h2><Timeline events={data.events} /></div>
+          </div>
+        </details>
+      )}
     </div>
   )
 }
