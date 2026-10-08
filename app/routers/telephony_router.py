@@ -242,14 +242,18 @@ def _lead_in_scope(db, user, lead_id) -> Lead:
 
 
 @router.get("/calls/human/readiness/{lead_id}")
-def human_readiness(lead_id: str, db: Session = Depends(get_db),
+def human_readiness(lead_id: str, number_id: Optional[str] = Query(None),
+                    db: Session = Depends(get_db),
                     user: User = Depends(require_tenant_user)):
     lead = _lead_in_scope(db, user, lead_id)
-    return TS.human_call_readiness(db, lead, user)
+    return TS.human_call_readiness(db, lead, user, number_id)
 
 
 class HumanCallIn(BaseModel):
     lead_id: str
+    # Which approved voice number to call from. Required (by the server's answer,
+    # not the client's) when the organization has more than one.
+    number_id: Optional[str] = Field(None, max_length=64)
 
 
 @router.post("/calls/human", status_code=201)
@@ -258,7 +262,7 @@ def place_human_call(req: HumanCallIn, db: Session = Depends(get_db),
                      _w: User = Depends(require_not_observation)):
     lead = _lead_in_scope(db, user, req.lead_id)
     try:
-        call = TS.start_human_call(db, lead, user)
+        call = TS.start_human_call(db, lead, user, req.number_id)
     except TS.RateLimited as exc:
         raise HTTPException(status_code=429, detail=str(exc))
     except PermissionError as exc:
@@ -268,7 +272,9 @@ def place_human_call(req: HumanCallIn, db: Session = Depends(get_db),
     try:
         from app.routers.audit_log_router import log_action
         log_action(db, lead.organization_id, user.id, action="voice.human_call",
-                   target_type="lead", target_id=lead.id)
+                   target_type="lead", target_id=lead.id,
+                   details={"call_id": call.id, "from_phone": call.from_phone,
+                            "phone_number_id": call.phone_number_id})
     except Exception:                                        # noqa: BLE001
         log.exception("audit log failed for human call %s", call.id)
     return TS.call_json(call)

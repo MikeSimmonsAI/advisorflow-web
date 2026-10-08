@@ -30,6 +30,7 @@ from typing import List, Optional, Tuple
 from app.models.models import Lead, Organization, User, VoiceCall
 from app.models.telephony_models import (InboundCallLog, OrgVoicemailDrop, PhoneNumber,
                                          TelephonyUserSetting, Voicemail)
+from app.services import dialer_sender as DS
 from app.services import number_resolution as NR
 from app.services import telephony_twilio as TT
 from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
@@ -599,7 +600,36 @@ def handle_async_amd(db, call: VoiceCall, amd: str, call_sid: str) -> str:
 
 # ── human dialer ────────────────────────────────────────────────────────────
 
-def human_call_readiness(db, lead: Lead, user: User) -> dict:
+LEGACY_ORG_OPTION_ID = "org-column"
+
+
+def human_sender(db, org, lead: Lead, number_id: Optional[str] = None) -> dict:
+    """The caller ID a human call would use, from THIS organization's own approved
+    voice inventory only (never brand/platform pool, never another tenant, never a
+    literal). Adds ``options``, ``resolved`` (a ResolvedNumber when ok) for callers."""
+    from app.models.telephony_models import PhoneNumber
+    org_id = getattr(org, "id", None)
+    ws = getattr(lead, "location_id", None) or getattr(lead, "workspace_id", None)
+    rows = db.query(PhoneNumber).filter(PhoneNumber.organization_id == org_id).all() if org_id else []
+    options = DS.eligible_identities(rows, org_id, ws)
+    legacy = NR.normalize_e164(getattr(org, "org_twilio_phone_number", None))
+    if legacy and DS.valid_caller_id(legacy) and not any(
+            r.e164 == legacy for r in rows) and not any(o["e164"] == legacy for o in options):
+        options.append({"id": LEGACY_ORG_OPTION_ID, "e164": legacy, "label": None,
+                        "workspace_id": None})
+    picked = DS.choose_sender(options, number_id, ws)
+    picked["options"] = [{"id": o["id"], "e164": o["e164"], "label": o["label"]} for o in options]
+    picked["resolved"] = None
+    if picked["ok"]:
+        legacy_pick = picked["number_id"] == LEGACY_ORG_OPTION_ID
+        picked["resolved"] = NR.ResolvedNumber(
+            ok=True, e164=picked["e164"], level="organization",
+            source="org_column" if legacy_pick else "phone_numbers",
+            number_id=None if legacy_pick else picked["number_id"], organization_id=org_id)
+    return picked
+
+
+def human_call_readiness(db, lead: Lead, user: User, number_id: Optional[str] = None) -> dict:
     """Every precondition of the human bridge, each with what to do about it."""
     from app.services import voice_bulk_gate
     org = db.query(Organization).filter(Organization.id == lead.organization_id).first()
@@ -608,13 +638,15 @@ def human_call_readiness(db, lead: Lead, user: User) -> dict:
     checks.append({"key": "compliance", "ok": refusal is None,
                    "label": "Compliance (DNC, suppression, call permission)",
                    "detail": refusal})
-    resolved = NR.resolve_voice_number(db, org, purpose=NR.PURPOSE_OUTBOUND)
+    sender = human_sender(db, org, lead, number_id)
+    resolved = sender["resolved"] or NR.ResolvedNumber(ok=False, reason=sender["reason"])
     checks.append({"key": "org_number", "ok": resolved.ok,
                    "label": "Organization voice number",
                    "detail": (None if resolved.ok else resolved.reason),
                    "fix": (None if resolved.ok else
-                           "A platform administrator assigns a voice-capable number to this "
-                           "organization (Organization Control Center > Operations).")})
+                           ("Pick which approved number this call comes from." if sender["needs_selection"]
+                            else "A platform administrator assigns a voice-capable number to this "
+                                 "organization (Organization Control Center > Operations)."))})
     cb = user_callback_phone(db, user.id)
     cb_problem = callback_phone_problem(db, lead.organization_id, cb) if cb else None
     setting = db.query(TelephonyUserSetting).filter(TelephonyUserSetting.user_id == user.id).first()
@@ -645,6 +677,8 @@ def human_call_readiness(db, lead: Lead, user: User) -> dict:
     return {"ready": all(c["ok"] for c in checks), "checks": checks,
             "provider_config_required": config_missing,
             "from_number": resolved.e164 if resolved.ok else None,
+            "from_options": sender["options"], "needs_selection": sender["needs_selection"],
+            "from_label": sender["label"] if resolved.ok else None,
             "from_level": resolved.level if resolved.ok else None,
             "callback_phone": cb, "callback_pending": pending, "mode": "twilio_bridge",
             "browser_calling": False,
@@ -653,16 +687,23 @@ def human_call_readiness(db, lead: Lead, user: User) -> dict:
                      "is not available in this stack.")}
 
 
-def start_human_call(db, lead: Lead, user: User) -> VoiceCall:
+def start_human_call(db, lead: Lead, user: User, number_id: Optional[str] = None) -> VoiceCall:
     """Place leg 1 of the bridge. Raises PermissionError(reason) on any refusal
     (no row written) and RuntimeError on a provider failure (row marked failed)."""
     enforce_human_call_rate(db, user.id)
-    ready = human_call_readiness(db, lead, user)
+    live = db.query(VoiceCall).filter(VoiceCall.lead_id == lead.id, VoiceCall.advisor_id == user.id,
+                                      VoiceCall.is_human_call.is_(True),
+                                      VoiceCall.status.in_(DS.LIVE_STATUSES)).all()
+    if DS.find_inflight(live, lead.id, user.id, datetime.utcnow()) is not None:
+        raise PermissionError("A call to this lead is already in progress. Wait for it to end.")
+    ready = human_call_readiness(db, lead, user, number_id)
     if not ready["ready"]:
         first = next(c for c in ready["checks"] if not c["ok"])
         raise PermissionError("%s: %s" % (first["label"], first.get("detail") or "not ready"))
     org = db.query(Organization).filter(Organization.id == lead.organization_id).first()
-    resolved = NR.resolve_voice_number(db, org, purpose=NR.PURPOSE_OUTBOUND)
+    resolved = human_sender(db, org, lead, number_id)["resolved"]
+    if resolved is None:
+        raise PermissionError("No approved caller ID could be selected for this call.")
     creds = NR.twilio_credentials(db, org, resolved)
     lead_e164 = NR.normalize_e164(lead.phone)
     if not lead_e164:

@@ -41,6 +41,8 @@ export default function CallButton({ leadId, onDone, label = 'Call', phone: lead
   const [saving, setSaving] = useState(false)
   const [call, setCall] = useState(null)
   const [placing, setPlacing] = useState(false)
+  const [pick, setPick] = useState('')
+  const busy = useRef(false)
   const [dispo, setDispo] = useState(false)
   const [logged, setLogged] = useState(false)
   const timer = useRef(null)
@@ -48,10 +50,12 @@ export default function CallButton({ leadId, onDone, label = 'Call', phone: lead
   const load = useCallback(() => {
     if (!leadId) return
     setErr('')
-    api.get(`/calls/human/readiness/${leadId}`).then(setReady)
+    const q = pick ? `?number_id=${encodeURIComponent(pick)}` : ''
+    api.get(`/calls/human/readiness/${leadId}${q}`).then(setReady)
       .catch(e => { setReady(null); setErr(e.message || 'Call setup could not be checked.') })
-  }, [leadId])
+  }, [leadId, pick])
 
+  useEffect(() => { setPick('') }, [leadId])
   useEffect(() => { setCall(null); setLogged(false); load() }, [load])
   useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -68,15 +72,17 @@ export default function CallButton({ leadId, onDone, label = 'Call', phone: lead
   }, [onDone])
 
   async function place() {
+    if (busy.current) return          // a double-click must not start two calls
+    busy.current = true
     setPlacing(true); setErr(''); setLogged(false)
     try {
-      const c = await api.post('/calls/human', { lead_id: leadId })
+      const c = await api.post('/calls/human', { lead_id: leadId, number_id: pick || undefined })
       setCall(c)
       poll(c.id)
     } catch (e) {
       setErr(e.message || 'The call could not be placed.')
       load()
-    } finally { setPlacing(false) }
+    } finally { busy.current = false; setPlacing(false) }
   }
 
   async function savePhone(e) {
@@ -138,10 +144,21 @@ export default function CallButton({ leadId, onDone, label = 'Call', phone: lead
         )}
       </div>
 
+      {(ready?.from_options || []).length > 1 && !active && (
+        <label className="tel-note" data-testid="tel-from-pick">
+          Call from{' '}
+          <select value={pick} onChange={e => setPick(e.target.value)} aria-label="Caller ID">
+            <option value="">Choose a number…</option>
+            {ready.from_options.map(o => (
+              <option key={o.id} value={o.id}>{fmt(o.e164)}{o.label ? ` · ${o.label}` : ''}</option>
+            ))}
+          </select>
+        </label>
+      )}
       {ready?.ready && !call && (
         <p className="tel-note">
           Your phone {fmt(ready.callback_phone)} rings first. When you answer, we dial the customer from
-          {' '}{fmt(ready.from_number)}{ready.from_level && ready.from_level !== 'organization' ? ` (${ready.from_level} number)` : ''}.
+          {' '}{fmt(ready.from_number)}{ready.from_label ? ` (${ready.from_label})` : ''}{ready.from_level && ready.from_level !== 'organization' ? ` (${ready.from_level} number)` : ''}.
         </p>
       )}
       {call && active && call.status === 'ringing_user' && (
