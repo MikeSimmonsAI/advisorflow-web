@@ -122,7 +122,7 @@ export default function GodRelayControlRoom({ onManualRefresh }) {
           {loading ? 'Checking…' : 'Check status now'}
         </button>
         <span style={label} data-testid="relay-check-line">
-          {isWorking(s) ? 'Worker active' : headline(s)} · refreshes every {POLL_MS / 1000}s
+          {isWorking(s) ? 'Worker active' : headline({ ...s, worker: workerView(s) })} · refreshes every {POLL_MS / 1000}s
           {lastOk ? ` · last successful check ${formatCT(new Date(lastOk).toISOString())}` : ' · no successful check yet'}
           {lastFailed ? ` · last attempt FAILED ${formatCT(new Date(lastFailed).toISOString())}` : ''}
         </span>
