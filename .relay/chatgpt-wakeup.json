@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "shared-sales-calendar-mobile-20261008-0051",
-  "parent_run_id": "manager-approval-smoke-proof-closure-20261008-0047",
-  "project": "EvoSys Pro \u2014 shared sales calendar and mobile workspace",
+  "relay_run_id": "shared-calendar-single-feed-closure-20261008-0057",
+  "parent_run_id": "shared-sales-calendar-mobile-20261008-0051",
+  "project": "EvoSys Pro \u2014 shared calendar single-feed closure",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37734529756",
-  "timestamp_ct": "2026-10-08 00:56 CT",
+  "actions_run_id": "37735021238",
+  "timestamp_ct": "2026-10-08 01:02 CT",
   "issue": 1,
-  "status_comment_id": 6053387899
+  "status_comment_id": 6053462744
 }
