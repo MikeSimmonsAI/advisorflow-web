@@ -48,7 +48,7 @@ class Wiring(unittest.TestCase):
         s = _src("frontend/src/pages/sales/TeamCalendar.jsx")
         self.assertIn("initialViewState(", s)
         self.assertIn("saveViewState(view, anchor)", s)
-        self.assertIn("data?.truncated", s)
+        self.assertIn("feed?.truncated", s)
         self.assertIn("sort(compareAppts)", s)
 
 

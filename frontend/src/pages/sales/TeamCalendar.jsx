@@ -41,6 +41,8 @@ import OutcomeDialog from './OutcomeDialog'
 import {
   eventQuery, makeRequestGuard, groupByLocalDate, mergeOptions, describeFeed,
   timeLabel, BUCKET_LABELS, TYPE_LABELS,
+  appointmentsFromFeed, filterAppointments, filterFeedEvents, locationsOf,
+  agendaToday, upcomingOf, attentionOf,
 } from './sharedEvents'
 import {
   ymd, addDays, dayFromYmd, startOfWeek, startOfMonth, monthGridRange,
@@ -442,9 +444,9 @@ export default function TeamCalendar() {
       date_from: from, date_to: to, scope: 'team',
       include_external: showExternal ? 'true' : 'false',
     })
+    // Roster / availability layers only. Appointment filters are applied to the
+    // shared feed on the client; this response's appointment list is not read.
     if (memberIds) q.set('member_ids', memberIds.join(','))
-    if (typeIds.length) q.set('meeting_type_ids', typeIds.join(','))
-    if (loc) q.set('location', loc)
     try {
       const r = await api.get('/sales/calendar/view?' + q.toString())
       if (reqId.current !== mine) return
@@ -455,7 +457,7 @@ export default function TeamCalendar() {
     } finally {
       if (reqId.current === mine) setLoading(false)
     }
-  }, [from, to, memberIds, typeIds, loc, showExternal])
+  }, [from, to, memberIds, showExternal])
 
   useEffect(() => { load() }, [load])
 
@@ -466,38 +468,37 @@ export default function TeamCalendar() {
   const [feedError, setFeedError] = useState(null)
   const [feedTypes, setFeedTypes] = useState([])
   const [feedOwners, setFeedOwners] = useState([])
-  useEffect(() => {
+  // ONE unfiltered request per range feeds every grid, panel and metric.
+  // Filters narrow it on the client, so facet options can never shrink and the
+  // grid can never disagree with the agenda about what exists.
+  const loadFeed = useCallback(() => {
     const token = feedGuard.current.begin()
     setFeedError(null)
-    api.get('/sales/calendar/events?' + eventQuery({
-      from, to, ownerIds: feedOwners, types: feedTypes })).then(r => {
+    return api.get('/sales/calendar/events?' + eventQuery({ from, to })).then(r => {
       if (feedGuard.current.isCurrent(token)) setFeed(r)
     }).catch(e => {
       if (feedGuard.current.isCurrent(token)) {
-        setFeedError(e.message || 'Could not load tasks and activity.')
+        setFeed(null)   // never leave another range's events painted under an error
+        setFeedError(e.message || 'Could not load the calendar.')
       }
     })
-  }, [from, to, feedTypes, feedOwners])
+  }, [from, to])
+  useEffect(() => { loadFeed() }, [loadFeed])
 
   const isManager = data?.is_manager
   const tz = data?.brand_sales_org?.timezone
   const people = data?.people || []
 
-  const appts = useMemo(() => {
-    let rows = [...(data?.appointments || [])].sort(compareAppts)
-    if (search.trim()) {
-      // Client-side because it is a "find the one I'm thinking of" filter over
-      // an already-loaded window, not a query. Sending it to the server would
-      // make every keystroke a round trip for no better answer.
-      const q = search.trim().toLowerCase()
-      rows = rows.filter(a => [
-        a.title, a.meeting_type, a.opportunity_company, a.location,
-        a.prospect?.name, a.prospect?.company,
-        ...(a.participants || []).map(p => p.full_name),
-      ].filter(Boolean).some(v => String(v).toLowerCase().includes(q)))
-    }
-    return rows
-  }, [data, search])
+  // Every appointment on screen comes from the shared feed.
+  const feedAppts = useMemo(() => appointmentsFromFeed(feed), [feed])
+  const appts = useMemo(() => [...filterAppointments(
+    feedAppts, { memberIds, typeIds, loc, search })].sort(compareAppts),
+  [feedAppts, memberIds, typeIds, loc, search])
+  const locations = useMemo(() => locationsOf(feedAppts), [feedAppts])
+  const nowUtc = feed?.now_utc || ''
+  const todayAgenda = useMemo(() => agendaToday(appts, feed?.today_local), [appts, feed])
+  const upcoming = useMemo(() => upcomingOf(appts, nowUtc), [appts, nowUtc])
+  const attention = useMemo(() => attentionOf(appts, nowUtc), [appts, nowUtc])
 
   const days = useMemo(() => {
     const n = view === 'day' ? 1 : 7
@@ -535,7 +536,7 @@ export default function TeamCalendar() {
     setFlash(msg)
     setOpenAppt(null)
     setOutcomeFor(null)
-    await load()
+    await Promise.all([load(), loadFeed()])
   }
 
   return (
@@ -563,6 +564,7 @@ export default function TeamCalendar() {
       }
     >
       <ErrorBar error={error} onRetry={load} />
+      <ErrorBar error={feedError} onRetry={loadFeed} />
 
       {flash && (
         <div className="sw-note sw-flex sw-between">
@@ -604,7 +606,7 @@ export default function TeamCalendar() {
         <select className="sw-select" style={{ width: 150 }}
                 value={loc} onChange={e => setLoc(e.target.value)}>
           <option value="">All Locations</option>
-          {(data?.locations || []).map(l => <option key={l} value={l}>{l}</option>)}
+          {locations.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
         <input className="sw-input" style={{ width: 168 }} placeholder="Search calendar…"
                value={search} onChange={e => setSearch(e.target.value)} />
@@ -614,7 +616,7 @@ export default function TeamCalendar() {
                  onChange={e => setShowExternal(e.target.checked)} />
           Show external calendars
         </label>
-        <button className="sw-btn" onClick={load} disabled={loading}>
+        <button className="sw-btn" onClick={() => { load(); loadFeed() }} disabled={loading}>
           {loading ? 'Loading…' : 'Refresh'}
         </button>
       </div>
@@ -622,10 +624,10 @@ export default function TeamCalendar() {
       {/* THE HONESTY BANNER. Rendered only when somebody's outside calendar
           could not actually be read, because "free" and "we could not check"
           must never look the same on a screen people book from. */}
-      {data?.truncated && (
+      {feed?.truncated && (
         <div className="cal-unverified" role="alert">
           <span aria-hidden="true">⚠</span>
-          <span><b>Calendar incomplete.</b> Only the first {data.limit || 500} meetings
+          <span><b>Calendar incomplete.</b> Only the first {feed.limit || 500} meetings
             in this range are shown. Narrow the dates or filters to see the rest.</span>
         </div>
       )}
@@ -655,13 +657,13 @@ export default function TeamCalendar() {
         <div>
           {/* ── desktop: the grid ─────────────────────────────────────── */}
           <div className="cal-desk">
-            {loading && !data ? <div className="sw-subtle">Loading…</div> : null}
+            {!feed && !feedError ? <div className="sw-subtle">Loading…</div> : null}
 
-            {data && (view === 'day' || view === 'week') && (
+            {feed && (view === 'day' || view === 'week') && (
               <>
                 <TimeGrid days={days} appts={appts} layers={people} tz={tz}
                           showExternal={showExternal}
-                          nowLocal={data.now_local}
+                          nowLocal={data?.now_local}
                           onOpen={setOpenAppt} />
                 <Card bodyless>
                   <div className="cal-legend">
@@ -676,12 +678,12 @@ export default function TeamCalendar() {
               </>
             )}
 
-            {data && view === 'month' && (
+            {feed && view === 'month' && (
               <MonthGrid anchor={anchor} appts={appts} onOpen={setOpenAppt}
                          onPickDay={d => { setAnchor(d); setView('day') }} />
             )}
 
-            {data && view === 'agenda' && (
+            {feed && view === 'agenda' && (
               <AgendaList appts={appts} onOpen={setOpenAppt} />
             )}
           </div>
@@ -691,7 +693,7 @@ export default function TeamCalendar() {
               phone, and pinch-zooming to find your 2pm is not a feature — so
               at this width the grid is REPLACED, not squeezed. */}
           <div className="cal-mob">
-            {!appts.length && data ? (
+            {!appts.length && feed ? (
               <Card><Empty title="Nothing booked in this range" /></Card>
             ) : null}
             {appts.map(a => (
@@ -703,15 +705,15 @@ export default function TeamCalendar() {
           {/* ── the three panels ──────────────────────────────────────── */}
           <div className="cal-bottom">
             <Card title="TODAY'S AGENDA"
-                  sub={data?.now_local
-                    ? dayFromYmd(String(data.now_local).slice(0, 10))
+                  sub={feed?.today_local
+                    ? dayFromYmd(feed.today_local)
                       .toLocaleDateString(undefined,
                         { weekday: 'long', month: 'short', day: 'numeric' })
                     : ''}>
-              {(data?.agenda_today || []).length === 0 && (
+              {todayAgenda.length === 0 && (
                 <div className="sw-subtle">Nothing scheduled today.</div>
               )}
-              {(data?.agenda_today || []).map(a => (
+              {todayAgenda.map(a => (
                 <div key={a.id} className="cal-row">
                   <span className="cal-row-t">{wallTime(a.starts_at_local)}</span>
                   <div className="cal-row-m">
@@ -761,7 +763,7 @@ export default function TeamCalendar() {
               {feed && describeFeed(feed).state === 'empty' && (
                 <div className="sw-subtle">No tasks or activity in this range.</div>
               )}
-              {feed && groupByLocalDate(feed.events).map(([day, evs]) => (
+              {feed && groupByLocalDate(filterFeedEvents(feed.events, { types: feedTypes, ownerIds: feedOwners })).map(([day, evs]) => (
                 <div key={day}>
                   <small>{day}</small>
                   {evs.map(e => (
@@ -797,12 +799,12 @@ export default function TeamCalendar() {
             </Card>
 
             <Card title="NEEDS ATTENTION"
-                  sub={(data?.attention || []).length + ' item'
-                    + ((data?.attention || []).length === 1 ? '' : 's')}>
-              {(data?.attention || []).length === 0 && (
+                  sub={attention.length + ' item'
+                    + (attention.length === 1 ? '' : 's')}>
+              {attention.length === 0 && (
                 <div className="sw-subtle">Nothing needs a human right now.</div>
               )}
-              {(data?.attention || []).slice(0, 8).map((it, i) => (
+              {attention.slice(0, 8).map((it, i) => (
                 <div key={it.appointment_id + '-' + it.kind + '-' + i}
                      className={'cal-attn k-' + it.kind}>
                   <i className="cal-attn-b" aria-hidden="true" />
@@ -812,8 +814,7 @@ export default function TeamCalendar() {
                       {it.starts_at_local ? ' · ' + wallTime(it.starts_at_local) : ''}</small>
                   </div>
                   <button className="sw-tiny" onClick={() => {
-                    const a = (data.appointments || [])
-                      .find(x => x.id === it.appointment_id)
+                    const a = feedAppts.find(x => x.id === it.appointment_id)
                     if (!a) return
                     if (it.kind === 'outcome') setOutcomeFor(a)
                     else setOpenAppt(a)
@@ -827,10 +828,10 @@ export default function TeamCalendar() {
 
             <Card title="UPCOMING"
                   sub={view === 'agenda' ? 'next two weeks' : 'in this range'}>
-              {(data?.upcoming || []).length === 0 && (
+              {upcoming.length === 0 && (
                 <div className="sw-subtle">Nothing upcoming in this range.</div>
               )}
-              {(data?.upcoming || []).slice(0, 8).map(a => (
+              {upcoming.slice(0, 8).map(a => (
                 <div key={a.id} className="cal-row">
                   <span className="cal-row-t">
                     {dayFromYmd(String(a.starts_at_local).slice(0, 10))
@@ -853,7 +854,7 @@ export default function TeamCalendar() {
         <aside className="cal-rail">
           <Card bodyless>
             <MiniMonth anchor={anchor} selected={anchor}
-                       appts={data?.appointments || []}
+                       appts={appts}
                        onPick={d => { setAnchor(d); if (view === 'month') setView('day') }} />
           </Card>
 

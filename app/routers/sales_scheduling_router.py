@@ -1506,7 +1506,14 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
                   include_external: bool = Query(True),
                   user: User = Depends(require_sales_member),
                   db: Session = Depends(get_db)):
-    """Everything the Team Calendar needs for a range, in one request.
+    """Availability layers, roster, provider health and filter vocabularies.
+
+    APPOINTMENT READS ARE RETIRED HERE FOR THE UI. Every visible calendar view
+    reads GET /calendar/events. The `appointments`, `agenda_today`, `attention`
+    and `upcoming` keys below remain only for API compatibility; no screen may
+    render them, and a test asserts the web page does not.
+
+    Original description: everything the Team Calendar needs for a range.
 
     ONE REQUEST BY DESIGN. The screen renders a grid, a roster with live
     status, provider health, an agenda, an attention list and an upcoming
@@ -1766,8 +1773,11 @@ def calendar_events(brand_sales_org_id: Optional[str] = Query(None),
             pids.setdefault(aid, []).append(uid)
         for a in rows:
             o = _opp(a.opportunity_id)
-            candidates.append(sce.appointment_event(
-                a, o, names.get(o.owner_user_id) if o else None, pids.get(a.id, [])))
+            ev = sce.appointment_event(
+                a, o, names.get(o.owner_user_id) if o else None, pids.get(a.id, []))
+            # Read-only card detail, so the grids need no second appointment read.
+            ev["appointment"] = _appt_out(db, a, user)
+            candidates.append(ev)
         status["appointments"] = {"status": "truncated" if trunc else "ok",
                                   "count": len(rows)}
     except Exception as exc:  # noqa: BLE001 - reported, never swallowed
@@ -1824,6 +1834,8 @@ def calendar_events(brand_sales_org_id: Optional[str] = Query(None),
                   "start_utc": sce.iso_utc_z(start_utc), "end_utc": sce.iso_utc_z(end_utc)},
         "is_manager": manager,
         "scope": "team" if manager else "mine",
+        "now_utc": sce.iso_utc_z(datetime.utcnow()),
+        "today_local": av.utc_to_local(datetime.utcnow(), tz).date().isoformat(),
     })
     return out
 

@@ -6,6 +6,9 @@
  * nothing they can act on. Agenda answers the actual question — "what is next,
  * and where do I have to be" — in the order it will happen.
  *
+ * ONE FEED. Appointments, tasks and activity all come from
+ * GET /sales/calendar/events, the same read the web grids use.
+ *
  * NO SECOND SCHEDULING ENGINE. Everything here is `sales_scheduling_router`:
  * the same availability, the same appointments, the same
  * `APPOINTMENT_STATUSES`, the same external busy blocks. The tenant stack
@@ -22,15 +25,14 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
 import { scheduling } from '../../src/api/endpoints';
-import { asList, useScopedQuery, useScopedRefresh } from '../../src/hooks/useApi';
+import { useScopedQuery, useScopedRefresh } from '../../src/hooks/useApi';
 import { useActiveExperience } from '../../src/experience/ExperienceContext';
 import {
   EmptyState, ErrorState, Loading, Pill, Row, Screen, ScreenTitle, SectionHeader,
 } from '../../src/components/ui';
-import { addDays, dayOf, isoDate, timeOf } from '../../src/format';
+import { addDays, isoDate } from '../../src/format';
 import { APPOINTMENT_STATUS_LABELS } from '../../src/vocab';
 import { palette, radius, space, type as typography } from '../../src/theme/tokens';
-import type { Appointment } from '../../src/api/types';
 
 type Range = { key: string; label: string; days: number };
 
@@ -45,44 +47,35 @@ export default function Calendar() {
   const brand = exp.brandSalesOrgId;
   const refresh = useScopedRefresh();
   const [rangeKey, setRangeKey] = useState('week');
-  const [scope, setScope] = useState<'mine' | 'team'>('mine');
 
   const range = RANGES.find((r) => r.key === rangeKey) ?? RANGES[1];
   const from = useMemo(() => isoDate(new Date()), []);
   const to = useMemo(() => isoDate(addDays(new Date(), range.days - 1)), [range.days]);
 
-  const query = useScopedQuery(['appointments', brand, rangeKey, scope], () =>
-    scheduling.appointments({
-      brand_sales_org_id: brand, date_from: from, date_to: to, scope,
-    }));
-
-  const appointments = asList<Appointment>(query.data, 'appointments', 'items');
-
-  // Same contract as the web page: tasks and activity beside appointments.
-  // The server narrows a seller to their own events; this only displays.
-  const feedQuery = useScopedQuery(['calendar-events', brand, rangeKey], () =>
+  // ONE source: the shared event feed, the same endpoint the web grids read.
+  // The server narrows a seller to their own events and a manager to the brand;
+  // this screen only displays. There is no second appointment read.
+  const query = useScopedQuery(['calendar-events', brand, rangeKey], () =>
     scheduling.calendarEvents({ brand_sales_org_id: brand, date_from: from, date_to: to }));
-  const feed = (feedQuery.data ?? {}) as {
+  const feed = (query.data ?? {}) as {
     events?: Array<Record<string, any>>; unscheduled?: Array<Record<string, any>>;
-    unavailable_sources?: string[]; truncated?: boolean;
+    unavailable_sources?: string[]; truncated?: boolean; scope?: string;
   };
-  const feedItems = (feed.events ?? []).filter((e) => e.type !== 'appointment');
+  const events = feed.events ?? [];
+  const partial = Boolean(feed.unavailable_sources?.length || feed.truncated);
 
-  /** Group by calendar day so the agenda reads as days, not as a flat list of
-   *  forty rows with no shape. */
+  /** Group by the event's OWN local date (server-derived), so a late-evening
+   *  meeting is never moved to the next day by the phone's timezone. */
   const grouped = useMemo(() => {
-    const map = new Map<string, Appointment[]>();
-    const sorted = [...appointments].sort(
-      (a, b) => String(a.starts_at ?? '').localeCompare(String(b.starts_at ?? '')),
-    );
-    for (const appt of sorted) {
-      const key = dayOf(appt.starts_at);
+    const map = new Map<string, Array<Record<string, any>>>();
+    for (const e of events) {
+      const key = String(e.local_date ?? 'unknown');
       const list = map.get(key) ?? [];
-      list.push(appt);
+      list.push(e);
       map.set(key, list);
     }
-    return Array.from(map.entries());
-  }, [appointments]);
+    return Array.from(map.entries()).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0));
+  }, [events]);
 
   return (
     <Screen refreshing={query.isFetching} onRefresh={refresh}>
@@ -104,78 +97,52 @@ export default function Calendar() {
         ))}
       </View>
 
-      <View style={styles.controls}>
-        {(['mine', 'team'] as const).map((s) => (
-          <Pressable
-            key={s}
-            onPress={() => setScope(s)}
-            style={[styles.chip, s === scope && styles.chipOn]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: s === scope }}
-          >
-            <Text style={[styles.chipText, s === scope && styles.chipTextOn]}>
-              {s === 'mine' ? 'Mine' : 'Team'}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
       {query.isLoading ? <Loading label="Loading your calendar" /> : null}
       {query.isError ? <ErrorState error={query.error} onRetry={refresh} /> : null}
 
-      {!query.isLoading && !query.isError && !grouped.length ? (
+      {partial ? (
+        <Text style={styles.chipText}>
+          Partial data{feed.unavailable_sources?.length
+            ? `: ${feed.unavailable_sources.join(', ')} unavailable` : ': list truncated'}.
+        </Text>
+      ) : null}
+
+      {!query.isLoading && !query.isError && !partial
+        && !grouped.length && !(feed.unscheduled ?? []).length ? (
         <EmptyState
-          title="Nothing booked"
-          body={`No appointments in the ${range.label.toLowerCase()}.`}
+          title="Nothing scheduled"
+          body={`No appointments, tasks or activity in the ${range.label.toLowerCase()}.`}
         />
       ) : null}
 
       {grouped.map(([day, items]) => (
         <View key={day} style={{ gap: space.sm }}>
           <SectionHeader title={day} />
-          {items.map((a) => (
-            <Row
-              key={String(a.id)}
-              title={String(a.title ?? a.meeting_type ?? 'Appointment')}
-              subtitle={a.prospect_name ?? a.opportunity_name ?? null}
-              meta={[
-                `${timeOf(a.starts_at)}–${timeOf(a.ends_at)}`,
-                a.location,
-              ].filter(Boolean).join(' · ')}
-              accent={a.status === 'cancelled' ? palette.neutral : palette.accent}
-              onPress={() => router.push(`/appointment/${a.id}` as never)}
-              right={
-                a.status && a.status !== 'scheduled'
-                  ? <Pill
-                      label={APPOINTMENT_STATUS_LABELS[String(a.status)] ?? String(a.status)}
-                      tone={a.status === 'completed' ? 'positive'
-                        : a.status === 'no_show' ? 'danger' : 'neutral'}
-                    />
-                  : a.confirmation_status === 'confirmed'
+          {items.map((e) => {
+            const isAppt = e.type === 'appointment';
+            return (
+              <Row
+                key={String(e.id)}
+                title={String(e.title ?? (isAppt ? 'Appointment' : 'Untitled'))}
+                subtitle={e.company ?? null}
+                meta={[
+                  e.all_day ? 'All day' : String(e.starts_at_local ?? '').slice(11, 16),
+                  e.type,
+                  e.appointment?.location,
+                ].filter(Boolean).join(' · ')}
+                accent={e.bucket === 'cancelled' ? palette.neutral : palette.accent}
+                onPress={isAppt
+                  ? () => router.push(`/appointment/${e.source_id}` as never) : undefined}
+                right={e.bucket !== 'scheduled'
+                  ? <Pill label={APPOINTMENT_STATUS_LABELS[String(e.status)] ?? String(e.bucket)}
+                      tone={e.bucket === 'completed' ? 'positive' : 'neutral'} />
+                  : e.appointment?.confirmation_status === 'confirmed'
                     ? <Pill label="Confirmed" tone="positive" />
-                    : <Pill label="Unconfirmed" tone="warning" />
-              }
-            />
-          ))}
+                    : <Pill label="Unconfirmed" tone="warning" />}
+              />
+            );
+          })}
         </View>
-      ))}
-
-      {feedQuery.isError ? <ErrorState error={feedQuery.error} onRetry={refresh} /> : null}
-      {(feed.unavailable_sources?.length || feed.truncated) ? (
-        <Text style={styles.chipText}>
-          Partial data{feed.unavailable_sources?.length
-            ? `: ${feed.unavailable_sources.join(', ')} unavailable` : ': list truncated'}.
-        </Text>
-      ) : null}
-      {feedItems.length ? <SectionHeader title="Tasks & activity" /> : null}
-      {feedItems.map((e) => (
-        <Row
-          key={String(e.id)}
-          title={String(e.title ?? 'Untitled')}
-          subtitle={e.company ?? null}
-          meta={[String(e.local_date ?? ''), e.bucket].filter(Boolean).join(' · ')}
-          accent={e.bucket === 'cancelled' ? palette.neutral : palette.accent}
-        />
       ))}
       {(feed.unscheduled ?? []).map((e) => (
         <Row key={String(e.id)} title={String(e.title ?? 'Untitled')}

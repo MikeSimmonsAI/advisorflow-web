@@ -63,6 +63,107 @@ export function describeFeed(data) {
   return { state: total ? 'ok' : 'empty' }
 }
 
+// ── appointments for the grids ──────────────────────────────────────────────
+// Month / week / day / agenda, the side panels and the metrics all read the
+// appointment events of the ONE feed. The legacy /calendar/view payload still
+// carries an `appointments` list for API compatibility, but the screen never
+// reads it, so it can no longer paint a second, conflicting grid.
+
+// Each appointment event carries the read-only detail the grid cards need under
+// `appointment`. Identity, status, bucket, instants and local dates come from
+// the event itself, so every view places the same row on the same day.
+export function appointmentsFromFeed(feed, { includeCancelled = false } = {}) {
+  const out = []
+  const seen = new Set()
+  for (const e of (feed && feed.events) || []) {
+    if (e.type !== 'appointment' || !e.appointment) continue
+    if (seen.has(e.id)) continue            // one event, one card, whatever the payload
+    seen.add(e.id)
+    if (e.bucket === 'cancelled' && !includeCancelled) continue
+    out.push({
+      ...e.appointment,
+      event_id: e.id,
+      bucket: e.bucket,
+      status: e.status,
+      starts_at: e.starts_at,
+      ends_at: e.ends_at,
+      starts_at_local: e.starts_at_local,
+      ends_at_local: e.ends_at_local,
+      local_date: e.local_date,
+      local_end_date: e.local_end_date,
+    })
+  }
+  return out
+}
+
+// Client-side narrowing of the already-loaded, already-authorised set. Facet
+// options are computed from the UNFILTERED set so a filter never removes the
+// way back out of itself.
+export function filterAppointments(appts, { memberIds, typeIds, loc, search } = {}) {
+  let rows = appts || []
+  if (memberIds) {
+    const keep = new Set(memberIds)
+    rows = rows.filter(a => (a.participants || []).some(p => keep.has(p.user_id)))
+  }
+  if (typeIds && typeIds.length) rows = rows.filter(a => typeIds.includes(a.meeting_type_id))
+  if (loc) {
+    const l = loc.toLowerCase()
+    rows = rows.filter(a => String(a.location || '').toLowerCase().includes(l))
+  }
+  const q = (search || '').trim().toLowerCase()
+  if (q) {
+    rows = rows.filter(a => [
+      a.title, a.meeting_type, a.opportunity_company, a.location,
+      a.prospect?.name, a.prospect?.company,
+      ...(a.participants || []).map(p => p.full_name),
+    ].filter(Boolean).some(v => String(v).toLowerCase().includes(q)))
+  }
+  return rows
+}
+
+export function locationsOf(appts) {
+  return Array.from(new Set((appts || []).map(a => (a.location || '').trim())
+    .filter(Boolean))).sort()
+}
+
+export function agendaToday(appts, todayLocal) {
+  return (appts || []).filter(a => a.local_date === todayLocal)
+}
+
+export function upcomingOf(appts, nowUtc, limit = 12) {
+  return (appts || []).filter(a => a.status === 'scheduled' && a.starts_at >= nowUtc)
+    .slice(0, limit)
+}
+
+export function attentionOf(appts, nowUtc) {
+  const out = []
+  for (const a of appts || []) {
+    if (a.status === 'cancelled') continue
+    const base = { appointment_id: a.id, title: a.title, starts_at_local: a.starts_at_local }
+    if (a.confirmation_status === 'pending' && a.starts_at >= nowUtc) {
+      out.push({ ...base, kind: 'unconfirmed', label: 'Prospect has not confirmed' })
+    }
+    if (a.sync_needs_attention) {
+      out.push({ ...base, kind: 'sync', label: a.sync_needs_attention
+        + ' calendar' + (a.sync_needs_attention === 1 ? '' : 's') + ' could not be written' })
+    }
+    if (a.sync_conflicts) out.push({ ...base, kind: 'conflict', label: 'Changed outside EvoSys Pro' })
+    if (a.outcome_state && a.outcome_state.needs_outcome) {
+      out.push({ ...base, kind: 'outcome', label: 'No outcome recorded' })
+    }
+  }
+  return out
+}
+
+// Narrow feed rows by the Tasks & Activity card's own type/owner chips.
+export function filterFeedEvents(events, { types, ownerIds } = {}) {
+  return (events || []).filter(e =>
+    (!types || !types.length || types.includes(e.type)) &&
+    (!ownerIds || !ownerIds.length ||
+      (e.owner && ownerIds.includes(e.owner.user_id)) ||
+      (e.participant_user_ids || []).some(id => ownerIds.includes(id))))
+}
+
 export function timeLabel(e) {
   if (e.all_day) return 'All day'
   const s = e.starts_at_local
