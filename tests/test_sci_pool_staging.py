@@ -87,3 +87,47 @@ def test_pool_numbers_refuse_outside_staging(client, db_session, monkeypatch):
     assert client.get("/god/staging/sci/pool-numbers", headers=h).status_code == 404
     assert client.post("/god/staging/sci/pool-numbers", headers=h,
                        json={"numbers": {"205": "+12052001234"}, "apply": True}).status_code == 404
+
+
+# ── Tenant isolation on inbound SMS (POC on the platform account, customers on their own) ──
+
+def _other_org(db, sid, token):
+    from app.models.models import Organization
+    from app.utils.crypto import encrypt_value
+    o = Organization(name="Other Customer %s" % sid[-4:], slug="other-%s" % sid[-4:].lower(), plan="standard",
+                     industry="funeral", org_twilio_account_sid=sid,
+                     org_twilio_auth_token_encrypted=encrypt_value(token))
+    db.add(o)
+    db.commit()
+    return o
+
+
+def test_tenant_signed_sms_cannot_reach_another_orgs_pool_number(db_session, sample_org, twilio_webhook, monkeypatch):
+    from app.models.models import Reply
+    poc = _other_org(db_session, "ACpoc000000000000000000000000001", "poc-token")
+    db_session.add(PhoneNumber(e164="+12052001234", organization_id=poc.id, workspace_id=None,
+                               label="pool:pool-205-birmingham", cap_sms=True, cap_voice_inbound=True,
+                               cap_voicemail=True, is_active=True))
+    db_session.commit()
+    data = {"From": "+12145550123", "To": "+12052001234", "Body": "hello", "MessageSid": "SMiso1"}
+    # sample_org's own (valid) account signs a message naming the POC org's number: refused
+    r = twilio_webhook("/sms/webhook/inbound", data=data)
+    assert r.status_code == 403
+    assert db_session.query(Reply).count() == 0
+    # the owning org's own account is accepted
+    ok = twilio_webhook("/sms/webhook/inbound", data=dict(data, MessageSid="SMiso2"),
+                        account_sid="ACpoc000000000000000000000000001", auth_token="poc-token")
+    assert ok.status_code == 200
+    # the PLATFORM account (EvoSys Pro, which buys the POC numbers) is trusted platform-wide
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACplatform00000000000000000000001")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "platform-token")
+    pf = twilio_webhook("/sms/webhook/inbound", data=dict(data, MessageSid="SMiso3"),
+                        account_sid="ACplatform00000000000000000000001", auth_token="platform-token")
+    assert pf.status_code == 200
+
+
+def test_org_shared_number_still_accepted_for_its_own_account(db_session, sample_org, twilio_webhook):
+    from tests.conftest import TEST_ORG_TWILIO_NUMBER
+    r = twilio_webhook("/sms/webhook/inbound", data={"From": "+12145550124", "To": TEST_ORG_TWILIO_NUMBER,
+                                                     "Body": "hi", "MessageSid": "SMown1"})
+    assert r.status_code == 200

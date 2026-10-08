@@ -2,6 +2,21 @@
 
 Written 2026-10-08 CT on `sci-program` (Desktop session). Staging only. **Nothing has been bought, registered, submitted or sent.**
 
+## 0. Account structure (Mike, 2026-10-08 12:41 CT)
+
+- **EvoSys Pro owns the Twilio infrastructure.**
+  - The six SCI POC numbers are bought on the existing EvoSys Pro account.
+  - They are assigned to the SCI POC workspace (`phone_numbers.organization_id` = the SCI org, label `pool:<id>`).
+  - SCI is a proof of concept under EvoSys Pro, not an activated customer account.
+- **How the POC is verified in code:** inbound webhooks signed by the EvoSys Pro (platform) account resolve through `platform_account()`, which reads `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` from the environment. The number row decides which organization receives the message, so SCI data stays in the SCI org.
+- **Future paying customers** each get their own Twilio account or subaccount, stored on their organization (`org_twilio_account_sid` / encrypted token). Each has separate credentials, billing, registrations, numbers and program configuration.
+  - The inbound guard resolves the signing account. Since 2026-10-08, a **customer-signed** text may only reach a number that customer's organization owns (`sms_router._check_tenant_owns_called_number`, matching the voice rule).
+  - Before this change, a tenant holding its own valid credentials could sign a message naming another organization's number. That gap is closed and tested in `tests/test_sci_pool_staging.py`.
+- **POC to production:**
+  - POC numbers and A2P registrations are not assumed to transfer.
+  - A converting customer gets a fresh account or subaccount with its own numbers and registrations. Any port or transfer is a deliberate, separate step.
+  - The POC rows are retired from the SCI org (`is_active=False`, never deleted) only after the new numbers are live.
+
 ## 1. Purchase summary (pending Mike's final confirmation)
 
 Mike approved the six area codes on 2026-10-08 12:23 CT and asked for a priced summary of exact numbers **before** anything is bought.
@@ -48,9 +63,10 @@ Mike approved the six area codes on 2026-10-08 12:23 CT and asked for a priced s
      - `APP_ENV` is not `staging`.
    - Re-applying the same numbers is a no-op.
 3. **Credential (needs Mike's authorization; credential change):**
-   - Inbound webhooks are signature-checked with the auth token of the Twilio account that owns the number.
-   - The SCI staging org needs that account connected. Today staging reports "the organization has no Twilio number configured".
-   - Mike enters or approves it; Claude never types it.
+   - Inbound webhooks are signature-checked with the auth token of the Twilio account that owns the number: here, the EvoSys Pro account.
+   - On `sci-staging-backend`, set `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` to the EvoSys Pro account (platform account). Do **not** store it as the SCI org's own credential: SCI is not a customer account yet.
+   - Mike enters these in Render; Claude never types or reads a secret.
+   - Production is unaffected; this is the staging service only.
 4. Proofs, all on staging with Mike's own phone as the only real handset:
    - known-contact text to each pool;
    - unknown-sender text → regional review queue;

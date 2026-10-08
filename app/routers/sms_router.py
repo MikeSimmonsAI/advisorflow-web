@@ -286,6 +286,25 @@ async def sms_status_callback(
     return _twiml_ack()
 
 
+def _check_tenant_owns_called_number(db: Session, resolved, to_raw: str) -> None:
+    """403 when a TENANT-signed inbound names a number another organization owns."""
+    if resolved is None or getattr(resolved, "source", "") == "platform":
+        return
+    try:
+        from app.services.number_resolution import resolve_owner_by_called_number
+        owner = resolve_owner_by_called_number(db, to_raw)
+    except Exception:                                       # noqa: BLE001
+        logger.exception("[sms_webhook] called-number owner lookup failed")
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if owner is None:
+        return          # unowned number: the handler below drops it without side effects
+    if not getattr(resolved, "organization_id", None) or resolved.organization_id != owner.organization_id:
+        logger.warning("[sms_webhook] account %s (org %s) named a number owned by org %s - refused",
+                       getattr(resolved, "account_sid", "?"), getattr(resolved, "organization_id", None),
+                       owner.organization_id)
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 @router.post("/webhook/inbound")
 async def inbound_webhook(
     request: Request,
@@ -309,7 +328,18 @@ async def inbound_webhook(
     signature from Org A cannot inject a reply into Org B's inbox. It raises
     403 on any failure, before any of the above is reachable.
     """
-    await guard_inbound(request, db)
+    _resolved = await guard_inbound(request, db)
+
+    # TENANT ISOLATION (2026-10-08). The guard proves WHICH Twilio account signed
+    # this request. A tenant-signed request may only deliver into the
+    # organization that owns the called number - exactly the voice webhook's
+    # rule (telephony_webhook_guard.assert_org_matches). Without it, a tenant
+    # holding its own Twilio credentials could sign a message naming another
+    # organization's location or pool number as `To` and inject a reply into
+    # that organization. The platform account (EvoSys Pro, which owns the POC
+    # numbers) is trusted platform-wide; every customer's own account or
+    # subaccount is held to its own organization. Checked BEFORE any side effect.
+    _check_tenant_owns_called_number(db, _resolved, To)
 
     # AI OPERATIONS (T7): route the reply to an AI conversation if one owns
     # this contact. Placed AFTER the authentication guard and BEFORE the
