@@ -1,12 +1,11 @@
 {
-  "relay_run_id": "ai-workforce-operator-queue-20261008-0107",
-  "parent_run_id": "shared-calendar-legacy-contract-retirement-20261008-0103",
-  "project": "EvoSys Pro \u2014 AI Workforce operator queue and run ledger",
+  "relay_run_id": "relay-restart-20261008-0858",
+  "parent_run_id": "ai-workforce-durable-evidence-20261008-0114",
+  "project": "Resume stalled Claude relay; AI Workforce durable evidence",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "timestamp_ct": "2026-10-08T09:29:43.348299+00:00",
+  "actions_run_id": "37788586678",
+  "timestamp_ct": "2026-10-08 09:01 CT",
   "issue": 1,
-  "status_comment_id": 6053616981,
-  "watchdog_retry": true,
-  "watchdog_retry_utc": "2026-10-08T09:29:43.348312+00:00"
+  "status_comment_id": 6061554703
 }
