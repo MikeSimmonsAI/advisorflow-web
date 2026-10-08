@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "shared-calendar-single-feed-closure-20261008-0057",
-  "parent_run_id": "shared-sales-calendar-mobile-20261008-0051",
-  "project": "EvoSys Pro \u2014 shared calendar single-feed closure",
+  "relay_run_id": "shared-calendar-legacy-contract-retirement-20261008-0103",
+  "parent_run_id": "shared-calendar-single-feed-closure-20261008-0057",
+  "project": "EvoSys Pro \u2014 retire duplicate calendar appointment contract",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37735021238",
-  "timestamp_ct": "2026-10-08 01:02 CT",
+  "actions_run_id": "37735509005",
+  "timestamp_ct": "2026-10-08 01:06 CT",
   "issue": 1,
-  "status_comment_id": 6053462744
+  "status_comment_id": 6053518451
 }
