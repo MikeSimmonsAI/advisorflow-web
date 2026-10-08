@@ -39,6 +39,10 @@ import FindTeamTime from './FindTeamTime'
 import BookAppointment from './BookAppointment'
 import OutcomeDialog from './OutcomeDialog'
 import {
+  eventQuery, makeRequestGuard, groupByLocalDate, mergeOptions, describeFeed,
+  timeLabel, BUCKET_LABELS, TYPE_LABELS,
+} from './sharedEvents'
+import {
   ymd, addDays, dayFromYmd, startOfWeek, startOfMonth, monthGridRange,
   sameDay, wallTime, wallMinutes, hourLabel, dayName, monthName, rangeLabel,
   placeSpan, assignLanes, zoneMinutes, zoneYmd, apptKind, CAL_LEGEND,
@@ -455,6 +459,26 @@ export default function TeamCalendar() {
 
   useEffect(() => { load() }, [load])
 
+  // The shared feed (tasks + activity beside appointments). Its own guard so a
+  // slow response for an old range cannot paint over a newer one.
+  const feedGuard = useRef(makeRequestGuard())
+  const [feed, setFeed] = useState(null)
+  const [feedError, setFeedError] = useState(null)
+  const [feedTypes, setFeedTypes] = useState([])
+  const [feedOwners, setFeedOwners] = useState([])
+  useEffect(() => {
+    const token = feedGuard.current.begin()
+    setFeedError(null)
+    api.get('/sales/calendar/events?' + eventQuery({
+      from, to, ownerIds: feedOwners, types: feedTypes })).then(r => {
+      if (feedGuard.current.isCurrent(token)) setFeed(r)
+    }).catch(e => {
+      if (feedGuard.current.isCurrent(token)) {
+        setFeedError(e.message || 'Could not load tasks and activity.')
+      }
+    })
+  }, [from, to, feedTypes, feedOwners])
+
   const isManager = data?.is_manager
   const tz = data?.brand_sales_org?.timezone
   const people = data?.people || []
@@ -703,6 +727,73 @@ export default function TeamCalendar() {
                       </button>}
                 </div>
               ))}
+            </Card>
+
+            <Card title="TASKS & ACTIVITY"
+                  sub={feed ? feed.total + ' in range' : 'Loading'}>
+              {feedError && <div className="sw-subtle" role="alert">{feedError}</div>}
+              {feed && describeFeed(feed).state === 'partial' && (
+                <div className="sw-subtle" role="status">
+                  Partial data{feed.unavailable_sources.length
+                    ? ': ' + feed.unavailable_sources.join(', ') + ' unavailable'
+                    : ': list truncated'}.
+                </div>
+              )}
+              <div className="cal-feed-filters">
+                {mergeOptions(feedTypes, feed?.facets?.types).map(t => (
+                  <button key={t} className={'sw-tiny' + (feedTypes.includes(t) ? ' sw-primary' : '')}
+                          aria-pressed={feedTypes.includes(t)}
+                          onClick={() => setFeedTypes(feedTypes.includes(t)
+                            ? feedTypes.filter(x => x !== t) : [...feedTypes, t])}>
+                    {TYPE_LABELS[t] || t}
+                  </button>
+                ))}
+                {isManager && mergeOptions(feedOwners, (feed?.facets?.owners || [])
+                  .map(o => o.user_id)).map(id => (
+                  <button key={id} className={'sw-tiny' + (feedOwners.includes(id) ? ' sw-primary' : '')}
+                          aria-pressed={feedOwners.includes(id)}
+                          onClick={() => setFeedOwners(feedOwners.includes(id)
+                            ? feedOwners.filter(x => x !== id) : [...feedOwners, id])}>
+                    {(feed?.facets?.owners || []).find(o => o.user_id === id)?.name || id}
+                  </button>
+                ))}
+              </div>
+              {feed && describeFeed(feed).state === 'empty' && (
+                <div className="sw-subtle">No tasks or activity in this range.</div>
+              )}
+              {feed && groupByLocalDate(feed.events).map(([day, evs]) => (
+                <div key={day}>
+                  <small>{day}</small>
+                  {evs.map(e => (
+                    <div key={e.id} className={'cal-row b-' + e.bucket}>
+                      <div className="cal-row-m">
+                        <b>{e.title || 'Untitled'}</b>
+                        <small>{timeLabel(e)} · {BUCKET_LABELS[e.bucket]}
+                          {e.company ? ' · ' + e.company : ''}</small>
+                      </div>
+                      {e.opportunity_id && (
+                        <button className="sw-tiny"
+                                onClick={() => nav('/sales/opportunities/' + e.opportunity_id)}>
+                          Open
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {feed && (feed.unscheduled || []).length > 0 && (
+                <div>
+                  <small>Unscheduled</small>
+                  {feed.unscheduled.map(e => (
+                    <div key={e.id} className="cal-row b-unscheduled">
+                      <div className="cal-row-m">
+                        <b>{e.title || 'Untitled'}</b>
+                        <small>{e.blockers[0] || 'No date'}{e.company ? ' · ' + e.company : ''}</small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
 
             <Card title="NEEDS ATTENTION"

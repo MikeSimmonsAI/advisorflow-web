@@ -137,6 +137,12 @@ export const scheduling = {
 
   appointment: (id: string) => api.get<Appointment>(`/sales/appointments/${id}`),
 
+  /** Read-only shared event feed: appointments + tasks + activity, one contract. */
+  calendarEvents: (params: {
+    brand_sales_org_id?: string; date_from?: string; date_to?: string;
+    owner_ids?: string; types?: string; buckets?: string;
+  } = {}) => api.get<Record<string, unknown>>(`/sales/calendar/events${qs(params)}`),
+
   meetingTypes: (params: { brand_sales_org_id?: string; opportunity_id?: string } = {}) =>
     api.get<Record<string, unknown>>(`/sales/meeting-types${qs(params)}`),
 

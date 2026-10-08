@@ -32,7 +32,8 @@ class Wiring(unittest.TestCase):
 
     def test_every_calendar_query_uses_total_order_and_cap_probe(self):
         self.assertNotIn(".order_by(SalesAppointment.starts_at.asc()).limit(500)", self.r)
-        self.assertEqual(self.r.count("= _capped_rows(q)"), 2)
+        # calendar_view, list_appointments and the shared event feed.
+        self.assertEqual(self.r.count("= _capped_rows(q)"), 3)
         self.assertIn("SalesAppointment.starts_at.asc(), SalesAppointment.id.asc()", self.r)
         self.assertIn("limit(CALENDAR_EVENT_CAP + 1)", self.r)
 

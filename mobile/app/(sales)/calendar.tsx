@@ -58,6 +58,16 @@ export default function Calendar() {
 
   const appointments = asList<Appointment>(query.data, 'appointments', 'items');
 
+  // Same contract as the web page: tasks and activity beside appointments.
+  // The server narrows a seller to their own events; this only displays.
+  const feedQuery = useScopedQuery(['calendar-events', brand, rangeKey], () =>
+    scheduling.calendarEvents({ brand_sales_org_id: brand, date_from: from, date_to: to }));
+  const feed = (feedQuery.data ?? {}) as {
+    events?: Array<Record<string, any>>; unscheduled?: Array<Record<string, any>>;
+    unavailable_sources?: string[]; truncated?: boolean;
+  };
+  const feedItems = (feed.events ?? []).filter((e) => e.type !== 'appointment');
+
   /** Group by calendar day so the agenda reads as days, not as a flat list of
    *  forty rows with no shape. */
   const grouped = useMemo(() => {
@@ -148,6 +158,28 @@ export default function Calendar() {
             />
           ))}
         </View>
+      ))}
+
+      {feedQuery.isError ? <ErrorState error={feedQuery.error} onRetry={refresh} /> : null}
+      {(feed.unavailable_sources?.length || feed.truncated) ? (
+        <Text style={styles.chipText}>
+          Partial data{feed.unavailable_sources?.length
+            ? `: ${feed.unavailable_sources.join(', ')} unavailable` : ': list truncated'}.
+        </Text>
+      ) : null}
+      {feedItems.length ? <SectionHeader title="Tasks & activity" /> : null}
+      {feedItems.map((e) => (
+        <Row
+          key={String(e.id)}
+          title={String(e.title ?? 'Untitled')}
+          subtitle={e.company ?? null}
+          meta={[String(e.local_date ?? ''), e.bucket].filter(Boolean).join(' · ')}
+          accent={e.bucket === 'cancelled' ? palette.neutral : palette.accent}
+        />
+      ))}
+      {(feed.unscheduled ?? []).map((e) => (
+        <Row key={String(e.id)} title={String(e.title ?? 'Untitled')}
+             subtitle={e.company ?? null} meta="Unscheduled" accent={palette.neutral} />
       ))}
     </Screen>
   );

@@ -41,6 +41,7 @@ from app.services.sales_access import (
     sales_org_ids, is_sales_manager, is_god,
 )
 from app.services import availability as av
+from app.services import shared_calendar_events as sce
 from app.services.meeting_roles import (
     ensure_meeting_types, resolve_meeting_slots, brand_members,
 )
@@ -1700,6 +1701,131 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
         # is not drawing was filtered out or simply unreadable.
         "external_included": bool(include_external),
     }
+
+
+# ── the shared event feed ───────────────────────────────────────────────────
+
+@router.get("/calendar/events")
+def calendar_events(brand_sales_org_id: Optional[str] = Query(None),
+                    date_from: Optional[date] = Query(None),
+                    date_to: Optional[date] = Query(None),
+                    owner_ids: Optional[str] = Query(None),
+                    types: Optional[str] = Query(None),
+                    buckets: Optional[str] = Query(None),
+                    user: User = Depends(require_sales_member),
+                    db: Session = Depends(get_db)):
+    """Appointments, tasks and activities as ONE read-only event contract.
+
+    The decision lives in `shared_calendar_events.decide`; this route only
+    loads brand-scoped rows. A seller is narrowed to their own events, never
+    refused. No write, send, invite or provider call happens here.
+    """
+    org = _org(user, db, brand_sales_org_id)
+    tz = org.timezone or DEFAULT_TIMEZONE
+    manager = is_sales_manager(user, db, org.id)
+
+    d_from = date_from or av.utc_to_local(datetime.utcnow(), tz).date()
+    d_to = date_to or (d_from + timedelta(days=6))
+    if d_to < d_from:
+        raise HTTPException(status_code=400, detail="date_to is before date_from.")
+    if (d_to - d_from).days > sce.MAX_RANGE_DAYS:
+        raise HTTPException(status_code=400,
+                            detail="Load at most %d days at a time." % sce.MAX_RANGE_DAYS)
+    start_utc, end_utc = sce.range_bounds(d_from, d_to, tz)
+
+    def _csv(v):
+        return {s for s in (v or "").split(",") if s} or None
+
+    type_set, bucket_set = _csv(types), _csv(buckets)
+    if (type_set and not type_set <= set(sce.EVENT_TYPES)) or \
+            (bucket_set and not bucket_set <= set(sce.BUCKETS)):
+        raise HTTPException(status_code=400, detail="Unknown type or bucket filter.")
+
+    names = {u.id: u.full_name for u in brand_members(db, org.id)}
+    opps = {}
+    status = {}
+    candidates = []
+
+    def _opp(oid):
+        if oid and oid not in opps:
+            opps[oid] = db.query(Opportunity).filter(
+                Opportunity.id == oid,
+                Opportunity.brand_sales_org_id == org.id).first()
+        return opps.get(oid)
+
+    # Each source fails on its own: one unreadable table must not blank the
+    # rest, and it must not look like "nothing scheduled" either.
+    try:
+        q = _visible_appointments(db, user, org).filter(
+            SalesAppointment.starts_at < end_utc, SalesAppointment.ends_at > start_utc)
+        rows, trunc = _capped_rows(q)
+        pids = {}
+        for aid, uid in db.query(AppointmentParticipant.appointment_id,
+                                 AppointmentParticipant.user_id).filter(
+                AppointmentParticipant.appointment_id.in_([r.id for r in rows] or [""])):
+            pids.setdefault(aid, []).append(uid)
+        for a in rows:
+            o = _opp(a.opportunity_id)
+            candidates.append(sce.appointment_event(
+                a, o, names.get(o.owner_user_id) if o else None, pids.get(a.id, [])))
+        status["appointments"] = {"status": "truncated" if trunc else "ok",
+                                  "count": len(rows)}
+    except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+        db.rollback()
+        status["appointments"] = {"status": "unavailable", "count": 0,
+                                  "detail": type(exc).__name__}
+
+    own = (Opportunity.brand_sales_org_id == org.id)
+    if not manager:
+        own = own & (Opportunity.owner_user_id == user.id)
+    try:
+        tq = db.query(Opportunity).filter(
+            own, Opportunity.next_action.isnot(None), Opportunity.next_action != "",
+            (Opportunity.next_action_due_at.is_(None)) |
+            ((Opportunity.next_action_due_at >= start_utc) &
+             (Opportunity.next_action_due_at < end_utc))
+        ).order_by(Opportunity.next_action_due_at.asc(), Opportunity.id.asc()
+                   ).limit(sce.EVENT_CAP + 1)
+        trows = tq.all()
+        for o in trows[:sce.EVENT_CAP]:
+            opps[o.id] = o
+            candidates.append(sce.task_event(o, tz, names.get(o.owner_user_id)))
+        status["tasks"] = {"status": "truncated" if len(trows) > sce.EVENT_CAP else "ok",
+                           "count": min(len(trows), sce.EVENT_CAP)}
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        status["tasks"] = {"status": "unavailable", "count": 0,
+                           "detail": type(exc).__name__}
+
+    try:
+        aq = (db.query(OpportunityEvent, Opportunity)
+              .join(Opportunity, Opportunity.id == OpportunityEvent.opportunity_id)
+              .filter(own, OpportunityEvent.occurred_at >= start_utc,
+                      OpportunityEvent.occurred_at < end_utc)
+              .order_by(OpportunityEvent.occurred_at.asc(), OpportunityEvent.id.asc())
+              .limit(sce.EVENT_CAP + 1))
+        arows = aq.all()
+        for ev, o in arows[:sce.EVENT_CAP]:
+            candidates.append(sce.activity_event(ev, o, tz, names.get(o.owner_user_id)))
+        status["activities"] = {"status": "truncated" if len(arows) > sce.EVENT_CAP else "ok",
+                                "count": min(len(arows), sce.EVENT_CAP)}
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        status["activities"] = {"status": "unavailable", "count": 0,
+                                "detail": type(exc).__name__}
+
+    out = sce.decide(viewer_id=user.id, brand_id=org.id, is_manager=manager,
+                     candidates=candidates, source_status=status,
+                     start_utc=start_utc, end_utc=end_utc,
+                     owner_ids=_csv(owner_ids), types=type_set, buckets=bucket_set)
+    out.update({
+        "brand_sales_org": {"id": org.id, "name": org.name, "timezone": tz},
+        "range": {"date_from": d_from, "date_to": d_to,
+                  "start_utc": sce.iso_utc_z(start_utc), "end_utc": sce.iso_utc_z(end_utc)},
+        "is_manager": manager,
+        "scope": "team" if manager else "mine",
+    })
+    return out
 
 
 @router.get("/calendar/sync-status")
