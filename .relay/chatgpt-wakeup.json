@@ -1,12 +1,11 @@
 {
-  "relay_run_id": "invoicing-draft-integrity-20261007-1910",
-  "parent_run_id": "shared-calendar-mobile-retry-20261007-1906",
-  "project": "EvoSys Pro \u2014 invoicing draft and status integrity",
+  "relay_run_id": "control-room-p0-20261007-2317",
+  "parent_run_id": "invoicing-draft-integrity-20261007-1910",
+  "project": "EvoSys Pro \u2014 P0 Control Room refresh and truthful UP NEXT",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "timestamp_ct": "2026-10-08T02:35:23.067302+00:00",
+  "actions_run_id": "37726763477",
+  "timestamp_ct": "2026-10-07 23:20 CT",
   "issue": 1,
-  "status_comment_id": 6049444503,
-  "watchdog_retry": true,
-  "watchdog_retry_utc": "2026-10-08T02:35:23.067312+00:00"
+  "status_comment_id": 6052135250
 }
