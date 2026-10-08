@@ -656,9 +656,15 @@ def overview(db: Session, org: BrandSalesOrg, day=None, now=None) -> dict:
     reps = rep_rollup(db, members, opps, att["proposals"], att["last_activity"],
                       att["by_owner"], today, now=now)
 
-    _appr.sweep_stale(db, org.id, now=now)
-    pending = _appr.pending_for_brand(db, org.id)
-    decided = _appr.recent_decided_for_brand(db, org.id, limit=8)
+    # READ-ONLY. The same single queue decision as /sales/manager/approvals/queue
+    # (pending only, oldest first, exact cents, precise blockers). No sweep, no
+    # write: a stale request is reported as blocked, never closed by a read.
+    from app.models.models import PROPOSAL_EDITABLE_STATUSES
+    from app.services import approval_queue_gather as _qg, approval_queue_truth as _qt
+    queue = _qt.decide_queue(brand_sales_org_id=org.id, requests=_qg.build(db, org.id),
+                             viewer_is_manager=True,
+                             editable_statuses=PROPOSAL_EDITABLE_STATUSES,
+                             history_limit=8)
 
     queues = _pwq.proposal_queues(db, opps, now=now, limit=25, names=names)
 
@@ -672,9 +678,11 @@ def overview(db: Session, org: BrandSalesOrg, day=None, now=None) -> dict:
         "attention": {k: v for k, v in att.items()
                       if k in ("items", "total", "red", "by_kind", "by_owner")},
         "approvals": {
-            "pending": [_appr.request_out(db, r) for r in pending],
-            "pending_count": len(pending),
-            "recent": [_appr.request_out(db, r) for r in decided],
+            "pending": queue["pending"],
+            "pending_count": queue["pending_count"],
+            "actionable_count": queue["actionable_count"],
+            "blocked_count": queue["blocked_count"],
+            "recent": queue["history"],
         },
         "closing_pipeline": closing,
         "reps": reps,

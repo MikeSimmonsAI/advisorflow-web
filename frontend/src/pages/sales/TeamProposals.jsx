@@ -25,6 +25,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
 import { Card, Chip, Empty, ErrorBar, Metric, money, dateTime } from './parts'
+import { usd } from '../../utils/approvalQueue'
 
 // Order matters: what the CUSTOMER did comes before what we have not done,
 // because their clock is the one we do not control.
@@ -212,8 +213,8 @@ export default function TeamProposals() {
               </button>}>
           {approvals.pending.map(r => (
             <div key={r.id} className="sw-decided">
-              <Chip tone="amber">{r.status_label}</Chip>
-              <span>{r.requested_by_name} — {money(r.requested_adjustment)}</span>
+              <Chip tone="amber">{r.actionable ? 'Actionable' : 'Blocked'}</Chip>
+              <span>{r.requested_by_name || 'Unknown'} — {usd(r.money?.requested_adjustment)}</span>
               <span className="sw-muted">{dateTime(r.requested_at)}</span>
             </div>
           ))}

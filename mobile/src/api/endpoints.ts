@@ -216,10 +216,10 @@ export const manager = {
 
   approvals: (brandSalesOrgId?: string) =>
     api.get<ApprovalRequest[] | { approvals: ApprovalRequest[]; requests?: ApprovalRequest[] }>(
-      `/sales/manager/approvals${qs({ brand_sales_org_id: brandSalesOrgId })}`),
+      `/sales/manager/approvals/queue${qs({ brand_sales_org_id: brandSalesOrgId })}`),
 
   decide: (requestId: string, body: Record<string, unknown>) =>
-    api.post<Record<string, unknown>>(`/sales/manager/approvals/${requestId}/decide`, body),
+    api.post<Record<string, unknown>>(`/sales/manager/approvals/${requestId}/decision`, body),
 
   pipeline: (params: {
     brand_sales_org_id?: string; owner_user_id?: string; stage?: string;

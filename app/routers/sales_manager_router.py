@@ -2,7 +2,8 @@
 
   /sales/manager/overview            the whole screen, one batched call
   /sales/manager/reps/{user_id}      one rep's book, for the drill-down
-  /sales/manager/approvals/{id}/decide   approve or deny a price request
+  /sales/manager/approvals/queue     the one read decision (no writes)
+  /sales/manager/approvals/{id}/decision   versioned approve/deny (legacy /decide is 410)
 
 EVERY route here is gated by `require_sales_manager`. That dependency is the
 boundary, not the nav item — hiding a link is presentation, and a rep who types
@@ -29,7 +30,6 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db
 from app.models.models import User
-from app.models.sales_models import PricingApprovalRequest
 from app.services.sales_access import require_sales_manager, is_sales_manager, is_god
 from app.services import manager_workspace as _mw
 from app.services import pricing_approvals as _appr
@@ -59,9 +59,7 @@ def manager_overview(brand_sales_org_id: str = Query(None),
     if not is_sales_manager(user, db, org.id):
         raise HTTPException(status_code=403,
                             detail="Sales manager access required for this brand.")
-    data = _mw.overview(db, org, day=day)
-    db.commit()          # sweep_stale may have closed dead approval requests
-    return data
+    return _mw.overview(db, org, day=day)          # read-only: no commit
 
 
 @router.get("/reps/{user_id}")
@@ -88,47 +86,22 @@ def manager_rep_detail(user_id: str,
 def manager_approvals(brand_sales_org_id: str = Query(None),
                       db: Session = Depends(get_db),
                       user: User = Depends(require_sales_manager)):
-    """The approval queue on its own, for polling without redrawing everything."""
-    org = _resolve_context(user, db, brand_sales_org_id)
-    if not is_sales_manager(user, db, org.id):
-        raise HTTPException(status_code=403,
-                            detail="Sales manager access required for this brand.")
-    _appr.sweep_stale(db, org.id)
-    pending = _appr.pending_for_brand(db, org.id)
-    recent = _appr.recent_decided_for_brand(db, org.id, limit=8)
-    db.commit()
-    return {
-        "pending": [_appr.request_out(db, r) for r in pending],
-        "pending_count": len(pending),
-        "recent": [_appr.request_out(db, r) for r in recent],
-    }
+    """Compatibility alias of `/approvals/queue`. Read-only; same single decision."""
+    return approvals_queue(brand_sales_org_id=brand_sales_org_id, db=db, user=user)
 
 
 @router.post("/approvals/{request_id}/decide")
 def decide_approval(request_id: str, body: dict,
-                    db: Session = Depends(get_db),
                     user: User = Depends(require_sales_manager)):
-    """Approve or deny. Approving applies the price as this manager.
+    """RETIRED. The unversioned decision bypassed optimistic concurrency.
 
-    Cross-brand requests return 404, not 403 — a manager of brand A must not be
-    able to learn that a request id in brand B exists.
+    Writes nothing and touches no row. Use `/approvals/{id}/decision` with the
+    `version` from `/approvals/queue` as `expected_version`.
     """
-    req = (db.query(PricingApprovalRequest)
-           .filter(PricingApprovalRequest.id == request_id).first())
-    if req is None:
-        raise HTTPException(status_code=404, detail="Request not found")
-    if not (is_god(user) or is_sales_manager(user, db, req.brand_sales_org_id)):
-        raise HTTPException(status_code=404, detail="Request not found")
-
-    approve = bool(body.get("approve"))
-    note = body.get("note")
-    res = _appr.decide(db, req, user, approve=approve, note=note)
-    if not res.get("ok"):
-        db.commit()      # a stale request is still closed, even on refusal
-        raise HTTPException(status_code=400, detail=res.get("error"))
-    db.commit()
-    return {"ok": True, "applied": res.get("applied", False),
-            "request": _appr.request_out(db, req)}
+    raise HTTPException(
+        status_code=410,
+        detail="This endpoint is retired. Use POST /sales/manager/approvals/"
+               "{id}/decision with expected_version.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

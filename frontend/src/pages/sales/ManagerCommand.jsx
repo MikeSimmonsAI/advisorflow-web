@@ -20,7 +20,7 @@
  * which already holds the timeline, the proposal, buyer activity and meetings.
  * Restating any of that here would create a second version of the truth.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
@@ -29,6 +29,7 @@ import {
   money, dateTime, wallTime, dueLabel, initials,
 } from './parts'
 import PipelineProjection from './PipelineProjection'
+import { usd, STATUS_TEXT, decisionBody, approveBlockedReason, errorMessage } from '../../utils/approvalQueue'
 
 const KIND_LABEL = {
   proposal_declined: 'Declined',
@@ -65,6 +66,7 @@ export default function ManagerCommand() {
   const [repData, setRepData] = useState(null)
   const [filter, setFilter] = useState(null)     // owner_user_id or null
   const [decideNote, setDecideNote] = useState({})
+  const inflight = useRef(false)        // double-click guard that survives re-render
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -79,20 +81,28 @@ export default function ManagerCommand() {
 
   useEffect(() => { load() }, [load])
 
-  async function decide(reqId, approve) {
+  // Versioned path only: the row's `version` goes back as expected_version.
+  // Any 409/404 reloads the screen and never reports success.
+  async function decide(it, approve) {
+    if (inflight.current) return
+    inflight.current = true
     setBusy(true); setError(null); setNote(null)
     try {
-      const res = await api.post(`/sales/manager/approvals/${reqId}/decide`, {
-        approve, note: decideNote[reqId] || null,
-      })
-      setNote(res.applied
-        ? 'Approved. The price is updated on the proposal.'
-        : 'Denied. Nothing on the proposal changed.')
-      setDecideNote(s => ({ ...s, [reqId]: '' }))
+      const res = await api.post(`/sales/manager/approvals/${it.id}/decision`,
+        decisionBody(it, approve, decideNote[it.id]))
+      setNote(res.replay
+        ? 'Already recorded. Nothing changed.'
+        : res.applied
+          ? 'Approved. The price is updated on the proposal.'
+          : 'Denied. Nothing on the proposal changed.')
+      setDecideNote(s => ({ ...s, [it.id]: '' }))
       await load()
     } catch (e) {
-      setError(e.message || 'That did not go through.')
+      const m = errorMessage(e)
+      setError(m.text)
+      if (m.reload) await load()
     } finally {
+      inflight.current = false
       setBusy(false)
     }
   }
@@ -145,7 +155,7 @@ export default function ManagerCommand() {
         <Metric label="Needs your attention" value={att.total} attn={att.total > 0}
                 sub={att.red ? `${att.red} urgent` : 'nothing urgent'}
                 onClick={() => scrollTo('mc-attention')} />
-        <Metric label="Waiting on your approval" value={appr.pending_count}
+        <Metric label="Waiting on your approval" value={appr.pending_count ?? '—'}
                 attn={appr.pending_count > 0}
                 sub={appr.pending_count ? 'someone is blocked' : 'nothing pending'}
                 onClick={appr.pending_count > 0 ? () => scrollTo('mc-approvals') : undefined} />
@@ -172,17 +182,30 @@ export default function ManagerCommand() {
             <div key={r.id} className="sw-appr">
               <div className="sw-appr-head">
                 <div>
-                  <b>{r.requested_by_name}</b>
-                  <span className="sw-muted"> asked {dateTime(r.requested_at)}</span>
+                  <b>{r.requested_by_name || 'Unknown requester'}</b>
+                  <span className="sw-muted"> asked {r.requested_at ? dateTime(r.requested_at) : '(time unavailable)'}</span>
                 </div>
-                <Chip tone="amber">{r.status_label}</Chip>
+                <Chip tone={r.actionable ? 'amber' : null}>{r.actionable ? 'Actionable' : 'Blocked'}</Chip>
               </div>
               <div className="sw-appr-money">
-                <Info label="List price" value={money(r.base_amount)} />
-                <Info label="Asking for" value={money(r.requested_adjustment)} />
-                <Info label="Customer would pay" value={money(r.requested_total)} />
+                {r.kind === 'custom_deal' ? (
+                  <>
+                    <Info label="Requested unit price" value={usd(r.money?.requested_unit_price)} />
+                    <Info label="Requested monthly" value={usd(r.money?.requested_monthly)} />
+                    <Info label="Current monthly" value={usd(r.money?.current_monthly)} />
+                  </>
+                ) : (
+                  <>
+                    <Info label="List price" value={usd(r.money?.base)} />
+                    <Info label="Asking for" value={usd(r.money?.requested_adjustment)} />
+                    <Info label="Customer would pay" value={usd(r.money?.requested_total)} />
+                  </>
+                )}
               </div>
-              <blockquote className="sw-quote">{r.reason}</blockquote>
+              <blockquote className="sw-quote">{r.reason || 'No reason recorded.'}</blockquote>
+              {approveBlockedReason(r) ? (
+                <div role="alert" className="sw-muted"><b>Cannot approve:</b> {approveBlockedReason(r)}</div>
+              ) : null}
               <div className="sw-appr-act">
                 <input
                   className="sw-input"
@@ -190,10 +213,10 @@ export default function ManagerCommand() {
                   value={decideNote[r.id] || ''}
                   onChange={e => setDecideNote(s => ({ ...s, [r.id]: e.target.value }))}
                 />
-                <button className="sw-btn sw-primary" disabled={busy}
-                        onClick={() => decide(r.id, true)}>Approve</button>
+                <button className="sw-btn sw-primary" disabled={busy || !!approveBlockedReason(r)}
+                        onClick={() => decide(r, true)}>Approve</button>
                 <button className="sw-btn" disabled={busy}
-                        onClick={() => decide(r.id, false)}>Deny</button>
+                        onClick={() => decide(r, false)}>Deny</button>
                 <button className="sw-btn sw-ghost"
                         onClick={() => nav(`/sales/opportunities/${r.opportunity_id}`)}>
                   Open the deal
@@ -409,8 +432,8 @@ export default function ManagerCommand() {
             <Card title="RECENTLY DECIDED" sub="Your last pricing calls">
               {appr.recent.map(r => (
                 <div key={r.id} className="sw-decided">
-                  <Chip tone={r.status === 'approved' ? 'green' : null}>{r.status_label}</Chip>
-                  <span>{money(r.requested_adjustment)} — {r.requested_by_name}</span>
+                  <Chip tone={r.status === 'approved' ? 'green' : null}>{STATUS_TEXT[r.status] || r.status}</Chip>
+                  <span>{usd(r.money?.requested_adjustment)} — {r.requested_by_name || 'Unknown'}</span>
                   <span className="sw-muted">{dateTime(r.decided_at)}</span>
                 </div>
               ))}
