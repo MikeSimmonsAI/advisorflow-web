@@ -42,6 +42,7 @@ from app.models.models import (
 )
 from app.models.sales_models import Opportunity, BrandPackage
 from app.services import package_pricing as _pp
+from app.services import price_math as pm
 from app.services import demo_sites as _demos
 from app.services.sales_access import (
     require_sales_member, assert_can_view_opportunity, sales_org_ids,
@@ -99,6 +100,10 @@ def _editable_or_400(prop: Proposal) -> None:
 
 def _money(v):
     return None if v is None else float(v)
+
+
+def _cents(v):
+    return pm.to_cents(v)
 
 
 def _proposal_opp(db: Session, prop: Proposal):
@@ -169,6 +174,8 @@ def _proposal_out(db: Session, prop: Proposal, user: User,
             "min_units": prop.custom_min_units,
             "term_months": prop.custom_term_months,
             "monthly_rate": float(_pp.custom_rate(prop)["monthly_rate"]),
+            "unit_price_cents": _cents(prop.custom_unit_price),
+            "monthly_rate_cents": _cents(_pp.custom_rate(prop)["monthly_rate"]),
             "basis": _pp.custom_basis(_pp.custom_rate(prop)),
         } if _pp.custom_rate(prop) else None),
         # Whether THIS user may set one. The server refuses either way; this
@@ -179,6 +186,10 @@ def _proposal_out(db: Session, prop: Proposal, user: User,
         "base_amount": _money(prop.base_amount),
         "adjustment": _money(prop.adjustment),
         "final_amount": _money(prop.final_amount),
+        # Exact integer cents: what the UI formats money from.
+        "base_amount_cents": _cents(prop.base_amount),
+        "adjustment_cents": _cents(prop.adjustment),
+        "final_amount_cents": _cents(prop.final_amount),
         "currency": prop.currency or "USD",
         # Manager-visible audit of any discount. A rep sees THAT it was
         # adjusted; the reason is a management artefact.
@@ -268,15 +279,19 @@ class UpdateProposalIn(BaseModel):
     # directly from a request body.
     package_id: Optional[str] = None
     billing_option: Optional[str] = None      # month_to_month | term_agreement
-    adjustment: Optional[float] = None
+    adjustment: Optional[float] = Field(None, ge=-1e9, le=1e9, allow_inf_nan=False)
     price_reason: Optional[str] = None
+    # The `updated_at` the caller loaded. If the proposal moved since, the edit
+    # is refused with 409 instead of silently overwriting another price.
+    # Omitted = legacy unguarded edit.
+    expected_updated_at: Optional[str] = None
     # The per-deal recurring rate. Manager-only, routed through
     # apply_custom_rate — there is no path that writes these columns directly
     # from a request body, for the same reason final_amount has none.
-    custom_unit_price: Optional[float] = None
+    custom_unit_price: Optional[float] = Field(None, ge=0, le=1e9, allow_inf_nan=False)
     custom_unit_label: Optional[str] = None
-    custom_min_units: Optional[int] = None
-    custom_term_months: Optional[int] = None
+    custom_min_units: Optional[int] = Field(None, ge=1, le=1_000_000)
+    custom_term_months: Optional[int] = Field(None, ge=0, le=120)
     # Explicit, because "omitted" and "clear it" are different instructions and
     # an Optional field cannot tell them apart.
     clear_custom_rate: bool = False
@@ -389,6 +404,10 @@ def update_proposal(proposal_id: str, body: UpdateProposalIn,
     """
     prop = _load_proposal(db, proposal_id, user)
     _editable_or_400(prop)
+
+    stale = pm.check_stale(prop.updated_at, body.expected_updated_at)
+    if not stale["ok"]:
+        raise HTTPException(status_code=409, detail=stale["error"])
 
     for field in ("title", "subtitle", "client_name", "client_email",
                   "client_company", "executive_summary", "business_need",
@@ -514,7 +533,8 @@ def revoke_access(proposal_id: str,
 
 class PricingRequestIn(BaseModel):
     requested_adjustment: float = Field(
-        ..., description="Signed amount against the list price. A discount is negative.")
+        ..., ge=-1e9, le=1e9, allow_inf_nan=False,
+        description="Signed amount against the list price. A discount is negative.")
     reason: str
 
 

@@ -139,6 +139,75 @@ class Atomic(unittest.TestCase):
         self.assertEqual(len(self.ns["_events"]), 1)
 
 
+class Cents(unittest.TestCase):
+    def test_to_cents_exact_and_refuses_junk(self):
+        self.assertEqual(M.to_cents(Decimal("1497.00")), 149700)
+        self.assertEqual(M.to_cents("0.1") + M.to_cents("0.2"), 30)
+        self.assertEqual(M.to_cents(-500), -50000)
+        self.assertEqual(M.to_cents(19.99), 1999)
+        self.assertIsNone(M.to_cents(None))
+        for bad in ("NaN", float("inf"), 10 ** 12, "x", True):
+            self.assertIsNone(M.to_cents(bad), bad)
+
+
+class Stale(unittest.TestCase):
+    T = datetime(2026, 10, 8, 12, 0, 0, 123456)
+
+    def test_omitted_guard_is_legacy_behaviour(self):
+        self.assertTrue(M.check_stale(self.T, None)["ok"])
+        self.assertTrue(M.check_stale(self.T, "")["ok"])
+
+    def test_matching_stamp_accepted_incl_z_and_offset(self):
+        self.assertTrue(M.check_stale(self.T, self.T.isoformat())["ok"])
+        self.assertTrue(M.check_stale(self.T, self.T.isoformat() + "Z")["ok"])
+        self.assertTrue(M.check_stale(self.T, self.T.isoformat() + "+00:00")["ok"])
+
+    def test_changed_proposal_refused_with_reload_message(self):
+        r = M.check_stale(datetime(2026, 10, 8, 12, 0, 1), self.T.isoformat())
+        self.assertFalse(r["ok"])
+        self.assertIn("changed since you loaded it", r["error"])
+        self.assertFalse(M.check_stale(None, self.T.isoformat())["ok"])
+
+    def test_malformed_guard_refused_not_ignored(self):
+        for bad in ("garbage", "2026-13-45", "12"):
+            self.assertFalse(M.check_stale(self.T, bad)["ok"], bad)
+
+
+class RouterWiring(unittest.TestCase):
+    def setUp(self):
+        self.src = _src("app/routers/sales_proposal_router.py")
+        self.fn = self.src[self.src.index("def update_proposal("):
+                           self.src.index('@router.post("/sales/proposals/{proposal_id}/version"')]
+
+    def test_stale_check_runs_before_any_mutation_and_is_409(self):
+        i_check = self.fn.index("pm.check_stale(")
+        self.assertLess(i_check, self.fn.index("setattr(prop, field, val)"))
+        self.assertLess(i_check, self.fn.index("ps.apply_pricing("))
+        self.assertLess(i_check, self.fn.index("ps.apply_custom_rate("))
+        self.assertIn("status_code=409, detail=stale[\"error\"]", self.fn)
+
+    def test_refusals_roll_back_and_keep_status_codes(self):
+        self.assertEqual(self.fn.count("db.rollback()"), 2)
+        self.assertIn("403 if \"manager\" in", self.fn)
+        self.assertLess(self.fn.index("ps.apply_pricing("), self.fn.index("db.commit()"))
+
+    def test_money_inputs_bounded_and_finite(self):
+        self.assertIn("adjustment: Optional[float] = Field(None, ge=-1e9, le=1e9, allow_inf_nan=False)", self.src)
+        self.assertIn("custom_unit_price: Optional[float] = Field(None, ge=0, le=1e9, allow_inf_nan=False)", self.src)
+        self.assertIn("requested_adjustment: float = Field(\n        ..., ge=-1e9, le=1e9, allow_inf_nan=False", self.src)
+        self.assertIn("custom_min_units: Optional[int] = Field(None, ge=1,", self.src)
+        self.assertIn("custom_term_months: Optional[int] = Field(None, ge=0, le=120)", self.src)
+
+    def test_output_carries_integer_cents_and_authority_unchanged(self):
+        for k in ("base_amount_cents", "adjustment_cents", "final_amount_cents",
+                  "unit_price_cents", "monthly_rate_cents"):
+            self.assertIn('"%s"' % k, self.src)
+        # authority is still the one service rule, not a new path
+        self.assertIn("ps.can_override_price(db, user, prop.brand_sales_org_id)", self.src)
+        self.assertNotIn("prop.final_amount =", self.src)
+        self.assertNotIn("prop.adjustment =", self.src)
+
+
 class Wiring(unittest.TestCase):
     def test_service_uses_shared_math(self):
         s = _src("app/services/proposal_service.py")

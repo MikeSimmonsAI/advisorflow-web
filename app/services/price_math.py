@@ -40,3 +40,34 @@ def price_total(base, adjustment):
         return {"ok": False, "total": None,
                 "error": "That adjustment would make the total negative."}
     return {"ok": True, "total": total, "error": None}
+
+
+def to_cents(value):
+    """-> int cents (exact, via the Decimal rule above) or None. The wire form
+    the UI formats money from, so no float ever carries a total."""
+    d = parse_money(value)
+    return None if d is None else int((d * 100).to_integral_value())
+
+
+def check_stale(current_stamp, expected_stamp):
+    """Optimistic concurrency for a proposal edit.
+
+    expected_stamp is the `updated_at` the caller loaded. Omitted keeps the
+    legacy unguarded behaviour: this adds a guard, never a new power. An
+    unparseable stamp is refused, not ignored: a malformed guard must not read
+    as "no guard". Returns {"ok", "error"}; the router maps a refusal to 409.
+    """
+    from datetime import datetime, timezone
+    if expected_stamp is None or expected_stamp == "":
+        return {"ok": True, "error": None}
+    try:
+        exp = datetime.fromisoformat(str(expected_stamp).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return {"ok": False, "error": "The proposal version marker was not understood. "
+                                      "Reload the proposal and try again."}
+    if exp.tzinfo is not None:
+        exp = exp.astimezone(timezone.utc).replace(tzinfo=None)
+    if current_stamp is None or current_stamp != exp:
+        return {"ok": False, "error": "This proposal changed since you loaded it. "
+                                      "Reload to see the current price, then re-apply your change."}
+    return {"ok": True, "error": None}

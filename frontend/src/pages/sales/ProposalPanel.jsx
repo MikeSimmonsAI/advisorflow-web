@@ -13,6 +13,10 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api, API_BASE } from '../../api/client'
 import { Card, Chip, Empty, ErrorBar, dateTime } from './parts'
+import {
+  formatCents, validateAdjustment, validateCustomRate, totalAfter,
+  refusalMessage, refusalKind,
+} from '../../utils/proposalMoney.js'
 
 const STATUS_TONE = {
   draft: null, internal_review: null, ready: 'blue', sent: 'blue',
@@ -31,13 +35,13 @@ const SECTIONS = [
   ['terms', 'TERMS', 'Commercial terms'],
 ]
 
-function money(v, cur) {
-  if (v === null || v === undefined) return '—'
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency', currency: cur || 'USD', maximumFractionDigits: 0,
-    }).format(v)
-  } catch { return (cur || 'USD') + ' ' + v }
+// Money renders from integer cents, always with cents, never via Intl/float
+// totals. `cents` (the server's *_cents field) wins; a legacy dollar value is
+// converted once, by rounding to the cent.
+function money(v, cur, cents) {
+  if (Number.isInteger(cents)) return formatCents(cents, cur)
+  if (v === null || v === undefined || !Number.isFinite(Number(v))) return '—'
+  return formatCents(Math.round(Number(v) * 100), cur)
 }
 
 
@@ -72,10 +76,8 @@ function CustomRate({ rate, currency, canEdit, disabled, onSave, onClear }) {
 
   // Shown live while typing, so nobody has to save to find out what the deal
   // actually costs per month.
-  const unitN = Number(f.unit || 0)
-  const minN = Math.max(1, Number(f.min || 1))
-  const termN = Number(f.term || 0)
-  const monthly = unitN * minN
+  const v = validateCustomRate(f)
+  const termN = v.ok && v.fields.custom_term_months ? v.fields.custom_term_months : 0
 
   if (!open) {
     return (
@@ -84,7 +86,7 @@ function CustomRate({ rate, currency, canEdit, disabled, onSave, onClear }) {
           <>
             <div className="sw-billing-row is-primary">
               <span>MONTHLY PLATFORM</span>
-              <b>{money(rate.monthly_rate, currency)}/mo</b>
+              <b>{money(rate.monthly_rate, currency, rate.monthly_rate_cents)}/mo</b>
             </div>
             {rate.basis && (
               <div className="sw-billing-row">
@@ -130,7 +132,7 @@ function CustomRate({ rate, currency, canEdit, disabled, onSave, onClear }) {
       <div className="sw-grid-even">
         <div className="sw-field">
           <label>RATE PER UNIT / MONTH</label>
-          <input className="sw-input" type="number" min="0" step="0.01" value={f.unit}
+          <input className="sw-input" inputMode="decimal" value={f.unit}
                  placeholder="250"
                  onChange={e => setF({ ...f, unit: e.target.value })} />
         </div>
@@ -154,16 +156,19 @@ function CustomRate({ rate, currency, canEdit, disabled, onSave, onClear }) {
         </div>
       </div>
 
-      {unitN > 0 && (
+      {!v.ok && (f.unit !== '' || f.term !== '') && (
+        <div role="alert" style={{ color: '#b91c1c', fontSize: 12, marginTop: 8 }}>{v.error}</div>
+      )}
+      {v.ok && (
         <div className="sw-billing-summary" style={{ marginTop: 10 }}>
           <div className="sw-billing-row is-primary">
             <span>MONTHLY PLATFORM</span>
-            <b>{money(monthly, currency)}/mo</b>
+            <b>{formatCents(v.monthlyCents, currency)}/mo</b>
           </div>
           {termN > 0 && (
             <div className="sw-billing-row">
               <span>{termN}-month platform commitment</span>
-              <b>{money(monthly * termN, currency)}</b>
+              <b>{formatCents(v.commitmentCents, currency)}</b>
             </div>
           )}
         </div>
@@ -175,15 +180,15 @@ function CustomRate({ rate, currency, canEdit, disabled, onSave, onClear }) {
 
       <div className="sw-flex" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
         <button className="sw-btn" disabled={disabled} onClick={() => setOpen(false)}>Cancel</button>
-        <button className="sw-btn sw-primary" disabled={disabled || !(unitN > 0)}
+        <button className="sw-btn sw-primary" disabled={disabled || !v.ok}
                 onClick={async () => {
-                  await onSave({
-                    custom_unit_price: unitN,
+                  // Closes only when the server accepted it; a refusal leaves
+                  // the form open beside the error.
+                  const saved = await onSave({
+                    ...v.fields,
                     custom_unit_label: f.label.trim() || null,
-                    custom_min_units: minN,
-                    custom_term_months: termN > 0 ? termN : null,
                   })
-                  setOpen(false)
+                  if (saved) setOpen(false)
                 }}>Save rate</button>
       </div>
     </div>
@@ -202,6 +207,7 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
   // A rep's request for a price they cannot set (Checkpoint 5).
   const [askReason, setAskReason] = useState('')
   const [askAdj, setAskAdj] = useState('')
+  const [adjText, setAdjText] = useState('')
   const [resource, setResource] = useState({ block_type: 'website_url', content: '', file_url: '' })
 
   const load = useCallback(async () => {
@@ -225,6 +231,9 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
 
   useEffect(() => { load() }, [load])
 
+  // Resolves true only when the server accepted the change. A refusal never
+  // sets a success note; a 409 reloads so the screen shows the current price
+  // while the refusal text stays visible.
   async function act(fn, okMsg) {
     setBusy(true); setError(null); setNote(null)
     try {
@@ -232,16 +241,26 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
       if (okMsg) setNote(okMsg)
       await load()
       if (onChanged) await onChanged()
-    } catch (e) { setError(e.message || 'That did not work.') }
-    finally { setBusy(false) }
+      return true
+    } catch (e) {
+      const msg = refusalMessage(e)
+      if (refusalKind(e) === 'conflict') await load()
+      setError(msg)
+      return false
+    } finally { setBusy(false) }
   }
+
+  // Every proposal edit carries the updated_at it was made against, so a stale
+  // screen cannot overwrite a newer price (server answers 409).
+  const patchProposal = fields => api.patch('/sales/proposals/' + current.id,
+    { ...fields, expected_updated_at: current.updated_at })
 
   const create = () => act(
     () => api.post('/sales/proposals', { opportunity_id: opp.id }),
     'Proposal created and prefilled from this opportunity.')
 
   const saveSections = () => act(
-    () => api.patch('/sales/proposals/' + current.id, draft),
+    () => patchProposal(draft),
     'Saved.')
 
   const publish = () => act(
@@ -291,28 +310,38 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
      package once one is chosen; there is no "unchoose". */
   const setPackage = pid => {
     if (!pid) return
-    return act(() => api.patch('/sales/proposals/' + current.id, { package_id: pid }))
+    return act(() => patchProposal({ package_id: pid }))
   }
 
   const saveCustomRate = fields => act(
-    () => api.patch('/sales/proposals/' + current.id, fields),
+    () => patchProposal(fields),
     'Custom rate saved. It is on the deal timeline.')
 
   const clearCustomRate = () => act(
-    () => api.patch('/sales/proposals/' + current.id, { clear_custom_rate: true }),
+    () => patchProposal({ clear_custom_rate: true }),
     'Custom rate cleared.')
 
-  const applyDiscount = adj => act(
-    () => api.patch('/sales/proposals/' + current.id,
-                    { adjustment: Number(adj), price_reason: reason }),
-    'Pricing updated.')
+  const applyDiscount = text => {
+    const v = validateAdjustment(text)
+    if (!v.ok) { setNote(null); setError(v.error); return }
+    const t = totalAfter(current.base_amount_cents, v.cents)
+    if (current.base_amount_cents != null && !t.ok) { setNote(null); setError(t.error); return }
+    return act(async () => {
+      await patchProposal({ adjustment: v.cents / 100, price_reason: reason })
+      setAdjText('')
+    }, 'Pricing updated.')
+  }
 
   // Asks. Does not set a price — the manager's decision does that.
-  const askForPrice = () => act(async () => {
-    await api.post('/sales/proposals/' + current.id + '/pricing-request',
-                   { requested_adjustment: Number(askAdj), reason: askReason })
-    setAskReason(''); setAskAdj('')
-  }, 'Sent to your manager. Nothing on the proposal has changed yet.')
+  const askForPrice = () => {
+    const v = validateAdjustment(askAdj)
+    if (!v.ok) { setNote(null); setError(v.error); return }
+    return act(async () => {
+      await api.post('/sales/proposals/' + current.id + '/pricing-request',
+                     { requested_adjustment: v.cents / 100, reason: askReason })
+      setAskReason(''); setAskAdj('')
+    }, 'Sent to your manager. Nothing on the proposal has changed yet.')
+  }
 
   const withdrawAsk = () => act(
     () => api.post('/sales/proposals/' + current.id + '/pricing-request/withdraw', {}),
@@ -379,6 +408,10 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
   }
 
   const p = current
+  const adjCheck = validateAdjustment(adjText)
+  const adjTotal = adjCheck.ok && p.base_amount_cents != null
+    ? totalAfter(p.base_amount_cents, adjCheck.cents) : null
+  const adjPreview = adjTotal ? (adjTotal.ok ? formatCents(adjTotal.cents, p.currency) : adjTotal.error) : '—'
   const history = (data.proposals || []).filter(x => x.id !== p.id)
   const sent = !!p.sent_at
 
@@ -452,8 +485,7 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
                         selected={p.billing_option || 'month_to_month'}
                         disabled={!p.editable || busy}
                         onChoose={opt => act(
-                          () => api.patch('/sales/proposals/' + current.id,
-                                          { billing_option: opt }))} />
+                          () => patchProposal({ billing_option: opt }))} />
       ) : null}
 
       {/* `base_amount` is the ONE-TIME figure and is labelled as such. It is
@@ -461,18 +493,18 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
           billing option - the setup fee is identical under both. */}
       <div className="sw-flex sw-between" style={{ padding: '10px 0' }}>
         <span className="sw-subtle">Implementation &amp; setup (one-time)</span>
-        <b>{money(p.base_amount, p.currency)}</b>
+        <b>{money(p.base_amount, p.currency, p.base_amount_cents)}</b>
       </div>
       {p.adjustment ? (
         <div className="sw-flex sw-between" style={{ padding: '4px 0' }}>
           <span className="sw-subtle">Adjustment</span>
-          <b style={{ color: '#9e6722' }}>{money(p.adjustment, p.currency)}</b>
+          <b style={{ color: '#9e6722' }}>{money(p.adjustment, p.currency, p.adjustment_cents)}</b>
         </div>
       ) : null}
       <div className="sw-flex sw-between"
            style={{ padding: '10px 0', borderTop: '1px solid #eef2f5' }}>
         <b style={{ fontSize: 12 }}>Implementation total (one-time)</b>
-        <b style={{ fontSize: 16 }}>{money(p.final_amount, p.currency)}</b>
+        <b style={{ fontSize: 16 }}>{money(p.final_amount, p.currency, p.final_amount_cents)}</b>
       </div>
 
       {/* The recurring side, kept visually separate from the one-time total
@@ -516,15 +548,22 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
           <input className="sw-input" placeholder="Reason (e.g. competitive vs Vendor X)"
                  value={reason} onChange={e => setReason(e.target.value)} />
           <div className="sw-flex" style={{ gap: 8, marginTop: 8 }}>
-            <input className="sw-input" type="number" placeholder="-500"
-                   style={{ width: 130 }}
-                   onKeyDown={e => { if (e.key === 'Enter') applyDiscount(e.target.value) }}
-                   id="adj-input" />
-            <button className="sw-tiny" disabled={busy || !reason.trim()}
-                    onClick={() => applyDiscount(document.getElementById('adj-input').value)}>
+            <input className="sw-input" inputMode="decimal" placeholder="-500.00"
+                   style={{ width: 130 }} value={adjText}
+                   onChange={e => setAdjText(e.target.value)}
+                   onKeyDown={e => { if (e.key === 'Enter' && reason.trim()) applyDiscount(adjText) }} />
+            <button className="sw-tiny" disabled={busy || !reason.trim() || !adjCheck.ok}
+                    onClick={() => applyDiscount(adjText)}>
               Apply adjustment
             </button>
           </div>
+          {adjText !== '' && (adjCheck.ok
+            ? <div className="sw-subtle" style={{ marginTop: 6, fontSize: 12 }}>
+                New one-time total: {adjPreview}
+              </div>
+            : <div role="alert" style={{ color: '#b91c1c', fontSize: 12, marginTop: 6 }}>
+                {adjCheck.error}
+              </div>)}
         </div>
       )}
       {/* A rep cannot set the price — but before Checkpoint 5 the only thing
@@ -540,10 +579,10 @@ export default function ProposalPanel({ opp, packages = [], onChanged }) {
           <input className="sw-input" placeholder="Why do you need it? Your manager reads this."
                  value={askReason} onChange={e => setAskReason(e.target.value)} />
           <div className="sw-flex" style={{ gap: 8, marginTop: 8 }}>
-            <input className="sw-input" type="number" placeholder="-500"
+            <input className="sw-input" inputMode="decimal" placeholder="-500.00"
                    style={{ width: 130 }} value={askAdj}
                    onChange={e => setAskAdj(e.target.value)} />
-            <button className="sw-tiny" disabled={busy || !askReason.trim() || !askAdj}
+            <button className="sw-tiny" disabled={busy || !askReason.trim() || !validateAdjustment(askAdj).ok}
                     onClick={() => askForPrice()}>
               Ask my manager
             </button>
