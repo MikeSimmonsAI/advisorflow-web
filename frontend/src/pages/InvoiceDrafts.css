@@ -1,0 +1,28 @@
+/* Theme tokens only (var(--...)) so light and dark both follow the app theme. */
+.invd-page { padding: 24px; max-width: 1100px; margin: 0 auto; color: var(--text-primary); }
+.invd-head h1 { margin: 0; font-size: 24px; }
+.invd-head p, .invd-muted { color: var(--text-muted); font-size: 14px; }
+.invd-cols { display: grid; grid-template-columns: minmax(240px, 340px) 1fr; gap: 16px; align-items: start; }
+.invd-panel { background: var(--surface, transparent); border: 1px solid var(--border-subtle, var(--border-danger)); border-radius: var(--radius-md, 8px); padding: 16px; min-width: 0; }
+.invd-form { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.invd-form input { flex: 1 1 140px; min-width: 0; }
+.invd-rows { list-style: none; margin: 0; padding: 0; }
+.invd-row { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; padding: 8px; }
+.invd-row.is-open { outline: 2px solid var(--signal-blue, #087cff); }
+.invd-money { font-variant-numeric: tabular-nums; text-align: right; }
+.invd-meta, .invd-totals { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; }
+.invd-totals { max-width: 360px; margin-left: auto; }
+.invd-table-wrap { overflow-x: auto; }
+.invd-table { width: 100%; border-collapse: collapse; }
+.invd-table th, .invd-table td { padding: 6px 8px; text-align: left; }
+.invd-notice { padding: 10px 12px; border-radius: var(--radius-md, 8px); margin: 12px 0; }
+.invd-ok { border: 1px solid var(--color-success); color: var(--color-success); }
+.invd-refused { border: 1px solid var(--border-danger); color: var(--text-primary); }
+.invd-banner { padding: 10px 12px; border: 1px dashed var(--border-subtle, currentColor); font-size: 14px; }
+.invd-transitions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.invd-history { padding-left: 18px; font-size: 14px; }
+@media (max-width: 720px) {
+  .invd-page { padding: 12px; }
+  .invd-cols { grid-template-columns: 1fr; }
+  .invd-totals { max-width: none; }
+}

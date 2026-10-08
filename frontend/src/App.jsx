@@ -82,6 +82,7 @@ import Templates from './pages/Templates'
 // sales_proposal_router.py, which is opportunity-scoped, versioned and
 // priced, and keeps its own page (TeamProposals) in the Sales Workspace.
 import Proposals from './pages/Proposals'
+import InvoiceDrafts from './pages/InvoiceDrafts'
 import ProposalEditor from './pages/ProposalEditor'
 import ProvisionClient from './pages/ProvisionClient'
 import Pipeline from './pages/Pipeline'
@@ -1108,6 +1109,7 @@ export default function App() {
             the query to the caller's organization_id. This guard is not the
             authorization — it only stops the UI opening a door onto a 403. */}
         <Route path="/proposals" element={<ProtectedRoute requireAdmin><Proposals /></ProtectedRoute>} />
+        <Route path="/invoice-drafts" element={<ProtectedRoute requireAdmin><InvoiceDrafts /></ProtectedRoute>} />
         <Route path="/proposals/:proposalId" element={<ProtectedRoute requireAdmin><ProposalEditor /></ProtectedRoute>} />
         <Route path="/provision-client" element={<ProtectedRoute requireSuperAdmin><ProvisionClient /></ProtectedRoute>} />
         <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />

@@ -114,6 +114,8 @@ const NAV_GROUPS = [
       // precisely the mistake documented in that file. `adminOnly` is the honest
       // test here because require_admin is what /proposals/* actually enforces.
       { to: '/proposals', label: 'Proposals', icon: 'file-text', adminOnly: true },
+      // Local invoice drafts: adminOnly, NO featureKey (not an entitlement key). Stops at approval-ready.
+      { to: '/invoice-drafts', label: 'Invoice Drafts', icon: 'file-text', adminOnly: true },
       { to: '/cadence', label: 'Cadence', icon: 'repeat', adminOnly: true, featureKey: 'cadences' },
       // `leads`, because that is all this page is. It calls /leads/ three
       // times — hot, warm and cold — and renders nothing else. Without a
