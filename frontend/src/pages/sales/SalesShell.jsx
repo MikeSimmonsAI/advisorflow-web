@@ -56,6 +56,11 @@ const NAV = [
   // My Work rather than under the manager group: what you have earned is your
   // own business, and needing a manager's nav to see it would be absurd.
   { to: '/sales/my-compensation', label: 'My Compensation', icon: '＄' },
+  // Forecast beside earned, read-only. NO `permission` on purpose: the server
+  // lets any sales member read their OWN projection (require_sales_member) and
+  // forces a seller's scope to themselves; management scope is decided there
+  // from brand authority, never by this nav.
+  { to: '/sales/compensation-projection', label: 'Compensation Forecast', icon: '↗' },
 ]
 
 // Team Availability is the one item that belongs to BOTH groups by right: a rep

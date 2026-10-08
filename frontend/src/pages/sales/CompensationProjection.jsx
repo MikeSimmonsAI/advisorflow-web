@@ -6,8 +6,13 @@
  * the server from the token — this page only passes optional filters.
  */
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import SalesShell from './SalesShell'
+import {
+  LEGEND, TILE_LABELS, EMPTY_TEXT, usd, errorMessage, emptyState,
+  projectionQuery, stageOptions,
+} from '../../utils/compensationProjection'
 
 const card = {
   background: 'var(--surface-card)', border: '1px solid var(--border-default)',
@@ -16,10 +21,6 @@ const card = {
 const grid = {
   display: 'grid', gap: 12, marginBottom: 16,
   gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-}
-
-function usd(m) {
-  return m && m.display != null ? '$' + m.display : '—'
 }
 
 function Tile({ label, money, sub, dashed }) {
@@ -34,29 +35,27 @@ function Tile({ label, money, sub, dashed }) {
   )
 }
 
-function errorText(e) {
-  const s = e?.status
-  if (s === 403) return 'Not authorized to view this compensation scope.'
-  if (s === 422) return 'Projection refused — stored data is inconsistent: ' + (e?.message || '')
-  if (s === 400) return 'Choose a brand to view.'
-  return e?.message || 'Could not load the projection.'
-}
-
 export default function CompensationProjection() {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [stage, setStage] = useState('')
+  // Optional ?brand_sales_org_id= for a user who spans brands. It is only a
+  // request: the server still decides whether this caller may see that brand.
+  const [params] = useSearchParams()
+  const brand = params.get('brand_sales_org_id') || ''
 
   useEffect(() => {
     setErr('')
-    api.get('/sales/compensation/projection' + (stage ? '?stage=' + encodeURIComponent(stage) : ''))
+    setD(null)
+    api.get('/sales/compensation/projection' + projectionQuery(brand, stage))
       .then(setD)
-      .catch(e => { setD(null); setErr(errorText(e)) })
-  }, [stage])
+      .catch(e => { setD(null); setErr(errorMessage(e)) })
+  }, [stage, brand])
 
   const f = d?.forecast
   const e = d?.earned
-  const stages = d ? Array.from(new Set((d.deals || []).map(x => x.stage))) : []
+  const stages = d ? stageOptions(d.deals) : []
+  const state = emptyState(d)
 
   return (
     <SalesShell title="Compensation Projection"
@@ -66,6 +65,17 @@ export default function CompensationProjection() {
       {d ? (
         <>
           <div style={{ color: 'var(--text-body)', marginBottom: 12 }}>{d.disclaimer}</div>
+          <dl className="cp-legend" aria-label="Legend" style={{ ...card, ...grid, marginBottom: 12 }}>
+            {LEGEND.map(x => (
+              <div key={x.key} data-kind={x.kind}>
+                <dt style={{ color: 'var(--text-strong)', fontWeight: 600 }}>{x.label}</dt>
+                <dd style={{ color: 'var(--text-muted)', fontSize: 12, margin: 0 }}>{x.text}</dd>
+              </div>
+            ))}
+          </dl>
+          {state === 'no_records' || state === 'blocked' ? (
+            <div style={card} role="status">{EMPTY_TEXT[state]}</div>
+          ) : null}
           <label style={{ color: 'var(--text-muted)', fontSize: 13 }}>
             Stage{' '}
             <select value={stage} onChange={ev => setStage(ev.target.value)}>
@@ -74,29 +84,29 @@ export default function CompensationProjection() {
             </select>
           </label>
 
-          <h3 style={{ color: 'var(--text-strong)' }}>Forecast ({d.scope})</h3>
+          <h3 style={{ color: 'var(--text-strong)' }}>Forecast — not earned ({d.scope})</h3>
           <div style={grid}>
-            <Tile dashed label="Projected gross sales" money={f.gross_sales}
+            <Tile dashed label={TILE_LABELS.gross} money={f.gross_sales}
                   sub={f.deal_count + ' open deal(s)'} />
-            <Tile dashed label="Expected weighted revenue" money={f.weighted_gross_sales}
+            <Tile dashed label={TILE_LABELS.weightedGross} money={f.weighted_gross_sales}
                   sub={f.weighted_gross_sales.cents == null ? 'No stage probability configured' : null} />
-            <Tile dashed label="Projected commission" money={f.commission} />
-            <Tile dashed label="Weighted commission" money={f.weighted_commission} />
-            <Tile dashed label="Pending approval (not in forecast)" money={d.pending.commission}
+            <Tile dashed label={TILE_LABELS.commission} money={f.commission} />
+            <Tile dashed label={TILE_LABELS.weightedCommission} money={f.weighted_commission} />
+            <Tile dashed label={TILE_LABELS.pending} money={d.pending.commission}
                   sub={d.pending.deal_count + ' deal(s)'} />
           </div>
 
-          <h3 style={{ color: 'var(--text-strong)' }}>Earned from collected payments</h3>
+          <h3 style={{ color: 'var(--text-strong)' }}>Earned from collected payments (on hold, payable, paid)</h3>
           <div style={grid}>
-            <Tile label="On holdback" money={e.on_hold} sub={e.on_hold.count + ' entry(ies)'} />
-            <Tile label="Holdback elapsed" money={e.payable} sub={e.payable.count + ' entry(ies)'} />
-            <Tile label="Paid" money={e.paid} sub={e.paid.count + ' entry(ies)'} />
-            <Tile label="Total earned" money={e.total} />
+            <Tile label={TILE_LABELS.onHold} money={e.on_hold} sub={e.on_hold.count + ' entry(ies)'} />
+            <Tile label={TILE_LABELS.payable} money={e.payable} sub={e.payable.count + ' entry(ies)'} />
+            <Tile label={TILE_LABELS.paid} money={e.paid} sub={e.paid.count + ' entry(ies)'} />
+            <Tile label={TILE_LABELS.earned} money={e.total} />
           </div>
 
           {d.blockers.length ? (
             <div style={card} role="status">
-              <strong style={{ color: 'var(--text-strong)' }}>Blockers</strong>
+              <strong style={{ color: 'var(--text-strong)' }}>Blockers (configuration — amounts not counted)</strong>
               <ul>{d.blockers.map(b => <li key={b}>{b}</li>)}</ul>
             </div>
           ) : null}
@@ -107,7 +117,7 @@ export default function CompensationProjection() {
               <thead>
                 <tr style={{ textAlign: 'left' }}>
                   <th>Deal</th><th>Stage</th><th>Probability</th><th>Gross</th>
-                  <th>Commission</th><th>Weighted</th><th>Rule / plan</th><th>Status</th>
+                  <th>Forecast commission</th><th>Weighted forecast</th><th>Rule / plan</th><th>Status</th>
                 </tr>
               </thead>
               <tbody>

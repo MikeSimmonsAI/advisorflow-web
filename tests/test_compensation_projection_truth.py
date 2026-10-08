@@ -271,8 +271,9 @@ class UiContract(unittest.TestCase):
             self.assertNotIn(word, code.replace("approve", ""), word)
         self.assertIn("var(--surface-card)", src)
         self.assertIn("not earned", src.lower())
+        helper = self._read("frontend", "src", "utils", "compensationProjection.js")
         for code_ in ("403", "422", "400"):
-            self.assertIn(code_, src)
+            self.assertIn(code_, helper)
 
     def test_route_and_endpoint_wired_read_only(self):
         app = self._read("frontend", "src", "App.jsx")
