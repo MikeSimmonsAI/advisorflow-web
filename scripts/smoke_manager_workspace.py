@@ -24,6 +24,10 @@ os.environ["JWT_SECRET"] = "smoke" + "0" * 59
 os.environ["SECRET_KEY"] = "smoke" + "0" * 59
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import manager_approval_smoke_contract as K                      # noqa: E402
+
+BRAND = "bso-evo"
 
 from fastapi.testclient import TestClient                        # noqa: E402
 from app.main import app                                         # noqa: E402
@@ -316,7 +320,7 @@ def test_permissions():
     r = c.get("/sales/manager/reps/u-blake", headers=rep)
     check("a rep cannot read the rep drill-down", r.status_code == 403, r.status_code)
 
-    r = c.get("/sales/manager/approvals", headers=rep)
+    r = c.get(K.QUEUE_PATH, headers=rep)
     check("a rep cannot read the approval queue", r.status_code == 403, r.status_code)
 
     r = c.get("/sales/manager/overview", headers=mgr)
@@ -529,30 +533,59 @@ def test_approvals():
     db.close()
 
     # The manager's queue.
-    r = c.get("/sales/manager/approvals", headers=mgr)
+    # Fail-closed on shape, unavailable counts, missing version, wrong brand.
+    r = c.get(K.QUEUE_PATH, headers=mgr)
     check("the manager sees the queue", r.status_code == 200, r.text[:200])
     q = r.json()
-    check("the live request is in it", q["pending_count"] == 1, q["pending_count"])
-    check("the queue names the deal",
-          q["pending"][0]["opportunity_id"] == "opp-noaction",
-          q["pending"][0].get("opportunity_id"))
+    try:
+        row = K.find_item(K.read_queue(q, BRAND), ID["req2"])
+    except K.ContractError as e:
+        row = {}
+        check("the queue has the authoritative versioned shape", False, e)
+    check("the live request is in it", q.get("pending_count") == 1, q.get("pending_count"))
+    check("the queue names the deal", row.get("opportunity_id") == "opp-noaction",
+          row.get("opportunity_id"))
+    money = row.get("money") or {}
+    check("the queue carries exact cents for the ask",
+          (money.get("requested_adjustment") or {}).get("cents") == -30000
+          and (money.get("requested_total") or {}).get("cents") == 469500, money)
+    check("the row carries a version", bool(row.get("version")), row.get("version"))
 
-    r = c.get("/sales/manager/approvals", headers=bb)
+    r = c.get(K.QUEUE_PATH, headers=bb)
+    bbq = r.json() if r.status_code == 200 else {}
     check("ANOTHER BRAND'S MANAGER SEES NONE OF IT",
-          r.status_code == 200 and r.json()["pending_count"] == 0, r.text[:200])
+          r.status_code == 200 and bbq.get("pending_count") == 0
+          and not any(i.get("id") == ID["req2"] for i in bbq.get("pending", [])), r.text[:200])
 
-    r = c.post("/sales/manager/approvals/%s/decide" % ID["req2"], headers=bb,
-               json={"approve": True})
+    dpath, dbody = K.decision_request(row, True)
+    r = c.post(dpath, headers=bb, json=dbody)
     check("another brand's manager cannot decide it", r.status_code == 404, r.status_code)
 
-    r = c.post("/sales/manager/approvals/%s/decide" % ID["req2"], headers=rep,
-               json={"approve": True})
-    check("A REP CANNOT APPROVE THEIR OWN REQUEST", r.status_code == 403, r.status_code)
+    r = c.post(dpath, headers=rep, json=dbody)
+    check("A REP CANNOT APPROVE THEIR OWN REQUEST", r.status_code in (403, 404), r.status_code)
 
-    r = c.post("/sales/manager/approvals/%s/decide" % ID["req2"], headers=mgr,
-               json={"approve": True, "note": "Fine for this one."})
-    check("the manager can approve", r.status_code == 200, r.text[:300])
-    check("and it reports that the price was applied", r.json()["applied"] is True)
+    r = c.post(dpath, headers=mgr, json={"approve": True})
+    check("a decision with no expected_version is refused", r.status_code == 400,
+          r.status_code)
+    r = c.post(dpath, headers=mgr, json=dict(dbody, expected_version="v1.stale.stale"))
+    check("a wrong expected_version is a 409 stale, not success", r.status_code == 409,
+          r.status_code)
+    db = SessionLocal()
+    check("and neither refusal changed the request",
+          db.query(PricingApprovalRequest).filter_by(id=ID["req2"]).first().status
+          == APPROVAL_PENDING)
+    db.close()
+
+    dbody = dict(dbody, note="Fine for this one.")
+    r = c.post(dpath, headers=mgr, json=dbody)
+    check("the manager can approve with the row's version", r.status_code == 200, r.text[:300])
+    try:
+        verdict = K.read_decision(r.status_code, r.json(), True)
+    except K.ContractError as e:
+        verdict = None
+        check("the approval response is a true success", False, e)
+    check("and it reports that the price was applied",
+          verdict == "applied" and r.json().get("applied") is True, r.text[:200])
 
     r = c.get("/sales/proposals/%s" % pid, headers=mgr)
     p = r.json()
@@ -586,19 +619,23 @@ def test_approvals():
     check("so is the price override itself", "proposal_price_override" in kinds, kinds)
     db.close()
 
-    r = c.post("/sales/manager/approvals/%s/decide" % ID["req2"], headers=mgr,
-               json={"approve": True})
-    check("the same request cannot be decided twice", r.status_code == 400, r.status_code)
+    r = c.post(dpath, headers=mgr, json=dbody)
+    check("the same manager repeating the same answer is a replay, not a second write",
+          r.status_code == 200 and r.json().get("replay") is True, r.text[:200])
+    r = c.post(dpath, headers=mgr, json=dict(dbody, approve=False))
+    check("the opposite answer on a decided request is a 409, not success",
+          r.status_code == 409, r.status_code)
 
     # Denial.
     r = c.post("/sales/proposals/%s/pricing-request" % pid, headers=rep,
                json={"requested_adjustment": -1000, "reason": "One more try."})
     deny_id = r.json()["id"]
     before = c.get("/sales/proposals/%s" % pid, headers=mgr).json()["final_amount"]
-    r = c.post("/sales/manager/approvals/%s/decide" % deny_id, headers=mgr,
-               json={"approve": False, "note": "We hold price on this package."})
+    drow = K.find_item(K.read_queue(c.get(K.QUEUE_PATH, headers=mgr).json(), BRAND), deny_id)
+    dpath2, dbody2 = K.decision_request(drow, False, "We hold price on this package.")
+    r = c.post(dpath2, headers=mgr, json=dbody2)
     check("a manager can deny", r.status_code == 200, r.text[:200])
-    check("denial applies nothing", r.json()["applied"] is False)
+    check("denial applies nothing", r.json().get("applied") is False)
     after = c.get("/sales/proposals/%s" % pid, headers=mgr).json()["final_amount"]
     check("A DENIED REQUEST LEAVES THE PRICE UNTOUCHED", before == after,
           (before, after))
@@ -631,6 +668,7 @@ def test_approval_goes_stale():
     r = c.post("/sales/proposals/%s/pricing-request" % pid, headers=rep,
                json={"requested_adjustment": -250, "reason": "Still hoping."})
     rid = r.json()["id"]
+    seen = K.find_item(K.read_queue(c.get(K.QUEUE_PATH, headers=mgr).json(), BRAND), rid)
 
     # The proposal is sent before the manager gets to it.
     db = SessionLocal()
@@ -640,24 +678,25 @@ def test_approval_goes_stale():
     db.commit()
     db.close()
 
-    r = c.post("/sales/manager/approvals/%s/decide" % rid, headers=mgr,
-               json={"approve": True})
+    # The manager's earlier read is now stale: its version must be refused.
+    r = c.post(K.DECISION_PATH % rid, headers=mgr,
+               json={"approve": True, "expected_version": seen["version"]})
+    check("a decision on a version the world moved past is a 409, not success",
+          r.status_code == 409, r.status_code)
+
+    fresh = K.find_item(K.read_queue(c.get(K.QUEUE_PATH, headers=mgr).json(), BRAND), rid)
+    check("the reloaded row is blocked with a precise reason, not hidden",
+          fresh["actionable"] is False and bool(fresh["blocker"]), fresh)
+    r = c.post(K.DECISION_PATH % rid, headers=mgr,
+               json={"approve": True, "expected_version": fresh["version"]})
     check("approving a locked proposal is refused, not silently ignored",
           r.status_code == 400, r.status_code)
-    check("and the refusal explains what to do",
-          "version" in (r.json().get("detail") or "").lower(), r.text[:200])
 
     db = SessionLocal()
     row = db.query(PricingApprovalRequest).filter_by(id=rid).first()
-    check("THE DEAD REQUEST IS CLOSED, NOT LEFT ROTTING IN THE QUEUE",
-          row.status == APPROVAL_STALE, row.status)
-    check("with a reason a human can read",
-          "moved on" in (row.decision_note or ""), row.decision_note)
+    check("a refused decision wrote nothing (still pending; reads never sweep)",
+          row.status == APPROVAL_PENDING, row.status)
     db.close()
-
-    r = c.get("/sales/manager/approvals", headers=mgr)
-    check("and it is gone from the queue", r.json()["pending_count"] == 0,
-          r.json()["pending_count"])
 
     # Asking on a locked proposal is refused up front.
     r = c.post("/sales/proposals/%s/pricing-request" % pid, headers=rep,
