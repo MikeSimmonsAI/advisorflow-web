@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "control-room-portfolio-ui-recovery-20261007-2359",
-  "parent_run_id": "control-room-portfolio-20261007-2344",
-  "project": "EvoSys Pro Control Room UI recovery",
+  "relay_run_id": "control-room-db-persistence-20261008-0003",
+  "parent_run_id": "control-room-portfolio-ui-recovery-20261007-2359",
+  "project": "EvoSys Pro \u2014 durable launch-board database persistence",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37730174280",
-  "timestamp_ct": "2026-10-08 00:02 CT",
+  "actions_run_id": "37730482308",
+  "timestamp_ct": "2026-10-08 00:07 CT",
   "issue": 1,
-  "status_comment_id": 6052670200
+  "status_comment_id": 6052733159
 }
