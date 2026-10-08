@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "manager-deal-approval-queue-20261008-0037",
-  "parent_run_id": "compensation-stage-filter-stability-20261008-0033",
-  "project": "EvoSys Pro \u2014 manager deal and pricing approval queue",
+  "relay_run_id": "manager-approval-single-path-closure-20261008-0043",
+  "parent_run_id": "manager-deal-approval-queue-20261008-0037",
+  "project": "EvoSys Pro \u2014 manager approval single-path closure",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37733363276",
-  "timestamp_ct": "2026-10-08 00:42 CT",
+  "actions_run_id": "37733829390",
+  "timestamp_ct": "2026-10-08 00:46 CT",
   "issue": 1,
-  "status_comment_id": 6053199043
+  "status_comment_id": 6053252401
 }
