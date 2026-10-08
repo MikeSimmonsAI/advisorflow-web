@@ -40,6 +40,7 @@ from app.services.workforce import handoff as wf_handoff
 from app.services.workforce import performance as wf_performance
 from app.services.workforce import queue as wf_queue
 from app.services.workforce import registry as wf_registry
+from app.services.workforce import operator_ledger
 from app.services.workforce import run_evidence
 from app.services.workforce import service as wf_service
 from app.utils.time_fmt import iso_utc  # S19: explicit-UTC timestamps
@@ -194,7 +195,8 @@ def get_queue(request: Request, db: Session = Depends(get_db),
         q = q.filter(AIWorkItem.employee_id == employee_id)
     if states:
         q = q.filter(AIWorkItem.state.in_(states))
-    items = q.order_by(AIWorkItem.updated_at.desc()).limit(limit).all()
+    items = (q.order_by(AIWorkItem.updated_at.desc(), AIWorkItem.id.desc())
+             .limit(limit).all())
 
     lead_ids = [i.subject_id for i in items if i.subject_type == "lead"]
     names = {}
@@ -335,6 +337,78 @@ def get_run(run_id: str, request: Request, db: Session = Depends(get_db),
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="No such run.")
     return {"organization_id": org_id, "run": run}
+
+
+@router.get("/ledger")
+def get_ledger(request: Request, db: Session = Depends(get_db),
+               user: User = Depends(require_tenant_user),
+               state: Optional[str] = Query(None),
+               employee_id: Optional[str] = Query(None),
+               limit: int = Query(100, ge=1, le=200)) -> Dict[str, Any]:
+    """The operator ledger: work items and runs, one vocabulary, one scope.
+
+    Read-only. The organization is the caller's workspace (never an argument);
+    every query filters on it in SQL and `build_ledger` drops any row that
+    disagrees. A failing source is reported in `source_errors` with
+    `partial: true` — never as an empty-but-successful ledger.
+    """
+    from datetime import datetime as _dt
+    from app.models.workforce_models import AIEmployeeRun
+    org_id = _org_id(user, db, request)
+    if employee_id:
+        _employee(db, org_id, employee_id)
+    now = _dt.utcnow()
+    # Same authority `require_admin` enforces on the review route, so the
+    # ledger never offers a decision the write route would refuse.
+    is_admin = bool(lead_scope.is_manager_here(user, db, request))
+    observation = getattr(request.state, "executive_observation",
+                          None) is not None
+    entries: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    n = max(1, min(int(limit), 200))
+    employees: Dict[str, Any] = {}
+    try:
+        employees = {e.id: e for e in db.query(AIEmployee)
+                     .filter(AIEmployee.organization_id == org_id).all()}
+    except Exception:  # noqa: BLE001 - reported as partial, not swallowed
+        _log.exception("workforce ledger: employees")
+        errors.append("employees")
+    runs_by_item: Dict[str, list] = {}
+    try:
+        rq = db.query(AIEmployeeRun).filter(
+            AIEmployeeRun.organization_id == org_id)
+        if employee_id:
+            rq = rq.filter(AIEmployeeRun.employee_id == employee_id)
+        runs = (rq.order_by(AIEmployeeRun.started_at.desc(),
+                            AIEmployeeRun.id.desc()).limit(n * 2).all())
+        for r in runs:
+            if r.work_item_id:
+                runs_by_item.setdefault(r.work_item_id, []).append(r)
+            entries.append(operator_ledger.shape_run_entry(
+                r, organization_id=org_id,
+                employee=employees.get(r.employee_id), now=now))
+    except Exception:  # noqa: BLE001
+        _log.exception("workforce ledger: runs")
+        errors.append("runs")
+    try:
+        iq = db.query(AIWorkItem).filter(AIWorkItem.organization_id == org_id)
+        if employee_id:
+            iq = iq.filter(AIWorkItem.employee_id == employee_id)
+        items = (iq.order_by(AIWorkItem.updated_at.desc(),
+                             AIWorkItem.id.desc()).limit(n * 2).all())
+        for it in items:
+            entries.append(operator_ledger.shape_work_item(
+                it, employee=employees.get(it.employee_id),
+                runs=runs_by_item.get(it.id, []), organization_id=org_id,
+                is_admin=is_admin, observation=observation, now=now))
+    except Exception:  # noqa: BLE001
+        _log.exception("workforce ledger: work items")
+        errors.append("work_items")
+    out = operator_ledger.build_ledger(entries, organization_id=org_id,
+                                       state=state, limit=n,
+                                       source_errors=errors)
+    out["as_of"] = now.isoformat() + "Z"
+    return out
 
 
 @router.get("/performance")
@@ -607,6 +681,10 @@ class ReviewRequest(BaseModel):
     decision: str            # return_to_queue | close_not_interested |
     #                          close_do_not_contact | close_bad_contact
     note: Optional[str] = None
+    # The `version` the caller's ledger row showed. Required: a decision made
+    # against a view that has since changed is refused (409), and a repeat of a
+    # decision that already took effect is a no-op success (replay).
+    expected_version: Optional[str] = None
 
 
 _REVIEW_DECISIONS = {
@@ -640,18 +718,44 @@ def review_work_item(item_id: str, payload: ReviewRequest, request: Request,
         raise HTTPException(status_code=400,
                             detail="Unknown review decision.")
     state, reason = target
+    plan = operator_ledger.plan_review(
+        current_state=item.state,
+        current_version=operator_ledger.version_token(item),
+        target_state=state, expected_version=payload.expected_version,
+        reachable=wf_queue.path_between(item.state, state) is not None)
+    if plan["outcome"] == "version_required":
+        raise HTTPException(status_code=400,
+                            detail="expected_version is required.")
+    if plan["outcome"] == "replay":
+        return {"item_id": item.id, "state": item.state,
+                "state_label": _state_label(item.state), "replayed": True,
+                "version": operator_ledger.version_token(item)}
+    if plan["outcome"] == "conflict":
+        raise HTTPException(
+            status_code=409,
+            detail="This item changed since you loaded it. Reload and retry.")
+    if plan["outcome"] == "illegal":
+        raise HTTPException(
+            status_code=409,
+            detail="That decision is not allowed from the current state.")
     try:
         wf_queue.advance_to(db, item, state,
                             reason=(payload.note or reason)[:255],
                             actor_kind=C.ACTOR_HUMAN, actor_id=user.id)
+        if state == C.ELIGIBILITY_PENDING:
+            from datetime import datetime as _dt
+            item.next_action_at = _dt.utcnow()
+        db.commit()
     except wf_queue.IllegalTransition as exc:
+        db.rollback()
         raise HTTPException(status_code=409, detail=str(exc))
-    if state == C.ELIGIBILITY_PENDING:
-        from datetime import datetime as _dt
-        item.next_action_at = _dt.utcnow()
-    db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(item)
     return {"item_id": item.id, "state": item.state,
-            "state_label": _state_label(item.state)}
+            "state_label": _state_label(item.state), "replayed": False,
+            "version": operator_ledger.version_token(item)}
 
 
 class HandoffActionRequest(BaseModel):

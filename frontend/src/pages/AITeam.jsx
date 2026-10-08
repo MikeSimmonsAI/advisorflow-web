@@ -26,6 +26,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { readAuthority } from '../auth/workspaceAuthority'
 import PageShell from '../components/PageShell'
+import WorkforceLedger from '../components/WorkforceLedger'
 import { applyRefresh, createActionGuard, createSequencer } from '../utils/workforceTruth'
 import '../styles/shared.css'
 import '../styles/aiWorkforce.css'
@@ -310,6 +311,10 @@ export default function AITeam () {
           </div>
         </div>
       )}
+
+      {/* ── WORK LEDGER. One read of work items and runs; read-only except a
+          versioned review decision. ─────────────────────────────────── */}
+      <WorkforceLedger />
     </PageShell>
   )
 }
