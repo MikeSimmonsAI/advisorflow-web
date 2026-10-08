@@ -99,6 +99,7 @@ from app.routers.god_catalog_router import router as god_catalog_router
 from app.routers.god_access_router import router as god_access_router
 from app.routers.god_relay_router import router as god_relay_router
 from app.routers.god_launch_board_router import router as god_launch_board_router
+from app.routers.invoice_draft_router import router as invoice_draft_router
 # THE ADVISORFLOW MASTER LEAD DATABASE. The one router in the codebase that
 # reads across tenants on purpose, which is exactly why it is its own module
 # and every route in it is require_god. No customer-facing router imports
@@ -992,6 +993,7 @@ app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisio
 app.include_router(god_pricing_router)   # Pricing floors + compensation plans — god_admin only
 app.include_router(god_billing_router)   # Customer SaaS plan catalogue + billing policy + revenue — god_admin only
 app.include_router(god_catalog_router)   # Brand catalogue: recurring add-ons + one-time products/services — god_admin only
+app.include_router(invoice_draft_router)  # /invoice-drafts — local drafts, workspace admin, no provider
 app.include_router(god_launch_board_router)  # /god/launch-board — project portfolio, god_admin only
 app.include_router(god_relay_router)    # /god/relay — Control Room relay state, read-only. god_admin only
 app.include_router(god_access_router)    # /god/access — Manage Access: footprint, preview, apply, audit. god_admin only

@@ -284,6 +284,7 @@ import app.models.energy_models  # noqa: F401  (imported for side effects)
 import app.models.push_models  # noqa: F401  (push_subscriptions, push_events — web push)
 import app.models.idempotency_models  # noqa: F401  (idempotency_keys - database-level at-most-once)
 import app.models.launch_board_models  # noqa: F401  (launch_board_projects/events - Control Room portfolio)
+import app.models.invoice_draft_models  # noqa: F401  (invoice_drafts/lines/events - local drafts, no provider)
 import app.models.conversation_models  # noqa: F401  (conversation_memory_items, conversation_states)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
