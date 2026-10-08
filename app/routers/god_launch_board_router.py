@@ -53,7 +53,9 @@ def board(response: Response, _god: User = Depends(require_god)):
     for k, v in rcr.NO_CACHE_HEADERS.items():
         response.headers[k] = v
     try:
-        return lb.view(lb.load())
+        out = lb.view(lb.load())
+        out["storage"] = lb.storage_status()
+        return out
     except lb.BoardError as e:
         raise HTTPException(status_code=503, detail=str(e))
 

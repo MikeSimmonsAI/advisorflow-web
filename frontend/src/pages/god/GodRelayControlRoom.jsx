@@ -7,6 +7,7 @@
  */
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api/client'
+import GodLaunchBoard from './GodLaunchBoard'
 import {
   POLL_MS, failedState, headline, isWorking, liveElapsedMinutes, createRefresher, isLapsed,
   formatCT, formatMinutes, leaseText, actionsRunText, upNext, blockers, recommendation, isCheckStale,
@@ -106,6 +107,8 @@ export default function GodRelayControlRoom() {
         </div>
       ) : null}
 
+      <GodLaunchBoard relayState={s} working={isWorking(s) && !isLapsed(s.worker, tick)} />
+
       <Worker worker={s.worker} generatedAt={s.generated_at} tick={tick} />
 
       {(s.queued_behind || []).length ? (
@@ -142,8 +145,8 @@ export default function GodRelayControlRoom() {
         </div>
       ) : null}
 
-      <div style={card}>
-        <b>History</b> <span style={label}>({s.completed_today} completed today)</span>
+      <details style={card} data-testid="relay-technical-log">
+        <summary><b>Technical log</b> <span style={label}>({s.completed_today} completed today · {(s.history || []).length} runs — expand for detail)</span></summary>
         {(s.history || []).length === 0 ? <div style={label}>No history.</div> : null}
         {(s.history || []).map(h => (
           <div key={h.relay_run_id} style={{ padding: '6px 0', borderTop: '1px solid var(--gm-card-line)' }}>
@@ -158,7 +161,7 @@ export default function GodRelayControlRoom() {
             {h.blocked_reason || h.health ? <div>{h.blocked_reason || h.health}</div> : null}
           </div>
         ))}
-      </div>
+      </details>
     </div>
   )
 }

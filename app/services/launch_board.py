@@ -36,6 +36,16 @@ def default_path() -> str:
         os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "launch_board.json")
 
 
+def storage_status() -> Dict:
+    """Whether the board file sits on an operator-chosen path (LAUNCH_BOARD_PATH, e.g. a
+    persistent disk). Unset means the repo-relative default, wiped on redeploy."""
+    configured = bool(os.environ.get("LAUNCH_BOARD_PATH"))
+    return {"configured_path": configured, "durable": configured,
+            "warning": None if configured else
+            "Board is stored on the app's local filesystem and is lost on redeploy until "
+            "LAUNCH_BOARD_PATH points at a persistent disk."}
+
+
 def load(path: Optional[str] = None) -> Dict:
     """Missing file = empty board. An unreadable/corrupt file raises (fail closed)."""
     path = path or default_path()
