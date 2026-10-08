@@ -94,6 +94,8 @@ Mike approved the six area codes on 2026-10-08 12:23 CT and asked for a priced s
 
 ## 5. A2P / carrier readiness (Mike decides and attests; Claude submits nothing)
 
+> **Update 2026-10-08 evening:** a NEW campaign under the EVO brand (links YES, phone numbers YES; Grok package) is the path. The SCI opt-in is `/sms-optin/?program=sci`, with its own wording pending final review. Consent is recorded per program and the SCI send gate is built. See `handoff/SMS_CONSENT_CENTER.md`. The table below is the earlier state.
+
 What a registration needs, and where each piece stands:
 
 | Field | Draft / status |

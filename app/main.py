@@ -72,6 +72,7 @@ from app.routers.god_diagnostics_calendar import router as god_calendar_diag_rou
 # module docstring for why the ordinary cancel flow is the wrong tool here.
 from app.routers.god_maintenance_router import router as god_maintenance_router
 from app.routers.god_sms_trace_router import router as god_sms_trace_router
+from app.routers.god_sms_consent_router import router as god_sms_consent_router
 # Checkpoint 6 control plane: sales operations, Won -> Customer provisioning,
 # implementation lifecycle and the control-plane audit view. Separate module
 # from god_router so the whole Checkpoint 6 surface reads as one thing.
@@ -994,6 +995,7 @@ app.include_router(branding_router)
 app.include_router(god_calendar_diag_router)  # read-only calendar wiring report
 app.include_router(god_maintenance_router)   # one record, dry-run first, no messages sent
 app.include_router(god_sms_trace_router)      # read-only provider forensics, sends nothing
+app.include_router(god_sms_consent_router)    # SMS Consent Center ledger + campaign registry, read-only
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
 app.include_router(god_relay_router)   # Control Room: relay status + Mike direction, god_admin only
 app.include_router(god_launch_board_router)  # /god/launch-board — project portfolio, god_admin only

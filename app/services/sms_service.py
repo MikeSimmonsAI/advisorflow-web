@@ -495,6 +495,36 @@ def _compose_body_core(template: str, lead: Lead, advisor: User, booking_url: st
     return enforce_sms_content_policy(body.rstrip() + "\n\n" + booking_url)
 
 
+class SciSmsBlocked(ValueError):
+    """An SCI text the SCI program gate refused. `.reasons` holds the codes."""
+
+    def __init__(self, reasons):
+        self.reasons = list(reasons)
+        super().__init__("SCI_SMS_BLOCKED: " + ",".join(self.reasons))
+
+
+def _final_send_guards(db: Session, lead: Lead, body: str, *, from_number=None,
+                       messaging_service_sid=None, path: str = "send") -> None:
+    """The SCI program gate, then the sending campaign's content approval.
+
+    SCI (app/services/sms_programs.py): no text to an SCI contact without SCI
+    consent of record under final wording, an approved campaign that lists the
+    SCI program, and SCI_SMS_SEND_ENABLED. None for every other organization.
+
+    Campaign content (app/services/sms_campaigns.py): a body carrying a link or
+    a phone number the sending campaign is not approved for is refused, never
+    sent. Unregistered senders are the most restrictive campaign.
+    """
+    from app.services import sms_campaigns, sms_programs
+    reasons = sms_programs.sci_send_refusal(db, lead, from_number=from_number,
+                                            messaging_service_sid=messaging_service_sid)
+    if reasons:
+        raise SciSmsBlocked(reasons)
+    sms_campaigns.assert_content_allowed(body, from_number=from_number,
+                                         messaging_service_sid=messaging_service_sid,
+                                         path=path)
+
+
 def _demo_send_guard(db: Session, lead: Lead, channel: str) -> None:
     """Refuse to place a real provider call for a demonstration tenant.
 
@@ -642,6 +672,15 @@ def send_sms(
             to=lead.phone,
         ))
 
+    # LAST CHECKS BEFORE THE PROVIDER CALL: the SCI program gate and what the
+    # sending campaign is approved to carry. Both raise ValueError subclasses,
+    # so every caller that already handles "blocked" handles these too.
+    _final_send_guards(db, lead, body,
+                       from_number=from_phone if program_sender is None else None,
+                       messaging_service_sid=(_messaging_service_sid
+                                              if program_sender is not None else None),
+                       path=send_source or "send_sms")
+
     twilio_msg = client.messages.create(**create_kwargs)
 
     # Log the send so the message history tab has data and health checks have failure data
@@ -751,6 +790,9 @@ def send_mms(
         to=lead.phone,
         media_url=[media_url],
     ))
+
+    _final_send_guards(db, lead, body, from_number=from_phone,
+                       path=send_source or "send_mms")
 
     twilio_msg = client.messages.create(**mms_kwargs)
 

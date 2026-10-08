@@ -226,7 +226,7 @@ def record_consent(db, org_id: str, *, phone_raw: str, disclosure_text: str,
                    source_url: Optional[str], ip: Optional[str], user_agent: Optional[str],
                    lead=None, profile_id: Optional[str] = None,
                    property_id: Optional[str] = None, deal_id: Optional[str] = None,
-                   program: str = PROGRAM) -> SmsConsentRecord:
+                   program: str = PROGRAM, form_id: str = FORM_ID) -> SmsConsentRecord:
     """Write one consent record. The ONLY writer. Caller commits.
 
     Called only after a person ticked the unticked box. The timestamp is the
@@ -241,7 +241,7 @@ def record_consent(db, org_id: str, *, phone_raw: str, disclosure_text: str,
         phone_raw=(phone_raw or "")[:40], phone_normalized=e164,
         status=STATUS_OPTED_IN, consent_given=True, consented_at=now,
         consent_method=METHOD_WEB_CHECKBOX,
-        source_url=(source_url or "")[:500] or None, form_id=FORM_ID,
+        source_url=(source_url or "")[:500] or None, form_id=form_id,
         form_version=(form_version or "")[:64] or None,
         disclosure_version=(disclosure_version or "")[:64] or None,
         disclosure_text=(disclosure_text or "")[:4000] or None,
@@ -264,7 +264,7 @@ def record_consent(db, org_id: str, *, phone_raw: str, disclosure_text: str,
         lead.sms_consent_text = rec.disclosure_text
         lead.sms_consent_source = " · ".join(b for b in (
             rec.source_url, rec.disclosure_version and "v" + rec.disclosure_version,
-            PROGRAM) if b)[:400]
+            program) if b)[:400]
     db.flush()
     return rec
 
@@ -514,6 +514,13 @@ def send_program_sms(db, lead, body: str, *, sender_user_id: Optional[str],
         # the operator who owns the seller. None assigned -> not sent, and said.
         return {"sent": False, "reasons": ["NO_SENDER_USER"]}
     client, mg_sid = program_sender(db, org_id)
+    # What the program's campaign is approved to carry (links / phone numbers).
+    from app.services import sms_campaigns
+    blocked = sms_campaigns.content_refusal(body, sms_campaigns.for_sender(
+        messaging_service_sid=mg_sid))
+    if blocked:
+        _log_block(org_id, lead.id, dict(result, reasons=blocked), send_source)
+        return {"sent": False, "reasons": blocked}
     kwargs = apply_status_callback(dict(body=body, messaging_service_sid=mg_sid, to=lead.phone))
     msg = client.messages.create(**kwargs)
     db.add(Message(lead_id=lead.id, sender_id=sender_user_id, body=body,
