@@ -53,6 +53,13 @@ class NavAndAccess(unittest.TestCase):
         self.assertIn("Depends(require_sales_member)", seg)
         self.assertNotIn("require_sales_manager", seg)
 
+    def test_stage_options_from_server_list_and_select_stays_mounted(self):
+        page = _src(PAGE)
+        self.assertIn("available_stages", page)
+        self.assertNotIn("stageOptions(d.deals)", page)
+        # the select precedes the `{d ? (` figures block, so it is never unmounted
+        self.assertLess(page.index("<select"), page.index("{d ? ("))
+
     def test_client_never_sends_payee_or_assumes_management(self):
         page = _src(PAGE) + _src(HELPER)
         self.assertNotIn("payee_user_id", page)

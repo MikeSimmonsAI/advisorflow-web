@@ -286,5 +286,59 @@ class UiContract(unittest.TestCase):
             self.assertNotIn(w, gather)
 
 
+class AvailableStages(unittest.TestCase):
+    """The stage dropdown must not shrink when a stage is selected."""
+
+    PROBS = {"proposal": "50", "discovery": "20", "negotiation": "70"}
+
+    def _deals(self):
+        rep2 = [{"payee_user_id": "rep2", "payee_kind": "seller",
+                 "amount": Decimal("500.00"), "rule_id": "r1",
+                 "basis": "pct_setup", "rate_percent": 5.0}]
+        return [deal("o1", stage="proposal"), deal("o2", stage="discovery"),
+                deal("o3", stage="negotiation", owner="rep2", payouts=rep2),
+                deal("o4", stage="proposal")]
+
+    def test_unfiltered_sorted_and_deduplicated(self):
+        r = run(self._deals(), probs=self.PROBS)
+        self.assertEqual(r["available_stages"],
+                         ["discovery", "negotiation", "proposal"])
+
+    def test_selection_does_not_shrink_options_and_switching(self):
+        base = run(self._deals(), probs=self.PROBS)["available_stages"]
+        for s in base:  # direct switch to any stage keeps the full list
+            r = run(self._deals(), probs=self.PROBS, stage=s)
+            self.assertEqual(r["available_stages"], base)
+            self.assertEqual(r["filters"]["stage"], s)
+            self.assertTrue(all(x["stage"] == s for x in r["deals"]))
+        r = run(self._deals(), probs=self.PROBS, stage=None)  # All stages
+        self.assertEqual(len(r["deals"]), 4)
+
+    def test_seller_scope_only_offers_own_stages(self):
+        r = run(self._deals(), probs=self.PROBS, payee_user_id="rep2")
+        self.assertEqual(r["available_stages"], ["negotiation"])
+        r = run(self._deals(), probs=self.PROBS, payee_user_id="rep1",
+                stage="proposal")
+        self.assertEqual(r["available_stages"], ["discovery", "proposal"])
+
+    def test_excluded_deals_still_offer_their_stage(self):
+        d = deal("o5", stage="stalled", pricing_complete=False)
+        r = run([d, deal("o1")], probs=self.PROBS, stage="proposal")
+        self.assertIn("stalled", r["available_stages"])
+
+    def test_empty_and_no_match(self):
+        self.assertEqual(run([])["available_stages"], [])
+        r = run(self._deals(), probs=self.PROBS, stage="nope")
+        self.assertEqual(r["deals"], [])
+        self.assertEqual(r["available_stages"],
+                         ["discovery", "negotiation", "proposal"])
+
+    def test_no_cross_tenant_leak(self):
+        other = deal("x1", stage="secret")
+        other["brand_sales_org_id"] = "brand-b"
+        with self.assertRaises(T.ProjectionInputError):
+            run([deal("o1"), other])
+
+
 if __name__ == "__main__":
     unittest.main()

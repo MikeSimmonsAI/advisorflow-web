@@ -56,6 +56,19 @@ test('empty vs excluded vs data', () => {
 test('query and stage ordering are deterministic', () => {
   assert.equal(projectionQuery('', ''), '')
   assert.equal(projectionQuery('b 1', 'Won/Open'), '?brand_sales_org_id=b%201&stage=Won%2FOpen')
-  assert.deepEqual(stageOptions([{ stage: 'b' }, { stage: 'a' }, { stage: 'b' }]), ['a', 'b'])
+  assert.deepEqual(stageOptions(['b', 'a', 'b']), ['a', 'b'])
   assert.deepEqual(stageOptions(undefined), [])
+})
+
+test('stage options come from available_stages, not filtered deal rows', () => {
+  const avail = ['Proposal', 'Discovery', 'Negotiation']
+  const all = stageOptions(avail, '')
+  // selecting a stage keeps every option; switching directly and back to All too
+  assert.deepEqual(stageOptions(avail, 'Discovery'), all)
+  assert.deepEqual(stageOptions(avail, 'Negotiation'), all)
+  assert.deepEqual(all, ['Discovery', 'Negotiation', 'Proposal'])
+  // selected stage stays displayable even if the server list is empty
+  assert.deepEqual(stageOptions([], 'Proposal'), ['Proposal'])
+  assert.deepEqual(stageOptions(null, ''), [])
+  assert.deepEqual(stageOptions([null, '', 'A'], ''), ['A'])
 })

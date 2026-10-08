@@ -39,22 +39,30 @@ export default function CompensationProjection() {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [stage, setStage] = useState('')
+  // Offered stages persist across refetches so the dropdown stays usable (and
+  // directly switchable) while a filtered request is in flight. Reset when the
+  // brand changes, and only ever filled from the server's available_stages.
+  const [available, setAvailable] = useState([])
   // Optional ?brand_sales_org_id= for a user who spans brands. It is only a
   // request: the server still decides whether this caller may see that brand.
   const [params] = useSearchParams()
   const brand = params.get('brand_sales_org_id') || ''
 
+  useEffect(() => { setAvailable([]); setStage('') }, [brand])
+
   useEffect(() => {
     setErr('')
     setD(null)
+    let live = true   // a slow earlier response must not overwrite a newer one
     api.get('/sales/compensation/projection' + projectionQuery(brand, stage))
-      .then(setD)
-      .catch(e => { setD(null); setErr(errorMessage(e)) })
+      .then(r => { if (live) { setD(r); setAvailable(r?.available_stages || []) } })
+      .catch(e => { if (live) { setD(null); setErr(errorMessage(e)) } })
+    return () => { live = false }
   }, [stage, brand])
 
   const f = d?.forecast
   const e = d?.earned
-  const stages = d ? stageOptions(d.deals) : []
+  const stages = stageOptions(available, stage)
   const state = emptyState(d)
 
   return (
@@ -62,6 +70,14 @@ export default function CompensationProjection() {
                 subtitle="Forecast only — not earned, not payable, not owed.">
       {err ? <div className="sw-err" role="alert">{err}</div> : null}
       {!d && !err ? <div className="sw-muted">Loading…</div> : null}
+      <label style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+        Stage{' '}
+        <select value={stage} onChange={ev => setStage(ev.target.value)}>
+          <option value="">All stages</option>
+          {stages.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </label>
+
       {d ? (
         <>
           <div style={{ color: 'var(--text-body)', marginBottom: 12 }}>{d.disclaimer}</div>
@@ -76,14 +92,6 @@ export default function CompensationProjection() {
           {state === 'no_records' || state === 'blocked' ? (
             <div style={card} role="status">{EMPTY_TEXT[state]}</div>
           ) : null}
-          <label style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-            Stage{' '}
-            <select value={stage} onChange={ev => setStage(ev.target.value)}>
-              <option value="">All stages</option>
-              {stages.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </label>
-
           <h3 style={{ color: 'var(--text-strong)' }}>Forecast — not earned ({d.scope})</h3>
           <div style={grid}>
             <Tile dashed label={TILE_LABELS.gross} money={f.gross_sales}

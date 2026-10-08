@@ -233,6 +233,7 @@ def decide(*, brand_sales_org_id: str,
     deal_rows: List[Dict[str, Any]] = []
     excluded: List[Dict[str, Any]] = []
     seen_deals = set()
+    available_stages = set()
 
     for d in deals:
         oid = _require_id(d.get("opportunity_id"), "opportunity_id")
@@ -241,8 +242,6 @@ def decide(*, brand_sales_org_id: str,
         if oid in seen_deals:
             raise ProjectionInputError("duplicate deal %s" % oid)
         seen_deals.add(oid)
-        if stage is not None and d.get("stage") != stage:
-            continue
         if payee_user_id is not None:
             # A seller sees deals where they have a payout or own the deal.
             involved = d.get("owner_user_id") == payee_user_id or any(
@@ -250,6 +249,12 @@ def decide(*, brand_sales_org_id: str,
                 for p in d.get("payouts") or [])
             if not involved:
                 continue
+        # Offered stages come from the brand+payee scoped set BEFORE the stage
+        # filter, so picking a stage never shrinks the choices.
+        if d.get("stage"):
+            available_stages.add(str(d["stage"]))
+        if stage is not None and d.get("stage") != stage:
+            continue
 
         def exclude(reason: str) -> None:
             excluded.append({"opportunity_id": oid,
@@ -347,7 +352,7 @@ def decide(*, brand_sales_org_id: str,
     return _assemble(brand, payee_user_id, stage, earned, earned_n, earned_rows,
                      pending_comm, pending_n, gross, weighted_rev, comm,
                      weighted_comm, forecast_n, weighted_n, weighted_missing,
-                     deal_rows, excluded, blockers)
+                     deal_rows, excluded, blockers, sorted(available_stages))
 
 
 class ScopeRefused(Exception):
@@ -396,7 +401,8 @@ def resolve_scope(*, user_id: str, requested_brand: Optional[str],
 def _assemble(brand, payee_user_id, stage, earned, earned_n, earned_rows,
               pending_comm, pending_n, gross, weighted_rev, comm,
               weighted_comm, forecast_n, weighted_n, weighted_missing,
-              deal_rows, excluded, blockers) -> Dict[str, Any]:
+              deal_rows, excluded, blockers,
+              available_stages=()) -> Dict[str, Any]:
     return {
         "basis": "projection",
         "disclaimer": ("Forecast figures are not earned, not payable and not "
@@ -422,6 +428,7 @@ def _assemble(brand, payee_user_id, stage, earned, earned_n, earned_rows,
             "weighted_deal_count": weighted_n,
             "weighted_missing_probability_count": weighted_missing,
         },
+        "available_stages": list(available_stages),
         "deals": deal_rows,
         "excluded": excluded,
         "blockers": blockers,

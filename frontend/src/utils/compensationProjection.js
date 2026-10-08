@@ -84,7 +84,13 @@ export function projectionQuery(brand, stage) {
   return p.length ? '?' + p.join('&') : ''
 }
 
-// Stable, de-duplicated, sorted stage list (deals order is the server's).
-export function stageOptions(deals) {
-  return Array.from(new Set((deals || []).map(x => x.stage))).sort()
+// Stage choices for the dropdown. The server's available_stages (derived from
+// the unfiltered, scope-limited deals) is authoritative; it is de-duplicated and
+// sorted here so order never depends on arrival. Deal rows are NOT used: they
+// are already stage-filtered. The selected stage is kept as an option so the
+// control never shows a value it cannot display.
+export function stageOptions(available, selected) {
+  const set = new Set((Array.isArray(available) ? available : []).filter(Boolean))
+  if (selected) set.add(selected)
+  return Array.from(set).sort()
 }
