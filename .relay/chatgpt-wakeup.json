@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "manager-approval-single-path-closure-20261008-0043",
-  "parent_run_id": "manager-deal-approval-queue-20261008-0037",
-  "project": "EvoSys Pro \u2014 manager approval single-path closure",
+  "relay_run_id": "manager-approval-smoke-proof-closure-20261008-0047",
+  "parent_run_id": "manager-approval-single-path-closure-20261008-0043",
+  "project": "EvoSys Pro \u2014 manager approval executable smoke closure",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37733829390",
-  "timestamp_ct": "2026-10-08 00:46 CT",
+  "actions_run_id": "37734168445",
+  "timestamp_ct": "2026-10-08 00:50 CT",
   "issue": 1,
-  "status_comment_id": 6053252401
+  "status_comment_id": 6053303351
 }
