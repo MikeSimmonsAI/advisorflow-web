@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api/client'
 import {
   POLL_MS, failedState, headline, isWorking, liveElapsedMinutes, createRefresher, isLapsed,
-  formatCT, formatMinutes, leaseText, actionsRunText,
+  formatCT, formatMinutes, leaseText, actionsRunText, upNext, blockers, recommendation, isCheckStale,
 } from '../../utils/relayControlRoom'
 
 const card = { background: 'var(--gm-card-bg, var(--gm-pill-blue-bg))', border: '1px solid var(--gm-card-line)',
@@ -63,12 +63,13 @@ export default function GodRelayControlRoom() {
   const [loading, setLoading] = useState(false)
   const [tick, setTick] = useState(Date.now())
 
-  const [lastChecked, setLastChecked] = useState(null)
+  const [lastOk, setLastOk] = useState(null)        // last SUCCESSFUL check
+  const [lastFailed, setLastFailed] = useState(null)  // last failed attempt
   const refresh = useMemo(() => createRefresher({
     fetchState: (url, opts) => api.get(url, opts),
     onLoading: setLoading,
-    onState: (s) => { setState(s); setLastChecked(Date.now()); setTick(Date.now()) },
-    onError: (s) => { setState(s); setLastChecked(Date.now()); setTick(Date.now()) },  // clears any stale active worker
+    onState: (s) => { setState(s); setLastOk(Date.now()); setLastFailed(null); setTick(Date.now()) },
+    onError: (s) => { setState(s); setLastFailed(Date.now()); setTick(Date.now()) },  // clears any stale active worker
   }), [])
   const load = useCallback(() => refresh(true), [refresh])
 
@@ -90,8 +91,14 @@ export default function GodRelayControlRoom() {
       </div>
       <div style={label}>
         {isWorking(s) ? 'Worker active' : headline(s)} · refreshes every {POLL_MS / 1000}s
-        {lastChecked ? ` · last checked ${formatCT(new Date(lastChecked).toISOString())}` : ''}
+        {lastOk ? ` · last successful check ${formatCT(new Date(lastOk).toISOString())}` : ' · no successful check yet'}
+        {lastFailed ? ` · last attempt FAILED ${formatCT(new Date(lastFailed).toISOString())}` : ''}
       </div>
+      {lastOk && isCheckStale(lastOk, tick) ? (
+        <div style={{ ...card, color: 'var(--gm-red)' }} role="alert">
+          Status is stale — the last successful check was more than {Math.round(POLL_MS * 3 / 1000)}s ago.
+        </div>
+      ) : null}
 
       {!s.available ? (
         <div style={{ ...card, color: 'var(--gm-red)' }} role="alert">
@@ -108,7 +115,32 @@ export default function GodRelayControlRoom() {
         </div>
       ) : null}
 
-      {s.suggested_next ? <div style={card}><b>Suggested next:</b> {s.suggested_next}</div> : null}
+      {blockers(s).length ? (
+        <div style={card} data-testid="relay-blockers">
+          <b>Blockers</b>
+          {blockers(s).map(b => <Row key={`${b.relay_run_id}-${b.kind}`} k={`${b.kind} · ${b.relay_run_id || ''}`} v={b.reason} />)}
+        </div>
+      ) : null}
+
+      <div style={card} data-testid="relay-up-next">
+        <b>UP NEXT</b> <span style={label}>(queued relay directives only)</span>
+        {upNext(s).length === 0 ? <div style={label}>Nothing queued.</div> : null}
+        {upNext(s).map(u => (
+          <div key={u.relay_run_id} style={{ padding: '6px 0', borderTop: '1px solid var(--gm-card-line)' }}>
+            <div><b>{u.relay_run_id}</b> · {u.project}</div>
+            <div style={label}>
+              {u.status}{u.stale ? ' (STALE)' : ''} · owner {u.owner} · last update {formatCT(u.last_update_at)} · {u.start}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {recommendation(s) ? (
+        <div style={card} data-testid="relay-recommendation">
+          <b>Recommendation</b> <span style={label}>(advice from the last run — not queued work)</span>
+          <div>{recommendation(s)}</div>
+        </div>
+      ) : null}
 
       <div style={card}>
         <b>History</b> <span style={label}>({s.completed_today} completed today)</span>
