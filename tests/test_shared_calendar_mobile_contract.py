@@ -32,13 +32,14 @@ class Wiring(unittest.TestCase):
 
     def test_every_calendar_query_uses_total_order_and_cap_probe(self):
         self.assertNotIn(".order_by(SalesAppointment.starts_at.asc()).limit(500)", self.r)
-        # calendar_view, list_appointments and the shared event feed.
-        self.assertEqual(self.r.count("= _capped_rows(q)"), 3)
+        # list_appointments and the shared event feed (calendar_view no longer
+        # queries appointments at all).
+        self.assertEqual(self.r.count("= _capped_rows(q)"), 2)
         self.assertIn("SalesAppointment.starts_at.asc(), SalesAppointment.id.asc()", self.r)
         self.assertIn("limit(CALENDAR_EVENT_CAP + 1)", self.r)
 
     def test_truncation_reported_by_both_endpoints(self):
-        self.assertEqual(self.r.count('"truncated": truncated'), 2)
+        self.assertEqual(self.r.count('"truncated": truncated'), 1)
 
     def test_scope_checks_unchanged(self):
         self.assertIn("Only a sales manager can view the team schedule.", self.r)

@@ -445,7 +445,7 @@ export default function TeamCalendar() {
       include_external: showExternal ? 'true' : 'false',
     })
     // Roster / availability layers only. Appointment filters are applied to the
-    // shared feed on the client; this response's appointment list is not read.
+    // shared feed on the client; this route returns no appointments.
     if (memberIds) q.set('member_ids', memberIds.join(','))
     try {
       const r = await api.get('/sales/calendar/view?' + q.toString())

@@ -1500,32 +1500,19 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
                   date_to: Optional[date] = Query(None),
                   scope: str = Query("team"),
                   member_ids: Optional[str] = Query(None),
-                  meeting_type_ids: Optional[str] = Query(None),
-                  location: Optional[str] = Query(None),
-                  include_cancelled: bool = Query(False),
                   include_external: bool = Query(True),
                   user: User = Depends(require_sales_member),
                   db: Session = Depends(get_db)):
-    """Availability layers, roster, provider health and filter vocabularies.
+    """Availability layers, roster, provider health and meeting-type vocabulary.
 
-    APPOINTMENT READS ARE RETIRED HERE FOR THE UI. Every visible calendar view
-    reads GET /calendar/events. The `appointments`, `agenda_today`, `attention`
-    and `upcoming` keys below remain only for API compatibility; no screen may
-    render them, and a test asserts the web page does not.
+    NO EVENT HISTORY HERE. Appointments, tasks and activity are read ONLY from
+    GET /calendar/events; this route neither queries nor returns them (the old
+    `appointments`, `agenda_today`, `attention`, `upcoming`, `locations`,
+    `total`, `truncated` and `limit` keys are gone). Appointment filters
+    (meeting type, location, cancelled) are applied by the client to that feed.
 
-    Original description: everything the Team Calendar needs for a range.
-
-    ONE REQUEST BY DESIGN. The screen renders a grid, a roster with live
-    status, provider health, an agenda, an attention list and an upcoming
-    list — all of which are views of the same window of time. Assembling them
-    from six endpoints would make them disagree with each other during a
-    paint, and a calendar whose panels contradict the grid beside them is a
-    calendar nobody trusts.
-
-    Day, Week, Month and Agenda are all THIS endpoint with a different range.
-    The server does not need to know which one is on screen, and keeping that
-    knowledge in the client is what stops four view modes becoming four
-    subtly-different queries.
+    Day, Week, Month and Agenda use this route with a different range for the
+    roster and availability layers only.
 
     `include_external` mirrors the screen's "show external calendars" control.
     Turning it off hides the band; it never changes what booking will allow,
@@ -1559,43 +1546,10 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
         # answer to "show me these people" when none of them exist here.
         wanted = []
 
-    # ── appointments ────────────────────────────────────────────────────────
-    if scope == "team":
-        if not manager:
-            # A rep asking for the team scope is narrowed rather than refused.
-            # The calendar is their own week either way, and a 403 rendered on
-            # a landing screen punishes somebody who did nothing wrong.
-            q = _visible_appointments(db, user, org)
-            scope = "mine"
-        else:
-            q = db.query(SalesAppointment).filter(
-                SalesAppointment.brand_sales_org_id == org.id)
-    else:
-        q = _visible_appointments(db, user, org)
-
-    q = q.filter(SalesAppointment.starts_at < end_utc,
-                 SalesAppointment.ends_at > start_utc)
-    if not include_cancelled:
-        q = q.filter(SalesAppointment.status != APPT_CANCELLED)
-
-    type_filter = {s for s in (meeting_type_ids or "").split(",") if s}
-    if type_filter:
-        q = q.filter(SalesAppointment.meeting_type_id.in_(type_filter))
-    if location:
-        q = q.filter(SalesAppointment.location.ilike("%" + location + "%"))
-
-    rows, truncated = _capped_rows(q)
-
-    # The member filter is applied on participants, which is a join this query
-    # deliberately avoids: an appointment matches if ANY selected person is on
-    # it, and expressing that in SQL alongside the visibility filter above
-    # produced a query that was easy to get subtly wrong. Filtering the
-    # (bounded) result set is correct and obviously correct.
-    appts = [_appt_out(db, a, user) for a in rows]
-    if member_ids is not None:
-        keep = {m.id for m in wanted}
-        appts = [a for a in appts
-                 if any(p["user_id"] in keep for p in a["participants"])]
+    # A rep asking for the team scope is narrowed rather than refused. The
+    # roster below is brand-wide either way; only the echoed scope changes.
+    if scope == "team" and not manager:
+        scope = "mine"
 
     # ── the per-person layers ───────────────────────────────────────────────
     visibility = {}
@@ -1632,54 +1586,9 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
             "external": (visibility or {}).get(m.id) or {},
         })
 
-    # ── the panels ──────────────────────────────────────────────────────────
-    today_local = av.utc_to_local(now, tz).date()
-    agenda = [a for a in appts
-              if str(a.get("starts_at_local") or "")[:10] == today_local.isoformat()]
-
-    # ATTENTION is a mixed list on purpose: a manager does not think in terms
-    # of "unconfirmed" versus "sync failed" versus "no outcome recorded" — they
-    # think "what will bite me". So the three are one ranked list with a reason
-    # on each, rather than three panels somebody has to check separately.
-    attention = []
-    for a in appts:
-        if a["status"] == APPT_CANCELLED:
-            continue
-        if a["confirmation_status"] == CONF_PENDING and a["starts_at"] >= now:
-            attention.append({"appointment_id": a["id"], "title": a["title"],
-                              "kind": "unconfirmed",
-                              "label": "Prospect has not confirmed",
-                              "action": "send_confirmation",
-                              "starts_at_local": a["starts_at_local"]})
-        if a["sync_needs_attention"]:
-            attention.append({"appointment_id": a["id"], "title": a["title"],
-                              "kind": "sync",
-                              "label": "%d calendar%s could not be written"
-                                       % (a["sync_needs_attention"],
-                                          "" if a["sync_needs_attention"] == 1 else "s"),
-                              "action": "resync",
-                              "starts_at_local": a["starts_at_local"]})
-        if a.get("sync_conflicts"):
-            attention.append({"appointment_id": a["id"], "title": a["title"],
-                              "kind": "conflict",
-                              "label": "Changed outside EvoSys Pro",
-                              "action": "review_conflict",
-                              "starts_at_local": a["starts_at_local"]})
-        if a["outcome_state"]["needs_outcome"]:
-            attention.append({"appointment_id": a["id"], "title": a["title"],
-                              "kind": "outcome",
-                              "label": "No outcome recorded",
-                              "action": "record_outcome",
-                              "starts_at_local": a["starts_at_local"]})
-
-    upcoming = [a for a in appts
-                if a["starts_at"] >= now and a["status"] == APPT_SCHEDULED][:12]
-
     # ── the filter vocabularies the screen renders ──────────────────────────
     types = ensure_meeting_types(db, org.id)
     db.commit()
-    locations = sorted({(a["location"] or "").strip() for a in appts
-                        if (a["location"] or "").strip()})
 
     return {
         "brand_sales_org": {"id": org.id, "name": org.name, "timezone": tz},
@@ -1690,18 +1599,10 @@ def calendar_view(brand_sales_org_id: Optional[str] = Query(None),
         "now_local": av.utc_to_local(now, tz),
         "scope": scope,
         "is_manager": manager,
-        "appointments": appts,
-        "total": len(appts),
-        # True when the cap omitted later events: the list is NOT complete.
-        "truncated": truncated, "limit": CALENDAR_EVENT_CAP,
         "people": people,
-        "agenda_today": agenda,
-        "attention": attention,
-        "upcoming": upcoming,
         "meeting_types": [{"id": t.id, "key": t.key, "name": t.name,
                            "duration_minutes": t.duration_minutes,
                            "is_internal": bool(t.is_internal)} for t in types],
-        "locations": locations,
         "external_visibility": _external_visibility_summary(visibility),
         "sync_status": _sync_status_for(db, members, viewer=user, is_manager=manager),
         # Stated so the client never has to infer whether the external band it

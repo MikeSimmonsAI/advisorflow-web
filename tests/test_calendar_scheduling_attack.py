@@ -199,9 +199,10 @@ def test_a_removed_users_existing_meeting_does_not_break_the_calendar(
         synchronize_session=False)
     db_session.commit()
 
-    r = client.get("/sales/calendar/view", headers=_h(mgr, db_session))
+    r = client.get("/sales/calendar/events", headers=_h(mgr, db_session))
     assert r.status_code == 200, r.text
-    assert a.id in {x["id"] for x in r.json()["appointments"]}
+    assert a.id in {x["source_id"] for x in r.json()["events"]
+                    if x["type"] == "appointment"}
 
     detail = client.get("/sales/appointments/%s" % a.id, headers=_h(mgr, db_session))
     assert detail.status_code == 200, detail.text
@@ -675,7 +676,7 @@ def test_a_bogus_member_filter_returns_nothing_not_everything(client, db_session
                    headers=_h(mgr, db_session))
     assert r.status_code == 200, r.text
     assert r.json()["people"] == []
-    assert r.json()["appointments"] == []
+    assert "appointments" not in r.json()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -710,15 +711,17 @@ def test_a_realistic_week_loads_in_one_pass(client, db_session, brand):
     assert made > 200, "the fixture must actually be a realistic week"
 
     t0 = time.time()
-    r = client.get("/sales/calendar/view?date_from=%s&date_to=%s"
-                   % ((monday.date()).isoformat(),
-                      (monday.date() + timedelta(days=6)).isoformat()),
-                   headers=_h(mgr, db_session))
+    qs = "?date_from=%s&date_to=%s" % ((monday.date()).isoformat(),
+                                       (monday.date() + timedelta(days=6)).isoformat())
+    r = client.get("/sales/calendar/view" + qs, headers=_h(mgr, db_session))
+    ev = client.get("/sales/calendar/events" + qs, headers=_h(mgr, db_session))
     elapsed = time.time() - t0
 
     assert r.status_code == 200, r.text
+    assert ev.status_code == 200, ev.text
     body = r.json()
-    assert len(body["appointments"]) >= 200
+    assert len([e for e in ev.json()["events"] if e["type"] == "appointment"]) >= 200
+    assert "appointments" not in body
     assert len(body["people"]) == 8
     # Generous on purpose — this is a regression guard against an accidental
     # per-appointment round trip, not a performance benchmark, and it runs on

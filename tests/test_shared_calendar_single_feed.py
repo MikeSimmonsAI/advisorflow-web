@@ -85,7 +85,7 @@ class EveryViewReadsTheFeed(unittest.TestCase):
         self.assertNotIn("meeting_type_ids", body)
         self.assertNotIn("setAppts", self.t)
         r = src("app/routers/sales_scheduling_router.py")
-        self.assertIn("APPOINTMENT READS ARE RETIRED HERE FOR THE UI", r)
+        self.assertIn("NO EVENT HISTORY HERE", r)
 
     def test_mobile_agenda_reads_only_the_feed(self):
         m = src("mobile/app/(sales)/calendar.tsx")

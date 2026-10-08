@@ -101,6 +101,11 @@ def brand_b(db_session, platform):
     return b
 
 
+# Appointment-derived keys retired from GET /sales/calendar/view.
+EVENT_HISTORY_KEYS = {"appointments", "agenda_today", "attention", "upcoming",
+                      "locations", "total", "truncated", "limit"}
+
+
 def _user(db, brand=None, role=ROLE_SALES_REP, name="Rep", tz=None):
     u = User(organization_id=None,
              email="csx%d@test.live" % next(_SEQ),
@@ -1333,7 +1338,10 @@ def test_a_rep_from_another_brand_cannot_read_this_calendar(client, db_session,
 
     view = client.get("/sales/calendar/view", headers=_h(b_user, db_session))
     assert view.status_code == 200
-    assert view.json()["appointments"] == [], "brand B must see none of brand A's"
+    assert not (set(view.json()) & EVENT_HISTORY_KEYS)
+    feed = client.get("/sales/calendar/events", headers=_h(b_user, db_session))
+    assert feed.status_code == 200, feed.text
+    assert feed.json()["events"] == [], "brand B must see none of brand A's"
 
 
 def test_another_reps_meeting_reads_as_busy_with_no_title(client, db_session, brand):
@@ -1495,11 +1503,11 @@ def test_the_field_view_has_everything_it_needs_from_one_payload(
     a.meeting_provider = "in_person"
     db_session.commit()
 
-    r = client.get("/sales/calendar/view?date_from=%s&date_to=%s"
+    r = client.get("/sales/calendar/events?date_from=%s&date_to=%s"
                    % (day.isoformat(), day.isoformat()),
                    headers=_h(mgr, db_session))
     assert r.status_code == 200, r.text
-    got = r.json()["appointments"][0]
+    got = [e for e in r.json()["events"] if e["type"] == "appointment"][0]["appointment"]
 
     for key in ("starts_at_local", "ends_at_local", "duration_minutes",
                 "meeting_type", "title", "location", "meeting_provider",
@@ -1515,8 +1523,9 @@ def test_the_calendar_view_and_the_availability_grid_stay_two_screens(
     """A small guard on a scope decision that was explicit in the brief.
 
     The two endpoints answer different questions and must not converge: the
-    calendar carries booked appointments, the availability grid carries
-    per-person free time. If somebody later merges them, this fails.
+    calendar view carries roster/availability layers (booked events live only
+    in /calendar/events), the availability grid carries per-person free time.
+    If somebody later merges them, this fails.
     """
     mgr = _user(db_session, brand, ROLE_SALES_MANAGER)
     _profile(db_session, mgr, lunch=None)
@@ -1524,7 +1533,9 @@ def test_the_calendar_view_and_the_availability_grid_stay_two_screens(
     cal = client.get("/sales/calendar/view", headers=_h(mgr, db_session)).json()
     avail = client.get("/sales/availability/team", headers=_h(mgr, db_session)).json()
 
-    assert "appointments" in cal and "agenda_today" in cal
+    assert "people" in cal and "meeting_types" in cal
+    assert not (set(cal) & EVENT_HISTORY_KEYS), (
+        "/calendar/view must not carry event history; /calendar/events is the only feed")
     assert "free" in avail["members"][0]
     assert "appointments" not in avail, (
         "the availability grid must not become a second calendar")

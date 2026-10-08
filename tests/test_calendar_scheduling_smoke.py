@@ -68,11 +68,12 @@ def test_calendar_view_responds_on_an_empty_brand(client, db_session, brand):
     body = r.json()
     # The contract the screen reads. Asserted by KEY rather than by value so a
     # panel cannot silently disappear from the payload.
-    for key in ("appointments", "people", "agenda_today", "attention",
-                "upcoming", "meeting_types", "locations", "range",
-                "external_visibility", "sync_status", "external_included"):
+    for key in ("people", "meeting_types", "range", "external_visibility",
+                "sync_status", "external_included"):
         assert key in body, "calendar view is missing '%s'" % key
-    assert body["appointments"] == []
+    for key in ("appointments", "agenda_today", "attention", "upcoming",
+                "locations", "total", "truncated", "limit"):
+        assert key not in body, "'%s' moved to /calendar/events" % key
     assert body["is_manager"] is True
 
 

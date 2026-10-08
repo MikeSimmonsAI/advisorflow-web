@@ -65,9 +65,8 @@ export function describeFeed(data) {
 
 // ── appointments for the grids ──────────────────────────────────────────────
 // Month / week / day / agenda, the side panels and the metrics all read the
-// appointment events of the ONE feed. The legacy /calendar/view payload still
-// carries an `appointments` list for API compatibility, but the screen never
-// reads it, so it can no longer paint a second, conflicting grid.
+// appointment events of the ONE feed. The roster/availability route carries no
+// appointment list at all, so it cannot paint a second, conflicting grid.
 
 // Each appointment event carries the read-only detail the grid cards need under
 // `appointment`. Identity, status, bucket, instants and local dates come from
