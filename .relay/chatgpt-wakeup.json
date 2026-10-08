@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "compensation-projection-discovery-20261008-0029",
-  "parent_run_id": "compensation-projection-truth-20261008-0023",
-  "project": "EvoSys Pro \u2014 compensation projection discoverability closure",
+  "relay_run_id": "compensation-stage-filter-stability-20261008-0033",
+  "parent_run_id": "compensation-projection-discovery-20261008-0029",
+  "project": "EvoSys Pro \u2014 compensation stage-filter stability",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37732686550",
-  "timestamp_ct": "2026-10-08 00:33 CT",
+  "actions_run_id": "37733044797",
+  "timestamp_ct": "2026-10-08 00:36 CT",
   "issue": 1,
-  "status_comment_id": 6053080549
+  "status_comment_id": 6053124796
 }
