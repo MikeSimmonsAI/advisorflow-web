@@ -4,8 +4,9 @@
   "project": "EvoSys Pro \u2014 AI Workforce operator queue and run ledger",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37735936023",
-  "timestamp_ct": "2026-10-08 01:12 CT",
+  "timestamp_ct": "2026-10-08T09:29:43.348299+00:00",
   "issue": 1,
-  "status_comment_id": 6053616981
+  "status_comment_id": 6053616981,
+  "watchdog_retry": true,
+  "watchdog_retry_utc": "2026-10-08T09:29:43.348312+00:00"
 }
