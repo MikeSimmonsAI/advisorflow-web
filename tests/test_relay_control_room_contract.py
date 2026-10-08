@@ -66,7 +66,7 @@ class RouterContract(unittest.TestCase):
         methods = {fn.name: m for m, fn in self._routes()}
         self.assertEqual(methods["relay_worker"], "get")
         body = self.src[self.src.index("def relay_worker"):]
-        body = body[:body.index("\n@router") if "\n@router" in body else len(body)]
+        body = body.split("\n@router")[0]
         for bad in ("post", "put", "patch", "delete", "_gh(", "urlopen"):
             self.assertNotIn(bad, body)
 
@@ -98,7 +98,7 @@ class RouterContract(unittest.TestCase):
     def test_headers_set_for_success_and_failure(self):
         # Failure is a normal return value, so the header loop runs for both.
         body = self.src[self.src.index("def relay_worker"):]
-        body = body[:body.index("\n@router")]
+        body = body.split("\n@router")[0]   # up to the next route, if any
         self.assertLess(body.index("NO_CACHE_HEADERS"), body.index("return rcr.get_state()"))
         self.assertNotIn("raise", body)
 
@@ -267,13 +267,17 @@ class UiContract(unittest.TestCase):
         self.assertIn("'none yet'", self.page)
 
     def test_integration_wiring(self):
-        # SCI staging serves the Control Room at /god/control-room (ControlRoom.jsx), which
-        # embeds the evidence-only relay panel and the launch board.
+        # Two lines share this panel: SCI staging (sci-program) embeds it in
+        # /god/control-room (ControlRoom.jsx); platform-dev mounts it at /god/relay.
         app = _read("frontend", "src", "App.jsx")
-        cr = _read("frontend", "src", "pages", "god", "ControlRoom.jsx")
-        self.assertIn("import('./pages/god/ControlRoom')", app)
-        self.assertRegex(app, r'path="/god/control-room"\s+element=\{<GodRoute><GodModeLayout><ControlRoom />')
-        self.assertIn("<GodRelayControlRoom onManualRefresh=", cr)
+        cr_path = os.path.join(ROOT, "frontend", "src", "pages", "god", "ControlRoom.jsx")
+        cr = _read("frontend", "src", "pages", "god", "ControlRoom.jsx") if os.path.exists(cr_path) else ""
+        if "<GodRelayControlRoom onManualRefresh=" in cr:
+            self.assertIn("import('./pages/god/ControlRoom')", app)
+            self.assertRegex(app, r'path="/god/control-room"\s+element=\{<GodRoute><GodModeLayout><ControlRoom />')
+        else:
+            self.assertIn("import('./pages/god/GodRelayControlRoom')", app)
+            self.assertRegex(app, r'path="/god/relay"\s+element=\{<GodRoute><GodModeLayout><GodRelayControlRoom />')
         self.assertIn("<GodLaunchBoard", _read("frontend", "src", "pages", "god", "GodRelayControlRoom.jsx"))
         util = _read("frontend", "src", "utils", "relayControlRoom.js")
         self.assertIn("/god/relay/worker", util)

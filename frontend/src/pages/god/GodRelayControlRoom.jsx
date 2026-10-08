@@ -94,7 +94,8 @@ export default function GodRelayControlRoom({ onManualRefresh }) {
   const [lastFailed, setLastFailed] = useState(null)  // last failed attempt
   const refresh = useMemo(() => createRefresher({
     fetchState: (url, opts) => api.get(url, opts),
-    onLoading: setLoading,
+    // The button says "Checking…" only for a manual check; background polls stay quiet.
+    onLoading: (v, manual) => { if (manual || !v) setLoading(!!(v && manual)) },
     onState: (s) => { setState(s); setLastOk(Date.now()); setLastFailed(null); setTick(Date.now()) },
     onError: (s) => { setState(s); setLastFailed(Date.now()); setTick(Date.now()) },  // clears any stale active worker
   }), [])
@@ -133,7 +134,13 @@ export default function GodRelayControlRoom({ onManualRefresh }) {
         </div>
       ) : null}
 
-      {!s.available ? (
+      {state === null ? (
+        <div style={{ ...card, color: 'var(--gm-dim, #6b7280)' }} role="status" data-testid="relay-loading">
+          Loading relay status…
+        </div>
+      ) : null}
+
+      {state !== null && !s.available ? (
         <div style={{ ...card, color: 'var(--gm-red, #b91c1c)' }} role="alert" data-testid="relay-unavailable">
           Relay status unavailable — {s.reason}. No worker state is being shown.
         </div>
