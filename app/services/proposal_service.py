@@ -45,6 +45,8 @@ from app.models.sales_models import (
 )
 from app.services import package_pricing as _pp
 
+from app.services.price_math import parse_money, price_total
+
 log = logging.getLogger(__name__)
 
 # How long a proposal stands unless someone says otherwise. Long enough not to
@@ -55,12 +57,7 @@ DEFAULT_VALID_DAYS = 30
 def _dec(value) -> Optional[Decimal]:
     """Money, as Decimal. Never float — 0.1 + 0.2 problems in a price a customer
     signs are not acceptable."""
-    if value is None or value == "":
-        return None
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return None
+    return parse_money(value)
 
 
 # ── identity ────────────────────────────────────────────────────────────────
@@ -440,6 +437,12 @@ def apply_custom_rate(db: Session, prop: Proposal, user, fields: dict,
     return {"ok": True, "error": None}
 
 
+_PRICING_COLUMNS = ("package_id", "base_amount", "adjustment", "final_amount",
+                    "currency", "billing_option", "contract_term_months",
+                    "price_override_by", "price_override_at",
+                    "price_override_reason")
+
+
 def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
                   adjustment=None, reason: str = None, now=None,
                   billing_option=None) -> dict:
@@ -448,7 +451,28 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
     Returns {"ok": bool, "error": str|None}. The caller turns a failure into a
     403 — this function never raises, and never silently drops an unauthorized
     change, which would be worse than refusing it.
+
+    ATOMIC: a refusal leaves the proposal exactly as it was. Callers such as
+    pricing_approvals.decide commit even on refusal (to close a stale request),
+    so a half-applied negative adjustment used to be persisted and the timeline
+    event for it kept. Pricing columns are restored and events only written on
+    success.
     """
+    snapshot = {c: getattr(prop, c) for c in _PRICING_COLUMNS}
+    events = []
+    res = _apply_pricing(db, prop, user, package_id, adjustment, reason,
+                         now, billing_option, events)
+    if not res["ok"]:
+        for c, v in snapshot.items():
+            setattr(prop, c, v)
+        return res
+    for ev in events:
+        _event(db, *ev)
+    return res
+
+
+def _apply_pricing(db, prop, user, package_id, adjustment, reason, now,
+                   billing_option, events) -> dict:
     now = now or datetime.utcnow()
 
     if package_id is not None and package_id != prop.package_id:
@@ -540,11 +564,11 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
                 prop.price_override_by = user.id
                 prop.price_override_at = now
                 prop.price_override_reason = (reason or "").strip()
-                _event(db, prop.opportunity_id, "proposal_price_override",
-                       "Proposal pricing adjusted",
-                       "%s %s — %s" % (prop.currency or "USD", adj,
-                                       prop.price_override_reason),
-                       user.id, now)
+                events.append((prop.opportunity_id, "proposal_price_override",
+                               "Proposal pricing adjusted",
+                               "%s %s — %s" % (prop.currency or "USD", adj,
+                                               prop.price_override_reason),
+                               user.id, now))
             else:
                 prop.price_override_by = None
                 prop.price_override_at = None
@@ -585,16 +609,10 @@ def apply_pricing(db: Session, prop: Proposal, user, package_id=None,
     # NO FEE IS NOT A ZERO FEE. A proposal with neither a base nor an adjustment
     # has not been priced, and saying "$0" would put a number the customer never
     # agreed to on a page they read as an offer.
-    base = _dec(prop.base_amount)
-    adj = _dec(prop.adjustment)
-    if base is None and adj is None:
-        prop.final_amount = None
-        return {"ok": True, "error": None}
-
-    total = (base or Decimal("0")) + (adj or Decimal("0"))
-    if total < 0:
-        return {"ok": False, "error": "That adjustment would make the total negative."}
-    prop.final_amount = total
+    verdict = price_total(prop.base_amount, prop.adjustment)
+    if not verdict["ok"]:
+        return {"ok": False, "error": verdict["error"]}
+    prop.final_amount = verdict["total"]
     return {"ok": True, "error": None}
 
 
