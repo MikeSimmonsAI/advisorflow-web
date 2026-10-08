@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "control-room-p0-20261007-2317",
-  "parent_run_id": "invoicing-draft-integrity-20261007-1910",
-  "project": "EvoSys Pro \u2014 P0 Control Room refresh and truthful UP NEXT",
+  "relay_run_id": "control-room-portfolio-20261007-2344",
+  "parent_run_id": "control-room-p0-20261007-2317",
+  "project": "EvoSys Pro Control Room portfolio management",
   "status": "COMPLETED",
   "branch": "platform-dev",
-  "actions_run_id": "37726763477",
-  "timestamp_ct": "2026-10-07 23:20 CT",
+  "actions_run_id": "37728921078",
+  "timestamp_ct": "2026-10-07 23:46 CT",
   "issue": 1,
-  "status_comment_id": 6052135250
+  "status_comment_id": 6052466197
 }
