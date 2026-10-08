@@ -61,9 +61,14 @@ class RouterContract(unittest.TestCase):
         return out
 
     def test_get_only(self):
-        self.assertEqual([m for m, _ in self._routes()], ["get"])
-        for bad in ("post", "put", "patch", "delete", "api_route", "websocket", "add_api_route"):
-            self.assertNotIn("router.%s" % bad, self.src)
+        # The staging router also carries Give Direction (POST /direction, /package*),
+        # which writes only a MIKE_INPUT audit comment. The worker view is GET-only.
+        methods = {fn.name: m for m, fn in self._routes()}
+        self.assertEqual(methods["relay_worker"], "get")
+        body = self.src[self.src.index("def relay_worker"):]
+        body = body.split("\n@router")[0]
+        for bad in ("post", "put", "patch", "delete", "_gh(", "urlopen"):
+            self.assertNotIn(bad, body)
 
     def test_god_protected_on_every_route(self):
         for _, fn in self._routes():
@@ -92,7 +97,8 @@ class RouterContract(unittest.TestCase):
 
     def test_headers_set_for_success_and_failure(self):
         # Failure is a normal return value, so the header loop runs for both.
-        body = self.src[self.src.index("def relay_state"):]
+        body = self.src[self.src.index("def relay_worker"):]
+        body = body.split("\n@router")[0]   # up to the next route, if any
         self.assertLess(body.index("NO_CACHE_HEADERS"), body.index("return rcr.get_state()"))
         self.assertNotIn("raise", body)
 
@@ -213,7 +219,7 @@ class UiContract(unittest.TestCase):
         self.util = _read("frontend", "src", "utils", "relayControlRoom.js")
 
     def test_authoritative_endpoint_cache_busted(self):
-        self.assertIn("/god/relay/state?_=", self.util)
+        self.assertIn("/god/relay/worker?_=", self.util)
         self.assertIn("_seq += 1", self.util)
         # every request (poll and manual) goes through the refresher: new URL + no-store, never reused
         self.assertIn("fetchState(stateUrl(), { cache: 'no-store' })", self.util)
@@ -261,14 +267,22 @@ class UiContract(unittest.TestCase):
         self.assertIn("'none yet'", self.page)
 
     def test_integration_wiring(self):
+        # Two lines share this panel: SCI staging (sci-program) embeds it in
+        # /god/control-room (ControlRoom.jsx); platform-dev mounts it at /god/relay.
         app = _read("frontend", "src", "App.jsx")
-        shell = _read("frontend", "src", "pages", "GodShell.jsx")
-        self.assertIn("import('./pages/god/GodRelayControlRoom')", app)
-        self.assertRegex(app, r'path="/god/relay"\s+element=\{<GodRoute><GodModeLayout><GodRelayControlRoom />')
-        self.assertIn("path: '/god/relay'", shell)
+        cr_path = os.path.join(ROOT, "frontend", "src", "pages", "god", "ControlRoom.jsx")
+        cr = _read("frontend", "src", "pages", "god", "ControlRoom.jsx") if os.path.exists(cr_path) else ""
+        if "<GodRelayControlRoom onManualRefresh=" in cr:
+            self.assertIn("import('./pages/god/ControlRoom')", app)
+            self.assertRegex(app, r'path="/god/control-room"\s+element=\{<GodRoute><GodModeLayout><ControlRoom />')
+        else:
+            self.assertIn("import('./pages/god/GodRelayControlRoom')", app)
+            self.assertRegex(app, r'path="/god/relay"\s+element=\{<GodRoute><GodModeLayout><GodRelayControlRoom />')
+        self.assertIn("<GodLaunchBoard", _read("frontend", "src", "pages", "god", "GodRelayControlRoom.jsx"))
+        util = _read("frontend", "src", "utils", "relayControlRoom.js")
+        self.assertIn("/god/relay/worker", util)
         api_dir = os.path.join(ROOT, "frontend", "src", "api")
         self.assertTrue(any(f.startswith("client.") for f in os.listdir(api_dir)))
-
 
 if __name__ == "__main__":
     unittest.main()

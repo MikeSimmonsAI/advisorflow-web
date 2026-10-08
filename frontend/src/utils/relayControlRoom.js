@@ -7,7 +7,9 @@ let _seq = 0
 // A unique query string per fetch so no proxy/browser cache can serve old state.
 export function stateUrl(now = Date.now()) {
   _seq += 1
-  return `/god/relay/state?_=${now}-${_seq}`
+  // SCI staging: /god/relay/state is the older relay snapshot; the evidence-only
+  // worker state lives at /god/relay/worker (same scripts/relay/relay_state.py contract).
+  return `/god/relay/worker?_=${now}-${_seq}`
 }
 
 // The state the page shows when a fetch fails: never a stale active worker.
@@ -186,4 +188,83 @@ export function createRefresher({ fetchState, onLoading, onState, onError, timeo
 
 export function actionsRunText(worker) {
   return worker && worker.actions_run_id ? String(worker.actions_run_id) : 'not mapped'
+}
+
+// The CT calendar day (YYYY-MM-DD) of an ISO time, or '' when unknown.
+export function ctDay(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+}
+
+// Today's relay run OUTCOMES, kept apart. A COMPLETED run means the run reported
+// completion (source/tests) - it is NOT a verified release. Blocked and approval
+// runs are counted separately and never added to "completed". Superseded/mismatch
+// cards are neither.
+export function runOutcomesToday(state, nowMs = Date.now()) {
+  const out = { completed: 0, blocked: 0, approval: 0, other: 0 }
+  if (!state || !state.available) return out
+  const today = ctDay(new Date(nowMs).toISOString())
+  for (const h of state.history || []) {
+    if (!h || ctDay(h.last_update_at) !== today) continue
+    if (h.state === 'terminal' && h.result === 'COMPLETED') out.completed += 1
+    else if (h.state === 'terminal' && h.result === 'BLOCKED') out.blocked += 1
+    else if (h.state === 'terminal' && h.result === 'APPROVAL_REQUIRED') out.approval += 1
+    else out.other += 1
+  }
+  return out
+}
+
+// The most recent finished run - shown apart from the live worker so "last completed"
+// can never be read as "working now".
+export function lastFinished(state) {
+  if (!state || !state.available) return null
+  return (state.history || []).find(h => h && h.state === 'terminal') || null
+}
+
+// ── Live-screen filters (issue #21 follow-up, after the first staging check) ──
+// The relay keeps every directive it ever saw. On the first screen only CURRENT facts
+// belong: queued directives past the lease were never accepted by any worker, and old
+// BLOCKED runs are history. Both stay available, counted, under the technical log.
+export const RECENT_HOURS = 24
+
+function ageHours(iso, nowMs) {
+  const t = iso ? Date.parse(iso) : NaN
+  return Number.isFinite(t) ? (nowMs - t) / 3600000 : Infinity
+}
+
+// UP NEXT split into what can still start (fresh) and what never started (stale).
+export function upNextSplit(state) {
+  const all = upNext(state)
+  return { fresh: all.filter(u => !u.stale), stale: all.filter(u => u.stale) }
+}
+
+// Blockers that are still current: worker health problems now, plus BLOCKED /
+// APPROVAL_REQUIRED / mismatch runs reported in the last RECENT_HOURS.
+export function currentBlockers(state, nowMs = Date.now(), hours = RECENT_HOURS) {
+  const w = (state && state.worker) || {}
+  return blockers(state).filter(b => {
+    if (b.relay_run_id && b.relay_run_id === w.relay_run_id && (w.health === 'STALE/HUNG' || w.health === 'STALE' || w.state === 'mismatch')) {
+      return w.state !== 'queued'   // a queued directive is not a worker; it is listed under UP NEXT (stale)
+    }
+    const h = ((state && state.history) || []).find(x => x.relay_run_id === b.relay_run_id)
+    return h ? ageHours(h.last_update_at, nowMs) <= hours : true
+  })
+}
+
+export function olderBlockerCount(state, nowMs = Date.now(), hours = RECENT_HOURS) {
+  const w = (state && state.worker) || {}
+  const queuedSelf = (b) => w.state === 'queued' && b.relay_run_id === w.relay_run_id
+  return blockers(state).filter(b => !queuedSelf(b)).length - currentBlockers(state, nowMs, hours).length
+}
+
+// Only an accepted run is a worker. A queued directive at the head of the list is NOT
+// "currently working": nobody has picked it up.
+export function workerView(state) {
+  const w = state && state.worker
+  if (w && w.state === 'queued') {
+    return { state: 'idle', display: 'Idle - no worker has accepted the queued directive', queuedHead: w }
+  }
+  return w || { state: 'unavailable', display: 'Relay status unavailable' }
 }

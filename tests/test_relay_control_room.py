@@ -1,4 +1,7 @@
-"""Control Room relay endpoint + service: read-only, God-only, fail-closed, no-cache."""
+"""Control Room worker endpoint (GET /god/relay/worker) + service: read-only, God-only, fail-closed, no-cache.
+
+On the SCI staging line /god/relay/state is the older relay snapshot (Give Direction,
+packages); the evidence-only worker state is served at /god/relay/worker."""
 import itertools
 from datetime import datetime, timedelta, timezone
 
@@ -84,9 +87,9 @@ def test_missing_credentials_unavailable(monkeypatch):
 def test_endpoint_god_only_and_no_store(client, db_session, monkeypatch):
     monkeypatch.setattr(rcr, "_fetch_comments", lambda: _active_comments())
     monkeypatch.setattr(rcr, "_fetch_runs", lambda: [])
-    assert client.get("/god/relay/state").status_code in (401, 403)
-    assert client.get("/god/relay/state", headers=_user(db_session, "advisor")).status_code == 403
-    r = client.get("/god/relay/state?_=123", headers=_user(db_session, "god_admin"))
+    assert client.get("/god/relay/worker").status_code in (401, 403)
+    assert client.get("/god/relay/worker", headers=_user(db_session, "advisor")).status_code == 403
+    r = client.get("/god/relay/worker?_=123", headers=_user(db_session, "god_admin"))
     assert r.status_code == 200
     assert r.json()["worker"]["relay_run_id"] == "a"
     cc = r.headers["cache-control"]
@@ -98,11 +101,11 @@ def test_endpoint_unavailable_payload_is_200_and_not_working(client, db_session,
     def boom():
         raise rcr.RelayUnavailable("down")
     monkeypatch.setattr(rcr, "_fetch_comments", boom)
-    r = client.get("/god/relay/state", headers=_user(db_session, "god_admin"))
+    r = client.get("/god/relay/worker", headers=_user(db_session, "god_admin"))
     assert r.status_code == 200 and r.json()["available"] is False
 
 
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
 def test_no_mutation_routes(client, db_session, method):
-    r = getattr(client, method)("/god/relay/state", headers=_user(db_session, "god_admin"))
+    r = getattr(client, method)("/god/relay/worker", headers=_user(db_session, "god_admin"))
     assert r.status_code == 405

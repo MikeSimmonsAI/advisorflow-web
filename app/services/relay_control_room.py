@@ -23,6 +23,7 @@ if _RELAY_DIR not in sys.path:
 import relay_state  # noqa: E402
 
 ISSUE_NUMBER = 1
+DEFAULT_REPOSITORY = "MikeSimmonsAI/advisorflow-web"
 POLL_SECONDS = 20
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -35,10 +36,23 @@ class RelayUnavailable(Exception):
     pass
 
 
+def _credentials():
+    """(token, repo) for the GitHub GET. Accepts the names the SCI staging backend
+    already uses for the Control Room (RELAY_GITHUB_READ_TOKEN / RELAY_GITHUB_REPO,
+    see app/services/relay_control.py) as well as the generic ones. The token value
+    is never returned to a caller of this module or logged."""
+    env = os.environ.get
+    token = (env("RELAY_READ_TOKEN") or env("RELAY_GITHUB_READ_TOKEN") or env("RELAY_GITHUB_WRITE_TOKEN")
+             or env("GITHUB_TOKEN"))
+    repo = env("RELAY_REPOSITORY") or env("RELAY_GITHUB_REPO") or env("GITHUB_REPOSITORY")
+    if token and not repo:
+        repo = DEFAULT_REPOSITORY   # same default as relay_control._repo()
+    return token, repo
+
+
 def _get(path: str):
     """GitHub GET. The only HTTP method this module ever uses."""
-    token = os.environ.get("RELAY_READ_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("RELAY_REPOSITORY") or os.environ.get("GITHUB_REPOSITORY")
+    token, repo = _credentials()
     if not token or not repo:
         raise RelayUnavailable("GitHub read credentials are not configured")
     url = "%s/repos/%s%s" % (os.environ.get("GITHUB_API_URL", "https://api.github.com"), repo, path)
