@@ -243,52 +243,30 @@ def test_assert_content_allowed_refuses_rather_than_sends():
     assert isinstance(exc.value, ValueError)        # existing callers treat it as "blocked"
 
 
-# ── 4. the SCI send gate, on the real send path ─────────────────────────────
+# ── 4. the SCI send gate (now on the toll-free line; see test_sci_toll_free.py) ──
 
-def _sci_send(db, advisor, lead, from_number="+12058823908"):
-    from app.services import sms_service
-    client = MagicMock()
-    client.messages.create.return_value = MagicMock(sid="SMx", status="queued", error_code=None,
-                                                    error_message=None)
-    with patch.object(sms_service, "_resolve_twilio_creds", return_value=(client, from_number, None)):
-        try:
-            sms_service.send_sms(db, advisor, lead, "Hi {first_name}, following up. Reply STOP to opt out.")
-            return client, None
-        except ValueError as exc:
-            return client, exc
+TF_VERIFIED = {"key": "TF-8449172171", "kind": "toll_free", "numbers": ["+18449172171"],
+               "verification_status": "TWILIO_APPROVED", "has_embedded_links": True,
+               "has_embedded_phone": True, "programs": ["sci"], "approved_scope": ["informational"]}
 
 
-def test_sci_text_is_refused_before_the_provider_call(db_session, sample_org, sample_advisor,
-                                                      sample_lead, monkeypatch):
-    sample_org.name = sms_programs.SCI_ORG_NAME
-    db_session.commit()
-    monkeypatch.delenv(sms_programs.SCI_SEND_ENV, raising=False)
-    client, exc = _sci_send(db_session, sample_advisor, sample_lead)
-    client.messages.create.assert_not_called()
-    assert exc is not None and set(exc.reasons) >= {
-        "SCI_SMS_DISABLED", "SCI_COPY_NOT_FINAL", "NO_SMS_CONSENT", "CAMPAIGN_NOT_APPROVED"}
-
-
-def test_sci_text_needs_every_condition(db_session, sample_org, sample_advisor, sample_lead, monkeypatch):
+def test_sci_web_consent_counts_only_under_final_wording(db_session, sample_org, sample_lead, monkeypatch):
     sample_org.name = sms_programs.SCI_ORG_NAME
     db_session.commit()
     monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
-    monkeypatch.setenv(sms_campaigns.ENV_REGISTRY, json.dumps([SCI_CAMPAIGN]))
-    _sci_final(monkeypatch)
-    # consent under the SCI wording, for this lead's number, in the SCI org
+    monkeypatch.setenv(sms_campaigns.ENV_REGISTRY, json.dumps([TF_VERIFIED]))
     sms_programs.record(db_session, sms_programs.PROGRAMS["sci"], sample_org.id,
                         phone_raw=sample_lead.phone, disclosure_text=SCI_TEXT,
                         disclosure_version=SCI_VERSION, form_version="optin-sci-v1",
                         source_url="https://evosyspro.live/sms-optin/?program=sci",
                         ip=None, user_agent=None)
     db_session.commit()
-    # from CO3YNIF's number: refused - that campaign does not list SCI
-    client, exc = _sci_send(db_session, sample_advisor, sample_lead, from_number="+14692241155")
-    client.messages.create.assert_not_called()
-    assert exc.reasons == ["CAMPAIGN_NOT_APPROVED"]
-    # from the new campaign's number with everything in place: sent (mocked)
-    client, exc = _sci_send(db_session, sample_advisor, sample_lead)
-    assert exc is None and client.messages.create.call_count == 1
+    tf = "+18449172171"
+    # wording still pending review -> a web consent under it does not count yet
+    out = sms_programs.sci_check(db_session, sample_org.id, sample_lead.phone, from_number=tf)
+    assert out["reasons"] == ["CONSENT_WORDING_UNREGISTERED"]
+    _sci_final(monkeypatch)
+    assert sms_programs.sci_check(db_session, sample_org.id, sample_lead.phone, from_number=tf)["eligible"]
 
 
 def test_sci_consent_under_unregistered_wording_does_not_count(db_session, sample_org, sample_lead,
@@ -296,7 +274,7 @@ def test_sci_consent_under_unregistered_wording_does_not_count(db_session, sampl
     sample_org.name = sms_programs.SCI_ORG_NAME
     db_session.commit()
     monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
-    monkeypatch.setenv(sms_campaigns.ENV_REGISTRY, json.dumps([SCI_CAMPAIGN]))
+    monkeypatch.setenv(sms_campaigns.ENV_REGISTRY, json.dumps([TF_VERIFIED]))
     _sci_final(monkeypatch)
     sms_programs.record(db_session, sms_programs.PROGRAMS["sci"], sample_org.id,
                         phone_raw=sample_lead.phone, disclosure_text="generic wording",
@@ -304,8 +282,22 @@ def test_sci_consent_under_unregistered_wording_does_not_count(db_session, sampl
                         ip=None, user_agent=None)
     db_session.commit()
     out = sms_programs.sci_check(db_session, sample_org.id, sample_lead.phone,
-                                 from_number="+12058823908")
+                                 from_number="+18449172171")
     assert out["reasons"] == ["CONSENT_WORDING_UNREGISTERED"]
+
+
+def test_sci_text_is_refused_before_the_provider_call(db_session, sample_org, sample_advisor,
+                                                      sample_lead, monkeypatch):
+    from app.services import sms_service
+    sample_org.name = sms_programs.SCI_ORG_NAME
+    db_session.commit()
+    monkeypatch.delenv(sms_programs.SCI_SEND_ENV, raising=False)
+    fake = MagicMock()
+    with patch.object(sms_programs, "sci_sender", return_value=(fake, "+18449172171")):
+        with pytest.raises(ValueError) as exc:
+            sms_service.send_sms(db_session, sample_advisor, sample_lead, "Hi. Reply STOP to opt out.")
+    fake.messages.create.assert_not_called()
+    assert set(exc.value.reasons) >= {"SCI_SMS_DISABLED", "NO_SMS_CONSENT", "CAMPAIGN_NOT_APPROVED"}
 
 
 def test_non_sci_orgs_are_untouched_by_the_sci_gate(db_session, sample_org, sample_lead):

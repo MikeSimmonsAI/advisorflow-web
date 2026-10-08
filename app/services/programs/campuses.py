@@ -105,12 +105,18 @@ def plan(db: Session, organization_id: str) -> List[Dict]:
         for e in numbers.get(p.location_id, []):
             if e not in row["numbers"]:
                 row["numbers"].append(e)
+    toll_free = pool_numbers.get(regional_pools.TOLL_FREE_POOL["pool_id"], [])
     for row in out.values():
         row["pool_numbers"] = pool_numbers.get(row["pool_id"], []) if row["pool_id"] else []
+        row["toll_free"] = list(toll_free)
         if row["numbers"]:
             row["number_status"] = "assigned"
         elif row["pool_numbers"]:
             row["number_status"] = "pooled"                 # sends from its regional pool number
+        elif toll_free and row["area_code"]:
+            # 2026-10-08: the SCI program runs on its toll-free line. A location
+            # with no verified area code (Oaklawn) is still held, not sent for.
+            row["number_status"] = "toll_free"
         elif row["pool_id"]:
             row["number_status"] = "pool number not yet provisioned"
         else:

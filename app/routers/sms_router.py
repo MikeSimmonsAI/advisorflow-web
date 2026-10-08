@@ -504,7 +504,7 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         # never attached to any location.
         try:
             from app.services.programs import regional_pools as _rp, responses as _pr
-            _label = next((p["label"] for p in _rp.POOLS.values() if p["pool_id"] == called_pool_id), "")
+            _label = _rp.label_for(called_pool_id)
             _pr.record_unmatched(db, _pr.RegionalReviewBucket(org_id, called_pool_id, _label),
                                  alias=called_number or "", sender=From, subject=None, body=Body,
                                  received_at=datetime.utcnow(), mailbox_message_id="sms:%s" % MessageSid,

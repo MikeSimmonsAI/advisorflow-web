@@ -13,6 +13,21 @@ Hooks used by the platform telephony service, for program organizations only
 Live forwarding is the platform's own route on the number
 (`default_inbound_route.ring_user_ids`): it rings program members at their
 VERIFIED callback numbers. No personal number is stored or guessed here.
+
+THE SCI TOLL-FREE LINE (Mike, 2026-10-08)
+-----------------------------------------
+Every call to the program's toll-free line goes STRAIGHT to voicemail: no
+ringing, no forwarding, no AI receptionist (`voicemail_only_line`). The caller
+is matched by phone number inside the program organization:
+
+  one cemetery    -> that cemetery's custom greeting (LocationProfile
+                     brand_settings.voicemail_greeting) or a default that
+                     names it; the voicemail is saved to that contact and the
+                     assigned representative is notified to call back
+  ambiguous       -> the number belongs to contacts at DIFFERENT cemeteries:
+                     neutral greeting, voicemail to the toll-free review queue
+                     (no contact is guessed)
+  unknown         -> neutral greeting, toll-free review queue
 """
 from __future__ import annotations
 
@@ -48,22 +63,138 @@ def location_for_number(db: Session, phone_number_id: Optional[str]) -> Optional
     return getattr(rec, "workspace_id", None) if rec else None
 
 
-def greeting_text(db: Session, org_id: str, phone_number_id: Optional[str]) -> Optional[str]:
+def _shared_line_pool(db: Session, phone_number_id: Optional[str]):
+    """The pool (area-code pool or the toll-free line) a number belongs to, or None."""
+    if not phone_number_id:
+        return None
+    from app.models.telephony_models import PhoneNumber
+    from app.services.programs import regional_pools
+    rec = db.query(PhoneNumber).filter(PhoneNumber.id == phone_number_id).first()
+    return regional_pools.pool_for_phone_number(rec) if rec else None
+
+
+def voicemail_only_line(db: Session, org_id: Optional[str], phone_number_id: Optional[str]) -> bool:
+    """True for a program organization's toll-free line: voicemail only, always."""
+    from app.services.programs import identity, regional_pools
+    if not org_id or identity.program_for_org(db, org_id) is None:
+        return False
+    pool = _shared_line_pool(db, phone_number_id)
+    return bool(pool) and regional_pools.is_toll_free_pool(pool["pool_id"])
+
+
+KNOWN, AMBIGUOUS, UNRESOLVED, UNKNOWN = "known", "ambiguous", "unresolved", "unknown"
+
+
+def caller_match(db: Session, org_id: str, from_raw: Optional[str]):
+    """(lead, profile, status) for a caller, by phone number, inside one org.
+
+    known       every contact with this number resolves to ONE cemetery
+    ambiguous   contacts with this number resolve to different cemeteries
+    unresolved  a contact matches but no cemetery resolves (person known)
+    unknown     no contact has this number
+    """
+    from app.models.models import Lead
+    from app.services import number_resolution as NR
+    from app.services.programs import identity
+    forms = NR.phone_forms(from_raw)
+    if not forms or not org_id:
+        return None, None, UNKNOWN
+    leads = (db.query(Lead).filter(Lead.organization_id == org_id, Lead.phone.in_(forms))
+             .order_by(Lead.updated_at.desc()).all())
+    if not leads:
+        return None, None, UNKNOWN
+    resolved = [(lead, identity.location_profile_for_lead(db, lead)) for lead in leads]
+    locs = {p.location_id for _, p in resolved if p is not None}
+    if len(locs) > 1:
+        return None, None, AMBIGUOUS
+    if len(locs) == 1:
+        if any(p is None for _, p in resolved):
+            return None, None, AMBIGUOUS          # some rows unresolved: do not guess
+        lead, prof = resolved[0]
+        return lead, prof, KNOWN
+    return leads[0], None, UNRESOLVED
+
+
+def caller_for_line(db: Session, org_id: str, from_raw, lead, contact):
+    """For the toll-free line: the contact a voicemail is saved to. An
+    ambiguous number is saved to no contact (review queue)."""
+    found, _prof, status = caller_match(db, org_id, from_raw)
+    if status == AMBIGUOUS:
+        return None, None
+    if found is not None:
+        return found, None
+    return lead, contact
+
+
+def location_greeting(prog, prof) -> str:
+    """That cemetery's own greeting, or a default that names it."""
+    from app.services.programs import identity
+    custom = str(identity.brand_settings(prof).get("voicemail_greeting") or "").strip()
+    if custom:
+        return custom[:500]
+    person = (prog.primary_contact_name or "").strip()
+    who = person if person else "our planning team"
+    return ("Thank you for calling %s. You've reached %s. Please leave your name, number and a "
+            "short message after the tone, and we'll get back to you." % (prof.official_name, who))
+
+
+def neutral_greeting(prog) -> str:
+    person = (prog.primary_contact_name or "").strip()
+    who = person if person else "our planning team"
+    return ("Thank you for calling. You've reached the planning line for %s. Please leave your name, "
+            "number and a short message after the tone, and we'll get back to you." % who)
+
+
+def greeting_text(db: Session, org_id: str, phone_number_id: Optional[str],
+                  from_raw: Optional[str] = None) -> Optional[str]:
     """The program's greeting, or None to keep the platform default.
 
-    A location number names its location. A number that is not tied to a
-    location (a shared or toll-free line) uses a general greeting that names
-    no location, so a caller is never told the wrong place."""
+    A location number names its location. A shared line (an area-code pool
+    or the toll-free line) carries no location: the CALLER decides - one
+    matched cemetery hears that cemetery's greeting; anyone else hears a
+    general greeting that names no location, so nobody is told the wrong place."""
     prog, prof = _program_and_location(db, org_id, location_for_number(db, phone_number_id))
     if prog is None:
         return None
-    person = (prog.primary_contact_name or "").strip()
-    who = person if person else "our planning team"
     if prof is not None:
-        return ("Thank you for calling %s. You've reached %s. Please leave your name, number and a "
-                "short message after the tone, and we'll get back to you." % (prof.official_name, who))
-    return ("Thank you for calling. You've reached the planning line for %s. Please leave your name, "
-            "number and a short message after the tone, and we'll get back to you." % who)
+        return location_greeting(prog, prof)
+    if from_raw and _shared_line_pool(db, phone_number_id) is not None:
+        _lead, matched, status = caller_match(db, org_id, from_raw)
+        if status == KNOWN and matched is not None:
+            return location_greeting(prog, matched)
+    return neutral_greeting(prog)
+
+
+def notify_voicemail(db: Session, vm, lead, assignee_id: Optional[str]) -> Optional[str]:
+    """Program orgs: tell the contact's assigned representative (else the
+    program's primary contact) there is a voicemail to call back. In-app only;
+    nothing is sent to the caller. Returns the notified user id."""
+    try:
+        from app.models.models import Notification, NotificationType
+        from app.services.programs import identity
+        prog = identity.program_for_org(db, vm.organization_id)
+        if prog is None:
+            return None
+        uid = assignee_id or prog.primary_contact_user_id
+        if not uid:
+            return None
+        where = None
+        if lead is not None:
+            prof = identity.location_profile_for_lead(db, lead)
+            where = prof.official_name if prof else None
+        name = (("%s %s" % (getattr(lead, "first_name", "") or "", getattr(lead, "last_name", "") or ""))
+                .strip().title() if lead is not None else "") or vm.from_e164 or "Unknown caller"
+        no_callback = vm.caller_state in ("dnc", "suppressed")
+        msg = ("Voicemail from %s%s on %s - %s" % (
+            name, " (%s)" % where if where else "", vm.to_e164 or "the toll-free line",
+            "review only, do not call back (Do Not Contact)" if no_callback else "please call back"))
+        db.add(Notification(user_id=uid, lead_id=getattr(lead, "id", None),
+                            type=NotificationType.REPLY_RECEIVED, message=msg[:500],
+                            link=("/leads/%s" % lead.id) if lead is not None else "/program?tab=responses"))
+        return uid
+    except Exception:                                    # noqa: BLE001
+        log.exception("program voicemail notification failed for %s", getattr(vm, "id", "?"))
+        return None
 
 
 def wants_transcription(db: Session, org_id: str) -> bool:

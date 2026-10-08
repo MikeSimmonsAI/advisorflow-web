@@ -788,3 +788,52 @@ def set_pool_numbers(body: PoolNumbersIn, db: Session = Depends(get_db), god: Us
                                cap_voice_outbound=False, is_active=True, created_by_id=god.id))
     db.commit()
     return {"dry_run": False, "plan": plan, "targets": _pool_targets()}
+
+
+class TollFreeIn(BaseModel):
+    apply: bool = False
+    sid: Optional[str] = None
+
+
+@router.post("/toll-free")
+def set_toll_free(body: TollFreeIn, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Record the EXISTING SCI toll-free line (+1 844-917-2171) on staging as the
+    SCI program's number: SMS + inbound voice + voicemail, NO outbound voice,
+    route voicemail_only (no ringing, no forwarding, no AI). Never buys, never
+    calls Twilio. Dry run unless `apply`. Idempotent."""
+    import json as _json
+    _on()
+    _staging_only()
+    from app.models.telephony_models import PhoneNumber
+    from app.services.programs import regional_pools as rp
+    org = _org(db)
+    label = rp.POOL_LABEL_PREFIX + rp.TOLL_FREE_POOL["pool_id"]
+    route = {"mode": "voicemail_only", "voicemail": True, "ring_user_ids": []}
+    existing = db.query(PhoneNumber).filter(PhoneNumber.e164 == rp.TOLL_FREE).first()
+    if existing is not None and existing.organization_id != org.id:
+        raise HTTPException(status_code=409, detail={"error": "the toll-free number belongs to another organization",
+                                                     "nothing_written": True})
+    action = "create" if existing is None else (
+        "unchanged" if ((existing.label or "") == label and existing.is_active and existing.cap_sms
+                        and existing.cap_voicemail and not existing.cap_voice_outbound
+                        and _route_mode(existing) == "voicemail_only") else "update")
+    plan = {"e164": rp.TOLL_FREE, "label": label, "route": route, "action": action,
+            "cap_sms": True, "cap_voice_inbound": True, "cap_voicemail": True, "cap_voice_outbound": False}
+    if not body.apply or action == "unchanged":
+        return {"dry_run": not body.apply, "plan": plan, "targets": _pool_targets()}
+    rec = existing or PhoneNumber(e164=rp.TOLL_FREE, provider="twilio", organization_id=org.id,
+                                  created_by_id=god.id)
+    rec.provider_sid = body.sid or getattr(rec, "provider_sid", None)
+    rec.workspace_id, rec.label, rec.is_active = None, label, True
+    rec.cap_sms, rec.cap_voice_inbound, rec.cap_voicemail, rec.cap_voice_outbound = True, True, True, False
+    rec.default_inbound_route = _json.dumps(route)
+    if existing is None:
+        db.add(rec)
+    db.commit()
+    return {"dry_run": False, "plan": plan, "targets": _pool_targets()}
+
+
+def _route_mode(rec) -> str:
+    from app.services import number_resolution as NR
+    return NR.parse_route(rec.default_inbound_route)["mode"]
+

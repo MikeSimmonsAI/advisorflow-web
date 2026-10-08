@@ -85,10 +85,14 @@ def _oaklawn():
 
 
 def _toll_free():
-    _eq(rp.BACKUP_TOLL_FREE, "+18449172171")
+    # 844-917-2171 is THE SCI line (revised 2026-10-08): its own location-less
+    # pool, never an area-code pool, and unknown senders go to its review queue.
+    _eq(rp.TOLL_FREE, "+18449172171")
     _eq(rp.pool_for_area_code("844"), None)
     _raises_lookup(rp.sender_pool, "844")
     assert not any("844" in p["pool_id"] for p in rp.POOLS.values())
+    d = rp.route_inbound(None, rp.TOLL_FREE_POOL["pool_id"])
+    _eq((d["location"], d["queue"]), (None, "regional_review:" + rp.TOLL_FREE_POOL["pool_id"]))
 
 
 _NO_SEND_MODULES = ("app/services/programs/reply_rules.py", "app/services/optout_parser.py",
@@ -142,8 +146,8 @@ CHECKS: List[Tuple[str, str, Callable[[], None], str]] = [
      "Unknown senders must never get a guessed location; fix route_inbound."),
     ("oaklawn_hold", "Oaklawn refuses/holds: no area code, no pool, no sender", _oaklawn,
      "Oaklawn must never get a sender; fix sender_pool and keep its 9 contacts out of every send."),
-    ("toll_free_overflow", "844 is overflow-only: never a pool or a sender", _toll_free,
-     "Remove 844 from any pool/sender path; it is backup only."),
+    ("toll_free_line", "844 is the SCI toll-free line: location-less, unknown senders to review", _toll_free,
+     "The toll-free line must never name a location; fix regional_pools TOLL_FREE_POOL / route_inbound."),
     ("no_auto_send", "No AI auto-send: drafts only, decision modules have no send path", _no_auto_send,
      "Remove the send/network import or call named in the failure; drafts must stay drafts."),
     ("cadence_pause", "Meaningful reply pauses cadence (never resumes a stopped one)", _cadence,

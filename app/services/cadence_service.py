@@ -243,7 +243,9 @@ def render_cadence_message(db: Session, lead: Lead, advisor: User, touch_number:
     from app.services.programs import identity as _program_identity
     _program_text = _program_identity.cadence_text(db, lead, touch_number)
     if _program_text:
-        return enforce_sms_content_policy(_program_text)
+        # SCI: links / phone numbers only if its own approved sender covers them.
+        from app.services import sms_programs as _sp
+        return enforce_sms_content_policy(_program_text, **_sp.content_allowance(db, lead))
 
     # If a cadence template touch provides a message, use it directly
     if message_template:

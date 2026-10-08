@@ -28,20 +28,25 @@ Such a program accepts no opt-ins (409), records nothing, and enables no send.
 The SCI program's own wording is registered but stays pending until Mike's
 final review.
 
-THE SCI SEND GATE
+THE SCI SEND GATE (revised 2026-10-08: toll-free line, existing contacts)
 -----------------
 No SMS reaches an SCI contact unless ALL hold (every failing code is reported):
 
-    SCI_SMS_DISABLED          SCI_SMS_SEND_ENABLED is not on
-    SCI_COPY_NOT_FINAL        the SCI program's wording is still pending
-    INVALID_NUMBER            not a usable US mobile number
-    NO_SMS_CONSENT            no SCI consent of record for this number in this org
-    OPTED_OUT                 the latest SCI consent was withdrawn (STOP etc.)
-    CONSENT_WORDING_UNREGISTERED  the consent's wording is not a registered final version
-    CAMPAIGN_NOT_APPROVED     the sending number is not on a VERIFIED campaign that lists "sci"
+    SCI_SMS_DISABLED              SCI_SMS_SEND_ENABLED is not on
+    INVALID_NUMBER                not a usable US mobile number
+    NO_SMS_CONSENT                no SCI consent of record for this number in this org
+    OPTED_OUT                     the latest SCI consent was withdrawn (STOP etc.)
+    SUPPRESSED                    on the organization's suppression list
+    CONSENT_WORDING_UNREGISTERED  a web consent not under the FINAL SCI wording, or an
+                                  owner-attested one without its attestation
+    CAMPAIGN_NOT_APPROVED         the sender is not an APPROVED sender listing "sci"
+                                  (the toll-free line needs Toll-Free Verification)
+    SENDER_SCOPE_NOT_APPROVED     promotional content on a sender approved only for
+                                  informational messages
 
-Suppression, DNC, holds and location review are already enforced by send_sms
-before this gate runs. There is no override.
+Existing contacts count through owner-attested consent (`reconcile_existing`):
+they do not have to sign up again. Suppression, DNC, holds and location review
+are also enforced by send_sms before this gate runs. There is no override.
 """
 from __future__ import annotations
 
@@ -129,9 +134,32 @@ INVALID_NUMBER = "INVALID_NUMBER"
 NO_SMS_CONSENT = "NO_SMS_CONSENT"
 OPTED_OUT = "OPTED_OUT"
 CONSENT_WORDING_UNREGISTERED = "CONSENT_WORDING_UNREGISTERED"
-CAMPAIGN_NOT_APPROVED = "CAMPAIGN_NOT_APPROVED"
-SCI_REASONS = (SCI_SMS_DISABLED, SCI_COPY_NOT_FINAL, INVALID_NUMBER, NO_SMS_CONSENT,
-               OPTED_OUT, CONSENT_WORDING_UNREGISTERED, CAMPAIGN_NOT_APPROVED)
+CAMPAIGN_NOT_APPROVED = "CAMPAIGN_NOT_APPROVED"        # the sending number is not an approved SCI sender
+SCOPE_NOT_APPROVED = "SENDER_SCOPE_NOT_APPROVED"      # e.g. promotional content on an informational-only toll-free
+SUPPRESSED = "SUPPRESSED"
+SCI_REASONS = (SCI_SMS_DISABLED, INVALID_NUMBER, NO_SMS_CONSENT, OPTED_OUT, SUPPRESSED,
+               CONSENT_WORDING_UNREGISTERED, CAMPAIGN_NOT_APPROVED, SCOPE_NOT_APPROVED)
+
+# ── Existing contacts: owner-attested consent (Mike, 2026-10-08) ────────────
+# The SCI contact list and its consent records are held by EVO Integrated
+# Solutions LLC: the contacts opted in through the EvoSys Pro opt-in page.
+# Those contacts are NOT made to sign up again. `reconcile_existing` files one
+# consent of record per eligible contact, method `owner_attested_import`, with
+# who attested, when, and the evidence reference - and it skips anyone who
+# is suppressed, DNC, or has ever opted out of SCI messages.
+METHOD_OWNER_ATTESTED = "owner_attested_import"
+ATTESTED_VERSION = "owner-attested-evosyspro-optin"
+ATTESTED_FORM_ID = "owner_attested_import"
+ATTESTED_SOURCE = "https://evosyspro.live/sms-optin/"
+
+# SCI sends from the toll-free line, never an advisor's or a local number.
+SCI_SENDER_ENV = "SCI_TOLL_FREE_NUMBER"
+SCI_SENDER_DEFAULT = "+18449172171"
+# Campaign families whose SMS is promotional (needs "promotional" in the
+# sender's approved scope). Everything else is informational follow-up on
+# information the contact asked for. Override with SCI_PROMOTIONAL_FAMILIES.
+SCI_PROMOTIONAL_FAMILIES_ENV = "SCI_PROMOTIONAL_FAMILIES"
+SCI_PROMOTIONAL_FAMILIES_DEFAULT = ("cemetery_x_sell",)
 
 
 class ProgramUnavailable(Exception):
@@ -220,6 +248,17 @@ def campaign_for_program(key: str) -> Optional[Dict[str, Any]]:
 
 # ── The SCI send gate ───────────────────────────────────────────────────────
 
+def sci_org_id(db) -> Optional[str]:
+    """SMS_PROGRAM_ORG_SCI, else the ONE active organization named SCI_ORG_NAME."""
+    from app.models.models import Organization
+    env = (os.environ.get(PROGRAMS[SCI].org_env) or "").strip()
+    if env:
+        return env
+    rows = (db.query(Organization.id).filter(Organization.name == SCI_ORG_NAME,
+                                             Organization.is_active.isnot(False)).all())
+    return rows[0][0] if len(rows) == 1 else None
+
+
 def is_sci_org(db, org_id: Optional[str]) -> bool:
     if not org_id:
         return False
@@ -230,17 +269,58 @@ def is_sci_org(db, org_id: Optional[str]) -> bool:
     return bool(org) and (org.name or "").strip() == SCI_ORG_NAME
 
 
+def consent_counts(p: Program, rec) -> bool:
+    """Does this consent record count for sending? A web-form consent needs the
+    program's FINAL registered wording; an owner-attested one needs the
+    attestation version and an evidence reference."""
+    if rec is None:
+        return False
+    if rec.consent_method == METHOD_OWNER_ATTESTED:
+        return rec.disclosure_version == ATTESTED_VERSION and bool((rec.disclosure_text or "").strip())
+    return (is_final_version(p, rec.disclosure_version)
+            and wording_matches(p, rec.disclosure_version, rec.disclosure_text))
+
+
+def sci_sender_number() -> str:
+    return (os.environ.get(SCI_SENDER_ENV) or "").strip() or SCI_SENDER_DEFAULT
+
+
+def sci_sender_entry() -> Optional[Dict[str, Any]]:
+    from app.services import sms_campaigns
+    return sms_campaigns.for_sender(sci_sender_number())
+
+
+def promotional_families() -> set:
+    raw = os.environ.get(SCI_PROMOTIONAL_FAMILIES_ENV)
+    if raw is None:
+        return set(SCI_PROMOTIONAL_FAMILIES_DEFAULT)
+    return {x.strip() for x in raw.split(",") if x.strip()}
+
+
+def message_category(db, lead) -> str:
+    """informational | promotional, from the contact's campaign family."""
+    from app.services import sms_campaigns
+    try:
+        from app.services.programs import identity
+        rec = identity.source_record_for_lead(db, lead)
+        fam = getattr(rec, "campaign_family", None)
+    except Exception:                                   # noqa: BLE001
+        fam = None
+    return (sms_campaigns.CATEGORY_PROMOTIONAL if fam and fam in promotional_families()
+            else sms_campaigns.CATEGORY_INFORMATIONAL)
+
+
 def sci_check(db, org_id: str, phone: Optional[str], *,
               from_number: Optional[str] = None,
-              messaging_service_sid: Optional[str] = None) -> Dict[str, Any]:
-    """Deterministic: reads env, the database and the campaign registry."""
+              messaging_service_sid: Optional[str] = None,
+              category: Optional[str] = None) -> Dict[str, Any]:
+    """Deterministic: reads env, the database and the sender registry."""
     from app.services import sms_campaigns, wholesale_sms
+    from app.services.compliance_service import is_phone_suppressed
     p = PROGRAMS[SCI]
     reasons: List[str] = []
     if not _truthy(SCI_SEND_ENV):
         reasons.append(SCI_SMS_DISABLED)
-    if not is_open(p):
-        reasons.append(SCI_COPY_NOT_FINAL)
     e164 = wholesale_sms.normalize_e164(phone)
     consent = None
     if not e164:
@@ -252,16 +332,114 @@ def sci_check(db, org_id: str, phone: Optional[str], *,
         else:
             if consent.status != "opted_in" or consent.opted_out_at is not None:
                 reasons.append(OPTED_OUT)
-            if not (is_final_version(p, consent.disclosure_version)
-                    and wording_matches(p, consent.disclosure_version, consent.disclosure_text)):
+            if not consent_counts(p, consent):
                 reasons.append(CONSENT_WORDING_UNREGISTERED)
+        if is_phone_suppressed(db, org_id, e164):
+            reasons.append(SUPPRESSED)
     entry = sms_campaigns.for_sender(from_number, messaging_service_sid)
     if not sms_campaigns.is_approved(entry) or SCI not in (entry.get("programs") or []):
         reasons.append(CAMPAIGN_NOT_APPROVED)
+    elif not sms_campaigns.scope_allows(entry, category):
+        reasons.append(SCOPE_NOT_APPROVED)
     reasons = [r for r in SCI_REASONS if r in reasons]
     return {"eligible": not reasons, "reasons": reasons, "program": p.consent_program,
             "phone": e164, "consent_id": getattr(consent, "id", None),
-            "campaign": (entry or {}).get("key")}
+            "consent_method": getattr(consent, "consent_method", None),
+            "sender": (entry or {}).get("key"), "sender_kind": sms_campaigns.kind(entry) if entry else None,
+            "category": category or sms_campaigns.CATEGORY_INFORMATIONAL}
+
+
+def content_allowance(db, lead) -> Dict[str, bool]:
+    """For an SCI contact: may its message carry a link / a phone number?
+    Only when the SCI sender is approved, lists SCI, and covers the message's
+    category. {} for everyone else (the platform default - CO3YNIF - applies)."""
+    from app.services import sms_campaigns
+    if lead is None or not is_sci_org(db, getattr(lead, "organization_id", None)):
+        return {}
+    entry = sci_sender_entry()
+    ok = (sms_campaigns.is_approved(entry) and SCI in (entry.get("programs") or [])
+          and sms_campaigns.scope_allows(entry, message_category(db, lead)))
+    f = sms_campaigns.features(entry) if ok else {"links": False, "phone": False}
+    return {"allow_links": f["links"], "allow_phone": f["phone"]}
+
+
+def sci_sender():
+    """(twilio_client, from_number) for SCI: the EvoSys Pro platform account
+    and the toll-free line. Raises ValueError when not configured. Reached only
+    after the SCI gate has passed."""
+    sid = (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip()
+    token = (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip()
+    if not (sid and token):
+        raise ValueError("SCI_SENDER_NOT_CONFIGURED: platform Twilio account is not set")
+    from twilio.rest import Client
+    return Client(sid, token), sci_sender_number()
+
+
+def reconcile_existing(db, org_id: str, *, attested_by: str, evidence_reference: str,
+                       apply: bool = False) -> Dict[str, Any]:
+    """File owner-attested SCI consent for the existing contacts. Dry run unless
+    `apply`. Never touches a number that is suppressed, DNC, or has ANY SCI
+    opt-out on record; never duplicates an active consent."""
+    from app.models.models import Lead
+    from app.models.sms_consent_models import SmsConsentRecord
+    from app.services import wholesale_sms
+    from app.services.compliance_service import is_phone_suppressed
+    if not (attested_by or "").strip() or not (evidence_reference or "").strip():
+        raise ValueError("attested_by and evidence_reference are required")
+    p = PROGRAMS[SCI]
+    out = {"eligible": 0, "created": 0, "skipped": {}, "apply": bool(apply)}
+
+    def skip(reason):
+        out["skipped"][reason] = out["skipped"].get(reason, 0) + 1
+
+    seen = set()
+    leads = (db.query(Lead).filter(Lead.organization_id == org_id)
+             .order_by(Lead.created_at.asc()).all())
+    for lead in leads:
+        e164 = wholesale_sms.normalize_e164(lead.phone)
+        if not e164:
+            skip("no_valid_mobile")
+            continue
+        if e164 in seen:
+            skip("duplicate_number")
+            continue
+        seen.add(e164)
+        status = (getattr(lead.status, "value", lead.status) or "").lower()
+        if status == "dnc":
+            skip("dnc")
+            continue
+        if is_phone_suppressed(db, org_id, e164):
+            skip("suppressed")
+            continue
+        recs = (db.query(SmsConsentRecord)
+                .filter(SmsConsentRecord.organization_id == org_id,
+                        SmsConsentRecord.program == p.consent_program,
+                        SmsConsentRecord.phone_normalized == e164).all())
+        if any(r.status != "opted_in" or r.opted_out_at for r in recs):
+            skip("opted_out_before")
+            continue
+        if any(consent_counts(p, r) for r in recs):
+            skip("already_consented")
+            continue
+        out["eligible"] += 1
+        if apply:
+            text = ("Owner-attested: this contact opted in to text messages through the EvoSys Pro "
+                    "opt-in page (%s). Consent records are held by EVO Integrated Solutions LLC. "
+                    "Attested by %s. Evidence: %s." % (ATTESTED_SOURCE, attested_by.strip(),
+                                                       evidence_reference.strip()))
+            rec = wholesale_sms.record_consent(
+                db, org_id, phone_raw=lead.phone, disclosure_text=text,
+                disclosure_version=ATTESTED_VERSION, form_version=None,
+                source_url=ATTESTED_SOURCE, ip=None, user_agent=None, lead=None,
+                program=p.consent_program, form_id=ATTESTED_FORM_ID,
+                consent_method=METHOD_OWNER_ATTESTED)
+            rec.lead_id = lead.id
+            entry = sci_sender_entry()
+            rec.campaign_sid = (entry or {}).get("campaign_id") or (entry or {}).get("key")
+            out["created"] += 1
+    if apply:
+        db.commit()
+    return out
 
 
 def sci_send_refusal(db, lead, *, from_number: Optional[str] = None,
@@ -271,7 +449,8 @@ def sci_send_refusal(db, lead, *, from_number: Optional[str] = None,
     if not is_sci_org(db, org_id):
         return None
     result = sci_check(db, org_id, getattr(lead, "phone", None),
-                       from_number=from_number, messaging_service_sid=messaging_service_sid)
+                       from_number=from_number, messaging_service_sid=messaging_service_sid,
+                       category=message_category(db, lead))
     if result["eligible"]:
         return None
     log.warning("sci_sms BLOCKED lead=%s reasons=%s", getattr(lead, "id", None),

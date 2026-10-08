@@ -9,12 +9,17 @@
                                     phone, organization.
     GET /god/sms-consent/sci-check  why an SCI text to a number would or would
                                     not be allowed (the real gate, dry)
+    POST /god/sms-consent/sci/reconcile
+                                    owner-attested consent for the EXISTING SCI
+                                    contacts (dry run unless apply). Skips
+                                    suppressed / DNC / ever-opted-out numbers.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_god
@@ -52,8 +57,30 @@ def records(program: Optional[str] = Query(None, description="general | wholesal
 @router.get("/sci-check")
 def sci_check(phone: str, from_number: Optional[str] = None,
               db: Session = Depends(get_db), _god: User = Depends(require_god)):
-    import os
-    org_id = (os.environ.get(sms_programs.PROGRAMS[sms_programs.SCI].org_env) or "").strip()
+    org_id = sms_programs.sci_org_id(db)
     if not org_id:
         return {"eligible": False, "reasons": ["program_org_not_configured"]}
-    return sms_programs.sci_check(db, org_id, phone, from_number=from_number)
+    return sms_programs.sci_check(db, org_id, phone,
+                                  from_number=from_number or sms_programs.sci_sender_number())
+
+
+class ReconcileIn(BaseModel):
+    attested_by: str
+    evidence_reference: str
+    apply: bool = False
+
+
+@router.post("/sci/reconcile")
+def sci_reconcile(body: ReconcileIn, db: Session = Depends(get_db),
+                  god: User = Depends(require_god)):
+    org_id = sms_programs.sci_org_id(db)
+    if not org_id or not sms_programs.is_sci_org(db, org_id):
+        raise HTTPException(status_code=409, detail="The SCI organization could not be resolved.")
+    try:
+        out = sms_programs.reconcile_existing(db, org_id, attested_by=body.attested_by,
+                                              evidence_reference=body.evidence_reference,
+                                              apply=body.apply)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    out["requested_by"] = god.email
+    return out

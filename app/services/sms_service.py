@@ -476,6 +476,10 @@ def _compose_body_core(template: str, lead: Lead, advisor: User, booking_url: st
     string, which is the whole point: no hidden send-time URL.
     """
     body = render_template(template, lead, advisor, booking_url)
+    # A program whose OWN approved sender may carry links / phone numbers (the
+    # SCI toll-free line, once verified) passes that here; everyone else keeps
+    # the CO3YNIF rule. The provider-call guard re-checks the real sender.
+    _allow = _content_allowance(lead)
 
     # SMS carries no URL under the current campaign. This is enforced here, at
     # the one point preview and send share, so an advisor who types or pastes a
@@ -484,15 +488,26 @@ def _compose_body_core(template: str, lead: Lead, advisor: User, booking_url: st
     # app/services/sms_content_policy.py for why (campaign CO3YNIF is
     # registered has_embedded_links=false; a URL is filtered as 30007).
     if not SMS_LINKS_ALLOWED:
-        return enforce_sms_content_policy(body)
+        return enforce_sms_content_policy(body, **_allow)
 
     if not booking_url:
-        return enforce_sms_content_policy(body)
+        return enforce_sms_content_policy(body, **_allow)
     if BOOKING_LINK_PLACEHOLDER in (template or ""):
-        return enforce_sms_content_policy(body)
+        return enforce_sms_content_policy(body, **_allow)
     if booking_url in body:
-        return enforce_sms_content_policy(body)   # already typed in by hand
-    return enforce_sms_content_policy(body.rstrip() + "\n\n" + booking_url)
+        return enforce_sms_content_policy(body, **_allow)   # already typed in by hand
+    return enforce_sms_content_policy(body.rstrip() + "\n\n" + booking_url, **_allow)
+
+
+def _content_allowance(lead) -> dict:
+    """sms_programs.content_allowance for this lead, {} when not applicable."""
+    try:
+        from sqlalchemy.orm import object_session
+        from app.services import sms_programs
+        _db = object_session(lead)
+        return sms_programs.content_allowance(_db, lead) if _db is not None else {}
+    except Exception:  # noqa: BLE001 - never widen on error; {} is the strict default
+        return {}
 
 
 class SciSmsBlocked(ValueError):
@@ -645,9 +660,19 @@ def send_sms(
 
     body = compose_body(template, lead, advisor, booking_url)
 
+    from app.services import sms_programs as _sci_programs
     if program_sender is not None:
         client, _messaging_service_sid = program_sender
         from_phone = None
+    elif _sci_programs.is_sci_org(db, lead.organization_id):
+        # SCI sends ONLY from its toll-free line on the EvoSys Pro account -
+        # never an advisor's or a local number. The gate runs first, so an
+        # unconfigured or unapproved sender is refused before any client exists.
+        _sci_refusal = _sci_programs.sci_send_refusal(
+            db, lead, from_number=_sci_programs.sci_sender_number())
+        if _sci_refusal:
+            raise SciSmsBlocked(_sci_refusal)
+        client, from_phone = _sci_programs.sci_sender()
     else:
         client, from_phone, _ = _resolve_twilio_creds(advisor, db)
 

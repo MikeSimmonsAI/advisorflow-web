@@ -329,7 +329,8 @@ def voicemail_twiml(db, log_row: InboundCallLog, route: dict, voicemail_capable:
     text, rec_url = greeting_for(db, log_row.organization_id, route)
     if not (route.get("greeting_text") or route.get("greeting_recording_url")):
         # Location outreach programs: "Thank you for calling <location>..."
-        text = _pv.greeting_text(db, log_row.organization_id, log_row.phone_number_id) or text
+        text = _pv.greeting_text(db, log_row.organization_id, log_row.phone_number_id,
+                                 from_raw=log_row.from_e164) or text
     log_row.status = "voicemail"
     transcribe = ("%s/voice/inbound/voicemail-transcription?log_id=%s" % (backend_base(), log_row.id)
                   if _pv.wants_transcription(db, log_row.organization_id) else None)
@@ -362,6 +363,15 @@ def handle_inbound(db, verified) -> str:
                .filter(InboundCallLog.organization_id == org_id,
                        InboundCallLog.call_sid == call_sid).first())
     lead, contact, _forms = find_caller(db, org_id, from_raw)
+    # A program's TOLL-FREE line: voicemail only, always - no ringing, no
+    # forwarding, no AI. The voicemail is saved to the caller's contact only
+    # when the number points at ONE cemetery (never a guess).
+    from app.services.programs import program_voice as _pv
+    vm_only = _pv.voicemail_only_line(db, org_id, owner.number_id)
+    if vm_only:
+        lead, contact = _pv.caller_for_line(db, org_id, from_raw, lead, contact)
+        route = dict(route, mode="voicemail_only", voicemail=True, ring_user_ids=[])
+        vm_ok = True
     state = caller_state(db, org_id, lead, contact, from_raw)
     if row is None:
         row = InboundCallLog(organization_id=org_id, phone_number_id=owner.number_id,
@@ -389,7 +399,7 @@ def handle_inbound(db, verified) -> str:
         db.commit()
         return TT.twiml_hangup("Thank you for calling. This number does not accept calls. Goodbye.")
 
-    if (route["mode"] == "ai_agent" and lead is not None and state == "known"
+    if (not vm_only and route["mode"] == "ai_agent" and lead is not None and state == "known"
             and row.voice_call_id):
         twiml = _ai_agent_twiml(db, row, lead)
         if twiml:
@@ -397,7 +407,8 @@ def handle_inbound(db, verified) -> str:
             db.commit()
             return twiml
 
-    ring = ring_numbers_for(db, org_id, route) if route["mode"] == "ring_then_voicemail" else []
+    ring = (ring_numbers_for(db, org_id, route)
+            if (route["mode"] == "ring_then_voicemail" and not vm_only) else [])
     if ring:
         row.status = "ringing"
         db.commit()
@@ -532,6 +543,9 @@ def store_voicemail(db, row: InboundCallLog, *, recording_sid: str, recording_ur
     db.add(task)
     db.flush()
     vm.task_id = task.id
+    # Program orgs: the assigned cemetery representative is told to call back.
+    from app.services.programs import program_voice as _pv
+    _pv.notify_voicemail(db, vm, lead, assignee)
 
     if row.voice_call_id:
         vc = db.query(VoiceCall).filter(VoiceCall.id == row.voice_call_id).first()

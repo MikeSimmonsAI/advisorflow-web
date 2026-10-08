@@ -22,6 +22,15 @@ campaign there is: no links, no phone numbers. A campaign whose status is
 anything but VERIFIED permits neither, whatever its registration says, because
 an unapproved campaign's features are a request, not a permission.
 
+TOLL-FREE IS NOT 10DLC
+----------------------
+A toll-free number is approved by Toll-Free Verification (TFV), not by an
+A2P 10DLC campaign: there is no brand, no campaign id and no embedded-link
+flag. `kind: "toll_free"` entries are approved by `verification_status`
+(TWILIO_APPROVED / VERIFIED) and carry an `approved_scope` - the message
+categories the verification covered. Promotional content needs "promotional"
+in that scope (`scope_allows`). 10DLC entries keep their own rules above.
+
 CONFIGURATION WITHOUT A DEPLOY
 ------------------------------
 `SMS_CAMPAIGN_REGISTRY_JSON` (a JSON list of entries, same shape as
@@ -41,16 +50,23 @@ log = logging.getLogger(__name__)
 
 ENV_REGISTRY = "SMS_CAMPAIGN_REGISTRY_JSON"
 STATUS_VERIFIED = "VERIFIED"
+KIND_10DLC = "a2p_10dlc"
+KIND_TOLL_FREE = "toll_free"
+TFV_APPROVED = ("TWILIO_APPROVED", "VERIFIED", "APPROVED")
+CATEGORY_INFORMATIONAL = "informational"
+CATEGORY_PROMOTIONAL = "promotional"
 
 # Reason codes (stable strings).
 LINKS_NOT_APPROVED = "CAMPAIGN_LINKS_NOT_APPROVED"
 PHONE_NOT_APPROVED = "CAMPAIGN_PHONE_NOT_APPROVED"
+SCOPE_NOT_APPROVED = "SENDER_SCOPE_NOT_APPROVED"
 
 # The campaign in service today. Facts read from the Twilio console on
 # 2026-10-08 (read-only review): Low Volume Mixed, VERIFIED, links NO, phone NO.
 _BUILTIN: List[Dict[str, Any]] = [
     {
         "key": "CO3YNIF",
+        "kind": KIND_10DLC,
         "campaign_id": "CO3YNIF",
         "messaging_service_sid": "MG37d057536564f3228788425b0f83ec92",
         "numbers": ["+14692241155"],
@@ -58,7 +74,23 @@ _BUILTIN: List[Dict[str, Any]] = [
         "has_embedded_links": False,
         "has_embedded_phone": False,
         "programs": ["general"],
+        "approved_scope": [CATEGORY_INFORMATIONAL, CATEGORY_PROMOTIONAL],   # Mixed use case
         "note": "EvoSys Pro Low Volume Mixed - links and phone numbers NOT registered",
+    },
+    {
+        # The SCI line (Mike, 2026-10-08). Approved by Toll-Free Verification,
+        # not 10DLC. Fail closed: NOT approved here until its verification
+        # status is confirmed and set through SMS_CAMPAIGN_REGISTRY_JSON
+        # (key "TF-8449172171"), together with the scope it was verified for.
+        "key": "TF-8449172171",
+        "kind": KIND_TOLL_FREE,
+        "numbers": ["+18449172171"],
+        "verification_status": "UNCONFIRMED",
+        "has_embedded_links": True,
+        "has_embedded_phone": True,
+        "programs": ["sci"],
+        "approved_scope": [CATEGORY_INFORMATIONAL],
+        "note": "EvoSys Pro toll-free - SCI SMS + inbound voicemail",
     },
 ]
 
@@ -111,8 +143,28 @@ def for_sender(from_number: Optional[str] = None,
     return None
 
 
+def kind(entry: Optional[Dict[str, Any]]) -> str:
+    return (entry or {}).get("kind") or KIND_10DLC
+
+
 def is_approved(entry: Optional[Dict[str, Any]]) -> bool:
-    return bool(entry) and str(entry.get("status") or "").upper() == STATUS_VERIFIED
+    """10DLC: campaign status VERIFIED. Toll-free: verification approved."""
+    if not entry:
+        return False
+    if kind(entry) == KIND_TOLL_FREE:
+        return str(entry.get("verification_status") or "").upper() in TFV_APPROVED
+    return str(entry.get("status") or "").upper() == STATUS_VERIFIED
+
+
+def scope_allows(entry: Optional[Dict[str, Any]], category: Optional[str]) -> bool:
+    """Is this message category inside what the sender was approved for?
+    Informational is the floor; promotional must be explicitly approved."""
+    if not is_approved(entry):
+        return False
+    cat = (category or CATEGORY_INFORMATIONAL).lower()
+    if cat == CATEGORY_INFORMATIONAL:
+        return True
+    return cat in [str(c).lower() for c in (entry.get("approved_scope") or [])]
 
 
 def features(entry: Optional[Dict[str, Any]]) -> Dict[str, bool]:
@@ -153,7 +205,10 @@ def public_view() -> List[Dict[str, Any]]:
     for e in registry():
         f = features(e)
         out.append({
-            "key": e.get("key"), "campaign_id": e.get("campaign_id"),
+            "key": e.get("key"), "kind": kind(e), "campaign_id": e.get("campaign_id"),
+            "verification_status": e.get("verification_status"),
+            "approved_scope": list(e.get("approved_scope") or []),
+            "approved_now": is_approved(e),
             "messaging_service_sid": e.get("messaging_service_sid"),
             "numbers": list(e.get("numbers") or []), "status": e.get("status"),
             "registered_links": bool(e.get("has_embedded_links")),

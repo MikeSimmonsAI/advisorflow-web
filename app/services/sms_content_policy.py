@@ -114,12 +114,15 @@ _HARD_BOUNDARY = ".!?;\n"
 _SOFT_LEADINS = (" or ", " and ")
 
 
-def _mark_disallowed(text: str) -> tuple[str, bool]:
+def _mark_disallowed(text: str, allow_links: bool = None,
+                     allow_phone: bool = None) -> tuple[str, bool]:
     out = text or ""
-    if not LINKS_ALLOWED:
+    links_ok = LINKS_ALLOWED if allow_links is None else bool(allow_links)
+    phone_ok = PHONE_NUMBERS_ALLOWED if allow_phone is None else bool(allow_phone)
+    if not links_ok:
         for p in _URL_PATTERNS:
             out = p.sub(_MARK, out)
-    if not PHONE_NUMBERS_ALLOWED:
+    if not phone_ok:
         out = _PHONE_PATTERN.sub(_MARK, out)
     return out, (_MARK in out)
 
@@ -184,6 +187,22 @@ def _tidy(text: str, salvage: bool) -> str:
     this can never quietly delete a short sentence someone meant to send.
     """
     out = text or ""
+    # A link that is ALLOWED to stay must survive tidying byte for byte: the
+    # sentence-spacing fix below would otherwise turn "example.com" into
+    # "example. com". Links are parked behind placeholders and put back last.
+    parked = []
+
+    def _park(m):
+        url = m.group(0)
+        tail = ""
+        while url and url[-1] in ".,!?;:)":
+            tail = url[-1] + tail
+            url = url[:-1]
+        parked.append(url)
+        return "\x01%d\x01%s" % (len(parked) - 1, tail)
+
+    for p in _URL_PATTERNS:
+        out = p.sub(lambda m: m.group(0) if "\x01" in m.group(0) else _park(m), out)
     out = re.sub(r"[ \t]+", " ", out)
     out = re.sub(r"\s+([,.!?])", r"\1", out)
 
@@ -196,17 +215,24 @@ def _tidy(text: str, salvage: bool) -> str:
     out = re.sub(r"([.!?])([A-Za-z])", r"\1 \2", out)
     out = re.sub(r"\n{3,}", "\n\n", out)
     out = re.sub(r"[ \t]*\n[ \t]*", "\n", out)
+    out = re.sub("\x01(\\d+)\x01", lambda m: parked[int(m.group(1))], out)
     return out.strip()
 
 
-def enforce_sms_content_policy(body: str) -> str:
+def enforce_sms_content_policy(body: str, allow_links: bool = None,
+                               allow_phone: bool = None) -> str:
     """The last thing that touches an outbound SMS body.
 
     Strips whatever the campaign is not registered to send, tidies the result
     so it reads like a person wrote it, and guarantees the opt-out language
     appears exactly once.
+
+    `allow_links` / `allow_phone` default to this module's CO3YNIF rule. They
+    are passed ONLY by a program whose own sender is approved for them
+    (sms_programs.content_allowance, from the campaign / toll-free registry),
+    and the provider-call guard re-checks the sending number regardless.
     """
-    marked, removed_something = _mark_disallowed(body or "")
+    marked, removed_something = _mark_disallowed(body or "", allow_links, allow_phone)
     text = _remove_marked_clauses(marked) if removed_something else marked
     text = _tidy(text, salvage=removed_something)
 

@@ -152,8 +152,33 @@ def context_for(db: Session, lead: Lead, channel: str = "sms",
             "flyer_link": flyer_link or "",
             "location_website": prof.website or "",
             "campaign": rec.campaign_family if rec else "",
+            # Per-cemetery contact points for outbound templates. They reach
+            # the family only if the SENDER is approved to carry them: the
+            # content policy strips links / phone numbers otherwise.
+            "location_phone": prof.facility_phone or "",
+            "booking_link": prof.appointment_link or "",
+            "planning_guide_link": planning_guide_link(prof),
         },
     }
+
+
+PLANNING_GUIDE_DEFAULT = "https://evosyspro.live/planning-guide"
+
+
+def brand_settings(prof) -> Dict:
+    import json
+    try:
+        v = json.loads(getattr(prof, "brand_settings", None) or "{}")
+        return v if isinstance(v, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def planning_guide_link(prof) -> str:
+    """The cemetery's own planning-guide link (brand_settings.planning_guide_link)
+    or the shared EvoSys Pro guide."""
+    return (str(brand_settings(prof).get("planning_guide_link") or "").strip()
+            or PLANNING_GUIDE_DEFAULT)
 
 
 def render(template: str, fields: Dict[str, str]) -> str:

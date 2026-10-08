@@ -226,7 +226,8 @@ def record_consent(db, org_id: str, *, phone_raw: str, disclosure_text: str,
                    source_url: Optional[str], ip: Optional[str], user_agent: Optional[str],
                    lead=None, profile_id: Optional[str] = None,
                    property_id: Optional[str] = None, deal_id: Optional[str] = None,
-                   program: str = PROGRAM, form_id: str = FORM_ID) -> SmsConsentRecord:
+                   program: str = PROGRAM, form_id: str = FORM_ID,
+                   consent_method: str = METHOD_WEB_CHECKBOX) -> SmsConsentRecord:
     """Write one consent record. The ONLY writer. Caller commits.
 
     Called only after a person ticked the unticked box. The timestamp is the
@@ -240,7 +241,7 @@ def record_consent(db, org_id: str, *, phone_raw: str, disclosure_text: str,
         organization_id=org_id, program=program,
         phone_raw=(phone_raw or "")[:40], phone_normalized=e164,
         status=STATUS_OPTED_IN, consent_given=True, consented_at=now,
-        consent_method=METHOD_WEB_CHECKBOX,
+        consent_method=consent_method,
         source_url=(source_url or "")[:500] or None, form_id=form_id,
         form_version=(form_version or "")[:64] or None,
         disclosure_version=(disclosure_version or "")[:64] or None,

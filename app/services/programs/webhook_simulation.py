@@ -31,7 +31,8 @@ SYNTH_CONTACTS = {
     "+12055550111": ("Synthetic Known Location", "205"),
     "+12055550122": ("Synthetic Oaklawn Hold", ""),
 }
-SYNTH_POOL_NUMBERS = {POOL_205_NUMBER: rp.POOLS["205"]["pool_id"]}
+SYNTH_POOL_NUMBERS = {POOL_205_NUMBER: rp.POOLS["205"]["pool_id"],
+                      TOLL_FREE: rp.TOLL_FREE_POOL["pool_id"]}   # 844 = THE SCI line (2026-10-08)
 
 
 def new_token() -> str:
@@ -59,10 +60,9 @@ def handle(token: str, req: Dict) -> Dict:
     sender, to = p.get("From", ""), p.get("To", "")
     loc, area = SYNTH_CONTACTS.get(sender, (None, None))
     pool_id = SYNTH_POOL_NUMBERS.get(to)
-    if to == TOLL_FREE or pool_id is None:
-        # 844 is overflow only: never a pool, never a sender, never resolves a location
+    if pool_id is None:
         out["queue"] = "overflow_review"
-        out["refused"] = "toll-free backup is overflow only" if to == TOLL_FREE else "not a pool number"
+        out["refused"] = "not a program number"
         return out
     if loc is not None and rp.pool_for_area_code(area) is None:
         out["queue"] = "hold"          # Oaklawn: no verified area code, nothing guessed or sent
@@ -169,10 +169,15 @@ def _scenarios(tok: str) -> List[Tuple[str, str, Callable[[], None]]]:
         _eq((r["queue"], r["location"], r["outbound"]), ("hold", None, 0))
         assert r["refused"]
 
-    @add("toll_free_overflow", "844 backup is overflow-only: never a pool, location or sender")
+    @add("toll_free_line", "844 SCI line: known contact to its own location, unknown to toll-free review")
     def _():
+        tf = rp.TOLL_FREE_POOL["pool_id"]
         r = handle(tok, sign(tok, SMS_PATH, _sms(known, TOLL_FREE, "hello")))
-        _eq((r["queue"], r["location"], r["pool_id"]), ("overflow_review", None, None))
+        _eq((r["queue"], r["location"], r["pool_id"]), (None, "Synthetic Known Location", tf))
+        r = handle(tok, sign(tok, SMS_PATH, _sms(unknown, TOLL_FREE, "Who is this?")))
+        _eq((r["queue"], r["location"]), ("regional_review:" + tf, None))
+        r = handle(tok, sign(tok, VOICE_PATH, _call(unknown, TOLL_FREE)))
+        _eq((r["queue"], r["location"], r["outbound"]), ("regional_review:" + tf, None, 0))
 
     @add("no_ai_autosend", "No AI auto-send: HOT inbound pauses cadence and sends nothing")
     def _():

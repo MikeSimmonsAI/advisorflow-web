@@ -77,6 +77,46 @@ An SCI text goes out only when **all** of these hold. Each failing check is repo
 
 The suppression, DNC, hold and location-review gates still run first. There is no override.
 
+## REVISED 2026-10-08 evening: SCI on the existing toll-free line
+
+**The line.** SCI uses **+1 844-917-2171** for SMS and every inbound call. **No numbers are bought.** The six area-code pools stay defined in code but nothing requires them.
+
+**Approval.** Toll-free approval is kept separate from 10DLC.
+- The registry entry `TF-8449172171` (`kind: toll_free`) is approved by `verification_status` (TWILIO_APPROVED/VERIFIED), not by a campaign.
+- It ships as **UNCONFIRMED** (fail closed).
+- Setting it is one env entry, where `approved_scope` lists the scope the verification covered:
+  ```json
+  SMS_CAMPAIGN_REGISTRY_JSON=[{"key":"TF-8449172171","kind":"toll_free","numbers":["+18449172171"],
+    "verification_status":"TWILIO_APPROVED","has_embedded_links":true,"has_embedded_phone":true,
+    "programs":["sci"],"approved_scope":["informational"]}]
+  ```
+
+**Promotional content** needs `"promotional"` in `approved_scope`.
+- Which campaign families count as promotional is set by `SCI_PROMOTIONAL_FAMILIES` (default `cemetery_x_sell`).
+- Other families are treated as informational follow-up.
+
+**Existing contacts.** The ~535 contacts get **owner-attested consent**, so they don't have to sign up again.
+- Endpoint: `POST /god/sms-consent/sci/reconcile` with `{attested_by, evidence_reference, apply}`. It is a dry run unless `apply` is set.
+- It skips contacts that are suppressed, marked DNC, have ever opted out of SCI, or have no valid mobile number. It never duplicates a record.
+- A STOP afterwards still ends consent.
+
+**Sender.** SCI texts go out only from the toll-free line (`SCI_TOLL_FREE_NUMBER`, default the 844 number), on the EvoSys Pro platform account. They never use an advisor's or a local number.
+
+**Replies.**
+- A reply to the toll-free line from a known contact goes to that contact's own conversation and cemetery.
+- A reply from an unknown sender goes to the review queue `regional_review:pool-tollfree-844`.
+
+**Calls.**
+- Every call goes **straight to voicemail**: no ringing, no forwarding, no AI. This is enforced even if the number's route says otherwise.
+- The caller is matched by phone number:
+  - one cemetery: that cemetery's greeting (`LocationProfile.brand_settings.voicemail_greeting`, or a default that names it);
+  - unknown, or ambiguous (contacts at different cemeteries): a neutral greeting, and the voicemail is saved to no contact (review queue).
+- The voicemail is saved to the contact, and the assigned representative gets a call-back task plus an in-app notification.
+
+**Templates.** Outbound templates gain `{location_phone}` (facility_phone), `{booking_link}` (appointment_link) and `{planning_guide_link}` (brand_settings.planning_guide_link, default https://evosyspro.live/planning-guide). They reach the family only when the toll-free line is verified and the message falls inside its scope; otherwise they are stripped.
+
+**Staging setup.** `POST /god/staging/sci/toll-free {"apply": true}` records the 844 number on the SCI org with route voicemail_only and no outbound voice. It is idempotent and works on staging only.
+
 ## Going live, in order (each step needs Mike's approval)
 
 1. **Approve the SCI wording.** Set `'status' => 'final'` in `sms-programs.php` and `copy_status="final"` in `sms_programs.py` (same commit). Re-run the tests.
@@ -91,11 +131,15 @@ The suppression, DNC, hold and location-review gates still run first. There is n
 3. **Backend env** (Render):
    - `SMS_PROGRAM_ORG_SCI` and `SMS_PROGRAM_ORG_WHOLESALE` set to the org ids.
    - Confirm `SMS_OPTIN_WEBHOOK_URL` on the host points at `/site-intake/evosyspro/sms-optin`.
-4. **Twilio** (Mike):
-   - register the new campaign;
-   - buy the numbers;
-   - add the registry entry with status PENDING.
-5. **After Twilio shows Verified:**
-   - set the entry to VERIFIED;
-   - live-test reply, click and call with Mike's own phone;
-   - then `SCI_SMS_SEND_ENABLED=on` only after a separate first-contact GO.
+4. **Twilio (Mike), toll-free (supersedes buying numbers):**
+   - confirm 844-917-2171's Toll-Free Verification status and scope;
+   - point its Messaging webhook to `…/sms/webhook/inbound` and its Voice webhook to `…/voice/inbound`;
+   - set the registry entry above.
+5. **Staging:**
+   - `POST /god/staging/sci/toll-free {"apply":true}`;
+   - `POST /god/sms-consent/sci/reconcile` (dry run, then apply, with the attestation);
+   - set `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` (Mike enters them);
+   - live-test reply, call and voicemail with Mike's own phone.
+6. **Then:**
+   - set `SCI_SMS_SEND_ENABLED=on` only after a separate first-contact GO;
+   - production only after Mike's GO.
