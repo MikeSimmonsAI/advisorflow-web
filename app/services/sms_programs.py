@@ -474,10 +474,7 @@ def reconcile_existing(db, org_id: str, *, attested_by: str, evidence_reference:
         out["eligible"] += 1
         if apply:
             if owner_holds_records and evidence is None:
-                text = ("Owner-attested: this contact opted in through the location's original "
-                        "sign-up (seminar registration, guide request or web form). The original "
-                        "opt-in records are held by the owner, Mike Simmons. Attested by %s. "
-                        "Evidence: %s." % (attested_by.strip(), evidence_reference.strip()))
+                text = _owner_attestation_text(attested_by, evidence_reference)
             else:
                 text = ("Owner-attested: this contact opted in to text messages through the EvoSys Pro "
                         "opt-in page (%s). Consent records are held by EVO Integrated Solutions LLC. "
@@ -498,12 +495,78 @@ def reconcile_existing(db, org_id: str, *, attested_by: str, evidence_reference:
     return out
 
 
+# The owner (Mike Simmons) holds the original sign-up records for every contact
+# he imports. So a contact with no consent on file is cleared automatically the
+# first time a text is about to go to it - no import step, no operator step.
+# The protections still hold: STOP / opt-out, suppression and DNC are never
+# cleared. Turn off with SCI_OWNER_HOLDS_RECORDS=off.
+OWNER_RECORDS_ENV = "SCI_OWNER_HOLDS_RECORDS"
+OWNER_NAME_ENV = "SCI_OWNER_NAME"
+
+
+def owner_holds_records() -> bool:
+    v = (os.environ.get(OWNER_RECORDS_ENV) or "on").strip().lower()
+    return v not in ("off", "0", "false", "no")
+
+
+def _owner_attestation_text(attested_by: str, evidence_reference: str) -> str:
+    return ("Owner-attested: this contact opted in through the location's original "
+            "sign-up (seminar registration, guide request or web form). The original "
+            "opt-in records are held by the owner, Mike Simmons. Attested by %s. "
+            "Evidence: %s." % (attested_by.strip(), evidence_reference.strip()))
+
+
+def auto_attest_lead(db, org_id: str, lead) -> bool:
+    """File the owner's consent record for one SCI contact if it has none.
+    True when a record was filed. Never touches an opted-out, suppressed or
+    DNC number, and never duplicates an active consent."""
+    if not owner_holds_records() or not _truthy(SCI_SEND_ENV):
+        return False                                # nothing is filed while SCI texting is off
+    from app.models.sms_consent_models import SmsConsentRecord
+    from app.services import wholesale_sms
+    from app.services.compliance_service import is_phone_suppressed
+    e164 = wholesale_sms.normalize_e164(getattr(lead, "phone", None))
+    if not e164:
+        return False
+    status = (getattr(getattr(lead, "status", None), "value", getattr(lead, "status", None)) or "").lower()
+    if status == "dnc" or is_phone_suppressed(db, org_id, e164):
+        return False
+    p = PROGRAMS[SCI]
+    recs = (db.query(SmsConsentRecord)
+            .filter(SmsConsentRecord.organization_id == org_id,
+                    SmsConsentRecord.program == p.consent_program,
+                    SmsConsentRecord.phone_normalized == e164).all())
+    if any(r.status != "opted_in" or r.opted_out_at for r in recs):
+        return False
+    if any(consent_counts(p, r) for r in recs):
+        return False
+    owner = (os.environ.get(OWNER_NAME_ENV) or "Mike Simmons").strip()
+    rec = wholesale_sms.record_consent(
+        db, org_id, phone_raw=lead.phone,
+        disclosure_text=_owner_attestation_text(owner, "original sign-up records held by the owner"),
+        disclosure_version=ATTESTED_VERSION, form_version=None,
+        source_url=ATTESTED_SOURCE, ip=None, user_agent=None, lead=None,
+        program=p.consent_program, form_id=ATTESTED_FORM_ID,
+        consent_method=METHOD_OWNER_ATTESTED)
+    rec.lead_id = getattr(lead, "id", None)
+    entry = sci_sender_entry()
+    rec.campaign_sid = (entry or {}).get("campaign_id") or (entry or {}).get("key")
+    db.commit()
+    log.info("sci_sms auto-attested lead=%s", getattr(lead, "id", None))
+    return True
+
+
 def sci_send_refusal(db, lead, *, from_number: Optional[str] = None,
                      messaging_service_sid: Optional[str] = None) -> Optional[List[str]]:
     """None for a non-SCI lead. For an SCI lead: None when permitted, else codes."""
     org_id = getattr(lead, "organization_id", None)
     if not is_sci_org(db, org_id):
         return None
+    try:
+        auto_attest_lead(db, org_id, lead)
+    except Exception:                                   # noqa: BLE001
+        db.rollback()
+        log.exception("sci_sms auto-attest failed lead=%s", getattr(lead, "id", None))
     result = sci_check(db, org_id, getattr(lead, "phone", None),
                        from_number=from_number, messaging_service_sid=messaging_service_sid,
                        category=message_category(db, lead))
