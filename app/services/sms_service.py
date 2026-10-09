@@ -443,6 +443,26 @@ BOOKING_LINK_PLACEHOLDER = "{booking_link}"
 
 
 def compose_body(template: str, lead: Lead, advisor: User, booking_url: str) -> str:
+    """The EXACT text that will be sent - preview and send both call this.
+
+    For a lead in a location outreach program the location sign-off
+    ("- Kerry Allan, Eastern Gate Memorial Gardens") is added here, at the one
+    point preview and send share, so the preview shows what the family gets.
+    Every other lead is returned exactly as `_compose_body_core` built it.
+    """
+    body = _compose_body_core(template, lead, advisor, booking_url)
+    try:
+        from sqlalchemy.orm import object_session
+        from app.services.programs import identity as _program_identity
+        _db = object_session(lead)
+        if _db is not None:
+            body = _program_identity.apply_sms_signoff(_db, lead, body)
+    except Exception:  # never let identity decoration break a send path
+        pass
+    return body
+
+
+def _compose_body_core(template: str, lead: Lead, advisor: User, booking_url: str) -> str:
     """The EXACT text that will be sent. One function, used by preview and send.
 
     `render_template` only substitutes a `{booking_link}` placeholder. A message
@@ -456,6 +476,10 @@ def compose_body(template: str, lead: Lead, advisor: User, booking_url: str) -> 
     string, which is the whole point: no hidden send-time URL.
     """
     body = render_template(template, lead, advisor, booking_url)
+    # A program whose OWN approved sender may carry links / phone numbers (the
+    # SCI toll-free line, once verified) passes that here; everyone else keeps
+    # the CO3YNIF rule. The provider-call guard re-checks the real sender.
+    _allow = _content_allowance(lead)
 
     # SMS carries no URL under the current campaign. This is enforced here, at
     # the one point preview and send share, so an advisor who types or pastes a
@@ -464,15 +488,56 @@ def compose_body(template: str, lead: Lead, advisor: User, booking_url: str) -> 
     # app/services/sms_content_policy.py for why (campaign CO3YNIF is
     # registered has_embedded_links=false; a URL is filtered as 30007).
     if not SMS_LINKS_ALLOWED:
-        return enforce_sms_content_policy(body)
+        return enforce_sms_content_policy(body, **_allow)
 
     if not booking_url:
-        return enforce_sms_content_policy(body)
+        return enforce_sms_content_policy(body, **_allow)
     if BOOKING_LINK_PLACEHOLDER in (template or ""):
-        return enforce_sms_content_policy(body)
+        return enforce_sms_content_policy(body, **_allow)
     if booking_url in body:
-        return enforce_sms_content_policy(body)   # already typed in by hand
-    return enforce_sms_content_policy(body.rstrip() + "\n\n" + booking_url)
+        return enforce_sms_content_policy(body, **_allow)   # already typed in by hand
+    return enforce_sms_content_policy(body.rstrip() + "\n\n" + booking_url, **_allow)
+
+
+def _content_allowance(lead) -> dict:
+    """sms_programs.content_allowance for this lead, {} when not applicable."""
+    try:
+        from sqlalchemy.orm import object_session
+        from app.services import sms_programs
+        _db = object_session(lead)
+        return sms_programs.content_allowance(_db, lead) if _db is not None else {}
+    except Exception:  # noqa: BLE001 - never widen on error; {} is the strict default
+        return {}
+
+
+class SciSmsBlocked(ValueError):
+    """An SCI text the SCI program gate refused. `.reasons` holds the codes."""
+
+    def __init__(self, reasons):
+        self.reasons = list(reasons)
+        super().__init__("SCI_SMS_BLOCKED: " + ",".join(self.reasons))
+
+
+def _final_send_guards(db: Session, lead: Lead, body: str, *, from_number=None,
+                       messaging_service_sid=None, path: str = "send") -> None:
+    """The SCI program gate, then the sending campaign's content approval.
+
+    SCI (app/services/sms_programs.py): no text to an SCI contact without SCI
+    consent of record under final wording, an approved campaign that lists the
+    SCI program, and SCI_SMS_SEND_ENABLED. None for every other organization.
+
+    Campaign content (app/services/sms_campaigns.py): a body carrying a link or
+    a phone number the sending campaign is not approved for is refused, never
+    sent. Unregistered senders are the most restrictive campaign.
+    """
+    from app.services import sms_campaigns, sms_programs
+    reasons = sms_programs.sci_send_refusal(db, lead, from_number=from_number,
+                                            messaging_service_sid=messaging_service_sid)
+    if reasons:
+        raise SciSmsBlocked(reasons)
+    sms_campaigns.assert_content_allowed(body, from_number=from_number,
+                                         messaging_service_sid=messaging_service_sid,
+                                         path=path)
 
 
 def _demo_send_guard(db: Session, lead: Lead, channel: str) -> None:
@@ -538,6 +603,14 @@ def send_sms(
     if test_records.is_test_record(lead) and send_source != _ss.MANUAL:
         raise ValueError(test_records.blocked_reason(lead))
 
+    # LOCATION OUTREACH PROGRAMS: a lead whose location is unresolved is not
+    # sent to under a made-up facility name - it waits in Location Review.
+    # None for every organization without a program.
+    from app.services.programs import identity as _program_identity
+    _loc_refusal = _program_identity.send_refusal(db, lead, send_source)
+    if _loc_refusal:
+        raise ValueError(f"Lead {lead.id}: {_loc_refusal}")
+
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC (likely a duplicate) - blocked from sending.")
 
@@ -587,9 +660,19 @@ def send_sms(
 
     body = compose_body(template, lead, advisor, booking_url)
 
+    from app.services import sms_programs as _sci_programs
     if program_sender is not None:
         client, _messaging_service_sid = program_sender
         from_phone = None
+    elif _sci_programs.is_sci_org(db, lead.organization_id):
+        # SCI sends ONLY from its toll-free line on the EvoSys Pro account -
+        # never an advisor's or a local number. The gate runs first, so an
+        # unconfigured or unapproved sender is refused before any client exists.
+        _sci_refusal = _sci_programs.sci_send_refusal(
+            db, lead, from_number=_sci_programs.sci_sender_number())
+        if _sci_refusal:
+            raise SciSmsBlocked(_sci_refusal)
+        client, from_phone = _sci_programs.sci_sender()
     else:
         client, from_phone, _ = _resolve_twilio_creds(advisor, db)
 
@@ -613,6 +696,15 @@ def send_sms(
             from_=from_phone,
             to=lead.phone,
         ))
+
+    # LAST CHECKS BEFORE THE PROVIDER CALL: the SCI program gate and what the
+    # sending campaign is approved to carry. Both raise ValueError subclasses,
+    # so every caller that already handles "blocked" handles these too.
+    _final_send_guards(db, lead, body,
+                       from_number=from_phone if program_sender is None else None,
+                       messaging_service_sid=(_messaging_service_sid
+                                              if program_sender is not None else None),
+                       path=send_source or "send_sms")
 
     twilio_msg = client.messages.create(**create_kwargs)
 
@@ -641,6 +733,7 @@ def send_sms(
     from app.services.send_record import record_after_send
     saved = record_after_send(db, lambda: message, lead=lead, channel="sms",
                               provider_id=getattr(twilio_msg, "sid", None))
+    _record_program_on_behalf(db, lead, sent_by_user_id, advisor, saved if saved is not None else message)
     return saved if saved is not None else message
 
 
@@ -674,6 +767,14 @@ def send_mms(
     # one-to-one MANUAL send by a person who sees the TEST badge may.
     if test_records.is_test_record(lead) and send_source != _ss.MANUAL:
         raise ValueError(test_records.blocked_reason(lead))
+
+    # LOCATION OUTREACH PROGRAMS: a lead whose location is unresolved is not
+    # sent to under a made-up facility name - it waits in Location Review.
+    # None for every organization without a program.
+    from app.services.programs import identity as _program_identity
+    _loc_refusal = _program_identity.send_refusal(db, lead, send_source)
+    if _loc_refusal:
+        raise ValueError(f"Lead {lead.id}: {_loc_refusal}")
 
     if lead.status == "dnc":
         raise ValueError(f"Lead {lead.id} is marked DNC - blocked from sending.")
@@ -715,6 +816,9 @@ def send_mms(
         media_url=[media_url],
     ))
 
+    _final_send_guards(db, lead, body, from_number=from_phone,
+                       path=send_source or "send_mms")
+
     twilio_msg = client.messages.create(**mms_kwargs)
 
     message = Message(
@@ -737,6 +841,7 @@ def send_mms(
     from app.services.send_record import record_after_send
     saved = record_after_send(db, lambda: message, lead=lead, channel="sms",
                               provider_id=getattr(twilio_msg, "sid", None))
+    _record_program_on_behalf(db, lead, sent_by_user_id, advisor, saved if saved is not None else message)
     return saved if saved is not None else message
 
 
@@ -786,3 +891,14 @@ def send_batch(
         except Exception:
             skipped.append(lead.id)
     return {"sent_count": len(sent), "skipped_count": len(skipped), "sent_ids": sent, "skipped_ids": skipped}
+
+def _record_program_on_behalf(db, lead, sent_by_user_id, advisor, message):
+    """Program leads: audit the real sender behind "Kerry Allan, <location>"."""
+    try:
+        from app.services.programs import identity as _pid
+        if _pid.program_for_org(db, lead.organization_id) is not None:
+            _pid.record_on_behalf(db, lead, channel="sms", actor_user_id=sent_by_user_id,
+                                  sender_user_id=getattr(advisor, "id", None),
+                                  message_id=getattr(message, "id", None))
+    except Exception:  # noqa: BLE001 - auditing never breaks a send that went out
+        pass

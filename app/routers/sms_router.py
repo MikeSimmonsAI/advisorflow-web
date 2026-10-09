@@ -286,6 +286,25 @@ async def sms_status_callback(
     return _twiml_ack()
 
 
+def _check_tenant_owns_called_number(db: Session, resolved, to_raw: str) -> None:
+    """403 when a TENANT-signed inbound names a number another organization owns."""
+    if resolved is None or getattr(resolved, "source", "") == "platform":
+        return
+    try:
+        from app.services.number_resolution import resolve_owner_by_called_number
+        owner = resolve_owner_by_called_number(db, to_raw)
+    except Exception:                                       # noqa: BLE001
+        logger.exception("[sms_webhook] called-number owner lookup failed")
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if owner is None:
+        return          # unowned number: the handler below drops it without side effects
+    if not getattr(resolved, "organization_id", None) or resolved.organization_id != owner.organization_id:
+        logger.warning("[sms_webhook] account %s (org %s) named a number owned by org %s - refused",
+                       getattr(resolved, "account_sid", "?"), getattr(resolved, "organization_id", None),
+                       owner.organization_id)
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 @router.post("/webhook/inbound")
 async def inbound_webhook(
     request: Request,
@@ -309,7 +328,18 @@ async def inbound_webhook(
     signature from Org A cannot inject a reply into Org B's inbox. It raises
     403 on any failure, before any of the above is reachable.
     """
-    await guard_inbound(request, db)
+    _resolved = await guard_inbound(request, db)
+
+    # TENANT ISOLATION (2026-10-08). The guard proves WHICH Twilio account signed
+    # this request. A tenant-signed request may only deliver into the
+    # organization that owns the called number - exactly the voice webhook's
+    # rule (telephony_webhook_guard.assert_org_matches). Without it, a tenant
+    # holding its own Twilio credentials could sign a message naming another
+    # organization's location or pool number as `To` and inject a reply into
+    # that organization. The platform account (EvoSys Pro, which owns the POC
+    # numbers) is trusted platform-wide; every customer's own account or
+    # subaccount is held to its own organization. Checked BEFORE any side effect.
+    _check_tenant_owns_called_number(db, _resolved, To)
 
     # AI OPERATIONS (T7): route the reply to an AI conversation if one owns
     # this contact. Placed AFTER the authentication guard and BEFORE the
@@ -383,6 +413,31 @@ async def inbound_webhook(
                 .first())
         org_id = _org.id if _org else None
 
+    # LOCATION NUMBERS (2026-10-06). A number registered in `phone_numbers`
+    # (one local number per location of a multi-location customer) is
+    # resolved here exactly as the voice webhook already resolves it. Before
+    # this, a reply to such a number matched no user/organization column and
+    # was DROPPED below. The number's workspace_id names the location, so the
+    # reply is attributed to the location the family actually wrote to.
+    called_location_id = None
+    called_pool_id = None
+    try:
+        from app.services.number_resolution import resolve_owner_by_called_number
+        _owner = resolve_owner_by_called_number(db, To)
+        if _owner is not None and _owner.source == "phone_numbers" and _owner.record is not None \
+                and getattr(_owner.record, "cap_sms", False):
+            if org_id is None:
+                org_id = _owner.organization_id
+            if _owner.organization_id == org_id:
+                called_location_id = getattr(_owner.record, "workspace_id", None)
+                from app.services.programs import regional_pools as _rp
+                _pool = _rp.pool_for_phone_number(_owner.record)
+                if _pool is not None:
+                    called_pool_id = _pool["pool_id"]
+                    called_location_id = None      # a shared regional number never names a location
+    except Exception:                                       # noqa: BLE001
+        logger.exception("[sms_webhook] location-number lookup failed for %s", twilio_to)
+
     if org_id is None:
         # Nobody owns this Twilio number — misconfigured, or a number that
         # belongs to something else entirely. Return early rather than doing a
@@ -394,12 +449,15 @@ async def inbound_webhook(
         return _twiml_ack()
 
     process_inbound_sms(db, org_id=org_id, advisor=advisor, From=From, Body=Body,
-                        MessageSid=MessageSid)
+                        MessageSid=MessageSid, called_number=To,
+                        called_location_id=called_location_id, called_pool_id=called_pool_id)
     return _twiml_ack()
 
 
 def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: str,
-                        MessageSid: str) -> dict:
+                        MessageSid: str, called_number: Optional[str] = None,
+                        called_location_id: Optional[str] = None,
+                        called_pool_id: Optional[str] = None) -> dict:
     """Everything the inbound webhook does once it knows WHICH ORGANIZATION the
     message arrived for. Split out of `inbound_webhook` in Wholesale Phase 7.1
     so there is exactly one inbound path: the Twilio webhook calls it after the
@@ -421,6 +479,40 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         Lead.phone == lead_phone,
         Lead.organization_id == org_id,
     ).order_by(Lead.updated_at.desc()).first()
+
+    if not lead and called_location_id:
+        # A location number, an unknown sender: never attached to anyone, kept
+        # for a person in the program's unmatched queue with the location known.
+        try:
+            from app.models.program_models import LocationProfile
+            from app.services.programs import responses as _pr
+            _prof = (db.query(LocationProfile)
+                     .filter(LocationProfile.organization_id == org_id,
+                             LocationProfile.location_id == called_location_id).first())
+            if _prof is not None:
+                _pr.record_unmatched(db, _prof, alias=called_number or "", sender=From, subject=None,
+                                     body=Body, received_at=datetime.utcnow(),
+                                     mailbox_message_id="sms:%s" % MessageSid,
+                                     reason="text to a location number from a phone that matches no contact")
+                db.commit()
+        except Exception:                                   # noqa: BLE001
+            db.rollback()
+            logger.exception("[sms_webhook] unmatched location text not recorded")
+
+    if not lead and called_pool_id:
+        # A shared regional number, an unknown sender: regional review queue,
+        # never attached to any location.
+        try:
+            from app.services.programs import regional_pools as _rp, responses as _pr
+            _label = _rp.label_for(called_pool_id)
+            _pr.record_unmatched(db, _pr.RegionalReviewBucket(org_id, called_pool_id, _label),
+                                 alias=called_number or "", sender=From, subject=None, body=Body,
+                                 received_at=datetime.utcnow(), mailbox_message_id="sms:%s" % MessageSid,
+                                 reason="text to regional pool %s from a phone that matches no contact" % called_pool_id)
+            db.commit()
+        except Exception:                                   # noqa: BLE001
+            db.rollback()
+            logger.exception("[sms_webhook] unmatched regional text not recorded")
 
     if not lead:
         # Unknown sender - nothing to route. A STOP is still honoured: the
@@ -453,9 +545,11 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         _seen = (db.query(Reply).join(Lead, Lead.id == Reply.lead_id)
                  .filter(Reply.twilio_sid == MessageSid,
                          Lead.organization_id == org_id).first())
-        if _seen is not None:
+        from app.services.programs.reply_rules import duplicate_inbound_result
+        _dup = duplicate_inbound_result(MessageSid, getattr(_seen, "id", None))
+        if _dup is not None:
             _route_to_evosense(db, org_id, lead, _seen)
-            return {"status": "duplicate", "reply_id": _seen.id}
+            return _dup
 
     # PHASE 7.1 (2/3) — does an EvoSense acquisition conversation own this
     # sender? If so EvoSense reads the reply (after it is saved, below) and the
@@ -593,6 +687,16 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
 
     logger.info("twilio inbound: lead=%s hot=%s classification=%s",
                 lead.id, is_hot, classification.value)
+
+    # LOCATION OUTREACH PROGRAMS: attach location/campaign, pause the cadence,
+    # classify HOT/ACTIVE/LOW/OPT-OUT/BAD DATA, alert, start the HOT SLA.
+    # After the commit and wrapped: it can never lose the message or 500.
+    from app.services.programs import responses as _program_responses
+    _program_responses.safe_on_inbound(
+        db, lead, Body, "sms", reply_id=reply.id,
+        reply_classification=classification.value if classification else None,
+        **({"reply_to_alias": called_number, "alias_location_id": called_location_id}
+           if called_location_id else {}))
 
     # PHASE 7.1 (3/3) — the reply is committed; now EvoSense may read it.
     # After the commit on purpose: an EvoSense or AI failure can never lose the
@@ -951,7 +1055,8 @@ def send_mms_endpoint(
         raise HTTPException(status_code=409, detail=send_guard.DUPLICATE_DETAIL)
     try:
         message = send_mms(db, acting_advisor(db, lead, current_user), lead,
-                           req.template, req.media_url, req.include_booking_link)
+                           req.template, req.media_url, req.include_booking_link,
+                           send_source="manual", sent_by_user_id=current_user.id)
         return {"message_id": message.id, "status": message.twilio_status}
     except ValueError as e:
         send_guard.release_after_failure(db, lead.id, guard_text, token)

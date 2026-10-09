@@ -2,6 +2,14 @@ DirectoryIndex index.html index.php
 Options -Indexes
 ErrorDocument 404 /404.html
 
+# /planning-guide is linked from registered SMS samples WITHOUT a trailing
+# slash. Serve it directly (no 301 to /planning-guide/), because carrier
+# reviewers treat a redirecting sample link as a defect.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^planning-guide$ planning-guide/index.php [L]
+</IfModule>
+
 # ── APPLICANT DATA IS NEVER SERVED, WHATEVER ELSE IS MISCONFIGURED ──────────
 #
 # storage/ and private/ each carry their own "Require all denied" .htaccess,

@@ -355,6 +355,20 @@ def site_sms_optin(platform_slug: str, payload: SitePayload,
     """
     platform, org = _destination(db, platform_slug, request)
 
+    # UNIVERSAL SMS CONSENT CENTER. One page serves several programs; each
+    # consent is filed under ITS program, in the organization that sends it,
+    # with its own wording and version (app/services/sms_programs.py). No
+    # program named = the general EvoSys Pro program, exactly as before.
+    from app.services import sms_programs
+    extra = payload.model_extra or {}
+    prog = sms_programs.get(extra.get("program"))
+    if prog is None:
+        raise HTTPException(status_code=422, detail="Unknown SMS program.")
+    if not sms_programs.is_open(prog):
+        # Wording not signed off: nothing is recorded under it.
+        raise HTTPException(status_code=409,
+                            detail="This SMS program is not accepting opt-ins yet.")
+
     phone = normalize_phone(payload.phone or "")
     if not phone:
         raise HTTPException(status_code=422,
@@ -363,12 +377,20 @@ def site_sms_optin(platform_slug: str, payload: SitePayload,
     if consent is None or not consent.given:
         raise HTTPException(status_code=400, detail="SMS consent is required.")
 
+    target = org
+    if prog.key != sms_programs.GENERAL:
+        try:
+            target = sms_programs.program_org(db, prog)
+        except sms_programs.ProgramUnavailable as exc:
+            log.error("sms-optin program=%s unavailable: %s", prog.key, exc.code)
+            raise HTTPException(status_code=503, detail=str(exc))
+
     # THE DO-NOT-CONTACT LIST OUTRANKS A NEW OPT-IN FORM. Somebody on it asked
     # to be left alone through a channel this platform trusts more than an
     # anonymous web form claiming otherwise.
     try:
         from app.services.compliance_service import is_phone_suppressed
-        if is_phone_suppressed(db, org.id, phone):
+        if is_phone_suppressed(db, target.id, phone):
             raise HTTPException(
                 status_code=409,
                 detail="This number is on the do-not-contact list.")
@@ -377,10 +399,37 @@ def site_sms_optin(platform_slug: str, payload: SitePayload,
     except Exception:
         log.exception("suppression check failed during site sms-optin")
 
-    sub = _submission(payload, pc.KIND_SMS_OPTIN, consent)
-    result = pc.capture(db, platform=platform, org=org, sub=sub)
+    lead = None
+    result = {"action": "consent_only", "lead_id": None}
+    if prog.key == sms_programs.GENERAL:
+        sub = _submission(payload, pc.KIND_SMS_OPTIN, consent)
+        result = pc.capture(db, platform=platform, org=org, sub=sub)
+        if result.get("lead_id"):
+            from app.models.models import Lead
+            lead = db.query(Lead).filter(Lead.id == result["lead_id"]).first()
+
+    # The consent of record: program, wording + version verbatim, the page,
+    # the visitor's IP and browser as the site saw them, and OUR clock. No
+    # confirmation text is sent from here - on any program.
+    try:
+        rec = sms_programs.record(
+            db, prog, target.id, phone_raw=payload.phone or "",
+            disclosure_text=consent.text or "", disclosure_version=consent.version,
+            form_version=(extra.get("form_version") or None),
+            source_url=consent.page_url, ip=payload.ip, user_agent=payload.user_agent,
+            lead=lead)
+    except ValueError:
+        db.rollback()
+        raise HTTPException(status_code=422,
+                            detail="A valid US mobile phone number is required.")
+    db.commit()
+    registered = sms_programs.wording_matches(prog, rec.disclosure_version, rec.disclosure_text)
+    if not registered:
+        log.warning("sms-optin program=%s consent %s wording/version %r is not registered",
+                    prog.key, rec.id, rec.disclosure_version)
     return {"success": True, "action": result["action"],
-            "lead_id": result["lead_id"]}
+            "lead_id": result["lead_id"], "program": prog.key,
+            "consent_id": rec.id, "wording_registered": registered}
 
 
 @router.post("/{platform_slug}/support", status_code=201)

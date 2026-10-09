@@ -230,6 +230,7 @@ import app.models.commercial_models  # noqa: F401  (imported for side effects)
 # customer's own configuration silently cannot be stored. Added to BOTH blocks
 # in this file, per the merge-artefact note above.
 import app.models.launch_experience_models  # noqa: F401  (side effects)
+import app.models.launch_board_models  # noqa: F401  (launch_board_projects/events - Control Room portfolio)
 # The AdvisorFlow MASTER LEAD DATABASE (master_contacts / lead_occurrences) —
 # the platform's own record of every person who has ever entered any tenant,
 # and which organization they entered through. Same Base, same reason.
@@ -503,6 +504,7 @@ import app.models.commercial_models  # noqa: F401  (imported for side effects)
 # customer's own configuration silently cannot be stored. Added to BOTH blocks
 # in this file, per the merge-artefact note above.
 import app.models.launch_experience_models  # noqa: F401  (side effects)
+import app.models.launch_board_models  # noqa: F401  (launch_board_projects/events - Control Room portfolio)
 
 # The AdvisorFlow MASTER LEAD DATABASE (master_contacts / lead_occurrences) —
 # the platform's own record of every person who has ever entered any tenant,
@@ -556,3 +558,4 @@ import app.models.energy_models  # noqa: F401  (imported for side effects)
 import app.models.push_models  # noqa: F401  (push_subscriptions, push_events — web push)
 import app.models.idempotency_models  # noqa: F401  (idempotency_keys - database-level at-most-once)
 import app.models.conversation_models  # noqa: F401  (conversation_memory_items, conversation_states)
+import app.models.program_models  # noqa: F401  (outreach programs: location profiles, source records, responses, assets)

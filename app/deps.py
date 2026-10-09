@@ -466,6 +466,18 @@ def require_tenant_or_observer(request: Request = None,
         return user
     if user.organization_id is not None:
         return user
+    # A membership-only identity (organization_id NULL, e.g. the SCI workspace
+    # "manager") that SELECTED a workspace it holds a membership in. This is the
+    # same test require_tenant_user applies to the writes on the same screens;
+    # without it that person could save settings but not read the page.
+    # selected_workspace_id returns nothing for a workspace merely asserted.
+    if request is not None and db is not None:
+        try:
+            from app.services import workspace_access
+            if workspace_access.selected_workspace_id(user, db, request):
+                return user
+        except Exception:
+            pass
     _obs = None
     if request is not None:
         _obs = getattr(request.state, "executive_observation", None)
@@ -582,6 +594,22 @@ def require_admin(request: Request,
     from app.services.lead_scope import is_manager_here
     if not is_manager_here(user, db, request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
+def require_org_admin(request: Request,
+                      user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)) -> User:
+    """require_admin, minus the workspace "manager" role: the workspace's own
+    user administration and organization settings (integration credentials
+    included) stay with org_admin. A manager works the business; an admin
+    runs the workspace."""
+    from app.services.lead_scope import effective_role, is_manager_here
+    if not is_manager_here(user, db, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    if effective_role(user, db, request) == "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Workspace administration requires the org admin role")
     return user
 
 

@@ -157,10 +157,14 @@ def test_homepage_has_one_wholesale_path_and_keeps_the_sms_optin():
 
 
 def test_existing_sms_optin_page_is_unchanged_and_points_sellers_to_sell():
+    # The Universal SMS Consent Center moved the wording into the program
+    # registry; the general program's wording and source URL are unchanged.
     src = _read("sms-optin/index.php")
-    assert ("$consentText='By checking this box, I agree to receive SMS/text messages from EvoSys Pro "
-            "including appointment confirmations, reminders, and related service follow-ups.") in src
-    assert "'source_url'=>'https://evosyspro.live/sms-optin/'" in src
+    reg = _read("private/sms-programs.php")
+    assert ("'disclosure' => 'By checking this box, I agree to receive SMS/text messages from EvoSys Pro "
+            "including appointment confirmations, reminders, and related service follow-ups.") in reg
+    assert "'version' => '2026-09'" in reg
+    assert "$sourceUrl = 'https://evosyspro.live/sms-optin/'" in src
     assert 'href="/sell"' in src and "separate program" in src
 
 

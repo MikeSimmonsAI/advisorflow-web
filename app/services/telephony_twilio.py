@@ -171,18 +171,21 @@ def twiml_inbound(*, ring_numbers: Iterable[str], timeout: int, dial_action_url:
 
 def twiml_record_voicemail(*, greeting_text: Optional[str], greeting_recording_url: Optional[str],
                            recording_callback_url: str, finish_url: str,
-                           max_length: int = 120) -> str:
+                           max_length: int = 120,
+                           transcribe_callback_url: Optional[str] = None) -> str:
     """Greeting, then <Record>. The recording arrives on recording_callback_url."""
     r = VoiceResponse()
     if greeting_recording_url:
         r.play(greeting_recording_url)
     else:
         r.say(greeting_text or "Please leave a message after the tone.")
+    extra = ({"transcribe": True, "transcribe_callback": transcribe_callback_url}
+             if transcribe_callback_url else {})
     r.record(max_length=max_length, play_beep=True, timeout=5, trim="trim-silence",
              action=finish_url, method="POST",
              recording_status_callback=recording_callback_url,
              recording_status_callback_method="POST",
-             recording_status_callback_event="completed")
+             recording_status_callback_event="completed", **extra)
     r.say("We did not receive a recording. Goodbye.")
     r.hangup()
     return _xml(r)

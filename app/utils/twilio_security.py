@@ -38,6 +38,8 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException, Request
 
+from app.utils.twilio_signature import candidate_urls, compute_signature
+
 logger = logging.getLogger(__name__)
 
 # Platform-level Twilio auth token — used for org-level account validation.
@@ -46,57 +48,25 @@ _PLATFORM_TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 
 
 def _compute_signature(auth_token: str, url: str, params: dict) -> str:
-    """
-    Compute the expected Twilio signature for this request.
-    Algorithm: HMAC-SHA1(auth_token, url + sorted(k+v for k,v in params))
-    Output: base64-encoded digest.
-    """
-    # Sort params by key, concatenate key+value (no separator) then append to URL
-    sorted_params = "".join(f"{k}{v}" for k, v in sorted(params.items()))
-    s = url + sorted_params
-    mac = hmac.new(auth_token.encode("utf-8"), s.encode("utf-8"), hashlib.sha1)
-    return base64.b64encode(mac.digest()).decode("utf-8")
+    """Expected Twilio signature; the algorithm lives in twilio_signature (pure)."""
+    return compute_signature(auth_token, url, params)
 
 
 def _candidate_urls(request: Request) -> list:
     """Every URL string Twilio could plausibly have signed for this request.
 
-    Built only from values the SERVER controls — the proxy's X-Forwarded-Proto
-    and this service's own configured public origin. The request path is taken
-    from the request itself; the scheme and host are not trusted from it.
+    Built only from values the SERVER controls: the proxy's X-Forwarded-Proto
+    and this service's own configured public origin. The path comes from the
+    request; the scheme and host are not trusted from it.
     """
-    path = request.url.path
-    query = request.url.query
-    suffix = path + (("?" + query) if query else "")
-
-    seen, out = set(), []
-
-    def add(u):
-        if u and u not in seen:
-            seen.add(u)
-            out.append(u)
-
-    # 1. The proxy's own statement about the original scheme.
-    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
-    host = (request.headers.get("x-forwarded-host")
-            or request.headers.get("host") or "").split(",")[0].strip()
-    if proto and host:
-        add("%s://%s%s" % (proto, host, suffix))
-    # 2. https on the Host header, for proxies that forward no proto header.
-    if host:
-        add("https://%s%s" % (host, suffix))
-    # 3. The origin this service was configured with — the same one used to
-    #    build the callback URL handed to Twilio in the first place.
+    base = None
     try:
         from app.services.twilio_callbacks import public_api_base
         base = public_api_base()
-        if base:
-            add(base.rstrip("/") + suffix)
     except Exception:                                        # pragma: no cover
         pass
-    # 4. Whatever the app itself thinks, last — correct only without a proxy.
-    add(str(request.url))
-    return out
+    return candidate_urls(request.url.path, request.url.query, request.headers,
+                          base, str(request.url))
 
 
 def verify_signature_or_403(request: Request, auth_token: str,

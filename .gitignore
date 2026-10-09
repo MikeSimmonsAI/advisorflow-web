@@ -108,3 +108,6 @@ reconciliation_findings*.csv
 # Wholesale media written by MEDIA_STORAGE_BACKEND=local. Real
 # uploaded files; never part of the source tree.
 .local_media/
+
+# Control Room launch board local file adapter (LAUNCH_BOARD_BACKEND=file only)
+data/launch_board.json
