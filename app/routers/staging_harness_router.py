@@ -960,6 +960,7 @@ def set_test_phone(body: TestPhoneIn, db: Session = Depends(get_db), god: User =
 
 class SendSmsIn(BaseModel):
     again: bool = False
+    phone: Optional[str] = None      # pick a named test contact by phone; default: the seeded test contact
 
 
 @router.post("/send-test-sms")
@@ -974,6 +975,14 @@ def send_test_sms(body: SendSmsIn, db: Session = Depends(get_db), god: User = De
     from app.services import send_source as _ss, sms_service
     org = _org(db)
     lead = _test_lead(db, org)
+    if body.phone:
+        from app.services import wholesale_sms
+        e164 = wholesale_sms.normalize_e164(body.phone)
+        d = e164[2:] if e164 else "-"
+        lead = (db.query(Lead).filter(Lead.organization_id == org.id, Lead.is_test.is_(True),
+                                      Lead.phone.in_([e164 or "-", "1" + d, d])).first())
+        if lead is None:
+            raise HTTPException(status_code=404, detail="No TEST contact has that phone: POST /god/staging/sci/test-contact first.")
     if not lead.phone:
         raise HTTPException(status_code=409, detail="No designated test phone: POST /god/staging/sci/test-phone first.")
     prior = db.query(Message).filter(Message.lead_id == lead.id).count()
@@ -989,4 +998,58 @@ def send_test_sms(body: SendSmsIn, db: Session = Depends(get_db), god: User = De
     return {"sent": True, "twilio_status": getattr(msg, "twilio_status", None),
             "provider_sid": getattr(msg, "twilio_sid", None), "to_last4": (lead.phone or "")[-4:],
             "body": msg.body}
+
+
+class TestContactIn(BaseModel):
+    first_name: str
+    last_name: str
+    phone: str
+    location: str = TEST_LOCATION
+    apply: bool = False
+
+
+@router.post("/test-contact")
+def add_test_contact(body: TestContactIn, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """An ADDITIONAL named TEST contact at a location, for a phone Mike has
+    designated for a live test (e.g. SCI management seeing a text arrive).
+    Leaves every other contact untouched. Staging only; dry run unless
+    `apply`; idempotent per phone; refuses a phone owned by a non-test contact."""
+    _on()
+    _staging_only()
+    from app.services import wholesale_sms
+    org = _org(db)
+    e164 = wholesale_sms.normalize_e164(body.phone)
+    if not e164:
+        raise HTTPException(status_code=422, detail="Not a usable US mobile number.")
+    d = e164[2:]
+    prof = (db.query(LocationProfile).filter(LocationProfile.organization_id == org.id,
+                                             LocationProfile.official_name == body.location,
+                                             LocationProfile.is_review_bucket.is_(False)).first())
+    if prof is None:
+        raise HTTPException(status_code=404, detail="Unknown location.")
+    owner = db.query(Lead).filter(Lead.organization_id == org.id, Lead.phone.in_([e164, "1" + d, d])).first()
+    if owner is not None and not owner.is_test:
+        raise HTTPException(status_code=409, detail="That number belongs to a real contact in this workspace.")
+    src = "TEST-" + d
+    plan = {"contact": "%s %s" % (body.first_name, body.last_name), "location": prof.official_name,
+            "phone_last4": d[-4:], "action": "unchanged" if owner is not None else "create"}
+    if not body.apply or owner is not None:
+        return {"dry_run": not body.apply, "plan": plan}
+    lead = Lead(organization_id=org.id, first_name=body.first_name.strip(), last_name=body.last_name.strip(),
+                phone="1" + d, status="new", is_test=True, assigned_to_id=god.id,
+                test_note="STAGING live-test contact designated by Mike")
+    db.add(lead)
+    db.flush()
+    raw = {"Lead ID": src, "First Name": lead.first_name, "Last Name": lead.last_name,
+           "Location Friendly Name": prof.official_name}
+    rec = ProgramSourceRecord(organization_id=org.id, source_lead_id=src, row_number=0, raw_json=json.dumps(raw),
+                              first_name=lead.first_name, last_name=lead.last_name, source_status="Qualified",
+                              source_campaign="Direct Mail> Veteran> Veteran Planning Guide",
+                              source_location_name=prof.official_name)
+    rec.location_id, rec.location_status = prof.location_id, "mapped"
+    rec.campaign_family, rec.link_status, rec.contact_master_key = "veteran_planning_guide", "unique", src
+    rec.lead_id = lead.id
+    db.add(rec)
+    db.commit()
+    return {"dry_run": False, "plan": plan, "lead_id": lead.id}
 

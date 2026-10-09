@@ -481,3 +481,23 @@ def test_send_test_sms_reaches_only_the_test_contact_through_every_gate(client, 
         kw = fake.messages.create.call_args.kwargs
         assert kw["from_"] == TF and kw["to"].endswith("2145550162")
         assert client.post("/god/staging/sci/send-test-sms", headers=h, json={}).status_code == 409
+
+
+def test_additional_test_contact_and_targeted_test_sms(client, db_session, monkeypatch):
+    h, org_id = _seed(client, db_session, monkeypatch)
+    body = {"first_name": "Michael", "last_name": "Test", "phone": "2145550163",
+            "location": "Eastern Gate Memorial Gardens"}
+    assert client.post("/god/staging/sci/test-contact", headers=h, json=body).json()["dry_run"] is True
+    made = client.post("/god/staging/sci/test-contact", headers=h, json=dict(body, apply=True)).json()
+    assert made["plan"]["action"] == "create"
+    assert client.post("/god/staging/sci/test-contact", headers=h, json=dict(body, apply=True)).json()["plan"]["action"] == "unchanged"
+    sms_programs.reconcile_existing(db_session, org_id, attested_by="Mike", evidence_reference="designated",
+                                    apply=True, evidence_phones=["2145550163"])
+    monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
+    fake = MagicMock()
+    fake.messages.create.return_value = MagicMock(sid="SMm", status="queued", error_code=None, error_message=None)
+    with patch.object(sms_programs, "sci_sender", return_value=(fake, TF)):
+        r = client.post("/god/staging/sci/send-test-sms", headers=h, json={"phone": "2145550163"})
+    assert r.status_code == 200, r.text
+    assert fake.messages.create.call_args.kwargs["to"].endswith("2145550163")
+    assert "Hi Michael" in r.json()["body"] and "Eastern Gate Memorial Gardens" in r.json()["body"]
