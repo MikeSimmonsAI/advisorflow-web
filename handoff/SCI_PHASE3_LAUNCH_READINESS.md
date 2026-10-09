@@ -184,3 +184,28 @@ The test used Mike's phone only (469-553-7417, the designated test phone on the 
 - messaging `https://advisorflow-backend.onrender.com/sms/webhook/inbound` (POST).
 
 **Still on.** `SCI_SMS_SEND_ENABLED=on` remains set on STAGING. Only the test phone has consent. Remove the variable in Render to switch staging outbound off.
+
+## 10. LIVE TEST: 3 message types × 2 phones (2026-10-09, about 12:10-13:05 CT)
+
+Setup:
+- Staging only. 844-917-2171 webhooks were pointed at staging for the test.
+- Kerry Allan is the representative for every cemetery.
+- Each round moved the phone's TEST contact to a different cemetery and campaign, then sent that campaign's real approved text.
+
+| Phone | Round | Campaign / cemetery | Text | Reply | Call → voicemail + task | Result |
+|---|---|---|---|---|---|---|
+| Mike 469-553-7417 | 1 | Veterans | delivered | "Yes please let scheduled something" | 17:16Z | PASS |
+| Mike 469-553-7417 | 2 | Seminar | delivered | "Yes let's go" | 17:33Z | PASS |
+| Mike 469-553-7417 | 3 | Web lead | delivered | "Right now 😂" | 17:36Z | PASS |
+| Michael Schlueter 540-392-7776 | 1 | Veterans / Eastern Gate Memorial Gardens | delivered | "Got it vet" | 17:27Z | PASS |
+| Michael Schlueter 540-392-7776 | 2 | Seminar / Striffler-Hamby Mortuary | delivered | "Test" (18:02Z) | not placed | reply PASS; call not run |
+| Michael Schlueter 540-392-7776 | 3 | Web lead / Eastern Gate Memorial Funeral Home | not sent | none | none | not run |
+
+Michael's Round 2 call and his Round 3 were not run: the participant stopped, and Mike closed the test. This is not counted as a failure. Every step that ran passed.
+
+After the test:
+- The 844 webhooks were restored through `POST /god/sms-consent/sci/telephony/restore-webhooks`. This god-only endpoint takes no input and can only set the two originals back:
+  - SMS: advisorflow-backend `/sms/webhook/inbound`
+  - Voice: `demo.twilio.com/welcome/voice/`
+- The restore was verified with `GET /god/sms-consent/sci/telephony?live=true`.
+- `SCI_SMS_SEND_ENABLED=on` is still set on staging. Mike can remove it in Render.

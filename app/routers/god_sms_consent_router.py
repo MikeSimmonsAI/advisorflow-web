@@ -172,6 +172,43 @@ def _twilio_number_readout(tf: str, expected: dict) -> dict:
         return {"checked": False, "reason": "Twilio read failed: %s" % type(exc).__name__}
 
 
+# The 844 line's webhooks as they were before any SCI live test. Fixed values:
+# this endpoint takes no input and can only put these two back.
+ORIGINAL_TOLL_FREE_WEBHOOKS = {
+    "sms_url": "https://advisorflow-backend.onrender.com/sms/webhook/inbound",
+    "sms_method": "POST",
+    "voice_url": "https://demo.twilio.com/welcome/voice/",
+    "voice_method": "POST",
+}
+
+
+@router.post("/sci/telephony/restore-webhooks")
+def sci_restore_webhooks(_god: User = Depends(require_god)):
+    """Put the toll-free line's SMS and Voice webhooks back to their pre-test
+    originals (ORIGINAL_TOLL_FREE_WEBHOOKS). Touches nothing else on the number."""
+    import os
+    from app.services.programs import regional_pools as rp
+    sid = (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip()
+    token = (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip()
+    if not (sid and token):
+        raise HTTPException(503, "platform Twilio account not configured on this service")
+    tf = rp.TOLL_FREE
+    try:
+        from twilio.rest import Client
+        c = Client(sid, token)
+        nums = c.incoming_phone_numbers.list(phone_number=tf, limit=1)
+        if not nums:
+            raise HTTPException(404, "toll-free number not found on the platform Twilio account")
+        n = nums[0].update(**ORIGINAL_TOLL_FREE_WEBHOOKS)
+    except HTTPException:
+        raise
+    except Exception as exc:                            # noqa: BLE001
+        raise HTTPException(502, "Twilio update failed: %s" % type(exc).__name__)
+    return {"restored": True, "number": tf,
+            "sms_url": n.sms_url, "sms_method": n.sms_method,
+            "voice_url": n.voice_url, "voice_method": n.voice_method}
+
+
 # ── SCI locations audit (read-only) ─────────────────────────────────────────
 
 @router.get("/sci/locations")
