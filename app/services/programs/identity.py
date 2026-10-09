@@ -10,9 +10,12 @@ Organizations without an OutreachProgram are untouched: every entry point
 here returns None for them after one indexed lookup.
 """
 import json
+import logging
 from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
+
+log = logging.getLogger(__name__)
 
 from app.models.models import Lead
 from app.models.program_models import (
@@ -157,7 +160,7 @@ def context_for(db: Session, lead: Lead, channel: str = "sms",
             # content policy strips links / phone numbers otherwise.
             "location_phone": prof.facility_phone or "",
             "booking_link": prof.appointment_link or "",
-            "planning_guide_link": planning_guide_link(prof),
+            "planning_guide_link": planning_guide_link(prof, db=db, family=(rec.campaign_family if rec else None)),
         },
     }
 
@@ -174,11 +177,40 @@ def brand_settings(prof) -> Dict:
         return {}
 
 
-def planning_guide_link(prof) -> str:
-    """The cemetery's own planning-guide link (brand_settings.planning_guide_link)
-    or the shared EvoSys Pro guide."""
-    return (str(brand_settings(prof).get("planning_guide_link") or "").strip()
-            or PLANNING_GUIDE_DEFAULT)
+def planning_guide_link(prof, db: Optional[Session] = None, family: Optional[str] = None) -> str:
+    """The planning guide a family is sent to, best first:
+
+    1. the cemetery's own link (brand_settings.planning_guide_link);
+    2. the HOSTED guide the program already sends by email - the active flyer
+       for the contact's campaign family (else the Veteran Planning Guide) at
+       this location, served by the platform at /program-assets/<token>;
+    3. the shared EvoSys Pro page https://evosyspro.live/planning-guide.
+    """
+    own = str(brand_settings(prof).get("planning_guide_link") or "").strip()
+    if own:
+        return own
+    if db is not None:
+        hosted = hosted_planning_guide(db, prof, family)
+        if hosted:
+            return hosted
+    return PLANNING_GUIDE_DEFAULT
+
+
+def hosted_planning_guide(db: Session, prof, family: Optional[str] = None) -> Optional[str]:
+    try:
+        from app.models.program_models import CampaignFamily
+        from app.services.programs.email_touches import flyer_for, public_asset_url
+        for key in [k for k in (family, "veteran_planning_guide") if k]:
+            fam = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == prof.organization_id,
+                                                   CampaignFamily.key == key).first())
+            if fam is None:
+                continue
+            asset = flyer_for(db, prof.organization_id, fam, prof.location_id)
+            if asset is not None and getattr(asset, "public_token", None):
+                return public_asset_url(asset.public_token)
+    except Exception:                                    # noqa: BLE001
+        log.exception("hosted planning guide lookup failed for %s", getattr(prof, "location_id", "?"))
+    return None
 
 
 def render(template: str, fields: Dict[str, str]) -> str:

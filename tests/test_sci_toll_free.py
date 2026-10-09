@@ -320,3 +320,66 @@ def test_template_fields_and_capability_gating(client, db_session, monkeypatch):
     assert "https://book.example.com/gardens" in out and "555-0177" in out
     # a non-SCI lead keeps the CO3YNIF rule
     assert sms_programs.content_allowance(db_session, Lead(organization_id="other")) == {}
+
+
+# ── 6. Phase 2: staging verification endpoints ──────────────────────────────
+
+def test_staging_toll_free_round_trip_passes_end_to_end(client, db_session, monkeypatch):
+    h, org_id = _seed(client, db_session, monkeypatch)
+    with patch("twilio.rest.Client") as tw:
+        out = client.post("/god/staging/sci/simulate/toll_free_round_trip", headers=h).json()
+        tw.assert_not_called()
+    assert out["pass"] is True, out
+    assert out["sent"] == 0
+
+
+def test_telephony_readout_reports_without_secrets(client, db_session, monkeypatch):
+    h, org_id = _seed(client, db_session, monkeypatch)
+    out = client.get("/god/sms-consent/sci/telephony", headers=h).json()
+    assert out["env"]["TWILIO_AUTH_TOKEN"] is True and PLATFORM_TOKEN not in json.dumps(out)
+    assert out["number_row"]["route_mode"] == "voicemail_only" and out["number_row"]["organization_is_sci"]
+    assert out["sender_approved"] is False and out["sci_send_enabled"] is False
+    assert out["expected_webhooks"]["voice_url"].endswith("/voice/inbound")
+    # live read uses GET only; mocked here
+    fake = MagicMock()
+    fake.incoming_phone_numbers.list.return_value = [MagicMock(
+        sid="PNx", sms_url="https://sci-staging-backend.onrender.com/sms/webhook/inbound", sms_method="POST",
+        voice_url="https://elsewhere.example/voice", voice_method="POST", messaging_service_sid=None)]
+    fake.messaging.v1.tollfree_verifications.list.return_value = [MagicMock(
+        status="TWILIO_APPROVED", use_case_categories=["ACCOUNT_NOTIFICATIONS"], message_volume="1,000",
+        date_updated="2026-09-01")]
+    with patch("twilio.rest.Client", return_value=fake):
+        live = client.get("/god/sms-consent/sci/telephony?live=true", headers=h).json()["twilio_live"]
+    assert live["sms_webhook_matches"] is True and live["voice_webhook_matches"] is False
+    assert live["toll_free_verification"][0]["status"] == "TWILIO_APPROVED"
+    assert not fake.incoming_phone_numbers.create.called and not fake.incoming_phone_numbers.return_value.update.called
+
+
+def test_locations_audit_lists_every_location_and_gaps(client, db_session, monkeypatch):
+    h, org_id = _seed(client, db_session, monkeypatch)
+    out = client.get("/god/sms-consent/sci/locations", headers=h).json()
+    assert out["totals"]["locations"] == len(out["locations"]) >= 1
+    gardens = next(r for r in out["locations"] if r["location"] == "Eastern Gate Memorial Gardens")
+    assert gardens["greeting"] == "default" and "Eastern Gate Memorial Gardens" in gardens["greeting_text"]
+    assert gardens["planning_guide_link"].startswith("https://")
+
+
+def test_planning_guide_prefers_the_hosted_guide(client, db_session, monkeypatch):
+    import uuid
+    from app.models.program_models import LocationProfile, ProgramAsset
+    from app.services.programs import identity
+    h, org_id = _seed(client, db_session, monkeypatch)
+    prof = (db_session.query(LocationProfile).filter(LocationProfile.organization_id == org_id,
+                                                     LocationProfile.official_name == "Eastern Gate Memorial Gardens").one())
+    assert identity.planning_guide_link(prof, db=db_session) == identity.PLANNING_GUIDE_DEFAULT
+    tok = uuid.uuid4().hex
+    db_session.add(ProgramAsset(organization_id=org_id, kind="flyer", title="Veteran Planning Guide",
+                                campaign_family="veteran_planning_guide", category="veteran_planning_guide",
+                                location_id=None, public_token=tok, is_active=True, version=1,
+                                filename="guide.pdf", content_type="application/pdf", data=b"%PDF-1.4"))
+    db_session.commit()
+    link = identity.planning_guide_link(prof, db=db_session)
+    assert link.endswith("/program-assets/%s" % tok) and link.startswith("https://")
+    prof.brand_settings = json.dumps({"planning_guide_link": "https://example.org/gardens-guide"})
+    db_session.commit()
+    assert identity.planning_guide_link(prof, db=db_session) == "https://example.org/gardens-guide"

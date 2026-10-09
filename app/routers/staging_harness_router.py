@@ -577,8 +577,10 @@ def simulate(case: str, db: Session = Depends(get_db), god: User = Depends(requi
         return _sms_round_trip(db, org, prog, prof)
     if case == "pool_round_trip":
         return _pool_round_trip(db, org, prof)
+    if case == "toll_free_round_trip":
+        return _toll_free_round_trip(db, org, prof)
     raise HTTPException(status_code=404, detail="Unknown case. Cases: sms_round_trip, pool_round_trip, normal, active, opt_out, wrong_person, "
-                        "unknown_sender, wrong_alias, duplicate_inbound, duplicate_outbound, missing_location, "
+                        "toll_free_round_trip, unknown_sender, wrong_alias, duplicate_inbound, duplicate_outbound, missing_location, "
                         "held_contact, flyer_missing, resend_temporary_failure, mailbox_temporary_failure, "
                         "bounce, sla_escalation")
 
@@ -836,4 +838,89 @@ def set_toll_free(body: TollFreeIn, db: Session = Depends(get_db), god: User = D
 def _route_mode(rec) -> str:
     from app.services import number_resolution as NR
     return NR.parse_route(rec.default_inbound_route)["mode"]
+
+
+def _toll_free_round_trip(db, org, prof):
+    """The SCI toll-free line end to end, through the REAL handlers, without a
+    carrier: inbound SMS (known contact, unknown sender, STOP) via
+    process_inbound_sms with the toll-free pool id; inbound calls via
+    telephony_service.handle_inbound with a platform-verified request; a
+    voicemail via store_voicemail. Nothing is sent and Twilio is never called
+    (staff alerts are recorded, not delivered)."""
+    import re as _re
+    from app.models.models import Notification, Reply
+    from app.models.telephony_models import InboundCallLog, PhoneNumber, Voicemail
+    from app.models.work_models import LeadTask
+    from app.routers.sms_router import process_inbound_sms
+    from app.services import telephony_service as TS
+    from app.services.programs import regional_pools as rp
+    from app.services.telephony_webhook_guard import VerifiedVoiceRequest
+    from app.services.compliance_service import is_phone_suppressed
+    tf = rp.TOLL_FREE
+    num = db.query(PhoneNumber).filter(PhoneNumber.e164 == tf, PhoneNumber.organization_id == org.id).first()
+    if num is None:
+        raise HTTPException(status_code=409, detail="Record the toll-free line first: POST /god/staging/sci/toll-free")
+    home = prof["Eastern Gate Memorial Funeral Home"]
+    lead = db.query(Lead).filter(Lead.organization_id == org.id, Lead.email == "sim.campus@example.com").one()
+    tag = uuid.uuid4().hex[:8]
+    stranger, stopper = "+12055550966", "+12055550955"
+    out = {"toll_free": tf, "sent": 0}
+    before = db.query(Reply).filter(Reply.lead_id == lead.id).count()
+    with mock.patch("app.services.programs.responses._deliver_staff_alert",
+                    side_effect=lambda *a, **k: (False, "simulation - not sent")):
+        known = process_inbound_sms(db, org_id=org.id, advisor=None, From="+12055550101",
+                                    Body="Can someone call me about the planning guide?", MessageSid="SMtf%s" % tag,
+                                    called_number=tf, called_location_id=None,
+                                    called_pool_id=rp.TOLL_FREE_POOL["pool_id"])
+        unknown = process_inbound_sms(db, org_id=org.id, advisor=None, From=stranger, Body="Who is this?",
+                                      MessageSid="SMtf%su" % tag, called_number=tf, called_location_id=None,
+                                      called_pool_id=rp.TOLL_FREE_POOL["pool_id"])
+        stop = process_inbound_sms(db, org_id=org.id, advisor=None, From=stopper, Body="STOP",
+                                   MessageSid="SMtf%ss" % tag, called_number=tf, called_location_id=None,
+                                   called_pool_id=rp.TOLL_FREE_POOL["pool_id"])
+    resp = (db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id)
+            .order_by(ProgramResponse.created_at.desc()).first())
+    u = (db.query(ProgramUnmatchedReply).filter(ProgramUnmatchedReply.organization_id == org.id,
+                                                ProgramUnmatchedReply.from_address == stranger)
+         .order_by(ProgramUnmatchedReply.created_at.desc()).first())
+    out["sms"] = {
+        "known": {"result": known, "reply_attached": db.query(Reply).filter(Reply.lead_id == lead.id).count() - before,
+                  "cemetery_is_contacts_own": bool(resp and resp.location_id == home.location_id)},
+        "unknown": {"result": unknown, "queued_for_review": u is not None and u.location_id is None},
+        "stop": {"result": stop, "suppressed": bool(is_phone_suppressed(db, org.id, stopper))}}
+
+    def call(frm, sid):
+        v = VerifiedVoiceRequest({"To": tf, "From": frm, "CallSid": sid}, None, org.id, True)
+        xml = TS.handle_inbound(db, v)
+        said = " ".join(_re.findall(r"<Say[^>]*>(.*?)</Say>", xml))
+        return xml, said
+    xml_k, said_k = call("+12055550101", "CAtf%sk" % tag)
+    xml_u, said_u = call(stranger, "CAtf%su" % tag)
+    out["voice"] = {
+        "known": {"voicemail_only": "<Record" in xml_k and "<Dial" not in xml_k and "<Connect" not in xml_k,
+                  "greeting_names_contacts_cemetery": home.official_name in said_k, "greeting": said_k[:300]},
+        "unknown": {"voicemail_only": "<Record" in xml_u and "<Dial" not in xml_u,
+                    "greeting_is_neutral": not any(p.official_name in said_u for p in prof.values()),
+                    "greeting": said_u[:300]}}
+    row = db.query(InboundCallLog).filter(InboundCallLog.call_sid == "CAtf%sk" % tag).one()
+    rec_sid = "RE" + uuid.uuid4().hex
+    vm = TS.store_voicemail(db, row, recording_sid=rec_sid,
+                            recording_url="https://api.twilio.com/simulated/%s" % rec_sid,
+                            duration="9", call_sid=row.call_sid)
+    task = db.query(LeadTask).filter(LeadTask.id == vm.task_id).first()
+    notes = (db.query(Notification).filter(Notification.lead_id == lead.id,
+                                           Notification.message.like("Voicemail from%")).count())
+    out["voicemail"] = {"saved_to_contact": vm.lead_id == lead.id, "recording_stored": bool(vm.recording_url),
+                        "callback_task": bool(task), "task_assignee_is_contacts_rep": bool(task) and
+                        task.assigned_to_id == lead.assigned_to_id,
+                        "rep_notified": notes > 0}
+    checks = [out["sms"]["known"]["reply_attached"] == 1, out["sms"]["known"]["cemetery_is_contacts_own"],
+              out["sms"]["unknown"]["queued_for_review"], out["sms"]["stop"]["suppressed"],
+              out["voice"]["known"]["voicemail_only"], out["voice"]["known"]["greeting_names_contacts_cemetery"],
+              out["voice"]["unknown"]["voicemail_only"], out["voice"]["unknown"]["greeting_is_neutral"],
+              out["voicemail"]["saved_to_contact"], out["voicemail"]["callback_task"],
+              out["voicemail"]["rep_notified"]]
+    out["pass"] = all(checks)
+    out["passed_checks"] = "%d/%d" % (sum(1 for c in checks if c), len(checks))
+    return out
 
