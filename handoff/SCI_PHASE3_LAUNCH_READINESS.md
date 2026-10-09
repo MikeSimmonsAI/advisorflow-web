@@ -167,3 +167,20 @@ Recommendation:
 5. Approve the outbound single test text to P1 (optional, section 4 step 10).
 6. Production GO: deploy `sci-program`; create SCI in production; Kerry's account; point the 844 webhooks at production.
 7. First-contact GO: turn on `SCI_SMS_SEND_ENABLED` and one campaign family, with a small batch.
+
+## 9. LIVE TEST RESULT (2026-10-09, 10:55-11:17 CT): ALL PASS
+
+The test used Mike's phone only (469-553-7417, the designated test phone on the SCI TEST contact at Eastern Gate Memorial Gardens). Staging was on build `7e56afe` with the EvoSys Pro Twilio credential set and `SCI_SMS_SEND_ENABLED=on`. Consent was recorded for the test phone only.
+
+| Test | Result |
+|---|---|
+| Outbound SCI text from 844-917-2171 to the test phone (all gates applied) | PASS: delivered 10:55, signed "Kerry Allan, Eastern Gate Memorial Gardens", with the STOP line |
+| Inbound reply | PASS: on the test contact's conversation, at Eastern Gate Memorial Gardens; staff alert created |
+| Call | PASS: voicemail only, no ring; Mike confirmed the Eastern Gate Memorial Gardens greeting was correct |
+| Voicemail | PASS: recording saved to the test contact; callback task created; in-app notification created |
+
+**Webhooks.** Pointed at staging at 10:55. RESTORED at 11:17 and verified through the Twilio API:
+- voice `https://demo.twilio.com/welcome/voice/` (POST);
+- messaging `https://advisorflow-backend.onrender.com/sms/webhook/inbound` (POST).
+
+**Still on.** `SCI_SMS_SEND_ENABLED=on` remains set on STAGING. Only the test phone has consent. Remove the variable in Render to switch staging outbound off.
