@@ -166,6 +166,22 @@ def context_for(db: Session, lead: Lead, channel: str = "sms",
 
 
 PLANNING_GUIDE_DEFAULT = "https://evosyspro.live/planning-guide"
+PLANNING_GUIDE_ENV = "SCI_PLANNING_GUIDE_URL"
+
+
+def default_planning_guide() -> str:
+    """SCI_PLANNING_GUIDE_URL when set; else the guide THIS platform serves at
+    /planning-guide (same base as the hosted flyers); else the website page."""
+    import os
+    explicit = (os.environ.get(PLANNING_GUIDE_ENV) or "").strip()
+    if explicit:
+        return explicit
+    try:
+        from app.services.twilio_callbacks import public_api_base
+        base = (os.environ.get("PROGRAM_ASSET_BASE_URL") or "").strip().rstrip("/") or public_api_base()
+    except Exception:                                    # noqa: BLE001
+        base = ""
+    return (base + "/planning-guide") if base else PLANNING_GUIDE_DEFAULT
 
 
 def brand_settings(prof) -> Dict:
@@ -184,7 +200,8 @@ def planning_guide_link(prof, db: Optional[Session] = None, family: Optional[str
     2. the HOSTED guide the program already sends by email - the active flyer
        for the contact's campaign family (else the Veteran Planning Guide) at
        this location, served by the platform at /program-assets/<token>;
-    3. the shared EvoSys Pro page https://evosyspro.live/planning-guide.
+    3. the public guide (default_planning_guide): SCI_PLANNING_GUIDE_URL, else the
+       platform's own /planning-guide page, else evosyspro.live/planning-guide.
     """
     own = str(brand_settings(prof).get("planning_guide_link") or "").strip()
     if own:
@@ -193,7 +210,7 @@ def planning_guide_link(prof, db: Optional[Session] = None, family: Optional[str
         hosted = hosted_planning_guide(db, prof, family)
         if hosted:
             return hosted
-    return PLANNING_GUIDE_DEFAULT
+    return default_planning_guide()
 
 
 def hosted_planning_guide(db: Session, prof, family: Optional[str] = None) -> Optional[str]:

@@ -175,8 +175,13 @@ def notify_voicemail(db: Session, vm, lead, assignee_id: Optional[str]) -> Optio
         prog = identity.program_for_org(db, vm.organization_id)
         if prog is None:
             return None
-        uid = assignee_id or prog.primary_contact_user_id
-        if not uid:
+        uids = [assignee_id or prog.primary_contact_user_id]
+        if not uids[0]:
+            # Nobody assigned and no program primary contact: the organization's
+            # admins, so a voicemail never waits unseen.
+            from app.services.programs.responses import _org_admin_users
+            uids = [u.id for u in _org_admin_users(db, vm.organization_id)]
+        if not uids:
             return None
         where = None
         if lead is not None:
@@ -188,10 +193,11 @@ def notify_voicemail(db: Session, vm, lead, assignee_id: Optional[str]) -> Optio
         msg = ("Voicemail from %s%s on %s - %s" % (
             name, " (%s)" % where if where else "", vm.to_e164 or "the toll-free line",
             "review only, do not call back (Do Not Contact)" if no_callback else "please call back"))
-        db.add(Notification(user_id=uid, lead_id=getattr(lead, "id", None),
-                            type=NotificationType.REPLY_RECEIVED, message=msg[:500],
-                            link=("/leads/%s" % lead.id) if lead is not None else "/program?tab=responses"))
-        return uid
+        for uid in uids:
+            db.add(Notification(user_id=uid, lead_id=getattr(lead, "id", None),
+                                type=NotificationType.REPLY_RECEIVED, message=msg[:500],
+                                link=("/leads/%s" % lead.id) if lead is not None else "/program?tab=responses"))
+        return uids[0]
     except Exception:                                    # noqa: BLE001
         log.exception("program voicemail notification failed for %s", getattr(vm, "id", "?"))
         return None

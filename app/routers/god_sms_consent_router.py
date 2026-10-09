@@ -202,7 +202,7 @@ def sci_locations(db: Session = Depends(get_db), _god: User = Depends(require_go
         bs = identity.brand_settings(p)
         pg = identity.planning_guide_link(p, db=db)
         pg_source = ("own" if bs.get("planning_guide_link") else
-                     "default" if pg == identity.PLANNING_GUIDE_DEFAULT else "hosted_flyer")
+                     "public_guide" if pg == identity.default_planning_guide() else "hosted_flyer")
         digits = re.sub(r"\D", "", p.facility_phone or "")
         phone_ok = len(digits) in (10, 11)
         link_ok = (p.appointment_link or "").startswith("https://")
@@ -212,8 +212,8 @@ def sci_locations(db: Session = Depends(get_db), _god: User = Depends(require_go
             issues.append("no local phone")
         if not link_ok:
             issues.append("no https booking link")
-        if pg_source == "default":
-            issues.append("planning guide falls back to evosyspro.live/planning-guide")
+        if pg_source == "public_guide":
+            issues.append("no cemetery-specific planning guide (uses the public guide)")
         if not greeting_custom:
             issues.append("default greeting (names the cemetery)")
         if lead_ids and assigned < len(lead_ids) and rep_user is None:
@@ -233,7 +233,8 @@ def sci_locations(db: Session = Depends(get_db), _god: User = Depends(require_go
               "with_local_phone": sum(1 for r in rows if "no local phone" not in r["issues"]),
               "with_booking_link": sum(1 for r in rows if "no https booking link" not in r["issues"]),
               "custom_greeting": sum(1 for r in rows if r["greeting"] == "custom"),
-              "planning_guide_hosted_or_own": sum(1 for r in rows if r["planning_guide_source"] != "default"),
+              "planning_guide_hosted_or_own": sum(1 for r in rows if r["planning_guide_source"] != "public_guide"),
+              "public_planning_guide": identity.default_planning_guide(),
               "contacts": sum(r["contacts"] for r in rows),
               "contacts_with_rep": sum(r["contacts_with_rep"] for r in rows),
               "program_primary_contact": rep_user.email if rep_user else None}

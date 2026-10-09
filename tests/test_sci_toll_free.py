@@ -309,7 +309,8 @@ def test_template_fields_and_capability_gating(client, db_session, monkeypatch):
     db_session.commit()
     f = identity.context_for(db_session, lead)["fields"]
     assert f["location_phone"] == "(205) 555-0177" and f["booking_link"] == "https://book.example.com/gardens"
-    assert f["planning_guide_link"] == "https://evosyspro.live/planning-guide"
+    assert f["planning_guide_link"] == identity.default_planning_guide() \
+        == "https://sci-staging-backend.onrender.com/planning-guide"
     tpl = identity.render("Book: {booking_link} Guide: {planning_guide_link} Call {location_phone}.", f)
     # toll-free not confirmed verified: links and phone numbers stripped
     out = enforce_sms_content_policy(tpl, **sms_programs.content_allowance(db_session, lead))
@@ -371,7 +372,7 @@ def test_planning_guide_prefers_the_hosted_guide(client, db_session, monkeypatch
     h, org_id = _seed(client, db_session, monkeypatch)
     prof = (db_session.query(LocationProfile).filter(LocationProfile.organization_id == org_id,
                                                      LocationProfile.official_name == "Eastern Gate Memorial Gardens").one())
-    assert identity.planning_guide_link(prof, db=db_session) == identity.PLANNING_GUIDE_DEFAULT
+    assert identity.planning_guide_link(prof, db=db_session) == identity.default_planning_guide()
     tok = uuid.uuid4().hex
     db_session.add(ProgramAsset(organization_id=org_id, kind="flyer", title="Veteran Planning Guide",
                                 campaign_family="veteran_planning_guide", category="veteran_planning_guide",
@@ -383,3 +384,34 @@ def test_planning_guide_prefers_the_hosted_guide(client, db_session, monkeypatch
     prof.brand_settings = json.dumps({"planning_guide_link": "https://example.org/gardens-guide"})
     db_session.commit()
     assert identity.planning_guide_link(prof, db=db_session) == "https://example.org/gardens-guide"
+
+
+def test_public_planning_guide_page_is_served_without_login(client, monkeypatch):
+    r = client.get("/planning-guide")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    assert "Your Pre-Planning Guide" in r.text and "<script" not in r.text.lower()
+    assert "default-src 'none'" in r.headers.get("content-security-policy", "")
+    monkeypatch.setenv("SCI_PLANNING_GUIDE_URL", "https://evosyspro.live/planning-guide")
+    from app.services.programs import identity
+    assert identity.default_planning_guide() == "https://evosyspro.live/planning-guide"
+
+
+def test_voicemail_notifies_admins_when_no_rep_or_primary_contact(client, db_session, monkeypatch, twilio_webhook):
+    from app.models.models import User
+    _mount()
+    h, org_id = _seed(client, db_session, monkeypatch)
+    lead = _lead(db_session, org_id, SIM_ACTIVE)
+    lead.assigned_to_id = None
+    admin = User(organization_id=org_id, email="sci-admin@example.com", full_name="SCI Admin",
+                 password_hash="x", role="org_admin", is_active=True, must_change_password=False)
+    db_session.add(admin)
+    db_session.commit()
+    _call(twilio_webhook, SIM_ACTIVE, "CAtf9")
+    row = db_session.query(InboundCallLog).filter_by(call_sid="CAtf9").one()
+    rec = _re(9)
+    twilio_webhook("/voice/inbound/voicemail-recording?log_id=%s" % row.id,
+                   {"CallSid": "CAtf9", "RecordingSid": rec, "RecordingStatus": "completed",
+                    "RecordingUrl": "https://api.twilio.com/x/%s" % rec, "RecordingDuration": "5"},
+                   account_sid=PLATFORM_SID, auth_token=PLATFORM_TOKEN)
+    assert db_session.query(Notification).filter(Notification.user_id == admin.id,
+                                                 Notification.message.like("Voicemail from%")).count() >= 1

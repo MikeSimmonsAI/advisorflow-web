@@ -1420,6 +1420,16 @@ def preview_asset(asset_id: str, db: Session = Depends(get_db),
     return Response(content=a.data, media_type=a.content_type, headers=headers)
 
 
+@public_router.get("/planning-guide")
+def planning_guide_page():
+    """The public pre-planning guide SCI texts link to. No auth, no script, no
+    tracking; served by the platform so the link works on every deployment."""
+    from app.services.programs.planning_guide_page import HTML
+    return Response(content=HTML, media_type="text/html; charset=utf-8", headers={
+        "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"})
+
+
 @public_router.get("/program-assets/{token}")
 def hosted_asset(token: str, db: Session = Depends(get_db)):
     """The hosted link a family opens. Only an ACTIVE version is served."""
