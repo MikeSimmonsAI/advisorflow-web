@@ -317,6 +317,12 @@ def apply_sms_signoff(db: Session, lead: Lead, body: str) -> str:
     text = (body or "").rstrip()
     if signoff in text:
         return body
+    # The message already introduces the person AND the location ("this is
+    # Kerry Allan with <Location>"): a trailing sign-off would only repeat it.
+    prof = ctx.get("profile")
+    person = (ctx["program"].primary_contact_name or "").strip()
+    if prof is not None and prof.official_name in text and (not person or person in text):
+        return body
     # The sign-off goes BEFORE the opt-out line, which stays last.
     from app.services.sms_content_policy import REQUIRED_OPT_OUT
     if text.endswith(REQUIRED_OPT_OUT):

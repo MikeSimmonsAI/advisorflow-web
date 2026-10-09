@@ -961,6 +961,7 @@ def set_test_phone(body: TestPhoneIn, db: Session = Depends(get_db), god: User =
 class SendSmsIn(BaseModel):
     again: bool = False
     phone: Optional[str] = None      # pick a named test contact by phone; default: the seeded test contact
+    use_campaign_text: bool = False  # send the contact's REAL campaign SMS (its family's template)
 
 
 @router.post("/send-test-sms")
@@ -990,6 +991,17 @@ def send_test_sms(body: SendSmsIn, db: Session = Depends(get_db), god: User = De
         raise HTTPException(status_code=409, detail="A test text was already sent to the test contact (%d)." % prior)
     template = ("Hi {first_name}, this is a test text from the SCI line via EvoSys Pro. "
                 "Reply to this message to test replies. Reply STOP to opt out.")
+    if body.use_campaign_text:
+        from app.models.program_models import CampaignFamily
+        from app.services.programs import identity
+        ctx = identity.context_for(db, lead, channel="sms")
+        rec = identity.source_record_for_lead(db, lead)
+        fam = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == org.id,
+                                               CampaignFamily.key == getattr(rec, "campaign_family", None)).first()
+               if rec is not None else None)
+        if not ctx or not ctx.get("ok") or fam is None or not fam.sms_template:
+            raise HTTPException(status_code=409, detail="No campaign text resolves for this test contact.")
+        template = identity.render(fam.sms_template, ctx["fields"])
     try:
         msg = sms_service.send_sms(db, god, lead, template, include_booking_link=False,
                                    send_source=_ss.MANUAL, sent_by_user_id=god.id)
@@ -1005,6 +1017,7 @@ class TestContactIn(BaseModel):
     last_name: str
     phone: str
     location: str = TEST_LOCATION
+    family: str = "veteran_planning_guide"   # the campaign (message type) this contact is in
     apply: bool = False
 
 
@@ -1032,9 +1045,22 @@ def add_test_contact(body: TestContactIn, db: Session = Depends(get_db), god: Us
         raise HTTPException(status_code=409, detail="That number belongs to a real contact in this workspace.")
     src = "TEST-" + d
     plan = {"contact": "%s %s" % (body.first_name, body.last_name), "location": prof.official_name,
-            "phone_last4": d[-4:], "action": "unchanged" if owner is not None else "create"}
-    if not body.apply or owner is not None:
-        return {"dry_run": not body.apply, "plan": plan}
+            "family": body.family, "phone_last4": d[-4:], "action": "create"}
+    if owner is not None:
+        # An existing TEST contact for this phone MOVES to the requested cemetery
+        # and campaign (one cemetery per phone at a time - never ambiguous).
+        recs = (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org.id,
+                                                     ProgramSourceRecord.lead_id == owner.id).all())
+        same = all(r.location_id == prof.location_id and r.campaign_family == body.family for r in recs)
+        plan["action"] = "unchanged" if same else "move"
+        if body.apply and not same:
+            for r in recs:
+                r.location_id, r.location_status = prof.location_id, "mapped"
+                r.campaign_family, r.source_location_name = body.family, prof.official_name
+            db.commit()
+        return {"dry_run": not body.apply, "plan": plan, "lead_id": owner.id}
+    if not body.apply:
+        return {"dry_run": True, "plan": plan}
     lead = Lead(organization_id=org.id, first_name=body.first_name.strip(), last_name=body.last_name.strip(),
                 phone="1" + d, status="new", is_test=True, assigned_to_id=god.id,
                 test_note="STAGING live-test contact designated by Mike")
@@ -1047,7 +1073,7 @@ def add_test_contact(body: TestContactIn, db: Session = Depends(get_db), god: Us
                               source_campaign="Direct Mail> Veteran> Veteran Planning Guide",
                               source_location_name=prof.official_name)
     rec.location_id, rec.location_status = prof.location_id, "mapped"
-    rec.campaign_family, rec.link_status, rec.contact_master_key = "veteran_planning_guide", "unique", src
+    rec.campaign_family, rec.link_status, rec.contact_master_key = body.family, "unique", src
     rec.lead_id = lead.id
     db.add(rec)
     db.commit()

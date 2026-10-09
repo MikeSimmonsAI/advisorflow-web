@@ -34,9 +34,11 @@ DEFAULT_FAMILIES = [
     {
         "key": "veteran_planning_guide", "name": "Veteran Planning Guide",
         "patterns": ["Veteran Planning Guide"], "asset_category": "veteran_planning_guide",
-        "sms": ("Hi {first_name}, this is {primary_contact_name} with {location_name}. "
-                "You asked about the Veteran Planning Guide - I can send it over. "
-                "{reply_instructions}"),
+        # Approved by Mike 2026-10-09 (Veterans message).
+        "sms": ("Hi {first_name}, this is {primary_contact_name} with {location_name}. A while back you "
+                "requested a Veteran Benefits Guide from us, and our records show we never got connected. "
+                "When's a good time to make sure you receive all of your benefits? Thank you for your "
+                "service. I look forward to talking with you soon."),
         "subject": "Your Veteran Planning Guide from {location_name}",
         "body": ("Hi {first_name},\n\nThank you for your interest in the Veteran Planning Guide. "
                  "{flyer_link}\n\nIf you have any questions about the benefits available to you "
@@ -46,8 +48,10 @@ DEFAULT_FAMILIES = [
     {
         "key": "veteran_official", "name": "Veteran Official",
         "patterns": ["Veteran> Official"], "asset_category": "veteran_planning_guide",
-        "sms": ("Hi {first_name}, this is {primary_contact_name} with {location_name}, following up "
-                "on your veteran benefits request. {reply_instructions}"),
+        "sms": ("Hi {first_name}, this is {primary_contact_name} with {location_name}. A while back you "
+                "requested a Veteran Benefits Guide from us, and our records show we never got connected. "
+                "When's a good time to make sure you receive all of your benefits? Thank you for your "
+                "service. I look forward to talking with you soon."),
         "subject": "Your veteran benefits information - {location_name}",
         "body": ("Hi {first_name},\n\nI'm following up on your veteran benefits request. "
                  "{flyer_link}\n\n{reply_instructions}\n\n{primary_contact_name}\n{location_name}"),
@@ -99,6 +103,28 @@ DEFAULT_FAMILIES = [
                  "{primary_contact_name}\n{location_name}"),
     },
     {
+        # Approved by Mike 2026-10-09 (Seminar message).
+        "key": "seminar", "name": "Seminar",
+        "patterns": ["Seminar"], "asset_category": "general_preplanning",
+        "sms": ("Hi {first_name}, this is {primary_contact_name} with {location_name}. I'm reaching out "
+                "because you signed up for one of our seminars in the past. I'm still holding on to your "
+                "savings certificate and the personal planning guide we ordered for you. What's the best "
+                "time and way to get these to you? Thanks!"),
+        "subject": "Your seminar savings certificate - {location_name}",
+        "body": ("Hi {first_name},\n\nYou signed up for one of our seminars, and I'm still holding your "
+                 "savings certificate and personal planning guide. {flyer_link}\n\n{reply_instructions}\n\n"
+                 "{primary_contact_name}\n{location_name}"),
+    },
+    {
+        "key": "web_lead", "name": "Web Lead",
+        "patterns": ["Web", "Website", "Online"], "asset_category": "general_preplanning",
+        "sms": ("Hi {first_name}, this is {primary_contact_name} with {location_name}, following up on the "
+                "information you requested on our website. When's a good time to connect?"),
+        "subject": "The information you requested - {location_name}",
+        "body": ("Hi {first_name},\n\nThank you for requesting information on our website. {flyer_link}\n\n"
+                 "{reply_instructions}\n\n{primary_contact_name}\n{location_name}"),
+    },
+    {
         "key": "re_engagement", "name": "Re-engagement / Follow-Up",
         "patterns": [], "asset_category": "re_engagement",
         "sms": ("Hi {first_name}, {primary_contact_name} with {location_name} checking in. "
@@ -108,6 +134,15 @@ DEFAULT_FAMILIES = [
                  "{primary_contact_name}\n{location_name}"),
     },
 ]
+
+# Former default SMS texts, replaced by Mike's approved wording 2026-10-09. A
+# family still holding one of these exactly is upgraded; an edited one is kept.
+SUPERSEDED_SMS = {
+    "Hi {first_name}, this is {primary_contact_name} with {location_name}. "
+    "You asked about the Veteran Planning Guide - I can send it over. {reply_instructions}",
+    "Hi {first_name}, this is {primary_contact_name} with {location_name}, following up "
+    "on your veteran benefits request. {reply_instructions}",
+}
 
 FLYER_CATEGORIES = {
     "veteran_planning_guide": "Veteran Planning Guide",
@@ -208,6 +243,9 @@ def ensure_campaign_families(db: Session, org: Organization) -> List[CampaignFam
     out = []
     for spec in DEFAULT_FAMILIES:
         fam = have.get(spec["key"])
+        if fam is not None and (fam.sms_template or "") in SUPERSEDED_SMS:
+            # Still the old default (never edited by a person): take the approved text.
+            fam.sms_template = spec["sms"]
         if fam is None:
             fam = CampaignFamily(
                 organization_id=org.id, key=spec["key"], name=spec["name"],

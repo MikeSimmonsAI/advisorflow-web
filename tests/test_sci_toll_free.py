@@ -501,3 +501,31 @@ def test_additional_test_contact_and_targeted_test_sms(client, db_session, monke
     assert r.status_code == 200, r.text
     assert fake.messages.create.call_args.kwargs["to"].endswith("2145550163")
     assert "Hi Michael" in r.json()["body"] and "Eastern Gate Memorial Gardens" in r.json()["body"]
+
+
+def test_rounds_move_the_test_contact_and_send_the_real_campaign_text(client, db_session, monkeypatch):
+    h, org_id = _seed(client, db_session, monkeypatch)
+    phone = "2145550164"
+    monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
+    fake = MagicMock()
+    fake.messages.create.return_value = MagicMock(sid="SMr", status="queued", error_code=None, error_message=None)
+    rounds = [("Eastern Gate Memorial Gardens", "veteran_planning_guide", "Veteran Benefits Guide"),
+              ("Striffler-Hamby Mortuary", "seminar", "savings certificate"),
+              ("Eastern Gate Memorial Funeral Home", "web_lead", "on our website")]
+    for i, (loc, fam, needle) in enumerate(rounds):
+        c = client.post("/god/staging/sci/test-contact", headers=h, json={
+            "first_name": "Rita", "last_name": "Round", "phone": phone, "location": loc, "family": fam,
+            "apply": True}).json()
+        assert c["plan"]["action"] == ("create" if i == 0 else "move")
+        if i == 0:
+            sms_programs.reconcile_existing(db_session, org_id, attested_by="Mike", evidence_reference="designated",
+                                            apply=True, evidence_phones=[phone])
+        with patch.object(sms_programs, "sci_sender", return_value=(fake, TF)):
+            r = client.post("/god/staging/sci/send-test-sms", headers=h,
+                            json={"phone": phone, "use_campaign_text": True, "again": True})
+        assert r.status_code == 200, r.text
+        text = r.json()["body"]
+        assert needle in text and ("with %s" % loc) in text and "Kerry Allan" in text
+        assert text.count("Kerry Allan") == 1 and "EvoSys" not in text and "test" not in text.lower()
+        assert text.endswith("Reply STOP to opt out.")
+    assert fake.messages.create.call_count == 3
