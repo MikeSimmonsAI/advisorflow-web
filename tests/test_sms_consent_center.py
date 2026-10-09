@@ -156,7 +156,7 @@ def test_sci_once_final_files_into_the_sci_org(client, db_session, monkeypatch):
     assert r.status_code == 201, r.text
     rec = db_session.query(SmsConsentRecord).one()
     assert rec.organization_id == sci.id and rec.program == "sci_poc_sms"
-    assert rec.campaign_sid == "CMtest"
+    assert rec.campaign_sid == "TF-8449172171"       # SCI's own sender: the toll-free line
 
 
 def test_sci_env_pointing_at_another_customer_is_refused(client, db_session, monkeypatch):
@@ -297,7 +297,7 @@ def test_sci_text_is_refused_before_the_provider_call(db_session, sample_org, sa
         with pytest.raises(ValueError) as exc:
             sms_service.send_sms(db_session, sample_advisor, sample_lead, "Hi. Reply STOP to opt out.")
     fake.messages.create.assert_not_called()
-    assert set(exc.value.reasons) >= {"SCI_SMS_DISABLED", "NO_SMS_CONSENT", "CAMPAIGN_NOT_APPROVED"}
+    assert set(exc.value.reasons) >= {"SCI_SMS_DISABLED", "NO_SMS_CONSENT"}
 
 
 def test_non_sci_orgs_are_untouched_by_the_sci_gate(db_session, sample_org, sample_lead):

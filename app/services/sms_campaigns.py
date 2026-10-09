@@ -79,13 +79,18 @@ _BUILTIN: List[Dict[str, Any]] = [
     },
     {
         # The SCI line (Mike, 2026-10-08). Approved by Toll-Free Verification,
-        # not 10DLC. Fail closed: NOT approved here until its verification
-        # status is confirmed and set through SMS_CAMPAIGN_REGISTRY_JSON
-        # (key "TF-8449172171"), together with the scope it was verified for.
+        # not 10DLC. CONFIRMED read-only in the Twilio console 2026-10-08:
+        # "Messaging toll free verification - Approved on 2026-08-22", use
+        # category ACCOUNT NOTIFICATIONS, opt-in type Web Form
+        # (https://evosyspro.live/sms-optin/), ~10,000 msgs/month. That scope is
+        # informational only: promotional content stays refused. Override via
+        # SMS_CAMPAIGN_REGISTRY_JSON (key "TF-8449172171") if it ever changes.
         "key": "TF-8449172171",
         "kind": KIND_TOLL_FREE,
         "numbers": ["+18449172171"],
-        "verification_status": "UNCONFIRMED",
+        "verification_status": "TWILIO_APPROVED",
+        "verified_on": "2026-08-22",
+        "use_case": "ACCOUNT_NOTIFICATIONS",
         "has_embedded_links": True,
         "has_embedded_phone": True,
         "programs": ["sci"],

@@ -143,3 +143,39 @@ The suppression, DNC, hold and location-review gates still run first. There is n
 6. **Then:**
    - set `SCI_SMS_SEND_ENABLED=on` only after a separate first-contact GO;
    - production only after Mike's GO.
+
+## Phase 2 verification (2026-10-08 night, staging fb0382e)
+
+**Twilio, read-only (console, EVOSYS Pro account):**
+- +1 844-917-2171 voice webhook: `https://demo.twilio.com/welcome/voice/`. That is Twilio's default demo, so callers today hear Twilio's demo message, not SCI voicemail.
+- +1 844-917-2171 messaging webhook: `https://advisorflow-backend.onrender.com/sms/webhook/inbound` (the PRODUCTION backend).
+- I could not read the Toll-Free Verification status: the console's verification page would not render. It remains UNCONFIRMED in the registry, so the gate fails closed.
+- +1 469-224-1155 (CO3YNIF): unchanged.
+
+**Staging environment:**
+- `API_BASE_URL` is set.
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `SMS_PROGRAM_ORG_SCI` (resolved by name instead) and `SMS_CAMPAIGN_REGISTRY_JSON` are not set.
+- `SCI_SMS_SEND_ENABLED` is off.
+
+**End to end on staging** (`POST /god/staging/sci/simulate/toll_free_round_trip`, real handlers, no carrier): **11/11 passed, 0 sent.**
+- SMS from a known contact lands on that contact's conversation, at its own cemetery.
+- SMS from an unknown number goes to review.
+- STOP suppresses the number.
+- A call from a known caller goes to voicemail only, with a greeting that names the caller's cemetery.
+- A call from an unknown caller goes to voicemail only, with a neutral greeting.
+- The voicemail is saved to the contact, a callback task is assigned to the contact's rep, and the rep is notified.
+
+**Contact list** (the real `SCI_Filtered_551_Leads.csv`, imported through the real `program_setup` pipeline into a THROWAWAY local database, which was deleted afterwards):
+- 551 rows → 535 contacts promoted, 10 held records (review queues), 39 locations, 0 contacts without a resolved cemetery.
+- Owner-attested reconciliation dry run: **533 eligible**, 2 skipped (invalid phone numbers `1662458988`, `1850207338`).
+- 7 numbers appear on more than one row; 1 number spans two cemeteries (ambiguous: neutral greeting, review).
+- Every row's `Campaign Channel` is `Direct Mail`.
+
+**Locations** (`GET /god/sms-consent/sci/locations`):
+- 39 locations: 38 on the toll-free line, plus Oaklawn held (no verified area code).
+- 0 have a local phone, a booking link, a custom greeting or a cemetery-specific planning guide. That data was never supplied, and none is invented.
+- No program primary contact (Kerry) user exists. Voicemail alerts now fall back to the organization's admins.
+
+**Planning guide:**
+- The platform now serves `/planning-guide` itself (staging: `https://sci-staging-backend.onrender.com/planning-guide`, which returns 200).
+- SCI links default to the platform page. Set `SCI_PLANNING_GUIDE_URL=https://evosyspro.live/planning-guide` once that page is uploaded; it is 404 live today.

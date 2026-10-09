@@ -67,9 +67,16 @@ def _lead(db, org_id, phone):
 # ── 1. toll-free approval is its own thing ──────────────────────────────────
 
 def test_toll_free_is_separate_from_10dlc_and_fails_closed(monkeypatch):
+    # built-in: the console-confirmed approval (2026-08-22, Account Notifications)
     monkeypatch.delenv(sms_campaigns.ENV_REGISTRY, raising=False)
     tf = sms_campaigns.for_sender(TF)
-    assert sms_campaigns.kind(tf) == "toll_free" and not sms_campaigns.is_approved(tf)
+    assert sms_campaigns.kind(tf) == "toll_free" and sms_campaigns.is_approved(tf)
+    assert tf["use_case"] == "ACCOUNT_NOTIFICATIONS" and tf["approved_scope"] == ["informational"]
+    assert not sms_campaigns.scope_allows(tf, "promotional")
+    # an unconfirmed status fails closed
+    monkeypatch.setenv(sms_campaigns.ENV_REGISTRY, json.dumps([dict(TF_VERIFIED, verification_status="UNCONFIRMED")]))
+    tf = sms_campaigns.for_sender(TF)
+    assert not sms_campaigns.is_approved(tf)
     assert sms_campaigns.features(tf) == {"links": False, "phone": False}
     # a 10DLC-style "status: VERIFIED" does not approve a toll-free entry
     monkeypatch.setenv(sms_campaigns.ENV_REGISTRY, json.dumps([dict(TF_VERIFIED, verification_status=None,
@@ -113,20 +120,26 @@ def test_reconcile_existing_contacts_without_resignup(client, db_session, monkey
 
     body = {"attested_by": "Mike Simmons", "evidence_reference": "EvoSys Pro opt-in export 2026-10"}
     dry = client.post("/god/sms-consent/sci/reconcile", headers=h, json=body).json()
-    assert dry["apply"] is False and dry["created"] == 0
+    assert dry["apply"] is False and dry["created"] == 0 and dry["evidence_supplied"] is False
     assert dry["skipped"].get("suppressed") == 1 and dry["skipped"].get("dnc") == 1
     assert dry["skipped"].get("opted_out_before") == 1
     assert dry["eligible"] >= 1                       # SIM-ACTIVE at least
+    # NO automatic attestation: apply without the opt-in evidence is refused
+    r = client.post("/god/sms-consent/sci/reconcile", headers=h, json=dict(body, apply=True))
+    assert r.status_code == 422
     assert db.query(SmsConsentRecord).filter_by(consent_method="owner_attested_import").count() == 0
 
-    applied = client.post("/god/sms-consent/sci/reconcile", headers=h, json=dict(body, apply=True)).json()
-    assert applied["created"] == dry["eligible"]
+    # with evidence: only numbers that appear in the opt-in records are attested
+    ev = dict(body, apply=True, evidence_phones=["(205) 555-0102", "+12055550151", "2055550199"])
+    applied = client.post("/god/sms-consent/sci/reconcile", headers=h, json=ev).json()
+    assert applied["created"] == 1 and applied["skipped"].get("no_opt_in_evidence", 0) >= 0
+    assert applied["skipped"].get("opted_out_before") == 1        # +12055550151 had opted out: still skipped
     rec = (db.query(SmsConsentRecord).filter_by(organization_id=org_id, program="sci_poc_sms",
                                                 phone_normalized=SIM_ACTIVE).one())
     assert rec.consent_method == "owner_attested_import" and "Mike Simmons" in rec.disclosure_text
     assert rec.lead_id == _lead(db, org_id, SIM_ACTIVE).id
-    again = client.post("/god/sms-consent/sci/reconcile", headers=h, json=dict(body, apply=True)).json()
-    assert again["created"] == 0 and again["skipped"].get("already_consented") == applied["created"]
+    again = client.post("/god/sms-consent/sci/reconcile", headers=h, json=ev).json()
+    assert again["created"] == 0 and again["skipped"].get("already_consented") == 1
 
     # the gate accepts attested consent - no re-signup - on the approved toll-free
     monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
@@ -148,9 +161,11 @@ def test_reconcile_requires_attestation(client, db_session, monkeypatch):
 def test_sci_gate_on_toll_free(client, db_session, monkeypatch):
     h, org_id = _seed(client, db_session, monkeypatch)
     db = db_session
-    sms_programs.reconcile_existing(db, org_id, attested_by="Mike", evidence_reference="ref", apply=True)
+    sms_programs.reconcile_existing(db, org_id, attested_by="Mike", evidence_reference="ref", apply=True,
+                                     evidence_phones=[SIM_ACTIVE])
     monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
-    # toll-free not yet confirmed as verified -> refused
+    # toll-free status unconfirmed -> refused
+    monkeypatch.setenv(sms_campaigns.ENV_REGISTRY, json.dumps([dict(TF_VERIFIED, verification_status="UNCONFIRMED")]))
     assert sms_programs.sci_check(db, org_id, SIM_ACTIVE, from_number=TF)["reasons"] == ["CAMPAIGN_NOT_APPROVED"]
     monkeypatch.setenv(sms_campaigns.ENV_REGISTRY, json.dumps([TF_VERIFIED]))
     assert sms_programs.sci_check(db, org_id, SIM_ACTIVE, from_number=TF)["eligible"]
@@ -179,7 +194,8 @@ def test_sci_send_uses_the_toll_free_line_only(client, db_session, monkeypatch):
             sms_service.send_sms(db, advisor, lead, "Hi {first_name}. Reply STOP to opt out.")
         assert "SCI_SMS_DISABLED" in str(exc.value) and "NO_SMS_CONSENT" in str(exc.value)
         fake.messages.create.assert_not_called()
-        sms_programs.reconcile_existing(db, org_id, attested_by="Mike", evidence_reference="ref", apply=True)
+        sms_programs.reconcile_existing(db, org_id, attested_by="Mike", evidence_reference="ref", apply=True,
+                                     evidence_phones=[SIM_ACTIVE])
         monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
         sms_service.send_sms(db, advisor, lead, "Hi {first_name}. Reply STOP to opt out.")
     assert fake.messages.create.call_count == 1
@@ -313,6 +329,7 @@ def test_template_fields_and_capability_gating(client, db_session, monkeypatch):
         == "https://sci-staging-backend.onrender.com/planning-guide"
     tpl = identity.render("Book: {booking_link} Guide: {planning_guide_link} Call {location_phone}.", f)
     # toll-free not confirmed verified: links and phone numbers stripped
+    monkeypatch.setenv(sms_campaigns.ENV_REGISTRY, json.dumps([dict(TF_VERIFIED, verification_status="UNCONFIRMED")]))
     out = enforce_sms_content_policy(tpl, **sms_programs.content_allowance(db_session, lead))
     assert "http" not in out and "555-0177" not in out
     # verified: carried
@@ -339,7 +356,7 @@ def test_telephony_readout_reports_without_secrets(client, db_session, monkeypat
     out = client.get("/god/sms-consent/sci/telephony", headers=h).json()
     assert out["env"]["TWILIO_AUTH_TOKEN"] is True and PLATFORM_TOKEN not in json.dumps(out)
     assert out["number_row"]["route_mode"] == "voicemail_only" and out["number_row"]["organization_is_sci"]
-    assert out["sender_approved"] is False and out["sci_send_enabled"] is False
+    assert out["sender_approved"] is True and out["sci_send_enabled"] is False
     assert out["expected_webhooks"]["voice_url"].endswith("/voice/inbound")
     # live read uses GET only; mocked here
     fake = MagicMock()
@@ -415,3 +432,30 @@ def test_voicemail_notifies_admins_when_no_rep_or_primary_contact(client, db_ses
                    account_sid=PLATFORM_SID, auth_token=PLATFORM_TOKEN)
     assert db_session.query(Notification).filter(Notification.user_id == admin.id,
                                                  Notification.message.like("Voicemail from%")).count() >= 1
+
+
+def test_oaklawn_contacts_are_held_from_sci_texts(db_session, sample_org, sample_lead, monkeypatch):
+    from app.services.programs import identity
+    from types import SimpleNamespace
+    sample_org.name = sms_programs.SCI_ORG_NAME
+    db_session.commit()
+    monkeypatch.setattr(identity, "location_profile_for_lead",
+                        lambda db, lead: SimpleNamespace(official_name="Oaklawn Central Care Center"))
+    assert "LOCATION_UNVERIFIED" in sms_programs.sci_send_refusal(db_session, sample_lead,
+                                                                 from_number=TF)
+    monkeypatch.setattr(identity, "location_profile_for_lead",
+                        lambda db, lead: SimpleNamespace(official_name="Alabama Heritage Cemetery"))
+    assert "LOCATION_UNVERIFIED" not in (sms_programs.sci_send_refusal(db_session, sample_lead,
+                                                                      from_number=TF) or [])
+
+
+def test_designated_test_phone_is_staging_only_and_never_clashes(client, db_session, monkeypatch):
+    h, org_id = _seed(client, db_session, monkeypatch)
+    dry = client.post("/god/staging/sci/test-phone", headers=h, json={"phone": "(214) 555-0161"}).json()
+    assert dry["dry_run"] is True and dry["plan"]["phone_last4"] == "0161"
+    assert client.post("/god/staging/sci/test-phone", headers=h,
+                       json={"phone": SIM_ACTIVE, "apply": True}).status_code == 409
+    ok = client.post("/god/staging/sci/test-phone", headers=h, json={"phone": "2145550161", "apply": True}).json()
+    assert ok["dry_run"] is False
+    monkeypatch.setenv("APP_ENV", "production")
+    assert client.post("/god/staging/sci/test-phone", headers=h, json={"phone": "2145550161"}).status_code == 404

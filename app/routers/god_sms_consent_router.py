@@ -16,7 +16,7 @@
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -68,6 +68,9 @@ class ReconcileIn(BaseModel):
     attested_by: str
     evidence_reference: str
     apply: bool = False
+    # Phone numbers from the ACTUAL opt-in records. Required to apply: no
+    # number is attested without a matching record.
+    evidence_phones: Optional[List[str]] = None
 
 
 @router.post("/sci/reconcile")
@@ -79,7 +82,7 @@ def sci_reconcile(body: ReconcileIn, db: Session = Depends(get_db),
     try:
         out = sms_programs.reconcile_existing(db, org_id, attested_by=body.attested_by,
                                               evidence_reference=body.evidence_reference,
-                                              apply=body.apply)
+                                              apply=body.apply, evidence_phones=body.evidence_phones)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     out["requested_by"] = god.email

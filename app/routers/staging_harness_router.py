@@ -924,3 +924,36 @@ def _toll_free_round_trip(db, org, prof):
     out["passed_checks"] = "%d/%d" % (sum(1 for c in checks if c), len(checks))
     return out
 
+
+class TestPhoneIn(BaseModel):
+    phone: str
+    apply: bool = False
+
+
+@router.post("/test-phone")
+def set_test_phone(body: TestPhoneIn, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Put a DESIGNATED TEST PHONE on the seeded test contact (a TEST record at
+    Eastern Gate Memorial Gardens), so a live text or call from that phone to
+    the toll-free line matches a contact and a cemetery. Staging only; dry run
+    unless `apply`; refuses a number already used by any other contact in the
+    SCI workspace. Sends nothing."""
+    _on()
+    _staging_only()
+    from app.services import wholesale_sms
+    org = _org(db)
+    lead = _test_lead(db, org)
+    e164 = wholesale_sms.normalize_e164(body.phone)
+    if not e164:
+        raise HTTPException(status_code=422, detail="Not a usable US mobile number.")
+    digits = e164[2:]
+    clash = (db.query(Lead).filter(Lead.organization_id == org.id, Lead.id != lead.id,
+                                   Lead.phone.in_([e164, "1" + digits, digits])).first())
+    if clash is not None:
+        raise HTTPException(status_code=409, detail="That number belongs to another contact in this workspace.")
+    plan = {"contact": lead.email, "is_test": bool(getattr(lead, "is_test", False)),
+            "location": TEST_LOCATION, "phone_last4": digits[-4:], "action": "set"}
+    if body.apply:
+        lead.phone = "1" + digits
+        db.commit()
+    return {"dry_run": not body.apply, "plan": plan}
+

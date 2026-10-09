@@ -137,8 +137,27 @@ CONSENT_WORDING_UNREGISTERED = "CONSENT_WORDING_UNREGISTERED"
 CAMPAIGN_NOT_APPROVED = "CAMPAIGN_NOT_APPROVED"        # the sending number is not an approved SCI sender
 SCOPE_NOT_APPROVED = "SENDER_SCOPE_NOT_APPROVED"      # e.g. promotional content on an informational-only toll-free
 SUPPRESSED = "SUPPRESSED"
+LOCATION_UNVERIFIED = "LOCATION_UNVERIFIED"          # e.g. Oaklawn: address / area code not verified
 SCI_REASONS = (SCI_SMS_DISABLED, INVALID_NUMBER, NO_SMS_CONSENT, OPTED_OUT, SUPPRESSED,
-               CONSENT_WORDING_UNREGISTERED, CAMPAIGN_NOT_APPROVED, SCOPE_NOT_APPROVED)
+               LOCATION_UNVERIFIED, CONSENT_WORDING_UNREGISTERED, CAMPAIGN_NOT_APPROVED,
+               SCOPE_NOT_APPROVED)
+
+
+def location_unverified(db, lead) -> bool:
+    """True when the contact's cemetery is UNVERIFIED in the SCI grouping file
+    (scripts/sci_campuses.csv: Address Status "unverified" or no area code -
+    today only Oaklawn Central Care Center). Such contacts are held: nothing is
+    sent for a location whose identity is not confirmed."""
+    try:
+        from app.services.programs import campuses, identity
+        prof = identity.location_profile_for_lead(db, lead)
+        if prof is None:
+            return False                     # unresolved is refused upstream (Location Review)
+        row = next((r for r in campuses.load_grouping() if r.get("Location") == prof.official_name), None)
+        return row is not None and ((row.get("Address Status") or "").strip().lower() == "unverified"
+                                    or not (row.get("Area Code") or "").strip())
+    except Exception:                                   # noqa: BLE001
+        return True                          # cannot tell: hold
 
 # ── Existing contacts: owner-attested consent (Mike, 2026-10-08) ────────────
 # The SCI contact list and its consent records are held by EVO Integrated
@@ -232,7 +251,8 @@ def record(db, p: Program, org_id: str, *, phone_raw: str, disclosure_text: str,
         # The campaign this consent was collected for, from the registry - never
         # another program's settings. NULL when no campaign lists the program.
         entry = campaign_for_program(p.key)
-        rec.campaign_sid = (entry or {}).get("campaign_id")
+        # 10DLC: the campaign id. Toll-free (no campaign): the registry key.
+        rec.campaign_sid = (entry or {}).get("campaign_id") or (entry or {}).get("key")
         rec.messaging_service_sid = (entry or {}).get("messaging_service_sid")
         db.flush()
     return rec
@@ -241,6 +261,10 @@ def record(db, p: Program, org_id: str, *, phone_raw: str, disclosure_text: str,
 def campaign_for_program(key: str) -> Optional[Dict[str, Any]]:
     """The registered campaign that lists this program (approved ones first)."""
     from app.services import sms_campaigns
+    if key == SCI:
+        sender = sci_sender_entry()          # SCI sends only from its toll-free line
+        if sender is not None and SCI in (sender.get("programs") or []):
+            return sender
     hits = [e for e in sms_campaigns.registry() if key in (e.get("programs") or [])]
     hits.sort(key=lambda e: not sms_campaigns.is_approved(e))
     return hits[0] if hits else None
@@ -376,10 +400,17 @@ def sci_sender():
 
 
 def reconcile_existing(db, org_id: str, *, attested_by: str, evidence_reference: str,
-                       apply: bool = False) -> Dict[str, Any]:
+                       apply: bool = False, evidence_phones=None) -> Dict[str, Any]:
     """File owner-attested SCI consent for the existing contacts. Dry run unless
     `apply`. Never touches a number that is suppressed, DNC, or has ANY SCI
-    opt-out on record; never duplicates an active consent."""
+    opt-out on record; never duplicates an active consent.
+
+    EVIDENCE REQUIRED TO APPLY (Phase 3, 2026-10-08). An attestation is filed
+    ONLY for a number that appears in `evidence_phones` - the phone numbers in
+    the actual opt-in records (e.g. the EvoSys Pro opt-in page export). A
+    number with no matching record is reported `no_opt_in_evidence` and gets
+    nothing. Without an evidence list, a dry run reports what the protections
+    alone would allow; `apply` is refused."""
     from app.models.models import Lead
     from app.models.sms_consent_models import SmsConsentRecord
     from app.services import wholesale_sms
@@ -387,7 +418,14 @@ def reconcile_existing(db, org_id: str, *, attested_by: str, evidence_reference:
     if not (attested_by or "").strip() or not (evidence_reference or "").strip():
         raise ValueError("attested_by and evidence_reference are required")
     p = PROGRAMS[SCI]
-    out = {"eligible": 0, "created": 0, "skipped": {}, "apply": bool(apply)}
+    evidence = None
+    if evidence_phones is not None:
+        evidence = {e for e in (wholesale_sms.normalize_e164(x) for x in evidence_phones) if e}
+    if apply and evidence is None:
+        raise ValueError("apply needs the opt-in evidence: evidence_phones from the actual opt-in records")
+    out = {"eligible": 0, "created": 0, "skipped": {}, "apply": bool(apply),
+           "evidence_supplied": evidence is not None,
+           "evidence_numbers": len(evidence) if evidence is not None else 0}
 
     def skip(reason):
         out["skipped"][reason] = out["skipped"].get(reason, 0) + 1
@@ -421,6 +459,9 @@ def reconcile_existing(db, org_id: str, *, attested_by: str, evidence_reference:
         if any(consent_counts(p, r) for r in recs):
             skip("already_consented")
             continue
+        if evidence is not None and e164 not in evidence:
+            skip("no_opt_in_evidence")
+            continue
         out["eligible"] += 1
         if apply:
             text = ("Owner-attested: this contact opted in to text messages through the EvoSys Pro "
@@ -451,6 +492,9 @@ def sci_send_refusal(db, lead, *, from_number: Optional[str] = None,
     result = sci_check(db, org_id, getattr(lead, "phone", None),
                        from_number=from_number, messaging_service_sid=messaging_service_sid,
                        category=message_category(db, lead))
+    if location_unverified(db, lead):
+        result["reasons"] = [r for r in SCI_REASONS if r in set(result["reasons"]) | {LOCATION_UNVERIFIED}]
+        result["eligible"] = False
     if result["eligible"]:
         return None
     log.warning("sci_sms BLOCKED lead=%s reasons=%s", getattr(lead, "id", None),
