@@ -957,3 +957,36 @@ def set_test_phone(body: TestPhoneIn, db: Session = Depends(get_db), god: User =
         db.commit()
     return {"dry_run": not body.apply, "plan": plan}
 
+
+class SendSmsIn(BaseModel):
+    again: bool = False
+
+
+@router.post("/send-test-sms")
+def send_test_sms(body: SendSmsIn, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """The ONE live SCI text: to the seeded TEST contact's designated test phone
+    only, as a person's MANUAL send, through the real send_sms - every gate
+    (SCI consent, approved toll-free sender, SCI_SMS_SEND_ENABLED, suppression,
+    content approval) applies. Staging only. Refuses a second send unless `again`."""
+    _on()
+    _staging_only()
+    from app.models.models import Message
+    from app.services import send_source as _ss, sms_service
+    org = _org(db)
+    lead = _test_lead(db, org)
+    if not lead.phone:
+        raise HTTPException(status_code=409, detail="No designated test phone: POST /god/staging/sci/test-phone first.")
+    prior = db.query(Message).filter(Message.lead_id == lead.id).count()
+    if prior and not body.again:
+        raise HTTPException(status_code=409, detail="A test text was already sent to the test contact (%d)." % prior)
+    template = ("Hi {first_name}, this is a test text from the SCI line via EvoSys Pro. "
+                "Reply to this message to test replies. Reply STOP to opt out.")
+    try:
+        msg = sms_service.send_sms(db, god, lead, template, include_booking_link=False,
+                                   send_source=_ss.MANUAL, sent_by_user_id=god.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Refused before the provider: %s" % exc)
+    return {"sent": True, "twilio_status": getattr(msg, "twilio_status", None),
+            "provider_sid": getattr(msg, "twilio_sid", None), "to_last4": (lead.phone or "")[-4:],
+            "body": msg.body}
+

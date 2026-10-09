@@ -459,3 +459,25 @@ def test_designated_test_phone_is_staging_only_and_never_clashes(client, db_sess
     assert ok["dry_run"] is False
     monkeypatch.setenv("APP_ENV", "production")
     assert client.post("/god/staging/sci/test-phone", headers=h, json={"phone": "2145550161"}).status_code == 404
+
+
+def test_send_test_sms_reaches_only_the_test_contact_through_every_gate(client, db_session, monkeypatch):
+    h, org_id = _seed(client, db_session, monkeypatch)
+    assert client.post("/god/staging/sci/send-test-sms", headers=h, json={}).status_code in (409, 422)
+    client.post("/god/staging/sci/test-phone", headers=h, json={"phone": "2145550162", "apply": True})
+    # no consent / sending off -> refused before the provider
+    fake = MagicMock()
+    fake.messages.create.return_value = MagicMock(sid="SMlive", status="queued", error_code=None, error_message=None)
+    with patch.object(sms_programs, "sci_sender", return_value=(fake, TF)):
+        r = client.post("/god/staging/sci/send-test-sms", headers=h, json={})
+        assert r.status_code == 422 and "SCI_SMS_DISABLED" in r.json()["detail"]
+        fake.messages.create.assert_not_called()
+        sms_programs.reconcile_existing(db_session, org_id, attested_by="Mike", evidence_reference="test phone",
+                                        apply=True, evidence_phones=["2145550162"])
+        monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
+        r = client.post("/god/staging/sci/send-test-sms", headers=h, json={})
+        assert r.status_code == 200, r.text
+        assert fake.messages.create.call_count == 1
+        kw = fake.messages.create.call_args.kwargs
+        assert kw["from_"] == TF and kw["to"].endswith("2145550162")
+        assert client.post("/god/staging/sci/send-test-sms", headers=h, json={}).status_code == 409
