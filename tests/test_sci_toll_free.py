@@ -554,3 +554,42 @@ def test_rounds_move_the_test_contact_and_send_the_real_campaign_text(client, db
         assert text.count("Kerry Allan") == 1 and "EvoSys" not in text and "test" not in text.lower()
         assert text.endswith("Reply STOP to opt out.")
     assert fake.messages.create.call_count == 3
+
+
+def test_first_send_clears_contact_automatically(client, db_session, monkeypatch):
+    """Mike holds the sign-ups: a contact with no consent on file is cleared
+    the first time a text is about to go to it. STOP / suppressed / DNC never are."""
+    from app.services.compliance_service import add_suppression_entry_from_reply
+    h, org_id = _seed(client, db_session, monkeypatch, [TF_VERIFIED])
+    db = db_session
+    monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
+    active = _lead(db, org_id, SIM_ACTIVE)
+    assert sms_programs.auto_attest_lead(db, org_id, active) is True
+    rec = (db.query(SmsConsentRecord).filter_by(organization_id=org_id, program="sci_poc_sms",
+                                                phone_normalized=SIM_ACTIVE).one())
+    assert rec.consent_method == "owner_attested_import" and rec.lead_id == active.id
+    assert "held by the owner, Mike Simmons" in rec.disclosure_text
+    assert sms_programs.auto_attest_lead(db, org_id, active) is False          # no duplicate
+    assert sms_programs.sci_check(db, org_id, SIM_ACTIVE, from_number=TF)["eligible"] is True
+
+    # STOP afterwards: never re-cleared
+    wholesale_sms.record_opt_out(db, org_id, SIM_ACTIVE, keyword="STOP")
+    db.commit()
+    assert sms_programs.auto_attest_lead(db, org_id, active) is False
+    assert "OPTED_OUT" in sms_programs.sci_check(db, org_id, SIM_ACTIVE, from_number=TF)["reasons"]
+
+    # suppressed and DNC: never cleared
+    add_suppression_entry_from_reply(db, org_id, SIM_CAMPUS, reason="Replied: STOP")
+    db.commit()
+    assert sms_programs.auto_attest_lead(db, org_id, _lead(db, org_id, SIM_CAMPUS)) is False
+    dnc = Lead(organization_id=org_id, first_name="Dee", last_name="Ncee", phone="12055550170", status="dnc")
+    db.add(dnc)
+    db.commit()
+    assert sms_programs.auto_attest_lead(db, org_id, dnc) is False
+
+    # switch off: nothing is filed
+    monkeypatch.setenv(sms_programs.OWNER_RECORDS_ENV, "off")
+    fresh = Lead(organization_id=org_id, first_name="Fay", last_name="Resh", phone="12055550171", status="new")
+    db.add(fresh)
+    db.commit()
+    assert sms_programs.auto_attest_lead(db, org_id, fresh) is False
