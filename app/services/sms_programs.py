@@ -400,7 +400,8 @@ def sci_sender():
 
 
 def reconcile_existing(db, org_id: str, *, attested_by: str, evidence_reference: str,
-                       apply: bool = False, evidence_phones=None) -> Dict[str, Any]:
+                       apply: bool = False, evidence_phones=None,
+                       owner_holds_records: bool = False) -> Dict[str, Any]:
     """File owner-attested SCI consent for the existing contacts. Dry run unless
     `apply`. Never touches a number that is suppressed, DNC, or has ANY SCI
     opt-out on record; never duplicates an active consent.
@@ -410,7 +411,14 @@ def reconcile_existing(db, org_id: str, *, attested_by: str, evidence_reference:
     the actual opt-in records (e.g. the EvoSys Pro opt-in page export). A
     number with no matching record is reported `no_opt_in_evidence` and gets
     nothing. Without an evidence list, a dry run reports what the protections
-    alone would allow; `apply` is refused."""
+    alone would allow; `apply` is refused.
+
+    OWNER HOLDS THE RECORDS (2026-10-09, Mike's decision). With
+    `owner_holds_records=True` the owner attests that he physically holds the
+    original opt-in records (seminar sign-ups, guide requests, web forms) for
+    these contacts. Apply then needs no evidence list: every number that passes
+    the protections (STOP / opt-out, suppression, DNC) is attested, and each
+    record says where the originals are held."""
     from app.models.models import Lead
     from app.models.sms_consent_models import SmsConsentRecord
     from app.services import wholesale_sms
@@ -421,10 +429,11 @@ def reconcile_existing(db, org_id: str, *, attested_by: str, evidence_reference:
     evidence = None
     if evidence_phones is not None:
         evidence = {e for e in (wholesale_sms.normalize_e164(x) for x in evidence_phones) if e}
-    if apply and evidence is None:
+    if apply and evidence is None and not owner_holds_records:
         raise ValueError("apply needs the opt-in evidence: evidence_phones from the actual opt-in records")
     out = {"eligible": 0, "created": 0, "skipped": {}, "apply": bool(apply),
            "evidence_supplied": evidence is not None,
+           "owner_holds_records": bool(owner_holds_records),
            "evidence_numbers": len(evidence) if evidence is not None else 0}
 
     def skip(reason):
@@ -464,10 +473,16 @@ def reconcile_existing(db, org_id: str, *, attested_by: str, evidence_reference:
             continue
         out["eligible"] += 1
         if apply:
-            text = ("Owner-attested: this contact opted in to text messages through the EvoSys Pro "
-                    "opt-in page (%s). Consent records are held by EVO Integrated Solutions LLC. "
-                    "Attested by %s. Evidence: %s." % (ATTESTED_SOURCE, attested_by.strip(),
-                                                       evidence_reference.strip()))
+            if owner_holds_records and evidence is None:
+                text = ("Owner-attested: this contact opted in through the location's original "
+                        "sign-up (seminar registration, guide request or web form). The original "
+                        "opt-in records are held by the owner, Mike Simmons. Attested by %s. "
+                        "Evidence: %s." % (attested_by.strip(), evidence_reference.strip()))
+            else:
+                text = ("Owner-attested: this contact opted in to text messages through the EvoSys Pro "
+                        "opt-in page (%s). Consent records are held by EVO Integrated Solutions LLC. "
+                        "Attested by %s. Evidence: %s." % (ATTESTED_SOURCE, attested_by.strip(),
+                                                           evidence_reference.strip()))
             rec = wholesale_sms.record_consent(
                 db, org_id, phone_raw=lead.phone, disclosure_text=text,
                 disclosure_version=ATTESTED_VERSION, form_version=None,

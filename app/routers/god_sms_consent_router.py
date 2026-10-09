@@ -71,6 +71,9 @@ class ReconcileIn(BaseModel):
     # Phone numbers from the ACTUAL opt-in records. Required to apply: no
     # number is attested without a matching record.
     evidence_phones: Optional[List[str]] = None
+    # True = the owner attests he holds the original opt-in records himself;
+    # apply then needs no evidence list (protections still apply).
+    owner_holds_records: bool = False
 
 
 @router.post("/sci/reconcile")
@@ -82,7 +85,8 @@ def sci_reconcile(body: ReconcileIn, db: Session = Depends(get_db),
     try:
         out = sms_programs.reconcile_existing(db, org_id, attested_by=body.attested_by,
                                               evidence_reference=body.evidence_reference,
-                                              apply=body.apply, evidence_phones=body.evidence_phones)
+                                              apply=body.apply, evidence_phones=body.evidence_phones,
+                                              owner_holds_records=body.owner_holds_records)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     out["requested_by"] = god.email

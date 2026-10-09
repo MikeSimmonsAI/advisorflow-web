@@ -151,6 +151,31 @@ def test_reconcile_existing_contacts_without_resignup(client, db_session, monkey
     assert "OPTED_OUT" in sms_programs.sci_check(db, org_id, SIM_ACTIVE, from_number=TF)["reasons"]
 
 
+def test_reconcile_owner_holds_records(client, db_session, monkeypatch):
+    """Mike holds the original opt-in records himself: apply with no evidence
+    list attests every contact that passes STOP / suppression / DNC."""
+    from app.services.compliance_service import add_suppression_entry_from_reply
+    h, org_id = _seed(client, db_session, monkeypatch, [TF_VERIFIED])
+    db = db_session
+    add_suppression_entry_from_reply(db, org_id, SIM_CAMPUS, reason="Replied: STOP")
+    db.add(Lead(organization_id=org_id, first_name="Dee", last_name="Ncee", phone="12055550160", status="dnc"))
+    db.commit()
+    body = {"attested_by": "Mike Simmons", "evidence_reference": "original sign-up records held by Mike Simmons",
+            "apply": True, "owner_holds_records": True}
+    out = client.post("/god/sms-consent/sci/reconcile", headers=h, json=body).json()
+    assert out["owner_holds_records"] is True and out["created"] == out["eligible"] >= 1
+    assert out["skipped"].get("suppressed") == 1 and out["skipped"].get("dnc") == 1
+    assert "no_opt_in_evidence" not in out["skipped"]
+    rec = (db.query(SmsConsentRecord).filter_by(organization_id=org_id, program="sci_poc_sms",
+                                                phone_normalized=SIM_ACTIVE).one())
+    assert rec.consent_method == "owner_attested_import"
+    assert "held by the owner, Mike Simmons" in rec.disclosure_text
+    monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
+    assert sms_programs.sci_check(db, org_id, SIM_ACTIVE, from_number=TF)["eligible"] is True
+    assert "NO_SMS_CONSENT" in sms_programs.sci_check(db, org_id, SIM_CAMPUS, from_number=TF)["reasons"] \
+        or "SUPPRESSED" in sms_programs.sci_check(db, org_id, SIM_CAMPUS, from_number=TF)["reasons"]
+
+
 def test_reconcile_requires_attestation(client, db_session, monkeypatch):
     h, _ = _seed(client, db_session, monkeypatch)
     r = client.post("/god/sms-consent/sci/reconcile", headers=h,
