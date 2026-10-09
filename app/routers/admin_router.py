@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from app.deps import (
-    get_db, require_admin, require_super_admin, require_god,
+    get_db, require_admin, require_org_admin, require_super_admin, require_god,
     get_platform_org_ids, load_org_in_scope, load_user_in_scope,
     platform_ids_in_scope, ELEVATED_ROLES,
 )
@@ -213,7 +213,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # It was enforced NOWHERE before: an organization with no features enabled
 # could list, create, deactivate, reset the password of and force-logout the
 # users of the workspace it was standing in.
-_USERS = [Depends(require_feature("users"))]
+# User administration stays with org_admin: a workspace "manager" works leads,
+# not the workspace's people (deps.require_org_admin).
+_USERS = [Depends(require_feature("users")), Depends(require_org_admin)]
 
 
 

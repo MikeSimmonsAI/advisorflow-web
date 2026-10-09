@@ -175,6 +175,7 @@ def send_email_via_provider(
     message_type: str = None,
     sensitivity: str = None,
     template_id: str = None,
+    headers: dict = None,
 ) -> dict:
     """
     Sends via Resend. Returns {"success": bool, "provider_message_id": str|None, "error": str|None}.
@@ -289,6 +290,10 @@ def send_email_via_provider(
         if _audit and _audit.strip().lower() != (to_email or "").strip().lower():
             params["bcc"] = [_audit]
 
+        if headers:
+            # e.g. List-Unsubscribe / List-Unsubscribe-Post for program email.
+            params["headers"] = dict(headers)
+
         if attachments:
             params["attachments"] = [
                 {"filename": att["filename"], "content": att["content"], "content_type": att.get("content_type", "application/octet-stream")}
@@ -363,7 +368,8 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
                        subject: str = None, body_html: str = None,
                        send_source: str = None,
                        sent_by_user_id: str = None,
-                       raise_on_provider_failure: bool = False) -> EmailMessage:
+                       raise_on_provider_failure: bool = False,
+                       attachments: list = None) -> EmailMessage:
     """Sends one email to a lead and logs it. Raises ValueError if the lead
     may not be emailed.
 
@@ -419,6 +425,12 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     # on a send path must refuse rather than deliver.
     from app.services.sms_service import _demo_send_guard
     _demo_send_guard(db, lead, "email")
+
+    # A program lead with no resolved location is never emailed.
+    from app.services.programs import identity as _program_identity
+    _loc_refusal = _program_identity.send_refusal(db, lead, send_source)
+    if _loc_refusal:
+        raise ValueError(f"Lead {lead.id}: {_loc_refusal}")
 
     # THE COMPLIANCE GATE, and it is the SAME one the auto-send queue runs.
     #
@@ -486,6 +498,21 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     # with it.
     from app.services.public_identity import sending_identity_for_org
     org = sending_identity_for_org(db, lead.organization_id)
+    # LOCATION OUTREACH PROGRAMS: the From name is the program's person at the
+    # family's own location ("Kerry Allan | Eastern Gate Memorial Gardens").
+    # The address and domain stay the resolved, verified ones.
+    from app.services.programs import identity as _program_identity
+    org = _program_identity.apply_email_identity(db, lead, org)
+    # Program email carries a one-click unsubscribe (footer link + RFC 8058
+    # headers). Other organizations' mail is unchanged.
+    _program_headers = None
+    if _program_identity.program_for_org(db, lead.organization_id) is not None:
+        from app.services.programs import unsubscribe as _unsub
+        rendered = dict(rendered)
+        rendered["body_html"] = (rendered.get("body_html") or "") + _unsub.footer_html(
+            lead.id, _unsub.postal_line(db, lead))
+        _program_headers = {"List-Unsubscribe": "<%s>" % _unsub.url_for(lead.id),
+                            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"}
 
     # Provider selection: Resend using the org's own API key + from address when
     # configured; falls back to global env vars for orgs that haven't set them yet.
@@ -499,6 +526,8 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
         subject=rendered["subject"],
         body_html=rendered["body_html"],
         org=org,
+        **({"headers": _program_headers} if _program_headers else {}),
+        **({"attachments": attachments} if attachments else {}),
     )
 
     email_msg = EmailMessage(
@@ -516,6 +545,9 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     if result["success"]:
         lead.status = "sent"
     db.commit()
+    if result["success"] and _program_identity.program_for_org(db, lead.organization_id) is not None:
+        _program_identity.record_on_behalf(db, lead, channel="email", actor_user_id=sent_by_user_id,
+                                           sender_user_id=advisor.id, message_id=email_msg.id)
 
     # THE ROW IS WRITTEN EITHER WAY - a failed send is a fact worth keeping,
     # and status="failed" above records it. What differs is whether the caller

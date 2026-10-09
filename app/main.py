@@ -72,10 +72,13 @@ from app.routers.god_diagnostics_calendar import router as god_calendar_diag_rou
 # module docstring for why the ordinary cancel flow is the wrong tool here.
 from app.routers.god_maintenance_router import router as god_maintenance_router
 from app.routers.god_sms_trace_router import router as god_sms_trace_router
+from app.routers.god_sms_consent_router import router as god_sms_consent_router
 # Checkpoint 6 control plane: sales operations, Won -> Customer provisioning,
 # implementation lifecycle and the control-plane audit view. Separate module
 # from god_router so the whole Checkpoint 6 surface reads as one thing.
 from app.routers.god_ops_router import router as god_ops_router
+from app.routers.god_relay_router import router as god_relay_router
+from app.routers.god_launch_board_router import router as god_launch_board_router
 # Pricing floors and compensation plans — the owner's commercial control panel.
 # Separate module from god_router because it configures COMMERCIAL POLICY rather
 # than operating on records, and because payroll configuration is worth being
@@ -456,6 +459,10 @@ ALLOWED_ORIGINS = [
     "http://localhost:5174",
     "http://localhost:3000",
 ]
+# A STAGING (or other non-production) frontend declares its own origin here,
+# comma separated. Unset in production, so the list above is unchanged there.
+ALLOWED_ORIGINS += [o.strip().rstrip("/") for o in (os.environ.get("CORS_EXTRA_ORIGINS") or "").split(",")
+                    if o.strip().startswith("https://")]
 
 # ── EVERY HEADER THE BROWSER IS ALLOWED TO SEND ─────────────────────────────
 #
@@ -493,6 +500,9 @@ BROWSER_HEADERS = [
     "X-Org-Override", "X-Brand-Override",
     WORKSPACE_HEADER,
     WORKSPACE_LOCATION_HEADER,   # X-Workspace-Location (workspace-level entitlements)
+    # Replay protection on god-only writes (Control Room launch board). Unlisted, the
+    # cross-origin preflight fails and the browser never sends the write at all.
+    "Idempotency-Key",
     # The device-description headers per-device sessions read. A NATIVE app is
     # not subject to CORS and would work without them being listed — which is
     # exactly why they are listed. The moment the web client adopts one, an
@@ -985,7 +995,10 @@ app.include_router(branding_router)
 app.include_router(god_calendar_diag_router)  # read-only calendar wiring report
 app.include_router(god_maintenance_router)   # one record, dry-run first, no messages sent
 app.include_router(god_sms_trace_router)      # read-only provider forensics, sends nothing
+app.include_router(god_sms_consent_router)    # SMS Consent Center ledger + campaign registry, read-only
 app.include_router(god_router)   # AdvisorFlow Command Center — god_admin only  # public — no auth, must stay after CORS middleware
+app.include_router(god_relay_router)   # Control Room: relay status + Mike direction, god_admin only
+app.include_router(god_launch_board_router)  # /god/launch-board — project portfolio, god_admin only
 app.include_router(god_ops_router)   # Checkpoint 6 — god operations, provisioning, implementations
 app.include_router(god_pricing_router)   # Pricing floors + compensation plans — god_admin only
 app.include_router(god_billing_router)   # Customer SaaS plan catalogue + billing policy + revenue — god_admin only
@@ -1172,6 +1185,8 @@ from app.routers.skiptrace_cost_router import router as skiptrace_cost_router  #
 app.include_router(skiptrace_cost_router)   # /wholesale/skip-trace — cost catalogue, estimates, compare, approval (never calls a vendor)
 from app.routers.inbound_mailbox_router import router as inbound_mailbox_router  # noqa: E402
 app.include_router(inbound_mailbox_router)   # /god/email/inbound-mailboxes — shared reply mailbox connect/status/poll
+from app.routers.staging_harness_router import router as staging_harness_router  # noqa: E402
+app.include_router(staging_harness_router)   # /god/staging/sci — 404 unless STAGING_TEST_HARNESS=on (staging only)
 # Files — photos, documents, proof of funds. One upload path and one
 # authenticated serve path for the whole module; see the router's docstring for
 # why no stored object is ever given a public URL.
@@ -1186,6 +1201,17 @@ app.include_router(wholesale_rooms_public)  # public — token IS the authorizat
 app.include_router(wholesale_contracts_router)
 # Phase 7 EvoSense - same gates as the rest of the Wholesale module.
 app.include_router(evosense_router)
+# Location outreach programs (SCI): /program, hosted /program-assets/{token}, /god/programs.
+from app.routers.program_router import (router as program_router,
+                                        public_router as program_public_router,
+                                        god_router as program_god_router)
+app.include_router(program_router)
+app.include_router(program_public_router)  # public - the token IS the authorization
+app.include_router(program_god_router)
+# Resend delivery / bounce / complaint events (signed; inert until RESEND_WEBHOOK_SECRET is set).
+from app.routers.email_events_router import router as email_events_router, unsubscribe_router as email_unsubscribe_router
+app.include_router(email_events_router)
+app.include_router(email_unsubscribe_router)  # public - the signed token IS the authorization
 
 
 # ── Background asyncio loops ──────────────────────────────────────────────────
@@ -1634,6 +1660,70 @@ async def _wholesale_exception_loop():
         await asyncio.sleep(wholesale_ex.AUTO_INTERVAL_SECONDS)
 
 
+async def _program_sla_loop():
+    """Location outreach programs: re-alert HOT replies past their SLA, and
+    (only when PROGRAM_EMAIL_TOUCHES_SENDING is on) send due campaign emails.
+
+    Every two minutes, one pass across instances. Writes in-app alerts and the
+    alert log; staff SMS/email only where a program has switched them on and
+    configured a recipient. Contacts a customer only through the email-touch
+    switch above.
+    """
+    from app.services.programs import responses as program_responses
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("program_sla_loop")
+    interval = 120
+    await asyncio.sleep(95)  # startup delay - offset from the other loops
+    while True:
+        if not await _pass_claimed(JobName.PROGRAM_SLA, interval):
+            await asyncio.sleep(interval)
+            continue
+        try:
+            async with record_job_run(JobName.PROGRAM_SLA, db_factory=SessionLocal) as _m:
+                def _one_pass():
+                    db = SessionLocal()
+                    try:
+                        out = {"realerted": len(program_responses.sla_sweep(db))}
+                        # Campaign email touches. Returns at once unless
+                        # PROGRAM_EMAIL_TOUCHES_SENDING is on AND a campaign
+                        # family is switched on; never raises out of the pass.
+                        # STAGING ONLY: production reads the reply mailbox from
+                        # the advisorflow-email-poller cron every 5 minutes. A
+                        # staging stack without that cron sets
+                        # INBOUND_MAILBOX_INPROCESS_POLL=on to read it here on
+                        # the same 5-minute pace. Never set in production.
+                        if (os.environ.get("INBOUND_MAILBOX_INPROCESS_POLL") or "").lower() in ("1", "true", "on", "yes"):
+                            try:
+                                from app.services.programs import email_touches as _et_pace
+                                from datetime import timedelta as _td
+                                if _et_pace.pass_due(key="mailbox_poll", every=_td(minutes=5)):
+                                    from app.services.inbound_mailbox_service import poll_all_mailboxes
+                                    mb = poll_all_mailboxes(db)
+                                    out["mailbox"] = {k: mb[k] for k in ("mailboxes_polled", "mailbox_matched", "mailbox_errors")}
+                            except Exception as exc:                 # noqa: BLE001
+                                db.rollback()
+                                _logger.error("in-process mailbox poll error: %s", exc, exc_info=True)
+                        try:
+                            from app.services.programs import email_touches as _et
+                            if _et.sending_enabled() and _et.pass_due():
+                                r = _et.run(db)
+                                out["email_touches"] = {k: r[k] for k in ("sent", "failed", "blocked", "skipped")}
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("program email touches error: %s", exc, exc_info=True)
+                        return out
+                    finally:
+                        db.close()
+                report = await _off_loop(_one_pass)
+                _m.update(report)
+        except Exception as exc:                               # noqa: BLE001
+            _logger.error("program_sla error: %s", exc, exc_info=True)
+        await asyncio.sleep(interval)
+
+
 @app.on_event("startup")
 async def on_startup():
     # 0. THE ENVIRONMENT BOUNDARY. Before the database is touched, before a
@@ -2021,6 +2111,7 @@ async def on_startup():
         JobName.SALES_REMINDERS:      _sales_reminder_loop,
         JobName.EVOSENSE_HUNT:        _evosense_hunt_loop,
         JobName.WHOLESALE_EXCEPTIONS: _wholesale_exception_loop,
+        JobName.PROGRAM_SLA:          _program_sla_loop,
     }
     for _job_name in _plan["start"]:
         _factory = _loop_factories.get(_job_name)
@@ -2072,7 +2163,11 @@ def _build_metadata() -> dict:
 
     # RENDER_SERVICE_ID present means a Render deploy; its absence means local
     # or another host. Stated rather than guessed at from the hostname.
-    environment = ("production" if _os.environ.get("RENDER_SERVICE_ID")
+    # APP_ENV (app/services/environment.py) names staging/demo explicitly;
+    # without it a Render deploy is production and anything else development.
+    _app_env = (_os.environ.get("APP_ENV") or "").strip().lower()
+    environment = (_app_env if _app_env in ("production", "staging", "demo")
+                   else "production" if _os.environ.get("RENDER_SERVICE_ID")
                    else "development")
 
     return {

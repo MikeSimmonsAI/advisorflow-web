@@ -379,7 +379,8 @@ function dedupedGet(path, opts = {}) {
 
 export const api = {
   get: (path, opts = {}) => dedupedGet(path, opts),
-  post: (path, body) => request(path, { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body) }),
+  // `opts.headers` carries per-call headers such as Idempotency-Key.
+  post: (path, body, opts = {}) => request(path, { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body), ...(opts.headers ? { headers: opts.headers } : {}) }),
   put: (path, body) => request(path, { method: 'PUT', body: body instanceof FormData ? body : JSON.stringify(body) }),
   patch: (path, body) => request(path, { method: 'PATCH', body: body instanceof FormData ? body : JSON.stringify(body) }),
   delete: (path) => request(path, { method: 'DELETE' }),

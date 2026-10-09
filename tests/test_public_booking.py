@@ -452,10 +452,15 @@ def test_a_resubmission_returns_the_original_and_creates_nothing(
         db_session, site):
     """THE LOST-RESPONSE CASE. The server did the work; the answer never
     arrived; the visitor pressed the button again."""
-    first = _book(db_session, site, key="same-key")
+    # The SAME request again: same slot. (Re-reading the first free slot here would
+    # pick the NEXT slot, because the first booking took this one - that is a
+    # different booking under the same key and is correctly refused, see
+    # tests/test_public_booking_replay.py.)
+    slot = _slots(db_session, site)["slots"][0]["starts_at"]
+    first = _book(db_session, site, starts_at=slot, key="same-key")
     assert first.ok and first.created
 
-    second = _book(db_session, site, key="same-key")
+    second = _book(db_session, site, starts_at=slot, key="same-key")
     assert second.ok
     assert second.status == pb.BOOK_IDEMPOTENT
     assert second.created is False
@@ -469,11 +474,12 @@ def test_a_resubmission_returns_the_original_and_creates_nothing(
 
 
 def test_a_replay_does_not_re_run_the_side_effects(db_session, site):
-    first = _book(db_session, site, key="side-effects")
+    slot = _slots(db_session, site)["slots"][0]["starts_at"]   # same request, same slot
+    first = _book(db_session, site, starts_at=slot, key="side-effects")
     before = db_session.query(AppointmentReminder).count()
     events_before = db_session.query(OpportunityEvent).count()
 
-    second = _book(db_session, site, key="side-effects")
+    second = _book(db_session, site, starts_at=slot, key="side-effects")
     assert second.status == pb.BOOK_IDEMPOTENT
     assert db_session.query(AppointmentReminder).count() == before
     assert db_session.query(OpportunityEvent).count() == events_before, (

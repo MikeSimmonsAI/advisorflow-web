@@ -55,6 +55,12 @@ EXEMPT = {
     # simulated message and book an appointment, and cannot conjure a person.
     "services/demo_environment.py": "Demo Suite seeder; writes only into is_demo tenants, which have no plan and no billable seats",
 
+    # SCI STAGING BOOTSTRAP. Fails closed unless APP_ENV=staging AND the database is the
+    # SCI staging database; writes at most ONE named manager (organization_id NULL) plus
+    # one membership. It is a deploy-time provisioning step for a staging tenant, not a
+    # customer-facing create path, and it cannot run against production.
+    "services/sci_staging_bootstrap.py": "staging-only provisioning of one named SCI manager seat; fails closed outside the SCI staging database",
+
     # THE AI WORKFORCE SYNTHETIC PROFILES. Same category as the Demo Suite
     # seeder above, and the reason is stated rather than inherited.
     #

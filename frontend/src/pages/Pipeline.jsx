@@ -133,7 +133,7 @@ function Trend({ pct, points }) {
 export default function Pipeline() {
   const navigate = useNavigate()
   const terminology = useTerminology()
-  const { isManager } = useWorkspaceAuthority()
+  const { isWorkspaceManager: isManager } = useWorkspaceAuthority()
   const [searchParams] = useSearchParams()
   const [tab, setTab] = useState(() => searchParams.get('tab') || 'board')
   const [days, setDays] = useState(30)

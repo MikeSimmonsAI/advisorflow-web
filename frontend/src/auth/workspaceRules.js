@@ -188,6 +188,15 @@ export function roleOf(branding, user) {
   return branding?.workspace_role || user?.role || null
 }
 
+/** Workspace ADMINISTRATOR: mirrors backend deps.require_org_admin / lead_scope.
+ *  WORKSPACE_ADMIN_ROLES (+ god). Users, organization settings, credentials. */
 export function isManagerRole(role) {
   return role === 'org_admin' || role === 'super_admin' || role === 'god_admin'
+}
+
+/** Works the whole workspace (leads, conversations, campaigns, reports, program
+ *  center): mirrors backend lead_scope.is_manager_here, which also admits the
+ *  workspace "manager" role. A manager is NOT an administrator (isManagerRole). */
+export function isWorkspaceManagerRole(role) {
+  return isManagerRole(role) || role === 'manager'
 }

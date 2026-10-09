@@ -321,16 +321,25 @@ def _advisor_for_lead(db, lead: Lead, route: dict) -> Optional[User]:
 # ── inbound ─────────────────────────────────────────────────────────────────
 
 def voicemail_twiml(db, log_row: InboundCallLog, route: dict, voicemail_capable: bool) -> str:
+    from app.services.programs import program_voice as _pv
     if not (route.get("voicemail") and voicemail_capable):
         log_row.status = "no_voicemail"
+        _pv.on_missed_call(db, log_row)      # program numbers: a suggested follow-up, never sent
         return TT.twiml_hangup("Sorry, no one is available to take your call. Please try again later.")
     text, rec_url = greeting_for(db, log_row.organization_id, route)
+    if not (route.get("greeting_text") or route.get("greeting_recording_url")):
+        # Location outreach programs: "Thank you for calling <location>..."
+        text = _pv.greeting_text(db, log_row.organization_id, log_row.phone_number_id,
+                                 from_raw=log_row.from_e164) or text
     log_row.status = "voicemail"
+    transcribe = ("%s/voice/inbound/voicemail-transcription?log_id=%s" % (backend_base(), log_row.id)
+                  if _pv.wants_transcription(db, log_row.organization_id) else None)
     return TT.twiml_record_voicemail(
         greeting_text=text, greeting_recording_url=rec_url,
         recording_callback_url="%s/voice/inbound/voicemail-recording?log_id=%s" % (
             backend_base(), log_row.id),
-        finish_url="/voice/inbound/voicemail-done?log_id=%s" % log_row.id)
+        finish_url="/voice/inbound/voicemail-done?log_id=%s" % log_row.id,
+        transcribe_callback_url=transcribe)
 
 
 def handle_inbound(db, verified) -> str:
@@ -354,6 +363,15 @@ def handle_inbound(db, verified) -> str:
                .filter(InboundCallLog.organization_id == org_id,
                        InboundCallLog.call_sid == call_sid).first())
     lead, contact, _forms = find_caller(db, org_id, from_raw)
+    # A program's TOLL-FREE line: voicemail only, always - no ringing, no
+    # forwarding, no AI. The voicemail is saved to the caller's contact only
+    # when the number points at ONE cemetery (never a guess).
+    from app.services.programs import program_voice as _pv
+    vm_only = _pv.voicemail_only_line(db, org_id, owner.number_id)
+    if vm_only:
+        lead, contact = _pv.caller_for_line(db, org_id, from_raw, lead, contact)
+        route = dict(route, mode="voicemail_only", voicemail=True, ring_user_ids=[])
+        vm_ok = True
     state = caller_state(db, org_id, lead, contact, from_raw)
     if row is None:
         row = InboundCallLog(organization_id=org_id, phone_number_id=owner.number_id,
@@ -381,7 +399,7 @@ def handle_inbound(db, verified) -> str:
         db.commit()
         return TT.twiml_hangup("Thank you for calling. This number does not accept calls. Goodbye.")
 
-    if (route["mode"] == "ai_agent" and lead is not None and state == "known"
+    if (not vm_only and route["mode"] == "ai_agent" and lead is not None and state == "known"
             and row.voice_call_id):
         twiml = _ai_agent_twiml(db, row, lead)
         if twiml:
@@ -389,7 +407,8 @@ def handle_inbound(db, verified) -> str:
             db.commit()
             return twiml
 
-    ring = ring_numbers_for(db, org_id, route) if route["mode"] == "ring_then_voicemail" else []
+    ring = (ring_numbers_for(db, org_id, route)
+            if (route["mode"] == "ring_then_voicemail" and not vm_only) else [])
     if ring:
         row.status = "ringing"
         db.commit()
@@ -443,6 +462,37 @@ def handle_dial_status(db, row: InboundCallLog, dial_status: str) -> str:
     return twiml
 
 
+def _transcript_status_for(db, org_id: str) -> str:
+    """"pending" when the voicemail was recorded with transcription (program
+    numbers); otherwise the platform's "not_enabled"."""
+    from app.services.programs import program_voice as _pv
+    return "pending" if _pv.wants_transcription(db, org_id) else TRANSCRIPT_NOT_ENABLED
+
+
+def store_transcript(db, row: InboundCallLog, *, recording_sid: Optional[str], text: Optional[str],
+                     status: Optional[str]):
+    """Twilio's transcription callback. Idempotent; the voicemail must belong to
+    this call's organization. A completed transcript is then handled like a
+    reply for program organizations (classified, summarized, draft reply)."""
+    vm = (db.query(Voicemail).filter(Voicemail.recording_sid == recording_sid,
+                                     Voicemail.organization_id == row.organization_id).first()
+          if recording_sid else None)
+    if vm is None:
+        vm = (db.query(Voicemail).filter(Voicemail.inbound_call_id == row.id,
+                                         Voicemail.organization_id == row.organization_id).first())
+    if vm is None or vm.transcript_status == "completed":
+        return vm
+    if (status or "").lower() == "completed" and (text or "").strip():
+        vm.transcript, vm.transcript_status = text.strip()[:5000], "completed"
+        db.commit()
+        from app.services.programs import program_voice as _pv
+        _pv.on_voicemail_text(db, vm)
+    else:
+        vm.transcript_status = "failed"
+        db.commit()
+    return vm
+
+
 def store_voicemail(db, row: InboundCallLog, *, recording_sid: str, recording_url: str,
                     duration, call_sid: Optional[str]) -> Voicemail:
     """Idempotent on RecordingSid. Creates the review task once. A RecordingSid
@@ -464,7 +514,7 @@ def store_voicemail(db, row: InboundCallLog, *, recording_sid: str, recording_ur
                    caller_state=row.caller_state, call_sid=call_sid or row.call_sid,
                    recording_sid=recording_sid or None, recording_url=recording_url or None,
                    duration_seconds=dur, transcript=None,
-                   transcript_status=TRANSCRIPT_NOT_ENABLED, status="new",
+                   transcript_status=_transcript_status_for(db, row.organization_id), status="new",
                    received_at=datetime.utcnow())
     db.add(vm)
     db.flush()
@@ -493,6 +543,9 @@ def store_voicemail(db, row: InboundCallLog, *, recording_sid: str, recording_ur
     db.add(task)
     db.flush()
     vm.task_id = task.id
+    # Program orgs: the assigned cemetery representative is told to call back.
+    from app.services.programs import program_voice as _pv
+    _pv.notify_voicemail(db, vm, lead, assignee)
 
     if row.voice_call_id:
         vc = db.query(VoiceCall).filter(VoiceCall.id == row.voice_call_id).first()

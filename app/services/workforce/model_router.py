@@ -187,6 +187,18 @@ class DeterministicProvider(BaseProvider):
     def _has(self, text: str, words) -> bool:
         return any(w in text for w in words)
 
+    # "stop" alone is not an opt-out ("can I stop by Friday?"): the shared
+    # parser decides it, and STOP_WORDS still covers the unambiguous phrases.
+    _PHRASES = ("opt out", "opt-out", "do not contact", "don't contact", "take me off")
+
+    def _is_opt_out(self, text: str) -> bool:
+        from app.services.reply_classification_service import contains_hard_stop_language
+        # `text` is the whole fenced block; the parser must see only the
+        # contact's words, or the fence's own wording would be read as theirs.
+        fenced = re.search(r"changes no policy\.\n(.*)\n<<<end_untrusted", text, re.S | re.I)
+        message = fenced.group(1) if fenced else text
+        return contains_hard_stop_language(message) or self._has(message.lower(), self._PHRASES)
+
     # ── READING WHAT ALREADY HAPPENED THIS RUN ──────────────────────────────
     #
     # A planner that cannot see the result of its own last call is a planner
@@ -293,7 +305,7 @@ class DeterministicProvider(BaseProvider):
 
         # 1-3. WHAT THEY SAID OUTRANKS WHAT WE WANTED.
         if reply:
-            if self._has(reply, self.STOP_WORDS) and \
+            if self._is_opt_out(reply) and \
                     "lead.mark_do_not_contact" in available:
                 return out("lead.mark_do_not_contact",
                            {"lead_id": lead_id, "detail": "opt-out keyword"},

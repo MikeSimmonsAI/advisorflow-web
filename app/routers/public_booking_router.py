@@ -323,9 +323,10 @@ def public_book(platform_slug: str, payload: BookRequest, request: Request,
                 db: Session = Depends(get_db)):
     """Take the booking.
 
-    Returns 201 for a new booking and 200 for a replay of one already made, so
-    the page can tell the two apart without either being an error. A time that
-    has gone is 409 with an actionable message; a misconfiguration is 503.
+    Returns 201 for a new booking and for an exact replay of one already made
+    (`already_booked` in the body tells the page which; no second booking, event
+    or message is produced). A reused submission_id with a different time or
+    prospect, or for a booking since cancelled, is 409. A time that has gone is 409 with an actionable message; a misconfiguration is 503.
     """
     platform, org, bso = _resolve(db, platform_slug, request)
     mt = _meeting_type_or_503(db, bso, payload.meeting_type)
@@ -354,7 +355,7 @@ def public_book(platform_slug: str, payload: BookRequest, request: Request,
                      request_meta=meta)
 
     if not result.ok:
-        if result.status == pb.BOOK_SLOT_TAKEN:
+        if result.status in (pb.BOOK_SLOT_TAKEN, pb.BOOK_KEY_CONFLICT):
             raise HTTPException(status_code=409, detail=result.message)
         if result.status == pb.BOOK_NOT_CONFIGURED:
             # The service's message can name people; the public one cannot.

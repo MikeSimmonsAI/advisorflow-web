@@ -4,6 +4,7 @@ import { lazyPage } from './utils/lazyPage'
 import PageBoundary from './components/PageBoundary'
 import Layout from './components/Layout'
 import DemoBanner from './components/DemoBanner'
+import StagingBanner from './components/StagingBanner'
 import ContextBanner from './components/ContextBanner'
 import DemoConsole from './pages/DemoConsole'
 import Login from './pages/Login'
@@ -93,6 +94,7 @@ import MobileApp from './mobile/routes'
 // routes below is what stops a workspace without the module walking into the
 // server's 402 — the entitlement itself is enforced on every one of those
 // endpoints, exactly as entitlements.py insists it must be.
+const ProgramCenter = lazyPage(() => import('./pages/program/ProgramCenter'))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
@@ -121,6 +123,7 @@ const EvoControls = lazyPage(() => import('./pages/wholesale/evosense/EvoControl
 import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
+import { decideSciDoor, shouldLandInSci, SCI_ORG_NAME } from './auth/sciDoor'
 import CRMIntegration from './pages/CRMIntegration'
 import CRM from './pages/CRM'
 import TierDefinitions from './pages/TierDefinitions'
@@ -227,6 +230,7 @@ const LeadIntelligence = lazyPage(() => import('./pages/god/LeadIntelligence'))
 const FeatureEntitlements = lazyPage(() => import('./pages/god/FeatureEntitlements'))
 const GodVoiceConfig = lazyPage(() => import('./pages/god/GodVoiceConfig'))
 const GodRevenueHistory = lazyPage(() => import('./pages/god/GodRevenueHistory'))
+const ControlRoom = lazyPage(() => import('./pages/god/ControlRoom'))
 const RoadmapBoard = lazyPage(() => import('./pages/god/RoadmapBoard'))
 const GodLaunches = lazyPage(() => import('./pages/god/GodLaunches'))
 import HelpSupport from './pages/HelpSupport'
@@ -308,7 +312,7 @@ import { getCurrentUser, startKeepAlive, startRefreshLoop, getOrgContext,
 import { decideWorkspaceAccess, contextsListWorkspace,
          VERIFYING, AUTHORIZED, DENIED, UNVERIFIED } from './auth/workspaceGuard'
 import { roleOf, routeFeatureDenied } from './auth/workspaceAuthority'
-import { exitCustomer } from './pages/god/enterCustomer'
+import { enterCustomer, exitCustomer } from './pages/god/enterCustomer'
 
 function isAuthenticated() {
   // Check both keys: af_token is the current key, bookaboost_token is the legacy key.
@@ -475,6 +479,11 @@ function HomeRedirect() {
     // a sales grant.
     if (def.type === 'executive') {
       return <Navigate to="/executive" replace />
+    }
+    // SCI-only manager: straight into the SCI front door. Anyone else with a
+    // single workspace keeps the route they always had.
+    if (shouldLandInSci(ctx)) {
+      return <Navigate to="/sci" replace />
     }
     if (def.type === 'workspace' && def.organization_id) {
       return <Navigate to={'/workspace/' + def.organization_id} replace />
@@ -663,6 +672,154 @@ function WorkspaceRoute() {
 }
 
 /**
+ * SciFrontDoor - /sci. Auth required; selects the SCI workspace only for a
+ * caller whose server-built context list contains it, then opens Program Center.
+ * A platform owner without an SCI membership is sent to the Platform Console
+ * (God Mode enters a customer explicitly). Everyone else is refused cleanly.
+ */
+function SciFrontDoor() {
+  const { phase, ctx, retry } = useAuthorizedContexts()
+  const navigate = useNavigate()
+  const [godEntry, setGodEntry] = useState({ phase: 'idle', error: null })
+  const [godEntryAttempt, setGodEntryAttempt] = useState(0)
+
+  const user = getCurrentUser()
+  const decision = phase === 'ready' && ctx ? decideSciDoor(ctx) : null
+
+  useEffect(() => {
+    if (!isAuthenticated() || mustChangePassword()) return
+    if (!decision || decision.state !== 'god' || user?.role !== 'god_admin') return
+    if (godEntry.phase !== 'idle') return
+
+    let live = true
+    setGodEntry({ phase: 'loading', error: null })
+
+    ;(async () => {
+      try {
+        // God Mode has no SCI workspace membership by design. Resolve the one
+        // canonical SCI customer and enter it through the SAME audited
+        // customer-context path used everywhere else in God Mode. This grants
+        // no membership; enterCustomer() refuses to continue if the server
+        // reports that membership counts changed.
+        const q = encodeURIComponent('Service Corporation International')
+        const data = await api.get(
+          '/god/orgs?search=' + q + '&status=active&limit=20',
+          { skipRedirect: true, noOrgContext: true }
+        )
+        const orgs = Array.isArray(data?.orgs) ? data.orgs : []
+        const exact = orgs.filter(o =>
+          o &&
+          o.is_active !== false &&
+          String(o.name || '').trim().toLowerCase() === SCI_ORG_NAME
+        )
+
+        if (exact.length !== 1) {
+          throw new Error(
+            exact.length === 0
+              ? 'SCI workspace could not be found.'
+              : 'More than one SCI workspace matched. Entry was stopped.'
+          )
+        }
+
+        // God enters by audited organization override, not workspace membership.
+        // Clear any stale X-Workspace-Id first; otherwise Program endpoints can
+        // interpret the old workspace id as a membership-scoped request and
+        // correctly refuse a god_admin who does not hold that membership.
+        clearWorkspaceContext()
+        await enterCustomer(exact[0].id, exact[0].name)
+        if (live) navigate('/program', { replace: true })
+      } catch (err) {
+        if (live) {
+          setGodEntry({
+            phase: 'error',
+            error: err?.message || 'Could not enter the SCI workspace.',
+          })
+        }
+      }
+    })()
+
+    return () => { live = false }
+  }, [decision?.state, godEntryAttempt, navigate, user?.role])
+
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  if (mustChangePassword()) return <Navigate to="/change-password" replace />
+  const here = typeof window !== 'undefined' ? window.location.pathname : ''
+
+  if (phase === 'error') {
+    return (
+      <Layout>
+        <VerificationUnavailable status={null} message="Could not confirm your access."
+                                 path={here} onRetry={retry} />
+      </Layout>
+    )
+  }
+
+  if (phase !== 'ready' || !ctx || !decision) {
+    return (
+      <div role="status" aria-live="polite"
+           style={{ minHeight: '60vh', display: 'grid', placeItems: 'center',
+                    padding: 24, color: 'var(--text-secondary)' }}>
+        Confirming SCI access…
+      </div>
+    )
+  }
+
+  if (decision.state === 'enter') {
+    if (getWorkspaceContext() !== decision.organizationId) {
+      setWorkspaceContext(decision.organizationId)
+    }
+    return <Navigate to="/program" replace />
+  }
+
+  if (decision.state === 'god') {
+    if (godEntry.phase === 'error') {
+      return (
+        <div style={{ maxWidth: 560, margin: '12vh auto', padding: '0 24px' }}>
+          <h1 style={{ fontSize: 22, marginBottom: 8 }}>SCI access could not be opened</h1>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            {godEntry.error || 'The SCI workspace could not be entered.'}
+          </p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setGodEntry({ phase: 'idle', error: null })
+                setGodEntryAttempt((n) => n + 1)
+              }}
+              style={{ padding: '10px 16px', borderRadius: 8, cursor: 'pointer' }}
+            >
+              Try again
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/god')}
+              style={{ padding: '10px 16px', borderRadius: 8, cursor: 'pointer' }}
+            >
+              Back to God Mode
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div role="status" aria-live="polite"
+           style={{ minHeight: '60vh', display: 'grid', placeItems: 'center',
+                    padding: 24, color: 'var(--text-secondary)' }}>
+        Entering SCI…
+      </div>
+    )
+  }
+
+  return (
+    <Layout>
+      <Unauthorized required="SCI workspace membership"
+                    role={getCurrentUser()?.role} path={here} />
+    </Layout>
+  )
+}
+
+/**
  * WorkspaceSelector — for somebody who holds several workspaces and no back
  * office, so there is no header to hang a switcher on yet.
  */
@@ -835,6 +992,8 @@ export default function App() {
           this process is the demo environment, so a production bundle has no
           demo affordance in its DOM to find. */}
       <DemoBanner />
+      {/* STAGING / QA strip: backend-reported, renders nothing outside staging. */}
+      <StagingBanner />
       {/* The owner console, Sales, Executive and Wholesale areas load on first
           visit (utils/lazyPage); this is what shows for that moment. */}
       {/* Outside any shell (owner console, executive, sales) a chunk that
@@ -852,6 +1011,7 @@ export default function App() {
             mechanisms, deliberately not merged. */}
         <Route path="/workspace/:organizationId" element={<WorkspaceRoute />} />
         <Route path="/workspaces" element={<WorkspaceSelector />} />
+        <Route path="/sci" element={<SciFrontDoor />} />
         <Route path="/onboarding" element={<Onboarding />} />
         {/* Public by necessity: the invited customer has no account yet. */}
         <Route path="/activate" element={<Activate />} />
@@ -1051,6 +1211,7 @@ export default function App() {
         <Route path="/view/rate-requests" element={<Navigate to="/rate-requests" replace />} />
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
+        <Route path="/program" element={<ProtectedRoute><ProgramCenter /></ProtectedRoute>} />
         <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute feature="reports" requireAdmin><Reports /></ProtectedRoute>} />
         <Route path="/campaigns" element={<ProtectedRoute feature="campaigns" requireAdmin><CampaignBuilder /></ProtectedRoute>} />
@@ -1315,6 +1476,8 @@ export default function App() {
         {/* GOD-09: cross-org lead browser */}
         <Route path="/god/lead-browser"          element={<GodRoute><GodModeLayout><GodLeadBrowser /></GodModeLayout></GodRoute>} />
         <Route path="/god/lead-intelligence"     element={<GodRoute><GodModeLayout><LeadIntelligence /></GodModeLayout></GodRoute>} />
+        {/* Control Room: relay status, timeline, Needs Mike, Give Direction */}
+        <Route path="/god/control-room"          element={<GodRoute><GodModeLayout><ControlRoom /></GodModeLayout></GodRoute>} />
         {/* GOD-04: platform roadmap board */}
         <Route path="/god/roadmap"               element={<GodRoute><GodModeLayout><RoadmapBoard /></GodModeLayout></GodRoute>} />
         {/* Customer Launches — the staff view of onboarding intake. Sits in

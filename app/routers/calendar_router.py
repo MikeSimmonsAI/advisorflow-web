@@ -260,6 +260,14 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
         # SAME time. That returns the earlier outcome and touches nothing. A
         # request naming a DIFFERENT time is a reschedule and still runs, which
         # is the behaviour that existed before.
+        # Terminal states stay terminal: a late or replayed webhook must not
+        # reactivate a cancelled/expired link (it would re-create the calendar
+        # event and text the family about an appointment that was cancelled).
+        if (booking.status or "") in ("cancelled", "expired"):
+            logger.warning("booking-confirmed: booking=%s is %s - refusing",
+                           booking.id, booking.status)
+            raise HTTPException(status_code=409,
+                                detail="Booking is %s and cannot be confirmed" % booking.status)
         _already = (booking.status or "") in ("booked", "confirmed")
         _same_slot = False
         if _already and booking.booked_time and slot_display:
@@ -883,6 +891,20 @@ def confirm_booking(req: BookingConfirmRequest, db: Session = Depends(get_db)):
     booking = db.query(BookingLink).filter(BookingLink.token == req.booking_token).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking link not found or expired")
+
+    # Terminal states stay terminal: a cancelled/expired link must not be
+    # silently re-booked by a late or replayed request.
+    if booking.status in ("cancelled", "expired"):
+        raise HTTPException(status_code=409, detail="Booking is %s and cannot be confirmed" % booking.status)
+    # A repeat of an already-confirmed request must not insert a second calendar
+    # event (orphaning the first) or resend the confirmation messages.
+    if booking.status in ("booked", "confirmed") and booking.calendar_event_id:
+        same_time = (booking.booked_time is not None
+                     and booking.booked_time == req.booked_datetime.replace(tzinfo=None))
+        if not same_time:
+            raise HTTPException(status_code=409, detail="Booking is already confirmed for a different time")
+        return {"success": True, "event_id": booking.calendar_event_id, "event_link": None,
+                "already_confirmed": True}
 
     result = create_calendar_event_for_booking(db, booking, req.booked_datetime, req.duration_minutes)
     if not result["success"]:

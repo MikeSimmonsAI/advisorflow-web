@@ -56,6 +56,9 @@ class JobName:
     # Writes only exception rows; contacts nobody. Named so the ledger can say
     # when it stopped.
     WHOLESALE_EXCEPTIONS = "wholesale_exception_sweep_loop"
+    # Location outreach programs: re-alert HOT replies nobody has handled
+    # within the program's SLA. Writes alerts only; never contacts a customer.
+    PROGRAM_SLA = "program_sla_loop"
 
     # Render cron SERVICES. Separate names on purpose, even where the work
     # overlaps a loop above: cadence runs hourly in the web dyno AND daily as a
@@ -100,6 +103,7 @@ LOOP_JOB_NAMES = (
     JobName.SALES_REMINDERS,
     JobName.EVOSENSE_HUNT,
     JobName.WHOLESALE_EXCEPTIONS,
+    JobName.PROGRAM_SLA,
 )
 
 ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES
@@ -118,6 +122,7 @@ EXPECTED_INTERVAL_MINUTES = {
     JobName.SALES_REMINDERS: 15,
     JobName.EVOSENSE_HUNT: 15,
     JobName.WHOLESALE_EXCEPTIONS: 60,
+    JobName.PROGRAM_SLA: 2,
     JobName.CADENCE_CRON: 24 * 60,        # render.yaml: "0 14 * * *"
     JobName.EMAIL_POLLER: 5,              # render.yaml: "*/5 * * * *"
     # ai_conversation_cron is RETIRED (see RETIRED_JOB_NAMES): no interval, so

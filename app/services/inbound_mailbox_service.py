@@ -4,7 +4,9 @@ See app/models/inbound_mailbox_models.py for why this exists.
 
 CONNECT: a platform owner signs in to Microsoft AS the mailbox (for example
 support@evosyspro.live) through the normal OAuth consent screen. Delegated
-Mail.Read only - this path never sends mail and never holds a password.
+Mail.ReadWrite: EvoSys reads the Inbox and, only AFTER a reply has been fully
+processed, moves it into its location's Outlook folder (programs/mailfiling.py).
+This path never sends mail, never deletes mail and never holds a password.
 
 POLL (every run of the email poller cron): read the Inbox from the stored
 cursor (first run: the last 3 days, so replies that already arrived are picked
@@ -42,7 +44,13 @@ from app.models.inbound_mailbox_models import InboundMailbox, InboundMailboxMess
 
 log = logging.getLogger(__name__)
 
-MAILBOX_SCOPES = "offline_access Mail.Read User.Read"
+# Mail.ReadWrite: after a location-alias reply is fully processed, EvoSys files
+# the original into the location's Outlook folder (programs/mailfiling.py).
+# A mailbox connected before this asked only for Mail.Read; its refresh falls
+# back to MAILBOX_READ_SCOPES, reading continues exactly as before, and filing
+# reports "reconnect with Mail.ReadWrite".
+MAILBOX_SCOPES = "offline_access Mail.ReadWrite User.Read"
+MAILBOX_READ_SCOPES = "offline_access Mail.Read User.Read"
 FIRST_RUN_LOOKBACK = timedelta(days=3)
 CURSOR_OVERLAP = timedelta(minutes=10)
 MAX_MESSAGES_PER_RUN = 500
@@ -107,24 +115,42 @@ def connect_from_code(db: Session, *, code: str, connected_by_user_id: str,
     return box
 
 
-def _access_token(box: InboundMailbox) -> str:
+def _refresh(box: InboundMailbox, scope: str):
     from app.services import microsoft_email_service as M
     from app.utils.crypto import decrypt_value
-    if not box.refresh_token_encrypted:
-        raise MailboxAuthError("No Microsoft sign-in stored for this mailbox.")
-    r = httpx.post(f"{M.AUTHORITY}/oauth2/v2.0/token", data={
+    return httpx.post(f"{M.AUTHORITY}/oauth2/v2.0/token", data={
         "client_id": os.environ.get("MICROSOFT_CLIENT_ID") or M.MICROSOFT_CLIENT_ID,
         "client_secret": os.environ.get("MICROSOFT_CLIENT_SECRET") or M.MICROSOFT_CLIENT_SECRET,
         "refresh_token": decrypt_value(box.refresh_token_encrypted),
-        "grant_type": "refresh_token", "scope": MAILBOX_SCOPES}, timeout=15)
+        "grant_type": "refresh_token", "scope": scope}, timeout=15)
+
+
+def _access_token_rw(box: InboundMailbox):
+    """(access_token, can_write). Asks for Mail.ReadWrite; a sign-in that only
+    ever consented to Mail.Read gets a read token instead of an error."""
+    if not box.refresh_token_encrypted:
+        raise MailboxAuthError("No Microsoft sign-in stored for this mailbox.")
+    r = _refresh(box, MAILBOX_SCOPES)
+    can_write = True
     if r.status_code in (400, 401):
-        raise MailboxAuthError(f"Microsoft refused the stored sign-in ({r.status_code}): {r.text[:200]}")
+        first = r.text[:200]
+        r = _refresh(box, MAILBOX_READ_SCOPES)
+        can_write = False
+        if r.status_code in (400, 401):
+            raise MailboxAuthError(f"Microsoft refused the stored sign-in ({r.status_code}): {first}")
     r.raise_for_status()
     data = r.json()
+    granted = (data.get("scope") or "").lower()
+    if granted and "mail.readwrite" not in granted:
+        can_write = False
     if data.get("refresh_token"):
         from app.utils.crypto import encrypt_value
         box.refresh_token_encrypted = encrypt_value(data["refresh_token"])
-    return data["access_token"]
+    return data["access_token"], can_write
+
+
+def _access_token(box: InboundMailbox) -> str:
+    return _access_token_rw(box)[0]
 
 
 # ── Graph read ───────────────────────────────────────────────────────────────
@@ -153,7 +179,7 @@ def _fetch(token: str, since: datetime) -> List[dict]:
     skip = _skip_folder_ids(token)
     url = f"{GRAPH}/me/messages"
     params = {"$filter": f"receivedDateTime ge {iso}",
-              "$select": "id,internetMessageId,subject,from,receivedDateTime,body,bodyPreview,conversationId,parentFolderId",
+              "$select": "id,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,bodyPreview,conversationId,parentFolderId",
               "$orderby": "receivedDateTime asc", "$top": 50}
     out: List[dict] = []
     while url and len(out) < MAX_MESSAGES_PER_RUN:
@@ -317,6 +343,49 @@ def route(db: Session, org_ids: List[str], sender: str, subject: Optional[str] =
     return pool[0], "matched", detail
 
 
+def recipients_of(m: dict) -> List[str]:
+    """Every To/Cc address on a Graph message, lower-cased."""
+    out = []
+    for key in ("toRecipients", "ccRecipients"):
+        for r in m.get(key) or []:
+            a = ((r or {}).get("emailAddress") or {}).get("address")
+            if a and a.strip():
+                out.append(a.strip().lower())
+    return out
+
+
+def _alias_location(db: Session, m: dict):
+    """LOCATION OUTREACH PROGRAMS: the location profile whose alias this
+    message was addressed to (easterngategardens@...), or None. An alias names
+    exactly one workspace and location, so it - not the shared-mailbox sender
+    list - decides where the reply is routed."""
+    try:
+        from app.services.programs import aliases as _aliases
+        return _aliases.resolve(db, recipients_of(m))
+    except Exception:  # noqa: BLE001 - routing falls back to the sender, as before
+        log.exception("alias resolution failed")
+        return None
+
+
+def _file_processed(db: Session, box: InboundMailbox, row, gid: str, prof, mover) -> None:
+    try:
+        from app.services.programs import identity as _identity
+        from app.services.programs.mailfiling import file_message
+        prog = _identity.program_for_org(db, prof.organization_id)
+        if prog is None:
+            return
+        f = file_message(db, mover, box_id=box.id, mailbox_message_id=row.id, graph_id=gid,
+                         prog=prog, prof=prof)
+        if f is not None:
+            row.detail = ((row.detail + " ") if row.detail else "") + (
+                "Filed in %s." % f.folder_path if f.status == "filed"
+                else "Not filed yet (%s)." % (f.last_error or f.status))
+        db.commit()
+    except Exception:  # noqa: BLE001 - a filing problem never undoes processing
+        db.rollback()
+        log.exception("outlook filing failed for message %s", gid)
+
+
 def _store_reply(db: Session, lead, body: str, received_at: datetime, message_id: Optional[str] = None):
     from app.models.models import Notification, Reply
     # Same message (same body, received within minutes), not merely the same
@@ -370,17 +439,35 @@ def _maybe_hand_to_ai(db: Session, lead, reply) -> None:
             log.exception("pipeline failed for lead %s", lead.id)
 
 
+def _reconnect_alert(db: Session, box: InboundMailbox, error: str) -> None:
+    """The mailbox just lost its Microsoft sign-in: tell the people who depend
+    on it, once per outage (not every five minutes)."""
+    try:
+        from app.services.programs import responses as _pr
+        _pr.mailbox_reconnect_alert(db, box.address, error)
+    except Exception:  # noqa: BLE001 - alerting must never break polling
+        log.exception("mailbox reconnect alert failed")
+
+
 def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[datetime] = None,
-                 addresses: Optional[Dict[str, set]] = None) -> Dict:
+                 addresses: Optional[Dict[str, set]] = None, mover=None) -> Dict:
     now = now or datetime.utcnow()
     box.last_polled_at = now
+    was_auth_error = box.last_status == "auth_error"
     try:
-        token = _access_token(box) if fetch is None else None
+        token = None
+        if fetch is None:
+            token, can_write = _access_token_rw(box)
+            if mover is None:
+                from app.services.programs.mailfiling import GraphMover
+                mover = GraphMover(token, can_write)
         since = (box.cursor_received_at - CURSOR_OVERLAP) if box.cursor_received_at else now - FIRST_RUN_LOOKBACK
         messages = (fetch or (lambda s: _fetch(token, s)))(since)
     except MailboxAuthError as e:
         box.last_status, box.last_error = "auth_error", str(e)[:1000]
         db.commit()
+        if not was_auth_error:
+            _reconnect_alert(db, box, str(e))
         log.error("inbound mailbox %s: %s", box.address, e)
         return {"mailbox": box.address, "checked": 0, "matched": 0, "errors": 1, "auth_error": True}
     except Exception as e:  # noqa: BLE001
@@ -426,8 +513,30 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
             if not sender or sender == box.address:
                 row.outcome, row.detail = "own_mail", "Sent by the mailbox itself."
             else:
-                lead, outcome, detail = route(db, org_ids, sender, m.get("subject"))
+                alias_prof = _alias_location(db, m)
+                if alias_prof is not None:
+                    from app.services.programs import aliases as _aliases
+                    _aliases.mark_verified(alias_prof, now)
+                    lead, outcome, detail = route(db, [alias_prof.organization_id], sender, m.get("subject"))
+                    detail = ("Sent to %s (%s). " % (alias_prof.email_alias, alias_prof.official_name)
+                              + (detail or "")).strip()
+                else:
+                    lead, outcome, detail = route(db, org_ids, sender, m.get("subject"))
                 row.outcome, row.detail = outcome, detail
+                if lead is None and alias_prof is not None:
+                    # Addressed to a location but no contact matches: kept,
+                    # alerted and queued in the program - never left unread.
+                    row.organization_id = alias_prof.organization_id
+                    db.add(row)
+                    db.flush()
+                    from app.services.programs import responses as _program_responses
+                    _program_responses.record_unmatched(
+                        db, alias_prof, alias=alias_prof.email_alias, sender=sender,
+                        subject=m.get("subject"),
+                        body=clean_body((m.get("body") or {}).get("content") or m.get("bodyPreview") or ""),
+                        received_at=received, mailbox_message_id=row.id, reason=outcome)
+                    db.commit()
+                    continue
                 if lead is not None:
                     body = clean_body((m.get("body") or {}).get("content") or m.get("bodyPreview") or "")
                     if not body:
@@ -441,8 +550,18 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                     db.add(row)
                     db.commit()
                     if created:
+                        # Location outreach programs: pause, classify, alert, SLA.
+                        from app.services.programs import responses as _program_responses
+                        _program_responses.safe_on_inbound(
+                            db, lead, body, "email", reply_id=reply.id,
+                            reply_to_alias=alias_prof.email_alias if alias_prof is not None else None,
+                            alias_location_id=alias_prof.location_id if alias_prof is not None else None)
                         _maybe_hand_to_ai(db, lead, reply)
                         db.commit()
+                    if alias_prof is not None:
+                        # Processed first, filed second: only now is the
+                        # original moved to its location folder.
+                        _file_processed(db, box, row, gid, alias_prof, mover)
                     matched += 1
                     continue
             db.add(row)
@@ -465,6 +584,13 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                 first_failed = now
             if now - first_failed < ERROR_RETRY_WINDOW:
                 hold = received if hold is None else min(hold, received)
+    if mover is not None:
+        try:
+            from app.services.programs.mailfiling import retry_pending
+            retry_pending(db, mover, box.id)
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            log.exception("outlook filing retry failed for %s", box.address)
     # Advance the cursor, but never past a failed message that is still inside
     # its retry window, so it is read again next run (the fetch is `ge`, and the
     # next run starts CURSOR_OVERLAP earlier still).
@@ -477,11 +603,14 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
     return {"mailbox": box.address, "checked": len(messages), "matched": matched, "errors": errors}
 
 
-def probe(db: Session, box: InboundMailbox) -> Dict:
-    """Read-only look at the mailbox: its folders and the 15 newest messages in
-    ANY folder, so "why was nothing read?" can be answered (moved to another
-    folder, Junk, a different account signed in...)."""
-    token = _access_token(box)
+def probe(db: Session, box: InboundMailbox, folder: Optional[str] = None) -> Dict:
+    """Look at the mailbox without changing it: the access the sign-in actually
+    grants, its folders and the 15 newest messages in ANY folder, so "why was
+    nothing read / filed?" can be answered (moved to another folder, Junk, a
+    different account signed in, a Mail.Read-only sign-in...). With `folder`
+    (e.g. "Inbox/Customers Folder/SCI/Eastern Gate Memorial Gardens") it also
+    says whether that Outlook folder exists - nothing is created or moved."""
+    token, can_write = _access_token_rw(box)
     db.commit()
     h = {"Authorization": f"Bearer {token}"}
     me = httpx.get(f"{GRAPH}/me", headers=h, params={"$select": "mail,userPrincipalName,displayName"}, timeout=15)
@@ -491,7 +620,9 @@ def probe(db: Session, box: InboundMailbox) -> Dict:
     msgs = httpx.get(f"{GRAPH}/me/messages", headers=h,
                      params={"$select": "subject,from,receivedDateTime,parentFolderId",
                              "$orderby": "receivedDateTime desc", "$top": 15}, timeout=20)
-    return {
+    out = {
+        "mail_access": "Mail.ReadWrite" if can_write else "Mail.Read only - reconnect to allow Outlook filing",
+        "can_file": can_write,
         "account": me.json() if me.status_code == 200 else {"error": me.status_code, "body": me.text[:300]},
         "folders": ([{"name": f["displayName"], "total": f.get("totalItemCount"), "unread": f.get("unreadItemCount")}
                      for f in folders.json().get("value", [])] if folders.status_code == 200
@@ -502,6 +633,13 @@ def probe(db: Session, box: InboundMailbox) -> Dict:
                     for m in msgs.json().get("value", [])] if msgs.status_code == 200
                    else {"error": msgs.status_code, "body": msgs.text[:300]}),
     }
+    if folder:
+        from app.services.programs.mailfiling import GraphMover
+        try:
+            out["folder_check"] = {"path": folder, "exists": bool(GraphMover(token, can_write).folder_id(folder))}
+        except Exception as exc:  # noqa: BLE001
+            out["folder_check"] = {"path": folder, "exists": None, "error": "%s: %s" % (type(exc).__name__, str(exc)[:200])}
+    return out
 
 
 def poll_all_mailboxes(db: Session) -> Dict:

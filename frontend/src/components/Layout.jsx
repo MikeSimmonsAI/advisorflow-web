@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation } from '../api/client'
-import { isManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
+import { isManagerRole, isWorkspaceManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
 import { detectTheme, shellTheme, shellThemeSource, productName, BRAND_CONFIG, THEMES } from '../theme.js'
 import SignalPulse from './SignalPulse'
@@ -62,6 +62,9 @@ const NAV_GROUPS = [
     label: 'Workspace',
     items: [
       { to: '/', label: 'Overview', icon: 'grid' },
+      // A location outreach program's own center (SCI). Shown only when the
+      // workspace runs one - answered by GET /program/status on mount.
+      { to: '/program', label: 'Family Service Center', icon: 'home', programOnly: true },
       // LAUNCH — the customer's onboarding. Shown ONLY while setup is still
       // open. A completed launch remains reviewable from Organization settings
       // for admins, but no longer sits in the normal operational rail.
@@ -183,10 +186,10 @@ const NAV_GROUPS = [
   {
     label: 'Administration',
     items: [
-      { to: '/users', label: 'Users', icon: 'user-plus', adminOnly: true, featureKey: 'users' },
+      { to: '/users', label: 'Users', icon: 'user-plus', adminOnly: true, workspaceAdminOnly: true, featureKey: 'users' },
       { to: '/settings', label: 'My Settings', icon: 'settings' },
-      { to: '/org-settings', label: 'Organization', icon: 'building', adminOnly: true, featureKey: 'branding_settings' },
-      { to: '/tier-definitions', label: 'Tier Config', icon: 'layers', adminOnly: true, featureKey: 'tier_config' },
+      { to: '/org-settings', label: 'Organization', icon: 'building', adminOnly: true, workspaceAdminOnly: true, featureKey: 'branding_settings' },
+      { to: '/tier-definitions', label: 'Tier Config', icon: 'layers', adminOnly: true, workspaceAdminOnly: true, featureKey: 'tier_config' },
       { to: '/audit-log', label: 'Audit Log', icon: 'activity', adminOnly: true, featureKey: 'audit_log' },
 
       // ── ADMINISTRATION OF INFRASTRUCTURE, not use of a feature ───────────
@@ -344,6 +347,14 @@ export default function Layout({ children }) {
   // item stays hidden; `implementation: null` (a 200 - no 404, no console
   // error) is the normal answer for many orgs. `live` is the authoritative
   // completed state.
+  const [programActive, setProgramActive] = useState(false)
+  useEffect(() => {
+    let alive = true
+    api.get('/program/status', { skipRedirect: true })
+      .then(d => { if (alive) setProgramActive(!!d?.active) })
+      .catch(() => { if (alive) setProgramActive(false) })
+    return () => { alive = false }
+  }, [])
   const [launchNavState, setLaunchNavState] = useState(null)
   useEffect(() => {
     let alive = true
@@ -878,13 +889,18 @@ export default function Layout({ children }) {
             // and falls back to the user row only for a deployment that has
             // not refreshed its cached branding yet.
             const workspaceRole = roleOf(branding, user)
-            const isOrgAdmin = isManagerRole(workspaceRole) || isGodAdmin
+            // adminOnly = backend require_admin (is_manager_here: admins AND the
+            // workspace 'manager'). workspaceAdminOnly = backend require_org_admin
+            // (users, organization settings), which refuses a manager.
+            const isOrgAdmin = isWorkspaceManagerRole(workspaceRole) || isGodAdmin
+            const isWorkspaceAdmin = isManagerRole(workspaceRole) || isGodAdmin
             const visible = (item) => {
               if (item.fiberOnly && !(branding && branding.industry === 'fiber')) return false
               // Only orgs with an open implementation see Launch. `null`
               // means the answer has not arrived yet, and the item stays
               // hidden until it does — a nav entry that appears a second late
               // is far better than one that flashes and vanishes.
+              if (item.programOnly && !programActive) return false
               if (item.launchOnly &&
                   (!launchNavState?.exists || launchNavState.completed)) return false
               // A capability item is NEVER shown on the strength of a role.
@@ -892,6 +908,7 @@ export default function Layout({ children }) {
               // `capability` asks what the server says you may administer.
               if (item.capability) return hasCapability(item.capability)
               if (item.adminOnly && !isOrgAdmin) return false
+              if (item.workspaceAdminOnly && !isWorkspaceAdmin) return false
               if (item.featureKey !== undefined && !navFeatureEnabled(item.featureKey)) return false
               return true
             }

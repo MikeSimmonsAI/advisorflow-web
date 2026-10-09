@@ -108,6 +108,20 @@ async def inbound_voicemail_recording(request: Request, log_id: str = "",
     return _xml("<?xml version='1.0'?><Response/>")
 
 
+@router.post("/voice/inbound/voicemail-transcription")
+async def inbound_voicemail_transcription(request: Request, log_id: str = "",
+                                          db: Session = Depends(get_db)):
+    """Twilio <Record transcribe> callback: the voicemail's text."""
+    v = await verify_voice_webhook(request, db)
+    row = TS.inbound_row(db, log_id)
+    if row is None:
+        return _xml("<?xml version='1.0'?><Response/>")
+    assert_org_matches(v, row.organization_id)
+    TS.store_transcript(db, row, recording_sid=v.get("RecordingSid"),
+                        text=v.get("TranscriptionText"), status=v.get("TranscriptionStatus"))
+    return _xml("<?xml version='1.0'?><Response/>")
+
+
 @router.post("/voice/inbound/voicemail-done")
 async def inbound_voicemail_done(request: Request, log_id: str = "", db: Session = Depends(get_db)):
     v = await verify_voice_webhook(request, db)

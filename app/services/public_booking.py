@@ -174,12 +174,18 @@ BOOK_IDEMPOTENT     = "already_booked"
 BOOK_SLOT_TAKEN     = "slot_unavailable"
 BOOK_NOT_CONFIGURED = "not_configured"
 BOOK_INVALID        = "invalid_request"
+BOOK_KEY_CONFLICT   = "idempotency_conflict"
 
 # What a PUBLIC caller is told when the slot went away. Deliberately actionable
 # and deliberately vague about whose calendar changed - a visitor learning that
 # a named employee just became busy is a small privacy leak with no upside.
 SLOT_GONE_MESSAGE = ("That time was taken while you were filling in the form. "
                      "Please pick another one.")
+
+
+KEY_CONFLICT_MESSAGE = ("This submission reference was already used for a "
+                        "different or no-longer-active booking. Please reload "
+                        "the page and choose a time again.")
 
 
 @dataclass
@@ -604,6 +610,31 @@ def _slot_for(found: dict, starts_at: datetime) -> Optional[dict]:
     return None
 
 
+def _replay_result(db: Session, prior: SalesAppointment, starts_at: datetime,
+                   form: Dict[str, Any]) -> BookingResult:
+    """What a repeated submission_id gets back. Never mutates, never re-sends.
+
+    An EXACT replay (same start, same prospect email, appointment still live)
+    returns the original booking. Anything else under the same key - a different
+    time, a different prospect, or an appointment that was since cancelled or
+    otherwise ended - is refused rather than answered with a booking the visitor
+    did not ask for, and a terminal appointment is never reactivated.
+    """
+    same = (prior.starts_at == starts_at
+            and (prior.prospect_email or "").lower()
+            == (form.get("email") or "").lower())
+    if not same or prior.status != APPT_SCHEDULED:
+        return BookingResult(ok=False, status=BOOK_KEY_CONFLICT,
+                             message=KEY_CONFLICT_MESSAGE)
+    return BookingResult(
+        ok=True, status=BOOK_IDEMPOTENT, appointment=prior, created=False,
+        opportunity=(db.query(Opportunity)
+                     .filter(Opportunity.id == prior.opportunity_id).first()
+                     if prior.opportunity_id else None),
+        message="This booking was already made.",
+        artifacts={"replayed": True})
+
+
 def book(db: Session, *, platform: Platform, bso: BrandSalesOrg,
          intake_org, meeting_type: MeetingType, owner: User,
          owner_source: str, starts_at: datetime, form: Dict[str, Any],
@@ -631,13 +662,7 @@ def book(db: Session, *, platform: Platform, bso: BrandSalesOrg,
     # ── 0. the retry guard, before any side effect ──────────────────────────
     prior = existing_booking(db, bso, idempotency_key)
     if prior is not None:
-        return BookingResult(
-            ok=True, status=BOOK_IDEMPOTENT, appointment=prior, created=False,
-            opportunity=(db.query(Opportunity)
-                         .filter(Opportunity.id == prior.opportunity_id).first()
-                         if prior.opportunity_id else None),
-            message="This booking was already made.",
-            artifacts={"replayed": True})
+        return _replay_result(db, prior, starts_at, form)
 
     duration = meeting_type.duration_minutes or 30
     ends_at = starts_at + timedelta(minutes=duration)
@@ -771,11 +796,9 @@ def book(db: Session, *, platform: Platform, bso: BrandSalesOrg,
         if idempotency_key and ("idempotency" in text or "uq_sales_appt" in text):
             prior = existing_booking(db, bso, idempotency_key)
             if prior is not None:
-                return BookingResult(ok=True, status=BOOK_IDEMPOTENT,
-                                     appointment=prior, created=False,
-                                     message="This booking was already made.",
-                                     artifacts={"replayed": True,
-                                                "race": True})
+                res = _replay_result(db, prior, starts_at, form)
+                res.artifacts["race"] = True
+                return res
         # The participant exclusion constraint: somebody booked one of these
         # people between our checks and our commit. One wins; this one fails
         # honestly.

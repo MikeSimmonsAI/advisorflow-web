@@ -41,6 +41,7 @@ opt-out language always still applies as a hard override.
 """
 
 import os
+import re
 import json
 from app.services import ai_gateway
 
@@ -54,15 +55,9 @@ def _get_client():
     return _client
 
 
-# Kept as the hard-override safety net for legal opt-out language - see
-# module docstring above for why this is never fully replaced by the AI
-# classification alone. Deliberately narrow: "stop"/"unsubscribe"/"remove
-# me" are unambiguous legal opt-out phrasing. A plain "not interested" is
-# NOT in this list on purpose - that's its own not_interested category,
-# not an automatic DNC trigger (see module docstring).
-HARD_STOP_KEYWORDS = ["stop", "unsubscribe", "remove me"]
-# Whole-message opt-outs (see contains_hard_stop_language).
-STANDARD_OPT_OUT_WORDS = {"cancel", "end", "quit", "optout", "opt out", "opt-out", "revoke", "stopall"}
+from app.services.optout_parser import (  # noqa: F401  (re-exported for existing callers)
+    HARD_STOP_KEYWORDS, STANDARD_OPT_OUT_WORDS, contains_hard_stop_language, _normalize_reply,
+)
 
 VALID_CLASSIFICATIONS = ("interested", "callback", "dnc", "not_interested", "wrong_number", "question", "neutral")
 
@@ -137,12 +132,11 @@ def _fallback_keyword_classify(body: str, error: str = None) -> dict:
     body_lower = body.lower()
     hot_keywords = ["yes", "interested", "book", "schedule", "ok let's", "when can"]
     callback_keywords = ["call me", "call back"]
-    hard_stop_keywords = ["stop", "unsubscribe", "remove me"]
     not_interested_keywords = ["not interested", "no thanks", "no thank you", "not right now"]
     wrong_number_keywords = ["wrong number", "who is this", "don't know what this is"]
     question_marker = "?"
 
-    if any(kw in body_lower for kw in hard_stop_keywords):
+    if contains_hard_stop_language(body):
         classification = "dnc"
     elif any(kw in body_lower for kw in wrong_number_keywords):
         classification = "wrong_number"
@@ -168,25 +162,6 @@ def _fallback_keyword_classify(body: str, error: str = None) -> dict:
         reasoning += f": {error}"
 
     return {"classification": classification, "confidence": "low", "reasoning": reasoning}
-
-
-def contains_hard_stop_language(body: str) -> bool:
-    """
-    The non-negotiable legal opt-out check - always runs regardless of
-    what the AI classifier returns. If someone says STOP, UNSUBSCRIBE, or
-    explicitly asks to be removed, that lead goes to DNC, full stop, no
-    exceptions, no AI judgment call. A plain "not interested" does NOT
-    trigger this - see module docstring for why that's now its own
-    not_interested category instead of an automatic DNC trigger.
-    """
-    body_lower = body.lower()
-    if any(kw in body_lower for kw in HARD_STOP_KEYWORDS):
-        return True
-    # Twilio's standard opt-out keywords, which the carrier layer already
-    # honours on its own. Matched only as the WHOLE message, because as
-    # substrings "end", "quit" and "cancel" appear in ordinary replies
-    # ("weekend", "cancel my appointment") that are not opt-outs.
-    return body_lower.strip().strip(".!").strip() in STANDARD_OPT_OUT_WORDS
 
 
 # ── ONE DEFINITION OF "THIS REPLY STILL NEEDS A PERSON" ──────────────────────

@@ -157,6 +157,16 @@ def _is_lock_contention(exc) -> bool:
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    # ── Location outreach programs (SCI, 2026-10-06) ──
+    # The program tables exist on the staging database already, so a column
+    # added to them after first boot must be listed here (create_all only
+    # creates missing TABLES).
+    ("program_responses", "urgency", "VARCHAR"),
+    ("outreach_programs", "customer_identity_locked", "BOOLEAN DEFAULT TRUE"),
+    ("outreach_programs", "placement_seed_addresses", "TEXT"),
+    ("location_profiles", "campus_key", "VARCHAR"),
+    ("location_profiles", "campus_label", "VARCHAR"),
+    # @@PROGRAM_COLUMNS@@
     # ── Telephony (2026-09-28): human dialer, AMD, number record ──
     ("voice_calls", "is_human_call", "BOOLEAN"),
     ("voice_calls", "phone_number_id", "VARCHAR"),
@@ -1646,10 +1656,11 @@ INDEXES_TO_CREATE = [
     "CREATE INDEX IF NOT EXISTS ix_email_messages_sender_id ON email_messages(sender_id)",
     "CREATE INDEX IF NOT EXISTS ix_replies_lead_id       ON replies(lead_id)",
     "CREATE INDEX IF NOT EXISTS ix_replies_received_at   ON replies(received_at)",
-    # booking_links — looked up by lead, by org, and by slug
+    # booking_links — looked up by lead (the token is already UNIQUE, so indexed).
+    # The table has no organization_id or slug column (the org is reached
+    # through lead_id), so the two indexes that named them failed on every
+    # boot with "column does not exist"; removed rather than left to log.
     "CREATE INDEX IF NOT EXISTS ix_booking_links_lead_id       ON booking_links(lead_id)",
-    "CREATE INDEX IF NOT EXISTS ix_booking_links_organization_id ON booking_links(organization_id)",
-    "CREATE INDEX IF NOT EXISTS ix_booking_links_slug          ON booking_links(slug)",
     # audit_log_entries — heavily filtered by org, action, actor, and time
     "CREATE INDEX IF NOT EXISTS ix_audit_log_org_created ON audit_log_entries(organization_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_audit_log_actor       ON audit_log_entries(actor_user_id)",

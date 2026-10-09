@@ -141,6 +141,9 @@ const NAV = [
   { group: 'PLATFORM' },
   { label: 'Dashboard',        path: '/god',                  icon: 'command',
     hint: 'Command Center — platform health, status and what needs attention' },
+  // Control Room: the one screen for the ChatGPT <-> Claude relay.
+  { label: 'Control Room',     path: '/god/control-room',     icon: 'activity',
+    hint: 'Who is working, what is next, what needs you — and where to give direction' },
   // Platform overview is where the owner should LAND — with no customer
   // selected — rather than arriving already inside somebody's tenant.
   { label: 'Platform Overview', path: '/god/platform',        icon: 'layers',

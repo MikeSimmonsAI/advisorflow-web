@@ -35,12 +35,29 @@ export default function GodEmailDiagnostics() {
   const [busy, setBusy] = useState(null)
   const [note, setNote] = useState(null)
 
+  const [loadedAt, setLoadedAt] = useState(null)
+
+  // NEVER SHOW A STALE STATE. The mailbox recovers on its own (the next poll
+  // after a fixed secret or a transient Microsoft error clears last_error),
+  // so this screen re-reads every 30 seconds while it is visible, says when
+  // it last did, and drops an earlier failure banner once the server reports
+  // every mailbox healthy again.
   const load = useCallback(() => {
     api.get('/god/email/inbound-mailboxes?limit=100')
-      .then(d => { setData(d); setErr(null) })
+      .then(d => {
+        setData(d); setErr(null); setLoadedAt(new Date())
+        const healthy = (d.mailboxes || []).every(b => !b.is_active || ['ok', 'connected'].includes(b.last_status))
+        if (healthy) setNote(n => (n && !n.ok ? null : n))
+      })
       .catch(e => setErr(e.message || 'Could not load'))
   }, [])
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    const t = setInterval(() => { if (!document.hidden) load() }, 30000)
+    const onVis = () => { if (!document.hidden) load() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVis) }
+  }, [load])
 
   useEffect(() => {
     const ok = params.get('mailbox_connected')
@@ -80,6 +97,7 @@ export default function GodEmailDiagnostics() {
       <h1 style={{ margin: '0 0 4px' }}>Email diagnostics</h1>
       <p style={{ marginTop: 0, color: 'var(--text-secondary, #64748b)' }}>
         Where workspace email is sent from, and whether replies to that address come back into EvoSys.
+        {loadedAt ? <span data-testid="diag-as-of"> Status as of {loadedAt.toLocaleTimeString()} (refreshes every 30 s).</span> : null}
       </p>
       {note ? (
         <div role="status" style={{ ...card, padding: 12, background: note.ok ? '#ecfdf5' : '#fef2f2',
@@ -97,7 +115,9 @@ export default function GodEmailDiagnostics() {
         </div>
         <p style={{ color: 'var(--text-secondary, #64748b)', fontSize: 13 }}>
           Connect the address workspaces send from (for example <b>support@evosyspro.live</b>). On Microsoft's page, pick
-          that mailbox's account. EvoSys gets read-only access to its Inbox; it never sends from here.
+          that mailbox's account. EvoSys gets read and write access to that mailbox (Mail.ReadWrite): it reads replies
+          from the Inbox and, only after a reply has been processed, files it into its location's Outlook folder. It
+          never sends, deletes or creates folders from here.
         </p>
         {data && boxes.length === 0 ? (
           <div style={{ padding: 12, background: '#fffbeb', borderRadius: 8 }}>

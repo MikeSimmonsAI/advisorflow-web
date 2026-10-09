@@ -8,7 +8,8 @@ connected Microsoft 365 - and nobody polled the address the mail actually came
 from.
 
 An InboundMailbox is that sending address, connected once by a person through
-Microsoft sign-in (delegated Mail.Read; we never hold a password). The poller
+Microsoft sign-in (delegated Mail.ReadWrite - read, then file processed
+replies into Outlook folders; we never hold a password). The poller
 reads it, routes each message to the right workspace and lead, and writes one
 InboundMailboxMessage per message it looked at - matched or not - so
 "why didn't this reply show up?" is answered from the product, not from logs.
