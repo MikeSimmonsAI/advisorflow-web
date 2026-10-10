@@ -196,12 +196,13 @@ from app.routers.wholesale_files_router import router as wholesale_files_router 
 from app.routers.wholesale_rooms_router import router as wholesale_rooms_router  # noqa: E402
 from app.routers.wholesale_rooms_router import public_router as wholesale_rooms_public  # noqa: E402
 # Phase 5. Contract templates, the document lifecycle and signature
-# requests. Nothing in it drafts a contract — see its docstring.
+# requests, plus the ready-made starter contracts (wholesale_contract_docs).
 from app.routers.wholesale_contracts_router import router as wholesale_contracts_router  # noqa: E402
 # Phase 7. EvoSense Acquisition Engine - strategies, discovery, cost-aware
 # enrichment and seller intelligence BEFORE a deal exists. Same feature gate.
 from app.routers.evosense_router import router as evosense_router  # noqa: E402
 from app.routers.source_feed_router import router as source_feed_router  # noqa: E402
+from app.routers.esign_webhook_router import router as esign_webhook_router  # noqa: E402
 # Executive Suite — brand-scoped read-only portal for brand executives.
 # Separate from god_router (owner control plane) and sales_router (brand sales
 # workspace). No tenant Layout; no god controls; no cross-brand visibility.
@@ -1200,11 +1201,12 @@ app.include_router(wholesale_files_router)
 app.include_router(wholesale_rooms_router)
 app.include_router(wholesale_rooms_public)  # public — token IS the authorization
 # Contract templates and the document lifecycle. Same gates as the rest of
-# the module; it stores the customer's own forms and never writes one.
+# the module; it stores the customer's own forms and fills the starter set.
 app.include_router(wholesale_contracts_router)
 # Phase 7 EvoSense - same gates as the rest of the Wholesale module.
 app.include_router(evosense_router)
 app.include_router(source_feed_router)   # /source-feeds - token-only file feed (TAD from the operator's PC)
+app.include_router(esign_webhook_router)  # /esign/docuseal/webhook - provider callback; status re-read from DocuSeal
 # Location outreach programs (SCI): /program, hosted /program-assets/{token}, /god/programs.
 from app.routers.program_router import (router as program_router,
                                         public_router as program_public_router,

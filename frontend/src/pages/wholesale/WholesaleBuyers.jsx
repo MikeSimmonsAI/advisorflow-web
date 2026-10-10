@@ -34,6 +34,7 @@ export default function WholesaleBuyers() {
   const [includeTest, setIncludeTest] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
+  const [showFind, setShowFind] = useState(false)
   const [expanded, setExpanded] = useState(null)
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
@@ -92,6 +93,8 @@ export default function WholesaleBuyers() {
                         title="Add these buyers to your shared contacts as partners. Buy boxes, standing and history stay exactly as they are. Admins only.">
                   Link {unlinked} to contacts</button>
               ) : null}
+              <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowFind(true)}
+                      title="Local investors from the county records: owners of several houses who keep buying">Find cash buyers</button>
               <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowImport(true)}>Import buyers</button>
               <button type="button" className="evo-btn evo-btn--primary" onClick={() => setShowAdd(true)}>+ Add buyer</button>
             </>} />
@@ -207,6 +210,7 @@ export default function WholesaleBuyers() {
 
       {showAdd ? <AddBuyer onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); setNotice('Buyer added. Give them a buy box so they appear in matches.'); load() }} /> : null}
       {showImport ? <BuyerImport onClose={() => setShowImport(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
+      {showFind ? <FindBuyers onClose={() => setShowFind(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
       {editing ? <EditBuyer buyer={buyers.find((b) => b.id === editing)} onDone={() => { setEditing(null); load() }} /> : null}
       {expanded ? <BuyBoxes buyer={buyers.find((b) => b.id === expanded)} onChanged={load} onClose={() => setExpanded(null)} /> : null}
     </EvoApp>
@@ -509,6 +513,118 @@ function BuyerImport({ onDone, onClose }) {
             ))}
           </ul>
         </div>
+      ) : null}
+    </Drawer>
+  )
+}
+
+
+/* FIND CASH BUYERS: local investors from the county appraisal file - owners of
+ * several houses who keep taking title. Pick the ones to add; each arrives with
+ * a buy box built from where they already own, and with no phone or email
+ * (the county file has none) until one is looked up. */
+function FindBuyers({ onClose, onDone }) {
+  const [county, setCounty] = useState('dallas')
+  const [data, setData] = useState(null)
+  const [recentOnly, setRecentOnly] = useState(true)
+  const [q, setQ] = useState('')
+  const [picked, setPicked] = useState({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  const load = useCallback(async () => {
+    setError(null)
+    try {
+      const p = new URLSearchParams({ county, recent_only: String(recentOnly) })
+      if (q.trim()) p.set('q', q.trim())
+      setData(await api.get('/wholesale/buyers/finder?' + p.toString()))
+    } catch (e) { setError(errText(e)) }
+  }, [county, recentOnly, q])
+
+  useEffect(() => { load() }, [load])
+  const running = data && data.status && data.status.state === 'running'
+  useEffect(() => {
+    if (!running) return undefined
+    const t = setInterval(load, 8000)
+    return () => clearInterval(t)
+  }, [running, load])
+
+  async function scan() {
+    setBusy(true); setError(null)
+    try { await api.post('/wholesale/buyers/finder/run', { county }); await load() }
+    catch (e) { setError(errText(e)) } finally { setBusy(false) }
+  }
+
+  async function add() {
+    const keys = Object.keys(picked).filter((k) => picked[k])
+    if (!keys.length) return
+    setBusy(true); setError(null)
+    try {
+      const r = await api.post('/wholesale/buyers/finder/import', { county, keys })
+      setPicked({})
+      onDone(`${r.created} investor(s) added from ${county === 'dallas' ? 'Dallas' : 'Tarrant'} County records`
+             + (r.skipped.length ? ` (${r.skipped.length} skipped)` : '') + '. Look up a phone for each before sending deals.')
+      await load()
+    } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+  }
+
+  const rows = (data && data.buyers) || []
+  const nPicked = Object.values(picked).filter(Boolean).length
+  const st = (data && data.status) || {}
+
+  return (
+    <Drawer open onClose={onClose} title="Find cash buyers" sub="Local investors from the county property records · free">
+      <Note>{data ? data.note : 'Owners in the county file who hold several houses and keep buying.'}</Note>
+      <ErrorBox error={error} />
+      <div className="ws-actions" style={{ flexWrap: 'wrap', gap: 8, margin: '8px 0' }}>
+        <select className="ws-input ws-input--inline" value={county}
+                onChange={(e) => { setCounty(e.target.value); setPicked({}) }}>
+          <option value="dallas">Dallas County</option>
+          <option value="tarrant">Tarrant County</option>
+        </select>
+        <button className="btn btn--secondary btn--sm" disabled={busy || running} onClick={scan}>
+          {running ? 'Scanning the county file…' : data && data.generated_at ? 'Scan again' : 'Scan the county file'}</button>
+        <label className="ws-checkbox"><input type="checkbox" checked={recentOnly}
+               onChange={(e) => setRecentOnly(e.target.checked)} /> Bought in the last 2 years</label>
+        <input className="ws-input ws-input--inline" placeholder="Name or ZIP" value={q}
+               onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 160 }} />
+      </div>
+      <div className="ws-hint">
+        {running ? 'Reading every parcel in the county - this takes a few minutes. You can close this and come back.'
+          : st.state === 'failed' ? `The last scan failed: ${st.error}`
+          : data && data.generated_at ? `Last scan ${new Date(data.generated_at).toLocaleString()} · ${data.total} investors match`
+          : 'No scan yet for this county. Click "Scan the county file".'}
+      </div>
+      {rows.length ? (
+        <>
+          <div className="ws-actions" style={{ margin: '8px 0' }}>
+            <button className="btn btn--primary btn--sm" disabled={busy || !nPicked} onClick={add}>
+              Add {nPicked || ''} to my buyers</button>
+            <button className="btn btn--secondary btn--sm" disabled={busy}
+                    onClick={() => setPicked(Object.fromEntries(rows.filter((b) => !b.already_added).slice(0, 50).map((b) => [b.key, true])))}>
+              Pick top 50</button>
+          </div>
+          <div className="evo-table-wrap" style={{ maxHeight: 520, overflow: 'auto' }}>
+            <table className="evo-table">
+              <thead><tr><th /><th>Owner</th><th className="is-num">Holds</th><th className="is-num">Bought (2 yrs)</th><th>Where</th><th>Mailing</th></tr></thead>
+              <tbody>
+                {rows.map((b) => (
+                  <tr key={b.key}>
+                    <td><input type="checkbox" disabled={b.already_added} checked={!!picked[b.key]}
+                               aria-label={`Pick ${b.name}`}
+                               onChange={(e) => setPicked((p) => ({ ...p, [b.key]: e.target.checked }))} /></td>
+                    <td><span className="evo-strong">{b.name}</span>
+                      <span className="evo-prop__sub">{b.kind === 'company' ? 'Company' : 'Person'}{b.already_added ? ' · already in your buyers' : ''}{b.out_of_state ? ' · out of state' : ''}</span></td>
+                    <td className="is-num" title={`${b.houses} houses, ${b.multifamily} multifamily, ${b.lots} lots`}>{b.properties}</td>
+                    <td className="is-num">{b.bought_recently || '—'}</td>
+                    <td className="evo-small">{(b.zips && b.zips.length ? b.zips.slice(0, 4).join(', ') : (b.samples || [])[0]) || '—'}</td>
+                    <td className="evo-small">{[b.mailing.city, b.mailing.state].filter(Boolean).join(', ') || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       ) : null}
     </Drawer>
   )

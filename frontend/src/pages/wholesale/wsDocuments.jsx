@@ -231,6 +231,13 @@ function Row({ doc, busy, act, capability, onAttach, onDelete }) {
           {doc.signature_provider ? (
             <div className="ws-comp__sub">via {doc.signature_provider}</div>
           ) : null}
+          {doc.signature_provider && doc.signature_provider !== 'manual' && doc.external_ref
+            && ['sent', 'viewed'].includes(doc.status_key || doc.status) ? (
+            <button className="btn btn--secondary btn--sm" disabled={busy} style={{ marginTop: 4 }}
+                    onClick={() => act(() => api.post(`/wholesale/documents/${doc.id}/signature-refresh`, {}),
+                      'Signing status checked with the signing service.')}>
+              Check signing status</button>
+          ) : null}
         </div>
       </td>
       {/* Phase 5 publication boundary, per document and per audience.

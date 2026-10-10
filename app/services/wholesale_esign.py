@@ -228,6 +228,9 @@ class SignatureRequest:
     file_id: Optional[str] = None
     file_name: Optional[str] = None
     message: Optional[str] = None
+    # A generated document (wholesale_contract_docs) travels as HTML with the
+    # provider's own signature-field tags in it.
+    html: Optional[str] = None
 
 
 @dataclass
@@ -332,9 +335,120 @@ class ManualSignatureProvider(SignatureProvider):
 #     A vendor added here also needs a webhook that moves the document to
 #     `signed` or `declined`. Until that webhook exists, the document would sit
 #     at `sent` forever, which is a worse lie than not offering the button.
+class DocuSealProvider(SignatureProvider):
+    """DocuSeal (docuseal.com): 20c per completed document on the API, free
+    unlimited test mode. A generated contract goes up as HTML whose
+    <signature-field role=...> tags become the signing boxes; DocuSeal emails
+    each signer in order. `signed` is recorded only after DocuSeal itself says
+    the submission is complete - the webhook is a nudge to ask, never trusted
+    on its own (`fetch_submission`)."""
+
+    key = "docuseal"
+    label = "DocuSeal"
+    electronic = True
+    required_env = ("WHOLESALE_DOCUSEAL_API_KEY",)
+
+    @staticmethod
+    def base() -> str:
+        return (os.environ.get("WHOLESALE_DOCUSEAL_API_URL") or "https://api.docuseal.com").rstrip("/")
+
+    def _call(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Any:
+        import json as _json
+        import urllib.request
+        from app.services.evosense.sources.base import ssl_context
+        data = _json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(self.base() + path, data=data, method=method, headers={
+            "X-Auth-Token": os.environ["WHOLESALE_DOCUSEAL_API_KEY"],
+            "Content-Type": "application/json", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=30, context=ssl_context()) as r:
+            return _json.loads(r.read().decode("utf-8") or "null")
+
+    def send(self, req: SignatureRequest) -> SignatureResult:
+        if not self.is_configured():
+            return SignatureResult(status=SEND_NOT_CONFIGURED, provider=self.key,
+                                   message="WHOLESALE_DOCUSEAL_API_KEY is not set.")
+        if not req.html:
+            return SignatureResult(
+                status=SEND_FAILED, provider=self.key,
+                message=("Only the ready-made contracts can be sent from here. For your own "
+                         "uploaded form, send it however you normally do and upload the signed copy."))
+        signers = [p for p in (req.parties or []) if p.get("email")]
+        if not signers:
+            return SignatureResult(status=SEND_FAILED, provider=self.key,
+                                   message="No signer has an email address.")
+        body: Dict[str, Any] = {
+            "name": req.title,
+            "send_email": True,
+            "order": "preserved",
+            "documents": [{"name": req.title, "html": req.html}],
+            "submitters": [{"role": p["role"], "email": p["email"],
+                            **({"name": p["name"]} if p.get("name") else {}),
+                            "external_id": "%s:%s" % (req.document_id, p["role"])} for p in signers],
+        }
+        if req.message:
+            body["message"] = {"subject": req.title, "body": req.message[:2000]}
+        try:
+            out = self._call("POST", "/submissions/html", body)
+        except Exception as exc:  # vendor-side failure: never raise, never claim sent
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:200]   # HTTPError body
+            except Exception:
+                pass
+            return SignatureResult(status=SEND_FAILED, provider=self.key,
+                                   message=("DocuSeal refused the request: %s %s" % (exc, detail)).strip()[:300])
+        sub_id = out.get("id") if isinstance(out, dict) else None
+        if sub_id is None and isinstance(out, list) and out:
+            sub_id = out[0].get("submission_id")
+        if sub_id is None:
+            return SignatureResult(status=SEND_FAILED, provider=self.key,
+                                   message="DocuSeal answered without a submission id; nothing recorded as sent.")
+        return SignatureResult(status=SEND_SENT, provider=self.key, external_ref=str(sub_id),
+                               sent_at=datetime.utcnow(),
+                               message="Sent to %d signer%s by DocuSeal." % (len(signers), "" if len(signers) == 1 else "s"))
+
+    def fetch_submission(self, submission_id: str) -> Dict[str, Any]:
+        """DocuSeal's own record of the submission (status, signed PDF link)."""
+        return self._call("GET", "/submissions/%s" % int(submission_id))
+
+
+def submission_outcome(sub: Dict[str, Any]) -> Dict[str, Any]:
+    """What a DocuSeal submission record means for our document."""
+    subs = sub.get("submitters") or []
+    states = [str(s.get("status") or "").lower() for s in subs]
+    status = str(sub.get("status") or "").lower()
+    if "declined" in states or status == "declined":
+        outcome = STATUS_DECLINED
+    elif status == "completed" or (states and all(s == "completed" for s in states)):
+        outcome = STATUS_SIGNED
+    elif any(s in ("opened", "completed") for s in states):
+        outcome = STATUS_VIEWED
+    else:
+        outcome = STATUS_SENT
+    return {"outcome": outcome,
+            "signed_pdf_url": sub.get("combined_document_url"),
+            "audit_log_url": sub.get("audit_log_url"),
+            "completed_at": sub.get("completed_at"),
+            "signers": [{"role": s.get("role"), "status": s.get("status"),
+                         "completed_at": s.get("completed_at")} for s in subs]}
+
+
 PROVIDERS: Dict[str, SignatureProvider] = {
     ManualSignatureProvider.key: ManualSignatureProvider(),
+    DocuSealProvider.key: DocuSealProvider(),
 }
+
+
+def active_provider(setting_key: Optional[str]) -> SignatureProvider:
+    """The org's chosen provider; when it is still the default ("manual") and
+    an electronic provider is connected on this deployment, that one - adding
+    the key IS the choice. An explicit non-manual setting always wins."""
+    if setting_key and setting_key != ManualSignatureProvider.key:
+        return get_provider(setting_key)
+    for p in PROVIDERS.values():
+        if p.electronic and p.is_configured():
+            return p
+    return PROVIDERS[ManualSignatureProvider.key]
 
 
 def get_provider(key: Optional[str]) -> SignatureProvider:
@@ -359,7 +473,7 @@ def provider_report() -> List[Dict[str, Any]]:
             "key": key,
             "label": p.label,
             "electronic": p.electronic,
-            "billable": False,
+            "billable": bool(p.electronic),
             "configured": p.is_configured(),
             "missing_env": p.missing_config(),
             "status": "ready" if p.is_configured() else "not_connected",

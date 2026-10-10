@@ -1303,3 +1303,125 @@ def record_response(outreach_id: str, payload: ResponseIn, request: Request,
     return {"outreach_id": row.id, "status": row.status,
             "offer_amount": (float(row.offer_amount)
                              if row.offer_amount is not None else None)}
+
+
+# ── Cash-buyer finder (county appraisal rolls) ─────────────────────────────
+#
+# Local investors found in the county file: owners holding several houses who
+# keep taking title. See wholesale_buyer_finder for exactly what is counted.
+
+from app.services import wholesale_buyer_finder as finder  # noqa: E402
+
+
+def _existing_names(db: Session, org_id: str) -> set:
+    rows = db.query(WholesaleBuyer.company_name, WholesaleBuyer.contact_name).filter(
+        WholesaleBuyer.organization_id == org_id).all()
+    return {finder.norm_name(n) for r in rows for n in r if n}
+
+
+@router.get("/buyers/finder")
+def buyer_finder(county: str = Query("dallas"), min_props: int = Query(3, ge=2, le=100),
+                 recent_only: bool = Query(False), q: Optional[str] = Query(None, max_length=80),
+                 db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """The last scan of one county, minus investors already in your buyer list."""
+    if county not in finder.COUNTIES:
+        raise HTTPException(status_code=400, detail="County must be one of: %s" % ", ".join(finder.COUNTIES))
+    org_id = svc.read_org_id(db, user)
+    res = finder.load(county) or {}
+    have = _existing_names(db, org_id) if org_id else set()
+    qn = finder.norm_name(q or "")
+    rows = []
+    for b in res.get("buyers") or []:
+        if b["properties"] < min_props or (recent_only and not b["bought_recently"]):
+            continue
+        if qn and qn not in finder.norm_name(b["name"]) and not any(qn in z for z in b.get("zips") or []):
+            continue
+        rows.append({**b, "already_added": finder.norm_name(b["name"]) in have})
+    return {"county": county, "status": finder.status(county), "generated_at": res.get("generated_at"),
+            "source": res.get("source"), "criteria": res.get("criteria"), "stats": res.get("stats"),
+            "buyers": rows[:500], "total": len(rows),
+            "note": ("Owners in the %s County appraisal file who hold several houses. 'Bought recently' "
+                     "counts deeds recorded to them in the period - Texas records publish no sale price. "
+                     "The county file has no phone or email: look them up, or mail them." % county.title())}
+
+
+class FinderRunIn(BaseModel):
+    county: str = "dallas"
+    min_props: int = 3
+    max_props: int = 60
+    recent_months: int = 24
+
+
+@router.post("/buyers/finder/run")
+def buyer_finder_run(payload: FinderRunIn, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user),
+                     _guard: User = Depends(require_not_observation)):
+    """Start a fresh scan of one county (a few minutes, in the background)."""
+    if payload.county not in finder.COUNTIES:
+        raise HTTPException(status_code=400, detail="County must be one of: %s" % ", ".join(finder.COUNTIES))
+    return finder.start(payload.county, min_props=max(2, min(payload.min_props, 100)),
+                        max_props=max(10, min(payload.max_props, 5000)),
+                        recent_months=max(3, min(payload.recent_months, 120)))
+
+
+class FinderImportIn(BaseModel):
+    county: str
+    keys: List[str]
+
+
+@router.post("/buyers/finder/import")
+def buyer_finder_import(payload: FinderImportIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user),
+                        _guard: User = Depends(require_not_observation)):
+    """Add chosen investors to the buyer list with a buy box built from where
+    they already own. They arrive without phone or email (the county file has
+    none) and are not sent deals until one is added."""
+    org_id = svc.write_org_id(db, user)
+    res = finder.load(payload.county) or {}
+    by_key = {b["key"]: b for b in res.get("buyers") or []}
+    have = _existing_names(db, org_id)
+    created, skipped = 0, []
+    for key in payload.keys[:500]:
+        b = by_key.get(key)
+        if not b:
+            skipped.append({"key": key, "reason": "not in the last scan - run the finder again"})
+            continue
+        if finder.norm_name(b["name"]) in have:
+            skipped.append({"key": key, "reason": "already in your buyer list"})
+            continue
+        m = b.get("mailing") or {}
+        mailing = ", ".join(x for x in (m.get("street"), m.get("city"),
+                                        " ".join(y for y in (m.get("state"), m.get("zip")) if y)) if x)
+        what = ", ".join(x for x in ("%d house%s" % (b["houses"], "" if b["houses"] == 1 else "s") if b["houses"] else None,
+                                     "%d multifamily" % b["multifamily"] if b["multifamily"] else None,
+                                     "%d lot%s" % (b["lots"], "" if b["lots"] == 1 else "s") if b["lots"] else None) if x)
+        detail = "%s County records: owns %s; %d deed(s) to them in the last %s months" % (
+            payload.county.title(), what or "%d parcels" % b["properties"], b["bought_recently"],
+            (res.get("criteria") or {}).get("recent_months", 24))
+        notes = "\n".join(x for x in (
+            "Mailing address (county record): %s" % mailing if mailing else None,
+            "Last deed to them: %s" % b["last_deed"] if b.get("last_deed") else None,
+            "Examples: %s" % "; ".join(b.get("samples") or []) if b.get("samples") else None,
+            "No phone or email yet - look one up or mail them before sending deals.") if x)
+        buyer = WholesaleBuyer(organization_id=org_id,
+                               entity_type="company" if b["kind"] == "company" else "person",
+                               company_name=b["name"] if b["kind"] == "company" else None,
+                               contact_name=b["name"] if b["kind"] != "company" else None,
+                               preferred_channel="phone", source="county_roll:%s" % payload.county,
+                               source_detail=detail[:250], notes=notes, past_deals_count=0)
+        db.add(buyer)
+        db.flush()
+        types = [t for t, n in (("single_family", b["houses"]), ("multifamily", b["multifamily"]),
+                                ("land", b["lots"])) if n]
+        box = WholesaleBuyBox(organization_id=org_id, buyer_id=buyer.id, label="From county records")
+        _apply_box(box, {"counties": [payload.county.title()],
+                         **({"zips": b["zips"]} if b.get("zips") else {}),
+                         **({"property_types": types} if types else {})})
+        db.add(box)
+        have.add(finder.norm_name(b["name"]))
+        created += 1
+    svc.log_event(db, org_id, "buyers.imported", actor_type=ACTOR_USER, actor_user_id=user.id,
+                  summary="%d investor(s) added from %s County records" % (created, payload.county.title()),
+                  after={"source": "county_roll:%s" % payload.county, "skipped": len(skipped)})
+    db.commit()
+    return {"created": created, "skipped": skipped}

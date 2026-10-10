@@ -520,7 +520,7 @@ def request_signature(document_id: str, payload: SignatureIn, request: Request,
         raise HTTPException(status_code=404, detail="Document not found")
 
     settings = svc.resolve_settings(db, org_id)
-    provider = esign.get_provider(getattr(settings, "esign_provider", None))
+    provider = esign.active_provider(getattr(settings, "esign_provider", None))
 
     parties = payload.parties
     if parties is None and doc.parties:
@@ -568,3 +568,183 @@ def request_signature(document_id: str, payload: SignatureIn, request: Request,
         "document_status": esign.normalise(doc.status),
         "capability": esign.capability(),
     }
+
+
+# ── Ready-made contracts (wholesale_contract_docs) ─────────────────────────
+#
+# Starter purchase / assignment / disclosure documents filled from the deal,
+# previewed, printed, or sent for e-signature through the active provider.
+# Every screen that shows them carries docs.STARTER_NOTICE.
+
+from app.models.models import Organization  # noqa: E402
+from app.services import wholesale_contract_docs as docs  # noqa: E402
+
+
+def _contract_values(db: Session, org_id: str, deal: WholesaleDeal, user: User,
+                     overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    prop = db.query(WholesaleProperty).filter(WholesaleProperty.id == deal.property_id).first()
+    lead = None
+    if deal.seller_lead_id:
+        lead = (db.query(Lead).filter(Lead.id == deal.seller_lead_id,
+                                      Lead.organization_id == org_id).first())
+    buyer = None
+    if deal.assigned_buyer_id:
+        buyer = (db.query(WholesaleBuyer).filter(WholesaleBuyer.id == deal.assigned_buyer_id,
+                                                 WholesaleBuyer.organization_id == org_id).first())
+    seller_name = " ".join(x for x in (getattr(lead, "first_name", None),
+                                       getattr(lead, "last_name", None)) if x) or None
+    seller_name = seller_name or getattr(prop, "owner_name", None)
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    return docs.build_values(deal=deal, prop=prop, seller_name=seller_name,
+                             seller_email=getattr(lead, "email", None), buyer=buyer,
+                             org_name=getattr(org, "name", None), user=user, overrides=overrides)
+
+
+@router.get("/contract-kits")
+def contract_kits(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """The ready-made documents, what each needs, and whether e-signing is live."""
+    org_id = svc.read_org_id(db, user)
+    settings = svc.resolve_settings(db, org_id) if org_id else None
+    provider = esign.active_provider(getattr(settings, "esign_provider", None))
+    return {"kits": docs.kits(), "notice": docs.STARTER_NOTICE,
+            "fields": docs.LABELS, "overridable": list(docs.OVERRIDABLE),
+            "signature": {"provider": provider.key, "label": provider.label,
+                          "electronic": bool(provider.electronic and provider.is_configured()),
+                          "reason": None if provider.electronic else esign.capability()["reason"]}}
+
+
+class ContractIn(BaseModel):
+    values: Optional[Dict[str, Any]] = None     # typed overrides (OVERRIDABLE keys only)
+    message: Optional[str] = None
+
+
+@router.post("/deals/{deal_id}/contracts/{kind}/preview")
+def contract_preview(deal_id: str, kind: str, payload: ContractIn,
+                     db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """The filled document (blanks highlighted) and what is still missing.
+    Read-only: nothing is stored."""
+    if kind not in docs.KINDS:
+        raise HTTPException(status_code=404, detail="Unknown document")
+    org_id = svc.read_org_id(db, user)
+    if not org_id:
+        raise HTTPException(status_code=409, detail="No customer organization selected.")
+    deal = svc.get_deal(db, org_id, deal_id)
+    values = _contract_values(db, org_id, deal, user, payload.values)
+    miss = docs.missing(kind, values)
+    return {"kind": kind, "label": docs.KINDS[kind]["label"], "html": docs.render(kind, values),
+            "values": values, "missing": miss, "signer_problems": docs.signer_problems(kind, values),
+            "parties": docs.parties(kind, values), "ready": not miss,
+            "notice": docs.STARTER_NOTICE}
+
+
+@router.post("/deals/{deal_id}/contracts/{kind}/send")
+def contract_send(deal_id: str, kind: str, payload: ContractIn, request: Request,
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                  _guard: User = Depends(require_not_observation)):
+    """Send the filled document for e-signature. Refused (nothing stored,
+    nothing sent) while a required blank or a signer's email is missing, or
+    when no e-signature provider is connected."""
+    if kind not in docs.KINDS:
+        raise HTTPException(status_code=404, detail="Unknown document")
+    org_id = svc.write_org_id(db, user)
+    deal = svc.get_deal(db, org_id, deal_id)
+    values = _contract_values(db, org_id, deal, user, payload.values)
+    miss = docs.missing(kind, values) + docs.signer_problems(kind, values)
+    if miss:
+        raise HTTPException(status_code=409, detail="Fill these in first: %s." % ", ".join(miss))
+    settings = svc.resolve_settings(db, org_id)
+    provider = esign.active_provider(getattr(settings, "esign_provider", None))
+    if not (provider.electronic and provider.is_configured()):
+        return {"sent": False, "message": esign.capability()["reason"],
+                "html": docs.render(kind, values)}
+    title = docs.document_title(kind, values)
+    signers = docs.parties(kind, values)
+    doc = WholesaleDocument(organization_id=org_id, deal_id=deal.id, doc_type=docs.DOC_TYPE[kind],
+                            title=title, status=esign.STATUS_APPROVED, parties=json.dumps(signers),
+                            buyer_id=deal.assigned_buyer_id if kind != "purchase_agreement" else None,
+                            uploaded_by_id=user.id,
+                            notes="Generated from the EvoSys starter template (%s)." % kind)
+    db.add(doc)
+    db.flush()
+    result = provider.send(esign.SignatureRequest(document_id=doc.id, title=title, parties=signers,
+                                                  html=docs.render(kind, values, for_signature=True),
+                                                  message=payload.message))
+    if not result.left_the_building:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=result.message)
+    doc.status = esign.transition(doc.status, esign.STATUS_SENT)
+    doc.signature_status = "out_for_signature"
+    doc.signature_provider = result.provider
+    doc.external_ref = result.external_ref
+    if kind == "purchase_agreement":
+        deal.contract_status = "sent"
+    elif kind == "assignment_agreement":
+        deal.assignment_status = "sent"
+    svc.log_event(db, org_id, "document.sent_for_signature", actor_type=ACTOR_USER,
+                  actor_user_id=user.id, deal_id=deal.id,
+                  summary="%s sent for signature via %s to %s" % (
+                      docs.KINDS[kind]["short"], result.provider,
+                      ", ".join("%s (%s)" % (p["role"], p["email"]) for p in signers)))
+    db.commit()
+    return {"sent": True, "document_id": doc.id, "provider": result.provider,
+            "external_ref": result.external_ref, "message": result.message}
+
+
+def apply_signature_outcome(db: Session, doc: WholesaleDocument, outcome: Dict[str, Any],
+                            *, actor: str = "signature provider") -> bool:
+    """Move a document (and its deal) to what the provider reports. Only legal
+    moves happen; returns True when anything changed."""
+    target = outcome["outcome"]
+    current = esign.normalise(doc.status)
+    if target == current or not esign.can_transition(current, target):
+        return False
+    doc.status = target
+    deal = db.query(WholesaleDeal).filter(WholesaleDeal.id == doc.deal_id).first()
+    if target == esign.STATUS_SIGNED:
+        doc.signature_status = "signed"
+        doc.executed_at = doc.executed_at or datetime.utcnow()
+        if outcome.get("signed_pdf_url"):
+            doc.file_url = outcome["signed_pdf_url"]
+            doc.file_name = doc.file_name or ((doc.title or "signed") + ".pdf")
+        if outcome.get("audit_log_url"):
+            doc.notes = ((doc.notes + "\n") if doc.notes else "") + "Audit trail: %s" % outcome["audit_log_url"]
+        if deal is not None and doc.doc_type == "purchase_contract":
+            deal.contract_status = "signed"
+            deal.contract_signed_at = deal.contract_signed_at or datetime.utcnow()
+        if deal is not None and doc.doc_type == "assignment":
+            deal.assignment_status = "signed"
+            deal.assignment_signed_at = deal.assignment_signed_at or datetime.utcnow()
+    elif target == esign.STATUS_DECLINED:
+        doc.signature_status = "declined"
+    elif target == esign.STATUS_VIEWED:
+        doc.viewed_at = doc.viewed_at or datetime.utcnow()
+    svc.log_event(db, doc.organization_id, "document.status", actor_type="system",
+                  deal_id=doc.deal_id,
+                  summary="%s: %s → %s (reported by %s)" % (
+                      (doc.doc_type or "document").replace("_", " "), esign.STATUS_LABEL[current],
+                      esign.STATUS_LABEL[target], actor))
+    return True
+
+
+@router.post("/documents/{document_id}/signature-refresh")
+def signature_refresh(document_id: str, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user),
+                      _guard: User = Depends(require_not_observation)):
+    """Ask the provider where this document stands (works without a webhook)."""
+    org_id = svc.write_org_id(db, user)
+    doc = (db.query(WholesaleDocument).filter(WholesaleDocument.id == document_id,
+                                              WholesaleDocument.organization_id == org_id).first())
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    provider = esign.PROVIDERS.get(doc.signature_provider or "")
+    if not doc.external_ref or not hasattr(provider, "fetch_submission") or not provider.is_configured():
+        raise HTTPException(status_code=409, detail="This document was not sent through a connected e-signature provider.")
+    try:
+        outcome = esign.submission_outcome(provider.fetch_submission(doc.external_ref))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="%s did not answer: %s" % (provider.label, str(exc)[:160]))
+    changed = apply_signature_outcome(db, doc, outcome)
+    db.commit()
+    return {"changed": changed, "status": esign.normalise(doc.status),
+            "status_label": esign.STATUS_LABEL[esign.normalise(doc.status)], "signers": outcome["signers"],
+            "signed_pdf_url": doc.file_url if esign.normalise(doc.status) == esign.STATUS_SIGNED else None}
