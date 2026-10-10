@@ -2,7 +2,7 @@
 
 Written 2026-10-09 CT.
 
-- **Branch:** `sci-program`. Commits f3a1ccc8, 4be6b376, 1893827a.
+- **Branch:** `sci-program`. Commits f3a1ccc8, 4be6b376, 1893827a, c5a162f7.
 - **Deployed to:** staging only. Production and `main` are untouched.
 - **Staging URL:** https://sci-staging-frontend.onrender.com/program. `/sci` opens the same workspace.
 
