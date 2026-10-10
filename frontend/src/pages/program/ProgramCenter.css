@@ -17,7 +17,7 @@
 .sci-app button { cursor: pointer; }
 .sci-app button:disabled { cursor: not-allowed; opacity: .55; }
 .sci-app :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 6px; }
-.sci-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.sci-sr { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 
 /* ── sidebar ── */
 .sci-side {
@@ -180,7 +180,7 @@ button.sci-action:hover { background: #f7fafa; }
 .sci-savebar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 18px; }
 
 /* tables */
-.sci-tablewrap { overflow-x: auto; }
+.sci-tablewrap { overflow-x: auto; position: relative; }
 .sci-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .sci-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--sub); font-weight: 600; background: #f3f6f6; padding: 11px 14px; white-space: nowrap; }
 .sci-table td { padding: 13px 14px; border-top: 1px solid #edf1f1; vertical-align: top; }
