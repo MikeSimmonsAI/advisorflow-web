@@ -8,6 +8,7 @@ import CaseFile from './CaseFile'
 import { useToast } from '../components/Toast'
 import { formatPhone } from '../utils/phone'
 import { leadDetailTabFromSearch } from '../utils/leadDetailTabs'
+import { useWhoAmI } from '../utils/whoAmI'
 import { confirmLeadDelete, deleteLeadIds, deleteSummary } from '../utils/deleteRecords'
 import { useTerminology } from '../terminology'
 import HumanDialerPanel from '../components/telephony/HumanDialerPanel'
@@ -491,6 +492,7 @@ export default function LeadDetail() {
   const [activityError, setActivityError] = useState('')
   // Command center: Conversation Brain's state (owner, next best action), the
   // dialer's call + voicemail history, and view-only filters.
+  const me = useWhoAmI()
   const [brainCtx, setBrainCtx] = useState(null)
   const [dialerHist, setDialerHist] = useState(null)
   const [convFilter, setConvFilter] = useState('all')
@@ -1130,7 +1132,7 @@ export default function LeadDetail() {
   const latestVoicemail = inboundVoicemails[0] || null
   const assignedUser = assignableUsers.find((u) => u.id === lead.assigned_to_id)
   const assignedLabel = !lead.assigned_to_id ? 'Unassigned'
-    : lead.assigned_to_id === currentUser?.id ? 'You'
+    : lead.assigned_to_id === (me?.user_id || currentUser?.id) ? 'You'
     : (assignedUser?.full_name || 'Another advisor')
   const sourceLabel = lead.source_detail || lead.import_list_name || lead.source || null
   let customFields = {}

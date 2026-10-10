@@ -4,6 +4,7 @@ import { api, getCurrentUser } from '../api/client'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
 import MessageReview from '../components/MessageReview'
 import { formatPhone } from '../utils/phone'
+import { useWhoAmI } from '../utils/whoAmI'
 import '../styles/shared.css'
 import './Leads.css'
 import '../styles/sciWorkspace.css'
@@ -539,7 +540,8 @@ function ClassicLeads() {
 
   const baseLeads = view === 'review' ? needsReview : view === 'duplicates' ? leads.filter((l) => l.is_duplicate) : leads.filter((l) => !l.is_duplicate)
 
-  const myId = getCurrentUser()?.id || null
+  const me = useWhoAmI()
+  const myId = me?.user_id || getCurrentUser()?.id || null
   const filteredLeads = useMemo(() => {
     let result = baseLeads
     const sv = SAVED_VIEWS.find(s => s.key === savedView)
@@ -1252,7 +1254,8 @@ function ClassicLeads() {
       {/* ── Tabs + Filter Bar ── */}
       <div className="leads-controls">
         <div className="leads-views" role="group" aria-label="Saved views">
-          {SAVED_VIEWS.filter(s => !s.admin || canBulkAssign).map(s => (
+          {SAVED_VIEWS.filter(s => !s.admin || canBulkAssign || currentUser?.role === 'god_admin'
+            || ['org_admin', 'super_admin', 'god_admin'].includes(me?.workspace_role)).map(s => (
             <button key={s.key} type="button" className={savedView === s.key ? 'on' : ''} aria-pressed={savedView === s.key}
               onClick={() => { setSavedView(s.key); setSelected(new Set()); setLeadsPage(1) }}>{s.label}</button>
           ))}
