@@ -27,6 +27,63 @@ import {
 } from '../ds/ds'
 import '../ds/evo-pages.css'
 import EvoActions from './EvoActions'
+import PropertyPhoto from './PropertyPhoto'
+
+/** Free links: Google Maps, Street View, and the county's own record page. */
+function PlaceLinks({ links }) {
+  if (!links) return null
+  const items = [[links.maps_url, 'Open in Google Maps'], [links.street_view_url, 'Street View'],
+    [links.county_record_url, links.county_record_label || 'County record']].filter(([u]) => u)
+  if (!items.length) return null
+  return (
+    <p className="evo-small" style={{ margin: '8px 0 0', display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>
+      {items.map(([u, l]) => <a key={u} className="evo-link" href={u} target="_blank" rel="noreferrer">{l} ↗</a>)}
+    </p>
+  )
+}
+
+/** Every public-record fact on file for this property, each with where it came
+ *  from. Unknown stays "not on record" - nothing is filled in by guess. */
+function PublicRecord({ p, f, owners, links }) {
+  const phys = f.physical || {}
+  const ap = f.appraisal || null
+  const none = <span className="evo-muted">not on record</span>
+  const num = (v, suffix = '') => (v === null || v === undefined || v === '' ? none : `${Number(v).toLocaleString()}${suffix}`)
+  const age = phys.year_built ? ` (${new Date().getFullYear() - phys.year_built} yrs old)` : ''
+  const current = owners.filter((o) => o.current !== false)
+  const rows = [
+    ['Parcel / account', phys.parcel_apn || p.parcel_apn ? (links && links.county_record_url
+      ? <a className="evo-link" href={links.county_record_url} target="_blank" rel="noreferrer">{phys.parcel_apn || p.parcel_apn} ↗</a>
+      : (phys.parcel_apn || p.parcel_apn)) : none],
+    ['County', p.county ? `${p.county} County, ${p.state || 'TX'}` : none],
+    ['City / ZIP', p.city || p.zip_code ? [p.city, p.zip_code].filter(Boolean).join(' ') : none],
+    ['Property type', phys.property_type ? humanize(phys.property_type) : none],
+    ['Bedrooms', num(phys.bedrooms)],
+    ['Full baths', num(phys.bathrooms)],
+    ['Half baths', phys.half_bathrooms != null ? num(phys.half_bathrooms) : none],
+    ['Living area', num(phys.square_feet, ' sq ft')],
+    ['Year built', phys.year_built ? `${phys.year_built}${age}` : none],
+    ['Tax value (total)', ap ? `${money(ap.value)} · ${ap.year || ''}` : none],
+    ['Land value', ap && ap.land != null ? money(ap.land) : none],
+    ['Improvement value', ap && ap.improvements != null ? money(ap.improvements) : none],
+    ['Value per sq ft', ap && ap.value && phys.square_feet ? `${money(Math.round(ap.value / phys.square_feet))} (tax value)` : none],
+    ['Last deed transfer', f.deed_transfer && f.deed_transfer.date ? `${shortDate(f.deed_transfer.date)} · price not public in Texas` : none],
+    ['Years owned', f.ownership_years && f.ownership_years.value != null ? `${f.ownership_years.value} years` : none],
+    ['Occupancy', f.occupancy && f.occupancy.value ? humanize(f.occupancy.value) : none],
+    ['Owner of record', current.length ? current.map((o) => `${o.name || 'name not on record'}${o.owner_type_label ? ` (${o.owner_type_label.toLowerCase()})` : ''}`).join('; ') : none],
+    ['Owner mailing address', current.length && current.some((o) => o.mailing) ? current.map((o) => o.mailing).filter(Boolean).join('; ') : none],
+  ]
+  return (
+    <Panel title="Public record" id="record"
+           hint={ap && ap.source ? `From ${ap.source}${ap.at ? ` · read ${shortDate(ap.at)}` : ''}` : 'County appraisal and deed records on file'}>
+      <dl className="evo-kv" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '10px 20px', margin: 0 }}>
+        {rows.map(([k, v]) => (
+          <div key={k}><dt className="evo-muted evo-small">{k}</dt><dd style={{ margin: 0, fontWeight: 600 }}>{v}</dd></div>
+        ))}
+      </dl>
+    </Panel>
+  )
+}
 
 const FRESHNESS = { current: 'FRESH', aging: 'AGING', stale: 'STALE' }
 
@@ -161,8 +218,8 @@ export default function EvoProperty() {
 
       <section className="evo-phero" aria-label="Property snapshot">
         <div className="evo-phero__media">
-          <PropertyThumb address={p.address} size="hero" lazy={false}
-                         label={p.is_test ? 'Sandbox · property image unavailable' : undefined} />
+          <PropertyPhoto propertyId={propertyId} address={p.address} isTest={p.is_test} />
+          <PlaceLinks links={d.links} />
         </div>
         <div className="evo-phero__body">
           <div className="evo-chips">
@@ -191,6 +248,8 @@ export default function EvoProperty() {
         </div>
       </section>
 
+      <PublicRecord p={p} f={f} owners={d.owners || []} links={d.links} />
+
       {(d.review_flags || []).length ? (
         <Alert kind="warn">
           <strong>Review before anything else:</strong>
@@ -213,7 +272,7 @@ export default function EvoProperty() {
       <EvoActions d={d} propertyId={propertyId} busy={busy} act={act} onPromote={() => setPromoteOpen(true)} />
 
       <nav className="evo-sec-nav" aria-label="Sections">
-        {[['actions', 'What you can do'], ['intel', 'Intelligence'], ['conversation', 'Conversation'], ['facts', 'Seller facts'], ['deal', 'Deal intelligence'],
+        {[['record', 'Public record'], ['actions', 'What you can do'], ['intel', 'Intelligence'], ['conversation', 'Conversation'], ['facts', 'Seller facts'], ['deal', 'Deal intelligence'],
           ['signals', 'Why found'], ['owner', 'Owner & contact'], ['data', 'Data intelligence'], ['timeline', 'Timeline']]
           .map(([id, label]) => <a key={id} href={`#${id}`}>{label}</a>)}
       </nav>

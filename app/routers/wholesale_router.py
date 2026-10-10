@@ -2652,6 +2652,27 @@ def get_deal_valuation(deal_id: str, db: Session = Depends(get_db),
     return deal_valuation(db, org_id, deal)
 
 
+@router.get("/comps/{comp_id}/street-view.jpg")
+def comp_street_view(comp_id: str, size: str = Query("320x200", max_length=9),
+                     db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """A street-level photo of the COMP's own address (Google Street View),
+    used when nobody has uploaded a photo. 404 when Google has none."""
+    from fastapi import Response
+    from app.services.evosense import street_view as SV
+    org_id = svc.read_org_id(db, user)
+    comp = (db.query(WholesaleComp)
+            .filter(WholesaleComp.id == comp_id, WholesaleComp.organization_id == org_id).first())
+    if comp is None or not (comp.street_address or "").strip():
+        raise HTTPException(status_code=404, detail="Comp not found")
+    body, meta = SV.image(comp, size)
+    if not body:
+        raise HTTPException(status_code=404, detail="No street-level photo: %s" % (meta.get("reason") or "unavailable"))
+    return Response(content=body, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=86400",
+                             "X-Photo-Source": "Google Street View",
+                             "X-Photo-Date": str(meta.get("date") or "")})
+
+
 @router.delete("/comps/{comp_id}")
 def delete_comp(comp_id: str, request: Request, db: Session = Depends(get_db),
                 user: User = Depends(require_tenant_user),

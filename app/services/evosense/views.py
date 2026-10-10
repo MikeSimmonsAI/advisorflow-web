@@ -548,6 +548,10 @@ def row(p, signals: Optional[List[str]] = None, strategy_name: Optional[str] = N
             "is_test": bool(p.is_test), "strategy_id": p.best_strategy_id,
             "strategy_name": strategy_name, "discovered_at": _iso(p.discovered_at),
             "promoted_deal_id": p.promoted_deal_id, "parcel_apn": p.parcel_apn,
+            "bedrooms": float(p.bedrooms) if p.bedrooms is not None else None,
+            "bathrooms": float(p.bathrooms) if p.bathrooms is not None else None,
+            "square_feet": p.square_feet, "year_built": p.year_built,
+            "ownership_years": p.ownership_years, "occupancy": p.occupancy,
             "last_observed_at": _iso(p.last_observed_at),
             "archived_at": _iso(getattr(p, "archived_at", None)),
             "archive_reason": getattr(p, "archive_reason", None)}
@@ -557,7 +561,13 @@ SORTS = {"opportunity": (EvoSenseProperty.opportunity_score.desc().nullslast(),)
          "intent": (EvoSenseProperty.seller_intent.desc().nullslast(),
                     EvoSenseProperty.opportunity_score.desc().nullslast()),
          "newest": (EvoSenseProperty.discovered_at.desc(),),
-         "contact": (EvoSenseProperty.contact_confidence.desc().nullslast(),)}
+         "contact": (EvoSenseProperty.contact_confidence.desc().nullslast(),),
+         "value_low": (EvoSenseProperty.appraisal_value.asc().nullslast(),),
+         "value_high": (EvoSenseProperty.appraisal_value.desc().nullslast(),),
+         "owned_longest": (EvoSenseProperty.ownership_years.desc().nullslast(),),
+         "oldest": (EvoSenseProperty.year_built.asc().nullslast(),),
+         "largest": (EvoSenseProperty.square_feet.desc().nullslast(),),
+         "address": (EvoSenseProperty.street_address.asc().nullslast(),)}
 
 
 def _contactability(db, prop):
@@ -577,8 +587,9 @@ def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optiona
           q: Optional[str] = None, signal: Optional[str] = None, sort: str = "opportunity",
           limit: int = 50, offset: int = 0, county: Optional[str] = None,
           min_score: Optional[int] = None, source: Optional[str] = None,
-          archived: bool = False) -> Dict[str, Any]:
+          archived: bool = False, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     limit = max(1, min(int(limit or 50), 200))
+    fx = {k: v for k, v in (filters or {}).items() if v not in (None, "")}
     base = db.query(EvoSenseProperty).filter(EvoSenseProperty.organization_id == org_id)
     # A rolled-back pilot is hidden, never deleted; "archived" shows only it.
     base = base.filter(EvoSenseProperty.archived_at.isnot(None) if archived
@@ -596,14 +607,24 @@ def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optiona
         base = base.filter(EvoSenseProperty.best_strategy_id == strategy_id)
     if q:
         like = "%%%s%%" % q.strip()
+        from app.models.evosense_models import EvoSenseOwner, EvoSenseOwnership
+        by_owner = (db.query(EvoSenseOwnership.property_id)
+                    .join(EvoSenseOwner, EvoSenseOwner.id == EvoSenseOwnership.owner_id)
+                    .filter(EvoSenseOwnership.organization_id == org_id,
+                            EvoSenseOwner.display_name.ilike(like)))
         base = base.filter(or_(EvoSenseProperty.street_address.ilike(like),
                                EvoSenseProperty.city.ilike(like),
-                               EvoSenseProperty.zip_code.ilike(like)))
+                               EvoSenseProperty.zip_code.ilike(like),
+                               EvoSenseProperty.parcel_apn.ilike(like),
+                               EvoSenseProperty.id.in_(by_owner)))
     if signal:
-        sub = (db.query(EvoSenseSignal.property_id)
-               .filter(EvoSenseSignal.organization_id == org_id, EvoSenseSignal.signal_type == signal,
-                       EvoSenseSignal.active.is_(True)))
-        base = base.filter(EvoSenseProperty.id.in_(sub))
+        # one signal, or several separated by commas: the property must carry ALL of them
+        for one in [x.strip() for x in str(signal).split(",") if x.strip()]:
+            sub = (db.query(EvoSenseSignal.property_id)
+                   .filter(EvoSenseSignal.organization_id == org_id, EvoSenseSignal.signal_type == one,
+                           EvoSenseSignal.active.is_(True)))
+            base = base.filter(EvoSenseProperty.id.in_(sub))
+    base = _apply_filters(db, org_id, base, fx)
     counts_q = base.with_entities(EvoSenseProperty.status, func.count(EvoSenseProperty.id)) \
         .group_by(EvoSenseProperty.status)
     counts = {s: int(n) for s, n in counts_q.all()}
@@ -632,7 +653,63 @@ def inbox(db, org_id: str, *, bucket: Optional[str] = None, strategy_id: Optiona
             "sources": sorted({k for (k,) in db.query(EvoSenseObservation.provider_key.distinct())
                                .filter(EvoSenseObservation.organization_id == org_id).all() if k}),
             "archived": bool(archived),
+            "cities": sorted({c for (c,) in db.query(EvoSenseProperty.city.distinct())
+                              .filter(EvoSenseProperty.organization_id == org_id).all() if c}),
+            "property_types": sorted({c for (c,) in db.query(EvoSenseProperty.property_type.distinct())
+                                      .filter(EvoSenseProperty.organization_id == org_id).all() if c}),
+            "filters": fx,
             "sandbox": sandbox_state(db, org_id)}
+
+
+# Search filters for the Discovery Inbox. Each one reads a column the public
+# record actually filled; a property whose value is unknown never matches a
+# range (it is not guessed into or out of it).
+_RANGES = {
+    "value": EvoSenseProperty.appraisal_value, "year_built": EvoSenseProperty.year_built,
+    "sqft": EvoSenseProperty.square_feet, "beds": EvoSenseProperty.bedrooms,
+    "baths": EvoSenseProperty.bathrooms, "owned_years": EvoSenseProperty.ownership_years,
+    "score": EvoSenseProperty.opportunity_score,
+}
+
+
+def _num(v):
+    try:
+        return float(str(v).replace(",", "").replace("$", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_filters(db, org_id, base, fx: Dict[str, Any]):
+    for key, col in _RANGES.items():
+        lo, hi = _num(fx.get("min_" + key)), _num(fx.get("max_" + key))
+        if lo is not None:
+            base = base.filter(col >= lo)
+        if hi is not None:
+            base = base.filter(col <= hi)
+    if fx.get("city"):
+        base = base.filter(func.lower(EvoSenseProperty.city) == str(fx["city"]).strip().lower())
+    if fx.get("zip"):
+        zips = [z.strip()[:5] for z in str(fx["zip"]).split(",") if z.strip()]
+        base = base.filter(or_(*[EvoSenseProperty.zip_code.like(z + "%") for z in zips]))
+    if fx.get("property_type"):
+        base = base.filter(EvoSenseProperty.property_type == fx["property_type"])
+    if fx.get("occupancy"):
+        base = base.filter(EvoSenseProperty.occupancy == fx["occupancy"])
+    if fx.get("street"):
+        base = base.filter(EvoSenseProperty.street_address.ilike("%%%s%%" % str(fx["street"]).strip()))
+    if fx.get("parcel"):
+        base = base.filter(EvoSenseProperty.parcel_apn.ilike("%%%s%%" % str(fx["parcel"]).strip()))
+    if fx.get("owner"):
+        from app.models.evosense_models import EvoSenseOwner, EvoSenseOwnership
+        own = (db.query(EvoSenseOwnership.property_id)
+               .join(EvoSenseOwner, EvoSenseOwner.id == EvoSenseOwnership.owner_id)
+               .filter(EvoSenseOwnership.organization_id == org_id,
+                       EvoSenseOwnership.is_current.is_(True),
+                       EvoSenseOwner.display_name.ilike("%%%s%%" % str(fx["owner"]).strip())))
+        base = base.filter(EvoSenseProperty.id.in_(own))
+    if fx.get("missing") == "physical":
+        base = base.filter(EvoSenseProperty.square_feet.is_(None))
+    return base
 
 
 def _score_payload(s: Optional[EvoSenseScore]):

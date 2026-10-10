@@ -22,6 +22,7 @@ import {
   PropertyThumb, Ring, SandboxTag, Scores, Status, Tag, ago, cents, humanize, money, when,
 } from '../ds/ds'
 import '../ds/evo-pages.css'
+import PropertyPhoto, { usePropertyPhoto } from './PropertyPhoto'
 
 const ACT_TONE = {
   'handoff.opened': 'attention', 'reply.read': 'info', 'reply.received': 'info', 'promoted': 'good',
@@ -200,7 +201,7 @@ export default function EvoCommand() {
       ) : (
         <div className="evo-pcards evo-gapb">
           {spotlight.map((p) => (
-            <PropCard key={p.id} href={`/wholesale/evosense/property/${p.id}`}
+            <PhotoPropCard key={p.id} pid={p.id} test={p.is_test} href={`/wholesale/evosense/property/${p.id}`}
                       address={p.address} place={[[p.city, p.state].filter(Boolean).join(', '), p.zip_code].filter(Boolean).join(' ')}
                       score={p.opportunity_score} status={<Status status={p.status} />}
                       facts={[['Contact', p.contact_confidence ?? '—'], ['Intent', p.seller_intent ?? '—'],
@@ -244,7 +245,7 @@ export default function EvoCommand() {
                             <div className="evo-prop__text">
                               <Link className="evo-prop__addr" to={`/wholesale/evosense/property/${p.id}`}
                                     onClick={(e) => e.stopPropagation()}>{p.address}</Link>
-                              <span className="evo-prop__sub">{[p.city, p.state].filter(Boolean).join(', ')} {p.zip_code}</span>
+                              <span className="evo-prop__sub">{[p.city || (p.county ? `${p.county} County` : null), p.state].filter(Boolean).join(', ')} {p.zip_code}</span>
                             </div>
                           </div>
                         </td>
@@ -296,6 +297,13 @@ export default function EvoCommand() {
   )
 }
 
+/** A top-opportunity card with the real street-level photo of that address
+ *  when Google has one (at most four cards, so at most four photos). */
+function PhotoPropCard({ pid, test, ...rest }) {
+  const { src } = usePropertyPhoto(pid, { enabled: !test, size: '480x300' })
+  return <PropCard src={src} {...rest} />
+}
+
 function NeedsYouHero({ n, onOpen }) {
   const eco = n.economics || {}
   const contact = n.contact
@@ -303,7 +311,7 @@ function NeedsYouHero({ n, onOpen }) {
   return (
     <section className="evo-hero" aria-labelledby="needs-you-title">
       <div className="evo-hero__media">
-        <PropertyThumb address={n.address} size="hero" label={n.is_test ? 'Sandbox · property image unavailable' : undefined} />
+        <PropertyPhoto propertyId={n.property_id} address={n.address} isTest={n.is_test} showWhy={false} />
       </div>
       <div className="evo-hero__body">
         <div className="evo-hero__top">
@@ -369,19 +377,37 @@ function SystemStatus({ cc }) {
   const a = cc.automation || {}
   const i = a.inbound || {}
   const ctl = cc.controls || {}
+  const ch = ctl.channels || {}
+  // What each channel can ACTUALLY do right now - not just whether its pause
+  // switch is off. The server's channel truth (views.channel_truth) decides.
+  const prog = (ch.paused_sms && ch.paused_sms.program) || {}
+  const smsReady = !!prog.can_send
+  const budgets = ((cc.spent && cc.spent.strategies) || []).filter((s) => s.status === 'active')
+  const anyBudget = budgets.some((s) => (s.daily_budget_cents || 0) > 0)
+  const paid = ch.paused_paid_data || {}
+  const paidRow = ctl.paused_paid_data ? ['attention', 'Paused', paid.why]
+    : paid.state === 'NOTHING CONNECTED' ? ['quiet', 'Nothing connected', paid.why]
+    : paid.state === 'SANDBOX ONLY' ? ['attention', 'Sandbox only', paid.why]
+    : !anyBudget ? ['quiet', 'Budget $0', 'Every active strategy has a $0 daily budget, so no paid lookup can run.']
+    : ['good', 'Ready', paid.why]
+  const sms = ch.paused_sms || {}
+  const smsRow = ctl.paused_sms ? ['attention', 'Paused', sms.why]
+    : smsReady ? ['good', 'Ready', sms.why]
+    : ['quiet', prog.enabled ? 'No texting number' : 'Not set up', sms.why]
   const rows = [
     ['Automatic hunting', a.hunting === 'active' ? ['good', 'Running'] : a.hunting === 'paused' ? ['attention', 'Paused']
       : a.hunting === 'manual' ? ['quiet', 'Manual only'] : ['quiet', 'Off']],
-    ['Inbound seller replies', ['good', 'Receiving']],
-    ['Paid data lookups', ctl.paused_paid_data ? ['attention', 'Paused'] : ['good', 'Allowed']],
-    ['SMS outreach', ctl.paused_sms ? ['attention', 'Paused'] : ['good', 'Allowed']],
+    ['Inbound seller replies', prog.messaging_service_configured ? ['good', 'Receiving']
+      : ['quiet', 'No texting number', 'No Wholesale texting number is set up, so no seller reply can arrive by text yet.']],
+    ['Paid data lookups', paidRow],
+    ['SMS outreach', smsRow],
     ['AI reply reading', ctl.paused_ai_replies ? ['attention', 'Paused'] : ['good', 'On']],
   ]
   return (
     <Panel title="System status" action={<Link className="evo-link" to="/wholesale/evosense/controls">Controls</Link>}>
       <ul className="evo-sys">
-        {rows.map(([k, [tone, v]]) => (
-          <li key={k}><span>{k}</span><span className={`evo-status is-${tone}`}>{v}</span></li>
+        {rows.map(([k, [tone, v, why]]) => (
+          <li key={k} title={why || undefined}><span>{k}</span><span className={`evo-status is-${tone}`}>{v}</span></li>
         ))}
       </ul>
       {(i.pending_ai_review || i.routing_review || i.held_while_paused) ? (
@@ -404,7 +430,7 @@ function SystemStatus({ cc }) {
 }
 
 function FragmentRow({ k, v }) {
-  return <><dt title="Next automatic hunt">{k}</dt><dd>{v}</dd></>
+  return <><dt title="Next automatic hunt for this strategy">Next hunt · {k}</dt><dd>{v}</dd></>
 }
 
 function BudgetUsage({ spent }) {
@@ -419,8 +445,8 @@ function BudgetUsage({ spent }) {
           const pct = s.daily_budget_cents ? Math.min(100, Math.round(100 * s.today_cents / s.daily_budget_cents)) : 0
           return (
             <li key={s.id}>
-              <div className="evo-budget__row"><span>{s.name}</span>
-                <span className="evo-mono">{cents(s.today_cents)} / {cents(s.daily_budget_cents)}</span></div>
+              <div className="evo-budget__row"><span>{s.name} · spent today</span>
+                <span className="evo-mono">{s.daily_budget_cents ? `${cents(s.today_cents)} of ${cents(s.daily_budget_cents)}` : 'no daily budget set'}</span></div>
               <div className={`evo-bar-meter${pct >= 95 ? ' is-danger' : pct >= 75 ? ' is-warning' : ''}`} role="progressbar"
                    aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${s.name}: ${pct}% of today's budget used`}>
                 <span style={{ width: `${pct}%` }} />

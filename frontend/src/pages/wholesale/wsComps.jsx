@@ -23,10 +23,37 @@
  * that are actually included, and reads as an em dash when it cannot be
  * computed at all.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import { fmtMoney, fmtNum, fmtDate, Note, Why } from './wsShared'
 import { AuthImage, UploadZone, ConfirmDelete, openFile } from './wsFiles'
+
+/** No uploaded photo: a street-level photo of the comp's own address (Google
+ *  Street View), labelled as such - or "No photo" when Google has none. */
+function CompStreetView({ comp, alt }) {
+  const [src, setSrc] = useState(null)
+  const [done, setDone] = useState(false)
+  useEffect(() => {
+    let url = null
+    let alive = true
+    setSrc(null); setDone(false)
+    if (!comp.id || !comp.street_address) { setDone(true); return undefined }
+    api.get(`/wholesale/comps/${comp.id}/street-view.jpg`, { asBlob: true })
+      .then((b) => { url = URL.createObjectURL(b); if (alive) setSrc(url) })
+      .catch(() => {})
+      .finally(() => { if (alive) setDone(true) })
+    return () => { alive = false; if (url) URL.revokeObjectURL(url) }
+  }, [comp.id, comp.street_address])
+  if (src) {
+    return (
+      <span title="Google Street View of this address" style={{ position: 'relative', display: 'inline-block' }}>
+        <img src={src} alt={`Street view of ${alt}`} className="ws-comp__thumb" />
+        <span className="ws-comp__sub" style={{ display: 'block', fontSize: 10 }}>Street View</span>
+      </span>
+    )
+  }
+  return <span className="ws-comp__thumb is-empty">{done ? 'No photo' : '…'}</span>
+}
 
 /* Every editable field on a comp, once. The add form and the edit form are the
  * same list, so a field can never exist in one and be missing from the other. */
@@ -317,7 +344,7 @@ function CompRow({ comp, vsMedian, capability, busy, act, onEdit, editing,
                     onClick={() => openFile(comp.photo.url)}>
               <AuthImage path={comp.photo.url} alt={name} className="ws-comp__thumb" />
             </button>
-          ) : <span className="ws-comp__thumb is-empty">No photo</span>}
+          ) : <CompStreetView comp={comp} alt={name} />}
         </td>
         <td>
           <div className="ws-comp__addr">{comp.street_address || '(no address)'}</div>

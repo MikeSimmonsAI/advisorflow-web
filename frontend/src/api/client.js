@@ -69,7 +69,7 @@ function sleep(ms) {
 // THE OPTIONS THAT ARE OURS, NOT `fetch`'s. Everything else in `options` is
 // spread into fetch() verbatim, so anything we invent has to be named here or
 // it silently becomes a no-op property on the request init object.
-const CLIENT_ONLY_OPTIONS = ['params', 'noOrgContext', 'skipRedirect', 'asCustomer']
+const CLIENT_ONLY_OPTIONS = ['params', 'noOrgContext', 'skipRedirect', 'asCustomer', 'asBlob']
 
 /**
  * Serialise a `params` object onto a path as a query string.
@@ -292,6 +292,9 @@ async function request(path, options = {}, attempt = 0, skipRedirect = false) {
     throw err
   }
 
+  // `asBlob`: an image or file read WITH the same workspace/customer headers as
+  // every other call (fetchObjectUrl sends only the token).
+  if (options.asBlob) return res.blob()
   const contentType = res.headers.get('content-type') || ''
   if (contentType.includes('application/json')) return res.json()
   return res.text()
@@ -354,7 +357,7 @@ function _getDedupeKey(path, opts) {
   const wsLocation = (workspaceLocationHeader() || [])[1] || ''
   const obs = _observationOrgId || ''
   const flags = [opts.noOrgContext ? 1 : 0, opts.skipRedirect ? 1 : 0,
-                 opts.asCustomer ? 1 : 0].join('')
+                 opts.asCustomer ? 1 : 0, opts.asBlob ? 1 : 0].join('')
   const route = typeof window !== 'undefined' ? window.location.pathname : '/'
   return [path, org, brand, ws, wsLocation, obs, flags, route].join('\u0000')
 }
