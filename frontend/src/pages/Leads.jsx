@@ -1392,8 +1392,7 @@ function ClassicLeads() {
                   </th>
                 )}
                 <SortTh col="first_name">Name</SortTh>
-                <th>Phone</th>
-                <th>Email</th>
+                <th>Contact</th>
                 <SortTh col="tier">Tier</SortTh>
                 <SortTh col="status">Status</SortTh>
                 <th>Owner</th>
@@ -1436,8 +1435,10 @@ function ClassicLeads() {
                         )}
                       </div>
                     </td>
-                    <td className="mono leads-secondary">{formatPhone(lead.phone) || '—'}</td>
-                    <td className="mono leads-secondary">{lead.email || '—'}</td>
+                    <td className="mono leads-secondary leads-contact-cell">
+                      <div>{formatPhone(lead.phone) || '—'}</div>
+                      {lead.email && <div className="leads-contact-email">{lead.email}</div>}
+                    </td>
                     <td><TierBadge tier={lead.tier} /></td>
                     <td><StatusBadge status={lead.status} /></td>
                     <td className="leads-secondary">{!lead.assigned_to_id ? 'Unassigned' : lead.assigned_to_id === myId ? 'You'
@@ -1455,6 +1456,11 @@ function ClassicLeads() {
                           {new Date(lead.created_at).toLocaleDateString()}
                         </div>
                       )}
+                    </td>
+                    {/* The "Last Msg" column had a header and no cell, so every
+                        column after Source sat under the wrong heading. */}
+                    <td className="leads-secondary" style={{ whiteSpace: 'nowrap', fontSize: 12 }}>
+                      {lead.last_messaged_at ? new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(lead.last_messaged_at) ? lead.last_messaged_at : lead.last_messaged_at + 'Z').toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—'}
                     </td>
                     <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
                       {/* KEEP SEPARATE. Until this existed, the only way to get
