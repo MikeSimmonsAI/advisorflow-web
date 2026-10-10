@@ -282,4 +282,7 @@ def test_capability_refuses_to_claim_an_electronic_signature():
     assert cap["electronic_signature"] is False
     assert "signed outside this system" in cap["reason"].lower()
     # Every listed provider is honest about whether it can carry a signature.
-    assert all(p["electronic"] is False for p in cap["providers"])
+    # An electronic provider may be LISTED (DocuSeal), but without its key it is
+    # not connected and nothing claims it can sign.
+    assert all(not (p["electronic"] and p["configured"]) for p in cap["providers"])
+    assert {p["key"] for p in cap["providers"] if p["electronic"]} <= {"docuseal"}

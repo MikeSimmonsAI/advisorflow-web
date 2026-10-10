@@ -13,9 +13,10 @@
  *   the blanks left blank and labelled with where that fact actually comes
  *   from. A legal description is not guessed from an address.
  *
- *   IT DOES NOT DRAFT.  No clause, no recital, no "suggested wording", and no
- *   generated Texas wholesale agreement. That is a lawyer's work and the
- *   product does not pretend otherwise.
+ *   IT OFFERS A STARTER SET.  A plain-English Texas purchase agreement,
+ *   assignment and buyer disclosure, filled from the deal (ReadyContracts),
+ *   always labelled as a starter to have an attorney approve, and sendable
+ *   for e-signature when a provider is connected.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
@@ -82,9 +83,10 @@ export function ContractDesk({ deal, act, busy }) {
         </span>
       </div>
 
+      <ReadyContracts deal={deal} onSent={load} />
+
       <Note>
-        Pick your own form, then carry these facts into it. Nothing here writes
-        contract language.
+        Using your own form instead? Carry these facts into it.
       </Note>
 
       <Templates templates={sheet.templates} />
@@ -132,20 +134,134 @@ export function ContractDesk({ deal, act, busy }) {
         ))}
       </div>
 
-      <Why label="Why the product will not draft the contract for you">
+      <Why label="About the ready-made contracts">
         <p>
-          A wholesale assignment is a binding real-property agreement. Whether
-          one is sufficient turns on the law of the state it is written for and
-          on the facts of the particular deal, and neither of those is something
-          this platform is in a position to judge.
+          A wholesale assignment is a binding real-property agreement. The
+          ready-made set is a plain-English starting point for Texas, not legal
+          advice: have a Texas real estate attorney approve it once (or upload
+          the set they give you above) before you rely on it.
         </p>
         <p>
-          So it does the part software is good at — remembering your forms and
-          never losing a fact — and leaves the drafting to the person whose
-          professional judgement it actually is. A generated agreement that
-          looked right would be the most expensive feature in the product.
+          Every value in it comes from this deal or from what you type on this
+          screen. A document cannot be sent while a required blank is open, and
+          it only shows as Signed once the signing service confirms every party
+          signed.
         </p>
       </Why>
+    </div>
+  )
+}
+
+
+/* READY-MADE CONTRACTS: the starter purchase agreement, assignment and buyer
+ * disclosure, filled from this deal. Preview, print, or send for e-signature.
+ * Fields the deal does not hold yet can be typed here; a document cannot be
+ * sent while a required blank or a signer's email is missing. */
+const EDITABLE = {
+  purchase_agreement: ['seller_name', 'seller_email', 'price', 'earnest_money', 'option_days',
+    'title_company', 'closing_date', 'additional_terms'],
+  assignment_agreement: ['assignee_name', 'assignee_signer', 'assignee_email', 'contract_date',
+    'assignment_fee', 'assignee_deposit', 'title_company', 'closing_date', 'additional_terms'],
+  assignee_disclosure: ['assignee_name', 'assignee_signer', 'assignee_email'],
+}
+
+function ReadyContracts({ deal, onSent }) {
+  const [kits, setKits] = useState(null)
+  const [kind, setKind] = useState(null)
+  const [vals, setVals] = useState({})
+  const [pv, setPv] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [notice, setNotice] = useState(null)
+
+  useEffect(() => {
+    api.get('/wholesale/contract-kits').then(setKits).catch((e) => setError(errText(e)))
+  }, [])
+
+  const preview = useCallback(async (k, v) => {
+    setBusy(true); setError(null)
+    try { setPv(await api.post(`/wholesale/deals/${deal.id}/contracts/${k}/preview`, { values: v })) }
+    catch (e) { setError(errText(e)) }
+    finally { setBusy(false) }
+  }, [deal.id])
+
+  function open(k) { setKind(k); setVals({}); setNotice(null); preview(k, {}) }
+
+  function printIt() {
+    const w = window.open('', '_blank')
+    if (!w) { setError('The browser blocked the print window. Allow pop-ups for this site.'); return }
+    w.document.write(pv.html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300)
+  }
+
+  async function send() {
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      const r = await api.post(`/wholesale/deals/${deal.id}/contracts/${kind}/send`, { values: vals })
+      if (r.sent) { setNotice(`${r.message} You'll see it under Documents; it moves to Signed on its own.`); onSent && onSent() }
+      else setError(r.message)
+    } catch (e) { setError(errText(e)) }
+    finally { setBusy(false) }
+  }
+
+  if (!kits) return error ? <div className="ws-error">{error}</div> : null
+  const sig = kits.signature || {}
+  const labels = kits.fields || {}
+  const blocked = pv ? [...(pv.missing || []), ...(pv.signer_problems || [])] : []
+
+  return (
+    <div className="ws-fill" style={{ marginBottom: 14 }}>
+      <div className="ws-fill__head">
+        <span>Ready-made contracts</span>
+        <span className={`ws-pill ${sig.electronic ? 'is-ok' : 'is-muted'}`}>
+          {sig.electronic ? `E-signing on (${sig.label})` : 'E-signing not connected'}
+        </span>
+      </div>
+      <Note>{kits.notice}</Note>
+      <div className="ws-actions" style={{ flexWrap: 'wrap', margin: '8px 0' }}>
+        {kits.kits.map((k) => (
+          <button key={k.kind} className={`btn btn--sm ${kind === k.kind ? 'btn--primary' : 'btn--secondary'}`}
+                  onClick={() => open(k.kind)} title={k.when}>{k.short}</button>
+        ))}
+      </div>
+      {error ? <div className="ws-error">{error}</div> : null}
+      {notice ? <div className="ws-good">{notice}</div> : null}
+      {kind && pv ? (
+        <>
+          <div className="ws-grid">
+            {(EDITABLE[kind] || []).map((key) => (
+              <div className="ws-field" key={key}>
+                <label htmlFor={`rc-${key}`}>{labels[key] || key}</label>
+                {key === 'additional_terms' ? (
+                  <textarea id={`rc-${key}`} rows={2} value={vals[key] ?? ''}
+                            placeholder={pv.values[key] || ''}
+                            onChange={(e) => setVals((v) => ({ ...v, [key]: e.target.value }))} />
+                ) : (
+                  <input id={`rc-${key}`} className="ws-input" value={vals[key] ?? ''}
+                         type={key === 'closing_date' || key === 'contract_date' ? 'date' : 'text'}
+                         placeholder={pv.values[key] || 'not on file'}
+                         onChange={(e) => setVals((v) => ({ ...v, [key]: e.target.value }))} />
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="ws-actions" style={{ margin: '8px 0' }}>
+            <button className="btn btn--secondary btn--sm" disabled={busy} onClick={() => preview(kind, vals)}>
+              Update preview</button>
+            <button className="btn btn--secondary btn--sm" disabled={busy} onClick={printIt}>Print / save PDF</button>
+            <button className="btn btn--primary btn--sm" disabled={busy || !sig.electronic || blocked.length > 0}
+                    onClick={send}
+                    title={!sig.electronic ? (sig.reason || 'Connect DocuSeal to send for signature')
+                      : blocked.length ? `Missing: ${blocked.join(', ')}` : 'Email it to the signers in order'}>
+              Send for e-signature</button>
+          </div>
+          {blocked.length ? <div className="ws-hint">Still needed before sending: {blocked.join(' · ')}</div> : null}
+          {!sig.electronic ? (
+            <div className="ws-hint">To sign electronically, add a DocuSeal API key in Render (WHOLESALE_DOCUSEAL_API_KEY). Until then, print it and upload the signed copy under Documents.</div>
+          ) : null}
+          <iframe title="Contract preview" srcDoc={pv.html} sandbox=""
+                  style={{ width: '100%', height: 560, border: '1px solid #ddd', borderRadius: 8, background: '#fff', marginTop: 8 }} />
+        </>
+      ) : null}
     </div>
   )
 }

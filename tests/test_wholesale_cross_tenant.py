@@ -422,6 +422,12 @@ def attacks(ids):
          {"status": "approved"}),
         ("post", "/wholesale/documents/%s/signature-request" % ids["document_id"],
          {"parties": [{"name": "attacker", "email": "a@example.com"}]}),
+        # The ready-made contracts carry the seller, the price and the dates;
+        # sending one emails a stranger's deal to whoever the caller names.
+        ("post", "/wholesale/deals/%s/contracts/purchase_agreement/preview" % d, {}),
+        ("post", "/wholesale/deals/%s/contracts/purchase_agreement/send" % d,
+         {"values": {"price": "1", "seller_email": "a@example.com"}}),
+        ("post", "/wholesale/documents/%s/signature-refresh" % ids["document_id"], {}),
     ] + evosense_attacks(ids) + funding_and_exception_attacks(ids) + ops_attacks(ids)
 
 
@@ -612,6 +618,9 @@ def test_every_id_bearing_wholesale_route_is_in_the_attack_list(theirs):
     # an id, which is how this check previously reported a covered endpoint as
     # missing.
     values = {str(v) for v in theirs.values() if v}
+    # A document KIND is a path parameter too (contracts/{kind}/...); the attack
+    # uses the purchase agreement, so that word squashes like an id.
+    values.add("purchase_agreement")
 
     def template(path):
         return "/".join("{}" if part in values else part
