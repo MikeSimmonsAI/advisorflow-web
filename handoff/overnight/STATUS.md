@@ -7,3 +7,12 @@
 - Next: 10/10/2026 01:57:34
 - Next check-in by:  CT
 - Code:  @ 
+
+## 2026-10-10 01:37 CT - SCI - running
+- Task: Overnight start: heartbeat and check-ins set up
+- Done since last check-in: Heartbeat/watchdog scripts written; first entry had a script bug (fixed)
+- Tests / progress: Full suite rerun on 881297b started 01:33
+- Blocker: none
+- Next: SCI gap fixes, watchdog scheduling
+- Next check-in by: 01:57 CT
+- Code: desktop/consent-center @ 881297bb
