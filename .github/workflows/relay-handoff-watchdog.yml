@@ -24,6 +24,10 @@ jobs:
       RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev'
       RELAY_STATUS_ACTORS: ${{ vars.RELAY_STATUS_ACTORS || 'github-actions[bot],claude[bot]' }}
       HANDOFF_STALE_MINUTES: "10"
+      # Never re-wake ChatGPT on a run older than 6h, nor more than twice per run,
+      # nor once a newer relay run has started (stops obsolete re-signals).
+      HANDOFF_MAX_AGE_MINUTES: "360"
+      HANDOFF_MAX_RETRIES: "2"
     steps:
       - name: Load relay watchdog
         uses: actions/checkout@v4

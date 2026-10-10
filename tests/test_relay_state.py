@@ -88,7 +88,9 @@ class RelayStateTests(unittest.TestCase):
         self.assertEqual(out["history"][0]["state"], "superseded")
 
     def test_stale_hung_threshold(self):
-        cs = [directive("a", 0), ack("a", 1), status("a", "WORKING", 2)]
+        # A progress update at minute 20 keeps the heartbeat fresh (test_relay_heartbeat
+        # covers silence); this test is about the 30-minute lease alone.
+        cs = [directive("a", 0), ack("a", 1), status("a", "WORKING", 2), status("a", "WORKING", 20)]
         self.assertEqual(build(cs, now_min=30)["worker"]["health"], "ok")          # 29 min
         w = build(cs, now_min=32)["worker"]                                         # 31 min
         self.assertEqual((w["health"], w["display"]), ("STALE/HUNG", "STALE/HUNG"))

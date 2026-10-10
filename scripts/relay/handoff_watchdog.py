@@ -21,8 +21,10 @@ import urllib.request
 from datetime import datetime, timezone
 
 from relay_guard import (
+    ACK,
     DIRECTIVE,
     REVIEW,
+    STATUS,
     TERMINAL_STATUSES,
     _csv,
     _login,
@@ -77,9 +79,53 @@ def handled_after(comments, terminal_comment, run_id: str) -> bool:
     return False
 
 
+def superseded_by(comments, terminal_comment, run_id: str):
+    """A newer relay run (directive/ACK/status for a different run_id) posted after
+    the terminal status means the relay moved on; re-signalling the old run would
+    only wake ChatGPT on obsolete work."""
+    tid = int(terminal_comment.get("id") or 0)
+    for c in comments:
+        if int(c.get("id") or 0) <= tid:
+            continue
+        p = parse(c.get("body") or "")
+        other = p.get("run_id")
+        if p["kind"] in (DIRECTIVE, ACK, STATUS) and other and other != run_id:
+            return other
+    return None
+
+
+def prior_resignals(run_id: str) -> int:
+    """How many times this watchdog already re-signalled run_id (relay-signal commits)."""
+    try:
+        commits = api("/commits?sha=relay-signal&per_page=100") or []
+    except Exception as exc:  # unknown -> treat as capped, never spam
+        print(f"handoff watchdog: could not read relay-signal history ({exc}); not re-signalling")
+        return 10**6
+    tag = f"relay watchdog re-signal: {run_id}"
+    return sum(1 for c in commits if (c.get("commit") or {}).get("message", "").strip() == tag)
+
+
+def decide_resignal(age: float, threshold: int, max_age: int, retries: int, max_retries: int,
+                    handled: bool, newer_run):
+    """Pure decision: (resignal?, reason)."""
+    if handled:
+        return False, "already handled"
+    if newer_run:
+        return False, f"superseded by newer run {newer_run}"
+    if age < threshold:
+        return False, f"only {age:.1f}m old (< {threshold}m)"
+    if age > max_age:
+        return False, f"expired: {age:.0f}m old (> {max_age}m); needs a human, not another wake-up"
+    if retries >= max_retries:
+        return False, f"already re-signalled {retries}x (cap {max_retries})"
+    return True, f"missed handoff, terminal age {age:.1f}m, retry {retries + 1}/{max_retries}"
+
+
 def main() -> int:
     issue = int(os.environ.get("RELAY_ISSUE") or 1)
     threshold = int(os.environ.get("HANDOFF_STALE_MINUTES") or 10)
+    max_age = int(os.environ.get("HANDOFF_MAX_AGE_MINUTES") or 360)
+    max_retries = int(os.environ.get("HANDOFF_MAX_RETRIES") or 2)
     branches = _csv("RELAY_ALLOWED_BRANCHES", "sci-program,wholesale-nightly,platform-dev")
     automation = _csv("RELAY_STATUS_ACTORS", DEFAULT_AUTOMATION)
     actors = _csv("RELAY_AUTHORIZED_ACTORS", "MikeSimmonsAI")
@@ -110,11 +156,14 @@ def main() -> int:
 
     rid = info["run_id"]
     age = age_minutes(terminal)
-    if handled_after(comments, terminal, rid):
-        print(f"handoff watchdog: {rid} already handled")
-        return 0
-    if age < threshold:
-        print(f"handoff watchdog: {rid} only {age:.1f}m old (< {threshold}m)")
+    handled = handled_after(comments, terminal, rid)
+    newer = None if handled else superseded_by(comments, terminal, rid)
+    retries = 0
+    if not handled and not newer and threshold <= age <= max_age:
+        retries = prior_resignals(rid)
+    ok, reason = decide_resignal(age, threshold, max_age, retries, max_retries, handled, newer)
+    if not ok:
+        print(f"handoff watchdog: {rid} {reason}")
         return 0
 
     payload = {
@@ -137,7 +186,7 @@ def main() -> int:
         with open(out, "a", encoding="utf-8") as f:
             f.write("resignal=true\n")
             f.write(f"run_id={rid}\n")
-    print(f"handoff watchdog: MISSED HANDOFF {rid}, terminal age {age:.1f}m; re-signal required")
+    print(f"handoff watchdog: MISSED HANDOFF {rid}: {reason}; re-signal required")
     return 0
 
 
