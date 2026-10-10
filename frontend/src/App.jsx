@@ -325,7 +325,7 @@ function mustChangePassword() {
 }
 
 function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = false,
-                         requireGodAdmin = false, feature = null }) {
+                         requireGodAdmin = false, feature = null, bare = false }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
   const user = getCurrentUser()
@@ -398,6 +398,10 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   // owner is most likely to forget which customer they entered on the ordinary
   // pages — the leads list, a lead detail — which is exactly where a banner
   // that only appeared on special screens would be missing.
+  // `bare`: a screen that brings its own full-page shell (the SCI Family
+  // Service Center has its own navigation). Same checks above; only the
+  // tenant Layout chrome is left out. The context banner stays.
+  if (bare) return <><ContextBanner />{children}</>
   return <Layout><ContextBanner />{children}</Layout>
 }
 
@@ -1211,7 +1215,7 @@ export default function App() {
         <Route path="/view/rate-requests" element={<Navigate to="/rate-requests" replace />} />
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
-        <Route path="/program" element={<ProtectedRoute><ProgramCenter /></ProtectedRoute>} />
+        <Route path="/program" element={<ProtectedRoute bare><ProgramCenter /></ProtectedRoute>} />
         <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute feature="reports" requireAdmin><Reports /></ProtectedRoute>} />
         <Route path="/campaigns" element={<ProtectedRoute feature="campaigns" requireAdmin><CampaignBuilder /></ProtectedRoute>} />

@@ -153,11 +153,17 @@ def location_unverified(db, lead) -> bool:
         prof = identity.location_profile_for_lead(db, lead)
         if prof is None:
             return False                     # unresolved is refused upstream (Location Review)
-        row = next((r for r in campuses.load_grouping() if r.get("Location") == prof.official_name), None)
-        return row is not None and ((row.get("Address Status") or "").strip().lower() == "unverified"
-                                    or not (row.get("Area Code") or "").strip())
+        return location_name_unverified(prof.official_name)
     except Exception:                                   # noqa: BLE001
         return True                          # cannot tell: hold
+
+
+def location_name_unverified(official_name: Optional[str]) -> bool:
+    """The grouping-file rule for one location name (see location_unverified)."""
+    from app.services.programs import campuses
+    row = next((r for r in campuses.load_grouping() if r.get("Location") == official_name), None)
+    return row is not None and ((row.get("Address Status") or "").strip().lower() == "unverified"
+                                or not (row.get("Area Code") or "").strip())
 
 # ── Existing contacts: owner-attested consent (Mike, 2026-10-08) ────────────
 # The SCI contact list and its consent records are held by EVO Integrated
