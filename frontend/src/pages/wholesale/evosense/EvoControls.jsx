@@ -121,6 +121,57 @@ function Kind({ kind }) {
   return <Tag kind={k}>{l}</Tag>
 }
 
+/** Upload the publisher's own file for a source that refuses our servers
+ *  (TAD serves it to a person's computer, not to the cloud). Shows where to
+ *  download it, the copy on file, and - for a platform admin - the upload. */
+function SourceUpload({ sourceKey, onDone, onError }) {
+  const [st, setSt] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [file, setFile] = useState(null)
+  const load = useCallback(() => {
+    api.get(`/wholesale/evosense/sources/${sourceKey}/upload`).then(setSt).catch(() => setSt(null))
+  }, [sourceKey])
+  useEffect(() => { load() }, [load])
+  if (!st || !st.uploadable) return null
+  const cur = st.current
+  const blocked = st.access && st.access.blocked
+  async function send(e) {
+    e.preventDefault()
+    if (!file) return
+    setBusy(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const r = await api.upload(`/wholesale/evosense/sources/${sourceKey}/upload`, fd)
+      setFile(null)
+      load()
+      onDone(`${st.label}: uploaded (${Math.round((r.size || 0) / 1048576)} MB). Tarrant lookups run again on the next hunt.`)
+    } catch (err) { onError(errText(err)) } finally { setBusy(false) }
+  }
+  return (
+    <Panel title="Tarrant Appraisal District file" id="tad-upload"
+           hint="TAD refuses our servers but gives the same free file to your own computer">
+      <p className="evo-small" style={{ margin: '0 0 10px' }}>
+        {cur ? <>On file: uploaded {ago(cur.uploaded_at)}{cur.source_date ? ` · TAD published ${cur.source_date}` : ''} · {Math.round((cur.size || 0) / 1048576)} MB{cur.via === 'feed' ? ' · sent by the nightly job' : ''}.</>
+          : blocked ? <strong>No copy on file - Tarrant owner, size, year built and tax value are missing until one is uploaded.</strong>
+          : 'No uploaded copy on file.'}
+      </p>
+      <ol className="evo-small" style={{ margin: '0 0 12px', paddingLeft: 18 }}>
+        <li>Download <strong>{st.file_name}</strong> from <a className="evo-link" href={st.download_page} target="_blank" rel="noreferrer">TAD data downloads ↗</a> (free, no login).</li>
+        <li>Upload it here exactly as downloaded - do not unzip it.</li>
+      </ol>
+      {st.can_upload ? (
+        <form onSubmit={send} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input type="file" accept=".zip,application/zip" aria-label={`${st.label} zip file`}
+                 onChange={(e) => setFile(e.target.files && e.target.files[0])} />
+          <button type="submit" className="evo-btn evo-btn--primary evo-btn--sm" disabled={busy || !file}>
+            {busy ? 'Uploading… (about a minute)' : 'Upload file'}</button>
+        </form>
+      ) : <p className="evo-muted evo-small" style={{ margin: 0 }}>Only a platform admin can upload this file.</p>}
+    </Panel>
+  )
+}
+
 export default function EvoControls() {
   // Providers, verification, scoring, budgets and RESUMING are workspace-admin
   // actions on the server (evosense_router._admin / _is_admin_here). Anyone
@@ -229,6 +280,7 @@ export default function EvoControls() {
               ]} />
 
       <div className="evo-stack" role="tabpanel" id="panel-sources" aria-labelledby="tab-sources" hidden={tab !== 'sources'}>
+        <SourceUpload sourceKey="tad" onDone={(msg) => { setNotice(msg); load() }} onError={setError} />
         <Panel title="Source Registry" flush
                hint="HEALTHY only after a real probe or run succeeded — and it means retrieval worked, not that every derived field is true · paid vendors are not purchased">
           {!reg ? <p className="evo-muted" style={{ padding: '0 20px' }}>Loading sources…</p> : (

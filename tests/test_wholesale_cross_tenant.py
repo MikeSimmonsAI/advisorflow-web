@@ -329,6 +329,7 @@ def attacks(ids):
         ("patch", "/wholesale/comps/%s" % ids["comp_id"], {"sale_price": 1}),
         ("delete", "/wholesale/comps/%s" % ids["comp_id"], None),
         ("post", "/wholesale/comps/%s/verify" % ids["comp_id"], {"attestation": "stolen verification"}),
+        ("get", "/wholesale/comps/%s/street-view.jpg" % ids["comp_id"], None),
         ("post", "/wholesale/deals/%s/repairs" % d, {"status": "MANUAL_ESTIMATE", "amount": 1}),
         ("get", "/wholesale/deals/%s/valuation" % d, None),
         ("post", "/wholesale/deals/%s/documents" % d,
@@ -478,6 +479,8 @@ def evosense_attacks(ids):
     base = "/wholesale/evosense"
     return [
         ("get", "%s/properties/%s" % (base, ep), None),
+        ("get", "%s/properties/%s/photo" % (base, ep), None),
+        ("get", "%s/properties/%s/photo.jpg" % (base, ep), None),
         ("post", "%s/properties/%s/enrich" % (base, ep), {"approved": True}),
         ("post", "%s/properties/%s/outreach" % (base, ep), None),
         ("post", "%s/properties/%s/reply" % (base, ep), {"text": "STOP", "delivery": "manual_entry"}),

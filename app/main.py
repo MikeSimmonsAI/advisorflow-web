@@ -201,6 +201,7 @@ from app.routers.wholesale_contracts_router import router as wholesale_contracts
 # Phase 7. EvoSense Acquisition Engine - strategies, discovery, cost-aware
 # enrichment and seller intelligence BEFORE a deal exists. Same feature gate.
 from app.routers.evosense_router import router as evosense_router  # noqa: E402
+from app.routers.source_feed_router import router as source_feed_router  # noqa: E402
 # Executive Suite — brand-scoped read-only portal for brand executives.
 # Separate from god_router (owner control plane) and sales_router (brand sales
 # workspace). No tenant Layout; no god controls; no cross-brand visibility.
@@ -1203,6 +1204,7 @@ app.include_router(wholesale_rooms_public)  # public — token IS the authorizat
 app.include_router(wholesale_contracts_router)
 # Phase 7 EvoSense - same gates as the rest of the Wholesale module.
 app.include_router(evosense_router)
+app.include_router(source_feed_router)   # /source-feeds - token-only file feed (TAD from the operator's PC)
 # Location outreach programs (SCI): /program, hosted /program-assets/{token}, /god/programs.
 from app.routers.program_router import (router as program_router,
                                         public_router as program_public_router,

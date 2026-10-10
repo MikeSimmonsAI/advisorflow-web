@@ -121,11 +121,27 @@ def inbox(bucket: Optional[str] = None, strategy_id: Optional[str] = None, q: Op
           limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
           county: Optional[str] = None, min_score: Optional[int] = Query(None, ge=0, le=100),
           source: Optional[str] = None, archived: bool = False,
+          city: Optional[str] = None, zip: Optional[str] = None, property_type: Optional[str] = None,
+          occupancy: Optional[str] = None, owner: Optional[str] = None, street: Optional[str] = None,
+          parcel: Optional[str] = None, missing: Optional[str] = None,
+          min_value: Optional[str] = None, max_value: Optional[str] = None,
+          min_year_built: Optional[str] = None, max_year_built: Optional[str] = None,
+          min_sqft: Optional[str] = None, max_sqft: Optional[str] = None,
+          min_beds: Optional[str] = None, min_baths: Optional[str] = None,
+          min_owned_years: Optional[str] = None, max_owned_years: Optional[str] = None,
+          max_score: Optional[str] = None,
           db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     org_id = _read_org(db, user)
+    filters = {"city": city, "zip": zip, "property_type": property_type, "occupancy": occupancy,
+               "owner": owner, "street": street, "parcel": parcel, "missing": missing,
+               "min_value": min_value, "max_value": max_value,
+               "min_year_built": min_year_built, "max_year_built": max_year_built,
+               "min_sqft": min_sqft, "max_sqft": max_sqft, "min_beds": min_beds, "min_baths": min_baths,
+               "min_owned_years": min_owned_years, "max_owned_years": max_owned_years,
+               "max_score": max_score}
     out = V.inbox(db, org_id, bucket=bucket, strategy_id=strategy_id, q=q,
                   signal=signal, sort=sort, limit=limit, offset=offset, county=county,
-                  min_score=min_score, source=source, archived=archived)
+                  min_score=min_score, source=source, archived=archived, filters=filters)
     # One server-computed next step per row (read-only; see services/evosense/actions.py).
     items = out.get("items") if isinstance(out, dict) else None
     if items:
@@ -150,7 +166,58 @@ def property_detail(property_id: str, db: Session = Depends(get_db),
     out["dismissed"] = acts["dismissed"]
     out["next"] = acts["next"]
     out["summary"] = ACT.summary(db, org_id, prop, out, acts)
+    out["links"] = _public_links(prop)
     return out
+
+
+def _public_links(prop) -> dict:
+    """Free, public pages for this exact parcel/address (no key, no cost)."""
+    from app.services.evosense import street_view as SV
+    links = dict(SV.links_for(prop))
+    apn = (prop.parcel_apn or "").strip()
+    county = (prop.county or "").strip().lower()
+    links["county_record_url"] = None
+    links["county_record_label"] = None
+    if apn and county == "dallas":
+        links["county_record_url"] = "https://www.dallascad.org/AcctDetailRes.aspx?ID=%s" % apn
+        links["county_record_label"] = "DCAD account %s" % apn
+    elif apn and county == "tarrant":
+        links["county_record_url"] = "https://www.tad.org/property?account=%s" % apn
+        links["county_record_label"] = "TAD account %s" % apn
+    return links
+
+
+@router.get("/properties/{property_id}/photo")
+def property_photo_info(property_id: str, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_or_observer)):
+    """Whether a real street-level photo of this address exists, its date, and
+    free Google Maps links. Never buys an image."""
+    from app.services.evosense import street_view as SV
+    org_id = _read_org(db, user)
+    prop = _prop(db, org_id, property_id)
+    if prop.is_test:
+        return {"available": False, "reason": "sandbox", **SV.links_for(prop)}
+    return SV.metadata(prop)
+
+
+@router.get("/properties/{property_id}/photo.jpg")
+def property_photo(property_id: str, size: str = Query("640x400", max_length=9),
+                   db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """The street-level photo itself (Google Street View), only when Google has
+    imagery for this exact address. 404 otherwise - the page then says so."""
+    from fastapi import Response
+    from app.services.evosense import street_view as SV
+    org_id = _read_org(db, user)
+    prop = _prop(db, org_id, property_id)
+    if prop.is_test:
+        raise HTTPException(status_code=404, detail="Sandbox record: no photo.")
+    body, meta = SV.image(prop, size)
+    if not body:
+        raise HTTPException(status_code=404, detail="No street-level photo: %s" % (meta.get("reason") or "unavailable"))
+    return Response(content=body, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=86400",
+                             "X-Photo-Source": "Google Street View",
+                             "X-Photo-Date": str(meta.get("date") or "")})
 
 
 class OwnerIn(BaseModel):
@@ -1274,6 +1341,60 @@ def verify_source(payload: VerifyIn, db: Session = Depends(get_db),
                     source_key, "ok" if res.get("ok") else "%s %s" % (res.get("code"), res.get("error"))))
     db.commit()
     return {**res, "registry": PV.source_registry(db, org_id)}
+
+
+@router.get("/sources/tad/upload")
+def source_upload_status(db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_or_observer)):
+    """Which file TAD takes, where to download it, and the copy on file. TAD is
+    the only source that takes an upload, so the path names it (no id in it)."""
+    source_key = "tad"
+    return {**PV.upload_status(source_key),
+            "can_upload": getattr(user, "role", None) in PV.PLATFORM_ADMIN_ROLES,
+            "access": PV.platform_access(db, source_key)}
+
+
+@router.post("/sources/tad/upload")
+async def source_upload(file: UploadFile = File(...), db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A platform admin uploads the publisher's own file (e.g. TAD's property
+    data, which TAD serves to a person's computer but refuses to our servers).
+    The file is shared by every workspace, so only a platform admin may do it."""
+    source_key = "tad"
+    if getattr(user, "role", None) not in PV.PLATFORM_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Only a platform admin can upload a public-record file.")
+    return await _save_source_upload(db, source_key, file.read, via="upload", by=user.email)
+
+
+async def _save_source_upload(db, source_key: str, read_chunk, *, via: str, by: Optional[str],
+                              source_date: Optional[str] = None):
+    """Stream the body to a temp file beside the final copy, capped in size,
+    then hand it to PV.accept_upload (which validates before replacing)."""
+    import os
+    import tempfile
+    from app.services.evosense.sources import base as SB_
+    cap = PV.UPLOADABLE[source_key]["max_bytes"]
+    fd, tmp = tempfile.mkstemp(dir=SB_.upload_dir(), suffix=".part")
+    got = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = await read_chunk(1024 * 1024)
+                if not chunk:
+                    break
+                got += len(chunk)
+                if got > cap:
+                    raise HTTPException(status_code=413, detail="File is larger than %s MB." % (cap // 2 ** 20))
+                out.write(chunk)
+        if got == 0:
+            raise HTTPException(status_code=422, detail="The file was empty.")
+        try:
+            return PV.accept_upload(db, source_key, tmp, source_date=source_date, by=by, via=via)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 class ProviderPatch(BaseModel):
