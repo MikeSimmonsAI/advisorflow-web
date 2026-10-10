@@ -111,12 +111,41 @@ def store_upload(key: str, tmp_path: str, meta: Dict[str, Any]) -> Dict[str, Any
     return meta
 
 
+CERT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs")
+_SSL_CTX = None
+
+
+def ssl_context():
+    """Full certificate checking, never switched off. Some public-record sites
+    (taxsales.lgbs.com) send their certificate without the issuing
+    intermediate; browsers fetch it on their own, Python does not. So the
+    trust store here is the system roots + certifi's roots + the few public
+    intermediates shipped in ./certs. Hostname and chain are still verified."""
+    global _SSL_CTX
+    if _SSL_CTX is None:
+        import glob
+        import ssl
+        ctx = ssl.create_default_context()
+        try:
+            import certifi
+            ctx.load_verify_locations(cafile=certifi.where())
+        except Exception:
+            pass
+        for pem in sorted(glob.glob(os.path.join(CERT_DIR, "*.pem"))):
+            try:
+                ctx.load_verify_locations(cafile=pem)
+            except Exception:
+                pass
+        _SSL_CTX = ctx
+    return _SSL_CTX
+
+
 def _request(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET"):
     h = {"User-Agent": USER_AGENT}
     h.update(headers or {})
     req = urllib.request.Request(url, headers=h, method=method)
     try:
-        return urllib.request.urlopen(req, timeout=TIMEOUT)
+        return urllib.request.urlopen(req, timeout=TIMEOUT, context=ssl_context())
     except urllib.error.HTTPError as exc:
         if exc.code in (429, 503):
             ra = exc.headers.get("Retry-After") if exc.headers else None
