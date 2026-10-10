@@ -1246,3 +1246,72 @@ def verify_source(db, org_id: str, key: str, *, platform_admin: bool = False) ->
         row.last_probe_ok_at = cfg.last_verified_at
         clear_platform_block(db, key)
     return {"key": key, "ok": True, "detail": detail}
+
+
+# ── uploaded copies of a public source's file ───────────────────────────────
+# TAD refuses cloud servers but serves the same free file to a person's own
+# computer. A platform admin (or the operator's nightly feed job) uploads it;
+# the adapter then reads that copy. Only sources listed here accept an upload.
+UPLOADABLE = {"tad": {"label": "TAD Property Data (Delimited) - Residential",
+                      "file_name": "PropertyData(Delimited)_R.ZIP",
+                      "download_page": "https://www.tad.org/resources/data-downloads",
+                      "max_bytes": 400 * 1024 * 1024}}
+
+
+def validate_uploaded_zip(key: str, path: str) -> Dict[str, Any]:
+    """The file must be the publisher's own export: a readable zip with the
+    data member and every column the adapter reads. Raises ValueError."""
+    import zipfile
+    from app.services.evosense.sources import base as SB_
+    if key == "tad":
+        from app.services.evosense.sources.tarrant import TAD_REQUIRED
+        try:
+            zf = zipfile.ZipFile(path)
+        except zipfile.BadZipFile:
+            raise ValueError("That is not a zip file. Upload the .ZIP exactly as TAD publishes it.")
+        try:
+            member = next((n for n in zf.namelist() if n.lower().endswith(".txt")), None)
+            if member is None:
+                raise ValueError("No .txt data file inside the zip - is this the TAD Property Data file?")
+            header = next(SB_.text_lines(zf, member)).split("|")
+        finally:
+            zf.close()
+        missing = [c for c in TAD_REQUIRED if c not in header]
+        if missing:
+            raise ValueError("This is not the TAD residential property file (missing columns: %s)."
+                             % ", ".join(missing[:6]))
+        return {"member": member, "columns": len(header)}
+    raise ValueError("This source does not take uploads.")
+
+
+def accept_upload(db, key: str, tmp_path: str, *, source_date: Optional[str] = None,
+                  by: Optional[str] = None, via: str = "upload") -> Dict[str, Any]:
+    """Validate, store, and make the source usable again: the platform block
+    is lifted and every workspace's row for it is marked as answering, because
+    the adapter now reads this copy instead of calling the publisher."""
+    from app.models.evosense_models import EvoSenseProviderConfig
+    from app.services.evosense.sources import base as SB_
+    if key not in UPLOADABLE:
+        raise ValueError("This source does not take uploads.")
+    detail = validate_uploaded_zip(key, tmp_path)
+    meta = SB_.store_upload(key, tmp_path, {
+        "uploaded_at": C.now().isoformat() + "Z", "source_date": source_date or None,
+        "by": by, "via": via, **detail})
+    clear_platform_block(db, key)
+    p = PROVIDERS.get(key)
+    cap = getattr(p, "lookup_capability", None)
+    for cfg in db.query(EvoSenseProviderConfig).filter(EvoSenseProviderConfig.provider_key == key).all():
+        record_success(cfg, capability=cap)
+        cfg.last_verified_at = C.now()
+    db.commit()
+    C.log.info("evosense: %s file uploaded via %s (%s bytes)", key, via, meta.get("size"))
+    return {"key": key, "ok": True, **meta}
+
+
+def upload_status(key: str) -> Dict[str, Any]:
+    from app.services.evosense.sources import base as SB_
+    info = UPLOADABLE.get(key)
+    if info is None:
+        return {"key": key, "uploadable": False}
+    return {"key": key, "uploadable": True, **{k: v for k, v in info.items() if k != "max_bytes"},
+            "max_mb": info["max_bytes"] // (1024 * 1024), "current": SB_.uploaded_info(key)}

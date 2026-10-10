@@ -1343,6 +1343,60 @@ def verify_source(payload: VerifyIn, db: Session = Depends(get_db),
     return {**res, "registry": PV.source_registry(db, org_id)}
 
 
+@router.get("/sources/tad/upload")
+def source_upload_status(db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_or_observer)):
+    """Which file TAD takes, where to download it, and the copy on file. TAD is
+    the only source that takes an upload, so the path names it (no id in it)."""
+    source_key = "tad"
+    return {**PV.upload_status(source_key),
+            "can_upload": getattr(user, "role", None) in PV.PLATFORM_ADMIN_ROLES,
+            "access": PV.platform_access(db, source_key)}
+
+
+@router.post("/sources/tad/upload")
+async def source_upload(file: UploadFile = File(...), db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A platform admin uploads the publisher's own file (e.g. TAD's property
+    data, which TAD serves to a person's computer but refuses to our servers).
+    The file is shared by every workspace, so only a platform admin may do it."""
+    source_key = "tad"
+    if getattr(user, "role", None) not in PV.PLATFORM_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Only a platform admin can upload a public-record file.")
+    return await _save_source_upload(db, source_key, file.read, via="upload", by=user.email)
+
+
+async def _save_source_upload(db, source_key: str, read_chunk, *, via: str, by: Optional[str],
+                              source_date: Optional[str] = None):
+    """Stream the body to a temp file beside the final copy, capped in size,
+    then hand it to PV.accept_upload (which validates before replacing)."""
+    import os
+    import tempfile
+    from app.services.evosense.sources import base as SB_
+    cap = PV.UPLOADABLE[source_key]["max_bytes"]
+    fd, tmp = tempfile.mkstemp(dir=SB_.upload_dir(), suffix=".part")
+    got = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = await read_chunk(1024 * 1024)
+                if not chunk:
+                    break
+                got += len(chunk)
+                if got > cap:
+                    raise HTTPException(status_code=413, detail="File is larger than %s MB." % (cap // 2 ** 20))
+                out.write(chunk)
+        if got == 0:
+            raise HTTPException(status_code=422, detail="The file was empty.")
+        try:
+            return PV.accept_upload(db, source_key, tmp, source_date=source_date, by=by, via=via)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
 class ProviderPatch(BaseModel):
     key: str
     enabled: Optional[bool] = None

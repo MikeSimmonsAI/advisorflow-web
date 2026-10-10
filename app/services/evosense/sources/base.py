@@ -61,9 +61,54 @@ def sha256(data) -> str:
 
 def local_override(key: str) -> Optional[str]:
     """EVOSENSE_SRC_<KEY>_PATH points an adapter at a local file (tests, or an
-    operator who downloaded the file by hand)."""
+    operator who downloaded the file by hand). Otherwise a file a platform
+    admin (or the operator's feed job) UPLOADED for that source is used."""
     p = os.environ.get("EVOSENSE_SRC_%s_PATH" % key.upper())
-    return p if p and os.path.exists(p) else None
+    if p and os.path.exists(p):
+        return p
+    up = uploaded_path(key)
+    return up if os.path.exists(up) else None
+
+
+# ── operator-uploaded copies of a public file ──────────────────────────────
+# Some publishers refuse cloud servers but serve the same free file to a
+# person's own computer (TAD). The person downloads it and uploads it here; the
+# adapter then reads the uploaded copy exactly as it would the published one.
+# The disk is not durable on every host: after a restart the copy is gone and
+# the adapter goes back to asking the publisher, so the feed job re-sends it.
+
+def upload_dir() -> str:
+    d = os.environ.get("EVOSENSE_SOURCE_UPLOAD_DIR") or os.path.join(cache_dir(), "uploaded")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def uploaded_path(key: str) -> str:
+    return os.path.join(upload_dir(), "%s.zip" % key)
+
+
+def uploaded_info(key: str) -> Optional[Dict[str, Any]]:
+    path = uploaded_path(key)
+    if not os.path.exists(path):
+        return None
+    meta: Dict[str, Any] = {}
+    try:
+        with open(path[:-4] + ".json", encoding="utf-8") as fh:
+            meta = json.load(fh)
+    except (OSError, ValueError):
+        pass
+    meta.setdefault("size", os.path.getsize(path))
+    return meta
+
+
+def store_upload(key: str, tmp_path: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Atomically replace the uploaded copy (already validated by the caller)."""
+    path = uploaded_path(key)
+    os.replace(tmp_path, path)
+    meta = dict(meta, size=os.path.getsize(path))
+    with open(path[:-4] + ".json", "w", encoding="utf-8") as fh:
+        json.dump(meta, fh)
+    return meta
 
 
 def _request(url: str, headers: Optional[Dict[str, str]] = None, method: str = "GET"):
@@ -243,9 +288,10 @@ def open_zip(key: str, url: str, *, allow_download: bool = True) -> OpenedZip:
     download to the cache. meta = {url, ranged, size, last_modified, mode}."""
     local = local_override(key)
     if local:
-        return OpenedZip(zipfile.ZipFile(local), {"url": url, "mode": "local_file", "path": local,
-                                                 "size": os.path.getsize(local),
-                                                 "last_modified": None})
+        up = uploaded_info(key) if local == uploaded_path(key) else None
+        return OpenedZip(zipfile.ZipFile(local), {"url": url, "mode": "uploaded_file" if up else "local_file",
+                                                 "path": local, "size": os.path.getsize(local),
+                                                 "last_modified": (up or {}).get("source_date")})
     info = _probe(url)
     info["url"] = url
     if info["ranged"] and info["size"]:
