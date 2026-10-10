@@ -317,7 +317,9 @@ button.sci-action:hover { background: #f7fafa; }
   .sci-topselect { max-width: 120px; }
   .sci-hero { padding: 20px; }
   .sci-hero h2 { font-size: 19px; }
-  .sci-camp { flex-wrap: wrap; }
+  .sci-camp { flex-wrap: wrap; gap: 12px; }
+  .sci-camp-img { width: 72px; height: 56px; }
+  .sci-camp-body { flex: 1 1 160px; }
   .sci-locbanner { height: 150px; }
   .sci-locbanner-title { max-width: 100%; right: 0; }
   .sci-bubble { max-width: 92%; }
