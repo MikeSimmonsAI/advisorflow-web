@@ -28,3 +28,12 @@
 ## 2026-10-10 04:24 CT - WATCHDOG - STALE
 - STALE: last heartbeat 167 min ago (task: Overnight start: heartbeat and check-ins set up); next check-in was due 01:57
 
+
+## 2026-10-10 04:27 CT - SCI - running
+- Task: C: SCI gaps closed; next B visual acceptance + D merge audit
+- Done since last check-in: Heartbeat+watchdog live (watchdog verification run succeeded); voicemail + call recording playback; contact location; appointment outcomes; commit 1345e69f pushed to staging
+- Tests / progress: Targeted: 81 + 57 passed. Full suite rerun on 881297b in progress (separate worktree)
+- Blocker: none
+- Next: Visual acceptance of 14 screens at 5 widths after staging deploy; merge audit (clean trial merge main+sci)
+- Next check-in by: 04:47 CT
+- Code: desktop/consent-center @ 1345e69f
