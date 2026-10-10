@@ -87,6 +87,8 @@ REGISTRY = {
     # advisor/staff-facing alerts to the staff member's own phone
     ("app/routers/calendar_router.py", "booking_confirmed_webhook"): ("refusal_for_phone", ["refusal_for_phone"]),
     ("app/services/pipeline_service.py", "_notify_fsa_sms"): ("staff_notify", []),
+    # SCI program staff alert (hot response / SLA breach) to the configured staff recipient
+    ("app/services/programs/responses.py", "_deliver_staff_alert"): ("staff_notify", []),
     # lead-facing direct sends that must refuse Wholesale sellers
     ("app/services/appointment_flow_service.py", "*"): ("refusal_for_phone", ["refusal_for_phone"]),
     ("app/services/post_appointment_service.py", "*"): ("refusal_for_phone", ["refusal_for_phone"]),
