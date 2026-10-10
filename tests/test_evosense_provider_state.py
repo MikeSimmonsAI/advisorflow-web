@@ -129,7 +129,13 @@ def test_capabilities_are_rated_per_market(client, db_session, sample_org, dfw_f
     assert "Tarrant Appraisal District (TAD) property data" not in caps["ASSESSOR"]["providers"]
     assert any(u["state"] == "BLOCKED" for u in caps["ASSESSOR"]["unavailable"])
     tax = {m["market"]: m for m in caps["TAX"]["by_market"]}
-    assert tax["Tarrant County"]["kind"] == "real" and tax["Dallas County"]["kind"] == "manual"
+    # Dallas tax delinquency now has an automated source (tax-foreclosure list); while it is
+    # switched off the market says the real source is unavailable rather than "manual only".
+    assert tax["Tarrant County"]["kind"] == "real" and tax["Dallas County"]["kind"] == "unavailable"
+    _enable(client, h, "lgbs_tax_sales")
+    prov = ok(client.get("/wholesale/evosense/providers", headers=h))
+    tax = {m["market"]: m for m in {c["capability"]: c for c in prov["capabilities"]}["TAX"]["by_market"]}
+    assert tax["Dallas County"]["kind"] == "real"
     code = {m["market"]: m for m in caps["CODE_VIOLATION"]["by_market"]}
     assert "City of Dallas only" in code["Dallas County"]["label"]
     # a disabled sandbox adapter serves nothing

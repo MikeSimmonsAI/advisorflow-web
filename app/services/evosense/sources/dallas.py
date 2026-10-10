@@ -110,6 +110,36 @@ class DcadReader:
         stats["records"] = len(recs)
         return {"records": recs, "stats": dict(stats), "source_url": url, "source_updated_at": None}
 
+    def lookup_many(self, accounts) -> Dict[str, Any]:
+        """Lookup by DCAD account: owner of record, situs, value, building facts
+        for properties another source found (e.g. a tax-foreclosure listing).
+        One pass over each member of the cached certified export."""
+        wanted = {(a or "").strip() for a in accounts if (a or "").strip()}
+        stats: Counter = Counter()
+        if not wanted:
+            return {"records": {}, "stats": {}, "source_url": DCAD_PAGE}
+        url = self.locate()
+        oz = B.open_zip("dcad", url)
+        cands: Dict[str, Dict[str, Any]] = {a: {} for a in wanted}
+        try:
+            self._join(oz.zip, "ACCOUNT_INFO.CSV", cands, "info", stats)
+            for a in [a for a, c in cands.items() if "info" not in c]:
+                del cands[a]                          # not a DCAD account: no record, not a guess
+            self._join(oz.zip, "ACCOUNT_APPRL_YEAR.CSV", cands, "val", stats)
+            self._join(oz.zip, "RES_DETAIL.CSV", cands, "res", stats)
+            self._join(oz.zip, "APPLIED_STD_EXEMPT.CSV", cands, "exempt", stats)
+        finally:
+            oz.close()
+        recs = {}
+        for a, c in cands.items():
+            c.setdefault("res", {"ACCOUNT_NUM": a})   # land / non-residential: no building row
+            rec = self.record(c, url)
+            if not c["res"].get("TOT_LIVING_AREA_SF"):
+                rec["property_type"] = None           # only RES_DETAIL says single-family
+            recs[a] = rec
+        stats["matched"] = len(recs)
+        return {"records": recs, "stats": dict(stats), "source_url": DCAD_PAGE}
+
     def _join(self, zf, member, cands, slot, stats):
         need = {a for a, c in cands.items() if slot not in c}
         if not need:
