@@ -1962,3 +1962,88 @@
 .ws-page .ws-val-comp { padding: 6px 0; border-bottom: 1px solid var(--border-subtle); }
 .ws-page .ws-val-repair { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
 .ws-page .ws-val-repair select { width: 100%; }
+
+/* ── Buyer board: keyboard focus, narrow widths, light theme ─────────────────
+   Tokens only, so the light theme inherits its own contrast. The board used to
+   scroll sideways at phone width with Actions — the point of the screen — in the
+   last column off-screen; below 720px each buyer is a stacked card and every
+   action is on screen. */
+.ws-page .ws-dispo button:focus-visible,
+.ws-page .ws-dispo a:focus-visible,
+.ws-page .ws-dispo select:focus-visible,
+.ws-page .ws-confirm button:focus-visible,
+.ws-page .ws-respond button:focus-visible,
+.ws-page .ws-respond select:focus-visible,
+.ws-page .ws-respond input:focus-visible {
+  outline: 2px solid var(--signal-blue); outline-offset: 2px;
+}
+.ws-page .ws-blocked, .ws-page .ws-spread.is-down { font-weight: 600; }
+@media (max-width: 720px) {
+  .ws-page .ws-dispo { white-space: normal; }
+  .ws-page .ws-dispo thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .ws-page .ws-dispo, .ws-page .ws-dispo tbody, .ws-page .ws-dispo tr,
+  .ws-page .ws-dispo td { display: block; width: 100%; box-sizing: border-box; }
+  .ws-page .ws-dispo td[data-label] {
+    min-width: 0 !important; text-align: left; white-space: normal;
+  }
+  .ws-page .ws-dispo td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-secondary); margin-bottom: 2px;
+  }
+  .ws-page .ws-dispo__row { border-top: 1px solid var(--border-subtle); padding: 8px 0; }
+  .ws-page .ws-dispo .ws-input--inline { min-width: 0; width: 100%; }
+  .ws-page .ws-confirm { flex-direction: column; align-items: stretch; }
+}
+
+/* ── Offers, documents, confirm dialogs, settings: focus and narrow width ──
+   Tokens only, so the light theme follows. The screen-reader-only class is
+   repeated unscoped because the Settings page is not inside .ws-page. */
+.ws-vis-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+.ws-page .ws-offer-entry button:focus-visible,
+.ws-page .ws-offer-entry input:focus-visible,
+.ws-page .ws-docs button:focus-visible,
+.ws-page .ws-docs select:focus-visible,
+.ws-page .ws-docs input:focus-visible,
+.ws-page .ws-matches input:focus-visible,
+.ws-page .ws-template button:focus-visible {
+  outline: 2px solid var(--signal-blue); outline-offset: 2px;
+}
+.ws-page .ws-doc__warn { color: var(--signal-amber, var(--text-primary)); }
+@media (max-width: 720px) {
+  .ws-page .ws-position { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .ws-page .ws-offer-entry { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .ws-page .ws-offer-entry .ws-input { width: 100%; box-sizing: border-box; }
+  .ws-page .ws-actions--wrap { flex-wrap: wrap; }
+}
+
+/* ── Exceptions and Funding Partners: recovery, focus, narrow widths ─────────
+   Tokens only, so the light theme inherits its own contrast. */
+.ws-page .ws-exc__item { padding: 16px; list-style: none; margin-bottom: 12px; }
+.ws-page .ws-exc__head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ws-page .ws-exc__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.ws-page .ws-exc__actions button[disabled] { cursor: not-allowed; }
+.ws-page .ws-fp__wrap { overflow-x: auto; }
+.ws-page .ws-fp__actions { white-space: nowrap; }
+.ws-page .ws-fp__err { display: block; color: var(--signal-red, var(--text-primary)); font-weight: 600; font-size: 12px; margin-top: 2px; }
+.ws-page .ws-exc__item button:focus-visible,
+.ws-page .ws-exc__item select:focus-visible,
+.ws-page .ws-exc__item textarea:focus-visible,
+.ws-page .ws-fp button:focus-visible,
+.ws-page .ws-fp__form input:focus-visible,
+.ws-page .ws-fp__form textarea:focus-visible,
+.ws-page .ws-fp__form button:focus-visible,
+.ws-page .ws-tab:focus-visible {
+  outline: 2px solid var(--signal-blue); outline-offset: 2px;
+}
+@media (max-width: 720px) {
+  .ws-page .ws-exc__actions .btn { flex: 1 1 100%; }
+  .ws-page .ws-fp__actions { white-space: normal; }
+  .ws-page .ws-fp__form { grid-template-columns: 1fr; }
+}

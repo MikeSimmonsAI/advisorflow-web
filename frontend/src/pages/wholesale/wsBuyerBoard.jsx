@@ -19,10 +19,16 @@
  * a first-class case, not an edge one: the response form works regardless of
  * what the delivery status says.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { fmtMoney, fmtWhen, fmtLabel, errText, Note, Why } from './wsShared'
 import { UploadZone, openFile } from './wsFiles'
+import {
+  initialBoardState, loadStarted, loadSucceeded, loadFailed, boardView,
+  createInFlight, describeRefusal, resendOutcome, selectOutcome,
+  allowedResponseStatuses, defaultResponseStatus, selectDisabledReason,
+  currentSelection,
+} from './wsBoardState'
 
 const RESPONSE_STATUSES = [
   ['not_contacted', 'Not contacted'],
@@ -86,7 +92,7 @@ const RESPONSE_LABEL = Object.fromEntries(RESPONSE_STATUSES)
 const POF_LABEL = POF_MEANING
 
 function statusTone(status) {
-  if (['interested', 'offer_submitted', 'replied'].includes(status)) return 'is-ok'
+  if (['interested', 'offer_submitted', 'replied', 'selected'].includes(status)) return 'is-ok'
   if (['passed', 'rejected', 'no_response', 'failed', 'blocked'].includes(status)) return 'is-dnc'
   if (['sent', 'delivered', 'opened'].includes(status)) return 'is-warn'
   return 'is-muted'
@@ -224,35 +230,55 @@ function WhatTheySent({ row }) {
 
 function ResponseForm({ row, busy, onSave, onCancel }) {
   const [draft, setDraft] = useState({
-    status: row.status && RESPONSE_LABEL[row.status] ? row.status : 'replied',
+    // A selected row keeps its status server-side; do not default it to
+    // "replied", which the server refuses for the current selection.
+    status: defaultResponseStatus(row),
     offer_amount: row.offer_amount ?? '',
     target_close_date: row.target_close_date ?? '',
     response_note: row.response_note ?? '',
   })
+  const allowed = allowedResponseStatuses(row)
+  const offerText = String(draft.offer_amount).replace(/[$,\s]/g, '')
+  const offerInvalid = offerText !== '' && !(Number.isFinite(Number(offerText)) && Number(offerText) >= 0)
 
   return (
-    <div className="ws-respond">
+    <div className="ws-respond" role="group"
+         aria-label={`Response from ${row.buyer_name || 'this buyer'}`}
+         onKeyDown={(e) => { if (e.key === 'Escape' && !busy) { e.stopPropagation(); onCancel() } }}>
       <div className="ws-respond__head">
         What <strong>{row.buyer_name || 'this buyer'}</strong> said
       </div>
       <div className="ws-grid">
         <div className="ws-field">
           <label htmlFor={`resp-${row.outreach_id}-status`}>Where they stand</label>
-          <select id={`resp-${row.outreach_id}-status`} className="ws-input"
+          <select id={`resp-${row.outreach_id}-status`} className="ws-input" autoFocus
                   value={draft.status}
                   onChange={(e) => setDraft((d) => ({ ...d, status: e.target.value }))}>
-            {RESPONSE_STATUSES.map(([k, label]) => (
+            {RESPONSE_STATUSES.filter(([k]) => allowed.includes(k)).map(([k, label]) => (
               <option key={k} value={k}>{label}</option>
             ))}
           </select>
+          {row.is_selected ? (
+            <span className="ws-comp__sub">
+              This buyer is the current selection, so only an offer or backing
+              out can be recorded.
+            </span>
+          ) : null}
         </div>
         <div className="ws-field">
           <label htmlFor={`resp-${row.outreach_id}-amount`}>Their offer</label>
           <input id={`resp-${row.outreach_id}-amount`} className="ws-input"
                  inputMode="decimal" value={draft.offer_amount}
+                 aria-invalid={offerInvalid || undefined}
+                 aria-describedby={offerInvalid ? `resp-${row.outreach_id}-amount-err` : undefined}
                  onChange={(e) => setDraft(
                    (d) => ({ ...d, offer_amount: e.target.value }))} />
         </div>
+        {offerInvalid ? (
+          <div className="ws-warn" role="alert" id={`resp-${row.outreach_id}-amount-err`}>
+            Their offer must be a dollar amount of zero or more.
+          </div>
+        ) : null}
         <div className="ws-field">
           <label htmlFor={`resp-${row.outreach_id}-close`}>Close by</label>
           <input id={`resp-${row.outreach_id}-close`} className="ws-input" type="date"
@@ -274,11 +300,11 @@ function ResponseForm({ row, busy, onSave, onCancel }) {
         nothing here waits for an integration to notice a reply.
       </p>
       <div className="ws-actions" style={{ marginTop: 10 }}>
-        <button className="btn btn--primary btn--sm" disabled={busy}
+        <button className="btn btn--primary btn--sm" disabled={busy || offerInvalid}
+                aria-busy={busy || undefined}
                 onClick={() => onSave({
                   status: draft.status,
-                  offer_amount: draft.offer_amount === ''
-                    ? null : Number(draft.offer_amount),
+                  offer_amount: offerText === '' ? null : Number(offerText),
                   target_close_date: draft.target_close_date || null,
                   response_note: draft.response_note || null,
                 })}>
@@ -293,55 +319,91 @@ function ResponseForm({ row, busy, onSave, onCancel }) {
 
 
 export function BuyerBoard({ dealId, capability, act, busy }) {
-  const [board, setBoard] = useState(null)
-  const [error, setError] = useState(null)
+  const [state, setState] = useState(initialBoardState)
   const [responding, setResponding] = useState(null)
   const [confirming, setConfirming] = useState(null)
+  const genRef = useRef(0)
+  const inFlight = useRef(null)
+  if (inFlight.current === null) inFlight.current = createInFlight()
+  const selectTrigger = useRef(null)
+  const { board, error, refreshing } = state
 
+  // Each request takes a generation; only the newest may change the board, so a
+  // slow earlier refresh cannot put back rows a later one already replaced.
   const load = useCallback(async () => {
+    const gen = ++genRef.current
+    setState((s) => loadStarted(s))
     try {
-      setBoard(await api.get(`/wholesale/deals/${dealId}/buyer-board`))
-      setError(null)
+      const data = await api.get(`/wholesale/deals/${dealId}/buyer-board`)
+      setState((s) => loadSucceeded(s, gen, data))
     } catch (e) {
-      setError(errText(e))
+      setState((s) => loadFailed(s, gen, errText(e)))
     }
   }, [dealId])
 
   useEffect(() => { load() }, [load])
 
   // Every action goes through the page's `act` so errors land in one place, and
-  // then refreshes this board, which the deal room payload does not carry.
+  // then refreshes this board, which the deal room payload does not carry. The
+  // latch is synchronous: `busy` only flips after a render, so a fast second
+  // click would otherwise start a second mutation.
   async function run(fn, message) {
-    const done = await act(fn, message)
-    await load()
-    return done
+    const { ran, value } = await inFlight.current.run(async () => {
+      const done = await act(fn, message)
+      await load()
+      return done
+    })
+    return ran ? value : false
   }
 
-  if (error) {
+  function closeConfirm() {
+    setConfirming(null)
+    const el = selectTrigger.current
+    if (el && typeof el.focus === 'function') el.focus()
+  }
+
+  const view = boardView(state)
+  if (view === 'error') {
     return (
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">Buyer comparison</div>
-        <div className="ws-warn">{error}</div>
+        <div className="ws-warn" role="alert">
+          Could not load the buyer comparison: {error}
+        </div>
+        <div className="ws-actions" style={{ marginTop: 10 }}>
+          <button className="btn btn--secondary btn--sm" onClick={load}>Try again</button>
+        </div>
       </div>
     )
   }
-  if (!board) {
+  if (view === 'loading') {
     return (
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">Buyer comparison</div>
-        <p className="ws-panel-note">Loading…</p>
+        <p className="ws-panel-note" role="status">Loading…</p>
       </div>
     )
   }
 
   const rows = board.buyers || []
   const withOffers = rows.filter((r) => r.offer_amount !== null)
+  const selected = currentSelection(rows)
 
   return (
     <div className="panel ws-panel">
       <div className="panel-title ws-panel-title">
         <span>Buyer comparison ({rows.length})</span>
       </div>
+      {error ? (
+        <div className="ws-warn" role="alert">
+          The list may be out of date — the last refresh failed: {error}{' '}
+          <button className="btn btn--secondary btn--sm" disabled={refreshing}
+                  onClick={load}>Try again</button>
+        </div>
+      ) : null}
+      {refreshing ? (
+        <p className="ws-panel-note" role="status">Refreshing — the rows below are the last ones loaded.</p>
+      ) : null}
       <Note>
         What each buyer offered, what we make on it, whether they can pay and how
         fast they close — in one row each.
@@ -376,10 +438,10 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
         <div>
           <span className="ws-k">Selected</span>
           <strong>
-            {(rows.find((r) => r.is_selected) || {}).buyer_name || '—'}
+            {(selected || {}).buyer_name || '—'}
           </strong>
           <span className="ws-position__sub">
-            {rows.some((r) => r.is_selected)
+            {selected
               ? 'the assignment still needs its own approval'
               : 'nobody chosen yet'}
           </span>
@@ -411,7 +473,7 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
                           responding={responding === r.outreach_id}
                           onRespond={() => setResponding(r.outreach_id)}
                           onDone={() => setResponding(null)}
-                          onSelect={() => setConfirming(r)} />
+                          onSelect={(el) => { selectTrigger.current = el; setConfirming(r) }} />
               ))}
             </tbody>
           </table>
@@ -422,7 +484,9 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
           destructive act even though nothing is destroyed — and the question
           names the fee it implies rather than only the buyer. */}
       {confirming ? (
-        <div className="ws-confirm ws-confirm--decision">
+        <div className="ws-confirm ws-confirm--decision" role="alertdialog"
+             aria-label="Confirm buyer selection"
+             onKeyDown={(e) => { if (e.key === 'Escape' && !busy) closeConfirm() }}>
           <span className="ws-confirm__text">
             Select <strong>{confirming.buyer_name || 'this buyer'}</strong> at{' '}
             <strong>{fmtMoney(confirming.offer_amount)}</strong>?
@@ -439,14 +503,28 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
           </span>
           <span className="ws-actions">
             <button className="btn btn--secondary btn--sm" disabled={busy}
-                    onClick={() => setConfirming(null)}>Cancel</button>
+                    autoFocus onClick={closeConfirm}>Cancel</button>
             <button className="btn btn--primary btn--sm" disabled={busy}
+                    aria-busy={busy || undefined}
                     onClick={async () => {
+                      const id = confirming.outreach_id
                       const ok = await run(
-                        () => api.post(`/wholesale/deals/${dealId}/select-buyer`,
-                                       { outreach_id: confirming.outreach_id }),
-                        'Buyer selected.')
-                      if (ok) setConfirming(null)
+                        async () => {
+                          let r
+                          try {
+                            r = await api.post(
+                              `/wholesale/deals/${dealId}/select-buyer`,
+                              { outreach_id: id })
+                          } catch (e) {
+                            // words first, the stable code kept beside them
+                            throw new Error(describeRefusal(errText(e)))
+                          }
+                          const out = selectOutcome(r, rows, id)
+                          // idempotent retry: truthful, nothing was written
+                          if (!out.changed) throw new Error(out.message)
+                        },
+                        selectOutcome(null, rows, id).message)
+                      if (ok) closeConfirm()
                     }}>
               Select this buyer
             </button>
@@ -461,11 +539,22 @@ export function BuyerBoard({ dealId, capability, act, busy }) {
 function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
                    onSelect }) {
   const [pofOpen, setPofOpen] = useState(false)
+  // The server refuses to select a buyer who passed; say so before the click.
+  const selectBlocked = selectDisabledReason(row)
+  const respondRef = useRef(null)
+  const wasResponding = useRef(false)
+  // Closing the response form hands focus back to the button that opened it.
+  useEffect(() => {
+    if (wasResponding.current && !responding && respondRef.current) {
+      respondRef.current.focus()
+    }
+    wasResponding.current = responding
+  }, [responding])
 
   return (
     <>
       <tr className={`ws-dispo__row ${row.is_selected ? 'is-selected' : ''}`}>
-        <td>
+        <td data-label="Buyer">
           <div className="ws-comp__addr">
             {row.buyer_name || '(unnamed buyer)'}
             {row.is_selected ? <span className="ws-pill is-ok">Selected</span> : null}
@@ -478,7 +567,7 @@ function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
             {row.do_not_contact ? ' · OPTED OUT' : ''}
           </div>
         </td>
-        <td>
+        <td data-label="Where it went">
           <span className={`ws-pill ${statusTone(row.status)}`}>
             {RESPONSE_LABEL[row.status] || fmtLabel(row.status)}
           </span>
@@ -490,12 +579,12 @@ function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
             <div className="ws-comp__sub">“{row.response_note}”</div>
           ) : null}
         </td>
-        <td className="ws-num">
+        <td className="ws-num" data-label="Their offer">
           {row.offer_amount === null
             ? <span className="ws-muted">no number yet</span>
             : fmtMoney(row.offer_amount)}
         </td>
-        <td className="ws-num">
+        <td className="ws-num" data-label="Our spread">
           {row.spread === null
             ? <span className="ws-muted">—</span>
             : (
@@ -504,7 +593,7 @@ function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
               </strong>
             )}
         </td>
-        <td>
+        <td data-label="Proof of funds">
           <span className={`ws-pill ${pofTone(row.pof_status)}`}>
             {POF_LABEL[row.pof_status] || fmtLabel(row.pof_status)}
           </span>
@@ -531,33 +620,43 @@ function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
               </button>
             ) : null}
             <button className="btn btn--secondary btn--sm"
+                    aria-expanded={pofOpen}
+                    aria-label={`${pofOpen ? 'Hide' : (row.pof_file_id ? 'Replace' : 'Attach')} proof of funds for ${row.buyer_name || 'this buyer'}`}
                     onClick={() => setPofOpen((v) => !v)}>
-              {pofOpen ? 'Close' : (row.pof_file_id ? 'Replace' : 'Attach')}
+              {pofOpen ? 'Hide' : (row.pof_file_id ? 'Replace' : 'Attach')}
             </button>
           </div>
         </td>
-        <td className="ws-num">
+        <td className="ws-num" data-label="Closes in">
           {row.typical_close_days ? `${row.typical_close_days} days` : '—'}
           {row.target_close_date ? (
             <div className="ws-comp__sub">by {row.target_close_date}</div>
           ) : null}
         </td>
-        <td>
+        <td data-label="Actions">
           <span className="ws-actions ws-actions--wrap">
-            <button className="btn btn--secondary btn--sm" disabled={busy}
+            <button ref={respondRef} className="btn btn--secondary btn--sm" disabled={busy}
+                    aria-expanded={responding}
+                    aria-label={`Record response from ${row.buyer_name || 'this buyer'}`}
                     onClick={onRespond}>Record response</button>
-            <button className="btn btn--secondary btn--sm" disabled={busy}
+            <button className="btn btn--secondary btn--sm"
+                    disabled={busy || row.do_not_contact}
+                    aria-label={`Resend deal sheet to ${row.buyer_name || 'this buyer'}`}
+                    title={row.do_not_contact
+                      ? 'This buyer has opted out of contact.' : undefined}
                     onClick={() => run(async () => {
                       const r = await api.post(
                         `/wholesale/outreach/${row.outreach_id}/resend`)
-                      if (!r.sent) throw new Error(r.reason)
+                      const out = resendOutcome(r)
+                      if (!out.ok) throw new Error(out.message)
                     }, 'Resent.')}>Resend</button>
             {row.is_selected ? null : (
               <button className="btn btn--primary btn--sm"
-                      disabled={busy || row.do_not_contact}
-                      title={row.do_not_contact
-                        ? 'This buyer has opted out of contact.' : undefined}
-                      onClick={onSelect}>Select</button>
+                      disabled={busy || Boolean(selectBlocked)}
+                      title={selectBlocked || undefined}
+                      aria-label={`Select ${row.buyer_name || 'this buyer'}`
+                        + (selectBlocked ? ` — unavailable: ${selectBlocked}` : '')}
+                      onClick={(e) => onSelect(e.currentTarget)}>Select</button>
             )}
           </span>
         </td>
@@ -603,9 +702,17 @@ function BoardRow({ row, busy, run, capability, responding, onRespond, onDone,
           <ResponseForm row={row} busy={busy} onCancel={onDone}
                         onSave={async (payload) => {
                           const ok = await run(
-                            () => api.post(
-                              `/wholesale/outreach/${row.outreach_id}/response`,
-                              payload),
+                            async () => {
+                              try {
+                                await api.post(
+                                  `/wholesale/outreach/${row.outreach_id}/response`,
+                                  payload)
+                              } catch (e) {
+                                // e.g. "…is locked [selected_row_is_locked]": keep
+                                // the words and the code, drop the brackets
+                                throw new Error(describeRefusal(errText(e)))
+                              }
+                            },
                             'Response recorded.')
                           if (ok) onDone()
                         }} />

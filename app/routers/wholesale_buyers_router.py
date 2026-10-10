@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import (APIRouter, Depends, File, HTTPException, Query, Request,
                      UploadFile)
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.deps import (get_db, require_not_observation, require_tenant_or_observer,
@@ -36,8 +37,10 @@ from app.models.wholesale_models import (
 )
 from app.services import wholesale_analysis as analysis
 from app.services import wholesale_service as svc
+from app.services import wholesale_selection as sel
 from app.services.wholesale_matching import buyer_standing
 from app.services import wholesale_buyer_contacts as BC
+from app.services import wholesale_import_identity as ident
 from app.services.entitlements import require_feature
 from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
 
@@ -261,7 +264,8 @@ def list_buyers(db: Session = Depends(get_db),
                              (WholesaleBuyer.contact_name.ilike(like)) |
                              (WholesaleBuyer.email.ilike(like)))
     total = query.count()
-    rows = (query.order_by(WholesaleBuyer.created_at.desc())
+    # id tiebreak: equal created_at must not reorder rows between pages/refreshes.
+    rows = (query.order_by(WholesaleBuyer.created_at.desc(), WholesaleBuyer.id.asc())
             .offset(offset).limit(limit).all())
     boxes: Dict[str, List[WholesaleBuyBox]] = {}
     for box in db.query(WholesaleBuyBox).filter(
@@ -392,6 +396,26 @@ def update_buyer(buyer_id: str, payload: BuyerIn, request: Request,
     if "proof_of_funds_expires" in data:
         from app.routers.wholesale_router import _parse_date
         data["proof_of_funds_expires"] = _parse_date(data["proof_of_funds_expires"])
+    for key in ("typical_close_days", "past_deals_count"):
+        if data.get(key) is not None and data[key] < 0:
+            raise HTTPException(status_code=400,
+                                detail="%s cannot be negative." % key.replace("_", " ").capitalize())
+    if data.get("reliability_rating") is not None and not 0 <= data["reliability_rating"] <= 5:
+        raise HTTPException(status_code=400,
+                            detail="Reliability rating must be between 0 and 5.")
+    after_email = data["email"] if "email" in data else buyer.email
+    after_phone = data["phone"] if "phone" in data else buyer.phone
+    if (("email" in data or "phone" in data)
+            and not ((after_email or "").strip() or (after_phone or "").strip())):
+        raise HTTPException(
+            status_code=400,
+            detail="A buyer needs an email or a phone number — without one there "
+                   "is no way to send them a deal.")
+    after_name = ((data["company_name"] if "company_name" in data else buyer.company_name)
+                  or (data["contact_name"] if "contact_name" in data else buyer.contact_name))
+    if ("company_name" in data or "contact_name" in data) and not (after_name or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="A buyer needs a company name or a contact name.")
     identity = {k: data[k] for k in ("contact_name", "company_name", "email", "phone")
                 if k in data and data[k] != getattr(buyer, k)}
     for key, value in data.items():
@@ -459,7 +483,16 @@ def _apply_box(box: WholesaleBuyBox, data: Dict[str, Any]) -> None:
             setattr(box, key, value)
 
 
-def _validate_box(data: Dict[str, Any]) -> None:
+_BOX_RANGES = (("min_price", "max_price", "price"), ("min_beds", "max_beds", "bedroom count"),
+               ("min_sqft", "max_sqft", "square footage"),
+               ("min_year_built", "max_year_built", "year built"))
+_BOX_NONNEG = ("min_price", "max_price", "min_beds", "max_beds", "min_baths",
+               "min_sqft", "max_sqft", "min_year_built", "max_year_built", "min_spread")
+
+
+def _validate_box(data: Dict[str, Any], existing: Optional[WholesaleBuyBox] = None) -> None:
+    """`existing` is the stored box on PATCH, so a change to one end of a range
+    is checked against the end that is already saved."""
     if data.get("strategies"):
         bad = [s for s in data["strategies"] if str(s).lower() not in STRATEGIES]
         if bad:
@@ -470,11 +503,23 @@ def _validate_box(data: Dict[str, Any]) -> None:
         raise HTTPException(status_code=400,
                             detail="rehab_tolerance must be one of: %s"
                                    % ", ".join(REHAB_LEVELS))
-    lo, hi = data.get("min_price"), data.get("max_price")
-    if lo is not None and hi is not None and lo > hi:
-        raise HTTPException(status_code=400,
-                            detail="The minimum price is above the maximum price, so "
-                                   "nothing could ever match this buy box.")
+    for key in _BOX_NONNEG:
+        if data.get(key) is not None and data[key] < 0:
+            raise HTTPException(status_code=400,
+                                detail="%s cannot be negative." % key.replace("_", " ").capitalize())
+
+    def merged(key):
+        if key in data:
+            return data[key]
+        return getattr(existing, key, None) if existing is not None else None
+
+    for lo_key, hi_key, label in _BOX_RANGES:
+        lo, hi = merged(lo_key), merged(hi_key)
+        if lo is not None and hi is not None and lo > hi:
+            raise HTTPException(
+                status_code=400,
+                detail="The minimum %s is above the maximum %s, so nothing could "
+                       "ever match this buy box." % (label, label))
 
 
 @router.post("/buyers/{buyer_id}/buy-boxes")
@@ -511,7 +556,7 @@ def update_buy_box(box_id: str, payload: BuyBoxIn, request: Request,
     if box is None:
         raise HTTPException(status_code=404, detail="Buy box not found")
     data = payload.model_dump(exclude_unset=True)
-    _validate_box(data)
+    _validate_box(data, box)
     before = buy_box_json(box)
     _apply_box(box, data)
     db.flush()
@@ -611,7 +656,12 @@ async def import_buyers(request: Request, file: UploadFile = File(...),
             unmapped.append(header)
 
     source = "csv:%s" % (list_name or file.filename or "import")
-    created, boxes_created, skipped = 0, 0, []
+    created, boxes_created, skipped, rejected = 0, 0, [], []
+    # Retry safety: the org's existing buyers (any state) by normalised
+    # email/phone, plus what this file has already claimed. Org-scoped.
+    index = ident.build_index(db.query(WholesaleBuyer).filter(
+        WholesaleBuyer.organization_id == org_id).all())
+    seen_in_file: Dict[Any, int] = {}
 
     for i, row in enumerate(reader, start=2):
         data: Dict[str, Any] = {"source": source,
@@ -648,9 +698,20 @@ async def import_buyers(request: Request, file: UploadFile = File(...),
                                                 "could not be sent a deal"})
             continue
 
+        verdict = ident.decide(data.get("email"), data.get("phone"), index,
+                               seen_in_file, i)
+        if verdict["action"] == ident.REJECT:
+            rejected.append({"row": i, "reason": verdict["reason"]})
+            continue
+        if verdict["action"] == ident.SKIP:
+            skipped.append({"row": i, "reason": verdict["reason"],
+                            "existing_buyer_id": verdict.get("buyer_id")})
+            continue
+
         buyer = WholesaleBuyer(organization_id=org_id, **data)
         db.add(buyer)
         db.flush()
+        ident.claim(data.get("email"), data.get("phone"), seen_in_file, i)
         created += 1
 
         if box:
@@ -683,7 +744,8 @@ async def import_buyers(request: Request, file: UploadFile = File(...),
                   actor_user_id=user.id,
                   summary="%d buyer(s) imported, %d buy box(es) created"
                           % (created, boxes_created),
-                  after={"source": source, "skipped": len(skipped)})
+                  after={"source": source, "skipped": len(skipped),
+                         "rejected": len(rejected)})
     db.commit()
     new_ids = [b.id for b in db.query(WholesaleBuyer).filter(
         WholesaleBuyer.organization_id == org_id, WholesaleBuyer.source == source,
@@ -692,7 +754,9 @@ async def import_buyers(request: Request, file: UploadFile = File(...),
         WholesaleBuyer.organization_id == org_id, WholesaleBuyer.id.in_(new_ids or [""])).all(),
         user) if created else {}
     return {"created": created, "buy_boxes_created": boxes_created,
-            "skipped": skipped, "unmapped_columns": unmapped, "source": source,
+            "skipped": skipped, "rejected": rejected,
+            "skipped_count": len(skipped), "rejected_count": len(rejected),
+            "unmapped_columns": unmapped, "source": source,
             "contacts": linked}
 
 
@@ -834,6 +898,11 @@ def send_disposition(deal_id: str, payload: DispositionIn, request: Request,
     buyers = {b.id: b for b in db.query(WholesaleBuyer).filter(
         WholesaleBuyer.organization_id == org_id,
         WholesaleBuyer.id.in_([r.buyer_id for r in rows] or [""])).all()}
+    # Ids that are not this organization's buyers are reported, never dropped
+    # silently: the person pressing Send should see nothing went to them.
+    queued_ids = {r.buyer_id for r in rows}
+    unknown = [bid for bid in dict.fromkeys(payload.buyer_ids)
+               if bid not in queued_ids]
 
     results = []
     for row in rows:
@@ -869,7 +938,10 @@ def send_disposition(deal_id: str, payload: DispositionIn, request: Request,
     return {"sent": len(sent), "failed": len(results) - len(sent),
             "channel": payload.channel, "results": results,
             "blocked": [{"buyer_id": r["buyer_id"], "reason": r["reason"]}
-                        for r in results if not r["sent"]]}
+                        for r in results if not r["sent"]]
+                       + [{"buyer_id": bid, "reason": "That buyer was not found "
+                           "in this organization, so nothing was sent."}
+                          for bid in unknown]}
 
 
 @router.post("/outreach/{outreach_id}/resend")
@@ -909,6 +981,40 @@ def resend_outreach(outreach_id: str, request: Request,
     return {**outcome, "attempts": row.attempts}
 
 
+def _refusal_detail(code, label):
+    """Stable operator-visible refusal: human label plus a machine code."""
+    return "%s [%s]" % (label, code)
+
+
+def _apply_status_write(db, org_id, user, row, new_status):
+    """Gate a generic status write through the pure selection rules.
+
+    A refusal raises before anything is mutated. A selected buyer who passes
+    releases the selection (flag, deal assignment) with an audit event.
+    """
+    decision, code, label = sel.check_status_write(
+        row.status, bool(row.is_selected), new_status)
+    if decision == "refuse":
+        raise HTTPException(status_code=409, detail=_refusal_detail(code, label))
+    if decision in ("noop", "keep"):
+        return
+    if decision == "release":
+        deal = svc.get_deal(db, org_id, row.deal_id)
+        was = row.status
+        row.is_selected = False
+        if deal.assigned_buyer_id == row.buyer_id:
+            deal.assigned_buyer_id = None
+        svc.log_event(db, org_id, "buyer.selection_released",
+                      actor_type=ACTOR_USER, actor_user_id=user.id,
+                      deal_id=row.deal_id,
+                      summary="Selected buyer %s: selection released" % new_status,
+                      before={"outreach_id": row.id, "status": was,
+                              "is_selected": True},
+                      after={"outreach_id": row.id, "status": new_status,
+                             "is_selected": False})
+    row.status = new_status
+
+
 class OutreachUpdateIn(BaseModel):
     status: str
     response_note: Optional[str] = None
@@ -936,10 +1042,13 @@ def update_outreach(outreach_id: str, payload: OutreachUpdateIn, request: Reques
         raise HTTPException(status_code=400,
                             detail="status must be one of: %s" % ", ".join(OUTREACH_STATUSES))
     before = row.status
-    row.status = payload.status
+    _apply_status_write(db, org_id, user, row, payload.status)
     if payload.response_note is not None:
         row.response_note = payload.response_note
     if payload.offer_amount is not None:
+        if payload.offer_amount < 0:
+            raise HTTPException(status_code=400,
+                                detail="An offer amount cannot be negative.")
         row.offer_amount = analysis.money(payload.offer_amount)
     if payload.status == "sent" and row.sent_at is None:
         row.sent_at = datetime.utcnow()
@@ -1180,18 +1289,47 @@ def select_buyer(deal_id: str, payload: SelectBuyerIn, request: Request,
     buyer = (db.query(WholesaleBuyer)
              .filter(WholesaleBuyer.id == row.buyer_id,
                      WholesaleBuyer.organization_id == org_id).first())
-    if buyer is not None and buyer.do_not_contact:
-        raise HTTPException(
-            status_code=409,
-            detail="That buyer has opted out. Selecting them would mean "
-                   "working a deal with somebody who asked not to be contacted.")
+    if buyer is None:
+        raise HTTPException(status_code=404,
+                            detail="That buyer no longer exists in this organization.")
+    decision, code, label = sel.check_select(
+        row.status, bool(row.is_selected), bool(buyer.do_not_contact),
+        bool(buyer.is_active))
+    if decision == "refuse":
+        raise HTTPException(status_code=409, detail=_refusal_detail(code, label))
+    if decision == "noop" and deal.assigned_buyer_id == row.buyer_id:
+        # Retry of an applied selection: no second event, timestamp untouched.
+        return {"deal_id": deal_id, "selected_buyer_id": row.buyer_id,
+                "buyer_price": _num(deal.buyer_price),
+                "assignment_fee": _num(deal.assignment_fee),
+                "already_selected": True, "replaced_outreach_ids": []}
 
-    # One selected buyer per deal.
-    (db.query(WholesaleBuyerOutreach)
-     .filter(WholesaleBuyerOutreach.organization_id == org_id,
-             WholesaleBuyerOutreach.deal_id == deal_id,
-             WholesaleBuyerOutreach.id != row.id)
-     .update({"is_selected": False}, synchronize_session=False))
+    # One selected buyer per deal. A replaced buyer must not keep the status
+    # "selected": return them to the status their own evidence supports and
+    # leave an audit row per replacement.
+    replaced = (db.query(WholesaleBuyerOutreach)
+                .filter(WholesaleBuyerOutreach.organization_id == org_id,
+                        WholesaleBuyerOutreach.deal_id == deal_id,
+                        WholesaleBuyerOutreach.id != row.id)
+                .filter(or_(WholesaleBuyerOutreach.is_selected.is_(True),
+                            WholesaleBuyerOutreach.status == "selected"))
+                .with_for_update().all())
+    replaced_ids = []
+    for old in replaced:
+        was = old.status
+        old.is_selected = False
+        if was == "selected":
+            old.status = sel.replaced_status(old.offer_amount)
+        replaced_ids.append(old.id)
+        svc.log_event(db, org_id, "buyer.selection_replaced",
+                      actor_type=ACTOR_USER, actor_user_id=user.id,
+                      deal_id=deal_id,
+                      summary="Selection moved away from buyer %s" % old.buyer_id,
+                      before={"outreach_id": old.id, "status": was,
+                              "is_selected": True},
+                      after={"outreach_id": old.id, "status": old.status,
+                             "is_selected": False,
+                             "replaced_by_outreach_id": row.id})
 
     row.is_selected = True
     row.status = "selected"
@@ -1219,7 +1357,8 @@ def select_buyer(deal_id: str, payload: SelectBuyerIn, request: Request,
     return {"deal_id": deal_id, "selected_buyer_id": row.buyer_id,
             "buyer_price": float(offer) if offer is not None else None,
             "assignment_fee": (float(deal.assignment_fee)
-                               if deal.assignment_fee is not None else None)}
+                               if deal.assignment_fee is not None else None),
+            "already_selected": False, "replaced_outreach_ids": replaced_ids}
 
 
 class ResponseIn(BaseModel):
@@ -1257,13 +1396,16 @@ def record_response(outreach_id: str, payload: ResponseIn, request: Request,
             raise HTTPException(
                 status_code=400,
                 detail="Status must be one of: %s." % ", ".join(BUYER_RESPONSE_STATUSES))
-        row.status = value
+        _apply_status_write(db, org_id, user, row, value)
         if value in ("replied", "interested", "needs_info", "offer_submitted",
                      "passed", "rejected") and row.replied_at is None:
             row.replied_at = datetime.utcnow()
 
     if "offer_amount" in data:
         amount = analysis.money(data["offer_amount"])
+        if amount is not None and amount < 0:
+            raise HTTPException(status_code=400,
+                                detail="An offer amount cannot be negative.")
         row.offer_amount = amount
         # An amount IS a response. Recording one without moving the status
         # leaves a board that shows an offer nobody has noticed.
@@ -1273,9 +1415,10 @@ def record_response(outreach_id: str, payload: ResponseIn, request: Request,
         # because they were suppressed - and who then phoned in an offer is the
         # exact case this endpoint exists for. Leaving them on "failed" would
         # hide a live offer behind a delivery problem.
-        if amount is not None and row.status in ("queued", "sent", "delivered",
-                                                 "opened", "replied", "failed",
-                                                 "blocked", "not_contacted"):
+        if amount is not None and sel.offer_may_set_status(
+                row.status, bool(row.is_selected)) and row.status in (
+                "queued", "sent", "delivered", "opened", "replied", "failed",
+                "blocked", "not_contacted"):
             row.status = "offer_submitted"
             row.replied_at = row.replied_at or datetime.utcnow()
 

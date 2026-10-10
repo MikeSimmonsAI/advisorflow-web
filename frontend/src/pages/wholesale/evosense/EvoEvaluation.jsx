@@ -253,7 +253,7 @@ export default function EvoEvaluation() {
           <ul className="evo-feed" style={{ padding: '0 20px' }}>
             {runs.map((r) => (
               <li key={r.id}>
-                <strong>{r.name}</strong> · {r.label} · {r.mode} · {r.status}{r.status === 'planned' ? ` · max ${cents(r.max_spend_cents)}` : ` · ${cents(r.total_cost_cents)}`}{r.purged ? ' · data deleted' : ''}{' '}
+                <strong>{r.name}</strong> · {r.label} · {String(r.mode || '').replace(/_/g, ' ')} · {String(r.status || '').replace(/_/g, ' ')}{r.status === 'planned' ? ` · max ${cents(r.max_spend_cents)}` : ` · ${cents(r.total_cost_cents)}`}{r.purged ? ' · data deleted' : ''}{' '}
                 <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => view(r.id)}>Open</button>
               </li>
             ))}

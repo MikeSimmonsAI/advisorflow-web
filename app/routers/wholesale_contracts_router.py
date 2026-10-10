@@ -252,14 +252,16 @@ def _date(value) -> Optional[str]:
 
 def _fill_sheet(db: Session, org_id: str, deal: WholesaleDeal) -> List[Dict[str, Any]]:
     prop = (db.query(WholesaleProperty)
-            .filter(WholesaleProperty.id == deal.property_id).first())
+            .filter(WholesaleProperty.id == deal.property_id,
+                    WholesaleProperty.organization_id == org_id).first())
     # The owner's NAME and contact details live on the Lead, not on the seller
     # profile — the profile carries what they said about selling. Reading them
     # off the profile would have silently produced a contract party of None.
     seller = None
     if deal.seller_profile_id:
         seller = (db.query(WholesaleSellerProfile)
-                  .filter(WholesaleSellerProfile.id == deal.seller_profile_id).first())
+                  .filter(WholesaleSellerProfile.id == deal.seller_profile_id,
+                          WholesaleSellerProfile.organization_id == org_id).first())
     lead = None
     if deal.seller_lead_id:
         lead = (db.query(Lead)
@@ -268,7 +270,8 @@ def _fill_sheet(db: Session, org_id: str, deal: WholesaleDeal) -> List[Dict[str,
     buyer = None
     if deal.assigned_buyer_id:
         buyer = (db.query(WholesaleBuyer)
-                 .filter(WholesaleBuyer.id == deal.assigned_buyer_id).first())
+                 .filter(WholesaleBuyer.id == deal.assigned_buyer_id,
+                         WholesaleBuyer.organization_id == org_id).first())
 
     def g(obj, attr):
         return getattr(obj, attr, None) if obj is not None else None

@@ -5,11 +5,14 @@
  * is a platform truth. The "70% rule" in particular is a number this customer
  * sets; the code does not know it.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import '../../styles/shared.css'
 import './wholesale.css'
 import { errText, fmtLabel, Note, Reads, Why } from './wsShared'
+import { useRecord } from './wsRecordHook'
+import RecoveryNote from './wsRecoveryNote'
+import { smsReadinessLabel, withCurrentOption } from './wsListState'
 import { TemplateLibrary } from './wsContracts'
 import { Alert, EvoApp, Hero, PageSkeleton } from './ds/ds'
 import './ds/evo-pages.css'
@@ -84,30 +87,46 @@ export default function WholesaleSettings() {
   })
   const [settings, setSettings] = useState(null)
   const [channels, setChannels] = useState([])
+  const [channelsErr, setChannelsErr] = useState('')
   const [draft, setDraft] = useState({})
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
   const [busy, setBusy] = useState(false)
+  const saving = useRef(false)
+  const loadGen = useRef(0)
+
+  // Channel status alone: retrying it must never discard unsaved edits (load() resets the draft).
+  const channelGen = useRef(0)
+  const loadChannels = useCallback(async () => {
+    const g = ++channelGen.current
+    try {
+      const ch = await api.get('/wholesale/disposition/channels')
+      if (g !== channelGen.current) return
+      setChannels(ch.channels || [])
+      setChannelsErr('')
+    } catch (e) {
+      // Keep the last good list; say so rather than showing no channels.
+      if (g === channelGen.current) setChannelsErr(errText(e))
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setError(null)
+    const gen = ++loadGen.current
     try {
       const data = await api.get('/wholesale/settings')
+      if (gen !== loadGen.current) return
       setSettings(data)
       setDraft({})
       // A separate read because it answers a different question: the settings
       // above are this organization's, and these are the deployment's. A failure
       // here must not blank the settings screen, so it is caught on its own.
-      try {
-        const ch = await api.get('/wholesale/disposition/channels')
-        setChannels(ch.channels || [])
-      } catch {
-        setChannels([])
-      }
+      await loadChannels()
     } catch (e) {
+      if (gen !== loadGen.current) return
       setError(errText(e))
     }
-  }, [])
+  }, [loadChannels])
 
   useEffect(() => { load() }, [load])
 
@@ -117,6 +136,10 @@ export default function WholesaleSettings() {
   }
 
   async function save() {
+    // Synchronous latch: two clicks in one tick must not send two PATCHes.
+    if (saving.current) return
+    saving.current = true
+    loadGen.current += 1      // a load still in flight must not overwrite this save
     setBusy(true); setError(null); setNotice(null)
     try {
       const payload = {}
@@ -138,14 +161,21 @@ export default function WholesaleSettings() {
       setDraft({})
       setNotice('Settings saved.')
     } catch (e) {
-      setError(errText(e))
+      // The draft is kept so nothing typed is lost; Save changes retries it.
+      setError(`Settings were not saved — your changes are still here, so you can try again. ${errText(e)}`)
     } finally {
+      saving.current = false
       setBusy(false)
     }
   }
 
   if (!settings) {
-    return <EvoApp world="settings">{error ? <Alert>{error}</Alert> : <PageSkeleton />}</EvoApp>
+    return <EvoApp world="settings">{error ? (
+      <>
+        <Alert>{error}</Alert>
+        <button type="button" className="evo-btn evo-btn--secondary" onClick={load}>Try again</button>
+      </>
+    ) : <PageSkeleton />}</EvoApp>
   }
 
   const dirty = Object.keys(draft).length > 0
@@ -157,7 +187,10 @@ export default function WholesaleSettings() {
                 actions={<>
                   {dirty ? <span className="evo-status is-attention">Unsaved changes</span> : null}
                   <button type="button" className="evo-btn evo-btn--primary" disabled={!dirty || busy}
-                          onClick={save}>{busy ? 'Saving…' : 'Save changes'}</button>
+                          onClick={save} aria-describedby="ws-save-reason">{busy ? 'Saving…' : 'Save changes'}</button>
+                  <span id="ws-save-reason" className="ws-vis-hidden">
+                    {busy ? 'Saving in progress.' : !dirty ? 'Nothing to save — no changes yet.' : ''}
+                  </span>
                 </>} />
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>
@@ -324,6 +357,13 @@ export default function WholesaleSettings() {
             of lines. Squeezed into a flex column beside a badge it wrapped into
             a narrow ribbon with the badge stranded across a gap; it gets the
             full row and sits under the name and the badge. */}
+        {channelsErr ? (
+          <div className="evo-alert evo-alert--warn" role="alert">
+            Outbound channel status could not be loaded: {channelsErr}.
+            {channels.length ? ' The channels below were loaded earlier and may be out of date.' : ' No channel status is shown.'}
+            {' '}<button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={loadChannels}>Try again</button>
+          </div>
+        ) : null}
         {(channels || []).map((c) => (
           <div className="ws-channel-row" key={c.channel}>
             <div className="ws-channel-head">
@@ -512,13 +552,11 @@ function PublicContactPanel({ value, set }) {
  * assigned to this person and they get a notification that opens the deal.
  * Unassigned, every workspace admin is notified instead. */
 function InquiryRoutingPanel({ value, set }) {
-  const [users, setUsers] = useState([])
-  useEffect(() => {
-    let live = true
-    api.get('/wholesale/settings/assignees').then((r) => { if (live) setUsers(r.items || []) }).catch(() => {})
-    return () => { live = false }
-  }, [])
+  const { rec, view, reload } = useRecord(async () => (await api.get('/wholesale/settings/assignees')).items || [])
   const current = value('inquiry_assignee_id') || ''
+  // A failed list is not "no one to assign": the saved assignee stays selectable
+  // (by id) and the failure is shown with a retry.
+  const users = withCurrentOption(rec.data, current, 'Current assignee (name unavailable)')
   return (
     <div className="panel ws-panel">
       <div className="panel-title ws-panel-title">
@@ -534,8 +572,11 @@ function InquiryRoutingPanel({ value, set }) {
       </Note>
       <div className="ws-grid">
         <div className="ws-field">
+          <RecoveryNote what="The list of people" rec={rec} view={view} onRetry={reload}
+                        effect="The current choice is kept as saved; pick someone else after the list loads." />
           <label htmlFor="ws-inquiry-assignee">Assign new inquiries to</label>
-          <select id="ws-inquiry-assignee" value={current}
+          <select id="ws-inquiry-assignee" value={current} aria-busy={view === 'loading'}
+                  disabled={view === 'loading' || view === 'error'}
                   onChange={(e) => set('inquiry_assignee_id', e.target.value)}>
             <option value="">— unassigned (notify admins) —</option>
             {users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.role ? ` (${u.role.replace(/_/g, ' ')})` : ''}</option>)}
@@ -584,22 +625,26 @@ const SMS_FIELDS = [
 ]
 
 function SellerSmsPanel({ value, set, draft, savedAt }) {
-  const [status, setStatus] = useState(null)
+  const { rec, view, reload } = useRecord(() => api.get('/wholesale/sms/status'))
+  const status = rec.data
+  // Re-read the server's readiness after each save (not on first mount, which already loaded).
+  const firstSave = useRef(true)
   useEffect(() => {
-    let live = true
-    api.get('/wholesale/sms/status').then((s) => { if (live) setStatus(s) }).catch(() => {})
-    return () => { live = false }
-  }, [savedAt])
+    if (firstSave.current) { firstSave.current = false; return }
+    reload()
+  }, [savedAt, reload])
   const on = !!value('sms_program_enabled')
   const keyDraft = draft.public_intake_key
   return (
     <div className="panel ws-panel">
       <div className="panel-title ws-panel-title">
         <span>Seller SMS program</span>
-        <span className={`ws-pill ${status?.can_send ? 'is-ok' : 'is-warn'}`}>
-          {status?.can_send ? 'Ready to send to opted-in sellers' : 'Not sending'}
+        <span className={`ws-pill ${!status ? 'is-muted' : status.can_send && view !== 'stale' ? 'is-ok' : 'is-warn'}`}>
+          {smsReadinessLabel(view, status)}{status && view === 'stale' ? ' (last known)' : ''}
         </span>
       </div>
+      <RecoveryNote what="The program status" rec={rec} view={view} onRetry={reload}
+                    effect="Nothing is assumed: the readiness shown is not confirmed. The server still checks every send." />
       <Note>
         Texts go only to sellers who checked the optional SMS box on your seller
         inquiry page, and only through this program's Messaging Service. A phone

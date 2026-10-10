@@ -10,14 +10,14 @@
  * fails with no explanation are the two ways this kind of tool loses somebody's
  * trust.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import '../../styles/shared.css'
 import './wholesale.css'
 import {
   Band, Empty, ErrorBox, Factors, Score, Sourced, Steps, Warnings,
-  errText, fmtBool, fmtDate, fmtLabel, fmtMoney, fmtNum, fmtWhen, Note, Reads, Standing, Why,
+  errText, fmtBool, fmtDate, fmtLabel, fmtMoney, fmtNum, fmtWhen, Note, Reads, refusalLabel, Standing, Why,
 } from './wsShared'
 import { AuthImage } from './wsFiles'
 import { PropertyWorkspace } from './wsProperty'
@@ -31,9 +31,17 @@ import { SellerIntelPanel } from './wsIntel'
 import { ValuationPanel } from './wsValuation'
 import { DocumentDrawer } from './wsDocuments'
 import { SharingWorkspace } from './wsSharing'
+import {
+  appointmentSummary, isCurrentResult, sendInputKey, summarizeOutcome, validateAppointment, validateSend,
+} from './wsDispositionState'
 import DealOpsPanel, { DistributionNotice, LeadTemperatureChip, useDistribution } from './ops/DealOpsPanel'
 import { EvoApp, Hero, PageSkeleton, PropertyThumb, Ring, Status, Tag, humanize, money, shortDate } from './ds/ds'
 import './ds/evo-pages.css'
+import {
+  clearOutcome, createActionTracker, describeError, outcomesFor, panelOf, setOutcome,
+} from './wsActionState'
+import { contractTruth, missingPrerequisites, CONTRACT_STATUS_LABEL } from './wsDocState'
+import { currentBuyer, fundsTruth, matchEvidence, sortMatches } from './wsOfferState'
 
 const TABS = [
   ['overview', 'Overview'],
@@ -61,37 +69,58 @@ export default function WholesaleDeal() {
   const [tab, setTab] = useState('overview')
   const distribution = useDistribution()
   const [error, setError] = useState(null)
-  const [notice, setNotice] = useState(null)
-  const [busy, setBusy] = useState(false)
+  const [outcomes, setOutcomes] = useState({})
+  const [pendingKeys, setPendingKeys] = useState([])
+  const tracker = useRef(null)
+  if (!tracker.current) tracker.current = createActionTracker()
+  const tabRef = useRef('overview')
+  tabRef.current = tab
 
+  // Only the newest load may replace the room: a slow refresh that started
+  // before a save must not put the pre-save numbers back on screen.
   const load = useCallback(async () => {
-    setError(null)
+    const gen = tracker.current.nextLoad()
     try {
-      setRoom(await api.get(`/wholesale/deals/${dealId}`))
+      const fresh = await api.get(`/wholesale/deals/${dealId}`)
+      if (!tracker.current.isCurrentLoad(gen)) return
+      setError(null)
+      setRoom(fresh)
     } catch (e) {
+      if (!tracker.current.isCurrentLoad(gen)) return
       setError(errText(e))
     }
   }, [dealId])
 
   useEffect(() => { load() }, [load])
 
-  async function act(fn, successMessage) {
-    setBusy(true); setError(null); setNotice(null)
+  // `key` is "panel:action". Default is the open tab, so a panel is busy only
+  // while ITS mutation runs; other panels stay usable. The same key cannot be
+  // started twice (checked synchronously, before any re-render).
+  async function act(fn, successMessage, key) {
+    const k = key || `${tabRef.current}:act`
+    const panel = panelOf(k)
+    if (!tracker.current.begin(k)) return false
+    setPendingKeys(tracker.current.pendingKeys())
+    setOutcomes((o) => clearOutcome(o, panel))
     try {
       await fn()
-      if (successMessage) setNotice(successMessage)
+      if (successMessage) setOutcomes((o) => setOutcome(o, panel, 'ok', successMessage))
       await load()
       return true
     } catch (e) {
-      setError(errText(e))
+      setOutcomes((o) => setOutcome(o, panel, 'error', describeError(errText(e))))
       // Reported, not thrown. The caller uses the answer to decide whether to
       // close its editor: a form that closes on a failed save discards what
       // the person typed and leaves an error about a form they cannot see.
       return false
     } finally {
-      setBusy(false)
+      tracker.current.end(k)
+      setPendingKeys(tracker.current.pendingKeys())
     }
   }
+  const panelBusy = (panel) => pendingKeys.some((k) => panelOf(k) === panel)
+  const isBusy = (key) => pendingKeys.includes(key)
+  const shown = outcomesFor(outcomes, tab)
 
   if (error && !room) return <EvoApp world="operations"><ErrorBox error={error} /></EvoApp>
   if (!room) return <EvoApp world="operations"><PageSkeleton /></EvoApp>
@@ -128,10 +157,10 @@ export default function WholesaleDeal() {
         actions={
           <span className="evo-herostage">
             <label htmlFor="ws-stage-select">Stage</label>
-            <select id="ws-stage-select" value={deal.stage} disabled={busy}
+            <select id="ws-stage-select" value={deal.stage} disabled={panelBusy('stage')}
                     onChange={(e) => act(
                       () => api.post(`/wholesale/deals/${dealId}/stage`, { stage: e.target.value }),
-                      'Stage updated.')}>
+                      'Stage updated.', 'stage:set')}>
               {stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           </span>
@@ -163,8 +192,10 @@ export default function WholesaleDeal() {
         </div>
       </section>
 
-      <ErrorBox error={error} />
-      {notice ? <div className="ws-good">{notice}</div> : null}
+      {error ? <div role="alert"><ErrorBox error={error} /></div> : null}
+      {shown.map((o) => (o.kind === 'error'
+        ? <div key="e" role="alert" className="ws-error">{o.text}</div>
+        : <div key="o" role="status" className="ws-good">{o.text}</div>))}
 
       {/* ── THE DEAL SUMMARY HEADER ───────────────────────────────────────
           Fifteen questions, no clicks: what is it worth, what can we pay,
@@ -186,16 +217,16 @@ export default function WholesaleDeal() {
 
       {tab === 'overview' ? <Overview room={room} goTo={setTab} reload={load} /> : null}
       {tab === 'ops' ? <DealOpsPanel dealId={deal.id} /> : null}
-      {tab === 'seller' ? <SellerTab room={room} act={act} busy={busy} /> : null}
-      {tab === 'analysis' ? <AnalysisTab room={room} act={act} busy={busy} /> : null}
-      {tab === 'offer' ? <OfferTab room={room} act={act} busy={busy} /> : null}
-      {tab === 'funding' ? <><DistributionNotice distribution={distribution} kind="funding" /><FundingWorkspace deal={room.deal} /></> : null}
-      {tab === 'documents' ? <DocumentsTab room={room} act={act} busy={busy} /> : null}
-      {tab === 'buyers' ? <><DistributionNotice distribution={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={busy} /></> : null}
-      {tab === 'closing' ? <ClosingTab room={room} act={act} busy={busy} /> : null}
+      {tab === 'seller' ? <SellerTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
+      {tab === 'analysis' ? <AnalysisTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
+      {tab === 'offer' ? <OfferTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
+      {tab === 'funding' ? <><DistributionNotice state={distribution} kind="funding" /><FundingWorkspace deal={room.deal} /></> : null}
+      {tab === 'documents' ? <DocumentsTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
+      {tab === 'buyers' ? <><DistributionNotice state={distribution} kind="buyers" /><BuyersTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /></> : null}
+      {tab === 'closing' ? <ClosingTab room={room} act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'sharing'
         ? <SharingWorkspace deal={deal} buyers={room.buyer_matches}
-                            act={act} busy={busy} /> : null}
+                            act={act} busy={panelBusy(tab)} isBusy={isBusy} /> : null}
       {tab === 'audit' ? <AuditTab room={room} /> : null}
     </EvoApp>
   )
@@ -388,7 +419,7 @@ function Overview({ room, goTo, reload }) {
 }
 
 
-function SellerTab({ room, act, busy }) {
+function SellerTab({ room, act, busy, isBusy }) {
   const { seller, deal, property } = room
   const [message, setMessage] = useState('')
   const [compose, setCompose] = useState('send')
@@ -418,10 +449,10 @@ function SellerTab({ room, act, busy }) {
           ))}
         </div>
         <div className="ws-actions" style={{ marginTop: 12 }}>
-          <button className="btn btn--primary" disabled={busy}
+          <button className="btn btn--primary" disabled={isBusy('seller:attach')}
                   onClick={() => act(
                     () => api.post(`/wholesale/properties/${property.id}/seller`, form),
-                    'Owner attached.')}>
+                    'Owner attached.', 'seller:attach')}>
             Attach owner
           </button>
         </div>
@@ -492,7 +523,7 @@ function SellerTab({ room, act, busy }) {
             <KV label="Best callback time">{seller.best_callback_time}</KV>
             <KV label="Appointment">
               {seller.appointment_status
-                ? `${fmtLabel(seller.appointment_status, null)}${seller.appointment_at ? ' · ' + fmtWhen(seller.appointment_at) : ''}`
+                ? appointmentSummary(seller.appointment_status, seller.appointment_at, fmtWhen)
                 : null}
             </KV>
           </div>
@@ -528,7 +559,7 @@ function SellerTab({ room, act, busy }) {
                 suppression list, the consent record and the delivery receipt
                 all apply.
               </Note>
-              <OutreachForm dealId={deal.id} seller={seller} act={act} busy={busy} />
+              <OutreachForm dealId={deal.id} seller={seller} act={act} busy={isBusy('seller:sms')} />
               <Why label="What happens to a message that cannot be sent">
                 <p className="ws-comp__sub">
                   A sandbox record and a contact who has opted out are both
@@ -553,13 +584,13 @@ function SellerTab({ room, act, busy }) {
                         placeholder="What did they say?"
                         className="ws-input" />
               <div className="ws-actions" style={{ marginTop: 10 }}>
-                <button className="btn btn--primary" disabled={busy || !message.trim()}
+                <button className="btn btn--primary" disabled={isBusy('seller:reply') || !message.trim()}
                         onClick={() => act(
                           async () => {
                             await api.post(`/wholesale/deals/${deal.id}/seller-reply`,
                                            { message, mode: 'manual' })
                             setMessage('')
-                          }, 'Reply read and qualification updated.')}>
+                          }, 'Reply read and qualification updated.', 'seller:reply')}>
                   Read and qualify
                 </button>
                 <span className="ws-pill is-muted">Manual entry</span>
@@ -584,11 +615,11 @@ function SellerTab({ room, act, busy }) {
         {/* 0. CORRECT WHAT WE KNOW. The owner's contact details and answers,
             editable - an inquiry's typo or a wrong number is fixed here, not
             by re-entering the person. */}
-        <SellerEditor seller={seller} act={act} busy={busy} />
+        <SellerEditor seller={seller} act={act} busy={isBusy('seller:edit')} />
         <SellerIntelPanel profileId={seller.id} />
         {/* 4. THE CADENCE and 5. THE PERMISSIONS. Both are settings for the
             conversation rather than part of it, so they sit beside it. */}
-        <CadencePanel dealId={deal.id} cadence={room.cadence} act={act} busy={busy} />
+        <CadencePanel dealId={deal.id} cadence={room.cadence} act={act} busy={isBusy('seller:cadence')} />
 
         <div className="panel ws-panel">
           <div className="panel-title ws-panel-title">Contact permissions</div>
@@ -662,8 +693,16 @@ function SellerEditor({ seller, act, busy }) {
       let v = typeof form[k] === 'string' ? form[k].trim() : form[k]
       if (v === '') v = null
       else if (k === 'asking_price') v = Number(String(v).replace(/[$,\s]/g, ''))
-      else if (k === 'appointment_at') v = new Date(v).toISOString().slice(0, 19)
+      else if (k === 'appointment_at') v = validateAppointment({ status: 'x', at: v }).iso
       body[k] = v
+    }
+    const appt = validateAppointment({
+      status: form.appointment_status || null, at: form.appointment_at })
+    if (!appt.ok) {
+      // Nothing is sent and nothing typed is lost; focus goes to the field.
+      setErrs(appt.errors); setMsg(null)
+      setTimeout(() => document.getElementById(`sed-${appt.firstInvalid}`)?.focus(), 0)
+      return
     }
     if (note.trim()) body.notes = note.trim()
     if (!Object.keys(body).length) { setOpen(false); return }
@@ -677,7 +716,7 @@ function SellerEditor({ seller, act, busy }) {
         if (e?.detail?.errors) setErrs(e.detail.errors)
         throw e
       }
-    }, 'Seller details saved.')
+    }, 'Seller details saved.', 'seller:edit')
     if (okSaved) {
       setOpen(false); setNote('')
       if (consentNote) setMsg(consentNote)
@@ -703,6 +742,7 @@ function SellerEditor({ seller, act, busy }) {
                 <label htmlFor={`sed-${key}`}>{label}</label>
                 {SELLER_SELECTS[key] ? (
                   <select id={`sed-${key}`} value={form[key] || ''}
+                          aria-invalid={errs[key] ? true : undefined}
                           onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}>
                     <option value="">— not stated —</option>
                     {SELLER_SELECTS[key].map((o) => <option key={o} value={o}>{humanize(o)}</option>)}
@@ -710,10 +750,12 @@ function SellerEditor({ seller, act, busy }) {
                 ) : (
                   <input id={`sed-${key}`} value={form[key] ?? ''}
                          type={key === 'appointment_at' ? 'datetime-local' : 'text'}
+                         aria-invalid={errs[key] ? true : undefined}
+                         aria-describedby={errs[key] ? `sed-${key}-err` : undefined}
                          inputMode={key === 'asking_price' ? 'decimal' : undefined}
                          onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))} />
                 )}
-                {errs[key] ? <span className="ws-field__err">{errs[key]}</span> : null}
+                {errs[key] ? <span className="ws-field__err" id={`sed-${key}-err`} role="alert">{errs[key]}</span> : null}
               </div>
             ))}
             <div className="ws-field" style={{ gridColumn: '1 / -1' }}>
@@ -762,7 +804,8 @@ function CadencePanel({ dealId, cadence, act, busy }) {
   function go(action) {
     return () => act(
       () => api.post(`/wholesale/deals/${dealId}/cadence`, { action }),
-      `Cadence ${action === 'stop' ? 'stopped' : action + 'ed'}.`)
+      `Cadence ${action === 'stop' ? 'stopped' : action + 'ed'}.`,
+      'seller:cadence')
   }
 
   return (
@@ -858,7 +901,7 @@ function OutreachForm({ dealId, seller, act, busy }) {
                   await api.post(`/wholesale/deals/${dealId}/outreach`,
                                  { message: text, channel: 'sms' })
                   setText('')
-                }, 'Message sent.')}>
+                }, 'Message sent.', 'seller:sms')}>
           Send SMS
         </button>
         {!seller?.phone
@@ -870,7 +913,7 @@ function OutreachForm({ dealId, seller, act, busy }) {
 }
 
 
-function AnalysisTab({ room, act, busy }) {
+function AnalysisTab({ room, act, busy, isBusy }) {
   const { deal, analysis, comps, arv_calculation: arvCalc } = room
   const [form, setForm] = useState({
     arv: deal.arv ?? '', repair_estimate: deal.repair_estimate ?? '',
@@ -933,7 +976,7 @@ function AnalysisTab({ room, act, busy }) {
                     onChange={(e) => set('analysis_notes', e.target.value)} />
         </div>
         <div className="ws-actions" style={{ marginTop: 12 }}>
-          <button className="btn btn--primary" disabled={busy}
+          <button className="btn btn--primary" disabled={isBusy('analysis:save')}
                   onClick={() => act(() => {
                     const payload = {}
                     Object.entries(form).forEach(([k, v]) => {
@@ -941,13 +984,13 @@ function AnalysisTab({ room, act, busy }) {
                       payload[k] = k === 'analysis_notes' ? v : Number(v)
                     })
                     return api.patch(`/wholesale/deals/${deal.id}/analysis`, payload)
-                  }, 'Analysis updated.')}>
+                  }, 'Analysis updated.', 'analysis:save')}>
             Save assumptions
           </button>
-          <button className="btn btn--secondary" disabled={busy}
+          <button className="btn btn--secondary" disabled={isBusy('analysis:recalc')}
                   onClick={() => act(
                     () => api.post(`/wholesale/deals/${deal.id}/analysis/recalculate`),
-                    'Recalculated.')}>
+                    'Recalculated.', 'analysis:recalc')}>
             Recalculate from comps
           </button>
         </div>
@@ -967,7 +1010,7 @@ function AnalysisTab({ room, act, busy }) {
 }
 
 
-function OfferTab({ room, act, busy }) {
+function OfferTab({ room, act, busy, isBusy }) {
   const { deal, approvals, analysis } = room
   const [amount, setAmount] = useState(analysis.max_allowable_offer ?? '')
   const [reasoning, setReasoning] = useState('')
@@ -982,7 +1025,7 @@ function OfferTab({ room, act, busy }) {
           sides stand. The approval machinery below it is a separate question
           and was being read as the whole of the offer story. */}
       <NegotiationLedger deal={deal} offers={room.offers || []}
-                         analysis={analysis} act={act} busy={busy} />
+                         analysis={analysis} act={act} busy={busy} isBusy={isBusy} />
 
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">Ask for approval</div>
@@ -1016,7 +1059,7 @@ function OfferTab({ room, act, busy }) {
               <div className={`ws-approval ${isNext ? 'is-next' : ''}`} key={kind}>
                 <button
                   className={`btn ${isNext ? 'btn--primary' : 'btn--secondary'}`}
-                  disabled={busy}
+                  disabled={isBusy(`offer:approval:${kind}`)}
                   onClick={() => act(
                     () => api.post(`/wholesale/deals/${deal.id}/approvals`, {
                       kind,
@@ -1025,7 +1068,7 @@ function OfferTab({ room, act, busy }) {
                       // Only ever true once the operator has read the gap
                       // below and pressed the button again.
                       acknowledge_missing: acknowledged === kind,
-                    }), `${kind} approval requested.`)}>
+                    }), `${kind} approval requested.`, `offer:approval:${kind}`)}>
                   Request {kind} approval
                 </button>
                 {state.approved ? (
@@ -1111,26 +1154,28 @@ function OfferTab({ room, act, busy }) {
 }
 
 
-function DocumentsTab({ room, act, busy }) {
+function DocumentsTab({ room, act, busy, isBusy }) {
   const { deal } = room
 
   return (
     <>
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">Contract</div>
-        <ContractForm deal={deal} act={act} busy={busy} />
+        <ContractForm deal={deal} documents={room.documents} act={act} busy={isBusy('documents:contract')} />
       </div>
 
       {/* The drawer IS the panel. It used to be wrapped in a second one whose
           only content was a paragraph explaining the design, which made every
           document sit inside two nested boxes under an essay. */}
-      <DocumentDrawer room={room} act={act} busy={busy} />
+      <DocumentDrawer room={room} act={act} busy={busy} isBusy={isBusy} />
     </>
   )
 }
 
 
-function ContractForm({ deal, act, busy }) {
+function ContractForm({ deal, documents, act, busy }) {
+  const truth = contractTruth(deal, documents)
+  const gaps = missingPrerequisites(deal, documents)
   const [form, setForm] = useState({
     contract_price: deal.contract_price ?? '',
     contract_status: deal.contract_status ?? 'none',
@@ -1139,6 +1184,15 @@ function ContractForm({ deal, act, busy }) {
   })
   return (
     <>
+      <p className="ws-comp__sub" role="status">
+        Contract: <strong>{truth.label}</strong>
+      </p>
+      {truth.warning ? <div className="ws-warn" role="status">{truth.warning}</div> : null}
+      {gaps.length ? (
+        <ul className="ws-comp__sub" aria-label="Missing before this contract is complete">
+          {gaps.map((g) => <li key={g}>{g}</li>)}
+        </ul>
+      ) : null}
       <div className="ws-grid">
         <div className="ws-field">
           <label htmlFor="ct-price">Contract price</label>
@@ -1149,8 +1203,12 @@ function ContractForm({ deal, act, busy }) {
           <label htmlFor="ct-status">Status</label>
           <select id="ct-status" value={form.contract_status}
                   onChange={(e) => setForm((f) => ({ ...f, contract_status: e.target.value }))}>
-            {['none', 'preparing', 'sent', 'signed', 'cancelled'].map(
-              (s) => <option key={s} value={s}>{s}</option>)}
+            {Object.entries(CONTRACT_STATUS_LABEL).map(
+              ([k, label]) => <option key={k} value={k}>{label}</option>)}
+            {form.contract_status && !CONTRACT_STATUS_LABEL[form.contract_status]
+              ? <option value={form.contract_status} disabled>
+                  {String(form.contract_status).replace(/_/g, ' ')} (reference: {form.contract_status})
+                </option> : null}
           </select>
         </div>
         <div className="ws-field">
@@ -1173,7 +1231,7 @@ function ContractForm({ deal, act, busy }) {
                     contract_status: form.contract_status,
                     inspection_deadline: form.inspection_deadline || null,
                     close_of_escrow_target: form.close_of_escrow_target || null,
-                  }), 'Contract updated.')}>
+                  }), 'Contract updated.', 'documents:contract')}>
           Save contract
         </button>
       </div>
@@ -1195,8 +1253,10 @@ function ContractForm({ deal, act, busy }) {
  * they close, and what they have done here before. Nothing is ranked or
  * recommended beyond the score the matcher already computed.
  */
-function MatchRow({ m, chosen, onToggle }) {
+function MatchRow({ m, chosen, onToggle, isCurrent }) {
   const a = m.activity
+  const funds = fundsTruth(m)
+  const evidence = matchEvidence(m)
   const excluded = m.disqualified || m.do_not_contact
   return (
     <>
@@ -1219,7 +1279,12 @@ function MatchRow({ m, chosen, onToggle }) {
             <div className="ws-comp__sub ws-blocked">{m.disqualified_reason}</div>
           ) : null}
         </td>
-        <td className="ws-num"><Score value={m.score} /></td>
+        <td className="ws-num">
+          {typeof m.score === 'number' && evidence.enough
+            ? <Score value={m.score} />
+            : <span className="ws-muted">Insufficient evidence</span>}
+          <div className="ws-comp__sub">{evidence.text}</div>
+        </td>
         <td>
           {m.geography || <span className="ws-muted">anywhere — no geography set</span>}
           {m.max_price !== null && m.max_price !== undefined ? (
@@ -1227,9 +1292,10 @@ function MatchRow({ m, chosen, onToggle }) {
           ) : null}
         </td>
         <td>
-          {m.proof_of_funds_on_file
-            ? <span className="ws-pill is-ok">Funds on file</span>
-            : <span className="ws-pill is-muted">No funds on file</span>}
+          <span className={`ws-pill ${funds.key === 'on_file' ? 'is-ok' : 'is-muted'}`}>
+            {funds.label}
+          </span>
+          {isCurrent ? <div className="ws-comp__sub">Currently selected buyer</div> : null}
         </td>
         <td className="ws-num">
           {m.typical_close_days ? `${m.typical_close_days} days` : '—'}
@@ -1271,28 +1337,50 @@ function MatchRow({ m, chosen, onToggle }) {
 }
 
 
-function BuyersTab({ room, act, busy }) {
-  const { deal, buyer_matches: matches, analysis } = room
+function BuyersTab({ room, act, busy, isBusy }) {
+  const { deal, analysis } = room
+  const matches = sortMatches(room.buyer_matches || [])
+  const current = currentBuyer(deal, matches)
   const [chosen, setChosen] = useState({})
   const [askingPrice, setAskingPrice] = useState(analysis.buyer_price
                                                  ?? analysis.contract_price ?? '')
   const [preview, setPreview] = useState(null)
   const [outcome, setOutcome] = useState(null)
   const [channel, setChannel] = useState('email')
+  const [sendErrs, setSendErrs] = useState({})
   const selected = Object.keys(chosen).filter((k) => chosen[k])
+  const channels = room.disposition_channels || [{ channel: 'email' }]
+  const inputKey = sendInputKey({ selected, askingPrice, channel })
+  // A preview or send result describes the inputs that produced it. Once the
+  // buyers, price or channel change it is history, not the current state.
+  const previewCurrent = preview && isCurrentResult(preview.key, inputKey)
+  const outcomeCurrent = outcome && isCurrentResult(outcome.key, inputKey)
+  const outcomeSummary = outcome ? summarizeOutcome(outcome.data) : null
+
+  // Validate first; on a problem say which field, focus it, send nothing.
+  function checked() {
+    const v = validateSend({ selected, askingPrice, channel, channels })
+    setSendErrs(v.errors)
+    if (!v.ok) {
+      setTimeout(() => document.getElementById(v.firstInvalid)?.focus(), 0)
+      return null
+    }
+    return v.body
+  }
 
   return (
     <>
       <div className="panel ws-panel">
         <div className="panel-title ws-panel-title">
           <span>Matched buyers ({matches.length})</span>
-          <button className="btn btn--secondary btn--sm" disabled={busy}
+          <button className="btn btn--secondary btn--sm" disabled={isBusy('buyers:match')}
                   onClick={() => act(
                     () => api.post(`/wholesale/deals/${deal.id}/match-buyers`),
-                    'Buyers rescored.')}>
+                    'Buyers rescored.', 'buyers:match')}>
             Run matching
           </button>
         </div>
+        <p className="ws-comp__sub" role="status">{current.text}</p>
         <Note>
           Tick the buyers to send to. Nothing goes out until you press Send.
         </Note>
@@ -1312,6 +1400,7 @@ function BuyersTab({ room, act, busy }) {
             <tbody>
               {matches.map((m) => (
                 <MatchRow key={m.id} m={m} chosen={!!chosen[m.buyer_id]}
+                          isCurrent={current.state === 'selected' && String(current.id) === String(m.buyer_id)}
                           onToggle={(v) => setChosen(
                             (c) => ({ ...c, [m.buyer_id]: v }))} />
               ))}
@@ -1338,54 +1427,68 @@ function BuyersTab({ room, act, busy }) {
         <div className="ws-grid">
           <div className="ws-field">
             <label htmlFor="dp-asking">Asking price for buyers</label>
-            <input id="dp-asking" value={askingPrice}
+            <input id="dp-asking" value={askingPrice} inputMode="decimal"
+                   aria-invalid={sendErrs['dp-asking'] ? true : undefined}
+                   aria-describedby={sendErrs['dp-asking'] ? 'dp-asking-err' : undefined}
                    onChange={(e) => setAskingPrice(e.target.value)} />
+            {sendErrs['dp-asking'] ? <span className="ws-field__err" id="dp-asking-err" role="alert">{sendErrs['dp-asking']}</span> : null}
           </div>
           <div className="ws-field">
             <label htmlFor="dp-channel">Channel</label>
             <select id="dp-channel" value={channel}
                     onChange={(e) => setChannel(e.target.value)}>
-              {(room.disposition_channels || [{ channel: 'email' }]).map((c) => (
+              {channels.map((c) => (
                 <option key={c.channel} value={c.channel}>
                   {c.channel}{c.enabled === false ? ' (not enabled)' : ''}
                 </option>
               ))}
             </select>
+            {sendErrs['dp-channel'] ? <span className="ws-field__err" role="alert">{sendErrs['dp-channel']}</span> : null}
           </div>
         </div>
-        <div className="ws-actions" style={{ marginTop: 12 }}>
-          <button className="btn btn--secondary" disabled={busy || !selected.length}
-                  onClick={() => act(async () => {
-                    setPreview(await api.post(
-                      `/wholesale/deals/${deal.id}/disposition/preview`, {
-                        buyer_ids: selected,
-                        asking_price: askingPrice === '' ? null : Number(askingPrice),
-                      }))
-                  })}>
-            Preview the deal sheet
+        <div id="dp-buyers" tabIndex={-1} className="ws-actions" style={{ marginTop: 12 }}>
+          <button className="btn btn--secondary" disabled={isBusy('buyers:preview')}
+                  onClick={() => {
+                    const body = checked()
+                    if (!body) return
+                    const key = inputKey
+                    act(async () => {
+                      const data = await api.post(
+                        `/wholesale/deals/${deal.id}/disposition/preview`,
+                        { buyer_ids: body.buyer_ids, asking_price: body.asking_price })
+                      setPreview({ key, ...data })
+                    }, null, 'buyers:preview')
+                  }}>
+            {isBusy('buyers:preview') ? 'Building preview…' : 'Preview the deal sheet'}
           </button>
-          <button className="btn btn--primary" disabled={busy || !selected.length}
-                  onClick={() => act(async () => {
-                    const result = await api.post(
-                      `/wholesale/deals/${deal.id}/disposition`, {
-                        buyer_ids: selected,
-                        asking_price: askingPrice === '' ? null : Number(askingPrice),
-                        channel,
-                      })
-                    setChosen({})
-                    setOutcome(result)
-                  }, null)}>
-            Send to {selected.length || 0} buyer(s)
+          <button className="btn btn--primary" disabled={isBusy('buyers:send')}
+                  onClick={() => {
+                    const body = checked()
+                    if (!body) return
+                    const key = inputKey
+                    // A failed send keeps the ticks, price and channel so it
+                    // can be retried as-is; only a returned result clears them.
+                    act(async () => {
+                      const data = await api.post(
+                        `/wholesale/deals/${deal.id}/disposition`, body)
+                      setChosen({})
+                      setOutcome({ key, data })
+                    }, null, 'buyers:send')
+                  }}>
+            {isBusy('buyers:send') ? 'Sending…' : `Send to ${selected.length || 0} buyer(s)`}
           </button>
         </div>
+        {sendErrs['dp-buyers'] ? <div className="ws-field__err" role="alert">{sendErrs['dp-buyers']}</div> : null}
 
         {/* WHAT ACTUALLY HAPPENED, PER BUYER. Not a toast saying "done" —
             a send that was refused and a send that succeeded look identical in
             a toast, and the difference is the whole point. */}
         {outcome ? (
           <div style={{ marginTop: 14 }}>
-            <div className={outcome.sent ? 'ws-good' : 'ws-warn'}>
-              {outcome.sent} sent, {outcome.failed} not sent.
+            <div className={outcomeSummary.tone === 'good' ? 'ws-good' : 'ws-warn'} role="status">
+              {outcomeSummary.text}
+              {!outcomeCurrent ? ' This is the result of an earlier send — the buyers, price or channel have changed since.' : ''}
+              {' '}A send only means the message left this system; it is not a buyer response.
             </div>
             <div className="ws-scroll">
             <table className="ws-table">
@@ -1393,12 +1496,12 @@ function BuyersTab({ room, act, busy }) {
                 <tr><th>Buyer</th><th>Result</th><th>Detail</th></tr>
               </thead>
               <tbody>
-                {outcome.results.map((r) => (
+                {(outcome.data.results || []).map((r) => (
                   <tr key={r.buyer_id}>
                     <td>{r.buyer_name}</td>
                     <td>
                       <span className={`ws-pill ${r.sent ? 'is-ok' : 'is-dnc'}`}>
-                        {r.sent ? 'sent' : r.code}
+                        {r.sent ? 'Sent' : refusalLabel(r.code)}
                       </span>
                     </td>
                     <td className="ws-muted">
@@ -1417,6 +1520,7 @@ function BuyersTab({ room, act, busy }) {
 
         {preview ? (
           <div style={{ marginTop: 14 }}>
+            {!previewCurrent ? <div className="ws-warn">This preview is out of date — preview again.</div> : null}
             <div className="ws-notice">{preview.note}</div>
             <div className="mono ws-mono">{preview.subject}{'\n\n'}{preview.body}</div>
           </div>
@@ -1432,14 +1536,14 @@ function BuyersTab({ room, act, busy }) {
 }
 
 
-function ClosingTab({ room, act, busy }) {
+function ClosingTab({ room, act, busy, isBusy }) {
   // The ledger, the contract dates, title, the closing and the two ways a deal
   // ends. Lifted out whole: this tab was four disconnected forms and no
   // arithmetic, and the one subtraction a wholesaler's business turns on was
   // left for the reader to do in their head.
   return (
     <ClosingWorkspace deal={room.deal} matches={room.buyer_matches || []}
-                      act={act} busy={busy} />
+                      act={act} busy={busy} isBusy={isBusy} />
   )
 }
 

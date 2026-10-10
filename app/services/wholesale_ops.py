@@ -289,7 +289,7 @@ def callback_center(db, org_id: str, *, user=None, mine: bool = False, include_t
             continue
         buckets[item["bucket"]].append(item)
     for b in ("due_now", "upcoming", "overdue"):
-        buckets[b].sort(key=lambda i: i["due_at"] or "")
+        buckets[b].sort(key=lambda i: (i["due_at"] is None, i["due_at"] or "", i["created_at"] or "", str(i["id"])))
     completed_total = q.filter(WholesaleSellerCallback.status == "completed").count()
     return {"now": _iso(now), "buckets": buckets,
             "counts": {b: (completed_total if b == "completed" else len(buckets[b])) for b in BUCKETS},

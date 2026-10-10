@@ -17,10 +17,13 @@
  *                       refusing the platform reads BLOCKED everywhere.
  * No credential is stored, sent or shown here.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../api/client'
 import { isWholesaleAdmin } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
+import { useRecord } from '../wsRecordHook'
+import RecoveryNote from '../wsRecoveryNote'
+import { evidenceBlockedReason } from '../wsListState'
 import {
   Alert, EvoApp, Hero, Metric, Metrics, PageSkeleton, Panel, SandboxTag, TabBar, Tag, Tile, ago, cents, humanize,
 } from '../ds/ds'
@@ -68,8 +71,11 @@ const CAP_TONE = { OPERATIONAL: 'good', UNVERIFIED: 'attention', DEGRADED: 'dang
 /** The provider capability registry: per product capability, per provider,
  *  platform state and tenant state kept apart. "Configured" is never shown as
  *  connected - UNVERIFIED until a real call for THAT capability succeeds. */
-function CapabilityRegistry({ data }) {
-  if (!data) return <p className="evo-muted">Loading the capability registry…</p>
+function CapabilityRegistry({ data, view }) {
+  if (!data || !Array.isArray(data.capabilities)) {
+    return <p className="evo-muted" role="status">{view === 'error'
+      ? 'The capability registry is unavailable, so no capability is shown as ready or available.' : 'Loading the capability registry…'}</p>
+  }
   const yn = (v) => (v === null || v === undefined ? 'unknown' : v ? 'yes' : 'no')
   return (
     <Panel title="Capability registry" flush
@@ -128,13 +134,18 @@ export default function EvoControls() {
   const isAdmin = isWholesaleAdmin()
   const [ctl, setCtl] = useState(null)
   const [prov, setProv] = useState(null)
-  const [reg, setReg] = useState(null)
+  const ccR = useRecord(() => api.get('/wholesale/evosense/command-center'))
+  const regR = useRecord(() => api.get('/wholesale/evosense/sources'))
+  const capR = useRecord(() => api.get('/wholesale/evosense/capabilities'))
+  const reg = regR.rec.data && Array.isArray(regR.rec.data.sources) ? regR.rec.data : null
+  const capReg = capR.rec.data
   const [weights, setWeights] = useState({})
-  const [spent, setSpent] = useState(null)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [capReg, setCapReg] = useState(null)
+  const loadGen = useRef(0)
+  const filled = useRef(false)
+  const acting = useRef(false)
   const [budget, setBudget] = useState({ day: '', month: '', cap: '' })
   // Deep links from the Command Center land on the right tab: #sources,
   // #providers, #capabilities, #controls, #budget (= Usage & Costs).
@@ -145,43 +156,45 @@ export default function EvoControls() {
   })
 
   const load = useCallback(async () => {
+    const gen = ++loadGen.current
     try {
-      const [c, p, cc, r, caps] = await Promise.all([api.get('/wholesale/evosense/controls'), api.get('/wholesale/evosense/providers'),
-        api.get('/wholesale/evosense/command-center').catch(() => null),
-        api.get('/wholesale/evosense/sources').catch(() => null),
-        api.get('/wholesale/evosense/capabilities').catch(() => null)])
-      setCtl(c); setProv(p); setSpent(cc ? cc.spent : null); setReg(r); setCapReg(caps)
-      setWeights(Object.fromEntries(Object.entries({ ...(c.default_weights || {}), ...(c.score_weights || {}) })
-        .map(([k, v]) => [k, String(v)])))
-      setBudget({ day: c.org_daily_budget_cents == null ? '' : String(c.org_daily_budget_cents / 100),
-                  month: c.org_monthly_budget_cents == null ? '' : String(c.org_monthly_budget_cents / 100),
-                  cap: String(c.owner_touch_cap_days) })
+      const [c, p] = await Promise.all([api.get('/wholesale/evosense/controls'), api.get('/wholesale/evosense/providers')])
+      if (gen !== loadGen.current) return   // a newer load owns the screen
+      setCtl(c); setProv(p)
+      // Typed weights/budget are only seeded once: a retry never overwrites what the operator is editing.
+      if (!filled.current) {
+        filled.current = true
+        setWeights(Object.fromEntries(Object.entries({ ...(c.default_weights || {}), ...(c.score_weights || {}) })
+          .map(([k, v]) => [k, String(v)])))
+        setBudget({ day: c.org_daily_budget_cents == null ? '' : String(c.org_daily_budget_cents / 100),
+                    month: c.org_monthly_budget_cents == null ? '' : String(c.org_monthly_budget_cents / 100),
+                    cap: String(c.owner_touch_cap_days) })
+      }
       setError(null)
-    } catch (e) { setError(errText(e)) }
+    } catch (e) { if (gen === loadGen.current) setError(errText(e)) }
   }, [])
   useEffect(() => { load() }, [load])
 
-  async function patch(body, msg) {
+  // One mutation at a time, claimed synchronously so a double click cannot send twice.
+  async function guarded(fn) {
+    if (acting.current) return
+    acting.current = true
     setBusy(true); setError(null); setNotice(null)
-    try { setCtl(await api.patch('/wholesale/evosense/controls', body)); if (msg) setNotice(msg) }
-    catch (e) { setError(errText(e)) } finally { setBusy(false) }
+    try { await fn() } catch (e) { setError(errText(e)) } finally { acting.current = false; setBusy(false) }
   }
-  async function provider(key, body) {
-    setBusy(true); setError(null)
-    try {
-      setProv(await api.patch('/wholesale/evosense/providers', { key, ...body }))
-      setReg(await api.get('/wholesale/evosense/sources'))
-    } catch (e) { setError(errText(e)) } finally { setBusy(false) }
-  }
-  async function verify(key) {
-    setBusy(true); setError(null); setNotice(null)
-    try {
-      const r = await api.post('/wholesale/evosense/sources/verify', { key })
-      setReg(r.registry)
-      if (r.ok) setNotice(`${key}: verified against the live source.`)
-      else setError(`${key}: ${r.code || 'failed'} — ${r.error || ''}`)
-    } catch (e) { setError(errText(e)) } finally { setBusy(false) }
-  }
+  const patch = (body, msg) => guarded(async () => {
+    setCtl(await api.patch('/wholesale/evosense/controls', body)); if (msg) setNotice(msg)
+  })
+  const provider = (key, body) => guarded(async () => {
+    setProv(await api.patch('/wholesale/evosense/providers', { key, ...body }))
+    regR.reload()   // the change is saved; a failed registry refresh is reported by its own note, not as a failed save
+  })
+  const verify = (key) => guarded(async () => {
+    const r = await api.post('/wholesale/evosense/sources/verify', { key })
+    regR.reload()
+    if (r.ok) setNotice(`${key}: verified against the live source.`)
+    else setError(`${key}: ${r.code || 'failed'} — ${r.error || ''}`)
+  })
   function saveWeights() {
     const defaults = ctl.default_weights || {}
     const changed = {}
@@ -194,6 +207,9 @@ export default function EvoControls() {
 
   if (!ctl || !prov) return <EvoApp world="acquisition">{error ? <Alert>{error}</Alert> : <PageSkeleton />}</EvoApp>
 
+  const spent = ccR.rec.data && ccR.rec.data.spent ? ccR.rec.data.spent : null
+  // Source toggles/verify act on registry state; with none (or stale) they are paused, with the reason shown.
+  const regBlock = evidenceBlockedReason('The source registry', regR.view)
   const pausedCount = SWITCHES.filter(([k]) => ctl[k]).length
   const failing = prov.providers.filter((p) => ['FAILED', 'BLOCKED', 'DEGRADED', 'RATE LIMITED'].includes(p.state))
   const sandboxOn = prov.providers.some((p) => p.connector_kind === 'sandbox' && p.enabled)
@@ -218,12 +234,12 @@ export default function EvoControls() {
 
       <TabBar label="Providers and controls" value={tab} onChange={setTab}
               items={[
-                { key: 'sources', label: 'Source Registry', count: reg ? reg.sources.filter((x) => x.operational).length + ' operational' : null },
+                { key: 'sources', label: 'Source Registry', count: reg ? reg.sources.filter((x) => x.operational).length + ' operational' : (regR.view === 'error' ? 'unavailable' : null) },
                 { key: 'providers', label: 'Service Providers', count: prov.providers.length },
                 { key: 'evaluation', label: 'Provider Evaluation' },
                 { key: 'skipcost', label: 'Skip-trace Costs' },
                 { key: 'lists', label: 'Distress Lists' },
-                { key: 'capabilities', label: 'Capability Registry', count: capReg ? capReg.capabilities.filter((x) => x.state === 'OPERATIONAL').length + ' operational' : null },
+                { key: 'capabilities', label: 'Capability Registry', count: capReg && Array.isArray(capReg.capabilities) ? capReg.capabilities.filter((x) => x.state === 'OPERATIONAL').length + ' operational' : (capR.view === 'error' ? 'unavailable' : null) },
                 { key: 'controls', label: 'Controls & Compliance', count: pausedCount ? `${pausedCount} paused` : null },
                 { key: 'usage', label: 'Usage & Costs' },
               ]} />
@@ -231,7 +247,13 @@ export default function EvoControls() {
       <div className="evo-stack" role="tabpanel" id="panel-sources" aria-labelledby="tab-sources" hidden={tab !== 'sources'}>
         <Panel title="Source Registry" flush
                hint="HEALTHY only after a real probe or run succeeded — and it means retrieval worked, not that every derived field is true · paid vendors are not purchased">
-          {!reg ? <p className="evo-muted" style={{ padding: '0 20px' }}>Loading sources…</p> : (
+          <div style={{ padding: '0 20px' }}>
+            <RecoveryNote what="The source registry" rec={regR.rec} view={regR.view} onRetry={regR.reload}
+                          effect={regBlock ? 'Enable, disable and verify are paused until it loads.' : ''} />
+          </div>
+          {regBlock ? <p id="evo-reg-block" className="evo-muted evo-small" role="status" style={{ padding: '0 20px' }}>{regBlock}</p> : null}
+          {!reg ? <p className="evo-muted" style={{ padding: '0 20px' }} role="status">{regR.view === 'error'
+            ? 'No source state is shown, so none is treated as healthy or available.' : 'Loading sources…'}</p> : (
             <div className="evo-table-wrap">
               <table className="evo-table evo-table--cards">
                 <thead><tr><th scope="col">Source</th><th scope="col">Jurisdiction</th><th scope="col">Access</th>
@@ -261,11 +283,11 @@ export default function EvoControls() {
                       <td data-label="" className="is-right">
                         {x.connector_kind === 'real' ? (
                           <span className="evo-chips">
-                            <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin}
+                            <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin || !!regBlock} aria-describedby={regBlock ? 'evo-reg-block' : undefined}
                                     onClick={() => provider(x.key, { enabled: !x.enabled })}>{x.enabled ? 'Disable' : 'Enable'}</button>
-                            {x.enabled && x.state !== 'BLOCKED' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin}
+                            {x.enabled && x.state !== 'BLOCKED' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin || !!regBlock}
                                                  onClick={() => verify(x.key)}>Verify</button> : null}
-                            {x.enabled && x.state === 'BLOCKED' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin}
+                            {x.enabled && x.state === 'BLOCKED' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy || !isAdmin || !!regBlock}
                                                  title="Blocked platform-wide. Only a platform admin's re-test (one request) is sent; anyone else is refused without calling the source."
                                                  onClick={() => verify(x.key)}>Platform re-test</button> : null}
                           </span>
@@ -369,7 +391,8 @@ export default function EvoControls() {
       </div>
 
       <div className="evo-stack" role="tabpanel" id="panel-capabilities" aria-labelledby="tab-capabilities" hidden={tab !== 'capabilities'}>
-        <CapabilityRegistry data={capReg} />
+        <RecoveryNote what="The capability registry" rec={capR.rec} view={capR.view} onRetry={capR.reload} />
+        <CapabilityRegistry data={capReg} view={capR.view} />
       </div>
 
       <div className="evo-stack" role="tabpanel" id="panel-controls" aria-labelledby="tab-controls" hidden={tab !== 'controls'}>
@@ -444,6 +467,8 @@ export default function EvoControls() {
       </div>
 
       <div className="evo-stack" role="tabpanel" id="panel-usage" aria-labelledby="tab-usage" hidden={tab !== 'usage'}>
+        <RecoveryNote what="Spend figures" rec={ccR.rec} view={ccR.view} onRetry={ccR.reload} />
+        {ccR.view === 'error' ? <p className="evo-muted evo-small" role="status">Spend is unavailable — the dashes below mean unknown, not $0.</p> : null}
         <Metrics label="Usage summary">
           <Metric label="Spent today" value={spent ? cents(spent.today_cents) : null} tone="primary" />
           <Metric label="Spent this month" value={spent ? cents(spent.month_cents) : null} tone="primary" />

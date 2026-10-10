@@ -1453,22 +1453,48 @@ class TestGate21MigrationCleanup:
             "import_staged_rows not created by create_all"
         )
 
-    def test_migrate_add_import_tables_script_is_absent_or_noted_redundant(self):
-        """The standalone migration script should be gone (covered by create_all)."""
+    def test_dead_migration_artifact_is_not_an_active_migration(self):
+        """app/migrate_add_import_tables.py is a truncated, superseded artifact
+        (the real path is Base.metadata.create_all via app/models/registry.py).
+        It lives directly under app/ (NOT app/migrations or app/patches), so
+        guard that path: it must stay unparseable-or-absent and unreferenced
+        by any code, alembic, or deploy config, so it cannot become active."""
+        import ast
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        script = os.path.join(repo_root, "app", "migrations",
-                              "migrate_add_import_tables.py")
-        patches_script = os.path.join(repo_root, "app", "patches",
-                                      "migrate_add_import_tables.py")
-        # Either the file is gone, or it exists with a comment marking it redundant.
-        for path in (script, patches_script):
+        script = os.path.join(repo_root, "app", "migrate_add_import_tables.py")
+        if os.path.exists(script):
+            with open(script, encoding="utf-8") as fh:
+                src = fh.read()
+            try:
+                ast.parse(src)
+                parses = True
+            except SyntaxError:
+                parses = False
+            assert not parses, (
+                "migrate_add_import_tables.py now parses; it was a truncated dead "
+                "artifact. Do not activate it: the supported path is create_all()."
+            )
+        needle = "migrate_add_import_tables"
+        for rel in ("app/main.py", "app/models/registry.py", "render.yaml",
+                    "alembic.ini", "requirements.txt"):
+            path = os.path.join(repo_root, rel)
             if os.path.exists(path):
-                content = open(path).read()
-                assert any(word in content.lower() for word in
-                           ("redundant", "deprecated", "superseded", "create_all", "no longer")), (
-                    f"{path} still exists and is not marked redundant. "
-                    "Remove it or add a comment explaining it is superseded by create_all()."
-                )
+                with open(path, encoding="utf-8", errors="ignore") as fh:
+                    assert needle not in fh.read(), f"{rel} references the dead migration"
+        for dp, _, fs in os.walk(os.path.join(repo_root, "alembic")):
+            for f in fs:
+                if f.endswith(".py"):
+                    with open(os.path.join(dp, f), encoding="utf-8", errors="ignore") as fh:
+                        assert needle not in fh.read()
+
+    def test_import_models_registered_for_create_all(self):
+        """Static: the registry imports the import-intelligence models."""
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(repo_root, "app", "models", "registry.py"), encoding="utf-8") as fh:
+            reg = fh.read()
+        assert "import app.models.import_models" in reg
+        with open(os.path.join(repo_root, "app", "main.py"), encoding="utf-8") as fh:
+            assert "Base.metadata.create_all(bind=engine)" in fh.read()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

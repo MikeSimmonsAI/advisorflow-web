@@ -119,6 +119,9 @@ def channel_status() -> List[Dict[str, Any]]:
     ]
 
 
+RESEND_COOLDOWN_SECONDS = 60
+
+
 class SendRefused(Exception):
     """A refusal, not a fault. Carries the reason a person needs to read."""
 
@@ -160,11 +163,32 @@ def preflight(db, org_id: str, deal: WholesaleDeal, buyer: WholesaleBuyer,
     if not getattr(buyer, "is_active", True):
         raise SendRefused("This buyer is marked inactive.", "inactive")
 
+    #    The organization's suppression list is keyed by phone, not by record
+    #    type: a number that replied STOP to this organization must not be
+    #    texted from the same Twilio identity because it is now filed as a
+    #    buyer. `_send_sms` calls Twilio directly, so this is its only check.
+    if channel == "sms" and getattr(buyer, "phone", None):
+        from app.services.compliance_service import is_phone_suppressed
+        if is_phone_suppressed(db, org_id, buyer.phone):
+            raise SendRefused(
+                "This phone number is on the opt-out list, so nothing was sent.",
+                "suppressed")
+
     # 3. SOMEWHERE TO SEND IT.
     if channel == "email" and not getattr(buyer, "email", None):
         raise SendRefused("No email address on file for this buyer.", "no_address")
     if channel == "sms" and not getattr(buyer, "phone", None):
         raise SendRefused("No phone number on file for this buyer.", "no_address")
+
+    # 4a. DOUBLE-CLICK ON RESEND. Resend is the deliberate way past the guard
+    #     below, so a second click seconds after a successful send must not
+    #     deliver another copy.
+    if row is not None and force_resend and getattr(row, "sent_at", None) \
+            and getattr(row, "status", None) == "sent" \
+            and (datetime.utcnow() - row.sent_at).total_seconds() < RESEND_COOLDOWN_SECONDS:
+        raise SendRefused(
+            "This deal was sent to this buyer moments ago. Wait a minute before "
+            "resending so they do not get two copies.", "recently_sent")
 
     # 4. ALREADY SENT. The retry guard, and the reason a double-click is safe.
     if row is not None and not force_resend:
@@ -216,7 +240,8 @@ def send_to_buyer(db, org_id: str, deal: WholesaleDeal, buyer: WholesaleBuyer,
     try:
         preflight(db, org_id, deal, buyer, row, channel, force_resend=force_resend)
     except SendRefused as exc:
-        row.status = "failed" if exc.code not in ("already_sent",) else row.status
+        row.status = ("failed" if exc.code not in ("already_sent", "recently_sent")
+                      else row.status)
         row.blocked_reason = exc.reason
         return {"sent": False, "status": row.status, "reason": exc.reason,
                 "code": exc.code, "provider_message_id": None}

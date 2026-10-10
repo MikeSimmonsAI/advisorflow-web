@@ -16,13 +16,15 @@
  * not send anything, because sending is what the gated disposition path is
  * for, and a second outbound surface here would be a second place to audit.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
+import { copyOutcome } from './wsListState'
 import { Empty, ErrorBox, errText, fmtMoney, fmtWhen, Note, Why } from './wsShared'
 
 const ORIGIN = typeof window !== 'undefined' ? window.location.origin : ''
 
-export function SharingWorkspace({ deal, buyers, act, busy }) {
+export function SharingWorkspace({ deal, buyers, act, busy, isBusy = () => false }) {
+  const loadGen = useRef(0)
   const [state, setState] = useState(null)
   const [activity, setActivity] = useState([])
   const [error, setError] = useState(null)
@@ -32,21 +34,26 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
     expires_in_days: 30,
   })
   const [copied, setCopied] = useState(null)
+  const [copyFail, setCopyFail] = useState(null)   // { id, url } — kept visible for manual selection
+  const copyTimer = useRef(null)
 
   const load = useCallback(async () => {
     setError(null)
+    const gen = ++loadGen.current
     try {
       const [pub, act2] = await Promise.all([
         api.get(`/wholesale/deals/${deal.id}/publication`),
         api.get(`/wholesale/deals/${deal.id}/share-activity`),
       ])
+      if (gen !== loadGen.current) return   // a newer load owns the screen
       setState(pub)
       setActivity(act2.activity || [])
       setForm({})
-    } catch (e) { setError(errText(e)) }
+    } catch (e) { if (gen === loadGen.current) setError(errText(e)) }
   }, [deal.id])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   if (error && !state) return <ErrorBox error={error} />
   if (!state) return <Empty page>Loading…</Empty>
@@ -60,7 +67,7 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
   async function save() {
     const okSaved = await act(
       () => api.patch(`/wholesale/deals/${deal.id}/publication`, form),
-      'Saved. Nothing is shared until you publish.')
+      'Saved. Nothing is shared until you publish.', 'sharing:save')
     if (okSaved) await load()
   }
 
@@ -68,7 +75,8 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
     const okSet = await act(
       () => api.post(`/wholesale/deals/${deal.id}/publication/state`,
                      { audience, published }),
-      published ? 'Room published.' : 'Room closed. Existing links stop working.')
+      published ? 'Room published.' : 'Room closed. Existing links stop working.',
+      `sharing:publish-${audience}`)
     if (okSet) await load()
   }
 
@@ -79,7 +87,7 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
         buyer_id: newLink.audience === 'buyer' ? newLink.buyer_id || null : null,
         expires_in_days: newLink.expires_in_days === ''
           ? null : Number(newLink.expires_in_days),
-      }), 'Link created.')
+      }), 'Link created.', 'sharing:create-link')
     if (okMade) {
       setNewLink((n) => ({ ...n, recipient_name: '', recipient_email: '' }))
       await load()
@@ -89,20 +97,36 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
   async function revoke(link) {
     const okRev = await act(
       () => api.post(`/wholesale/share-links/${link.id}/revoke`, {}),
-      'Link revoked.')
+      'Link revoked.', `sharing:revoke-${link.id}`)
     if (okRev) await load()
   }
 
-  function copy(link) {
+  async function copy(link) {
     const url = ORIGIN + link.url_path
-    if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {})
-    setCopied(link.id)
-    setTimeout(() => setCopied(null), 2000)
+    const r = await copyOutcome(navigator.clipboard && navigator.clipboard.writeText
+      ? (t) => navigator.clipboard.writeText(t) : null, url)
+    clearTimeout(copyTimer.current)
+    if (r.ok) {
+      setCopyFail(null)
+      setCopied(link.id)
+      copyTimer.current = setTimeout(() => setCopied(null), 2000)
+    } else {
+      setCopied(null)
+      setCopyFail({ id: link.id, url, reason: r.reason })
+    }
   }
 
   return (
     <>
       <ErrorBox error={error} />
+      {copyFail ? (
+        <div className="ws-error" role="alert">
+          Copy failed: {copyFail.reason} The link has not been copied. Select it below and copy it yourself.
+          <input readOnly aria-label="Link to copy manually" value={copyFail.url} style={{ width: '100%', marginTop: 6 }}
+                 onFocus={(e) => e.target.select()} />
+          <button type="button" className="btn btn--secondary btn--sm" onClick={() => setCopyFail(null)}>Dismiss</button>
+        </div>
+      ) : null}
 
       <div className="ws-two-col">
         {/* ── The investor room ────────────────────────────────────────── */}
@@ -184,15 +208,15 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
           </div>
 
           <div className="ws-actions" style={{ marginTop: 14 }}>
-            <button className="btn btn--primary" disabled={busy || !dirty}
+            <button className="btn btn--primary" disabled={isBusy('sharing:save') || !dirty}
                     onClick={save}>Save</button>
             {b.published ? (
-              <button className="btn btn--secondary" disabled={busy}
+              <button className="btn btn--secondary" disabled={isBusy('sharing:publish-buyer')}
                       onClick={() => setPublished('buyer', false)}>
                 Close the room
               </button>
             ) : (
-              <button className="btn btn--secondary" disabled={busy}
+              <button className="btn btn--secondary" disabled={isBusy('sharing:publish-buyer')}
                       onClick={() => setPublished('buyer', true)}>
                 Publish the investor room
               </button>
@@ -249,15 +273,15 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
           </div>
 
           <div className="ws-actions" style={{ marginTop: 14 }}>
-            <button className="btn btn--primary" disabled={busy || !dirty}
+            <button className="btn btn--primary" disabled={isBusy('sharing:save') || !dirty}
                     onClick={save}>Save</button>
             {s.published ? (
-              <button className="btn btn--secondary" disabled={busy}
+              <button className="btn btn--secondary" disabled={isBusy('sharing:publish-seller')}
                       onClick={() => setPublished('seller', false)}>
                 Close the page
               </button>
             ) : (
-              <button className="btn btn--secondary" disabled={busy}
+              <button className="btn btn--secondary" disabled={isBusy('sharing:publish-seller')}
                       onClick={() => setPublished('seller', true)}>
                 Publish the seller page
               </button>
@@ -313,7 +337,7 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
         </div>
         <div className="ws-actions" style={{ marginTop: 12 }}>
           <button className="btn btn--primary" disabled={
-            busy || (newLink.audience === 'buyer' && !newLink.buyer_id)}
+            isBusy('sharing:create-link') || (newLink.audience === 'buyer' && !newLink.buyer_id)}
                   onClick={createLink}>Create a link</button>
         </div>
 
@@ -359,10 +383,11 @@ export function SharingWorkspace({ deal, buyers, act, busy }) {
                         <button className="btn btn--secondary btn--sm"
                                 onClick={() => copy(link)}>
                           {copied === link.id ? 'Copied' : 'Copy'}
+                          <span className="ws-vis-hidden" role="status">{copied === link.id ? ' to the clipboard' : ''}</span>
                         </button>
                         {link.active ? (
                           <button className="btn btn--secondary btn--sm ws-btn-delete"
-                                  disabled={busy}
+                                  disabled={isBusy(`sharing:revoke-${link.id}`)}
                                   onClick={() => revoke(link)}>Revoke</button>
                         ) : null}
                       </span>
