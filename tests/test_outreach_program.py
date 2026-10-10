@@ -1444,6 +1444,9 @@ def test_staging_harness_is_invisible_unless_switched_on(client, db_session, mon
 def test_staging_harness_seeds_and_refuses_a_second_send(client, db_session, monkeypatch):
     from app.models.models import Platform
     monkeypatch.setenv("STAGING_TEST_HARNESS", "on")
+    # The harness exists only on staging, and its test contact is a test
+    # record: production now refuses every send to one (test_records).
+    monkeypatch.setenv("APP_ENV", "staging")
     if not db_session.query(Platform).filter_by(slug="evosyspro").first():
         db_session.add(Platform(id="plt-evosyspro-t", name="EvoSys Pro", slug="evosyspro",
                                 support_email="support@evosyspro.live"))

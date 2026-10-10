@@ -34,6 +34,13 @@ class RecordOutcomeRequest(BaseModel):
     sale_items: str | None = None
     sale_amount: str | None = None
     notes: str | None = None
+    # What happened to the appointment: completed | no_show | cancelled |
+    # follow_up_needed (ATTENDANCE_VALUES). Optional - the checklist alone is
+    # still a valid record.
+    attendance: str | None = None
+
+
+ATTENDANCE_VALUES = ("completed", "no_show", "cancelled", "follow_up_needed")
 
 
 class OutcomeResponse(BaseModel):
@@ -50,6 +57,8 @@ class OutcomeResponse(BaseModel):
     sale_items: str | None
     sale_amount: str | None
     notes: str | None
+    attendance: str | None = None
+    booking_link_id: str | None = None
     created_at: datetime
 
 
@@ -81,6 +90,15 @@ def record_outcome(
 
     if req.has_open_closed_status and req.has_open_closed_status not in ("open", "closed"):
         raise HTTPException(status_code=400, detail="has_open_closed_status must be 'open', 'closed', or omitted.")
+    if req.attendance is not None and req.attendance not in ATTENDANCE_VALUES:
+        raise HTTPException(status_code=400, detail="attendance must be one of: %s." % ", ".join(ATTENDANCE_VALUES))
+    if req.booking_link_id:
+        # The appointment must be THIS contact's - an outcome is never filed
+        # against somebody else's booking.
+        from app.models.models import BookingLink
+        if not db.query(BookingLink).filter(BookingLink.id == req.booking_link_id,
+                                            BookingLink.lead_id == req.lead_id).first():
+            raise HTTPException(status_code=404, detail="Appointment not found for this contact.")
 
     outcome = LeadOutcome(
         lead_id=req.lead_id,
@@ -96,6 +114,7 @@ def record_outcome(
         sale_items=req.sale_items,
         sale_amount=req.sale_amount,
         notes=req.notes,
+        attendance=req.attendance,
     )
     db.add(outcome)
     db.commit()

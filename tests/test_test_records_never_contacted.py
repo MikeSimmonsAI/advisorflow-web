@@ -247,9 +247,26 @@ def test_plan_usage_excludes_test_leads(db_session):
     assert test_records.is_outreach_eligible(extra) is False
 
 
-def test_a_deliberate_manual_send_to_a_test_record_is_still_possible(db_session):
+def test_production_refuses_even_a_manual_send_to_a_test_record(db_session, monkeypatch):
+    """Oct 2026: in production a test record is blocked on every path."""
+    from types import SimpleNamespace
+    from app.services import compliance_service, test_records as tr
+    monkeypatch.delenv("APP_ENV", raising=False)
+    assert tr.manual_send_allowed() is False
+    lead = SimpleNamespace(id="t1", is_test=True, test_note="x", status="new", phone="12145550100",
+                           email="t@x.test", allow_email=None, manual_flag=None, organization_id=None,
+                           sms_consent=None)
+    import pytest as _p
+    with _p.raises(ValueError, match="test"):
+        compliance_service.check_compliance_preflight(db_session, lead, channel="email", allow_test=True)
+    monkeypatch.setenv("APP_ENV", "staging")
+    assert tr.manual_send_allowed() is True
+
+
+def test_a_deliberate_manual_send_to_a_test_record_is_still_possible(db_session, monkeypatch):
     """test_records: 'testers still need to test' - only a one-to-one MANUAL
-    send passes; every automated/bulk source is refused."""
+    send passes, and only on staging/demo; every automated/bulk source is refused."""
+    monkeypatch.setenv("APP_ENV", "staging")
     from types import SimpleNamespace
     from app.services import compliance_service, send_source as ss
     lead = SimpleNamespace(id="t1", is_test=True, test_note="x", status="new", phone="12145550100",

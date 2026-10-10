@@ -15,6 +15,7 @@ import { api, getCurrentUser } from '../api/client'
 import CommsWorkspace from './comms/CommsWorkspace'
 import { CLASSIFICATIONS, STATUSES, ClassTag, StatusTag, Tag, Icon, channelIcon, timeAgo } from './comms/commsShared'
 import './Replies.css'
+import '../styles/sciWorkspace.css'
 
 const TABS = [
   { key: 'all', label: 'All replies' },
@@ -30,6 +31,7 @@ const QUICK = [
   { key: 'question', label: 'Questions' },
   { key: 'interested', label: 'Positive' },
   { key: 'mine', label: 'Assigned to me' },
+  { key: 'unassigned', label: 'Unassigned' },
 ]
 
 const RANGES = [
@@ -95,6 +97,7 @@ export default function Replies() {
     if (status) p.status = status
     if (channel) p.channel = channel
     if (assigned) p.assigned_to = assigned
+    if (quick.includes('unassigned')) p.assigned_to = 'unassigned'
     if (quick.includes('mine')) p.assigned_to = 'me'
     if (range) p.date_from = isoDaysAgo(range)
     if (quick.includes('unreviewed')) p.reviewed = false
@@ -164,7 +167,7 @@ export default function Replies() {
   const to = data ? Math.min(data.page * data.page_size, data.total) : 0
 
   return (
-    <div className={`cc ${selected ? 'cc--has-selection' : ''}`}>
+    <div className={`cc sci-ws ${selected ? 'cc--has-selection' : ''}`}>
       <header className="cc-head">
         <div className="cc-head-text">
           <h1>Communications / Replies</h1>

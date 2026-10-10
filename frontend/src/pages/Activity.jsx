@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, getCurrentUser } from '../api/client'
+import { workspaceRole } from '../auth/workspaceAuthority'
+import '../styles/sciWorkspace.css'
+import VoicemailPlayer from '../components/telephony/VoicemailPlayer'
 
 const FEED_LIMIT = 300
 import '../styles/shared.css'
@@ -141,8 +144,113 @@ function formatTime(isoStr) {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + timeStr
 }
 
+// ── ACTIVITY & CALL HISTORY (Oct 2026) ──────────────────────────────────────
+// GET /activity/feed: texts and emails both ways, calls and voicemails, each
+// once, in the same lead scope as every other screen. Filters run on the
+// loaded window. Source ids appear only for admins, in a closed drawer.
+const FEED_KIND_LABEL = { sms: 'Text', email: 'Email', voice: 'Call' }
+const ACTOR_LABEL = { ai: 'AI', human: 'Person', system: 'Automation', customer: 'Customer' }
+
+function feedWhen(iso) {
+  if (!iso) return ''
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z')
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+}
+
+function ActivityFeed({ navigate }) {
+  const [days, setDays] = useState(30)
+  const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+  const [channel, setChannel] = useState('all')
+  const [direction, setDirection] = useState('all')
+  const [actor, setActor] = useState('all')
+  const [outcome, setOutcome] = useState('all')
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(null)
+  const role = workspaceRole(getCurrentUser())
+  const isAdmin = role === 'org_admin' || role === 'super_admin' || role === 'god_admin'
+
+  function load() {
+    setError('')
+    setData(null)
+    api.get('/activity/feed', { params: { days, limit: 500 } })
+      .then(setData).catch(e => setError(e.message || 'Could not load activity.'))
+  }
+  useEffect(() => { load() }, [days])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const items = (data?.items || []).filter(i => {
+    if (channel !== 'all' && i.channel !== channel) return false
+    if (direction !== 'all' && i.direction !== direction) return false
+    if (actor !== 'all' && i.actor !== actor) return false
+    if (outcome === 'failed' && !/fail|undeliver|bounce/i.test(i.result || '')) return false
+    if (outcome === 'voicemail' && !(i.kind === 'voicemail' || i.voicemail_left)) return false
+    if (q.trim()) {
+      const s = q.trim().toLowerCase()
+      return [i.lead_name, i.lead_phone, i.lead_email, i.summary].filter(Boolean).join(' ').toLowerCase().includes(s)
+    }
+    return true
+  })
+  const sel = (label, value, set, opts) => (
+    <select className="filter-select" aria-label={label} value={value} onChange={e => set(e.target.value)}>
+      {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+    </select>
+  )
+
+  return (
+    <section className="panel act-feed" aria-label="Activity and call history">
+      <div className="act-filters">
+        <input type="search" className="search-input" placeholder="Search contact or message" aria-label="Search activity"
+          value={q} onChange={e => setQ(e.target.value)} />
+        {sel('Channel', channel, setChannel, [['all', 'All channels'], ['sms', 'Texts'], ['email', 'Emails'], ['voice', 'Calls & voicemail']])}
+        {sel('Direction', direction, setDirection, [['all', 'In & out'], ['inbound', 'Inbound'], ['outbound', 'Outbound']])}
+        {sel('Who', actor, setActor, [['all', 'Anyone'], ['customer', 'Customer'], ['human', 'Person on our side'], ['ai', 'AI'], ['system', 'Automation']])}
+        {sel('Outcome', outcome, setOutcome, [['all', 'Any outcome'], ['failed', 'Failed only'], ['voicemail', 'Voicemail']])}
+        {sel('Date range', String(days), v => setDays(Number(v)), [['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']])}
+        <button type="button" className="btn btn--secondary" onClick={load}>Refresh</button>
+      </div>
+      {error && <div className="act-error" role="alert">{error} <button type="button" className="btn btn--secondary" onClick={load}>Retry</button></div>}
+      {!data && !error && <div className="empty-state" role="status">Loading activity…</div>}
+      {data && items.length === 0 && <div className="empty-state">{data.items.length ? 'Nothing matches these filters.' : 'No activity in this window.'}</div>}
+      {items.length > 0 && (
+        <ol className="act-list">
+          {items.map(i => (
+            <li key={i.id} className={`act-row act-row--${i.direction} act-row--${i.channel}`}>
+              <div className="act-row-head">
+                <span className={`sci-chip ${i.direction === 'inbound' ? 'sci-chip--blue' : ''}`}>
+                  {i.direction === 'inbound' ? 'Inbound' : 'Outbound'} {i.kind === 'voicemail' ? 'voicemail' : (FEED_KIND_LABEL[i.channel] || i.channel).toLowerCase()}
+                </span>
+                <button type="button" className="act-name" onClick={() => navigate(`/leads/${i.lead_id}?tab=${i.channel === 'voice' ? 'calls' : 'conversation'}`)}>{i.lead_name}</button>
+                {i.is_test && <span className="sci-chip sci-chip--red">Test</span>}
+                {i.actor && <span className="sci-chip">{ACTOR_LABEL[i.actor] || i.actor}</span>}
+                <span className={`sci-chip ${/fail|undeliver|bounce/i.test(i.result || '') ? 'sci-chip--red' : /deliver|booked|answered|completed|hot/i.test(i.result || '') ? 'sci-chip--green' : ''}`}>{i.result}</span>
+                {i.voicemail_left && <span className="sci-chip sci-chip--amber">Voicemail left</span>}
+                {i.duration_seconds ? <span className="act-muted">{Math.floor(i.duration_seconds / 60)}m {i.duration_seconds % 60}s</span> : null}
+                <time className="act-muted act-when" dateTime={i.at}>{feedWhen(i.at)}</time>
+              </div>
+              {i.summary && <div className="act-summary">{i.summary}</div>}
+              <div className="act-foot">
+                {i.has_transcript && <span className="act-muted">Transcript on the contact's Calls tab</span>}
+                {i.audio_path && <VoicemailPlayer path={i.audio_path} />}
+                {i.source_label && <span className="act-muted">{i.source_label}</span>}
+                {isAdmin && (
+                  <button type="button" className="act-tech" aria-expanded={open === i.id} onClick={() => setOpen(open === i.id ? null : i.id)}>
+                    {open === i.id ? 'Hide technical detail' : 'Technical detail'}
+                  </button>
+                )}
+              </div>
+              {isAdmin && open === i.id && <code className="act-ref">{i.kind} · {i.channel} · record {i.ref}</code>}
+            </li>
+          ))}
+        </ol>
+      )}
+      {data?.capped && <p className="act-muted">Showing the newest {data.items.length}. Narrow the date range to see further back.</p>}
+    </section>
+  )
+}
+
 export default function Activity() {
   const navigate = useNavigate()
+  const [mode, setMode] = useState('all')   // all | sends
   const [items, setItems]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
@@ -206,16 +314,22 @@ export default function Activity() {
   const failedCount    = items.filter((i) => ['failed', 'undelivered'].includes(i.delivery_status)).length
 
   return (
-    <div>
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 6 }}>
-          <h1 className="page-title" style={{ margin: 0 }}>Activity</h1>
-          {!loading && <span className="eq-queue-badge">{capped ? `latest ${items.length}` : items.length} sends</span>}
+    <div className="sci-ws act-page">
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 6, flexWrap: 'wrap' }}>
+          <h1 className="page-title" style={{ margin: 0 }}>Activity &amp; call history</h1>
+          {mode === 'sends' && !loading && <span className="eq-queue-badge">{capped ? `latest ${items.length}` : items.length} sends</span>}
         </div>
         <p className="page-subtitle" style={{ marginTop: 4 }}>
-          Every SMS and email you've sent — with delivery confirmation for SMS.
+          What actually happened, and when: texts, emails, calls and voicemails, in both directions.
         </p>
+        <div className="wq-tabs" role="tablist" aria-label="Activity view" style={{ marginTop: 12 }}>
+          <button type="button" role="tab" aria-selected={mode === 'all'} className={mode === 'all' ? 'on' : ''} onClick={() => setMode('all')}>All activity</button>
+          <button type="button" role="tab" aria-selected={mode === 'sends'} className={mode === 'sends' ? 'on' : ''} onClick={() => setMode('sends')}>Sends &amp; delivery</button>
+        </div>
       </div>
+
+      {mode === 'all' ? <ActivityFeed navigate={navigate} /> : (<>
 
       {/* Error banner */}
       {error && (
@@ -321,7 +435,7 @@ export default function Activity() {
             </span>
           </div>
         ) : (
-          <table className="data-table">
+          <div style={{ overflowX: 'auto' }}><table className="data-table">
             <thead>
               <tr>
                 <th style={{ width: 36 }}>Ch</th>
@@ -376,9 +490,10 @@ export default function Activity() {
                 )
               })}
             </tbody>
-          </table>
+          </table></div>
         )}
       </section>
+      </>)}
     </div>
   )
 }

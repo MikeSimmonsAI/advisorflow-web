@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import SignalPulse from '../components/SignalPulse'
 import '../styles/shared.css'
 import './WorkQueue.css'
+import '../styles/sciWorkspace.css'
 
 const emptyQueue = {
   needs_text: [],
@@ -302,6 +303,101 @@ function OperationalQueues() {
   )
 }
 
+// ── MY TASKS (My Work, Oct 2026) ────────────────────────────────────────────
+// Real tasks from GET /work/tasks - the ones Conversation Brain, the Replies
+// workspace and people create. Completing one is PATCH /work/tasks/{id}
+// {status: done}; nothing here is inferred from status text.
+const TASK_TABS = [
+  { key: 'priority', label: 'Priority', params: { status: 'open', due: 'overdue' } },
+  { key: 'today', label: 'Today', params: { status: 'open', due: 'today' } },
+  { key: 'upcoming', label: 'Upcoming', params: { status: 'open', due: 'upcoming' } },
+  { key: 'open', label: 'All open', params: { status: 'open' } },
+  { key: 'done', label: 'Completed', params: { status: 'done' } },
+]
+
+function MyTasks() {
+  const navigate = useNavigate()
+  const [tab, setTab] = useState('priority')
+  const [who, setWho] = useState('me')
+  const [data, setData] = useState(null)
+  const [counts, setCounts] = useState({})
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(null)
+
+  const load = useCallback(() => {
+    const def = TASK_TABS.find(x => x.key === tab) || TASK_TABS[0]
+    const params = { ...def.params, page_size: 50 }
+    if (who === 'me') params.assigned = 'me'
+    setError('')
+    api.get('/work/tasks', { params }).then(setData).catch(e => { setData(null); setError(e.message || 'Could not load tasks.') })
+    Promise.all(TASK_TABS.map(x => api.get('/work/tasks', { params: { ...x.params, page_size: 1, ...(who === 'me' ? { assigned: 'me' } : {}) } })
+      .then(d => [x.key, d.total]).catch(() => [x.key, null])))
+      .then(pairs => setCounts(Object.fromEntries(pairs)))
+  }, [tab, who])
+  useEffect(() => { load() }, [load])
+
+  async function setStatus(task, status) {
+    setBusy(task.id)
+    try { await api.patch(`/work/tasks/${task.id}`, { status }); load() }
+    catch (e) { setError(e.message || 'Could not update the task.') }
+    finally { setBusy(null) }
+  }
+
+  const items = data?.items || []
+  return (
+    <section className="panel workqueue-section workqueue-tasks" aria-labelledby="wq-tasks-h">
+      <div className="panel-header">
+        <div>
+          <h2 className="panel-title" id="wq-tasks-h">Tasks</h2>
+          <p className="workqueue-section-subtitle">Callbacks, follow-ups and handoffs people and the AI recorded. Completing one is saved with your name.</p>
+        </div>
+        <select className="filter-select" aria-label="Whose tasks" value={who} onChange={e => setWho(e.target.value)}>
+          <option value="me">Assigned to me</option>
+          <option value="all">Everyone I can see</option>
+        </select>
+      </div>
+      <div className="wq-tabs" role="tablist" aria-label="Task timing">
+        {TASK_TABS.map(x => (
+          <button key={x.key} type="button" role="tab" aria-selected={tab === x.key} className={tab === x.key ? 'on' : ''} onClick={() => setTab(x.key)}>
+            {x.label}{counts[x.key] != null && <span className="wq-count">{counts[x.key]}</span>}
+          </button>
+        ))}
+      </div>
+      {error ? <div className="workqueue-alert" role="alert">{error}</div> : null}
+      {!data && !error ? <div className="empty-state">Loading tasks…</div> : null}
+      {data && items.length === 0 ? (
+        <div className="empty-state">{tab === 'done' ? 'No completed tasks yet.' : tab === 'priority' ? 'Nothing overdue.' : 'No tasks here.'}</div>
+      ) : null}
+      {items.length > 0 && (
+        <ul className="wq-tasklist">
+          {items.map(task => (
+            <li key={task.id} className={`wq-task${task.overdue ? ' wq-task--overdue' : ''}`}>
+              <div className="wq-task-main">
+                <strong>{task.title}</strong>
+                <div className="wq-task-meta">
+                  {task.lead_name && <span>{task.lead_name}</span>}
+                  {task.due_at && <span className={task.overdue ? 'wq-overdue' : ''}>{task.overdue ? 'Overdue · ' : 'Due '}{formatDate(task.due_at)}</span>}
+                  {task.assigned_to_name && <span>Owner: {task.assigned_to_name}</span>}
+                  {task.source && task.source !== 'manual' && <span>From {humanize(task.source)}</span>}
+                  {task.status === 'done' && task.completed_at && <span>Done {formatDate(task.completed_at)}</span>}
+                </div>
+                {task.details && <p className="wq-task-details">{task.details}</p>}
+              </div>
+              <div className="wq-task-actions">
+                {task.lead_id && <button type="button" className="btn btn--secondary" onClick={() => navigate(`/leads/${task.lead_id}`)}>Open contact</button>}
+                {task.status === 'open'
+                  ? <button type="button" className="btn btn--primary" disabled={busy === task.id} onClick={() => setStatus(task, 'done')}>{busy === task.id ? 'Saving…' : 'Mark done'}</button>
+                  : <button type="button" className="btn btn--secondary" disabled={busy === task.id} onClick={() => setStatus(task, 'open')}>Reopen</button>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {data && data.total > items.length && <p className="workqueue-section-subtitle">Showing {items.length} of {data.total}.</p>}
+    </section>
+  )
+}
+
 export default function WorkQueue() {
   const navigate = useNavigate()
   const [queue, setQueue] = useState(emptyQueue)
@@ -339,12 +435,12 @@ export default function WorkQueue() {
   }
 
   return (
-    <div className="workqueue-page">
+    <div className="workqueue-page sci-ws">
       <header className="page-header workqueue-header">
         <div>
-          <p className="workqueue-eyebrow">Advisor Command Queue</p>
+          <p className="workqueue-eyebrow">My Work</p>
           <h1 className="page-title">Today&apos;s Work</h1>
-          <p className="page-subtitle">The leads, replies, cadence touches, and missing outcomes that need action now.</p>
+          <p className="page-subtitle">Tasks, replies, cadence touches and missing outcomes that need action now.</p>
         </div>
         <div className="workqueue-summary panel">
           <SignalPulse color={total > 0 ? 'blue' : 'green'} label={total > 0 ? 'Action needed' : 'Clear'} />
@@ -373,6 +469,8 @@ export default function WorkQueue() {
           </button>
         </section>
       ) : null}
+
+      <MyTasks />
 
       <div className="workqueue-grid">
         {sections.map((section) => {

@@ -268,6 +268,7 @@ def get_lead_timeline(lead_id: str,
         .all()
     )
     voice_call_list = []
+    from app.services.telephony_twilio import valid_recording_sid as _valid_rec_sid
     for vc in voice_calls_raw:
         voice_call_list.append({
             "id": vc.id,
@@ -279,6 +280,16 @@ def get_lead_timeline(lead_id: str,
             "voicemail_left": vc.voicemail_left,
             "call_number": vc.call_number,
             "recording_url": vc.recording_url,
+            # Which way the call went and who placed it, so the Calls tab can
+            # tell an AI call from an inbound call or a person's own call.
+            "direction": vc.direction or "outbound",
+            "is_human_call": bool(vc.is_human_call),
+            "provider": vc.provider,
+            # Playable through the authenticated proxy (GET /calls/{id}/audio)
+            # only when it holds a Twilio recording SID.
+            "audio_path": ("/calls/%s/audio" % vc.id
+                           if (vc.provider or "twilio") == "twilio"
+                           and _valid_rec_sid(vc.recording_sid) else None),
             "started_at": iso_utc(vc.started_at),
             "created_at": iso_utc(vc.created_at),
         })
@@ -303,8 +314,25 @@ def get_lead_timeline(lead_id: str,
         events = [e for e in events
                   if e.get("timestamp") is None or e["timestamp"] >= next_before]
 
+    # LOCATION OUTREACH PROGRAMS (SCI): the location this contact belongs to,
+    # resolved by the same rule every send uses (programs.identity). None for
+    # an organization without a program; resolved=False when the program has
+    # not placed this contact - a send would be held for Location Review.
+    program_location = None
+    try:
+        from app.services.programs import identity as _pid
+        _prog = _pid.program_for_org(db, lead.organization_id)
+        if _prog is not None:
+            _prof = _pid.location_profile_for_lead(db, lead)
+            program_location = {"resolved": _prof is not None,
+                                "name": _pid.display_name(_prog, _prof) if _prof is not None else None}
+    except Exception:                                        # noqa: BLE001
+        import logging as _logging
+        _logging.getLogger(__name__).exception("program location lookup failed for lead %s", lead.id)
+
     return {
         "lead": lead,
+        "program_location": program_location,
         "events": events,
         "ai_quality": ai_note,
         "booking": booking_info,

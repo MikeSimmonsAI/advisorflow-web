@@ -11,10 +11,11 @@
 //   Next call                   GET /dialer/queue - the user's callable leads,
 //                               already filtered by DNC / suppression / consent.
 // Nothing here invents a status: an empty history says so.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import CallButton from './CallButton'
+import VoicemailPlayer from './VoicemailPlayer'
 import { OUTCOMES } from './DispositionModal'
 import './telephony.css'
 
@@ -45,16 +46,23 @@ function callTitle(c) {
   return `${dir}${how}`
 }
 
-export default function HumanDialerPanel({ leadId, phone }) {
+// blockedReason: when set (an internal test record), no call control is
+//   offered at all - the reason is shown in its place.
+// compact: the Lead Command Center's Calls tab; drops the queue-exclusion note.
+// onHistory: hands the loaded history to the page (voicemail count) so it is
+//   fetched once, not twice.
+export default function HumanDialerPanel({ leadId, phone, blockedReason = null, compact = false, onHistory }) {
   const nav = useNavigate()
   const [ident, setIdent] = useState(null)
   const [hist, setHist] = useState(null)
   const [queue, setQueue] = useState(null)
   const [err, setErr] = useState('')
+  const onHistoryRef = useRef(onHistory)
+  useEffect(() => { onHistoryRef.current = onHistory }, [onHistory])
 
   const loadHist = useCallback(() => {
     if (!leadId) return
-    api.get(`/dialer/leads/${leadId}/history`).then(setHist).catch(e => setErr(e.message || 'History unavailable.'))
+    api.get(`/dialer/leads/${leadId}/history`).then(h => { setHist(h); onHistoryRef.current?.(h) }).catch(e => setErr(e.message || 'History unavailable.'))
   }, [leadId])
 
   const loadQueue = useCallback(() => {
@@ -83,7 +91,9 @@ export default function HumanDialerPanel({ leadId, phone }) {
         <dd className={pub?.ok ? '' : 'tel-missing'}>{ident == null ? '…' : pub?.ok ? fmt(pub.e164) : 'Not configured'}</dd>
       </dl>
 
-      <CallButton leadId={leadId} phone={phone} onDone={() => { loadHist(); loadQueue() }} />
+      {blockedReason
+        ? <div className="tel-box tel-box--error" role="note" data-testid="dialer-blocked">{blockedReason}</div>
+        : <CallButton leadId={leadId} phone={phone} onDone={() => { loadHist(); loadQueue() }} />}
 
       <div className="tel-subhead">
         <span>Call history</span>
@@ -99,10 +109,13 @@ export default function HumanDialerPanel({ leadId, phone }) {
       )}
       {hist && (hist.calls.length > 0 || hist.voicemails.length > 0) && (
         <ul className="tel-list">
-          {hist.voicemails.filter(v => v.status === 'new').map(v => (
+          {/* A voicemail that belongs to a call below is shown on that call, not twice. */}
+          {hist.voicemails.filter(v => !v.call_id).map(v => (
             <li key={`vm-${v.id}`}>
-              <span><span className="tel-pill tel-pill--vm">Voicemail</span> {when(v.received_at)}</span>
+              <span><span className="tel-pill tel-pill--vm">{v.status === 'new' ? 'New voicemail' : 'Voicemail'}</span> {when(v.received_at)}</span>
               <span className="tel-meta">{dur(v.duration_seconds) || 'Length unknown'} · from {fmt(v.from_phone) || 'withheld'}</span>
+              {v.transcript && <span className="tel-meta">“{v.transcript}”</span>}
+              {v.audio_url && <VoicemailPlayer path={v.audio_url} />}
             </li>
           ))}
           {hist.calls.slice(0, 8).map(c => (
@@ -111,6 +124,7 @@ export default function HumanDialerPanel({ leadId, phone }) {
                 <strong>{callTitle(c)}</strong> · {when(c.created_at)}
                 {c.voicemail_state === 'left' && <> <span className="tel-pill tel-pill--vm">VM left</span></>}
                 {c.voicemail_state === 'machine' && <> <span className="tel-pill tel-pill--vm">Machine</span></>}
+                {c.voicemail_id && <> <span className="tel-pill tel-pill--vm">{c.voicemail_status === 'new' ? 'New voicemail' : 'Voicemail'}</span></>}
               </span>
               <span className="tel-meta">
                 {c.disposition ? (OUTCOME_LABEL[c.disposition] || c.disposition.replace(/_/g, ' '))
@@ -119,6 +133,9 @@ export default function HumanDialerPanel({ leadId, phone }) {
                 {c.from_phone ? ` · from ${fmt(c.from_phone)}` : ''}
               </span>
               {c.disposition_notes && <span className="tel-meta">“{c.disposition_notes}”</span>}
+              {c.voicemail_transcript && <span className="tel-meta">Voicemail: “{c.voicemail_transcript}”</span>}
+              {c.voicemail_audio_url && <VoicemailPlayer path={c.voicemail_audio_url} />}
+              {c.recording_audio_url && <VoicemailPlayer path={c.recording_audio_url} label="Play call recording" />}
             </li>
           ))}
         </ul>
@@ -140,7 +157,7 @@ export default function HumanDialerPanel({ leadId, phone }) {
           ))}
         </ul>
       )}
-      {queue?.excluded?.length > 0 && (
+      {!compact && queue?.excluded?.length > 0 && (
         <p className="tel-note">
           Not in the queue: {queue.excluded.map(e => `${e.count} · ${e.reason.replace(/\.$/, '')}`).join('; ')}
         </p>

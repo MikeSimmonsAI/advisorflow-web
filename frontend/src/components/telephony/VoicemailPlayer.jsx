@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react'
 import { fetchObjectUrl } from '../../api/client'
 import './telephony.css'
 
-export default function VoicemailPlayer({ path }) {
+// Also plays a call recording (GET /calls/{id}/audio, same proxy rules).
+export default function VoicemailPlayer({ path, label = 'Play voicemail' }) {
   const [url, setUrl] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -18,7 +19,7 @@ export default function VoicemailPlayer({ path }) {
         setBusy(true); setErr('')
         try { setUrl(await fetchObjectUrl(path)) } catch (e) { setErr(e.message || 'Could not load the recording.') }
         finally { setBusy(false) }
-      }}>{busy ? 'Loading…' : 'Play voicemail'}</button>
+      }}>{busy ? 'Loading…' : label}</button>
       {err && <span className="tel-note">{err}</span>}
     </span>
   )

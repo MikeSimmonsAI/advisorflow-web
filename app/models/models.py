@@ -1379,6 +1379,11 @@ class LeadOutcome(Base):
     sale_amount = Column(String, nullable=True)  # stored as string deliberately - this is a sales note field for the advisor, not a billing/accounting ledger; real currency math belongs in Restland's actual accounting system, not here
 
     notes = Column(Text, nullable=True)
+    # What happened to the appointment itself (Oct 2026, Appointments screen):
+    # completed | no_show | cancelled | follow_up_needed. NULL on every row
+    # recorded before it existed - never back-filled or guessed.
+    attendance = Column(String, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
