@@ -707,6 +707,7 @@ APPOINTMENTS_CAP = 300  # per side: upcoming, and past
 @router.get("/appointments")
 def pipeline_appointments(
     days: int = _Query(30, ge=1, le=365),
+    include_pending: bool = _Query(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_tenant_or_observer),
 ):
@@ -770,7 +771,33 @@ def pipeline_appointments(
         "period_days": days,
         "totals": totals,
         "truncated": totals["upcoming"] > len(up_rows) or totals["past"] > len(past_rows),
+        # Additive, only when asked (the Appointments screen): booking links
+        # sent in the period that nobody has picked a time on yet. Same scope
+        # and test-record rule as the rows above; never mixed into `items`.
+        **({"pending": _pending_links(db, org_id, current_user, days, now)} if include_pending else {}),
     }
+
+
+def _pending_links(db, org_id, current_user, days, now):
+    from app.models.models import BookingLink
+    f = [Lead.organization_id == org_id, Lead.is_test.isnot(True),
+         BookingLink.status == "pending", BookingLink.created_at >= now - _td(days=days)]
+    if not _is_elevated(current_user, db):
+        f.append(Lead.assigned_to_id == current_user.id)
+    rows = (db.query(BookingLink, Lead.first_name, Lead.last_name, Lead.phone)
+            .join(Lead, BookingLink.lead_id == Lead.id).filter(*f)
+            .order_by(BookingLink.created_at.desc()).limit(APPOINTMENTS_CAP).all())
+    advisor_ids = {b.user_id for b, *_ in rows if b.user_id}
+    advisors = ({u.id: u.full_name for u in db.query(User).filter(User.id.in_(advisor_ids)).all()}
+                if advisor_ids else {})
+    return [{
+        "id": b.id, "lead_id": b.lead_id,
+        "lead_name": f"{fn or ''} {ln or ''}".strip() or None, "lead_phone": ph,
+        "status": "pending", "link_sent_at": b.created_at.isoformat() + "Z" if b.created_at else None,
+        "expires_at": b.expires_at.isoformat() + "Z" if getattr(b, "expires_at", None) else None,
+        "expired": bool(getattr(b, "expires_at", None) and b.expires_at < now),
+        "appointment_type": b.appt_label, "advisor_name": advisors.get(b.user_id),
+    } for b, fn, ln, ph in rows]
 
 
 # ════════════════════════════════════════════════════════════════════════════

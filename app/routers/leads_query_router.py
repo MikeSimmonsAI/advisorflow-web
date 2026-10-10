@@ -90,6 +90,9 @@ def list_leads(
         Lead.duplicate_reason, Lead.duplicate_match_field,
         Lead.duplicate_match_value, Lead.duplicate_of_lead_id,
         Lead.last_messaged_at,
+        # The Leads Directory marks internal test records and keeps them out
+        # of every bulk selection (app/services/test_records.py).
+        Lead.is_test,
     ]
     COL_NAMES = [
         "id", "first_name", "last_name", "phone", "email",
@@ -102,6 +105,7 @@ def list_leads(
         "duplicate_reason", "duplicate_match_field",
         "duplicate_match_value", "duplicate_of_lead_id",
         "last_messaged_at",
+        "is_test",
     ]
 
     # THE ONE AUTHORIZED SCOPE. This route used to build its own: an inline

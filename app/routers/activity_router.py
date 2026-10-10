@@ -179,3 +179,122 @@ def sent_activity(
     )[:limit]
 
     return merged
+
+
+# ── ACTIVITY & CALL HISTORY (Oct 2026) ───────────────────────────────────────
+#
+# One chronological, cross-channel log: texts and emails in BOTH directions,
+# calls (AI and human, both directions) and voicemails - each row once, from
+# the table that owns it. The scope is the one lead scope
+# (lead_scope.authorized_lead_query), so an advisor sees their own leads and a
+# manager the workspace, exactly as everywhere else. Nothing is synthesized:
+# an inbound text is a Reply row, a call is a VoiceCall row, a voicemail is a
+# Voicemail row. A voicemail left on a call is shown on that call, not again.
+#
+# `ref` is the source row's id. The screen shows it only to admins, in a
+# collapsed technical drawer.
+
+def _feed_lead_names(db: Session, ids) -> dict:
+    ids = [i for i in set(ids) if i]
+    if not ids:
+        return {}
+    rows = db.query(Lead.id, Lead.first_name, Lead.last_name, Lead.phone, Lead.email, Lead.is_test) \
+             .filter(Lead.id.in_(ids)).all()
+    out = {}
+    for r in rows:
+        name = ("%s %s" % (r.first_name or "", r.last_name or "")).strip() or r.phone or r.email or "Unnamed contact"
+        out[r.id] = {"name": name, "phone": r.phone, "email": r.email, "is_test": bool(r.is_test)}
+    return out
+
+
+def _feed_actor(src):
+    """Who produced an outbound message: ai | human | system, or None when the
+    row never recorded it (old rows) - never guessed."""
+    if not src:
+        return None
+    if is_ai_generated(src):
+        return "ai"
+    return "human" if src in (_src.MANUAL, _src.BULK) else "system"
+
+
+def _clip(text, n=160):
+    text = (text or "").strip()
+    return text if len(text) <= n else text[:n] + "…"
+
+
+@router.get("/feed")
+def activity_feed(
+    days: int = Query(default=30, ge=1, le=365),
+    limit: int = Query(default=300, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.models.models import Reply, VoiceCall
+    from app.models.telephony_models import Voicemail
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    scope = lead_scope.authorized_lead_query(db, current_user, Lead.id).subquery()
+    in_scope = lambda col: col.in_(db.query(scope.c.id))  # noqa: E731
+    items = []
+
+    for m in (db.query(Message).filter(in_scope(Message.lead_id), Message.sent_at >= cutoff)
+              .order_by(Message.sent_at.desc()).limit(limit).all()):
+        src = getattr(m, "send_source", None)
+        items.append({"kind": "message", "channel": "sms", "direction": "outbound", "ref": m.id,
+                      "lead_id": m.lead_id, "at": iso_utc(m.sent_at), "summary": _clip(m.body),
+                      "result": getattr(m, "delivery_status", None) or m.twilio_status or "pending",
+                      "actor": _feed_actor(src),
+                      "source_label": _src.source_label(src)})
+
+    for e in (db.query(EmailMessage).filter(in_scope(EmailMessage.lead_id), EmailMessage.sent_at >= cutoff)
+              .order_by(EmailMessage.sent_at.desc()).limit(limit).all()):
+        src = getattr(e, "send_source", None)
+        items.append({"kind": "message", "channel": "email", "direction": "outbound", "ref": e.id,
+                      "lead_id": e.lead_id, "at": iso_utc(e.sent_at),
+                      "summary": _clip(e.subject or "(no subject)"), "result": e.status or "sent",
+                      "actor": _feed_actor(src),
+                      "source_label": _src.source_label(src)})
+
+    for r in (db.query(Reply).filter(in_scope(Reply.lead_id), Reply.received_at >= cutoff)
+              .order_by(Reply.received_at.desc()).limit(limit).all()):
+        cls = getattr(r.classification, "value", r.classification)
+        items.append({"kind": "message", "channel": "email" if (r.source or "sms") == "email" else "sms",
+                      "direction": "inbound", "ref": r.id, "lead_id": r.lead_id, "at": iso_utc(r.received_at),
+                      "summary": _clip(r.body), "result": "hot" if r.is_hot else (cls or "received"),
+                      "actor": "customer", "source_label": None})
+
+    for c in (db.query(VoiceCall).filter(in_scope(VoiceCall.lead_id), VoiceCall.created_at >= cutoff)
+              .order_by(VoiceCall.created_at.desc()).limit(limit).all()):
+        direction = c.direction or "outbound"
+        human = bool(c.is_human_call) or c.provider == "manual"
+        result = c.disposition or c.outcome or c.answered_by or c.status
+        items.append({"kind": "call", "channel": "voice", "direction": direction, "ref": c.id,
+                      "lead_id": c.lead_id, "at": iso_utc(c.started_at or c.created_at),
+                      "summary": _clip(c.summary or c.disposition_notes or ""),
+                      "result": (result or "unknown").replace("_", " "),
+                      "duration_seconds": c.duration_seconds, "voicemail_left": bool(c.voicemail_left),
+                      "has_transcript": bool(c.transcript or c.voicemail_transcript),
+                      "has_recording": bool(c.recording_sid or c.recording_url),
+                      "actor": ("customer" if direction == "inbound" else "human" if human else "ai"),
+                      "source_label": "Call from own phone" if c.provider == "manual" else None})
+
+    for v in (db.query(Voicemail).filter(in_scope(Voicemail.lead_id), Voicemail.received_at >= cutoff)
+              .order_by(Voicemail.received_at.desc()).limit(limit).all()):
+        items.append({"kind": "voicemail", "channel": "voice", "direction": "inbound", "ref": v.id,
+                      "lead_id": v.lead_id, "at": iso_utc(v.received_at),
+                      "summary": _clip(v.transcript or ""), "result": v.status or "new",
+                      "duration_seconds": v.duration_seconds,
+                      "has_recording": bool(v.recording_sid or v.recording_url),
+                      "audio_path": ("/voicemails/%s/audio" % v.id) if (v.recording_sid or v.recording_url) else None,
+                      "actor": "customer", "source_label": None})
+
+    items.sort(key=lambda x: x["at"] or "", reverse=True)
+    items = items[:limit]
+    names = _feed_lead_names(db, [i["lead_id"] for i in items])
+    for i in items:
+        info = names.get(i["lead_id"]) or {}
+        i["lead_name"] = info.get("name") or "Unknown contact"
+        i["lead_phone"] = info.get("phone")
+        i["lead_email"] = info.get("email")
+        i["is_test"] = bool(info.get("is_test"))
+        i["id"] = "%s:%s" % (i["kind"] if i["kind"] != "message" else i["channel"] + "-" + i["direction"], i["ref"])
+    return {"items": items, "days": days, "limit": limit, "capped": len(items) >= limit}

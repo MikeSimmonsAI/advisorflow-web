@@ -57,6 +57,7 @@ import ConversationQueue from './pages/ConversationQueue'
 import Cadence from './pages/Cadence'
 import EmailQueue from './pages/EmailQueue'
 import Activity from './pages/Activity'
+import Appointments from './pages/Appointments'
 // ONE PAGE FOR EVERY CONFIGURED WORKFLOW SCREEN. The key in the URL names a
 // view the server resolved from this workspace's own configuration, so a
 // vertical's screens cost a row rather than a route each. See
@@ -1204,6 +1205,8 @@ export default function App() {
         <Route path="/cadence" element={<ProtectedRoute feature="cadences"><Cadence /></ProtectedRoute>} />
         <Route path="/email-queue" element={<ProtectedRoute feature="email"><EmailQueue /></ProtectedRoute>} />
         <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
+        {/* Family Service Center - appointments & visits (booking links in the lead scope). */}
+        <Route path="/appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />
         {/* A configured workflow screen. Deliberately NOT feature-gated: a
             view only ever shows records the reader can already reach through
             Leads, so gating it would hide a screen from somebody who can see

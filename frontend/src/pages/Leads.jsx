@@ -6,6 +6,7 @@ import MessageReview from '../components/MessageReview'
 import { formatPhone } from '../utils/phone'
 import '../styles/shared.css'
 import './Leads.css'
+import '../styles/sciWorkspace.css'
 import VoiceCampaign from '../components/VoiceCampaign'
 // Vertical switch (see Leads() below).
 import { verticalFor, VERTICAL_ENERGY } from '../verticals/workspaceVertical'
@@ -81,6 +82,30 @@ export default function Leads() {
   return <ClassicLeads />
 }
 
+// The Leads Directory's saved views. `test` is shown to workspace admins only.
+const SAVED_VIEWS = [
+  { key: 'all', label: 'All' },
+  { key: 'needs_reply', label: 'Needs reply', rule: l => l.status === 'replied' || l.status === 'hot' },
+  { key: 'mine', label: 'My leads', rule: (l, me) => Boolean(me) && l.assigned_to_id === me },
+  { key: 'waiting', label: 'Waiting on customer', rule: l => l.status === 'sent' || l.status === 'queued' },
+  { key: 'appointments', label: 'Appointments', rule: l => l.status === 'booked' },
+  { key: 'blocked', label: 'Blocked / needs setup', rule: l => !outreachState(l).ok },
+  { key: 'test', label: 'Test records', rule: l => Boolean(l.is_test), admin: true },
+]
+
+// One answer to "can outreach reach this person at all?" for the list. The
+// server's send gates still decide every real send; this only says why a row
+// would be refused, before anyone selects it.
+function outreachState(l) {
+  if (l.is_test) return { ok: false, tone: 'red', label: 'Test · no outreach' }
+  if (l.status === 'dnc') return { ok: false, tone: 'red', label: 'Do not contact' }
+  if (l.manual_flag === 'remove_all') return { ok: false, tone: 'red', label: 'Removed' }
+  if (l.is_duplicate) return { ok: false, tone: 'amber', label: 'Duplicate' }
+  if (!l.phone && !l.email) return { ok: false, tone: 'amber', label: 'No contact info' }
+  if (!l.phone) return { ok: true, tone: 'amber', label: 'Email only' }
+  return { ok: true, tone: 'green', label: 'Reachable' }
+}
+
 function ClassicLeads() {
   const navigate = useNavigate()
   const [leads, setLeads] = useState([])
@@ -149,6 +174,15 @@ function ClassicLeads() {
   })
   const [sortBy, setSortBy] = useState('created_at')
   const [sortDir, setSortDir] = useState('desc')
+
+  // ── SAVED VIEWS (Leads Directory, Oct 2026) ─────────────────────────────
+  // Each view is a plain rule over the loaded rows; the cards above the list
+  // carry SERVER totals for the same rules, so a number is never a guess.
+  const [savedView, setSavedView] = useState(() => {
+    const v = urlParams.get('view')
+    return SAVED_VIEWS.some(s => s.key === v) ? v : 'all'
+  })
+  const [serverCounts, setServerCounts] = useState(null)
 
   // ── THIS ORGANIZATION'S TIERS ────────────────────────────────────────────
   // Resolved from its configured business type. `presentTiers` keeps any value
@@ -505,8 +539,11 @@ function ClassicLeads() {
 
   const baseLeads = view === 'review' ? needsReview : view === 'duplicates' ? leads.filter((l) => l.is_duplicate) : leads.filter((l) => !l.is_duplicate)
 
+  const myId = getCurrentUser()?.id || null
   const filteredLeads = useMemo(() => {
     let result = baseLeads
+    const sv = SAVED_VIEWS.find(s => s.key === savedView)
+    if (sv && sv.rule) result = result.filter(l => sv.rule(l, myId))
     if (tierFilter) result = result.filter((l) => l.tier === tierFilter)
     if (statusFilter) result = result.filter((l) => l.status === statusFilter)
     if (searchQuery.trim()) {
@@ -537,9 +574,10 @@ function ClassicLeads() {
       return 0
     })
     return result
-  }, [baseLeads, tierFilter, statusFilter, searchQuery, sortBy, sortDir])
+  }, [baseLeads, tierFilter, statusFilter, searchQuery, sortBy, sortDir, savedView, myId])
 
-  const sendableLeads = filteredLeads.filter((l) => l.phone && l.status !== 'dnc' && !l.is_duplicate)
+  const sendableLeads = filteredLeads.filter((l) => l.phone && l.status !== 'dnc' && !l.is_duplicate
+    && !l.is_test && l.manual_flag !== 'remove_all')
   const sendableSelectedIds = Array.from(selected).filter((id) => sendableLeads.some((l) => l.id === id))
 
   const leadsPageCount = Math.max(1, Math.ceil(filteredLeads.length / LEADS_PAGE_SIZE))
@@ -779,6 +817,28 @@ function ClassicLeads() {
     duplicates: leads.filter((l) => l.is_duplicate).length,
   }), [leadsTotal, needsReviewTotal, leads, filteredLeads.length, sendableLeads.length, selectedCount])
 
+  // Server totals for the directory cards (the list itself is capped at 500).
+  useEffect(() => {
+    const total = (q) => api.get(`/leads/?page=1&page_size=1${q}`).then(d => (d && d.total) || 0).catch(() => null)
+    Promise.all([
+      total('&status=replied'), total('&status=hot'), total('&status=booked'),
+      myId ? total(`&assigned_to_id=${encodeURIComponent(myId)}`) : Promise.resolve(null),
+    ]).then(([replied, hot, booked, mine]) => setServerCounts({
+      needsReply: replied == null || hot == null ? null : replied + hot, booked, mine,
+    }))
+  }, [leadsTotal, myId])
+
+  // Filters live in the URL, so opening a lead and pressing Back returns to
+  // the same list instead of a reset one.
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search)
+    const put = (k, v) => { if (v) next.set(k, v); else next.delete(k) }
+    put('q', searchQuery.trim()); put('status', statusFilter); put('tier', tierFilter)
+    put('view', savedView === 'all' ? '' : savedView)
+    const s = next.toString()
+    if (s !== window.location.search.replace(/^\?/, '')) navigate({ search: s ? `?${s}` : '' }, { replace: true })
+  }, [searchQuery, statusFilter, tierFilter, savedView, navigate])
+
   useEffect(() => {
     if (!canBulkAssign) return
     api.get('/admin/users')
@@ -849,7 +909,7 @@ function ClassicLeads() {
   }
 
   return (
-    <div className="leads-page">
+    <div className="leads-page sci-ws">
 
       {/* ── Header ── */}
       <header className="leads-header">
@@ -913,22 +973,21 @@ function ClassicLeads() {
         </section>
       )}
 
-      {/* ── KPI Cards ── */}
-      <div className="leads-kpi-grid">
+      {/* ── Directory metrics: server totals; each one opens its view ── */}
+      <div className="leads-kpi-grid leads-kpi-grid--5">
         {[
-          { label: 'TOTAL LEADS', value: stats.total, accent: 'blue', icon: '👥' },
-          { label: 'SMS READY', value: stats.sendable, accent: 'green', icon: '📱', sub: 'Phone, not DNC, not duplicate' },
-          { label: 'NEEDS REVIEW', value: stats.needsReview, accent: 'amber', icon: '⚠️', sub: 'Assign tier before outreach', action: () => { setView('review'); setSelected(new Set()); } },
-          { label: 'BLOCKED', value: stats.dnc + stats.duplicates + stats.missingPhone, accent: 'red', icon: '🚫', sub: 'DNC, duplicate, or no phone' },
-        ].map(({ label, value, accent, icon, sub, action }) => (
-          <div key={label} className={`leads-kpi-card leads-kpi-card--${accent}`} onClick={action} style={{ cursor: action ? 'pointer' : 'default' }}>
-            <div className="leads-kpi-top">
-              <span className="leads-kpi-label">{label}</span>
-              <span className="leads-kpi-icon">{icon}</span>
-            </div>
-            <div className={`leads-kpi-value leads-kpi-value--${accent}`}>{loading ? '—' : value}</div>
+          { key: 'all', label: 'Total leads', value: stats.total, accent: 'blue', sub: 'In your scope' },
+          { key: 'needs_reply', label: 'Needs reply', value: serverCounts?.needsReply, accent: 'amber', sub: 'Replied or hot' },
+          { key: 'appointments', label: 'Appointments', value: serverCounts?.booked, accent: 'green', sub: 'Booked' },
+          { key: 'mine', label: 'Assigned to me', value: serverCounts?.mine, accent: 'blue', sub: 'Your leads' },
+          { key: 'blocked', label: 'Blocked / needs setup', value: stats.dnc + stats.duplicates + stats.missingPhone, accent: 'red', sub: 'DNC, duplicate or no phone (loaded rows)' },
+        ].map(({ key, label, value, accent, sub }) => (
+          <button type="button" key={key} className={`leads-kpi-card leads-kpi-card--${accent} ${savedView === key ? 'is-active' : ''}`}
+            aria-pressed={savedView === key} onClick={() => { setView('all'); setSavedView(key); setSelected(new Set()); setLeadsPage(1) }}>
+            <div className="leads-kpi-top"><span className="leads-kpi-label">{label}</span></div>
+            <div className={`leads-kpi-value leads-kpi-value--${accent}`}>{loading || value == null ? '—' : Number(value).toLocaleString()}</div>
             {sub && <div className="leads-kpi-sub">{sub}</div>}
-          </div>
+          </button>
         ))}
       </div>
 
@@ -1192,6 +1251,12 @@ function ClassicLeads() {
 
       {/* ── Tabs + Filter Bar ── */}
       <div className="leads-controls">
+        <div className="leads-views" role="group" aria-label="Saved views">
+          {SAVED_VIEWS.filter(s => !s.admin || canBulkAssign).map(s => (
+            <button key={s.key} type="button" className={savedView === s.key ? 'on' : ''} aria-pressed={savedView === s.key}
+              onClick={() => { setSavedView(s.key); setSelected(new Set()); setLeadsPage(1) }}>{s.label}</button>
+          ))}
+        </div>
         <div className="leads-tabs">
           <button className={`tab ${view === 'all' ? 'tab--active' : ''}`} onClick={() => { setView('all'); setSelected(new Set()); }}>
             All leads <span className="mono">{leadsTotal > leads.length ? leadsTotal : leads.filter(l => !l.is_duplicate).length}</span>
@@ -1328,6 +1393,8 @@ function ClassicLeads() {
                 <th>Email</th>
                 <SortTh col="tier">Tier</SortTh>
                 <SortTh col="status">Status</SortTh>
+                <th>Owner</th>
+                <th>Outreach</th>
                 <th>Source</th>
                 <SortTh col="last_messaged_at">Last Msg</SortTh>
                 <th></th>
@@ -1355,6 +1422,7 @@ function ClassicLeads() {
                       <div className="leads-name-cell">
                         <div className="leads-avatar">{initials}</div>
                         <span>{lead.first_name} {lead.last_name}</span>
+                        {lead.is_test && <span className="leads-chip leads-chip--red" title="Internal test record - excluded from all outreach">Test</span>}
                         {lead.manual_flag === 'bad_email' && (
                           <span style={{ fontSize: 10, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>⚠ bad email</span>
                         )}
@@ -1369,6 +1437,9 @@ function ClassicLeads() {
                     <td className="mono leads-secondary">{lead.email || '—'}</td>
                     <td><TierBadge tier={lead.tier} /></td>
                     <td><StatusBadge status={lead.status} /></td>
+                    <td className="leads-secondary">{!lead.assigned_to_id ? 'Unassigned' : lead.assigned_to_id === myId ? 'You'
+                      : (assignableUsers.find(u => u.id === lead.assigned_to_id)?.full_name || 'Assigned')}</td>
+                    <td>{(() => { const o = outreachState(lead); return <span className={`leads-chip leads-chip--${o.tone}`}>{o.label}</span> })()}</td>
                     <td className="mono leads-secondary" style={{ fontSize: 11 }}>
                       <div>{lead.source_file ? lead.source_file.replace(/\.[^.]+$/, '').slice(0, 22) : '—'}</div>
                       {lead.imported_by_name && (

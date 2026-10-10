@@ -80,6 +80,8 @@ const NAV_GROUPS = [
       { to: '/workqueue', label: 'My Work', icon: 'check-square' },
       { to: '/replies', label: 'Replies', icon: 'message' },
       { to: '/activity', label: 'Activity', icon: 'send' },
+      // Family Service Center bookings: /pipeline/appointments in the lead scope.
+      { to: '/appointments', label: 'Appointments', icon: 'calendar' },
       { to: '/availability', label: 'Availability', icon: 'calendar', featureKey: 'availability' },
       { to: '/fiber-capture', label: 'Fiber Lead', icon: 'zap', fiberOnly: true },
     ],
