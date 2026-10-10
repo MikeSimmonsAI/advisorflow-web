@@ -55,3 +55,12 @@
 - Next: Wholesale end-to-end assessment while suite runs; then visual acceptance
 - Next check-in by: 05:28 CT
 - Code: desktop/consent-center @ 1345e69f
+
+## 2026-10-10 05:31 CT - SCI + Wholesale - active
+- Task: Merge audit done; screen checks next
+- Done since last check-in: Production merge candidate (release/sci-lead-workflow) full suite: 7769 passed, 28 skipped, 0 failed. Wholesale: all 533 wholesale tests passed on the trial merge; 8 proof scripts pass after registering one new send path (pushed 9ea6843a)
+- Tests / progress: SCI merge candidate 7769/0; Wholesale 533/0; AI Workforce 266/0
+- Blocker: Chrome renderer still frozen; retrying now that the CPU is free
+- Next: Visual acceptance of 14 screens x 5 widths; then morning report
+- Next check-in by: 05:51 CT
+- Code: desktop/consent-center @ 1345e69f
