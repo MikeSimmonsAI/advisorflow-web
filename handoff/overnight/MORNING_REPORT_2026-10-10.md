@@ -16,3 +16,33 @@
 1. Merge release/sci-lead-workflow into main (production deploy).
 2. Merge relay/heartbeat-stall (or just scripts/relay/handoff_watchdog.py + the workflow file) into main to stop the obsolete relay re-signals.
 3. Wholesale gates listed above.
+
+## Addendum 08:55 (second pass, same night)
+### SCI
+- Correction: the merge is NOT schema-free. It adds one column, `lead_outcomes.attendance` (nullable, additive) automatically at startup through app/auto_migrate.py. Approving the merge approves that column on production. Rollback is still safe (older code ignores it). Readiness pack corrected.
+- Second, independent visual pass at the exact requested widths 1600 / 1440 / 1280 / 768 / 390: 14 screens x 5 = 70/70 with no sideways scroll. Contact sheets and all 70 images: C:\Dev\af-consent\handoff\screens\overnight-2026-10-10\ (not committed).
+- Small visual items (none block the merge):
+  1. Launch Readiness checklist still quotes the old suite count "7,745 passed (2026-10-09)"; current candidate is 7,769 / 0.
+  2. Phone/tablet width in God mode only: the menu button sits on top of the STAGING bar text and the clock is clipped at 390. Staff in a workspace do not see that bar.
+  3. My Work has an empty gap between the header and Exceptions at desktop widths.
+  4. Appointments: the small "Family Service Center" label sits tight under the workspace bar.
+- Verdict: CONDITIONAL GO. Condition = Mike merges, accepting the one added column.
+
+### AI Workforce
+- 11 workforce test files on current main code: 266 passed, 0 failed. Branches feat/ai-workforce-* are already fully in main. Proof level: automated tests with an in-memory database and stubbed model/provider; no live provider run.
+
+### Core platform (Priority 5)
+- Not started. Nothing claimed.
+
+### Truth in product
+- SCI: built and tested; staging browser-verified; NOT in production; no real customer sends were made.
+- Control Room: silence detection + desktop runner card are tested (relay suite) and on a branch; NOT on main, so the live Control Room does not show them yet. Stall detection on the PC IS live and caught 3 real stalls tonight (01:57-04:24, 05:52-07:41) plus the simulated one.
+- Wholesale: all Wholesale tests pass (533 + 91); no staging environment, no live provider proof; NO-GO for real sellers until Mike's gates.
+- AI Workforce: 266 tests pass; no live provider proof.
+
+### Mike's decisions (complete list)
+1. Merge release/sci-lead-workflow to main (includes the lead_outcomes.attendance column).
+2. Merge relay/heartbeat-stall to main (Control Room silence detection + fix for the relay re-signalling an old run).
+3. Wholesale: staging environment, skip-trace vendor, Twilio/A2P, GO before any seller message, close-requires-contract policy.
+4. Close the stale branches fix/relay-stall-detector-v2, fix/relay-active-stall-20261007, fix/relay-watchdog-hardening (superseded).
+5. Optional: a GitHub token on the PC if check-ins should also post to relay issue #1 (today they go to the overnight-status branch + chat).

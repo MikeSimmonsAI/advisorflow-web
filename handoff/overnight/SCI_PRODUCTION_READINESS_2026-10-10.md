@@ -3,7 +3,7 @@
 ## Candidate
 - Branch `release/sci-lead-workflow` @ 4557eab3 = `sci-program` 1345e69f merged onto `main` 90485585.
 - 15 commits ahead of main, 0 behind; main is an ancestor, so the merge is a fast-forward.
-- 51 files, +5373 / -2690. No database migration files in the diff.
+- 51 files, +5373 / -2690. No migration files, BUT one automatic schema change: `app/auto_migrate.py` adds the column `lead_outcomes.attendance` (VARCHAR, nullable) at startup. Additive only; existing rows stay empty. It runs on production automatically the first time the new code starts, so approving the merge also approves this column. (Correction 08:55: an earlier version of this page said "no schema changes".)
 
 ## Evidence
 - Full suite on the candidate: 7769 passed, 28 skipped, 0 failed (05:31 check-in).
@@ -20,4 +20,4 @@
 2. After deploy: open /program and one /leads/:id in production; confirm test records show no live send controls.
 
 ## Rollback
-- Redeploy the previous production commit 90485585 in Render, or `git revert` the 15 commits on main. No schema changes to undo.
+- Redeploy the previous production commit 90485585 in Render, or `git revert` the 15 commits on main. The added `lead_outcomes.attendance` column can stay after a rollback: the older code never reads it, so nothing breaks and nothing needs undoing.
