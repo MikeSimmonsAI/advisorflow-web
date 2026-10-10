@@ -12,6 +12,7 @@ import { useWhoAmI } from '../utils/whoAmI'
 import { confirmLeadDelete, deleteLeadIds, deleteSummary } from '../utils/deleteRecords'
 import { useTerminology } from '../terminology'
 import HumanDialerPanel from '../components/telephony/HumanDialerPanel'
+import VoicemailPlayer from '../components/telephony/VoicemailPlayer'
 import ConversationBrain from '../components/ConversationBrain'
 import '../styles/shared.css'
 import './LeadDetail.css'
@@ -1137,8 +1138,13 @@ export default function LeadDetail() {
   const sourceLabel = lead.source_detail || lead.import_list_name || lead.source || null
   let customFields = {}
   try { customFields = lead.custom_fields ? JSON.parse(lead.custom_fields) : {} } catch { customFields = {} }
-  const locationLabel = customFields.location || customFields.location_name || customFields.funeral_home
-    || customFields.facility || customFields.campus || null
+  // A location program (SCI) answers this from its own placement rule; a
+  // contact it has not placed says so instead of borrowing the workspace name.
+  const programLoc = data.program_location || null
+  const locationLabel = programLoc
+    ? (programLoc.resolved ? programLoc.name : 'Location not resolved')
+    : (customFields.location || customFields.location_name || customFields.funeral_home
+      || customFields.facility || customFields.campus || null)
   const canBookLink = !isTest && wholesaleLinks.length === 0 && Boolean(lead.email) && canSendEmail
   const bookBlockedReason = isTest ? TEST_REASON
     : wholesaleLinks.length > 0 ? 'Sellers are scheduled by a person, not sent a booking link.'
@@ -1650,7 +1656,9 @@ export default function LeadDetail() {
                             {!vc.transcript && !(vc.voicemail_left && vc.voicemail_transcript) && (
                               <div className="lcc-muted lcc-small">{vc.voicemail_left ? 'Voicemail left — no transcript.' : 'No transcript for this call.'}</div>
                             )}
-                            {vc.recording_url && <div className="lcc-muted lcc-small">Recording saved with the phone provider.</div>}
+                            {vc.audio_path
+                              ? <VoicemailPlayer path={vc.audio_path} label="Play call recording" />
+                              : vc.recording_url && <div className="lcc-muted lcc-small">Recording kept by the voice provider; not playable here.</div>}
                           </li>
                         )
                       })}
@@ -1771,6 +1779,7 @@ export default function LeadDetail() {
               )}
               <dl className="lcc-facts">
                 {[
+                  ['Location', locationLabel],
                   ['Phone', lead.phone ? formatPhone(lead.phone) : null],
                   ['Callback phone', lead.callback_phone ? formatPhone(lead.callback_phone) : null],
                   ['Email', lead.email],

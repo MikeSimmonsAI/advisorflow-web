@@ -97,3 +97,48 @@ def test_call_history_shows_an_inbound_call_and_its_voicemail_once(db_session):
     h = TS.lead_call_history(db_session, real)
     assert h["calls"][0]["voicemail_id"] == h["voicemails"][0]["id"]
     assert h["voicemails"][0]["call_id"] == h["calls"][0]["id"]
+
+
+def test_appointment_outcome_is_recorded_and_shown_on_the_appointment(client, db_session):
+    admin, real, test = _world(db_session)
+    now = datetime.utcnow()
+    bl = BookingLink(lead_id=real.id, user_id=admin.id, status="booked", booked_time=now - timedelta(days=2))
+    db_session.add(bl)
+    db_session.commit()
+    h = _h(db_session, admin)
+    bad = client.post("/outcomes/", headers=h, json={"lead_id": real.id, "booking_link_id": bl.id, "attendance": "maybe"})
+    assert bad.status_code == 400
+    other = client.post("/outcomes/", headers=h, json={"lead_id": test.id, "booking_link_id": bl.id, "attendance": "no_show"})
+    assert other.status_code == 404          # another contact's appointment
+    ok = client.post("/outcomes/", headers=h, json={"lead_id": real.id, "booking_link_id": bl.id, "attendance": "no_show"})
+    assert ok.status_code == 200 and ok.json()["attendance"] == "no_show"
+    items = client.get("/pipeline/appointments", headers=h).json()["items"]
+    row = [i for i in items if i["id"] == bl.id][0]
+    assert row["outcome"]["attendance"] == "no_show"
+
+
+def test_call_recording_route_only_plays_a_stored_twilio_recording_in_scope(client, db_session):
+    from app.models.models import VoiceCall
+    admin, real, test = _world(db_session)
+    c = VoiceCall(lead_id=real.id, advisor_id=admin.id, organization_id=real.organization_id,
+                  to_phone=real.phone, direction="outbound", provider="twilio")
+    db_session.add(c)
+    db_session.commit()
+    h = _h(db_session, admin)
+    r = client.get("/calls/%s/audio" % c.id, headers=h)
+    assert r.status_code == 404 and "recording" in r.json()["detail"].lower()
+    assert client.get("/calls/nope/audio", headers=h).status_code == 404
+    other_org = Organization(name="Elsewhere", slug="elsewhere-redesign", plan="standard")
+    db_session.add(other_org)
+    db_session.commit()
+    stranger = User(organization_id=other_org.id, email="s@else.test", password_hash=hash_password("TestPass123!"),
+                    full_name="S", role="org_admin", must_change_password=False)
+    db_session.add(stranger)
+    db_session.commit()
+    assert client.get("/calls/%s/audio" % c.id, headers=_h(db_session, stranger)).status_code == 404
+
+
+def test_lead_page_location_is_null_without_a_program(client, db_session):
+    admin, real, test = _world(db_session)
+    body = client.get("/leads/%s/timeline" % real.id, headers=_h(db_session, admin)).json()
+    assert body["program_location"] is None

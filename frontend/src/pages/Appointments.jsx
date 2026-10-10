@@ -35,7 +35,16 @@ const STAGE = {
   cancelled: { label: 'Cancelled', tone: '' },
 }
 
+// Recorded outcomes (POST /outcomes/ with the appointment's booking id).
+const ATTENDANCE = {
+  completed: { label: 'Completed', tone: 'green' },
+  no_show: { label: 'No-show', tone: 'red' },
+  cancelled: { label: 'Cancelled by family', tone: '' },
+  follow_up_needed: { label: 'Follow-up needed', tone: 'amber' },
+}
+
 function stageOf(a) {
+  if (a.outcome?.attendance && ATTENDANCE[a.outcome.attendance]) return ATTENDANCE[a.outcome.attendance]
   if (a.status === 'pending') return a.expired ? { label: 'Link expired', tone: 'red' } : STAGE.pending
   if (a.status === 'cancelled') return STAGE.cancelled
   if (a.status === 'confirmed' || a.confirmed_at) return STAGE.confirmed
@@ -80,15 +89,29 @@ export default function Appointments() {
     if (stage === 'upcoming') return r.upcoming && r.status !== 'cancelled'
     if (stage === 'pending') return r.status === 'pending'
     if (stage === 'past') return r.when && !r.upcoming && r.status !== 'cancelled'
+    if (stage === 'needs_outcome') return r.when && !r.upcoming && r.status !== 'cancelled' && r.status !== 'pending' && !r.outcome?.attendance
     return s.label.toLowerCase() === stage
   }).sort((a, b) => (b.sortAt || 0) - (a.sortAt || 0))
 
   const open = r => navigate(`/leads/${r.lead_id}?tab=overview`)
+  const [saving, setSaving] = useState(null)
+  const [saveErr, setSaveErr] = useState('')
+  async function recordOutcome(r, attendance) {
+    if (!attendance) return
+    setSaving(r.id); setSaveErr('')
+    try {
+      await api.post('/outcomes/', { lead_id: r.lead_id, booking_link_id: r.id, attendance,
+        appointment_date: r.when ? r.when.toISOString() : null })
+      load()
+    } catch (e) { setSaveErr(e.message || 'Could not save the outcome.') }
+    finally { setSaving(null) }
+  }
+  const needsOutcome = r => r.when && !r.upcoming && r.status !== 'cancelled' && r.status !== 'pending' && !r.outcome?.attendance
   const kpis = [
     { label: 'Upcoming appointments', value: data ? data.totals?.upcoming ?? upcoming.length : null, sub: 'Booked or confirmed', go: () => { setView('list'); setStage('upcoming') } },
     { label: 'Awaiting a time', value: data ? awaiting.length : null, sub: 'Link sent, no time picked (30 days)', go: () => { setView('list'); setStage('pending') } },
     { label: 'Confirmed', value: data ? confirmedUp.length : null, sub: 'Upcoming and confirmed', go: () => { setView('list'); setStage('confirmed') } },
-    { label: 'Outcomes needed', value: outcomes, sub: 'Past visits with no outcome', go: () => navigate('/workqueue') },
+    { label: 'Outcomes needed', value: data ? booked.filter(needsOutcome).length : null, sub: 'Past appointments, nothing recorded (30 days)', go: () => { setView('list'); setStage('needs_outcome') } },
   ]
 
   return (
@@ -116,6 +139,7 @@ export default function Appointments() {
       </div>
 
       {error && <div className="act-error" role="alert">{error} <button type="button" className="btn btn--secondary" onClick={load}>Retry</button></div>}
+      {saveErr && <div className="act-error" role="alert">{saveErr}</div>}
       {!data && !error && <div className="empty-state" role="status">Loading appointments…</div>}
 
       {data && view === 'week' && (
@@ -158,7 +182,7 @@ export default function Appointments() {
         <section className="panel appt-list" aria-label="Appointment list">
           <div className="appt-week-head">
             <div className="wq-tabs" role="group" aria-label="Stage">
-              {[['all', 'All'], ['pending', 'Link sent'], ['upcoming', 'Upcoming'], ['confirmed', 'Confirmed'], ['past', 'Past'], ['cancelled', 'Cancelled']].map(([k, l]) => (
+              {[['all', 'All'], ['pending', 'Link sent'], ['upcoming', 'Upcoming'], ['confirmed', 'Confirmed'], ['past', 'Past'], ['needs_outcome', 'Needs outcome'], ['cancelled', 'Cancelled']].map(([k, l]) => (
                 <button key={k} type="button" className={stage === k ? 'on' : ''} aria-pressed={stage === k} onClick={() => setStage(k)}>{l}</button>
               ))}
             </div>
@@ -177,7 +201,16 @@ export default function Appointments() {
                         <td className="appt-nowrap">{r.status === 'pending' ? `Link sent ${fmtFull(parseWhen(r.link_sent_at))}` : fmtFull(r.when)}</td>
                         <td>{r.appointment_type || '—'}</td>
                         <td>{r.advisor_name || '—'}</td>
-                        <td><button type="button" className="btn btn--secondary" onClick={() => open(r)}>Open</button></td>
+                        <td className="appt-nowrap">
+                          {needsOutcome(r) && (
+                            <select className="filter-select" aria-label={`Record outcome for ${r.lead_name || 'this appointment'}`}
+                              defaultValue="" disabled={saving === r.id} onChange={e => recordOutcome(r, e.target.value)}>
+                              <option value="" disabled>Record outcome…</option>
+                              {Object.entries(ATTENDANCE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                            </select>
+                          )}{' '}
+                          <button type="button" className="btn btn--secondary" onClick={() => open(r)}>Open</button>
+                        </td>
                       </tr>
                     )
                   })}

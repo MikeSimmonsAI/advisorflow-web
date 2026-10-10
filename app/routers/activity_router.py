@@ -287,6 +287,8 @@ def activity_feed(
             # The same event as that inbound call: shown once, on the call.
             call["voicemail_received"] = True
             call["has_recording"] = call.get("has_recording") or bool(v.recording_sid or v.recording_url)
+            if v.recording_sid or v.recording_url:
+                call["audio_path"] = "/voicemails/%s/audio" % v.id
             if v.transcript and not call.get("summary"):
                 call["summary"] = _clip(v.transcript)
             continue

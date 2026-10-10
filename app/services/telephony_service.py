@@ -890,7 +890,20 @@ def lead_call_history(db, lead: Lead, limit: int = 50) -> dict:
         v = vm_by_call.get(c.id)
         d["voicemail_id"] = v.id if v else None
         d["voicemail_status"] = v.status if v else None
+        d["voicemail_audio_url"] = _vm_audio(v) if v else None
+        d["voicemail_transcript"] = v.transcript if v else None
+        # The call's own recording, through GET /calls/{id}/audio - offered
+        # only when that route can actually play it (a Twilio recording SID).
+        from app.services import telephony_twilio as _TT
+        d["recording_audio_url"] = ("/calls/%s/audio" % c.id
+                                    if (c.provider or "twilio") == "twilio"
+                                    and _TT.valid_recording_sid(c.recording_sid) else None)
         return d
+
+    def _vm_audio(v):
+        # Only when a recording exists; the path is the authenticated proxy,
+        # never the provider URL.
+        return "/voicemails/%s/audio" % v.id if (v.recording_sid or v.recording_url) else None
 
     return {
         "lead_id": lead.id,
@@ -899,7 +912,8 @@ def lead_call_history(db, lead: Lead, limit: int = 50) -> dict:
                         "duration_seconds": v.duration_seconds,
                         "received_at": iso(v.received_at),
                         "call_id": by_sid.get(v.call_sid) if v.call_sid else None,
-                        "audio_url": "/voicemails/%s/audio" % v.id} for v in vms],
+                        "transcript": v.transcript,
+                        "audio_url": _vm_audio(v)} for v in vms],
         "unreviewed_voicemails": sum(1 for v in vms if v.status == "new"),
     }
 

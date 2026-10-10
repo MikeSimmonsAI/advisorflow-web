@@ -559,6 +559,43 @@ def voicemail_audio(vm_id: str, db: Session = Depends(get_db),
                     headers={"Cache-Control": "private, no-store"})
 
 
+@router.get("/calls/{call_id}/audio")
+def call_recording_audio(call_id: str, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_or_observer)):
+    """A call's recording through the same authenticated proxy as voicemail.
+
+    Authorized through the call's LEAD (lead_scope: same workspace, an advisor
+    only their own leads). Only a Twilio recording SID stored on the call is
+    fetched, server-side, with the owning account's credentials; the URL a
+    provider posted is never fetched or sent to a browser. Anything else - no
+    SID, another provider (e.g. Retell keeps its own) - is an honest 404.
+    """
+    call = db.query(VoiceCall).filter(VoiceCall.id == call_id).first()
+    if call is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    try:
+        lead_scope.load_lead_in_scope(db, user, call.lead_id)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Call not found")
+    if (call.provider or "twilio") != "twilio" or not TT.valid_recording_sid(call.recording_sid):
+        raise HTTPException(status_code=404, detail="No playable recording is stored for this call.")
+    org = db.query(Organization).filter(Organization.id == call.organization_id).first()
+    rec = (db.query(PhoneNumber).filter(PhoneNumber.id == call.phone_number_id).first()
+           if call.phone_number_id else None)
+    level = "organization" if rec is None or rec.organization_id else (
+        "brand" if rec.platform_id else "platform")
+    creds = NR.twilio_credentials(db, org, NR.ResolvedNumber(ok=True, level=level))
+    if not creds:
+        raise HTTPException(status_code=503, detail="The provider account for this recording is not configured.")
+    try:
+        content, ctype = TT.fetch_recording(creds, call.recording_sid)
+    except Exception as exc:                                 # noqa: BLE001
+        log.error("call recording fetch failed for %s: %s", call.id, exc)
+        raise HTTPException(status_code=502, detail="The recording could not be retrieved from the provider.")
+    return Response(content=content, media_type=ctype or "audio/mpeg",
+                    headers={"Cache-Control": "private, no-store"})
+
+
 # ══ number configuration ═════════════════════════════════════════════════════
 
 def _number_out(rec: PhoneNumber) -> dict:

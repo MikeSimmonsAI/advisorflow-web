@@ -757,6 +757,17 @@ def pipeline_appointments(
     advisor_ids = {b.user_id for b, *_ in rows if b.user_id}
     advisors = ({u.id: u.full_name for u in db.query(User).filter(User.id.in_(advisor_ids)).all()}
                 if advisor_ids else {})
+    # The latest outcome recorded against each appointment (LeadOutcome rows
+    # filed with its booking_link_id). None = nothing recorded yet.
+    from app.models.models import LeadOutcome as _LeadOutcome
+    _ids = [b.id for b, *_ in rows]
+    outcome_by_booking = {}
+    if _ids:
+        for o in (db.query(_LeadOutcome).filter(_LeadOutcome.booking_link_id.in_(_ids))
+                  .order_by(_LeadOutcome.created_at.asc()).all()):
+            outcome_by_booking[o.booking_link_id] = {
+                "attendance": o.attendance, "resulted_in_sale": bool(o.resulted_in_sale),
+                "recorded_at": o.created_at.isoformat() + "Z" if o.created_at else None}
     return {
         "items": [{
             "id": b.id, "lead_id": b.lead_id,
@@ -767,6 +778,7 @@ def pipeline_appointments(
             "confirmed_at": b.confirmed_at.isoformat() + "Z" if b.confirmed_at else None,
             "appointment_type": b.appt_label, "advisor_name": advisors.get(b.user_id),
             "upcoming": b.id in up_ids,
+            "outcome": outcome_by_booking.get(b.id),
         } for b, fn, ln, ph in rows],
         "period_days": days,
         "totals": totals,

@@ -599,6 +599,9 @@ COLUMNS_TO_ADD = [
     ("lead_outcomes", "has_insurance_funding", "BOOLEAN"),
     ("lead_outcomes", "is_veteran", "BOOLEAN"),
     ("lead_outcomes", "next_step", "TEXT"),
+    # Appointment attendance (Oct 2026): completed | no_show | cancelled |
+    # follow_up_needed. Nullable, additive; existing rows stay NULL.
+    ("lead_outcomes", "attendance", "VARCHAR"),
     ("users", "booking_page_url", "VARCHAR"),
     ("organizations", "org_address", "VARCHAR"),
     ("organizations", "org_phone", "VARCHAR"),

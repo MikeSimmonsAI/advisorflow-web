@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import { workspaceRole } from '../auth/workspaceAuthority'
 import '../styles/sciWorkspace.css'
+import VoicemailPlayer from '../components/telephony/VoicemailPlayer'
 
 const FEED_LIMIT = 300
 import '../styles/shared.css'
@@ -229,7 +230,7 @@ function ActivityFeed({ navigate }) {
               {i.summary && <div className="act-summary">{i.summary}</div>}
               <div className="act-foot">
                 {i.has_transcript && <span className="act-muted">Transcript on the contact's Calls tab</span>}
-                {i.kind === 'voicemail' && i.has_recording && <span className="act-muted">Recording saved</span>}
+                {i.audio_path && <VoicemailPlayer path={i.audio_path} />}
                 {i.source_label && <span className="act-muted">{i.source_label}</span>}
                 {isAdmin && (
                   <button type="button" className="act-tech" aria-expanded={open === i.id} onClick={() => setOpen(open === i.id ? null : i.id)}>

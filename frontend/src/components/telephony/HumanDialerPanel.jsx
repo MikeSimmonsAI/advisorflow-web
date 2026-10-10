@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import CallButton from './CallButton'
+import VoicemailPlayer from './VoicemailPlayer'
 import { OUTCOMES } from './DispositionModal'
 import './telephony.css'
 
@@ -109,10 +110,12 @@ export default function HumanDialerPanel({ leadId, phone, blockedReason = null, 
       {hist && (hist.calls.length > 0 || hist.voicemails.length > 0) && (
         <ul className="tel-list">
           {/* A voicemail that belongs to a call below is shown on that call, not twice. */}
-          {hist.voicemails.filter(v => v.status === 'new' && !v.call_id).map(v => (
+          {hist.voicemails.filter(v => !v.call_id).map(v => (
             <li key={`vm-${v.id}`}>
-              <span><span className="tel-pill tel-pill--vm">Voicemail</span> {when(v.received_at)}</span>
+              <span><span className="tel-pill tel-pill--vm">{v.status === 'new' ? 'New voicemail' : 'Voicemail'}</span> {when(v.received_at)}</span>
               <span className="tel-meta">{dur(v.duration_seconds) || 'Length unknown'} · from {fmt(v.from_phone) || 'withheld'}</span>
+              {v.transcript && <span className="tel-meta">“{v.transcript}”</span>}
+              {v.audio_url && <VoicemailPlayer path={v.audio_url} />}
             </li>
           ))}
           {hist.calls.slice(0, 8).map(c => (
@@ -130,6 +133,9 @@ export default function HumanDialerPanel({ leadId, phone, blockedReason = null, 
                 {c.from_phone ? ` · from ${fmt(c.from_phone)}` : ''}
               </span>
               {c.disposition_notes && <span className="tel-meta">“{c.disposition_notes}”</span>}
+              {c.voicemail_transcript && <span className="tel-meta">Voicemail: “{c.voicemail_transcript}”</span>}
+              {c.voicemail_audio_url && <VoicemailPlayer path={c.voicemail_audio_url} />}
+              {c.recording_audio_url && <VoicemailPlayer path={c.recording_audio_url} label="Play call recording" />}
             </li>
           ))}
         </ul>
