@@ -90,3 +90,12 @@
 - Next: Lead Command Center widths; production-readiness pack; Wholesale assessment
 - Next check-in by: 08:14 CT
 - Code: desktop/consent-center @ 1345e69f
+
+## 2026-10-10 08:00 CT - SCI + Wholesale - complete
+- Task: Overnight queue complete; waiting on Mike approval gates
+- Done since last check-in: Visual acceptance 75/75; readiness pack; Wholesale 91/91; relay watchdog fix; morning report
+- Tests / progress: SCI candidate 7769/0; Wholesale 533/0 + 91/0; relay 41/0; stall-recovery 10/10
+- Blocker: Approval gates: merge release/sci-lead-workflow and relay/heartbeat-stall to main
+- Next: Mike review
+- Next check-in by: 08:20 CT
+- Code: desktop/consent-center @ 1345e69f

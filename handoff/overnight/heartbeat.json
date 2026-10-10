@@ -1,14 +1,14 @@
 ﻿{
-    "at":  "2026-10-10T07:54:05.9663468-05:00",
-    "project":  "SCI",
-    "task":  "Visual acceptance: 70/70 screen x width checks clean; lead page + re-checks running",
-    "state":  "running",
-    "next_checkin_by":  "2026-10-10T08:14:05.9663468-05:00",
+    "at":  "2026-10-10T08:00:19.0796883-05:00",
+    "project":  "SCI + Wholesale",
+    "task":  "Overnight queue complete; waiting on Mike approval gates",
+    "state":  "complete",
+    "next_checkin_by":  "2026-10-10T08:20:19.0796883-05:00",
     "runner":  "claude-cloud-session (Mike\u0027s Claude app)",
     "branch":  "desktop/consent-center",
     "commit":  "1345e69f",
-    "done":  "Stall-recovery self-test 10/10 PASS; watchdog now writes recovery.json + releases dead lease; watchdog routines at :03/:23/:43 now recover, not just report; queue.md written",
-    "tests":  "15 routes x 5 widths: 0 horizontal overflow, 0 error states, 0 stuck loading",
-    "blocker":  "none",
-    "next":  "Lead Command Center widths; production-readiness pack; Wholesale assessment"
+    "done":  "Visual acceptance 75/75; readiness pack; Wholesale 91/91; relay watchdog fix; morning report",
+    "tests":  "SCI candidate 7769/0; Wholesale 533/0 + 91/0; relay 41/0; stall-recovery 10/10",
+    "blocker":  "Approval gates: merge release/sci-lead-workflow and relay/heartbeat-stall to main",
+    "next":  "Mike review"
 }
