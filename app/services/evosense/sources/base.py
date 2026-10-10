@@ -120,7 +120,8 @@ def ssl_context():
     (taxsales.lgbs.com) send their certificate without the issuing
     intermediate; browsers fetch it on their own, Python does not. So the
     trust store here is the system roots + certifi's roots + the few public
-    intermediates shipped in ./certs. Hostname and chain are still verified."""
+    intermediates shipped in ./certs (public CA certificates as PEM text, named
+    .crt because *.pem is git-ignored to keep private keys out). Hostname and chain are still verified."""
     global _SSL_CTX
     if _SSL_CTX is None:
         import glob
@@ -131,7 +132,7 @@ def ssl_context():
             ctx.load_verify_locations(cafile=certifi.where())
         except Exception:
             pass
-        for pem in sorted(glob.glob(os.path.join(CERT_DIR, "*.pem"))):
+        for pem in sorted(glob.glob(os.path.join(CERT_DIR, "*.crt"))):
             try:
                 ctx.load_verify_locations(cafile=pem)
             except Exception:

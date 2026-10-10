@@ -15,8 +15,16 @@ def test_context_verifies_and_checks_hostname():
 
 
 def test_shipped_intermediate_is_trusted():
-    B._SSL_CTX = None
-    names = [dict(x[0] for x in c["subject"]).get("commonName", "") for c in B.ssl_context().get_ca_certs()]
+    # Checked on a bare context so a machine whose own store already holds the
+    # intermediate (Windows does) cannot hide a missing or unreadable file.
+    import glob
+    import os
+    files = glob.glob(os.path.join(B.CERT_DIR, "*.crt"))
+    assert files, "no shipped intermediates"
+    bare = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    for f in files:
+        bare.load_verify_locations(cafile=f)
+    names = [dict(x[0] for x in c["subject"]).get("commonName", "") for c in bare.get_ca_certs()]
     assert "DigiCert Global G2 TLS RSA SHA256 2020 CA1" in names
 
 
