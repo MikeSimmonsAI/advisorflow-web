@@ -467,6 +467,18 @@ class DcadSource(PublicRecordSource):
     refresh = "Certified roll, refreshed by DCAD through the year"
     freshness_days = 180
     adapter_version = "dcad_certified/2"
+    lookup_capability = C.ASSESSOR
+
+    def applies(self, target):
+        # Lookup by account for a Dallas property another source found.
+        return (target.get("county") or "").lower() == "dallas" and bool(target.get("parcel_apn"))
+
+    def lookup_many(self, targets):
+        from app.services.evosense.sources.dallas import DcadReader
+        by_acct = {(t["parcel_apn"] or "").strip(): t["id"] for t in targets if t.get("parcel_apn")}
+        res = DcadReader().lookup_many(list(by_acct))
+        return {"results": {tid: res["records"].get(a) for a, tid in by_acct.items()},
+                "errors": {}, "stats": res["stats"]}
 
     def search(self, capability, query):
         from app.services.evosense.sources.dallas import DcadReader
@@ -587,6 +599,50 @@ class Dallas311Source(PublicRecordSource):
         return {"rows": len(rows)}
 
 
+class LgbsTaxSaleSource(PublicRecordSource):
+    scope, counties = "county", ("Dallas", "Tarrant", "Collin", "Denton", "Ellis", "Kaufman",
+                                 "Rockwall", "Parker", "Johnson")
+    key = "lgbs_tax_sales"
+    label = "Tax-foreclosure lawsuits & sales (Linebarger)"
+    capabilities = (C.TAX,)
+    discovery = True
+    coverage = ("North Texas counties - properties taken to judgment for unpaid property tax and "
+                "listed for the county tax sale (owner still holds title)")
+    jurisdiction = "Dallas, Tarrant and nearby counties, TX"
+    source_type = "Taxing units' delinquent-tax attorneys - public sale list"
+    access_method = "Public JSON list (taxsales.lgbs.com), a few paged requests per hunt"
+    public_url = "https://taxsales.lgbs.com/"
+    refresh = "Updated by the firm as suits, judgments and sales change"
+    freshness_days = 14
+    adapter_version = "lgbs_tax_sales/1"
+    terms_note = ("Public list published by the taxing units' attorneys; robots.txt allows all agents. "
+                  "Struck-off, sold and cancelled rows are skipped - only properties the owner still holds.")
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.lgbs import COUNTIES, LgbsTaxSaleReader
+        out = Records()
+        states = [s.upper() for s in query.get("states") or []]
+        if states and "TX" not in states:
+            out.stats = {"skipped": "strategy is not in Texas"}
+            return out
+        wanted = [c for c in _county(query) if c in COUNTIES] if _county(query) else list(COUNTIES)
+        if not wanted:
+            out.stats = {"skipped": "strategy counties are outside the tax-sale list's coverage"}
+            return out
+        res = LgbsTaxSaleReader().discover(limit=int(query.get("limit") or 25), counties=wanted)
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.lgbs import API
+        j = SB_.get_json(API, {"county": "DALLAS COUNTY", "state": "TX", "limit": 1})
+        if not isinstance(j, dict) or "count" not in j:
+            raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "taxsales.lgbs.com did not return a count")
+        return {"dallas_listed": j["count"]}
+
+
 class ManualOnlySource(AcquisitionProvider):
     """A real source EvoSense will not automate (no free bulk export, or a
     portal behind search forms / CAPTCHA). Fed through manual entry or CSV."""
@@ -668,7 +724,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
     TarrantTaxRollSource(), TadSource(), DcadSource(), CensusGeocoderSource(),
-    FortWorthCodeSource(), Dallas311Source(),
+    FortWorthCodeSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(),
 )}
