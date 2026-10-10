@@ -1,14 +1,14 @@
 ﻿{
-    "at":  "2026-10-10T08:31:59.8441228-05:00",
-    "project":  "SCI",
-    "task":  "Visual acceptance of screens",
-    "state":  "active",
-    "next_checkin_by":  "2026-10-10T08:51:59.8441228-05:00",
+    "at":  "2026-10-10T08:48:49.7788920-05:00",
+    "project":  "Overnight",
+    "task":  "Shift complete; waiting on Mike\u0027s decisions",
+    "state":  "complete",
+    "next_checkin_by":  "2026-10-10T18:48:49.7788920-05:00",
     "runner":  "claude-cloud-session (Mike\u0027s Claude app)",
     "branch":  "desktop/consent-center",
     "commit":  "1345e69f",
-    "done":  "No new test results; all suites done (SCI 7769/0, Wholesale 533/0, Workforce 266/0)",
-    "tests":  "unchanged",
-    "blocker":  "Old Chrome tabs frozen; opened a fresh tab to retry",
-    "next":  "Screenshots of 14 screens at 5 widths; then morning report"
+    "done":  "70/70 screen checks at 1600/1440/1280/768/390; morning report addendum; readiness pack corrected (one added column)",
+    "tests":  "SCI 7769/0; Wholesale 533/0 + 91/0; AI Workforce 266/0; relay 41/0",
+    "blocker":  "Approval gates only (merges to main)",
+    "next":  "Mike review"
 }
