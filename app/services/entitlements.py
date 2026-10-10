@@ -594,6 +594,14 @@ def require_feature(key: str):
         if getattr(user, "role", None) == "god_admin":
             return user
 
+        # EVOSYS WHOLESALE IS FOR NAMED LOGINS (product_access). Once any login
+        # has been named, a workspace entitlement alone is not enough.
+        if key == "wholesale_real_estate":
+            from app.services import product_access as _pa
+            if not _pa.may_use(db, user, _pa.WHOLESALE):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                    detail="EvoSys Wholesale is limited to named logins.")
+
         # WHICH CUSTOMER'S ENTITLEMENT — THE ONE SEAM, NOT A SECOND ONE.
         #
         # This read `users.organization_id` directly, which was the whole

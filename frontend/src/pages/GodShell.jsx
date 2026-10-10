@@ -158,6 +158,8 @@ const NAV = [
     hint: 'One row per human, every context they hold' },
   { label: 'Manage Access',    path: '/god/access',           icon: 'shield',
     hint: 'Open a person: brands, workspaces, demo, training — corrected in place' },
+  { label: 'SCI & Wholesale Access', path: '/god/access-setup', icon: 'shield',
+    hint: 'Put SCI under a login; name who may use EvoSys Wholesale' },
   { label: 'Feature Entitlements', path: '/god/entitlements', icon: 'toggle',
     hint: 'Platform → brand → organization → workspace → role feature access' },
   // Implementations is the handoff that follows a won customer; Customer
