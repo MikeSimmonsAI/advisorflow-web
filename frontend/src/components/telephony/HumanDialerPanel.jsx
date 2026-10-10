@@ -11,7 +11,7 @@
 //   Next call                   GET /dialer/queue - the user's callable leads,
 //                               already filtered by DNC / suppression / consent.
 // Nothing here invents a status: an empty history says so.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import CallButton from './CallButton'
@@ -45,16 +45,23 @@ function callTitle(c) {
   return `${dir}${how}`
 }
 
-export default function HumanDialerPanel({ leadId, phone }) {
+// blockedReason: when set (an internal test record), no call control is
+//   offered at all - the reason is shown in its place.
+// compact: the Lead Command Center's Calls tab; drops the queue-exclusion note.
+// onHistory: hands the loaded history to the page (voicemail count) so it is
+//   fetched once, not twice.
+export default function HumanDialerPanel({ leadId, phone, blockedReason = null, compact = false, onHistory }) {
   const nav = useNavigate()
   const [ident, setIdent] = useState(null)
   const [hist, setHist] = useState(null)
   const [queue, setQueue] = useState(null)
   const [err, setErr] = useState('')
+  const onHistoryRef = useRef(onHistory)
+  useEffect(() => { onHistoryRef.current = onHistory }, [onHistory])
 
   const loadHist = useCallback(() => {
     if (!leadId) return
-    api.get(`/dialer/leads/${leadId}/history`).then(setHist).catch(e => setErr(e.message || 'History unavailable.'))
+    api.get(`/dialer/leads/${leadId}/history`).then(h => { setHist(h); onHistoryRef.current?.(h) }).catch(e => setErr(e.message || 'History unavailable.'))
   }, [leadId])
 
   const loadQueue = useCallback(() => {
@@ -83,7 +90,9 @@ export default function HumanDialerPanel({ leadId, phone }) {
         <dd className={pub?.ok ? '' : 'tel-missing'}>{ident == null ? '…' : pub?.ok ? fmt(pub.e164) : 'Not configured'}</dd>
       </dl>
 
-      <CallButton leadId={leadId} phone={phone} onDone={() => { loadHist(); loadQueue() }} />
+      {blockedReason
+        ? <div className="tel-box tel-box--error" role="note" data-testid="dialer-blocked">{blockedReason}</div>
+        : <CallButton leadId={leadId} phone={phone} onDone={() => { loadHist(); loadQueue() }} />}
 
       <div className="tel-subhead">
         <span>Call history</span>
@@ -140,7 +149,7 @@ export default function HumanDialerPanel({ leadId, phone }) {
           ))}
         </ul>
       )}
-      {queue?.excluded?.length > 0 && (
+      {!compact && queue?.excluded?.length > 0 && (
         <p className="tel-note">
           Not in the queue: {queue.excluded.map(e => `${e.count} · ${e.reason.replace(/\.$/, '')}`).join('; ')}
         </p>

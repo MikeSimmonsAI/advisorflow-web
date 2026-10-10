@@ -8,7 +8,7 @@
 //
 // The Smart Composer drafts; it never sends. "Use" hands the draft to the
 // page's own composer, which applies every send gate.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { asUtc } from '../pages/sales/calendarTime'
 import './ConversationBrain.css'
@@ -52,7 +52,10 @@ function Section({ title, count, children, defaultOpen = true }) {
   )
 }
 
-export default function ConversationBrain({ leadId, onUseDraft, defaultChannel = 'sms', compact = false }) {
+// onContext: the page's own copy of the read (who owns the conversation, next
+//   best action) so its header and summary need no second request.
+// outreachBlocked: a reason (internal test record) - "Resume AI" is not offered.
+export default function ConversationBrain({ leadId, onUseDraft, defaultChannel = 'sms', compact = false, onContext, outreachBlocked = null }) {
   const [ctx, setCtx] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -61,12 +64,15 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
   const [draftText, setDraftText] = useState('')
   const [note, setNote] = useState('')
   const [actionNote, setActionNote] = useState('')
+  const onContextRef = useRef(onContext)
+  useEffect(() => { onContextRef.current = onContext }, [onContext])
+  const publish = (c) => { setCtx(c); onContextRef.current?.(c) }
 
   const load = useCallback(async () => {
     setError(null)
     try {
       const c = await api.get(`/conversation-intel/leads/${leadId}`)
-      setCtx(c)
+      publish(c)
       // Draft on a channel we may actually use: no SMS consent means email.
       if (c?.consent && !c.consent.sms && c.consent.email) setChannel('email')
     }
@@ -76,7 +82,7 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
 
   async function setMode(mode) {
     setBusy(true)
-    try { setCtx(await api.post(`/conversation-intel/leads/${leadId}/mode`, { mode })); setActionNote('') }
+    try { publish(await api.post(`/conversation-intel/leads/${leadId}/mode`, { mode })); setActionNote('') }
     catch (e) { setActionNote(e?.message || 'Could not change who is handling this conversation.') }
     finally { setBusy(false) }
   }
@@ -98,7 +104,7 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
   }
   async function resolveItem(id) {
     setBusy(true)
-    try { setCtx(await api.post(`/conversation-intel/leads/${leadId}/memory/${id}/resolve`, {})) }
+    try { publish(await api.post(`/conversation-intel/leads/${leadId}/memory/${id}/resolve`, {})) }
     catch (e) { setActionNote(e?.message || 'Could not update that item.') }
     finally { setBusy(false) }
   }
@@ -157,7 +163,8 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
           <div className="cb-actions">
             {st.mode !== 'human_active'
               ? <button type="button" className="btn btn--secondary cb-btn" disabled={busy} onClick={() => setMode('human_active')}>Take over</button>
-              : <button type="button" className="btn btn--secondary cb-btn" disabled={busy} onClick={() => setMode('ai_active')}>Resume AI</button>}
+              : <button type="button" className="btn btn--secondary cb-btn" disabled={busy || Boolean(outreachBlocked)}
+                  title={outreachBlocked || undefined} onClick={() => setMode('ai_active')}>Resume AI</button>}
             {st.mode !== 'ai_paused' && st.mode !== 'human_active' &&
               <button type="button" className="btn btn--secondary cb-btn" disabled={busy} onClick={() => setMode('ai_paused')}>Pause AI</button>}
             <button type="button" className="btn btn--secondary cb-btn" disabled={busy} onClick={createTask}>Create task</button>
@@ -166,6 +173,7 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
               of the panel, below the composer - "Task created" was off screen. */}
           {actionNote && <div className="cb-small cb-muted" role="status">{actionNote}</div>}
           {st.mode_reason && st.mode === 'human_active' && <div className="cb-muted cb-small">{st.mode_reason}</div>}
+          {outreachBlocked && <div className="cb-muted cb-small">{outreachBlocked} The AI can draft, but nothing is sent.</div>}
 
           {ctx.summary?.what_they_want && (
             <div className="cb-want"><span className="cb-k">What they want</span> {ctx.summary.what_they_want}</div>

@@ -3,7 +3,6 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
 import { workspaceRole } from '../auth/workspaceAuthority'
 import { TierBadge, StatusBadge } from '../components/StatusBadge'
-import SignalPulse from '../components/SignalPulse'
 import OutcomeTracker from '../components/OutcomeTracker'
 import CaseFile from './CaseFile'
 import { useToast } from '../components/Toast'
@@ -15,6 +14,7 @@ import HumanDialerPanel from '../components/telephony/HumanDialerPanel'
 import ConversationBrain from '../components/ConversationBrain'
 import '../styles/shared.css'
 import './LeadDetail.css'
+import './LeadCommandCenter.css'
 
 const QUALITY_COLOR = { hot: 'red', warm: 'amber', cold: 'blue', dead: 'neutral-dim', unknown: 'neutral' }
 
@@ -387,66 +387,47 @@ function CadencePanel({ cadence, loading }) {
 
 // ConversationBubble is a proper sub-component (not inline in .map)
 // so useState hooks are always called at the top level — no rules-of-hooks violations.
+//
+// Every message says which way it went and on which channel, in words: an
+// advisor must never have to infer direction from which side a bubble sits on.
+const CHANNEL_WORD = { sms: 'text', email: 'email', cadence: 'cadence', voice: 'call' }
+
+function fullWhen(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(asUtc(dateStr))
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, {
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  })
+}
+
 function ConversationBubble({ event: e }) {
   const [expanded, setExpanded] = useState(false)
 
   // Prefer body; fall back to body_preview for email messages
   const rawText = (e.body || e.body_preview || '').trim()
-  const THRESHOLD = 120
+  const THRESHOLD = 240
   const isLong = rawText.length > THRESHOLD
   const displayText = isLong && !expanded ? rawText.slice(0, THRESHOLD) + '…' : rawText
+  const dir = e.type === 'inbound' ? 'Inbound' : e.type === 'outbound' ? 'Outbound' : 'System'
+  const chan = CHANNEL_WORD[e.channel] || e.channel || ''
 
   return (
-    <div className={[
-      'lead-bubble',
-      `lead-bubble--${e.type}`,
-      e.channel === 'email'   ? 'lead-bubble--email'  : '',
-      e.channel === 'cadence' ? 'lead-bubble--system' : '',
-    ].join(' ').trim()}>
-      {e.type === 'inbound' && e.is_hot && (
-        <div className="lead-bubble-hot">
-          <SignalPulse color="red" size={6} /> Hot reply
-        </div>
-      )}
-
-      {/* Header row: channel icon + subject + timestamp on same line */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        {e.channel && e.channel !== 'sms' && (
-          <span className="lead-bubble-channel">
-            {e.channel === 'email' ? '✉️' : e.channel === 'cadence' ? '🔁' : e.channel}
-          </span>
-        )}
-        {e.subject && (
-          <span style={{
-            fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)',
-            flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {e.subject}
-          </span>
-        )}
-        <span className="lead-bubble-time">{timeAgo(e.timestamp)}</span>
+    <div className={`lcc-msg lcc-msg--${e.type || 'system'}${e.channel === 'email' ? ' lcc-msg--email' : ''}`}>
+      <div className="lcc-msg-meta">
+        <span className="lcc-msg-dir">{dir}{chan ? ` ${chan}` : ''}</span>
+        {e.type === 'inbound' && e.is_hot && <span className="lcc-chip lcc-chip--red">Hot reply</span>}
+        <time dateTime={asUtc(e.timestamp) || undefined} title={fullWhen(e.timestamp)}>{timeAgo(e.timestamp)}</time>
       </div>
-
-      {/* Message body */}
+      {e.subject && <div className="lcc-msg-subject">{e.subject}</div>}
       {rawText ? (
-        <p className="lead-bubble-text" style={{ margin: 0 }}>{displayText}</p>
+        <p className="lcc-msg-text">{displayText}</p>
       ) : (
-        <p className="lead-bubble-text" style={{ margin: 0, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
-          {e.subject ? '(email — no body preview)' : '(no message body)'}
-        </p>
+        <p className="lcc-msg-text lcc-muted"><em>{e.subject ? '(email — no body preview)' : '(no message body)'}</em></p>
       )}
-
       {e.type === 'outbound' && <DeliveryChip delivery={e.delivery} />}
-
       {isLong && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          style={{
-            fontSize: 11, color: 'var(--accent)', background: 'none',
-            border: 'none', cursor: 'pointer', padding: '2px 0', marginTop: 2,
-          }}
-        >
-          {expanded ? 'Show less ▲' : 'Show more ▼'}
+        <button type="button" className="lcc-linkbtn" onClick={() => setExpanded(!expanded)}>
+          {expanded ? 'Show less' : 'Show more'}
         </button>
       )}
     </div>
@@ -508,6 +489,24 @@ export default function LeadDetail() {
   const [activity, setActivity] = useState(null)
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
+  // Command center: Conversation Brain's state (owner, next best action), the
+  // dialer's call + voicemail history, and view-only filters.
+  const [brainCtx, setBrainCtx] = useState(null)
+  const [dialerHist, setDialerHist] = useState(null)
+  const [convFilter, setConvFilter] = useState('all')
+  const [historyQuery, setHistoryQuery] = useState('')
+  const [activityKind, setActivityKind] = useState('all')
+  const [menu, setMenu] = useState(null)
+  const [showDiag, setShowDiag] = useState(false)
+  const composerRef = useRef(null)
+  useEffect(() => {
+    if (!menu) return undefined
+    const onKey = (e) => { if (e.key === 'Escape') setMenu(null) }
+    const onDown = (e) => { if (!e.target.closest || !e.target.closest('.lcc-menu-wrap')) setMenu(null) }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onDown)
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDown) }
+  }, [menu])
   const location = useLocation()
   // ?tab=timeline|calls|conversation opens that tab (the Sales Board links to ?tab=timeline).
   const [activeTab, setActiveTab] = useState(() => leadDetailTabFromSearch(location.search)) // 'conversation' | 'calls' | 'timeline'
@@ -940,97 +939,6 @@ export default function LeadDetail() {
     }
   }
 
-  async function handleMediaUpload(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setMediaUploading(true)
-    setMediaError('')
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const result = await api.upload('/sms/upload-media', formData)
-      setMediaUrl(result.media_url)
-      setMediaFileName(result.filename)
-    } catch (err) {
-      setMediaError(err.message || 'Upload failed')
-    } finally {
-      setMediaUploading(false)
-      if (mediaInputRef.current) mediaInputRef.current.value = ''
-    }
-  }
-
-  function handleRemoveMedia() {
-    setMediaUrl('')
-    setMediaFileName('')
-    setMediaError('')
-  }
-
-  async function handleSend() {
-    if (!messageText.trim() || sending) return   // guards double submit
-    setSending(true)
-    setSendError('')
-    try {
-      if (mediaUrl) {
-        // Send as MMS with media attachment
-        await api.post('/sms/send-mms', {
-          lead_id: leadId,
-          template: messageText,
-          media_url: mediaUrl,
-          include_booking_link: includeBookingLink,
-        })
-        setMediaUrl('')
-        setMediaFileName('')
-      } else {
-        await api.post('/sms/send', {
-          lead_id: leadId,
-          template: messageText,
-          include_booking_link: includeBookingLink,
-        })
-      }
-      setMessageText('')
-      load()
-    } catch (err) {
-      setSendError(err.message)
-    } finally {
-      setSending(false)
-    }
-  }
-
-  async function handleSendEmail() {
-    if (!emailBody.trim() || sendingEmail) return   // guards double submit
-    setSendingEmail(true)
-    setSendError('')
-    try {
-      if (emailAttachment) {
-        // Use multipart endpoint when an attachment is present
-        const formData = new FormData()
-        formData.append('subject', emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track, orgName))
-        formData.append('body_html', emailBody)
-        formData.append('include_booking_link', includeBookingLink ? 'true' : 'false')
-        if (apptLabel) formData.append('appt_label', apptLabel)
-        formData.append('file', emailAttachment)
-        await api.upload(`/email/send-with-attachment/${leadId}`, formData)
-        setEmailAttachment(null)
-        if (emailAttachRef.current) emailAttachRef.current.value = ''
-      } else {
-        await api.post(`/email/send/${leadId}`, {
-          subject: emailSubject || smartSubject(lead?.first_name, lead?.tier, lead?.message_track, orgName),
-          body: emailBody,
-          include_booking_link: includeBookingLink,
-          appt_label: apptLabel,
-        })
-      }
-      setEmailSubject('')
-      setEmailBody('')
-      setEmailDraftReady(false)
-      load()
-    } catch (err) {
-      setSendError(err.message)
-    } finally {
-      setSendingEmail(false)
-    }
-  }
-
   async function handleRunAnalysis() {
     setAnalyzing(true)
     setAnalysisError('')
@@ -1092,7 +1000,7 @@ export default function LeadDetail() {
     loadActivity(false)
   }
 
-  if (loading) return <div className="empty-state" style={{ marginTop: 40 }}>Loading lead…</div>
+  if (loading && !data) return <div className="empty-state" style={{ marginTop: 40 }} role="status">Loading contact…</div>
   if (!data) return (
     <div className="empty-state" style={{ marginTop: 40 }}>
       <div>Couldn't load this lead.</div>
@@ -1116,6 +1024,16 @@ export default function LeadDetail() {
   })
   const wholesaleLinks = composeCtx?.wholesale || []
 
+  // ── INTERNAL TEST RECORD ──────────────────────────────────────────────────
+  //
+  // A test record (Lead.is_test, app/services/test_records.py) gets NO outbound
+  // control on this screen: text, email, click-to-call, AI voice, AI
+  // conversation, cadence and booking links are all switched off here, with one
+  // reason, before anyone presses anything. The server's own gates still apply
+  // underneath; this is so no button is offered that should not be pressed.
+  const isTest = Boolean(lead.is_test)
+  const TEST_REASON = 'Internal test record — excluded from all outreach.'
+
   // ── CHANNEL CAPABILITY ────────────────────────────────────────────────────
   //
   // Each channel depends only on what THAT channel needs. A lead with a phone
@@ -1125,14 +1043,14 @@ export default function LeadDetail() {
   // page still works if the endpoint is unreachable.
   const ch = composeCtx?.channels
   const notBlocked = lead.status !== 'dnc' && !lead.is_duplicate
-  const canSendSMS   = ch ? ch.sms.available   : Boolean(lead.phone && notBlocked)
-  const canSendEmail = ch ? ch.email.available : Boolean(lead.email && notBlocked)
-  const canSendBoth  = ch ? ch.both.available  : (canSendSMS && canSendEmail)
-  const canVoice     = ch ? ch.voice.available
-                          : Boolean(lead.phone && notBlocked)
-  const smsBlockedReason   = ch ? ch.sms.reason : null
-  const emailBlockedReason = ch ? ch.email.reason : 'This lead has no email address.'
-  const voiceBlockedReason = (voiceReadiness && !voiceReadiness.ready)
+  const canSendSMS   = !isTest && (ch ? ch.sms.available   : Boolean(lead.phone && notBlocked))
+  const canSendEmail = !isTest && (ch ? ch.email.available : Boolean(lead.email && notBlocked))
+  const canSendBoth  = !isTest && (ch ? ch.both.available  : (canSendSMS && canSendEmail))
+  const canVoice     = !isTest && (ch ? ch.voice.available
+                          : Boolean(lead.phone && notBlocked))
+  const smsBlockedReason   = isTest ? TEST_REASON : (ch ? ch.sms.reason : null)
+  const emailBlockedReason = isTest ? TEST_REASON : (ch ? ch.email.reason : 'This lead has no email address.')
+  const voiceBlockedReason = isTest ? TEST_REASON : (voiceReadiness && !voiceReadiness.ready)
     ? voiceReadiness.reason
     : (ch ? ch.voice.reason : null)
   const smsSender = composeCtx?.sms_sender || null
@@ -1195,1195 +1113,839 @@ export default function LeadDetail() {
     }
   }
 
-  return (
-    <div className="lead-detail-page">
-      <button className="lead-detail-back" onClick={() => navigate('/leads')}>
-        ← Back to leads
-      </button>
-      {deleteLeadErr && (
-        <div role="alert" data-testid="lead-delete-error"
-             style={{ margin: '8px 0', padding: '10px 14px', borderRadius: 8, background: 'var(--signal-red-dim)', color: 'var(--text-primary)', border: '1px solid var(--border-danger)' }}>
-          {deleteLeadErr}
+  // ── COMMAND CENTER VIEW MODEL ─────────────────────────────────────────────
+  // Everything below is read from data this page already loads. Nothing is
+  // invented: an unknown value says so.
+  const fullName = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'Unnamed contact'
+  const brainState = brainCtx?.state || {}
+  const humanActive = brainState.mode === 'human_active'
+  const nba = brainCtx?.next_best_action || null
+  const lastInbound = [...events].reverse().find((e) => e.type === 'inbound') || null
+  const lastEvent = [...events].reverse().find((e) => e.type === 'inbound' || e.type === 'outbound') || null
+  const inboundVoicemails = dialerHist?.voicemails || []
+  const latestVoicemail = inboundVoicemails[0] || null
+  const assignedUser = assignableUsers.find((u) => u.id === lead.assigned_to_id)
+  const assignedLabel = !lead.assigned_to_id ? 'Unassigned'
+    : lead.assigned_to_id === currentUser?.id ? 'You'
+    : (assignedUser?.full_name || 'Another advisor')
+  const sourceLabel = lead.source_detail || lead.import_list_name || lead.source || null
+  let customFields = {}
+  try { customFields = lead.custom_fields ? JSON.parse(lead.custom_fields) : {} } catch { customFields = {} }
+  const locationLabel = customFields.location || customFields.location_name || customFields.funeral_home
+    || customFields.facility || customFields.campus || null
+  const canBookLink = !isTest && wholesaleLinks.length === 0 && Boolean(lead.email) && canSendEmail
+  const bookBlockedReason = isTest ? TEST_REASON
+    : wholesaleLinks.length > 0 ? 'Sellers are scheduled by a person, not sent a booking link.'
+    : !lead.email ? 'Booking links go by email, and this contact has no email address.'
+    : !canSendEmail ? (emailBlockedReason || 'Email is not available for this contact.') : null
+  const aiStartBlockedReason = isTest ? TEST_REASON
+    : humanActive ? 'A person is handling this conversation. Use “Resume AI” in Conversation Brain to hand it back first.'
+    : null
+
+  const readiness = [
+    { key: 'email', label: 'Email', ok: canSendEmail, why: emailBlockedReason },
+    { key: 'sms', label: 'Text', ok: canSendSMS, why: smsBlockedReason },
+    { key: 'voice', label: 'Voice', ok: canVoice, why: voiceBlockedReason },
+  ]
+  const readyCount = readiness.filter((r) => r.ok).length
+  const missingContact = !lead.phone && !lead.email
+
+  const bookingLabel = !booking ? (wholesaleLinks.length ? 'By a person' : 'None')
+    : booking.status === 'booked' ? 'Booked'
+    : booking.status === 'pending' ? 'Pending'
+    : booking.status === 'cancelled' ? 'Cancelled'
+    : booking.status === 'expired' ? 'Expired'
+    : String(booking.status || 'Unknown')
+  const bookingSub = !booking ? (wholesaleLinks.length ? 'Seller is scheduled by hand' : 'No link sent yet')
+    : booking.status === 'booked' && booking.booked_time ? new Date(booking.booked_time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : booking.status === 'pending' ? 'Link sent; waiting for a time'
+    : booking.status === 'cancelled' ? 'Send a new link to reschedule'
+    : `Link sent ${timeAgo(booking.created_at)}`
+
+  const filteredEvents = convFilter === 'all' ? events : events.filter((e) => e.channel === convFilter)
+  const filteredKeys = convFilter === 'all' ? eventKeys : eventKeys.filter((_, i) => events[i].channel === convFilter)
+  const historyRows = [...events].reverse().filter((e) => {
+    const q = historyQuery.trim().toLowerCase()
+    if (!q) return true
+    return [e.subject, e.body, e.body_preview, e.channel, e.type].filter(Boolean).join(' ').toLowerCase().includes(q)
+  })
+  const ACTIVITY_KINDS = {
+    all: { label: 'All', test: () => true },
+    messages: { label: 'Messages', test: (t) => /^(sms|email)/.test(t) },
+    booking: { label: 'Booking', test: (t) => t.startsWith('booking') },
+    automation: { label: 'AI & cadence', test: (t) => t.startsWith('cadence') || t.startsWith('ai') },
+    consent: { label: 'Consent & flags', test: (t) => /dnc|consent|suppress|flag|opt/.test(t) },
+    other: { label: 'Other', test: (t) => !/^(sms|email|booking|cadence|ai)|dnc|consent|suppress|flag|opt/.test(t) },
+  }
+  const activityRows = activity?.events
+    ? [...activity.events].reverse().filter((ev) => ACTIVITY_KINDS[activityKind].test(String(ev.type || '')))
+    : []
+  const aiCalls = data?.voice_calls || []
+
+  function openTab(t) {
+    setActiveTab(t)
+    const params = new URLSearchParams(location.search)
+    params.set('tab', t)
+    navigate({ search: `?${params.toString()}` }, { replace: true })
+  }
+  function focusComposer() {
+    openTab('conversation')
+    setTimeout(() => {
+      const box = composerRef.current?.querySelector('textarea')
+      if (box) { box.scrollIntoView({ behavior: 'smooth', block: 'center' }); box.focus() }
+    }, 60)
+  }
+  function goBack() {
+    if (window.history.state && window.history.state.idx > 0) navigate(-1)
+    else navigate('/leads')
+  }
+  async function headerBook() {
+    if (booking?.status === 'booked') { setShowCaseFile(true); return }
+    if (!canBookLink) return
+    if (!window.confirm(`Email a booking link to ${lead.first_name || 'this contact'} at ${lead.email}?`)) return
+    handleResendBookingLink()
+  }
+  function openEdit() {
+    setEditForm({ first_name: lead.first_name || '', last_name: lead.last_name || '', phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '', street_address: lead.street_address || '', city: lead.city || '', state: lead.state || '', zip_code: lead.zip_code || '', relationship_type: lead.relationship_type || 'cold_lead' })
+    setEditError('')
+    setShowEdit(true)
+    setMenu(null)
+    openTab('overview')
+  }
+
+  const TABS = [
+    ['conversation', 'Conversation', events.length || null],
+    ['calls', 'Calls', (aiCalls.length + (dialerHist?.calls?.length || 0)) || null],
+    ['activity', 'Activity', activity?.event_count || null],
+    ['history', 'History', null],
+    ['overview', 'Overview', null],
+  ]
+
+  // The tone + direction + suggest controls, shared by the text and email composers.
+  const aiAssist = (onSuggest, label) => (
+    <details className="lcc-assist">
+      <summary>AI assist <span className="lcc-muted">· {currentTone.label} tone</span></summary>
+      <div className="lcc-assist-body">
+        <div className="lead-tone-pills" role="group" aria-label="Message tone">
+          {TONES.map((t, i) => (
+            <button key={t.key} type="button"
+              className={`lead-tone-pill ${tone === i ? 'lead-tone-pill--active' : ''}`}
+              style={tone === i ? { borderColor: t.color, color: t.color, background: `${t.color}18` } : {}}
+              onClick={() => setTone(i)} title={t.desc} aria-pressed={tone === i}
+            >{t.label}</button>
+          ))}
         </div>
+        <input className="compose-subject" aria-label="AI direction" placeholder={aiDirectionHint}
+          value={aiDirection} onChange={(e) => setAiDirection(e.target.value)} />
+        <div className="lead-compose-suggest">
+          <button type="button" className="btn btn--secondary" onClick={onSuggest} disabled={suggestingReply}>
+            {suggestingReply ? 'Drafting…' : label}
+          </button>
+          <span className="lead-compose-hint">AI fills the box. You edit and send.</span>
+        </div>
+      </div>
+    </details>
+  )
+
+  return (
+    <div className="lcc" data-testid="lead-command-center">
+      <nav className="lcc-crumbs" aria-label="Breadcrumb">
+        <button type="button" className="lcc-linkbtn" onClick={goBack}>← Leads</button>
+        <span aria-hidden="true">›</span>
+        <span>{fullName}</span>
+        {orgName && <span className="lcc-crumb-org">· {orgName}</span>}
+      </nav>
+      {deleteLeadErr && (
+        <div role="alert" data-testid="lead-delete-error" className="lcc-alert lcc-alert--red">{deleteLeadErr}</div>
       )}
 
-      <div className="lead-detail-hero">
-        <div className="lead-detail-hero-left">
-          <div className="lead-detail-avatar">{initials}</div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <h1 className="lead-detail-name">{lead.first_name} {lead.last_name}</h1>
-              <button
-                className="btn btn--secondary btn--sm"
-                style={{ fontSize: 11, padding: '3px 10px' }}
-                onClick={() => {
-                  setEditForm({ first_name: lead.first_name || '', last_name: lead.last_name || '', phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '', street_address: lead.street_address || '', city: lead.city || '', state: lead.state || '', zip_code: lead.zip_code || '', relationship_type: lead.relationship_type || 'cold_lead' })
-                  setEditError('')
-                  setShowEdit(e => !e)
-                }}
-              >
-                {showEdit ? '✕ Cancel' : '✏️ Edit'}
-              </button>
-              {/* Flag / Unflag button */}
-              {lead.manual_flag ? (
-                <button
-                  className="btn btn--ghost btn--sm"
-                  style={{ fontSize: 11, padding: '3px 10px', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.35)' }}
-                  onClick={() => handleFlagLead(null)}
-                  disabled={flagging}
-                  title="Unflag — restore to all lists"
-                >
-                  ⚑ Unflag
-                </button>
-              ) : (
-                <select aria-label="Flag this lead"
-                  style={{ fontSize: 11, padding: '3px 8px', cursor: 'pointer', color: 'var(--text-secondary)', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 6 }}
-                  defaultValue=""
-                  onChange={(e) => { if (e.target.value) { handleFlagLead(e.target.value); e.target.value = '' } }}
-                  disabled={flagging}
-                  title="Flag this contact"
-                >
-                  <option value="" disabled>⚑ Flag</option>
-                  <option value="bad_email">⚠ Bad email</option>
-                  <option value="remove_all">⛔ Remove from all outreach</option>
-                </select>
-              )}
-              <button
-                className="btn btn--ghost btn--sm"
-                style={{ fontSize: 11, padding: '3px 10px', color: '#c62828', border: '1px solid rgba(198,40,40,0.4)' }}
-                onClick={handleDeleteThisLead}
-                disabled={deletingLead}
-                data-testid="lead-detail-delete"
-                title="Permanently delete this lead"
-              >
-                {deletingLead ? 'Deleting…' : '🗑 Delete'}
-              </button>
-              {editSuccess && <span style={{ fontSize: 12, color: 'var(--signal-green)' }}>✓ Saved</span>}
+      {/* ── HEADER: identity, state, owner, actions ── */}
+      <header className="lcc-card lcc-head">
+        <div className="lcc-id">
+          <div className="lcc-avatar" aria-hidden="true">{initials}</div>
+          <div className="lcc-id-text">
+            <div className="lcc-name-row">
+              <h1 className="lcc-name">{fullName}</h1>
+              {editSuccess && <span className="lcc-chip lcc-chip--green" role="status">Saved</span>}
             </div>
-            <div className="lead-detail-contact">
-              {lead.phone && <span className="mono">📱 {formatPhone(lead.phone)}</span>}
-              {lead.email && <span className="mono">✉️ {lead.email}</span>}
-              {(lead.city || lead.street_address) && (
-                <span className="mono" style={{ color: 'var(--text-secondary)' }}>
-                  📍 {[lead.street_address, lead.city, lead.state, lead.zip_code].filter(Boolean).join(', ')}
-                </span>
+            <div className="lcc-contact">
+              {lead.phone && <span>☎ {formatPhone(lead.phone)}</span>}
+              {lead.callback_phone && lead.callback_phone !== lead.phone && (
+                <span title="Callback number the contact gave">↩ {formatPhone(lead.callback_phone)}</span>
               )}
+              {lead.email && <span>✉ {lead.email}</span>}
+              {missingContact && <span className="lcc-muted">No phone or email on file</span>}
             </div>
-            <div className="lead-detail-badges">
-              <TierBadge tier={lead.tier} />
+            <div className="lcc-badges">
               <StatusBadge status={lead.status} />
-              {lead.relationship_type && lead.relationship_type !== 'cold_lead' && (
-                <span className="badge badge--neutral-dim" title="Lead relationship type — affects AI familiarity">
-                  {{
-                    warm_lead: '☀️ Warm',
-                    re_engagement: '🔄 Re-engage',
-                    previous_prospect: '📋 Prev. prospect',
-                    past_customer: '🤝 Past customer',
-                    existing_customer: '⭐ Existing customer',
-                  }[lead.relationship_type] || lead.relationship_type}
+              {lead.tier && <TierBadge tier={lead.tier} />}
+              {brainState.mode && (
+                <span className={`lcc-chip ${humanActive ? 'lcc-chip--blue' : brainState.mode === 'ai_paused' ? 'lcc-chip--amber' : 'lcc-chip--neutral'}`}
+                  title={humanActive ? 'A person owns this conversation. The AI will not send on its own.' : 'Who is handling this conversation'}>
+                  {{ ai_active: 'AI active', human_active: 'Human active', ai_paused: 'AI paused',
+                     waiting_on_customer: 'Waiting on customer', waiting_on_human: 'Waiting on a person' }[brainState.mode] || brainState.mode}
                 </span>
               )}
-              {lead.is_duplicate && <span className="badge badge--neutral-dim">Duplicate</span>}
-              {lead.manual_flag === 'bad_email' && (
-                <span style={{ fontSize: 11, background: 'rgba(255,170,0,0.15)', color: '#ffaa00', border: '1px solid rgba(255,170,0,0.3)', borderRadius: 6, padding: '2px 8px' }}>⚠ bad email flagged</span>
-              )}
-              {lead.manual_flag === 'remove_all' && (
-                <span style={{ fontSize: 11, background: 'rgba(255,80,80,0.15)', color: '#ff6464', border: '1px solid rgba(255,80,80,0.3)', borderRadius: 6, padding: '2px 8px' }}>⛔ removed from all outreach</span>
-              )}
+              {brainState.state === 'waiting_on_staff' && <span className="lcc-chip lcc-chip--amber" title="The customer is waiting for us">Waiting on us</span>}
+              {brainState.state === 'waiting_on_customer' && <span className="lcc-chip lcc-chip--neutral">Waiting on customer</span>}
+              {isTest && <span className="lcc-chip lcc-chip--red" data-testid="lcc-test-chip" title={lead.test_note || TEST_REASON}>Internal test · no outreach</span>}
+              {lead.status === 'dnc' && <span className="lcc-chip lcc-chip--red">Do not contact</span>}
+              {lead.is_duplicate && <span className="lcc-chip lcc-chip--neutral">Duplicate</span>}
+              {lead.manual_flag === 'bad_email' && <span className="lcc-chip lcc-chip--amber">Bad email flagged</span>}
+              {lead.manual_flag === 'remove_all' && <span className="lcc-chip lcc-chip--red">Removed from all outreach</span>}
             </div>
           </div>
         </div>
-        {canReassignLead && (
-          <div className="lead-detail-assign">
-            <span className="lead-detail-assign-label" id="lead-assign-label">Assigned to</span>
-            <select
-              aria-labelledby="lead-assign-label"
-              className="filter-select"
-              value={lead.assigned_to_id || ''}
-              onChange={handleAssignmentChange}
-              disabled={assignmentSaving}
-            >
-              <option value="">Unassigned</option>
-              {assignableUsers.map((user) => (
-                <option key={user.id} value={user.id}>{user.full_name}</option>
-              ))}
-            </select>
+
+        <dl className="lcc-meta">
+          <div>
+            <dt>Last activity</dt>
+            <dd>{lastEvent ? timeAgo(lastEvent.timestamp) : 'None yet'}</dd>
+            <dd className="lcc-sub">{lastEvent ? `${lastEvent.type === 'inbound' ? 'Inbound' : 'Outbound'} ${CHANNEL_WORD[lastEvent.channel] || lastEvent.channel}` : 'No messages'}</dd>
           </div>
-        )}
+          <div>
+            <dt id="lead-assign-label">Assigned advisor</dt>
+            {canReassignLead ? (
+              <dd>
+                <select aria-labelledby="lead-assign-label" className="lcc-select" value={lead.assigned_to_id || ''}
+                  onChange={handleAssignmentChange} disabled={assignmentSaving}>
+                  <option value="">Unassigned</option>
+                  {assignableUsers.map((user) => <option key={user.id} value={user.id}>{user.full_name}</option>)}
+                </select>
+              </dd>
+            ) : <dd>{assignedLabel}</dd>}
+          </div>
+          <div>
+            <dt>Location · source</dt>
+            <dd>{locationLabel || orgName || 'This workspace'}</dd>
+            <dd className="lcc-sub">{sourceLabel || 'Source not recorded'}</dd>
+          </div>
+        </dl>
+
+        <div className="lcc-actions">
+          <button type="button" className="lcc-btn" onClick={() => openTab('calls')}
+            disabled={isTest || !lead.phone}
+            title={isTest ? TEST_REASON : !lead.phone ? 'No phone number on file' : 'Open calling for this contact'}>
+            Call
+          </button>
+          <button type="button" className="lcc-btn" onClick={focusComposer}
+            disabled={!canSend}
+            title={canSend ? 'Write a text or email' : (isTest ? TEST_REASON : (smsBlockedReason || emailBlockedReason || 'Messaging is not available'))}>
+            Message
+          </button>
+          <button type="button" className="lcc-btn lcc-btn--primary" onClick={headerBook}
+            disabled={booking?.status === 'booked' ? false : (!canBookLink || resendingLink)}
+            title={booking?.status === 'booked' ? 'Open the client record for this booking' : (bookBlockedReason || 'Email a booking link')}>
+            {booking?.status === 'booked' ? 'Client record' : resendingLink ? 'Sending…' : booking ? 'Resend link' : 'Book'}
+          </button>
+          <div className="lcc-menu-wrap">
+            <button type="button" className="lcc-btn lcc-btn--icon" aria-haspopup="menu" aria-expanded={menu === 'more'}
+              aria-label="More actions" onClick={() => setMenu(menu === 'more' ? null : 'more')}>⋯</button>
+            {menu === 'more' && (
+              <div className="lcc-menu" role="menu">
+                <button type="button" role="menuitem" onClick={openEdit}>Edit details</button>
+                <button type="button" role="menuitem" onClick={() => { setMenu(null); setShowCaseFile(true) }}>Open client record</button>
+                {lead.manual_flag ? (
+                  <button type="button" role="menuitem" disabled={flagging} onClick={() => { setMenu(null); handleFlagLead(null) }}>Unflag (restore to lists)</button>
+                ) : (<>
+                  <button type="button" role="menuitem" disabled={flagging} onClick={() => { setMenu(null); handleFlagLead('bad_email') }}>Flag: bad email</button>
+                  <button type="button" role="menuitem" disabled={flagging} onClick={() => { setMenu(null); handleFlagLead('remove_all') }}>Flag: remove from all outreach</button>
+                </>)}
+                <button type="button" role="menuitem" className="lcc-danger" data-testid="lead-detail-delete"
+                  disabled={deletingLead} onClick={() => { setMenu(null); handleDeleteThisLead() }}>
+                  {deletingLead ? 'Deleting…' : 'Delete contact'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+      {resendLinkMsg && (
+        <div role="status" className={`lcc-alert ${resendLinkMsg.ok ? 'lcc-alert--green' : 'lcc-alert--red'}`}>{resendLinkMsg.text}</div>
+      )}
+      {assignmentError && <div role="alert" className="lcc-alert lcc-alert--red">{assignmentError}</div>}
+
+      {/* ── KPI STRIP ── */}
+      <div className="lcc-kpis">
+        <div className="lcc-card lcc-kpi">
+          <div className="lcc-kpi-label">Last inbound</div>
+          <div className="lcc-kpi-value">{lastInbound ? timeAgo(lastInbound.timestamp) : 'None'}</div>
+          <div className="lcc-kpi-sub" title={lastInbound?.body || ''}>
+            {lastInbound ? `“${(lastInbound.body || lastInbound.subject || '').slice(0, 40)}${(lastInbound.body || '').length > 40 ? '…' : ''}”` : 'No reply yet'}
+          </div>
+        </div>
+        <button type="button" className="lcc-card lcc-kpi lcc-kpi--btn" onClick={() => openTab('calls')}>
+          <div className="lcc-kpi-label">Voicemails</div>
+          <div className="lcc-kpi-value">{dialerHist ? inboundVoicemails.length : '…'}</div>
+          <div className="lcc-kpi-sub">
+            {!dialerHist ? 'Loading' : latestVoicemail ? `Latest ${timeAgo(latestVoicemail.received_at)}${dialerHist.unreviewed_voicemails ? ` · ${dialerHist.unreviewed_voicemails} new` : ''}` : 'None from this contact'}
+          </div>
+        </button>
+        <div className="lcc-card lcc-kpi">
+          <div className="lcc-kpi-label">Booking</div>
+          <div className={`lcc-kpi-value ${booking?.status === 'booked' ? 'lcc-green' : booking?.status === 'pending' ? 'lcc-amber' : ''}`}>{bookingLabel}</div>
+          <div className="lcc-kpi-sub">{bookingSub}</div>
+        </div>
+        <div className="lcc-card lcc-kpi">
+          <div className="lcc-kpi-label">Reachability</div>
+          <div className={`lcc-kpi-value ${readyCount === 0 ? 'lcc-red' : readyCount < 3 ? 'lcc-amber' : 'lcc-green'}`}>
+            {isTest || readyCount === 0 ? 'Blocked' : readyCount === 3 ? 'All ready' : `${readyCount} of 3 ready`}
+          </div>
+          <div className="lcc-kpi-sub">{isTest ? 'Internal test record' : readiness.map((r) => `${r.label} ${r.ok ? '✓' : '✕'}`).join(' · ')}</div>
+        </div>
+        <div className="lcc-card lcc-kpi">
+          <div className="lcc-kpi-label">Next best action</div>
+          <div className="lcc-kpi-value">{nba ? ({ reply: 'Reply', wait: 'Wait', call: 'Call', create_task: 'Create task', schedule: 'Schedule', assign: 'Assign', request_info: 'Request info', move_stage: 'Move stage', nurture: 'Nurture', escalate: 'Escalate', human_takeover: 'Human takeover', do_nothing: 'Do nothing' }[nba.action] || nba.action) : (brainCtx ? 'None yet' : '…')}</div>
+          <div className="lcc-kpi-sub" title={nba?.reason || ''}>
+            {isTest && nba && nba.action !== 'wait' && nba.action !== 'do_nothing' ? 'Outreach is off for this test record' : (nba?.reason || (humanActive ? 'A person owns this conversation' : 'From Conversation Brain'))}
+          </div>
+        </div>
       </div>
 
-      {/* ── Inline Lead Edit Panel ── */}
-      {showEdit && (
-        <section className="panel" style={{ marginBottom: 16, padding: '16px 20px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
-            <label className="leads-add-label">First name
-              <input className="search-input" value={editForm.first_name || ''}
-                onChange={e => setEditForm(f => ({ ...f, first_name: e.target.value }))} />
-            </label>
-            <label className="leads-add-label">Last name
-              <input className="search-input" value={editForm.last_name || ''}
-                onChange={e => setEditForm(f => ({ ...f, last_name: e.target.value }))} />
-            </label>
-            <label className="leads-add-label">Phone
-              <input className="search-input" value={editForm.phone || ''}
-                onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))}
-                placeholder="e.g. 214-555-0199" />
-            </label>
-            <label className="leads-add-label">Email
-              <input className="search-input" value={editForm.email || ''}
-                onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
-                placeholder="email@example.com" />
-            </label>
-            <label className="leads-add-label">Street address
-              <input className="search-input" value={editForm.street_address || ''}
-                onChange={e => setEditForm(f => ({ ...f, street_address: e.target.value }))}
-                placeholder="123 Main St" />
-            </label>
-            <label className="leads-add-label">City
-              <input className="search-input" value={editForm.city || ''}
-                onChange={e => setEditForm(f => ({ ...f, city: e.target.value }))} />
-            </label>
-            <label className="leads-add-label">State
-              <input className="search-input" value={editForm.state || ''}
-                onChange={e => setEditForm(f => ({ ...f, state: e.target.value }))}
-                placeholder="TX" style={{ maxWidth: 80 }} />
-            </label>
-            <label className="leads-add-label">ZIP
-              <input className="search-input" value={editForm.zip_code || ''}
-                onChange={e => setEditForm(f => ({ ...f, zip_code: e.target.value }))}
-                placeholder="75001" style={{ maxWidth: 120 }} />
-            </label>
-          </div>
-          <label className="leads-add-label" style={{ marginBottom: 12 }}>
-            Lead relationship
-            <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '2px 0 6px' }}>
-              This is the PRIMARY AI context — it controls how familiar the AI sounds.
-            </p>
-            <select
-              className="search-input"
-              value={editForm.relationship_type || 'cold_lead'}
-              onChange={e => setEditForm(f => ({ ...f, relationship_type: e.target.value }))}
-            >
-              <option value="cold_lead">❄️ Cold lead — no prior relationship</option>
-              <option value="warm_lead">☀️ Warm lead — showed prior interest / referral</option>
-              <option value="re_engagement">🔄 Re-engagement — contacted before, went quiet</option>
-              <option value="previous_prospect">📋 Previous prospect — was in pipeline, didn't close</option>
-              <option value="past_customer">🤝 Past customer — was a customer, lapsed</option>
-              <option value="existing_customer">⭐ Existing customer — active relationship</option>
-            </select>
-          </label>
-          <label className="leads-add-label" style={{ marginBottom: 12 }}>Notes
-            <textarea className="search-input" rows={2} value={editForm.notes || ''}
-              onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
-              style={{ resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }} />
-          </label>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <button className="btn btn--primary" onClick={handleSaveEdit} disabled={editSaving}>
-              {editSaving ? 'Saving…' : 'Save changes'}
-            </button>
-            <button className="btn btn--secondary" onClick={() => setShowEdit(false)}>Cancel</button>
-            {editError && <span style={{ color: 'var(--signal-red)', fontSize: 12 }}>{editError}</span>}
-          </div>
-        </section>
-      )}
-
-      {assignmentError && <div className="compose-error">{assignmentError}</div>}
-
-      <div className="lead-detail-grid">
-        <div className="lead-detail-left">
-
-          {/* ── Tabbed Conversation + Full Timeline (Phase 2) ── */}
-          <section className="panel lead-detail-panel">
-            {/* Tab bar */}
-            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', marginBottom: 14, gap: 0 }}>
-              <button
-                onClick={() => setActiveTab('conversation')}
-                style={{
-                  padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                  background: 'none', border: 'none', borderBottom: activeTab === 'conversation' ? '2px solid var(--accent)' : '2px solid transparent',
-                  color: activeTab === 'conversation' ? 'var(--accent)' : 'var(--text-secondary)',
-                  marginBottom: -1,
-                }}
-              >
-                💬 Conversation
-                {events.length > 0 && (
-                  <span style={{ marginLeft: 6, fontSize: 11, background: 'var(--accent)', color: '#fff', borderRadius: 10, padding: '1px 6px' }}>
-                    {events.length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setActiveTab('calls')}
-                style={{
-                  padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                  background: 'none', border: 'none', borderBottom: activeTab === 'calls' ? '2px solid var(--accent)' : '2px solid transparent',
-                  color: activeTab === 'calls' ? 'var(--accent)' : 'var(--text-secondary)',
-                  marginBottom: -1,
-                }}
-              >
-                📞 Calls
-                {data?.voice_calls?.length > 0 && (
-                  <span style={{ marginLeft: 6, fontSize: 11, background: activeTab === 'calls' ? 'var(--accent)' : 'var(--border-subtle)', color: activeTab === 'calls' ? '#fff' : 'var(--text-secondary)', borderRadius: 10, padding: '1px 6px' }}>
-                    {data.voice_calls.length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setActiveTab('timeline')}
-                style={{
-                  padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                  background: 'none', border: 'none', borderBottom: activeTab === 'timeline' ? '2px solid var(--accent)' : '2px solid transparent',
-                  color: activeTab === 'timeline' ? 'var(--accent)' : 'var(--text-secondary)',
-                  marginBottom: -1,
-                }}
-              >
-                🗂️ Full History
-                {activity?.event_count > 0 && (
-                  <span style={{ marginLeft: 6, fontSize: 11, background: activeTab === 'timeline' ? 'var(--accent)' : 'var(--border-subtle)', color: activeTab === 'timeline' ? '#fff' : 'var(--text-secondary)', borderRadius: 10, padding: '1px 6px' }}>
-                    {activity.event_count}
-                  </span>
-                )}
-              </button>
-            </div>
-
-            {/* Tab: Conversation */}
-            {activeTab === 'conversation' && (
-              events.length === 0 ? (
-                <div className="empty-state">No messages yet. Send the first one below.</div>
-              ) : (
-                <div
-                  className="lead-timeline"
-                  ref={timelineRef}
-                  style={{ maxHeight: '420px', overflowY: 'auto' }}
-                >
-                  {olderCursor.hasMore && (
-                    <div style={{ textAlign: 'center', margin: '4px 0 10px' }}>
-                      <button
-                        className="btn btn--secondary"
-                        style={{ fontSize: 12, padding: '4px 12px' }}
-                        onClick={loadOlderActivity}
-                        disabled={loadingOlder}
-                      >
-                        {loadingOlder ? 'Loading older activity…' : 'Load older activity'}
-                      </button>
-                      {olderError && (
-                        <div style={{ fontSize: 12, color: 'var(--signal-red)', marginTop: 4 }}>{olderError}</div>
-                      )}
-                    </div>
-                  )}
-                  {events.map((e, i) => (
-                    <ConversationBubble key={eventKeys[i]} event={e} />
-                  ))}
-                </div>
-              )
-            )}
-
-            {/* Tab: Voice Calls + Transcripts */}
-            {activeTab === 'calls' && (() => {
-              const calls = data?.voice_calls || []
-              if (calls.length === 0) {
-                return <div className="empty-state">No AI voice calls yet. Use the "Call with AI" button below to start one.</div>
-              }
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '480px', overflowY: 'auto', paddingRight: 4 }}>
-                  {calls.map((vc) => {
-                    const outcomeColor = {
-                      booked: '#1ef082',
-                      booking_requested: '#1ea8ff',
-                      no_answer: '#888',
-                      not_interested: '#ff5050',
-                      completed: 'var(--color-success)',
-                      escalated: '#ffb41e',
-                      failed: '#ff5050',
-                    }[vc.outcome] || '#888'
-                    const outcomeLabel = {
-                      booked: '📅 Booked',
-                      booking_requested: '🔗 Booking link sent',
-                      no_answer: '📵 No answer',
-                      not_interested: '🚫 Not interested',
-                      completed: '✅ Completed',
-                      escalated: '🔔 Escalated',
-                      failed: '⚠️ Failed',
-                    }[vc.outcome] || vc.outcome || 'Unknown'
-                    const startedLabel = vc.started_at
-                      ? new Date(vc.started_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                      : new Date(vc.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                    const durationLabel = vc.duration_seconds
-                      ? `${Math.floor(vc.duration_seconds / 60)}m ${vc.duration_seconds % 60}s`
-                      : null
-
-                    return (
-                      <div key={vc.id} style={{
-                        background: 'var(--surface-card, rgba(255,255,255,0.04))',
-                        border: '1px solid var(--border-subtle)',
-                        borderLeft: `3px solid ${outcomeColor}`,
-                        borderRadius: 10,
-                        padding: '14px 16px',
-                      }}>
-                        {/* Call header */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                              📞 Call #{vc.call_number || '?'}
-                            </span>
-                            <span style={{ fontSize: 11, fontWeight: 600, background: outcomeColor + '22', color: outcomeColor, border: `1px solid ${outcomeColor}44`, borderRadius: 20, padding: '2px 8px' }}>
-                              {outcomeLabel}
-                            </span>
-                            {durationLabel && (
-                              <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>⏱ {durationLabel}</span>
-                            )}
-                          </div>
-                          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{startedLabel}</span>
-                        </div>
-
-                        {/* Live call transcript */}
-                        {vc.transcript && (
-                          <div style={{ marginBottom: 10 }}>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                              📝 Call Transcript
-                            </div>
-                            <div style={{
-                              fontSize: 12,
-                              color: 'var(--text-primary)',
-                              background: 'rgba(0,0,0,0.15)',
-                              border: '1px solid var(--border-subtle)',
-                              borderRadius: 8,
-                              padding: '10px 14px',
-                              lineHeight: 1.6,
-                              whiteSpace: 'pre-wrap',
-                              maxHeight: 280,
-                              overflowY: 'auto',
-                              fontFamily: 'var(--font-mono, monospace)',
-                            }}>
-                              {vc.transcript}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Voicemail transcript */}
-                        {vc.voicemail_left && vc.voicemail_transcript && (
-                          <div>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                              📬 Voicemail Transcript
-                            </div>
-                            <div style={{
-                              fontSize: 12,
-                              color: 'var(--text-primary)',
-                              background: 'rgba(255,180,30,0.06)',
-                              border: '1px solid rgba(255,180,30,0.2)',
-                              borderRadius: 8,
-                              padding: '10px 14px',
-                              lineHeight: 1.6,
-                              whiteSpace: 'pre-wrap',
-                              maxHeight: 180,
-                              overflowY: 'auto',
-                            }}>
-                              {vc.voicemail_transcript}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* No transcript available */}
-                        {!vc.transcript && !(vc.voicemail_left && vc.voicemail_transcript) && (
-                          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
-                            {vc.voicemail_left ? 'Voicemail left — no transcript available.' : 'No transcript for this call.'}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            })()}
-
-            {/* Tab: Full Timeline */}
-            {activeTab === 'timeline' && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                    Complete activity history — newest first
-                  </span>
-                  <button
-                    onClick={handleRefreshActivity}
-                    disabled={activityLoading}
-                    style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }}
-                  >
-                    {activityLoading ? '⏳' : '↺ Refresh'}
-                  </button>
-                </div>
-                {activityError && (
-                  <div style={{ fontSize: 12, color: 'var(--signal-red)', padding: '8px 12px', background: 'rgba(255,80,80,0.08)', borderRadius: 6, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    ⚠️ {activityError}
-                    <button onClick={handleRefreshActivity} style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Retry</button>
-                  </div>
-                )}
-                {activityLoading && !activity && (
-                  <div className="empty-state" style={{ padding: '20px 0' }}>Loading history…</div>
-                )}
-                {!activityLoading && !activityError && activity && activity.events.length === 0 && (
-                  <div className="empty-state" style={{ padding: '12px 0' }}>No activity recorded yet.</div>
-                )}
-                {activity && activity.events.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '500px', overflowY: 'auto', paddingRight: 2 }}>
-                    {[...activity.events].reverse().map((ev) => {
-                      const typeStyles = {
-                        lead_created:      { bg: 'rgba(100,100,255,0.08)', border: 'rgba(100,100,255,0.25)', icon: '👤', color: '#6464ff' },
-                        sms_sent:          { bg: 'rgba(30,200,168,0.07)', border: 'rgba(30,200,168,0.25)', icon: '📤', color: '#1ec8a8' },
-                        sms_reply:         { bg: ev.meta?.is_hot ? 'rgba(255,80,80,0.10)' : 'rgba(255,200,30,0.08)', border: ev.meta?.is_hot ? 'rgba(255,80,80,0.4)' : 'rgba(255,200,30,0.30)', icon: ev.meta?.is_hot ? '🔥' : '💬', color: ev.meta?.is_hot ? '#ff5050' : '#c8a020' },
-                        email_sent:        { bg: 'rgba(80,160,255,0.08)', border: 'rgba(80,160,255,0.25)', icon: '📧', color: '#50a0ff' },
-                        booking_booked:    { bg: 'rgba(30,240,130,0.10)', border: 'rgba(30,240,130,0.35)', icon: '📅', color: '#1ef082' },
-                        booking_confirmed: { bg: 'rgba(30,240,130,0.10)', border: 'rgba(30,240,130,0.35)', icon: '✅', color: '#1ef082' },
-                        booking_expired:   { bg: 'rgba(180,180,180,0.08)', border: 'rgba(180,180,180,0.25)', icon: '⏰', color: '#999' },
-                        booking_pending:   { bg: 'rgba(255,180,30,0.08)', border: 'rgba(255,180,30,0.25)', icon: '🔗', color: '#ffb41e' },
-                        booking_cancelled: { bg: 'rgba(255,80,80,0.08)', border: 'rgba(255,80,80,0.25)', icon: '❌', color: '#ff5050' },
-                        outcome_recorded:  { bg: 'rgba(140,80,255,0.08)', border: 'rgba(140,80,255,0.25)', icon: '📝', color: '#8c50ff' },
-                        cadence_started:   { bg: 'rgba(30,168,255,0.07)', border: 'rgba(30,168,255,0.2)', icon: '🤖', color: '#1ea8ff' },
-                        cadence_completed: { bg: 'rgba(30,240,130,0.08)', border: 'rgba(30,240,130,0.25)', icon: '🏁', color: '#1ef082' },
-                        dnc_flagged:       { bg: 'rgba(255,30,30,0.08)', border: 'rgba(255,30,30,0.30)', icon: '⛔', color: '#ff1e1e' },
-                      }
-                      const s = typeStyles[ev.type] || { bg: 'rgba(128,128,128,0.06)', border: 'rgba(128,128,128,0.18)', icon: '•', color: 'var(--text-secondary)' }
-                      const ts = ev.ts ? new Date(ev.ts).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
-                      return (
-                        <div key={ev.id} style={{
-                          background: s.bg,
-                          border: `1px solid ${s.border}`,
-                          borderLeft: `3px solid ${s.color}`,
-                          borderRadius: 8,
-                          padding: '10px 14px',
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>
-                              {s.icon} {ev.label}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', flexShrink: 0 }}>{ts}</div>
-                          </div>
-                          {ev.body && (
-                            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 5, lineHeight: 1.45 }}>
-                              {ev.body.length > 200 ? ev.body.slice(0, 200) + '…' : ev.body}
-                            </div>
-                          )}
-                          {ev.meta?.hot_reason && (
-                            <div style={{ fontSize: 11, color: s.color, marginTop: 4, fontStyle: 'italic' }}>
-                              {ev.meta.hot_reason}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-
-          {/* ── Appointment type + Send a message ── */}
-          <section className="panel lead-detail-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">✏️ Send a message</h2>
-              {canSendSMS && canSendEmail && (
-                <div className="lead-send-mode-tabs">
-                  <button
-                    className={`lead-send-tab ${effectiveSendMode === 'sms' ? 'lead-send-tab--active' : ''}`}
-                    onClick={() => setSendMode('sms')}
-                  >💬 SMS</button>
-                  <button
-                    className={`lead-send-tab ${effectiveSendMode === 'email' ? 'lead-send-tab--active' : ''}`}
-                    onClick={() => setSendMode('email')}
-                  >✉️ Email</button>
-                </div>
-              )}
-            </div>
-
-            {/* Appointment type dropdown — visible for both SMS and email */}
-            {canSend && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <label style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', fontWeight: 600 }}
-                  title="Sets the appointment type on the booking link — what the lead sees on the booking page">
-                  📅 Booking type
-                </label>
-                <select
-                  className="filter-select"
-                  style={{ flex: 1, fontSize: 12 }}
-                  value={apptLabel}
-                  onChange={(e) => setApptLabel(e.target.value)}
-                >
-                  {apptTypeOptions.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {!canSend ? (
-              <div className="empty-state">
-                {lead.is_duplicate ? 'This lead is a duplicate.' :
-                 lead.status === 'dnc' ? 'This lead is marked do-not-contact.' :
-                 !lead.phone && !lead.email ? 'No phone or email on file.' :
-                 /* The lead HAS contact details; the server said why neither
-                    channel can send. Say that, not "no phone or email". */
-                 <>
-                   <div style={{ fontWeight: 600, marginBottom: 6 }}>Messaging isn't available for this lead yet.</div>
-                   {[['Text', smsBlockedReason], ['Email', emailBlockedReason]]
-                     .filter(([, r]) => r)
-                     .map(([label, r]) => <div key={label} style={{ fontSize: 12.5, marginTop: 4 }}><strong>{label}:</strong> {r}</div>)}
-                 </>}
-              </div>
-            ) : effectiveSendMode === 'sms' && canSendSMS ? (
-              <div className="lead-compose">
-                <div className="lead-tone-bar">
-                  <span className="lead-tone-label">Message tone</span>
-                  <div className="lead-tone-pills">
-                    {TONES.map((t, i) => (
-                      <button
-                        key={t.key}
-                        className={`lead-tone-pill ${tone === i ? 'lead-tone-pill--active' : ''}`}
-                        style={tone === i ? { borderColor: t.color, color: t.color, background: `${t.color}18` } : {}}
-                        onClick={() => setTone(i)}
-                        title={t.desc}
-                      >{t.label}</button>
-                    ))}
-                  </div>
-                  <span className="lead-tone-desc">{currentTone.desc}</span>
-                </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input
-                    className="compose-subject"
-                    style={{ flex: 1, fontSize: 12 }}
-                    placeholder={aiDirectionHint}
-                    value={aiDirection}
-                    onChange={(e) => setAiDirection(e.target.value)}
-                  />
-                </div>
-                <div className="lead-compose-suggest">
-                  <button className="btn btn--secondary" onClick={handleSuggestReply} disabled={suggestingReply}>
-                    {suggestingReply ? '⏳ Drafting…' : `✨ Suggest ${currentTone.label} reply`}
-                  </button>
-                  <span className="lead-compose-hint">AI fills the box. You edit and send manually.</span>
-                </div>
-                <textarea
-                  className="compose-textarea"
-                  placeholder={`Hi ${lead.first_name || 'there'}, this is...`}
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  rows={4}
-                />
-                {/* Hidden file input for MMS media */}
-                <input
-                  ref={mediaInputRef}
-                  type="file"
-                  accept=".jpg,.jpeg,.png,.gif,.pdf"
-                  style={{ display: 'none' }}
-                  onChange={handleMediaUpload}
-                />
-                {/* Media preview strip */}
-                {mediaUrl && (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    background: 'var(--signal-blue-dim, #e3f2fd)',
-                    border: '1px solid var(--signal-blue, #1565c0)',
-                    borderRadius: 6, padding: '6px 10px', fontSize: 12,
-                    color: 'var(--signal-blue, #1565c0)', marginBottom: 4,
-                  }}>
-                    <span>📎</span>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mediaFileName}</span>
-                    <span style={{ opacity: 0.6, fontSize: 11 }}>Will send as MMS</span>
-                    <button
-                      onClick={handleRemoveMedia}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: 0, color: 'inherit', opacity: 0.7 }}
-                      title="Remove attachment"
-                    >✕</button>
-                  </div>
-                )}
-                {mediaError && <div style={{ color: 'var(--signal-red)', fontSize: 12, marginBottom: 4 }}>{mediaError}</div>}
-                {/* WHAT WILL BE SENT. Shown whenever a link is being added, so
-                    the advisor sees the branded URL before pressing Send rather
-                    than discovering it in the delivered message. */}
-                {!smsLinksAllowed && (
-                  <div style={SX.previewWarn}>
-                    <div style={SX.previewLabel}>Text messages carry no links</div>
-                    <div style={SX.previewBody}>
-                      The scheduling link goes out by email. Anything that looks
-                      like a link or a phone number is removed from a text before
-                      it is sent.
-                    </div>
-                    {smsPolicyReason && (
-                      <div style={SX.previewMeta}>{smsPolicyReason}</div>
-                    )}
-                  </div>
-                )}
-                {smsLinksAllowed && includeBookingLink && (bookingUrl || bookingUrlReason) && (
-                  <div style={bookingUrl ? SX.previewOk : SX.previewWarn}>
-                    <div style={SX.previewLabel}>
-                      {bookingUrl ? 'Will be sent as' : 'Booking link unavailable'}
-                    </div>
-                    {bookingUrl ? (
-                      <>
-                        <div style={SX.previewBody}>{smsPreview || bookingUrl}</div>
-                        <div style={SX.previewMeta}>
-                          {smsPreview.length} characters ·{' '}
-                          {smsPreview.length <= 160 ? '1 segment' : `${Math.ceil(smsPreview.length / 153)} segments`}
-                        </div>
-                      </>
-                    ) : (
-                      <div style={SX.previewBody}>{bookingUrlReason}</div>
-                    )}
-                  </div>
-                )}
-
-                {/* SENDER READINESS. The composer knows before Send whether a
-                    Twilio sender resolves, and from where. This warning is
-                    never hidden - an advisor who cannot send should know why
-                    while writing, not after pressing the button. */}
-                {smsSender && !smsSender.ready && (
-                  <div style={SX.senderWarn}>{smsSender.reason}</div>
-                )}
-                {smsSender && smsSender.ready && smsSender.from_number && (
-                  <div style={SX.senderOk}>
-                    Sending from {formatPhone(smsSender.from_number)}
-                    {smsSender.source === 'organization' ? ' (organization sender)' : ''}
-                  </div>
-                )}
-
-                <div className="compose-footer">
-                  {smsLinksAllowed && (
-                    <label className="compose-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={includeBookingLink}
-                        onChange={(e) => setIncludeBookingLink(e.target.checked)}
-                      />
-                      Include booking link
-                    </label>
-                  )}
-                  <button
-                    className="btn btn--ghost"
-                    onClick={() => mediaInputRef.current?.click()}
-                    disabled={mediaUploading}
-                    title="Attach flyer or image (MMS)"
-                    style={{ padding: '6px 10px', fontSize: 13 }}
-                  >
-                    {mediaUploading ? '⏳' : '📎 Flyer'}
-                  </button>
-                  <button
-                    className="btn btn--primary"
-                    onClick={handleSend}
-                    disabled={sending || !messageText.trim()}
-                  >
-                    {sending ? 'Sending…' : mediaUrl ? 'Send MMS 📎' : 'Send SMS'}
-                  </button>
-                </div>
-                {sendError && <div className="compose-error">{sendError}</div>}
-              </div>
-            ) : canSendEmail ? (
-              <div className="lead-compose">
-                <div className="lead-tone-bar">
-                  <span className="lead-tone-label">Message tone</span>
-                  <div className="lead-tone-pills">
-                    {TONES.map((t, i) => (
-                      <button
-                        key={t.key}
-                        className={`lead-tone-pill ${tone === i ? 'lead-tone-pill--active' : ''}`}
-                        style={tone === i ? { borderColor: t.color, color: t.color, background: `${t.color}18` } : {}}
-                        onClick={() => setTone(i)}
-                        title={t.desc}
-                      >{t.label}</button>
-                    ))}
-                  </div>
-                  <span className="lead-tone-desc">{currentTone.desc}</span>
-                </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input
-                    className="compose-subject"
-                    style={{ flex: 1, fontSize: 12 }}
-                    placeholder={aiDirectionHint}
-                    value={aiDirection}
-                    onChange={(e) => setAiDirection(e.target.value)}
-                  />
-                </div>
-                <div className="lead-compose-suggest">
-                  <button className="btn btn--secondary" onClick={handleSuggestEmail} disabled={suggestingReply}>
-                    {suggestingReply ? '⏳ Drafting…' : `✨ AI draft ${currentTone.label} email`}
-                  </button>
-                  <span className="lead-compose-hint">
-                    {emailSender && emailSender.channel === 'microsoft_365'
-                      ? 'Sends from your connected Microsoft 365 inbox.'
-                      : 'Sends from the workspace address below. Connect Microsoft 365 in Integrations to send from your own inbox.'}
-                  </span>
-                </div>
-                {emailDraftReady && (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    background: 'var(--signal-green-dim, #e8f5e9)',
-                    border: '1px solid var(--signal-green, #2e7d32)',
-                    borderRadius: 6, padding: '7px 12px', fontSize: 13,
-                    color: 'var(--signal-green, #2e7d32)', fontWeight: 600,
-                  }}>
-                    ✅ Draft ready — review and edit below, then send.
-                    <button
-                      style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
-                      onClick={() => setEmailDraftReady(false)}
-                      title="Dismiss"
-                    >×</button>
-                  </div>
-                )}
-                <input
-                  className="compose-subject"
-                  placeholder={`Subject — e.g. ${smartSubject(lead.first_name, lead.tier, lead.message_track, orgName)}`}
-                  value={emailSubject}
-                  onChange={(e) => setEmailSubject(e.target.value)}
-                />
-                <textarea
-                  className="compose-textarea"
-                  placeholder={`Hi ${lead.first_name || 'there'}, this is...`}
-                  value={emailBody}
-                  onChange={(e) => setEmailBody(e.target.value)}
-                  rows={5}
-                />
-                {/* Attachment picker */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  <input
-                    ref={emailAttachRef}
-                    type="file"
-                    accept="image/*,.pdf,.doc,.docx"
-                    style={{ display: 'none' }}
-                    onChange={(e) => setEmailAttachment(e.target.files?.[0] || null)}
-                  />
-                  <button
-                    className="btn btn--secondary"
-                    style={{ fontSize: 12, padding: '4px 10px' }}
-                    onClick={() => emailAttachRef.current?.click()}
-                    type="button"
-                  >
-                    📎 {emailAttachment ? 'Change file' : 'Attach file'}
-                  </button>
-                  {emailAttachment && (
-                    <>
-                      <span style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {emailAttachment.name}
-                      </span>
-                      <button
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--signal-red)', lineHeight: 1, padding: 0 }}
-                        onClick={() => { setEmailAttachment(null); if (emailAttachRef.current) emailAttachRef.current.value = '' }}
-                        title="Remove attachment"
-                      >✕</button>
-                    </>
-                  )}
-                </div>
-                {/* WHO THE FAMILY WILL SEE THIS FROM. Same contract as the SMS
-                    sender line above: never hidden, and stated while the
-                    advisor is writing rather than after they press Send. */}
-                {emailSender && !emailSender.ready && (
-                  <div style={SX.senderWarn}>{emailSender.reason}</div>
-                )}
-                {emailSender && emailSender.ready && emailSender.from_email && (
-                  <div style={SX.senderOk}>
-                    Sending from {emailSender.from_email}{emailSender.channel === 'microsoft_365' ? ' (your Microsoft 365 inbox)' : ''}
-                    {emailSender.reply_to_email
-                      ? ` · replies go to ${emailSender.reply_to_email}`
-                      : ''}
-                  </div>
-                )}
-
-                <div className="compose-footer">
-                  <label className="compose-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={includeBookingLink}
-                      onChange={(e) => setIncludeBookingLink(e.target.checked)}
-                    />
-                    Include booking button
-                  </label>
-                  <button
-                    className="btn btn--primary"
-                    onClick={handleSendEmail}
-                    disabled={sendingEmail || !emailBody.trim()
-                              || (emailSender ? !emailSender.ready : false)}
-                  >
-                    {sendingEmail ? 'Sending…' : emailAttachment ? '📎 Send with attachment' : 'Send email'}
-                  </button>
-                </div>
-                {sendError && <div className="compose-error">{sendError}</div>}
-              </div>
-            ) : null}
-          </section>
-        </div>
-
-        <div className="lead-detail-right">
-          {/* ── Conversation memory: facts, open questions, next best action ── */}
-          <ConversationBrain leadId={leadId} onUseDraft={(text) => {
-            setMessageText(text)
-            const box = document.querySelector('.lead-detail-left textarea')
-            if (box) { box.scrollIntoView({ behavior: 'smooth', block: 'center' }); box.focus() }
-          }} />
-          {/* ── AI Conversation ── */}
-          <section className="panel lead-detail-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">🤖 AI Conversation</h2>
-              {aiConvStatus?.active && (
-                <span className="badge badge--green" style={{ fontSize: 10 }}>ACTIVE</span>
-              )}
-              {aiConvStatus?.paused && (
-                <span className="badge badge--amber" style={{ fontSize: 10 }}>PAUSED</span>
-              )}
-              {aiConvStatus?.flagged && (
-                <span className="badge badge--red" style={{ fontSize: 10 }}>⚠️ NEEDS YOU</span>
-              )}
-            </div>
-
-            {aiConvStatus?.flagged && (
-              <div style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--signal-red)' }}>
-                ⚠️ {aiConvStatus.flag_reason || 'Human response needed'}
-              </div>
-            )}
-
-            {aiConvStatus?.active && !aiConvStatus?.flagged && (
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                Touch {aiConvStatus.touch_number || 0}{aiConvStatus.total_touches ? ` of ${aiConvStatus.total_touches}` : ''} · {aiConvStatus.messages_sent || 0} sent
-                {aiConvStatus.next_send_at && (
-                  <span style={{ color: 'var(--text-tertiary)', display: 'block', fontSize: 11, marginTop: 2 }}>
-                    Next: {new Date(aiConvStatus.next_send_at).toLocaleString()}
-                  </span>
-                )}
-              </div>
-            )}
-
-            {!aiConvStatus?.active || aiConvStatus?.status === 'not_started' ? (
-              <div>
-                {/* Channels this lead can actually be reached on. Email used to
-                    be offered - and preselected - for a lead with no email
-                    address, so the only way to discover it was to press Start
-                    and read "Lead has no email address". Now an unavailable
-                    channel is disabled and says why. */}
-                <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                  {[
-                    ['email', '✉️ Email', canSendEmail, emailBlockedReason],
-                    ['sms',   '💬 SMS',   canSendSMS,   smsBlockedReason],
-                    ['both',  '⚡ Both',  canSendBoth,  ch?.both?.reason],
-                  ].map(([key, label, available, why]) => (
-                    <button
-                      key={key}
-                      onClick={() => available && setAiConvChannel(key)}
-                      disabled={!available}
-                      title={available ? undefined : (why || 'Not available for this lead')}
-                      style={{
-                        padding: '6px 14px', borderRadius: 20, border: '1px solid',
-                        fontSize: 12, fontWeight: 600,
-                        cursor: available ? 'pointer' : 'not-allowed',
-                        opacity: available ? 1 : 0.42,
-                        borderColor: effectiveAiChannel === key ? 'var(--accent)' : 'var(--border-subtle)',
-                        background: effectiveAiChannel === key ? 'var(--accent)' : 'transparent',
-                        color: effectiveAiChannel === key ? '#fff' : 'var(--text-secondary)',
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {!canSendEmail && emailBlockedReason && (
-                  <div style={SX.channelNote}>Email: {emailBlockedReason}</div>
-                )}
-                {!canSendSMS && smsBlockedReason && (
-                  <div style={SX.channelNote}>SMS: {smsBlockedReason}</div>
-                )}
-                <button
-                  className="btn btn--primary"
-                  style={{ width: '100%', fontSize: 14, padding: '12px', marginTop: 12 }}
-                  onClick={handleStartAiConversation}
-                  disabled={aiConvLoading || !effectiveAiChannel}
-                >
-                  {aiConvLoading ? '⏳ Starting…' : '🤖 Start AI Conversation'}
+      <div className="lcc-main">
+        {/* ── WORKSPACE: tabs + panes ── */}
+        <section className="lcc-card lcc-work" aria-label="Contact workspace">
+          <div className="lcc-tabbar">
+            <div className="lcc-tabs" role="tablist" aria-label="Contact views">
+              {TABS.map(([key, label, count]) => (
+                <button key={key} type="button" role="tab" id={`lcc-tab-${key}`} aria-selected={activeTab === key}
+                  aria-controls={`lcc-pane-${key}`} className={`lcc-tab ${activeTab === key ? 'lcc-tab--on' : ''}`}
+                  onClick={() => openTab(key)}>
+                  {label}{count ? <span className="lcc-count">{count}</span> : null}
                 </button>
-                <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8, textAlign: 'center' }}>
-                  {effectiveAiChannel
-                    ? 'AI runs a multi-touch sequence over 14 days, responds to replies, and pauses on escalation.'
-                    : 'This lead cannot be reached on any channel right now.'}
-                </p>
+              ))}
+            </div>
+            {activeTab === 'conversation' && (
+              <select className="lcc-select" aria-label="Show channel" value={convFilter} onChange={(e) => setConvFilter(e.target.value)}>
+                <option value="all">All channels</option>
+                <option value="sms">Text only</option>
+                <option value="email">Email only</option>
+                <option value="cadence">Cadence notes</option>
+              </select>
+            )}
+          </div>
+
+          {/* Tab: Conversation */}
+          {activeTab === 'conversation' && (
+            <div className="lcc-pane lcc-pane--conv" id="lcc-pane-conversation" role="tabpanel" aria-labelledby="lcc-tab-conversation">
+              <div className="lcc-thread" ref={timelineRef}>
+                {olderCursor.hasMore && (
+                  <div className="lcc-center">
+                    <button type="button" className="lcc-btn lcc-btn--sm" onClick={loadOlderActivity} disabled={loadingOlder}>
+                      {loadingOlder ? 'Loading older messages…' : 'Load older messages'}
+                    </button>
+                    {olderError && <div className="lcc-err">{olderError}</div>}
+                  </div>
+                )}
+                {filteredEvents.length === 0 ? (
+                  <div className="lcc-empty">{events.length === 0 ? 'No messages yet.' : 'Nothing on this channel.'}</div>
+                ) : filteredEvents.map((e, i) => <ConversationBubble key={filteredKeys[i]} event={e} />)}
               </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 8 }}>
-                {aiConvStatus?.paused || aiConvStatus?.flagged ? (
-                  <button className="btn btn--primary" style={{ flex: 1 }} onClick={handleResumeAiConversation}>
-                    ▶️ Resume AI
-                  </button>
+
+              {/* DOCKED COMPOSER */}
+              <div className="lcc-composer" ref={composerRef}>
+                {isTest ? (
+                  <div className="lcc-composer-off" data-testid="lcc-composer-blocked">
+                    <strong>Messaging is off.</strong> {TEST_REASON}
+                    <textarea className="compose-textarea" disabled rows={2} aria-label="Message (disabled)"
+                      placeholder="Messaging is disabled for an internal test record." />
+                  </div>
+                ) : !canSend ? (
+                  <div className="lcc-composer-off">
+                    {lead.is_duplicate ? 'This contact is a duplicate.' :
+                     lead.status === 'dnc' ? 'This contact is marked do-not-contact.' :
+                     missingContact ? 'No phone or email on file.' : (
+                      <>
+                        <strong>Messaging isn't available for this contact yet.</strong>
+                        {[['Text', smsBlockedReason], ['Email', emailBlockedReason]].filter(([, r]) => r)
+                          .map(([label, r]) => <div key={label}><strong>{label}:</strong> {r}</div>)}
+                      </>)}
+                  </div>
                 ) : (
-                  <button className="btn btn--secondary" style={{ flex: 1 }} onClick={handlePauseAiConversation}>
-                    ⏸️ Pause AI
+                  <>
+                    <div className="lcc-composer-head">
+                      <div className="lcc-seg" role="group" aria-label="Send as">
+                        <button type="button" className={effectiveSendMode === 'sms' ? 'on' : ''} disabled={!canSendSMS}
+                          title={canSendSMS ? undefined : smsBlockedReason || undefined} onClick={() => setSendMode('sms')}>Text</button>
+                        <button type="button" className={effectiveSendMode === 'email' ? 'on' : ''} disabled={!canSendEmail}
+                          title={canSendEmail ? undefined : emailBlockedReason || undefined} onClick={() => setSendMode('email')}>Email</button>
+                      </div>
+                      <label className="lcc-inline">
+                        <span>Booking type</span>
+                        <select className="lcc-select" value={apptLabel} onChange={(e) => setApptLabel(e.target.value)}
+                          title="Sets the appointment type on the booking link">
+                          {apptTypeOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                      </label>
+                      {humanActive && <span className="lcc-chip lcc-chip--blue" title="You are replying as a person; the AI will not send on its own.">You own this conversation</span>}
+                    </div>
+
+                    {effectiveSendMode === 'sms' && canSendSMS ? (
+                      <div className="lead-compose">
+                        {aiAssist(handleSuggestReply, `Suggest ${currentTone.label} reply`)}
+                        <textarea className="compose-textarea" aria-label="Text message"
+                          placeholder={`Hi ${lead.first_name || 'there'}, this is...`}
+                          value={messageText} onChange={(e) => setMessageText(e.target.value)} rows={3} />
+                        <input ref={mediaInputRef} type="file" accept=".jpg,.jpeg,.png,.gif,.pdf" style={{ display: 'none' }} onChange={handleMediaUpload} />
+                        {mediaUrl && (
+                          <div className="lcc-attach">
+                            <span>📎 {mediaFileName}</span><span className="lcc-muted">Will send as MMS</span>
+                            <button type="button" className="lcc-linkbtn" onClick={handleRemoveMedia} aria-label="Remove attachment">Remove</button>
+                          </div>
+                        )}
+                        {mediaError && <div className="lcc-err">{mediaError}</div>}
+                        {!smsLinksAllowed && (
+                          <div style={SX.previewWarn}>
+                            <div style={SX.previewLabel}>Text messages carry no links</div>
+                            <div style={SX.previewBody}>The scheduling link goes out by email. Anything that looks like a link or a phone number is removed from a text before it is sent.</div>
+                            {smsPolicyReason && <div style={SX.previewMeta}>{smsPolicyReason}</div>}
+                          </div>
+                        )}
+                        {smsLinksAllowed && includeBookingLink && (bookingUrl || bookingUrlReason) && (
+                          <div style={bookingUrl ? SX.previewOk : SX.previewWarn}>
+                            <div style={SX.previewLabel}>{bookingUrl ? 'Will be sent as' : 'Booking link unavailable'}</div>
+                            {bookingUrl ? (<>
+                              <div style={SX.previewBody}>{smsPreview || bookingUrl}</div>
+                              <div style={SX.previewMeta}>{smsPreview.length} characters · {smsPreview.length <= 160 ? '1 segment' : `${Math.ceil(smsPreview.length / 153)} segments`}</div>
+                            </>) : <div style={SX.previewBody}>{bookingUrlReason}</div>}
+                          </div>
+                        )}
+                        {smsSender && !smsSender.ready && <div style={SX.senderWarn}>{smsSender.reason}</div>}
+                        <div className="compose-footer lcc-compose-foot">
+                          <span className="lcc-muted lcc-small">
+                            {smsSender && smsSender.ready && smsSender.from_number
+                              ? `From ${formatPhone(smsSender.from_number)}${smsSender.source === 'organization' ? ' (organization sender)' : ''}` : ''}
+                          </span>
+                          {smsLinksAllowed && (
+                            <label className="compose-checkbox">
+                              <input type="checkbox" checked={includeBookingLink} onChange={(e) => setIncludeBookingLink(e.target.checked)} />
+                              Include booking link
+                            </label>
+                          )}
+                          <button type="button" className="lcc-btn lcc-btn--sm" onClick={() => mediaInputRef.current?.click()}
+                            disabled={mediaUploading} title="Attach flyer or image (MMS)">{mediaUploading ? 'Uploading…' : '📎 Flyer'}</button>
+                          <button type="button" className="lcc-btn lcc-btn--primary" onClick={handleSend}
+                            disabled={sending || !messageText.trim() || (smsSender ? !smsSender.ready : false)}>
+                            {sending ? 'Sending…' : mediaUrl ? 'Send MMS' : 'Send text'}
+                          </button>
+                        </div>
+                        {sendError && <div className="compose-error" role="alert">{sendError}</div>}
+                      </div>
+                    ) : canSendEmail ? (
+                      <div className="lead-compose">
+                        {aiAssist(handleSuggestEmail, `AI draft ${currentTone.label} email`)}
+                        {emailDraftReady && (
+                          <div className="lcc-alert lcc-alert--green" role="status">
+                            Draft ready — review and edit below, then send.
+                            <button type="button" className="lcc-linkbtn" onClick={() => setEmailDraftReady(false)} aria-label="Dismiss">Dismiss</button>
+                          </div>
+                        )}
+                        <input className="compose-subject" aria-label="Email subject"
+                          placeholder={`Subject — e.g. ${smartSubject(lead.first_name, lead.tier, lead.message_track, orgName)}`}
+                          value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
+                        <textarea className="compose-textarea" aria-label="Email body"
+                          placeholder={`Hi ${lead.first_name || 'there'}, this is...`}
+                          value={emailBody} onChange={(e) => setEmailBody(e.target.value)} rows={4} />
+                        <input ref={emailAttachRef} type="file" accept="image/*,.pdf,.doc,.docx" style={{ display: 'none' }}
+                          onChange={(e) => setEmailAttachment(e.target.files?.[0] || null)} />
+                        {emailAttachment && (
+                          <div className="lcc-attach">
+                            <span>📎 {emailAttachment.name}</span>
+                            <button type="button" className="lcc-linkbtn" aria-label="Remove attachment"
+                              onClick={() => { setEmailAttachment(null); if (emailAttachRef.current) emailAttachRef.current.value = '' }}>Remove</button>
+                          </div>
+                        )}
+                        {emailSender && !emailSender.ready && <div style={SX.senderWarn}>{emailSender.reason}</div>}
+                        <div className="compose-footer lcc-compose-foot">
+                          <span className="lcc-muted lcc-small">
+                            {emailSender && emailSender.ready && emailSender.from_email
+                              ? `From ${emailSender.from_email}${emailSender.channel === 'microsoft_365' ? ' (your Microsoft 365 inbox)' : ''}${emailSender.reply_to_email ? ` · replies to ${emailSender.reply_to_email}` : ''}`
+                              : ''}
+                          </span>
+                          <label className="compose-checkbox">
+                            <input type="checkbox" checked={includeBookingLink} onChange={(e) => setIncludeBookingLink(e.target.checked)} />
+                            Include booking button
+                          </label>
+                          <button type="button" className="lcc-btn lcc-btn--sm" onClick={() => emailAttachRef.current?.click()}>
+                            📎 {emailAttachment ? 'Change file' : 'Attach'}
+                          </button>
+                          <button type="button" className="lcc-btn lcc-btn--primary" onClick={handleSendEmail}
+                            disabled={sendingEmail || !emailBody.trim() || (emailSender ? !emailSender.ready : false)}>
+                            {sendingEmail ? 'Sending…' : emailAttachment ? 'Send with attachment' : 'Send email'}
+                          </button>
+                        </div>
+                        {sendError && <div className="compose-error" role="alert">{sendError}</div>}
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Tab: Calls */}
+          {activeTab === 'calls' && (
+            <div className="lcc-pane lcc-scroll" id="lcc-pane-calls" role="tabpanel" aria-labelledby="lcc-tab-calls">
+              <div className="lcc-calls">
+                <section className="lcc-sub-card" aria-label="Call this contact">
+                  <h3 className="lcc-h3">Call from your phone</h3>
+                  {lead.phone ? (
+                    <HumanDialerPanel leadId={leadId} phone={lead.phone} blockedReason={isTest ? TEST_REASON : null}
+                      compact onHistory={setDialerHist} />
+                  ) : <p className="lcc-muted">No phone number on file.</p>}
+                </section>
+                <section className="lcc-sub-card" aria-label="AI voice call">
+                  <h3 className="lcc-h3">AI voice call</h3>
+                  {callResult && (
+                    <div className="lcc-alert lcc-alert--green" role="status">
+                      Call placed — call #{callResult.call_number} to {callResult.lead_name}
+                      {callResult.from_phone ? ` from ${formatPhone(callResult.from_phone)}` : ''}
+                    </div>
+                  )}
+                  {callError && <div style={SX.senderWarn} role="alert">{callError}</div>}
+                  {!canVoice && voiceBlockedReason && !callError && <div style={SX.senderWarn}>{voiceBlockedReason}</div>}
+                  <button type="button" className="lcc-btn lcc-btn--primary" onClick={handleCall}
+                    disabled={calling || !canVoice || !lead.phone} title={canVoice ? undefined : (voiceBlockedReason || undefined)}>
+                    {calling ? 'Calling…' : 'Call with AI'}
+                  </button>
+                  <p className="lcc-muted lcc-small">The AI agent calls, says it is an AI, and books if they say yes. Recorded. Up to 3 attempts.</p>
+                  <h4 className="lcc-h4">AI call history</h4>
+                  {aiCalls.length === 0 ? <p className="lcc-muted">No AI voice calls yet.</p> : (
+                    <ul className="lcc-calllist">
+                      {aiCalls.map((vc) => {
+                        const outcomeLabel = { booked: 'Booked', booking_requested: 'Booking link sent', no_answer: 'No answer', not_interested: 'Not interested', completed: 'Completed', escalated: 'Escalated', failed: 'Failed' }[vc.outcome] || (vc.outcome ? vc.outcome.replace(/_/g, ' ') : (vc.status || 'Unknown'))
+                        const tone = { booked: 'green', booking_requested: 'blue', completed: 'green', escalated: 'amber', failed: 'red', not_interested: 'red' }[vc.outcome] || 'neutral'
+                        const startedLabel = fullWhen(vc.started_at || vc.created_at)
+                        const durationLabel = vc.duration_seconds ? `${Math.floor(vc.duration_seconds / 60)}m ${vc.duration_seconds % 60}s` : null
+                        return (
+                          <li key={vc.id} className="lcc-call">
+                            <div className="lcc-call-head">
+                              <strong>Outbound AI call{vc.call_number ? ` #${vc.call_number}` : ''}</strong>
+                              <span className={`lcc-chip lcc-chip--${tone}`}>{outcomeLabel}</span>
+                              {vc.voicemail_left && <span className="lcc-chip lcc-chip--amber">Voicemail left</span>}
+                              {durationLabel && <span className="lcc-muted">{durationLabel}</span>}
+                              <span className="lcc-muted lcc-right">{startedLabel}</span>
+                            </div>
+                            {vc.transcript && (
+                              <details><summary>Call transcript</summary><pre className="lcc-transcript">{vc.transcript}</pre></details>
+                            )}
+                            {vc.voicemail_left && vc.voicemail_transcript && (
+                              <details><summary>Voicemail transcript</summary><pre className="lcc-transcript">{vc.voicemail_transcript}</pre></details>
+                            )}
+                            {!vc.transcript && !(vc.voicemail_left && vc.voicemail_transcript) && (
+                              <div className="lcc-muted lcc-small">{vc.voicemail_left ? 'Voicemail left — no transcript.' : 'No transcript for this call.'}</div>
+                            )}
+                            {vc.recording_url && <div className="lcc-muted lcc-small">Recording saved with the phone provider.</div>}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </section>
+              </div>
+            </div>
+          )}
+
+          {/* Tab: Activity — the granular log for this contact, newest first */}
+          {activeTab === 'activity' && (
+            <div className="lcc-pane lcc-scroll" id="lcc-pane-activity" role="tabpanel" aria-labelledby="lcc-tab-activity">
+              <div className="lcc-filterbar">
+                <div className="lcc-seg" role="group" aria-label="Activity type">
+                  {Object.entries(ACTIVITY_KINDS).map(([k, v]) => (
+                    <button key={k} type="button" className={activityKind === k ? 'on' : ''} onClick={() => setActivityKind(k)}>{v.label}</button>
+                  ))}
+                </div>
+                <button type="button" className="lcc-linkbtn" onClick={handleRefreshActivity} disabled={activityLoading}>
+                  {activityLoading ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
+              {activityError && (
+                <div className="lcc-alert lcc-alert--red" role="alert">{activityError}
+                  <button type="button" className="lcc-linkbtn" onClick={handleRefreshActivity}>Retry</button></div>
+              )}
+              {activityLoading && !activity && <div className="lcc-empty">Loading activity…</div>}
+              {activity && activityRows.length === 0 && <div className="lcc-empty">No activity of this kind.</div>}
+              <ol className="lcc-events">
+                {activityRows.map((ev) => (
+                  <li key={ev.id} className={`lcc-event lcc-event--${String(ev.type || '').split('_')[0]}`}>
+                    <div className="lcc-event-head">
+                      <strong>{ev.label}</strong>
+                      <time className="lcc-muted" title={fullWhen(ev.ts)}>{fullWhen(ev.ts)}</time>
+                    </div>
+                    {ev.body && <div className="lcc-event-body">{ev.body.length > 220 ? ev.body.slice(0, 220) + '…' : ev.body}</div>}
+                    {ev.meta?.hot_reason && <div className="lcc-small lcc-red">{ev.meta.hot_reason}</div>}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {/* Tab: History — every message on record, searchable, plus cadence touches */}
+          {activeTab === 'history' && (
+            <div className="lcc-pane lcc-scroll" id="lcc-pane-history" role="tabpanel" aria-labelledby="lcc-tab-history">
+              <div className="lcc-filterbar">
+                <input className="lcc-search" type="search" placeholder="Search messages and emails" aria-label="Search history"
+                  value={historyQuery} onChange={(e) => setHistoryQuery(e.target.value)} />
+                {olderCursor.hasMore && (
+                  <button type="button" className="lcc-btn lcc-btn--sm" onClick={loadOlderActivity} disabled={loadingOlder}>
+                    {loadingOlder ? 'Loading…' : 'Load older records'}
                   </button>
                 )}
+              </div>
+              {olderError && <div className="lcc-err">{olderError}</div>}
+              <div className="lcc-tablewrap">
+                <table className="lcc-table">
+                  <thead><tr><th scope="col">When</th><th scope="col">Direction</th><th scope="col">Channel</th><th scope="col">Message</th><th scope="col">Result</th></tr></thead>
+                  <tbody>
+                    {historyRows.length === 0 && <tr><td colSpan={5} className="lcc-muted">{events.length ? 'No match.' : 'No records yet.'}</td></tr>}
+                    {historyRows.map((e, i) => (
+                      <tr key={`${timelineEventKey(e)}#h${i}`}>
+                        <td className="lcc-nowrap">{fullWhen(e.timestamp)}</td>
+                        <td>{e.type === 'inbound' ? 'Inbound' : e.type === 'outbound' ? 'Outbound' : 'System'}</td>
+                        <td>{CHANNEL_WORD[e.channel] || e.channel}</td>
+                        <td>{e.subject && <strong>{e.subject} · </strong>}{(e.body || e.body_preview || '').slice(0, 160)}</td>
+                        <td>{e.type === 'outbound' ? (DELIVERY_STATES[e.delivery?.state]?.label || e.status || '—') : (e.status || '—')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <h3 className="lcc-h3">Cadence touches</h3>
+              <CadencePanel cadence={cadenceHistory} loading={cadenceLoading} />
+            </div>
+          )}
+
+          {/* Tab: Overview — details, edit, record */}
+          {activeTab === 'overview' && (
+            <div className="lcc-pane lcc-scroll" id="lcc-pane-overview" role="tabpanel" aria-labelledby="lcc-tab-overview">
+              {showEdit ? (
+                <section className="lcc-sub-card" aria-label="Edit details">
+                  <div className="lcc-formgrid">
+                    {[['first_name', 'First name'], ['last_name', 'Last name'], ['phone', 'Phone', 'e.g. 214-555-0199'], ['email', 'Email', 'email@example.com'],
+                      ['street_address', 'Street address', '123 Main St'], ['city', 'City'], ['state', 'State', 'TX'], ['zip_code', 'ZIP', '75001']].map(([k, label, ph]) => (
+                      <label key={k} className="leads-add-label">{label}
+                        <input className="search-input" value={editForm[k] || ''} placeholder={ph}
+                          onChange={(e) => setEditForm((f) => ({ ...f, [k]: e.target.value }))} />
+                      </label>
+                    ))}
+                  </div>
+                  <label className="leads-add-label">Lead relationship
+                    <span className="lcc-small lcc-muted">The main AI context — it controls how familiar the AI sounds.</span>
+                    <select className="search-input" value={editForm.relationship_type || 'cold_lead'}
+                      onChange={(e) => setEditForm((f) => ({ ...f, relationship_type: e.target.value }))}>
+                      <option value="cold_lead">Cold lead — no prior relationship</option>
+                      <option value="warm_lead">Warm lead — showed prior interest / referral</option>
+                      <option value="re_engagement">Re-engagement — contacted before, went quiet</option>
+                      <option value="previous_prospect">Previous prospect — was in pipeline, didn't close</option>
+                      <option value="past_customer">Past customer — was a customer, lapsed</option>
+                      <option value="existing_customer">Existing customer — active relationship</option>
+                    </select>
+                  </label>
+                  <label className="leads-add-label">Notes
+                    <textarea className="search-input" rows={3} value={editForm.notes || ''}
+                      onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))} style={{ resize: 'vertical', fontFamily: 'inherit' }} />
+                  </label>
+                  <div className="lcc-row">
+                    <button type="button" className="lcc-btn lcc-btn--primary" onClick={handleSaveEdit} disabled={editSaving}>{editSaving ? 'Saving…' : 'Save changes'}</button>
+                    <button type="button" className="lcc-btn" onClick={() => setShowEdit(false)}>Cancel</button>
+                    {editError && <span className="lcc-err" role="alert">{editError}</span>}
+                  </div>
+                </section>
+              ) : (
+                <div className="lcc-row lcc-row--end"><button type="button" className="lcc-btn lcc-btn--sm" onClick={openEdit}>Edit details</button></div>
+              )}
+              <dl className="lcc-facts">
+                {[
+                  ['Phone', lead.phone ? formatPhone(lead.phone) : null],
+                  ['Callback phone', lead.callback_phone ? formatPhone(lead.callback_phone) : null],
+                  ['Email', lead.email],
+                  ['Address', [lead.street_address, lead.city, lead.state, lead.zip_code].filter(Boolean).join(', ')],
+                  ['Relationship', lead.relationship_type ? lead.relationship_type.replace(/_/g, ' ') : null],
+                  ['Appointment type', apptLabel],
+                  ['Tier', lead.tier ? lead.tier.replace(/_/g, ' ') : null],
+                  ['Source', sourceLabel],
+                  ['Source file', lead.source_file],
+                  ['Source year', lead.source_year],
+                  ['Last action', lead.last_action_raw],
+                  ['Status reason', lead.status_reason_raw],
+                  ['Flag', lead.manual_flag ? lead.manual_flag.replace(/_/g, ' ') : null],
+                  ['Test record', isTest ? (lead.test_note || 'Yes — no outreach') : null],
+                  ['Notes', lead.notes],
+                ].filter(([, v]) => v !== null && v !== undefined && v !== '').map(([label, value]) => (
+                  <div key={label} className="lcc-fact"><dt>{label}</dt><dd>{String(value)}</dd></div>
+                ))}
+              </dl>
+              <div className="lcc-row">
+                <button type="button" className="lcc-btn" onClick={() => setShowCaseFile(true)}>Open client record</button>
+              </div>
+              {isFuneral && <OutcomeTracker leadId={leadId} />}
+            </div>
+          )}
+        </section>
+
+        {/* ── RIGHT RAIL ── */}
+        <aside className="lcc-rail" aria-label="Contact state and next steps">
+          <ConversationBrain leadId={leadId} compact onContext={setBrainCtx}
+            outreachBlocked={isTest ? TEST_REASON : null}
+            onUseDraft={(text, channel) => {
+              if (channel === 'email' && canSendEmail) { setSendMode('email'); setEmailBody(text) }
+              else { setSendMode('sms'); setMessageText(text) }
+              focusComposer()
+            }} />
+
+          <section className="lcc-card lcc-rail-card" aria-labelledby="lcc-ready-h">
+            <h2 className="lcc-h2" id="lcc-ready-h">Channel readiness</h2>
+            {isTest ? (
+              <div className="lcc-alert lcc-alert--red" role="note" data-testid="lcc-test-block">
+                <strong>Production outreach blocked</strong>
+                <div>{TEST_REASON}</div>
+              </div>
+            ) : readyCount === 0 && (
+              <div className="lcc-alert lcc-alert--amber" role="note">
+                <strong>No channel can reach this contact right now.</strong>
+              </div>
+            )}
+            <ul className="lcc-ready">
+              {readiness.map((r) => (
+                <li key={r.key}>
+                  <span>{r.label}</span>
+                  <span className={`lcc-chip ${r.ok ? 'lcc-chip--green' : isTest || /consent|opt|dnc|do-not|suppress/i.test(r.why || '') ? 'lcc-chip--red' : 'lcc-chip--amber'}`}
+                    title={r.ok ? 'Ready' : (r.why || 'Unavailable')}>
+                    {r.ok ? 'Ready' : isTest ? 'Blocked' : 'Unavailable'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <button type="button" className="lcc-linkbtn" aria-expanded={showDiag} onClick={() => setShowDiag(!showDiag)}>
+              {showDiag ? 'Hide details' : 'View details'}
+            </button>
+            {showDiag && (
+              <div className="lcc-diag">
+                {readiness.filter((r) => !r.ok && r.why).map((r) => <div key={r.key}><strong>{r.label}:</strong> {r.why}</div>)}
+                {isTest && lead.test_note && <div><strong>Why it is a test record:</strong> {lead.test_note}</div>}
+                {smsSender && <div><strong>Text sender:</strong> {smsSender.ready ? (smsSender.from_number ? formatPhone(smsSender.from_number) : 'Ready') : smsSender.reason}</div>}
+                {emailSender && <div><strong>Email sender:</strong> {emailSender.ready ? (emailSender.from_email || 'Ready') : emailSender.reason}</div>}
+                {!smsLinksAllowed && smsPolicyReason && <div><strong>Text links:</strong> {smsPolicyReason}</div>}
               </div>
             )}
           </section>
 
-          {/* ── Cadence (SS6) ── */}
-          <section className="panel lead-detail-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">🔁 Cadence</h2>
-              <button
-                onClick={loadCadenceHistory}
-                disabled={cadenceLoading}
-                style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}
-              >
-                {cadenceLoading ? 'Refreshing…' : 'Refresh'}
-              </button>
+          <section className="lcc-card lcc-rail-card" aria-labelledby="lcc-ai-h">
+            <div className="lcc-rail-head">
+              <h2 className="lcc-h2" id="lcc-ai-h">AI conversation</h2>
+              {aiConvStatus?.active && <span className="lcc-chip lcc-chip--green">Running</span>}
+              {aiConvStatus?.paused && <span className="lcc-chip lcc-chip--amber">Paused</span>}
+              {aiConvStatus?.flagged && <span className="lcc-chip lcc-chip--red">Needs you</span>}
             </div>
-            <CadencePanel cadence={cadenceHistory} loading={cadenceLoading} />
+            {aiConvStatus?.flagged && <div className="lcc-alert lcc-alert--red">{aiConvStatus.flag_reason || 'Human response needed'}</div>}
+            {aiConvStatus?.active && !aiConvStatus?.flagged && (
+              <p className="lcc-small">Touch {aiConvStatus.touch_number || 0}{aiConvStatus.total_touches ? ` of ${aiConvStatus.total_touches}` : ''} · {aiConvStatus.messages_sent || 0} sent
+                {aiConvStatus.next_send_at && <span className="lcc-muted"> · next {new Date(aiConvStatus.next_send_at).toLocaleString()}</span>}</p>
+            )}
+            {!aiConvStatus?.active || aiConvStatus?.status === 'not_started' ? (
+              aiStartBlockedReason ? (
+                <p className="lcc-small lcc-muted" data-testid="lcc-ai-blocked">{aiStartBlockedReason}</p>
+              ) : (<>
+                <div className="lcc-seg" role="group" aria-label="AI channel">
+                  {[['email', 'Email', canSendEmail, emailBlockedReason], ['sms', 'Text', canSendSMS, smsBlockedReason], ['both', 'Both', canSendBoth, ch?.both?.reason]]
+                    .map(([key, label, available, why]) => (
+                      <button key={key} type="button" className={effectiveAiChannel === key ? 'on' : ''} disabled={!available}
+                        title={available ? undefined : (why || 'Not available for this contact')} onClick={() => available && setAiConvChannel(key)}>{label}</button>
+                    ))}
+                </div>
+                <button type="button" className="lcc-btn lcc-btn--primary lcc-btn--block" onClick={handleStartAiConversation}
+                  disabled={aiConvLoading || !effectiveAiChannel}>
+                  {aiConvLoading ? 'Starting…' : 'Start AI conversation'}
+                </button>
+                <p className="lcc-small lcc-muted">{effectiveAiChannel ? 'Runs a multi-touch sequence, answers replies, and pauses when a person is needed.' : 'This contact cannot be reached on any channel right now.'}</p>
+              </>)
+            ) : (
+              aiConvStatus?.paused || aiConvStatus?.flagged ? (
+                <button type="button" className="lcc-btn lcc-btn--primary lcc-btn--block" onClick={handleResumeAiConversation}
+                  disabled={Boolean(aiStartBlockedReason)} title={aiStartBlockedReason || undefined}>Resume AI</button>
+              ) : (
+                <button type="button" className="lcc-btn lcc-btn--block" onClick={handlePauseAiConversation}>Pause AI</button>
+              )
+            )}
+            {aiConvStatus?.active && aiStartBlockedReason && (aiConvStatus?.paused || aiConvStatus?.flagged) && (
+              <p className="lcc-small lcc-muted">{aiStartBlockedReason}</p>
+            )}
           </section>
 
-          {/* ── Human dialer: caller ID, call, outcome + notes, history, next call ── */}
-          {lead.phone && (
-            <section className="panel lead-detail-panel">
-              <div className="panel-header">
-                <h2 className="panel-title">☎️ Call</h2>
+          <div className="lcc-rail-pair">
+            <section className="lcc-card lcc-rail-card" aria-labelledby="lcc-book-h">
+              <div className="lcc-rail-head">
+                <h2 className="lcc-h2" id="lcc-book-h">Booking</h2>
+                <span className={`lcc-chip ${booking?.status === 'booked' ? 'lcc-chip--green' : booking?.status === 'pending' ? 'lcc-chip--amber' : 'lcc-chip--neutral'}`}>{bookingLabel}</span>
               </div>
-              <HumanDialerPanel leadId={leadId} phone={lead.phone} />
-            </section>
-          )}
-
-          {/* ── Voice Call ── */}
-          {lead.phone && (
-            <section className="panel lead-detail-panel">
-              <div className="panel-header">
-                <h2 className="panel-title">📞 AI Voice Call</h2>
-              </div>
-              {callResult && (
-                <div style={{ background: 'rgba(30,240,168,0.1)', border: '1px solid rgba(30,240,168,0.3)', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: 'var(--signal-green)' }}>
-                  ✅ Call placed — call #{callResult.call_number} to {callResult.lead_name}
-                  {callResult.from_phone ? ` from ${formatPhone(callResult.from_phone)}` : ''}
+              <p className="lcc-small">{bookingSub}{booking?.status === 'booked' && booking.calendar_event_id ? ' · on the calendar' : ''}</p>
+              {booking?.status === 'booked' ? (
+                <div className="lcc-col">
+                  <button type="button" className="lcc-btn lcc-btn--sm" onClick={() => setShowCaseFile(true)}>Open client record</button>
+                  <button type="button" className="lcc-btn lcc-btn--sm lcc-danger" onClick={() => handleCancelBooking(booking.id)} disabled={cancelling}>
+                    {cancelling ? 'Cancelling…' : 'Cancel booking'}
+                  </button>
                 </div>
+              ) : wholesaleLinks.length === 0 && (
+                <button type="button" className="lcc-btn lcc-btn--sm" onClick={headerBook}
+                  disabled={!canBookLink || resendingLink} title={bookBlockedReason || undefined}>
+                  {resendingLink ? 'Sending…' : booking ? 'Resend booking link' : 'Send booking link'}
+                </button>
               )}
-              {/* The real reason, kept on the page. It used to be an alert()
-                  that said "Unable to reach the server" for every failure,
-                  including ones the server had answered clearly. */}
-              {callError && (
-                <div style={SX.senderWarn}>{callError}</div>
+              {!canBookLink && booking?.status !== 'booked' && bookBlockedReason && wholesaleLinks.length === 0 && (
+                <p className="lcc-small lcc-muted">{bookBlockedReason}</p>
               )}
-              {!canVoice && voiceBlockedReason && !callError && (
-                <div style={SX.senderWarn}>{voiceBlockedReason}</div>
-              )}
-              <button
-                className="btn btn--primary"
-                style={{ width: '100%', fontSize: 14, padding: '12px' }}
-                onClick={handleCall}
-                disabled={calling || !canVoice}
-                title={canVoice ? undefined : (voiceBlockedReason || undefined)}
-              >
-                {calling ? '⏳ Calling…' : '📞 Call with AI'}
-              </button>
-              <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8, textAlign: 'center' }}>
-                The AI agent calls, discloses that it is an AI, and books if they say yes.
-                Recorded. Maximum 3 attempts.
-              </p>
             </section>
-          )}
-
-          {/* Lead -> Wholesale. A property seller is worked from the deal; the
-              platform's self-service booking link is never offered to them. */}
-          {wholesaleLinks.length > 0 && (
-            <section className="panel lead-detail-panel">
-              <div className="panel-header">
-                <h2 className="panel-title">🏠 Wholesale seller</h2>
+            <section className="lcc-card lcc-rail-card" aria-labelledby="lcc-read-h">
+              <div className="lcc-rail-head">
+                <h2 className="lcc-h2" id="lcc-read-h">AI read</h2>
+                {ai_quality && <span className={`badge badge--${QUALITY_COLOR[ai_quality.quality] || 'neutral'}`}>{ai_quality.quality || 'unknown'}</span>}
               </div>
-              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
+              {ai_quality?.recommended_approach
+                ? <p className="lcc-small">{ai_quality.recommended_approach}</p>
+                : <p className="lcc-small lcc-muted">{ai_quality ? 'No recommendation recorded.' : 'No analysis yet.'}</p>}
+              <button type="button" className="lcc-btn lcc-btn--sm" onClick={handleRunAnalysis} disabled={analyzing}>
+                {analyzing ? 'Analyzing…' : ai_quality ? 'Re-analyze' : 'Run analysis'}
+              </button>
+              {analysisError && <div className="lcc-err">{analysisError}</div>}
+            </section>
+          </div>
+
+          {wholesaleLinks.length > 0 && (
+            <section className="lcc-card lcc-rail-card" aria-labelledby="lcc-wh-h">
+              <h2 className="lcc-h2" id="lcc-wh-h">Wholesale seller</h2>
+              <ul className="lcc-plain">
                 {wholesaleLinks.map((w) => (
-                  <li key={w.seller_profile_id} style={{ fontSize: 13 }}>
+                  <li key={w.seller_profile_id}>
                     {w.deal_id
-                      ? <a href={`/wholesale/deals/${w.deal_id}`}
-                           onClick={(e) => { e.preventDefault(); navigate(`/wholesale/deals/${w.deal_id}`) }}>
-                          {w.address || 'Property'}
-                        </a>
+                      ? <a href={`/wholesale/deals/${w.deal_id}`} onClick={(e) => { e.preventDefault(); navigate(`/wholesale/deals/${w.deal_id}`) }}>{w.address || 'Property'}</a>
                       : <span>{w.address || 'Property'}</span>}
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-                      {[w.stage && w.stage.replace(/_/g, ' '),
-                        w.primary_seller ? 'seller of record' : 'additional contact — verify',
+                    <div className="lcc-small lcc-muted">
+                      {[w.stage && w.stage.replace(/_/g, ' '), w.primary_seller ? 'seller of record' : 'additional contact — verify',
                         w.source === 'seller_inquiry' ? 'came in via the seller form' : null,
-                        w.appointment_status && w.appointment_status !== 'none'
-                          ? `appointment ${w.appointment_status.replace(/_/g, ' ')}` : null]
+                        w.appointment_status && w.appointment_status !== 'none' ? `appointment ${w.appointment_status.replace(/_/g, ' ')}` : null]
                         .filter(Boolean).join(' · ')}
                     </div>
                   </li>
                 ))}
               </ul>
-              <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8 }}>
-                Sellers are scheduled by a person, not sent a booking link.
-              </p>
+              <p className="lcc-small lcc-muted">Sellers are scheduled by a person, not sent a booking link.</p>
             </section>
           )}
 
-          {booking && (
-            <section className="panel lead-detail-panel">
-              <div className="panel-header">
-                <h2 className="panel-title">📅 Booking</h2>
-                <span className={`badge badge--${
-                  booking.status === 'booked'    ? 'green' :
-                  booking.status === 'cancelled' ? 'neutral-dim' : 'amber'
-                }`}>
-                  {booking.status}
-                </span>
-              </div>
-              {booking.status === 'booked' && booking.booked_time && (
-                <p className="lead-detail-info-text">
-                  📅 {new Date(booking.booked_time).toLocaleString()}
-                  {booking.calendar_event_id && ' · on Outlook Calendar'}
-                </p>
-              )}
-              {booking.status === 'pending' && (
-                <p className="lead-detail-info-text">Link sent — waiting for lead to pick a time.</p>
-              )}
-              {booking.status === 'cancelled' && (
-                <p className="lead-detail-info-text" style={{ color: 'var(--text-secondary)' }}>
-                  Booking was cancelled. Send a fresh link to reschedule.
-                </p>
-              )}
-
-              {/* Resend link — show for pending, cancelled, or expired states */}
-              {booking.status !== 'booked' && (
-                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <button
-                    className="btn btn--primary"
-                    style={{ width: '100%', fontSize: 13 }}
-                    onClick={handleResendBookingLink}
-                    disabled={resendingLink}
-                  >
-                    {resendingLink ? 'Sending…' : '🔗 Resend Booking Link'}
-                  </button>
-                  {resendLinkMsg && (
-                    <p style={{
-                      fontSize: 12,
-                      color: resendLinkMsg.ok ? 'var(--color-success)' : 'var(--color-danger)',
-                      margin: 0,
-                    }}>
-                      {resendLinkMsg.ok ? '✓ ' : '✗ '}{resendLinkMsg.text}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {booking.status === 'booked' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <button
-                    className="btn btn--primary"
-                    style={{ width: '100%', fontSize: 13 }}
-                    onClick={() => setShowCaseFile(true)}
-                  >
-                    📋 Open Client Record
-                  </button>
-                  <button
-                    className="btn btn--danger"
-                    onClick={() => handleCancelBooking(booking.id)}
-                    disabled={cancelling}
-                  >
-                    {cancelling ? 'Cancelling…' : 'Cancel booking'}
-                  </button>
-                </div>
-              )}
-            </section>
-          )}
-
-          <section className="panel lead-detail-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">🤖 AI read</h2>
-              <button
-                className="btn btn--secondary"
-                onClick={handleRunAnalysis}
-                disabled={analyzing}
-                style={{ fontSize: 11, padding: '4px 10px' }}
-              >
-                {analyzing ? 'Analyzing…' : ai_quality ? 'Re-analyze' : 'Run analysis'}
-              </button>
+          <details className="lcc-card lcc-rail-card lcc-fold">
+            <summary><span className="lcc-h2">Cadence</span>
+              <span className="lcc-muted lcc-small">{cadenceHistory?.status || (cadenceHistory?.history?.length ? 'history' : 'not enrolled')}</span></summary>
+            <div className="lcc-row lcc-row--end">
+              <button type="button" className="lcc-linkbtn" onClick={loadCadenceHistory} disabled={cadenceLoading}>{cadenceLoading ? 'Refreshing…' : 'Refresh'}</button>
             </div>
-            {ai_quality ? (
-              <div className="lead-ai-read">
-                <span className={`badge badge--${QUALITY_COLOR[ai_quality.quality] || 'neutral'}`}>
-                  {ai_quality.quality || 'unknown'}
-                </span>
-                {ai_quality.recommended_approach && (
-                  <p className="lead-detail-info-text">{ai_quality.recommended_approach}</p>
-                )}
-              </div>
-            ) : (
-              <p className="lead-detail-info-text" style={{ color: 'var(--text-tertiary)' }}>
-                No analysis yet. Run it to get a read on this lead.
-              </p>
-            )}
-            {analysisError && <div className="compose-error">{analysisError}</div>}
-          </section>
-
-          {/* ── Case File (always accessible, not just booked) ── */}
-          {!booking && lead.email && wholesaleLinks.length === 0 && (
-            <section className="panel lead-detail-panel">
-              <div className="panel-header">
-                <h2 className="panel-title">🔗 Booking Link</h2>
-              </div>
-              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
-                No booking link sent yet. Send one directly to this lead's inbox.
-              </p>
-              <button
-                className="btn btn--primary"
-                style={{ width: '100%', fontSize: 13 }}
-                onClick={handleResendBookingLink}
-                disabled={resendingLink}
-              >
-                {resendingLink ? 'Sending…' : '🔗 Send Booking Link'}
-              </button>
-              {resendLinkMsg && (
-                <p style={{
-                  fontSize: 12,
-                  color: resendLinkMsg.ok ? 'var(--color-success)' : 'var(--color-danger)',
-                  marginTop: 8, marginBottom: 0,
-                }}>
-                  {resendLinkMsg.ok ? '✓ ' : '✗ '}{resendLinkMsg.text}
-                </p>
-              )}
-            </section>
-          )}
-
-          {!booking && (
-            <section className="panel lead-detail-panel">
-              <div className="panel-header">
-                <h2 className="panel-title">📋 Client Record</h2>
-              </div>
-              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
-                Record appointment outcomes, products discussed, and next steps for this client.
-              </p>
-              <button
-                className="btn btn--primary"
-                style={{ width: '100%', fontSize: 13 }}
-                onClick={() => setShowCaseFile(true)}
-              >
-                📁 Open Case File
-              </button>
-            </section>
-          )}
-
-          {isFuneral && <OutcomeTracker leadId={leadId} />}
-
-          <section className="panel lead-detail-panel">
-            <div className="panel-header"><h2 className="panel-title">📋 Details</h2></div>
-            <div className="lead-detail-facts">
-              {[
-                { label: 'Email',         value: lead.email },
-                { label: 'Appt type',     value: apptLabel },
-                { label: 'Source',        value: lead.source_file },
-                { label: 'Source year',   value: lead.source_year },
-                { label: 'Last action',   value: lead.last_action_raw },
-                { label: 'Status reason', value: lead.status_reason_raw },
-              ].map(({ label, value }) => value ? (
-                <div key={label} className="lead-detail-fact">
-                  <span className="lead-detail-fact-label">{label}</span>
-                  <span className="lead-detail-fact-value mono">{value}</span>
-                </div>
-              ) : null)}
-            </div>
-          </section>
-        </div>
+            <CadencePanel cadence={cadenceHistory} loading={cadenceLoading} />
+          </details>
+        </aside>
       </div>
 
       {showCaseFile && (
-        <CaseFile
-          lead={lead}
-          onClose={() => setShowCaseFile(false)}
-          onSaved={() => {}}
-        />
+        <CaseFile lead={lead} onClose={() => setShowCaseFile(false)} onSaved={() => {}} />
       )}
     </div>
   )

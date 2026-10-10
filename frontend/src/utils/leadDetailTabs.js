@@ -1,12 +1,18 @@
 // Which LeadDetail tab a URL asks for (?tab=...). The Sales Board and other
 // screens deep-link to /leads/{id}?tab=timeline, so the page must open on the
 // tab named in the URL instead of always starting on Conversation.
-export const LEAD_DETAIL_TABS = ['conversation', 'calls', 'timeline']
+//
+// Lead Command Center tabs (Oct 2026): Conversation, Calls, Activity, History,
+// Overview. The old "timeline" (Full History) was the activity log, so the
+// links that still say ?tab=timeline open Activity.
+export const LEAD_DETAIL_TABS = ['conversation', 'calls', 'activity', 'history', 'overview']
 
 const ALIASES = {
   conversation: 'conversation', conversations: 'conversation', messages: 'conversation', sms: 'conversation',
-  calls: 'calls', call: 'calls', phone: 'calls',
-  timeline: 'timeline', history: 'timeline', 'full-history': 'timeline', full_history: 'timeline', activity: 'timeline',
+  calls: 'calls', call: 'calls', phone: 'calls', voicemail: 'calls', voicemails: 'calls',
+  activity: 'activity', timeline: 'activity', log: 'activity',
+  history: 'history', 'full-history': 'history', full_history: 'history', audit: 'history',
+  overview: 'overview', details: 'overview', profile: 'overview', edit: 'overview',
 }
 
 // `search` is location.search ("?tab=timeline") or a URLSearchParams.
