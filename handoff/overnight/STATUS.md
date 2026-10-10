@@ -81,3 +81,12 @@
 - Next: Visual acceptance via headless Playwright instead of Chrome extension
 - Next check-in by: 08:01 CT
 - Code: desktop/consent-center @ 1345e69f
+
+## 2026-10-10 07:54 CT - SCI - running
+- Task: Visual acceptance: 70/70 screen x width checks clean; lead page + re-checks running
+- Done since last check-in: Stall-recovery self-test 10/10 PASS; watchdog now writes recovery.json + releases dead lease; watchdog routines at :03/:23/:43 now recover, not just report; queue.md written
+- Tests / progress: 15 routes x 5 widths: 0 horizontal overflow, 0 error states, 0 stuck loading
+- Blocker: none
+- Next: Lead Command Center widths; production-readiness pack; Wholesale assessment
+- Next check-in by: 08:14 CT
+- Code: desktop/consent-center @ 1345e69f
