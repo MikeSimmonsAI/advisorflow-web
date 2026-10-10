@@ -16,3 +16,7 @@
 - Next: SCI gap fixes, watchdog scheduling
 - Next check-in by: 01:57 CT
 - Code: desktop/consent-center @ 881297bb
+
+## 2026-10-10 01:38 CT - WATCHDOG - SIMULATED STALE
+- SIMULATED STALE: last heartbeat 45 min ago (task: simulated frozen worker); next check-in was due 01:13
+
