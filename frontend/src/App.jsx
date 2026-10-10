@@ -261,6 +261,7 @@ const GodMaintenanceOps = lazyPage(() => import('./pages/god/GodMaintenanceOps')
 // `<ContextBanner />` and reported the banner as missing from every tenant
 // screen. The banner was always there; the gate was reading a hole.
 const GodAccess = lazyPage(() => import('./pages/god/GodAccess'))
+const GodAccessSetup = lazyPage(() => import('./pages/god/GodAccessSetup'))
 const GodPublicIntake = lazyPage(() => import('./pages/god/GodPublicIntake'))
 // ADD A PERSON. The front door for seating somebody - email first, existing
 // identity reused, brand seat and/or customer workspace granted in one act.
@@ -1491,6 +1492,7 @@ export default function App() {
             Command Center. `/god/access` with no id is the person picker;
             `/god/access/:userId` is one person's whole footprint. */}
         <Route path="/god/access"                element={<GodRoute><GodModeLayout><GodAccess /></GodModeLayout></GodRoute>} />
+        <Route path="/god/access-setup"          element={<GodRoute><GodModeLayout><GodAccessSetup /></GodModeLayout></GodRoute>} />
         {/* ADD A PERSON — before `/god/access/:userId`, so "new" is never read
             as somebody's user id. */}
         <Route path="/god/access/new"            element={<GodRoute><GodModeLayout><GodAddPerson /></GodModeLayout></GodRoute>} />
