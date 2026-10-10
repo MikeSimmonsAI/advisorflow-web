@@ -72,3 +72,12 @@
 ## 2026-10-10 07:24 CT - WATCHDOG - STALE
 - STALE: last heartbeat 113 min ago (task: Merge audit done; screen checks next); next check-in was due 05:51
 
+
+## 2026-10-10 07:41 CT - SCI - running
+- Task: RECOVERY: resumed at screen checks (merge audit not repeated)
+- Done since last check-in: Stall diagnosed: cloud worker session went silent at 05:31 while retrying frozen Chrome renderer; no local process to restart. All work verified pushed (sci-program 1345e69f, release/sci-lead-workflow 4557eab3, wholesale 9ea6843a). Relay watchdog obsolete re-signal fixed (relay/heartbeat-stall b9007659)
+- Tests / progress: Relay watchdog 41/41
+- Blocker: none
+- Next: Visual acceptance via headless Playwright instead of Chrome extension
+- Next check-in by: 08:01 CT
+- Code: desktop/consent-center @ 1345e69f
