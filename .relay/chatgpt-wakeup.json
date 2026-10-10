@@ -1,0 +1,12 @@
+{
+  "relay_run_id": "relay-restart-20261008-0858",
+  "parent_run_id": "ai-workforce-durable-evidence-20261008-0114",
+  "project": "Resume stalled Claude relay; AI Workforce durable evidence",
+  "status": "COMPLETED",
+  "branch": "platform-dev",
+  "timestamp_ct": "2026-10-10T17:25:49.594278+00:00",
+  "issue": 1,
+  "status_comment_id": 6061554703,
+  "watchdog_retry": true,
+  "watchdog_retry_utc": "2026-10-10T17:25:49.594289+00:00"
+}
