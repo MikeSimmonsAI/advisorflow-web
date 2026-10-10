@@ -37,3 +37,12 @@
 - Next: Visual acceptance of 14 screens at 5 widths after staging deploy; merge audit (clean trial merge main+sci)
 - Next check-in by: 04:47 CT
 - Code: desktop/consent-center @ 1345e69f
+
+## 2026-10-10 04:45 CT - SCI + Control Room - running
+- Task: Full suite passed; Control Room heartbeat/stall work pushed; visual QA waiting on Chrome
+- Done since last check-in: Full suite on 881297b: 7765 passed, 29 skipped, 0 failed. Control Room: silence detection + desktop runner card (branch relay/heartbeat-stall, 165 relay tests pass)
+- Tests / progress: Full: 7765 pass / 0 fail. Relay: 165 pass. SCI targeted: 138 pass
+- Blocker: Chrome extension not responding (PC idle); visual screenshots paused
+- Next: Integration branch with today's SCI work + tests; retry Chrome; then Wholesale assessment
+- Next check-in by: 05:05 CT
+- Code: desktop/consent-center @ 1345e69f
