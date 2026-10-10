@@ -56,7 +56,10 @@ def gen_uuid():
 SCOPE_PLATFORM        = "platform"
 SCOPE_BRAND_SALES_ORG = "brand_sales_org"
 SCOPE_CUSTOMER_ORG    = "customer_org"
-SCOPE_TYPES = (SCOPE_PLATFORM, SCOPE_BRAND_SALES_ORG, SCOPE_CUSTOMER_ORG)
+# A named login may use a platform PRODUCT (scope_id = "wholesale").
+# See app/services/product_access.py.
+SCOPE_PRODUCT         = "product"
+SCOPE_TYPES = (SCOPE_PLATFORM, SCOPE_BRAND_SALES_ORG, SCOPE_CUSTOMER_ORG, SCOPE_PRODUCT)
 
 ROLE_SALES_MANAGER   = "sales_manager"
 ROLE_SALES_REP       = "sales_rep"
