@@ -31,6 +31,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import relay_guard as g  # noqa: E402
 
 LEASE_MINUTES = 30
+# SILENCE, not just elapsed time: an accepted run must post a progress update
+# (any trusted non-terminal STATUS comment) at least this often. Past it the
+# run reads STALE even inside its lease - a hung worker is flagged as soon as it
+# goes quiet, not only when the 30-minute lease runs out.
+HEARTBEAT_MINUTES = 20
 # The guard only accepts four STATUS values; the display additionally retires a run
 # on CANCELLED / SKIPPED so such a card can never stay "Working".
 VIEW_TERMINAL = g.TERMINAL_STATUSES + ("CANCELLED", "SKIPPED")
@@ -214,12 +219,18 @@ def build(comments: Iterable[Dict], runs: Optional[Iterable[Dict]], now: datetim
             cd.update(state="active", display="Working")
             cd["stage"] = stage(r, cd["checkpoint_sha"])
             el = cd["elapsed_min"]
+            quiet = cd["since_update_min"]
             if el is not None and el > LEASE_MINUTES:
                 cd.update(health="STALE/HUNG", display="STALE/HUNG",
                           health_detail="in progress %d min, past the %d-minute lease, no terminal status"
                                         % (el, LEASE_MINUTES))
+            elif quiet is not None and quiet > HEARTBEAT_MINUTES:
+                cd.update(health="STALE", display="STALE - silent",
+                          health_detail="no progress update for %d min (expected every %d min)"
+                                        % (quiet, HEARTBEAT_MINUTES))
             else:
                 cd["health"] = "ok"
+            cd["heartbeat_minutes"] = HEARTBEAT_MINUTES
             active.append((r, cd))
 
     # An accepted run outranks any queued directive (a queued one is not running); within
@@ -242,6 +253,35 @@ def build(comments: Iterable[Dict], runs: Optional[Iterable[Dict]], now: datetim
             "worker": primary or {"state": "idle", "display": "Idle - no active Claude worker"},
             "queued_behind": queued_behind, "history": history, "completed_today": len(done),
             "suggested_next": suggested}
+
+
+DESKTOP_GRACE_MINUTES = 10
+
+
+def desktop_runner(hb: Optional[Dict], now: datetime) -> Dict:
+    """The Claude Desktop / overnight runner, from its own heartbeat file
+    (handoff/overnight/heartbeat.json on the `overnight-status` branch, written by
+    every check-in). Evidence only: no heartbeat -> unknown; a heartbeat whose
+    promised next check-in has passed by more than the grace -> STALE."""
+    now = now.astimezone(timezone.utc)
+    if not hb or not hb.get("at"):
+        return {"state": "unknown", "display": "No desktop runner heartbeat", "health": "unknown"}
+    at, due = _ts(hb.get("at")), _ts(hb.get("next_checkin_by"))
+    out = {k: hb.get(k) or "" for k in ("project", "task", "branch", "commit", "runner", "done", "tests",
+                                         "blocker", "next", "at", "next_checkin_by")}
+    out["since_heartbeat_min"] = _mins(at, now)
+    reported = (hb.get("state") or "running").lower()
+    if reported == "complete":
+        out.update(state="complete", display="Complete", health="ok")
+    elif reported == "blocked":
+        out.update(state="blocked", display="Blocked", health="ok")
+    elif due is not None and now > due + timedelta(minutes=DESKTOP_GRACE_MINUTES):
+        out.update(state="stale", display="STALE - no heartbeat", health="STALE",
+                   health_detail="last heartbeat %s min ago; next check-in was due %s"
+                                 % (out["since_heartbeat_min"], hb.get("next_checkin_by")))
+    else:
+        out.update(state="active", display="Working", health="ok")
+    return out
 
 
 def r_first_ack(rec: Dict, rid: str, c: Dict) -> bool:

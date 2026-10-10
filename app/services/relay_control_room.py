@@ -86,7 +86,10 @@ def unavailable(reason: str, now: Optional[datetime] = None) -> Dict:
     return {"available": False, "generated_at": now.isoformat(), "reason": reason,
             "lease_minutes": relay_state.LEASE_MINUTES, "poll_seconds": POLL_SECONDS,
             "worker": {"state": "unavailable", "display": "Relay status unavailable"},
-            "queued_behind": [], "history": [], "completed_today": 0, "suggested_next": ""}
+            "queued_behind": [], "history": [], "completed_today": 0, "suggested_next": "",
+            # The overnight runner publishes its own heartbeat; a relay outage
+            # must not hide whether IT is alive.
+            "desktop_runner": desktop_runner_state(now=now)}
 
 
 def get_state(fetch_comments: Callable[[], List[Dict]] = None, fetch_runs: Callable[[], List[Dict]] = None,
@@ -105,4 +108,28 @@ def get_state(fetch_comments: Callable[[], List[Dict]] = None, fetch_runs: Calla
         log.exception("relay control room state failed")
         return unavailable("Relay state could not be computed", now)
     state.update(available=True, poll_seconds=POLL_SECONDS)
+    state["desktop_runner"] = desktop_runner_state(now=now)
     return state
+
+
+HEARTBEAT_PATH = "handoff/overnight/heartbeat.json"
+HEARTBEAT_BRANCH = "overnight-status"
+
+
+def _fetch_heartbeat() -> Optional[Dict]:
+    """The overnight runner's own heartbeat file (GitHub contents GET)."""
+    import base64
+    data = _get("/contents/%s?ref=%s" % (HEARTBEAT_PATH, HEARTBEAT_BRANCH)) or {}
+    raw = base64.b64decode(data.get("content") or "").decode("utf-8-sig")
+    return json.loads(raw) if raw.strip() else None
+
+
+def desktop_runner_state(fetch: Callable[[], Optional[Dict]] = None, now: Optional[datetime] = None) -> Dict:
+    """Separate from the relay worker: a missing or unreadable heartbeat reads
+    `unknown`, never `Working`, and never makes the relay itself unavailable."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        hb = (fetch or _fetch_heartbeat)()
+    except Exception:  # noqa: BLE001 - fail closed to unknown
+        return {"state": "unknown", "display": "Desktop runner heartbeat unavailable", "health": "unknown"}
+    return relay_state.desktop_runner(hb, now)

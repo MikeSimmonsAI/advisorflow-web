@@ -85,6 +85,44 @@ function Worker({ worker, generatedAt, tick, last }) {
   )
 }
 
+// THE OVERNIGHT / DESKTOP RUNNER, at the top of the page. Read from its own
+// heartbeat (GET /god/relay/worker -> desktop_runner). Shows what it is doing,
+// when it last checked in and when it promised to check in next; past that
+// promise (+10 min) it reads STALE in red. Never a percentage, never an ETA.
+function DesktopRunner({ runner, tick }) {
+  if (!runner) return null
+  const st = runner.state
+  const color = st === 'stale' ? 'var(--gm-red, #b91c1c)' : st === 'active' ? 'var(--gm-teal, #047857)'
+    : st === 'blocked' ? 'var(--gm-amber, #b45309)' : 'var(--gm-dim, #4b5563)'
+  const due = runner.next_checkin_by ? new Date(runner.next_checkin_by).getTime() : null
+  const overdue = due && st === 'active' && tick > due
+  return (
+    <div style={{ ...card, borderLeft: `4px solid ${color}` }} data-testid="desktop-runner" role="status">
+      <div style={head}>Overnight runner (Claude Desktop)</div>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 20, fontWeight: 700, color }}>{runner.display}</div>
+        {runner.project ? <div><b>{runner.project}</b>{runner.task ? ` · ${runner.task}` : ''}</div> : null}
+      </div>
+      {st === 'unknown' ? <div style={label}>No heartbeat has been published by the overnight runner.</div> : (
+        <div style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginTop: 8 }}>
+          <div>
+            <Row k="Last heartbeat" v={`${formatCT(runner.at)}${runner.since_heartbeat_min != null ? ` (${formatMinutes(runner.since_heartbeat_min)} ago)` : ''}`} />
+            <Row k="Next check-in by" v={`${formatCT(runner.next_checkin_by)}${overdue ? ' — overdue' : ''}`} />
+            <Row k="Code" v={[runner.branch, runner.commit].filter(Boolean).join(' @ ')} />
+          </div>
+          <div>
+            <Row k="Last checkpoint" v={runner.done} />
+            <Row k="Tests" v={runner.tests} />
+            <Row k="Next" v={runner.next} />
+            {runner.blocker && runner.blocker !== 'none' ? <Row k="Blocker" v={runner.blocker} /> : null}
+          </div>
+        </div>
+      )}
+      {runner.health_detail ? <div style={{ color, marginTop: 6 }}>{runner.health_detail}</div> : null}
+    </div>
+  )
+}
+
 export default function GodRelayControlRoom({ onManualRefresh }) {
   const [state, setState] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -133,6 +171,8 @@ export default function GodRelayControlRoom({ onManualRefresh }) {
           Status is stale — the last successful check was more than {Math.round(POLL_MS * 3 / 1000)}s ago.
         </div>
       ) : null}
+
+      <DesktopRunner runner={s.desktop_runner} tick={tick} />
 
       {state === null ? (
         <div style={{ ...card, color: 'var(--gm-dim, #6b7280)' }} role="status" data-testid="relay-loading">
