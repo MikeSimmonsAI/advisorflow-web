@@ -64,3 +64,7 @@
 - Next: Visual acceptance of 14 screens x 5 widths; then morning report
 - Next check-in by: 05:51 CT
 - Code: desktop/consent-center @ 1345e69f
+
+## 2026-10-10 06:24 CT - WATCHDOG - STALE
+- STALE: last heartbeat 53 min ago (task: Merge audit done; screen checks next); next check-in was due 05:51
+
