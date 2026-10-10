@@ -124,11 +124,11 @@ export default function Responses({ locationId, onChange, navigate }) {
                     <b>{r.name || 'Contact'}{r.location ? ` · ${r.location}` : ''}</b>
                     <small>{r.body || r.summary}</small>
                     <small>
+                      <Chip tone={CLASS_TONE[r.class]} plain>{r.label || CLASS_LABEL[r.class]}</Chip>{' '}
                       {when(r.received_at)} · {r.channel === 'sms' ? 'Text' : 'Email'}
                       {r.status === 'new' && ' · new'}{r.sla_breached && ' · past SLA'}
                     </small>
                   </span>
-                  <Chip tone={CLASS_TONE[r.class]} plain>{r.label || CLASS_LABEL[r.class]}</Chip>
                 </button>
               ))
             )}
@@ -169,9 +169,14 @@ function ConversationPane({ r, mark, navigate, onSent }) {
   const leadStatus = String(lead?.status || '').toLowerCase()
   const optedOut = r.class === 'opt_out' || OPTED_OUT_STATUSES.includes(leadStatus) || !!(lead?.opted_out || lead?.sms_opted_out)
   const canText = !!lead?.phone && !optedOut
-  const events = [...(tl?.events || [])]
-    .filter(e => e && (e.body || e.type))
-    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+  // Messages and calls in one timeline, oldest first.
+  const events = [
+    ...(tl?.events || []).filter(e => e && (e.body || e.type)),
+    ...(tl?.voice_calls || []).map(c => ({
+      type: 'call', channel: 'call', timestamp: c.started_at || c.created_at,
+      body: `Call · ${c.status || c.direction || 'voicemail'}`,
+    })),
+  ].sort((a, b) => (+new Date(a.timestamp) || 0) - (+new Date(b.timestamp) || 0))
 
   const send = async e => {
     e.preventDefault()
@@ -212,13 +217,10 @@ function ConversationPane({ r, mark, navigate, onSent }) {
                 return (
                   <div key={i} className={`sci-bubble ${dir}`}>
                     {ev.body || ev.type}
-                    <small>{when(ev.timestamp)} · {ev.channel || ev.type}{ev.status ? ` · ${ev.status}` : ''}</small>
+                    <small>{when(ev.timestamp)}{ev.type !== 'call' ? ` · ${ev.channel || ev.type}` : ''}{ev.status ? ` · ${ev.status}` : ''}</small>
                   </div>
                 )
               })}
-              {(tl?.voice_calls || []).map((c, i) => (
-                <div key={`v${i}`} className="sci-bubble sys">Call · {c.status || c.direction || 'voicemail'}<small>{when(c.started_at || c.created_at)}</small></div>
-              ))}
             </>
           )}
         </div>

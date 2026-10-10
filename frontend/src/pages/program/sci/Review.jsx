@@ -59,7 +59,7 @@ export default function Review({ locationId, locations, isManager, attention, in
     data_review: attention.data_review || 0, location_review: attention.location_review || 0,
     duplicate_review: attention.duplicate_review || 0, on_hold: attention.on_hold || 0,
   }
-  const pick = k => { setQueue(k); setOpenId(null) }
+  const pick = k => { setQueue(k); setOpenId(null); setMsg('') }
 
   return (
     <>
@@ -87,7 +87,7 @@ export default function Review({ locationId, locations, isManager, attention, in
           </div>
           <div className="sci-search" style={{ width: 280 }}>
             <label htmlFor="sci-rev-search" className="sci-sr">Search records</label>
-            <input id="sci-rev-search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Name, email, phone or Lead ID" />
+            <input id="sci-rev-search" value={search} onChange={e => { setSearch(e.target.value); setMsg('') }} placeholder="Name, email, phone or Lead ID" />
           </div>
         </div>
         <ErrorLine text={err} />

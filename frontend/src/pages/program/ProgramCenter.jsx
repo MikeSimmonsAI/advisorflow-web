@@ -43,6 +43,12 @@ const TABS = [
   { key: 'settings', label: 'Settings', icon: 'settings' },
 ]
 
+/** Open Review on the first queue that has work in it, most urgent first. */
+function firstOpenQueue(att) {
+  const order = ['location_review', 'data_review', 'duplicate_review', 'on_hold']
+  return order.find(k => (att?.[k] || 0) > 0) || 'all'
+}
+
 export default function ProgramCenter() {
   const [params, setParams] = useSearchParams()
   const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'dashboard'
@@ -180,7 +186,7 @@ export default function ProgramCenter() {
           {tab === 'dashboard' && <Dashboard data={data} goTab={goTab} setParam={setParam} />}
           {tab === 'responses' && <Responses locationId={locationId} onChange={load} navigate={navigate} />}
           {tab === 'review' && <Review locationId={locationId} locations={data.locations} isManager={isManager}
-            attention={att} initialQueue={params.get('queue') || 'data_review'} initialSearch={params.get('q') || ''} onChange={load} />}
+            attention={att} initialQueue={params.get('queue') || firstOpenQueue(att)} initialSearch={params.get('q') || ''} onChange={load} />}
           {tab === 'locations' && <Locations isManager={isManager} selected={locationId} onChange={load} />}
           {tab === 'campaigns' && <Campaigns isManager={isManager} locationId={locationId} locations={data.locations} />}
           {tab === 'assets' && <Assets isManager={isManager} locations={data.locations} />}
