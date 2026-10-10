@@ -57,7 +57,8 @@ function PublicRecord({ p, f, owners, links }) {
       : (phys.parcel_apn || p.parcel_apn)) : none],
     ['County', p.county ? `${p.county} County, ${p.state || 'TX'}` : none],
     ['City / ZIP', p.city || p.zip_code ? [p.city, p.zip_code].filter(Boolean).join(' ') : none],
-    ['Property type', phys.property_type ? humanize(phys.property_type) : none],
+    ['Property type', phys.property_type ? humanize(phys.property_type)
+      : (recordFacts(p, f, owners).landOnly ? 'Vacant land (building valued at $0)' : none)],
     ['Bedrooms', num(phys.bedrooms)],
     ['Full baths', num(phys.bathrooms)],
     ['Half baths', phys.half_bathrooms != null ? num(phys.half_bathrooms) : none],
@@ -83,6 +84,31 @@ function PublicRecord({ p, f, owners, links }) {
       </dl>
     </Panel>
   )
+}
+
+/** Plain facts that follow directly from the county record (never a guess):
+ *  - a land-only parcel: the county values the building at $0 and has no
+ *    building on file, so there are no beds, baths or square feet to show;
+ *  - an owner who lives somewhere else: the tax bill goes to a different
+ *    address than the property. */
+function recordFacts(p, f, owners) {
+  const phys = (f && f.physical) || {}
+  const ap = (f && f.appraisal) || null
+  const landOnly = !!(ap && Number(ap.improvements) === 0 && Number(ap.land) > 0
+    && !phys.bedrooms && !phys.square_feet && !phys.year_built)
+  const current = (owners || []).filter((o) => o.current !== false)
+  const owner = current[0] || null
+  const mailing = owner && owner.mailing ? String(owner.mailing) : ''
+  const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  const street = norm(p && p.address).split(' ').slice(0, 2).join(' ')   // house number + first word
+  const away = !!(mailing && street && !norm(mailing).includes(street))
+  let awayCity = null
+  if (away) {
+    const parts = mailing.split(',').map((s) => s.trim()).filter(Boolean)
+    const st = parts.findIndex((s) => /^[A-Z]{2}$/.test(s) || /^[A-Z]{2}\s+\d{5}/.test(s))
+    awayCity = st > 0 ? `${parts[st - 1]}, ${parts[st].slice(0, 2)}` : null
+  }
+  return { landOnly, land: ap ? ap.land : null, owner, away, awayCity }
 }
 
 const FRESHNESS = { current: 'FRESH', aging: 'AGING', stale: 'STALE' }
@@ -155,6 +181,7 @@ export default function EvoProperty() {
   const eco = d.economics || {}
   const line = (label) => (eco.lines || []).find((l) => l.label === label) || {}
   const place = [p.city, p.state].filter(Boolean).join(', ')
+  const rf = recordFacts(p, f, d.owners || [])
 
   const scoreDetail = {
     opportunity: d.scores.property_opportunity,
@@ -208,7 +235,8 @@ export default function EvoProperty() {
         sub={`${place} ${p.zip_code || ''}${p.county ? ` · ${p.county} County` : ''}`}
         meta={[
           { label: statusLabel(p.status) },
-          f.physical.property_type ? { label: humanize(f.physical.property_type) } : null,
+          f.physical.property_type ? { label: humanize(f.physical.property_type) } : (rf.landOnly ? { label: 'Vacant lot' } : null),
+          rf.away ? { label: 'Absentee owner' } : null,
           f.physical.bedrooms ? { label: `${f.physical.bedrooms} beds` } : null,
           f.physical.bathrooms ? { label: `${f.physical.bathrooms} full bath${Number(f.physical.bathrooms) === 1 ? '' : 's'}${f.physical.half_bathrooms ? ` + ${f.physical.half_bathrooms} half` : ''}` } : null,
           f.physical.square_feet ? { label: `${Number(f.physical.square_feet).toLocaleString()} sq ft` } : null,
@@ -240,9 +268,24 @@ export default function EvoProperty() {
             ) : (
               <div><dt>ARV</dt><dd className="is-quiet">—<small>{(f.arv && f.arv.label) || 'Insufficient comparable sales'}</small></dd></div>
             )}
-            <div><dt>Equity</dt><dd>{f.equity_pct.value != null ? `${f.equity_pct.value}%` : '—'}<small>{f.equity_pct.value != null ? (f.equity_pct.truth || '').toLowerCase().split(' (')[0] : 'missing'}</small></dd></div>
-            <div><dt>Occupancy</dt><dd>{f.occupancy.value ? humanize(f.occupancy.value) : '—'}<small>{f.occupancy.source || 'not reported'}</small></dd></div>
-            <div><dt>Size</dt><dd>{f.physical.bedrooms || '—'}bd · {f.physical.bathrooms || '—'}{f.physical.half_bathrooms ? `/${f.physical.half_bathrooms}` : ''}ba<small>{f.physical.half_bathrooms ? 'full / half baths · ' : 'full baths · '}{f.physical.square_feet ? `${Number(f.physical.square_feet).toLocaleString()} sq ft` : 'sq ft unknown'}{f.physical.year_built ? ` · ${f.physical.year_built}` : ''}</small></dd></div>
+            <div><dt>Equity</dt><dd>{f.equity_pct.value != null ? `${f.equity_pct.value}%` : '—'}<small>{f.equity_pct.value != null ? (f.equity_pct.truth || '').toLowerCase().split(' (')[0] : 'loan balance not on record'}</small></dd></div>
+            {f.occupancy.value ? (
+              <div><dt>Occupancy</dt><dd>{humanize(f.occupancy.value)}<small>{f.occupancy.source || ''}</small></dd></div>
+            ) : rf.landOnly ? (
+              <div><dt>Occupancy</dt><dd>Vacant lot<small>no building on the county record</small></dd></div>
+            ) : rf.away ? (
+              <div><dt>Occupancy</dt><dd>Absentee owner<small>owner gets mail{rf.awayCity ? ` in ${rf.awayCity}` : ' elsewhere'}</small></dd></div>
+            ) : (
+              <div><dt>Occupancy</dt><dd className="is-quiet">—<small>not reported</small></dd></div>
+            )}
+            {rf.landOnly ? (
+              <div><dt>Size</dt><dd>Land only<small>no house · land valued {money(rf.land)}</small></dd></div>
+            ) : (
+              <div><dt>Size</dt><dd>{f.physical.bedrooms || '—'}bd · {f.physical.bathrooms || '—'}{f.physical.half_bathrooms ? `/${f.physical.half_bathrooms}` : ''}ba<small>{f.physical.half_bathrooms ? 'full / half baths · ' : 'full baths · '}{f.physical.square_feet ? `${Number(f.physical.square_feet).toLocaleString()} sq ft` : 'sq ft unknown'}{f.physical.year_built ? ` · ${f.physical.year_built}` : ''}</small></dd></div>
+            )}
+            {rf.owner ? (
+              <div><dt>Owner</dt><dd style={{ fontSize: '1rem' }}>{rf.owner.name || 'name not on record'}<small>{rf.away ? `lives away${rf.awayCity ? ` · ${rf.awayCity}` : ''}` : (rf.owner.mailing ? 'mail goes to the property' : 'mailing address not on record')}</small></dd></div>
+            ) : null}
             <div><dt>Owned</dt><dd>{f.ownership_years.value != null ? `${f.ownership_years.value} yrs` : '—'}<small title={(f.deed_transfer || {}).note}>{f.deed_transfer && f.deed_transfer.date ? `deed transfer ${shortDate(f.deed_transfer.date)} · price not public` : 'no deed transfer date'}</small></dd></div>
           </dl>
         </div>
