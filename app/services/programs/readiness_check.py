@@ -182,43 +182,46 @@ def run_all(now: Optional[datetime] = None) -> Dict:
     }
 
 
-# ── launch gates (mirror of handoff/SCI_GO_NO_GO_CHECKLIST.md) ────────────────
+# ── launch gates (current as of 2026-10-09) ───────────────────────────────────
 # group: verified | test_now | external | approval
+# stage: A code QA · B inbound live test · C consent records · D carrier-approved
+#        message purpose · E admin assignment · F production · G first-contact GO
+# One sending number: the toll-free line +1 844-917-2171. No number purchase.
+STAGES: Dict[str, str] = {
+    "A": "Code QA", "B": "Inbound live test", "C": "Consent records",
+    "D": "Carrier-approved message purpose", "E": "Admin assignment",
+    "F": "Production", "G": "First-contact GO",
+}
 LAUNCH_GATES: List[Dict] = [
-    {"group": "verified", "key": "A1", "text": "Contact cleanup and holds: 535 clean contacts, 9 held. Held records stay in place."},
-    {"group": "verified", "key": "A2", "text": "39 entities / 30 campuses / six regional pools mapped (38 of 39 entities)."},
-    {"group": "verified", "key": "A4", "text": "STOP works; \"Can I stop by Friday?\" is not an opt-out."},
-    {"group": "verified", "key": "A5", "text": "HOT/ACTIVE/LOW, cadence pause on reply, no auto-send of drafts."},
-    {"group": "verified", "key": "A7", "text": "116-scenario stdlib harness passes."},
-    {"group": "verified", "key": "A11", "text": "Inbound HOT email proven on staging (alert, cadence pause, no auto-send)."},
-    {"group": "verified", "key": "T4", "text": "Signed inbound SMS/voice simulation passes (pure helper, synthetic token; the real FastAPI route + DB test is still open under B1)."},
-    {"group": "verified", "key": "A13", "text": "Real customer messaging is OFF; campaigns refuse to send."},
-    {"group": "test_now", "key": "T1", "text": "Run the controlled readiness test (button above): ten synthetic checks, no sends."},
-    {"group": "test_now", "key": "T2", "text": "Mailbox health on staging (B7): confirm the Health tab shows inbound sync working."},
-    {"group": "test_now", "key": "T3", "text": "Inbound email from Mike's approved test address to a location alias."},
-    {"group": "external", "key": "C2", "text": "Six Twilio numbers (205, 334, 850, 251, 706, 318) are not provisioned."},
-    {"group": "external", "key": "C3", "text": "A2P / carrier path for real outbound SMS is unresolved."},
-    {"group": "external", "key": "B1", "text": "Dependency-backed pytest and DB integration are not green (not run on the relay runner)."},
-    {"group": "external", "key": "B2", "text": "Michael's first interactive login is unverified."},
-    {"group": "external", "key": "B6", "text": "Email placement at Outlook, Yahoo and iCloud not checked (Gmail landed outside Inbox)."},
-    {"group": "external", "key": "C1", "text": "Oaklawn Central Care Center location is unresolved; its 9 contacts stay unsendable."},
-    {"group": "external", "key": "C6", "text": "SCI code is not in production; promotion to main is not done."},
-    {"group": "approval", "key": "D1", "text": "Mike: authorize spend for six local numbers."},
-    {"group": "approval", "key": "D2", "text": "Mike: confirm Kerry Allan's identity and signature (neutral Variant N is used until then)."},
-    {"group": "approval", "key": "D3", "text": "Mike: A2P / carrier registration decision and attestation."},
-    {"group": "approval", "key": "D4", "text": "Mike: production promotion of SCI code."},
-    {"group": "approval", "key": "D5", "text": "Mike: explicit GO for the first ~10 live clean contacts."},
+    {"group": "verified", "stage": "A", "key": "A1",
+     "text": "Full test suite on the production merge: 7,745 passed, 0 failed (2026-10-09)."},
+    {"group": "verified", "stage": "A", "key": "A2",
+     "text": "39 locations mapped; Oaklawn Central Care Center held until verified."},
+    {"group": "verified", "stage": "A", "key": "A4", "text": "STOP works; \"Can I stop by Friday?\" is not an opt-out."},
+    {"group": "verified", "stage": "A", "key": "A5", "text": "HOT/ACTIVE/LOW, cadence pause on reply, no auto-send of drafts."},
+    {"group": "verified", "stage": "B", "key": "B1",
+     "text": "Live test on (844) 917-2171 with two phones: texts out, replies in, calls go to voicemail with the "
+             "cemetery's greeting, voicemail saved to the contact with a task (2026-10-09)."},
+    {"group": "verified", "stage": "C", "key": "C1",
+     "text": "Consent: the owner holds the original sign-ups; each contact is recorded as owner-attested on its "
+             "first text. STOP, suppression and do-not-call always win."},
+    {"group": "verified", "stage": "D", "key": "D1",
+     "text": "Toll-free (844) 917-2171 approved by Twilio on 2026-08-22 (use case: Account Notifications)."},
+    {"group": "verified", "stage": "F", "key": "F1", "text": "SCI code merged to main and deployed to production (2026-10-09)."},
+    {"group": "test_now", "stage": "A", "key": "T1",
+     "text": "Run the controlled readiness test: ten synthetic checks, no sends. Synthetic is not a live test."},
+    {"group": "test_now", "stage": "B", "key": "T3", "text": "Inbound email from Mike's test address to a location address."},
+    {"group": "external", "stage": "E", "key": "E1",
+     "text": "Kerry Allan is a sender profile only; her user account has not been created."},
+    {"group": "external", "stage": "A", "key": "C9", "text": "Oaklawn Central Care Center is unresolved with SCI; its contacts stay unsendable."},
+    {"group": "external", "stage": "A", "key": "B6", "text": "Email placement at Outlook, Yahoo and iCloud not checked."},
+    {"group": "external", "stage": "F", "key": "F2", "text": "Production workspace and contacts are not loaded yet."},
+    {"group": "approval", "stage": "D", "key": "D2",
+     "text": "Mike: choose which campaigns to switch on (the approved toll-free scope is Account Notifications)."},
+    {"group": "approval", "stage": "G", "key": "G1", "text": "Mike: GO for the first real text to a family."},
 ]
 
-WHY_NO_GO: List[str] = [
-    "Six Twilio numbers are not provisioned (needs your spend approval).",
-    "No A2P / carrier path exists yet for real outbound SMS (your attestation).",
-    "Dependency-backed pytest and DB integration are still not green.",
-    "Michael's first interactive login is not yet verified.",
-    "Email placement at Outlook, Yahoo and iCloud has not been checked.",
-    "Oaklawn Central Care Center is unresolved with SCI.",
-    "SCI is not promoted to production, and there is no GO from you yet.",
-]
+WHY_NO_GO: List[str] = [g["text"] for g in LAUNCH_GATES if g["group"] in ("external", "approval")]
 
 
 def verdict(last: Optional[Dict]) -> Dict:
@@ -240,5 +243,6 @@ def verdict(last: Optional[Dict]) -> Dict:
 def console(last: Optional[Dict]) -> Dict:
     groups = {k: [g for g in LAUNCH_GATES if g["group"] == k] for k in ("verified", "test_now", "external", "approval")}
     return {"verdict": verdict(last), "groups": groups, "why_no_go": WHY_NO_GO, "last_run": last,
+            "stages": STAGES,
             "persisted": False,
             "note": "Synthetic data only. Nothing is sent. Results are kept in memory on this server and reset on restart."}

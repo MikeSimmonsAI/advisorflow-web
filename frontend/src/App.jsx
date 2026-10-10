@@ -57,6 +57,7 @@ import ConversationQueue from './pages/ConversationQueue'
 import Cadence from './pages/Cadence'
 import EmailQueue from './pages/EmailQueue'
 import Activity from './pages/Activity'
+import Appointments from './pages/Appointments'
 // ONE PAGE FOR EVERY CONFIGURED WORKFLOW SCREEN. The key in the URL names a
 // view the server resolved from this workspace's own configuration, so a
 // vertical's screens cost a row rather than a route each. See
@@ -326,7 +327,7 @@ function mustChangePassword() {
 }
 
 function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = false,
-                         requireGodAdmin = false, feature = null }) {
+                         requireGodAdmin = false, feature = null, bare = false }) {
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (mustChangePassword()) return <Navigate to="/change-password" replace />
   const user = getCurrentUser()
@@ -399,6 +400,10 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   // owner is most likely to forget which customer they entered on the ordinary
   // pages — the leads list, a lead detail — which is exactly where a banner
   // that only appeared on special screens would be missing.
+  // `bare`: a screen that brings its own full-page shell (the SCI Family
+  // Service Center has its own navigation). Same checks above; only the
+  // tenant Layout chrome is left out. The context banner stays.
+  if (bare) return <><ContextBanner />{children}</>
   return <Layout><ContextBanner />{children}</Layout>
 }
 
@@ -1200,6 +1205,8 @@ export default function App() {
         <Route path="/cadence" element={<ProtectedRoute feature="cadences"><Cadence /></ProtectedRoute>} />
         <Route path="/email-queue" element={<ProtectedRoute feature="email"><EmailQueue /></ProtectedRoute>} />
         <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
+        {/* Family Service Center - appointments & visits (booking links in the lead scope). */}
+        <Route path="/appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />
         {/* A configured workflow screen. Deliberately NOT feature-gated: a
             view only ever shows records the reader can already reach through
             Leads, so gating it would hide a screen from somebody who can see
@@ -1212,7 +1219,7 @@ export default function App() {
         <Route path="/view/rate-requests" element={<Navigate to="/rate-requests" replace />} />
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
-        <Route path="/program" element={<ProtectedRoute><ProgramCenter /></ProtectedRoute>} />
+        <Route path="/program" element={<ProtectedRoute bare><ProgramCenter /></ProtectedRoute>} />
         <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute feature="reports" requireAdmin><Reports /></ProtectedRoute>} />
         <Route path="/campaigns" element={<ProtectedRoute feature="campaigns" requireAdmin><CampaignBuilder /></ProtectedRoute>} />

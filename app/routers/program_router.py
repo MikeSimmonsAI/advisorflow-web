@@ -101,7 +101,20 @@ def _profile_json(db: Session, prog: OutreachProgram, p: LocationProfile) -> dic
         "logo_url": _asset_url(assets.get(p.logo_asset_id)),
         "hero_url": _asset_url(assets.get(p.hero_asset_id)),
         "brand_settings": json.loads(p.brand_settings or "{}"),
+        "verification_held": _held_location(p),
     }
+
+
+def _held_location(p) -> bool:
+    """True for a location whose identity is unverified (today: Oaklawn).
+    Nothing is sent for it; the screen shows it as held."""
+    if p.is_review_bucket:
+        return False
+    try:
+        from app.services import sms_programs as _sp
+        return _sp.location_name_unverified(p.official_name)
+    except Exception:                                   # noqa: BLE001
+        return True
 
 
 def _iso(dt):
@@ -533,9 +546,7 @@ def readiness(db: Session, prog: OutreachProgram) -> dict:
         {"key": "email_sender", "ok": bool(getattr(ident, "from_email", None)),
          "detail": getattr(ident, "from_email", None) or "no verified sending address resolved"},
         _alias_item(db, prog),
-        {"key": "sms_number", "ok": bool(sms_number),
-         "detail": sms_number or "no organization Twilio number configured"},
-        _sms_routing_item(db, prog.organization_id, sms_number),
+        *_sms_items(db, prog.organization_id, sms_number),
         _mailbox_item(db, ident),
         {"key": "primary_contact_user", "ok": bool(prog.primary_contact_user_id),
          "detail": "account linked" if prog.primary_contact_user_id else "profile only - add an email to create the account"},
@@ -641,6 +652,40 @@ def _email_runner_item() -> dict:
                        "%d per pass, %d per day, follow-up after %d days"
                        % (_et.batch_limit(), _et.daily_cap(), _et.followup_days()))
             if on else "off (%s) - no campaign email goes out" % _et.SENDING_ENV}
+
+
+def _sms_items(db: Session, org_id: str, org_number: Optional[str]) -> list:
+    """The program's texting number and where replies to it land. A program
+    that texts from the shared toll-free line (SCI) has no organization number
+    by design: its number is the toll-free line on the platform account."""
+    import os
+    from app.services import sms_campaigns as _sc, sms_programs as _sp
+    if not _sp.is_sci_org(db, org_id):
+        return [{"key": "sms_number", "ok": bool(org_number),
+                 "detail": org_number or "no organization Twilio number configured"},
+                _sms_routing_item(db, org_id, org_number)]
+    from app.models.telephony_models import PhoneNumber
+    from app.services.programs import regional_pools as rp
+    tf = _sp.sci_sender_number()
+    entry = _sp.sci_sender_entry()
+    creds = bool((os.environ.get("TWILIO_ACCOUNT_SID") or "").strip()
+                 and (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip())
+    approved = _sc.is_approved(entry)
+    gaps = [g for g, bad in (("platform Twilio account not configured on this server", not creds),
+                             ("not approved for sending", not approved)) if bad]
+    scope = ", ".join((entry or {}).get("approved_scope") or []) or "unknown"
+    num = {"key": "sms_number", "ok": not gaps,
+           "detail": "%s toll-free line on the platform account (approved scope: %s)%s"
+                     % (tf, scope, (" - " + "; ".join(gaps)) if gaps else "")}
+    row = db.query(PhoneNumber).filter(PhoneNumber.e164 == tf).first()
+    routed = (row is not None and row.is_active and row.organization_id == org_id
+              and rp.pool_for_phone_number(row) == rp.TOLL_FREE_POOL)
+    route = {"key": "sms_reply_routing", "ok": routed,
+             "detail": ("replies to %s route to each contact's own location; unknown senders go to "
+                        "Location Review" % tf) if routed else
+                       ("%s is not registered to this workspace as its toll-free line, so replies "
+                        "cannot be routed here" % tf)}
+    return [num, route]
 
 
 def _sms_routing_item(db: Session, org_id: str, number: Optional[str]) -> dict:

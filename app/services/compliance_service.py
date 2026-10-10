@@ -123,7 +123,8 @@ def check_compliance_preflight(db: Session, lead: Lead,
     # A deliberate one-to-one MANUAL send by a person who can see the TEST
     # badge is allowed (test_records docstring: testers still need to test);
     # every automated and bulk path passes allow_test=False.
-    if test_records.is_test_record(lead) and not allow_test:
+    # Production refuses even that (test_records.manual_send_allowed).
+    if test_records.is_test_record(lead) and not (allow_test and test_records.manual_send_allowed()):
         raise ValueError(
             f"Lead {lead.id} is an {test_records.blocked_reason(lead)} - "
             f"blocked from sending on any channel."

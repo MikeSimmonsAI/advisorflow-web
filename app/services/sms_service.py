@@ -600,7 +600,8 @@ def send_sms(
     from app.services import send_source as _ss
     # Automated and bulk sends never reach a test record; a deliberate
     # one-to-one MANUAL send by a person who sees the TEST badge may.
-    if test_records.is_test_record(lead) and send_source != _ss.MANUAL:
+    if test_records.is_test_record(lead) and (send_source != _ss.MANUAL
+                                              or not test_records.manual_send_allowed()):
         raise ValueError(test_records.blocked_reason(lead))
 
     # LOCATION OUTREACH PROGRAMS: a lead whose location is unresolved is not
@@ -765,7 +766,8 @@ def send_mms(
     from app.services import send_source as _ss
     # Automated and bulk sends never reach a test record; a deliberate
     # one-to-one MANUAL send by a person who sees the TEST badge may.
-    if test_records.is_test_record(lead) and send_source != _ss.MANUAL:
+    if test_records.is_test_record(lead) and (send_source != _ss.MANUAL
+                                              or not test_records.manual_send_allowed()):
         raise ValueError(test_records.blocked_reason(lead))
 
     # LOCATION OUTREACH PROGRAMS: a lead whose location is unresolved is not

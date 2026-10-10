@@ -27,6 +27,38 @@ from app.models.program_models import (
 )
 from app.services.programs import aliases as _aliases
 
+def _sms_block(db: Session, org_id: str, org) -> Dict:
+    """Texting, in four separate facts: configured (number + account on this
+    server), approved (carrier/Twilio verification), switched on, and seen
+    working live (the last real inbound text). A program on the shared
+    toll-free line (SCI) has no organization number by design."""
+    from app.services import sms_campaigns as _sc, sms_programs as _sp
+    last_in = (db.query(func.max(ProgramResponse.received_at))
+               .filter(ProgramResponse.organization_id == org_id, ProgramResponse.channel == "sms").scalar())
+    seen = last_in.strftime("%Y-%m-%dT%H:%M:%SZ") if last_in else None
+    if _sp.is_sci_org(db, org_id):
+        number = _sp.sci_sender_number()
+        entry = _sp.sci_sender_entry() or {}
+        configured = bool((os.environ.get("TWILIO_ACCOUNT_SID") or "").strip()
+                          and (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip())
+        approved = bool(_sc.is_approved(entry))
+        enabled = bool(_sp._truthy(_sp.SCI_SEND_ENV))
+        scope = ", ".join(entry.get("approved_scope") or []) or None
+        kind = "toll-free line on the platform account"
+    else:
+        number = getattr(org, "org_twilio_phone_number", None)
+        configured, approved, enabled, scope, kind = bool(number), None, bool(number), None, "organization number"
+    # "ok" needs proof of approval; unknown approval is a warning, never a pass.
+    status = "fail" if not (number and configured) else ("ok" if approved is True and enabled else "warn")
+    parts = ["%s %s" % (number or "no number", kind if number else "configured"),
+             "account configured" if configured else "account NOT configured on this server",
+             {True: "approved" + (" (%s)" % scope if scope else ""), False: "NOT approved", None: "approval unknown"}[approved],
+             "sending on" if enabled else "sending off",
+             ("last inbound text %s" % seen) if seen else "no inbound text seen yet"]
+    return {"status": status, "detail": "; ".join(parts), "number": number, "configured": configured,
+            "approved": approved, "sending_enabled": enabled, "approved_scope": scope, "last_inbound_at": seen}
+
+
 _DNS_CACHE: Dict[str, tuple] = {}
 DNS_TTL = 6 * 3600
 
@@ -159,10 +191,7 @@ def snapshot(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
     }
 
     # ── SMS ──
-    number = getattr(org, "org_twilio_phone_number", None)
-    out["sms"] = {"status": "fail" if not number else "warn",
-                  "detail": ("BLOCKED - no SCI sending number (TFV / dedicated number pending)" if not number
-                             else "number %s configured - confirm toll-free verification before sending" % number)}
+    out["sms"] = _sms_block(db, org_id, org)
 
     # ── campaigns ──
     fams = db.query(CampaignFamily).filter(CampaignFamily.organization_id == org_id).all()

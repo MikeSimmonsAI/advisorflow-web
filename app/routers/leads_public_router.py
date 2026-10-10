@@ -406,6 +406,12 @@ def resend_booking_link(
         raise HTTPException(status_code=400, detail="Lead is on the Do Not Contact list")
     if not lead.email:
         raise HTTPException(status_code=400, detail="Lead has no email address on file")
+    # A booking link is outreach: never to an internal test record in
+    # production (app/services/test_records.py). Checked BEFORE any link is
+    # expired or created, so a refusal changes nothing.
+    from app.services import test_records as _test_records
+    if _test_records.is_test_record(lead) and not _test_records.manual_send_allowed():
+        raise HTTPException(status_code=409, detail="Internal test record - excluded from all outreach.")
 
     # Expire any stale pending links so there's only one active at a time
     stale = db.query(BookingLink).filter(

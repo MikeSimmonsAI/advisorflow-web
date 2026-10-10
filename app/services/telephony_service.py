@@ -877,13 +877,43 @@ def lead_call_history(db, lead: Lead, limit: int = 50) -> dict:
            .filter(Voicemail.organization_id == org_id, Voicemail.lead_id == lead.id)
            .order_by(Voicemail.received_at.desc()).limit(limit).all())
     iso = (lambda d: iso_utc(d))
+    # ONE EVENT, ONE ROW. An inbound call that went to voicemail is a VoiceCall
+    # row AND a Voicemail row with the same provider call id. Each side names
+    # the other here so a screen can show it once (the call, marked voicemail)
+    # instead of twice. Matching is on the stored call SID only - never guessed
+    # from timestamps.
+    by_sid = {c.call_sid: c.id for c in calls if c.call_sid}
+    vm_by_call = {by_sid[v.call_sid]: v for v in vms if v.call_sid and v.call_sid in by_sid}
+
+    def _call(c):
+        d = call_json(c)
+        v = vm_by_call.get(c.id)
+        d["voicemail_id"] = v.id if v else None
+        d["voicemail_status"] = v.status if v else None
+        d["voicemail_audio_url"] = _vm_audio(v) if v else None
+        d["voicemail_transcript"] = v.transcript if v else None
+        # The call's own recording, through GET /calls/{id}/audio - offered
+        # only when that route can actually play it (a Twilio recording SID).
+        from app.services import telephony_twilio as _TT
+        d["recording_audio_url"] = ("/calls/%s/audio" % c.id
+                                    if (c.provider or "twilio") == "twilio"
+                                    and _TT.valid_recording_sid(c.recording_sid) else None)
+        return d
+
+    def _vm_audio(v):
+        # Only when a recording exists; the path is the authenticated proxy,
+        # never the provider URL.
+        return "/voicemails/%s/audio" % v.id if (v.recording_sid or v.recording_url) else None
+
     return {
         "lead_id": lead.id,
-        "calls": [call_json(c) for c in calls],
+        "calls": [_call(c) for c in calls],
         "voicemails": [{"id": v.id, "status": v.status, "from_phone": v.from_e164,
                         "duration_seconds": v.duration_seconds,
                         "received_at": iso(v.received_at),
-                        "audio_url": "/voicemails/%s/audio" % v.id} for v in vms],
+                        "call_id": by_sid.get(v.call_sid) if v.call_sid else None,
+                        "transcript": v.transcript,
+                        "audio_url": _vm_audio(v)} for v in vms],
         "unreviewed_voicemails": sum(1 for v in vms if v.status == "new"),
     }
 
