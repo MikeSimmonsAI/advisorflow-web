@@ -607,6 +607,10 @@ export default function LeadDetail() {
         setSendError(err.message || 'Failed to load lead')
       })
       .finally(() => setLoading(false))
+    // Calls + voicemails for the summary strip (the Calls tab refreshes it).
+    api.get(`/dialer/leads/${leadId}/history`)
+      .then(h => setDialerHist(h))
+      .catch(() => setDialerHist({ calls: [], voicemails: [], unavailable: true }))
     // Also load activity log in background
     loadActivity(true)
     loadCadenceHistory()
@@ -1180,7 +1184,14 @@ export default function LeadDetail() {
   const activityRows = activity?.events
     ? [...activity.events].reverse().filter((ev) => ACTIVITY_KINDS[activityKind].test(String(ev.type || '')))
     : []
-  const aiCalls = data?.voice_calls || []
+  // Every call (both directions, AI and human) is listed once, in the dialer's
+  // Call history. The AI section only adds what that list cannot show: the
+  // transcripts of AI calls.
+  const aiCalls = (data?.voice_calls || [])
+    .filter((vc) => vc.direction !== 'inbound' && !vc.is_human_call && vc.provider !== 'manual')
+  const aiTranscripts = aiCalls.filter((vc) => vc.transcript || (vc.voicemail_left && vc.voicemail_transcript))
+  const callCount = (dialerHist?.calls?.length || 0)
+    + (dialerHist?.voicemails || []).filter((v) => !v.call_id).length
 
   function openTab(t) {
     setActiveTab(t)
@@ -1215,7 +1226,7 @@ export default function LeadDetail() {
 
   const TABS = [
     ['conversation', 'Conversation', events.length || null],
-    ['calls', 'Calls', (aiCalls.length + (dialerHist?.calls?.length || 0)) || null],
+    ['calls', 'Calls', callCount || null],
     ['activity', 'Activity', activity?.event_count || null],
     ['history', 'History', null],
     ['overview', 'Overview', null],
@@ -1376,9 +1387,9 @@ export default function LeadDetail() {
         </div>
         <button type="button" className="lcc-card lcc-kpi lcc-kpi--btn" onClick={() => openTab('calls')}>
           <div className="lcc-kpi-label">Voicemails</div>
-          <div className="lcc-kpi-value">{dialerHist ? inboundVoicemails.length : '…'}</div>
+          <div className="lcc-kpi-value">{!dialerHist ? '…' : dialerHist.unavailable ? '—' : inboundVoicemails.length}</div>
           <div className="lcc-kpi-sub">
-            {!dialerHist ? 'Loading' : latestVoicemail ? `Latest ${timeAgo(latestVoicemail.received_at)}${dialerHist.unreviewed_voicemails ? ` · ${dialerHist.unreviewed_voicemails} new` : ''}` : 'None from this contact'}
+            {!dialerHist ? 'Loading' : dialerHist.unavailable ? 'Call history unavailable' : latestVoicemail ? `Latest ${timeAgo(latestVoicemail.received_at)}${dialerHist.unreviewed_voicemails ? ` · ${dialerHist.unreviewed_voicemails} new` : ''}` : 'None from this contact'}
           </div>
         </button>
         <div className="lcc-card lcc-kpi">
@@ -1395,7 +1406,7 @@ export default function LeadDetail() {
         </div>
         <div className="lcc-card lcc-kpi">
           <div className="lcc-kpi-label">Next best action</div>
-          <div className="lcc-kpi-value">{nba ? ({ reply: 'Reply', wait: 'Wait', call: 'Call', create_task: 'Create task', schedule: 'Schedule', assign: 'Assign', request_info: 'Request info', move_stage: 'Move stage', nurture: 'Nurture', escalate: 'Escalate', human_takeover: 'Human takeover', do_nothing: 'Do nothing' }[nba.action] || nba.action) : (brainCtx ? 'None yet' : '…')}</div>
+          <div className="lcc-kpi-value">{nba ? ({ reply: 'Reply', wait: 'Wait', call: 'Call', create_task: 'Create task', schedule: 'Schedule', assign: 'Assign', request_info: 'Request info', move_stage: 'Move stage', nurture: 'Nurture', escalate: 'Escalate', human_takeover: 'Human takeover', do_nothing: 'Do nothing' }[nba.action] || nba.action) : (brainCtx?.unavailable ? 'Unavailable' : brainCtx ? 'None yet' : '…')}</div>
           <div className="lcc-kpi-sub" title={nba?.reason || ''}>
             {isTest && nba && nba.action !== 'wait' && nba.action !== 'do_nothing' ? 'Outreach is off for this test record' : (nba?.reason || (humanActive ? 'A person owns this conversation' : 'From Conversation Brain'))}
           </div>
@@ -1609,10 +1620,12 @@ export default function LeadDetail() {
                     {calling ? 'Calling…' : 'Call with AI'}
                   </button>
                   <p className="lcc-muted lcc-small">The AI agent calls, says it is an AI, and books if they say yes. Recorded. Up to 3 attempts.</p>
-                  <h4 className="lcc-h4">AI call history</h4>
-                  {aiCalls.length === 0 ? <p className="lcc-muted">No AI voice calls yet.</p> : (
+                  <h4 className="lcc-h4">AI call transcripts</h4>
+                  {aiTranscripts.length === 0 ? (
+                    <p className="lcc-muted lcc-small">No AI call transcripts yet. Every call is listed under Call history.</p>
+                  ) : (
                     <ul className="lcc-calllist">
-                      {aiCalls.map((vc) => {
+                      {aiTranscripts.map((vc) => {
                         const outcomeLabel = { booked: 'Booked', booking_requested: 'Booking link sent', no_answer: 'No answer', not_interested: 'Not interested', completed: 'Completed', escalated: 'Escalated', failed: 'Failed' }[vc.outcome] || (vc.outcome ? vc.outcome.replace(/_/g, ' ') : (vc.status || 'Unknown'))
                         const tone = { booked: 'green', booking_requested: 'blue', completed: 'green', escalated: 'amber', failed: 'red', not_interested: 'red' }[vc.outcome] || 'neutral'
                         const startedLabel = fullWhen(vc.started_at || vc.created_at)
@@ -1669,7 +1682,7 @@ export default function LeadDetail() {
                 {activityRows.map((ev) => (
                   <li key={ev.id} className={`lcc-event lcc-event--${String(ev.type || '').split('_')[0]}`}>
                     <div className="lcc-event-head">
-                      <strong>{ev.label}</strong>
+                      <strong>{String(ev.label || '').replace(/_/g, ' ')}</strong>
                       <time className="lcc-muted" title={fullWhen(ev.ts)}>{fullWhen(ev.ts)}</time>
                     </div>
                     {ev.body && <div className="lcc-event-body">{ev.body.length > 220 ? ev.body.slice(0, 220) + '…' : ev.body}</div>}

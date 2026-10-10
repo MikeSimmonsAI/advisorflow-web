@@ -71,3 +71,29 @@ def test_command_center_blocks_every_outbound_path_for_test_records():
 def test_bulk_selection_on_the_directory_never_includes_test_records():
     src = _src("frontend/src/pages/Leads.jsx")
     assert "&& !l.is_test && l.manual_flag !== 'remove_all')" in src
+
+
+def test_booking_link_resend_refuses_a_test_record_in_production(client, db_session, monkeypatch):
+    admin, real, test = _world(db_session)
+    test.email = "staff@x.test"
+    db_session.commit()
+    monkeypatch.delenv("APP_ENV", raising=False)
+    r = client.post("/leads/%s/resend-booking-link" % test.id, headers=_h(db_session, admin))
+    assert r.status_code == 409 and "test record" in r.json()["detail"].lower()
+    assert db_session.query(BookingLink).filter(BookingLink.lead_id == test.id).count() == 0
+
+
+def test_call_history_shows_an_inbound_call_and_its_voicemail_once(db_session):
+    from app.models.models import VoiceCall
+    from app.models.telephony_models import Voicemail
+    from app.services import telephony_service as TS
+    admin, real, test = _world(db_session)
+    db_session.add_all([
+        VoiceCall(lead_id=real.id, advisor_id=admin.id, organization_id=real.organization_id, to_phone="+18449172171",
+                  direction="inbound", call_sid="CA-1", outcome="voicemail_received"),
+        Voicemail(organization_id=real.organization_id, lead_id=real.id, call_sid="CA-1", status="new"),
+    ])
+    db_session.commit()
+    h = TS.lead_call_history(db_session, real)
+    assert h["calls"][0]["voicemail_id"] == h["voicemails"][0]["id"]
+    assert h["voicemails"][0]["call_id"] == h["calls"][0]["id"]

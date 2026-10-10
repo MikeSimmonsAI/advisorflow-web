@@ -76,7 +76,10 @@ export default function ConversationBrain({ leadId, onUseDraft, defaultChannel =
       // Draft on a channel we may actually use: no SMS consent means email.
       if (c?.consent && !c.consent.sms && c.consent.email) setChannel('email')
     }
-    catch (e) { setError(e?.message || 'Could not load the conversation memory.') }
+    catch (e) {
+      setError(e?.message || 'Could not load the conversation memory.')
+      onContextRef.current?.({ unavailable: true })
+    }
   }, [leadId])
   useEffect(() => { if (leadId) load() }, [leadId, load])
 

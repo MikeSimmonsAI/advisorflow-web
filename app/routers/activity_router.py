@@ -262,6 +262,7 @@ def activity_feed(
                       "summary": _clip(r.body), "result": "hot" if r.is_hot else (cls or "received"),
                       "actor": "customer", "source_label": None})
 
+    calls_by_sid = {}
     for c in (db.query(VoiceCall).filter(in_scope(VoiceCall.lead_id), VoiceCall.created_at >= cutoff)
               .order_by(VoiceCall.created_at.desc()).limit(limit).all()):
         direction = c.direction or "outbound"
@@ -276,9 +277,19 @@ def activity_feed(
                       "has_recording": bool(c.recording_sid or c.recording_url),
                       "actor": ("customer" if direction == "inbound" else "human" if human else "ai"),
                       "source_label": "Call from own phone" if c.provider == "manual" else None})
+        if c.call_sid:
+            calls_by_sid[c.call_sid] = items[-1]
 
     for v in (db.query(Voicemail).filter(in_scope(Voicemail.lead_id), Voicemail.received_at >= cutoff)
               .order_by(Voicemail.received_at.desc()).limit(limit).all()):
+        call = calls_by_sid.get(v.call_sid) if v.call_sid else None
+        if call is not None:
+            # The same event as that inbound call: shown once, on the call.
+            call["voicemail_received"] = True
+            call["has_recording"] = call.get("has_recording") or bool(v.recording_sid or v.recording_url)
+            if v.transcript and not call.get("summary"):
+                call["summary"] = _clip(v.transcript)
+            continue
         items.append({"kind": "voicemail", "channel": "voice", "direction": "inbound", "ref": v.id,
                       "lead_id": v.lead_id, "at": iso_utc(v.received_at),
                       "summary": _clip(v.transcript or ""), "result": v.status or "new",

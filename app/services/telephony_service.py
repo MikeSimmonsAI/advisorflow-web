@@ -877,12 +877,28 @@ def lead_call_history(db, lead: Lead, limit: int = 50) -> dict:
            .filter(Voicemail.organization_id == org_id, Voicemail.lead_id == lead.id)
            .order_by(Voicemail.received_at.desc()).limit(limit).all())
     iso = (lambda d: iso_utc(d))
+    # ONE EVENT, ONE ROW. An inbound call that went to voicemail is a VoiceCall
+    # row AND a Voicemail row with the same provider call id. Each side names
+    # the other here so a screen can show it once (the call, marked voicemail)
+    # instead of twice. Matching is on the stored call SID only - never guessed
+    # from timestamps.
+    by_sid = {c.call_sid: c.id for c in calls if c.call_sid}
+    vm_by_call = {by_sid[v.call_sid]: v for v in vms if v.call_sid and v.call_sid in by_sid}
+
+    def _call(c):
+        d = call_json(c)
+        v = vm_by_call.get(c.id)
+        d["voicemail_id"] = v.id if v else None
+        d["voicemail_status"] = v.status if v else None
+        return d
+
     return {
         "lead_id": lead.id,
-        "calls": [call_json(c) for c in calls],
+        "calls": [_call(c) for c in calls],
         "voicemails": [{"id": v.id, "status": v.status, "from_phone": v.from_e164,
                         "duration_seconds": v.duration_seconds,
                         "received_at": iso(v.received_at),
+                        "call_id": by_sid.get(v.call_sid) if v.call_sid else None,
                         "audio_url": "/voicemails/%s/audio" % v.id} for v in vms],
         "unreviewed_voicemails": sum(1 for v in vms if v.status == "new"),
     }

@@ -108,7 +108,8 @@ export default function HumanDialerPanel({ leadId, phone, blockedReason = null, 
       )}
       {hist && (hist.calls.length > 0 || hist.voicemails.length > 0) && (
         <ul className="tel-list">
-          {hist.voicemails.filter(v => v.status === 'new').map(v => (
+          {/* A voicemail that belongs to a call below is shown on that call, not twice. */}
+          {hist.voicemails.filter(v => v.status === 'new' && !v.call_id).map(v => (
             <li key={`vm-${v.id}`}>
               <span><span className="tel-pill tel-pill--vm">Voicemail</span> {when(v.received_at)}</span>
               <span className="tel-meta">{dur(v.duration_seconds) || 'Length unknown'} · from {fmt(v.from_phone) || 'withheld'}</span>
@@ -120,6 +121,7 @@ export default function HumanDialerPanel({ leadId, phone, blockedReason = null, 
                 <strong>{callTitle(c)}</strong> · {when(c.created_at)}
                 {c.voicemail_state === 'left' && <> <span className="tel-pill tel-pill--vm">VM left</span></>}
                 {c.voicemail_state === 'machine' && <> <span className="tel-pill tel-pill--vm">Machine</span></>}
+                {c.voicemail_id && <> <span className="tel-pill tel-pill--vm">{c.voicemail_status === 'new' ? 'New voicemail' : 'Voicemail'}</span></>}
               </span>
               <span className="tel-meta">
                 {c.disposition ? (OUTCOME_LABEL[c.disposition] || c.disposition.replace(/_/g, ' '))

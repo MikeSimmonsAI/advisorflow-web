@@ -38,6 +38,18 @@ def is_test_record(lead: Lead) -> bool:
     return bool(getattr(lead, "is_test", False))
 
 
+def manual_send_allowed() -> bool:
+    """May a person's deliberate one-to-one send reach a test record?
+
+    Oct 2026 (lead workflow redesign spec, Mike's call): in PRODUCTION, no -
+    a test record is blocked on every path, manual included. On staging and
+    demo, yes, so live tests against staff phones keep working. Decided by
+    APP_ENV (app/services/environment.py), which defaults to production.
+    """
+    from app.services import environment
+    return not environment.is_production()
+
+
 def exclude_test_records(query):
     """Apply to EVERY bulk-outreach and performance-reporting query.
 

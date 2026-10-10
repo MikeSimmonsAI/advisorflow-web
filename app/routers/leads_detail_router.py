@@ -279,6 +279,11 @@ def get_lead_timeline(lead_id: str,
             "voicemail_left": vc.voicemail_left,
             "call_number": vc.call_number,
             "recording_url": vc.recording_url,
+            # Which way the call went and who placed it, so the Calls tab can
+            # tell an AI call from an inbound call or a person's own call.
+            "direction": vc.direction or "outbound",
+            "is_human_call": bool(vc.is_human_call),
+            "provider": vc.provider,
             "started_at": iso_utc(vc.started_at),
             "created_at": iso_utc(vc.created_at),
         })

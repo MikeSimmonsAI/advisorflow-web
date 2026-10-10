@@ -67,3 +67,20 @@ def test_feed_is_scoped_to_the_advisor_and_the_workspace(client, db_session):
     assert names(adv) == {"Mine Lead"}
     assert names(admin) == {"Mine Lead", "Their Lead"}
     assert names(stranger) == {"Foreign Lead"}
+
+
+def test_an_inbound_call_and_its_voicemail_are_one_event(client, db_session):
+    admin, adv, _ = _world(db_session)
+    lead = db_session.query(Lead).filter(Lead.first_name == "Mine").one()
+    now = datetime.utcnow()
+    db_session.add_all([
+        VoiceCall(lead_id=lead.id, advisor_id=adv.id, organization_id=lead.organization_id, to_phone="+18449172171",
+                  direction="inbound", call_sid="CA-same", outcome="voicemail_received", created_at=now - timedelta(minutes=5)),
+        Voicemail(organization_id=lead.organization_id, lead_id=lead.id, call_sid="CA-same",
+                  received_at=now - timedelta(minutes=4), status="new", transcript="Call me back"),
+    ])
+    db_session.commit()
+    items = client.get("/activity/feed", headers=_h(db_session, adv)).json()["items"]
+    linked = [i for i in items if i["kind"] == "call" and i["direction"] == "inbound"]
+    assert len(linked) == 1 and linked[0]["voicemail_received"] is True and linked[0]["summary"] == "Call me back"
+    assert len([i for i in items if i["kind"] == "voicemail"]) == 1   # only the unlinked one from _world
