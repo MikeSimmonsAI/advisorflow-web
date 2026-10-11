@@ -494,6 +494,7 @@ def evosense_attacks(ids):
     return [
         ("get", "%s/properties/%s" % (base, ep), None),
         ("get", "%s/properties/%s/photo" % (base, ep), None),
+        ("patch", "%s/properties/%s/facts" % (base, ep), {"bedrooms": 9}),
         ("get", "%s/properties/%s/photo.jpg" % (base, ep), None),
         ("post", "%s/properties/%s/enrich" % (base, ep), {"approved": True}),
         ("post", "%s/properties/%s/outreach" % (base, ep), None),

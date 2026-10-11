@@ -856,6 +856,34 @@ def list_strategies(include_archived: bool = False, db: Session = Depends(get_db
             "owner_geography": list(ST.OWNER_GEO)}
 
 
+class FactsIn(BaseModel):
+    model_config = {"extra": "forbid"}
+    bedrooms: Optional[float] = None
+    bathrooms: Optional[float] = None
+    square_feet: Optional[float] = None
+    year_built: Optional[float] = None
+
+
+@router.patch("/properties/{property_id}/facts")
+def edit_property_facts(property_id: str, payload: FactsIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user),
+                        _g: User = Depends(require_not_observation)):
+    """A person's own beds / baths / living area / year built. Send a field as
+    null to remove your entry and go back to the county record."""
+    from app.services.evosense import user_facts as UF
+    org_id = svc.write_org_id(db, user)
+    prop = (db.query(EvoSenseProperty).filter(EvoSenseProperty.id == property_id,
+                                              EvoSenseProperty.organization_id == org_id).first())
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+    sent = payload.model_dump(exclude_unset=True)
+    if not sent:
+        raise HTTPException(status_code=422, detail="Send at least one of bedrooms, bathrooms, square_feet, year_built.")
+    out = UF.set_facts(db, prop, user, sent)
+    db.commit()
+    return out
+
+
 @router.get("/strategy-starters")
 def strategy_starters(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     """The ready-made searches a person can add with one click."""

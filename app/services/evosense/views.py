@@ -864,6 +864,8 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
                          for k in ("property_type", "bedrooms", "bathrooms", "half_bathrooms", "square_feet",
                                    "year_built", "parcel_apn", "county")},
             "ranks": ranks,
+            # The person's own entries: {field: {value, county_value, by_name, at}}.
+            "entered_by_you": C.jload(getattr(prop, "user_facts", None), {}) or {},
         },
         "conflicts": C.jload(prop.conflicts, []) or [],
         "review_flags": review_flags(db, org_id, prop),
