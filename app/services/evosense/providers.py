@@ -361,6 +361,7 @@ class PublicRecordSource(AcquisitionProvider):
 # a different window; the readers wrap to the top when a window runs past the end.
 ROTATE_TARRANT_POOL = 9000     # delinquent residential accounts on the roll (approx.)
 ROTATE_DCAD_POOL = 7000        # POOR / VERY POOR / UNDESIRABLE residences (approx.)
+ROTATE_DALLAS_TRW_POOL = 1_000_000  # wrapped again by the reader to the real pool size
 
 
 def rotation_skip(window: int, pool: int, today: Optional[datetime] = None) -> int:
@@ -425,6 +426,56 @@ class TarrantTaxRollSource(PublicRecordSource):
         finally:
             oz.close()
         return {"url": url, "members": names, "mode": oz.meta.get("mode"), "size": oz.meta.get("size")}
+
+
+class DallasTrwSource(PublicRecordSource):
+    scope, counties = "county", ("Dallas",)
+    key = "dallas_trw"
+    label = "Dallas County tax roll (TRW delinquency file)"
+    capabilities = (C.TAX,)
+    discovery = True
+    coverage = "Dallas County, TX - every account the county Tax Office collects for"
+    jurisdiction = "Dallas County, TX"
+    source_type = "County tax assessor-collector roll"
+    access_method = "Bulk fixed-width file (weekly zip, free), read with HTTP byte ranges"
+    public_url = "https://www.dallascounty.org/departments/tax/tax-roll.php"
+    refresh = "Published weekly"
+    freshness_days = 30
+    adapter_version = "dallas_trw/1"
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.dallas_trw import TrwReader
+        out = Records()
+        if not _wants(query, "dallas"):
+            out.stats = {"skipped": "strategy does not include Dallas County"}
+            return out
+        limit = int(query.get("limit") or 25)
+        # The reader adds up the whole county block, so the window can move
+        # through every delinquent account: day-of-year x window, wrapped there.
+        res = TrwReader().discover(limit=limit,
+                                   min_due_cents=int(float(query.get("min_tax_due") or 250) * 100),
+                                   skip=rotation_skip(limit, ROTATE_DALLAS_TRW_POOL))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.dallas_trw import TrwReader, parse, COUNTY_UNIT
+        url = TrwReader().locate()
+        oz = SB_.open_zip(self.key, url, allow_download=False)
+        try:
+            names = oz.zip.namelist()
+            member = next((n for n in names if "flat404" in n.lower()), None)
+            if member is None:
+                raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "flat404 member missing from the TRW zip")
+            first = parse(next(SB_.text_lines(oz.zip, member)))
+            if not first["jurisdiction"].isdigit() or not first["year"].isdigit():
+                raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "TRW line does not match layout TRW-02")
+        finally:
+            oz.close()
+        return {"url": url, "members": names, "mode": oz.meta.get("mode"), "size": oz.meta.get("size"),
+                "county_unit": COUNTY_UNIT}
 
 
 class TadSource(PublicRecordSource):
@@ -879,7 +930,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), CensusGeocoderSource(),
+    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
