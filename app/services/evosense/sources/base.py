@@ -67,7 +67,42 @@ def local_override(key: str) -> Optional[str]:
     if p and os.path.exists(p):
         return p
     up = uploaded_path(key)
+    if not os.path.exists(up):
+        restore_upload(key)
     return up if os.path.exists(up) else None
+
+
+# The disk copy does not survive a deploy. providers.py registers a hook that
+# rebuilds it from the durable copy kept in the database.
+_RESTORE_HOOK = None
+
+
+def set_restore_hook(fn) -> None:
+    global _RESTORE_HOOK
+    _RESTORE_HOOK = fn
+
+
+_RESTORE_MISSED: Dict[str, float] = {}
+RESTORE_RETRY_SECONDS = 600
+
+
+def restore_upload(key: str) -> bool:
+    """Rebuild a wiped disk copy from durable storage. After a miss (nothing
+    stored, or storage unreachable) it waits RESTORE_RETRY_SECONDS before asking
+    again, so a source without a durable copy does not query on every read."""
+    if _RESTORE_HOOK is None:
+        return False
+    if time.time() - _RESTORE_MISSED.get(key, 0) < RESTORE_RETRY_SECONDS:
+        return False
+    try:
+        ok = bool(_RESTORE_HOOK(key))
+    except Exception:  # noqa: BLE001 - a restore failure leaves the source asking the publisher
+        ok = False
+    if ok:
+        _RESTORE_MISSED.pop(key, None)
+    else:
+        _RESTORE_MISSED[key] = time.time()
+    return ok
 
 
 # ── operator-uploaded copies of a public file ──────────────────────────────
@@ -89,6 +124,8 @@ def uploaded_path(key: str) -> str:
 
 def uploaded_info(key: str) -> Optional[Dict[str, Any]]:
     path = uploaded_path(key)
+    if not os.path.exists(path):
+        restore_upload(key)
     if not os.path.exists(path):
         return None
     meta: Dict[str, Any] = {}

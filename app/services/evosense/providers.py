@@ -503,6 +503,59 @@ class DcadSource(PublicRecordSource):
         return {"url": url, "size": info["size"], "ranged": info["ranged"]}
 
 
+class CollinCadSource(PublicRecordSource):
+    scope, counties = "county", ("Collin",)
+    key = "collin_cad"
+    label = "Collin Central Appraisal District (Collin CAD) appraisal roll"
+    capabilities = (C.PROPERTY_SEARCH, C.ASSESSOR, C.OWNERSHIP)
+    discovery = True
+    coverage = ("Collin County, TX - owner of record and mailing address, situs, category, "
+                "tax values, homestead, deed date, year built, living area (no beds / baths)")
+    jurisdiction = "Collin County, TX"
+    source_type = "Appraisal district roll on the State of Texas open-data portal"
+    access_method = "Official Socrata API on data.texas.gov (SoQL queries, paged)"
+    public_url = "https://collincad.org/open-data-portal/"
+    refresh = "Republished by the district on data.texas.gov (preliminary, then certified)"
+    freshness_days = 120
+    adapter_version = "collin_cad_socrata/1"
+    lookup_capability = C.ASSESSOR
+    terms_note = ("Published by Collin CAD on the State of Texas open-data portal for public use; "
+                  "queried through the portal's own API.")
+
+    def applies(self, target):
+        return (target.get("county") or "").lower() == "collin" and bool(target.get("parcel_apn"))
+
+    def lookup_many(self, targets):
+        from app.services.evosense.sources.collin import CollinReader
+        by_acct = {(t["parcel_apn"] or "").strip(): t["id"] for t in targets if t.get("parcel_apn")}
+        res = CollinReader().lookup_many(list(by_acct))
+        return {"results": {tid: res["records"].get(a) for a, tid in by_acct.items()},
+                "errors": {}, "stats": res["stats"]}
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.collin import CollinReader
+        out = Records()
+        if capability != C.PROPERTY_SEARCH or not _wants(query, "collin"):
+            out.stats = {"skipped": "strategy does not include Collin County"}
+            return out
+        types = [t for t in query.get("property_types") or []]
+        houses = bool(query.get("houses_only")) or (bool(types) and "land" not in types
+                                                    and "commercial" not in types)
+        res = CollinReader().discover(
+            limit=int(query.get("limit") or 25),
+            min_years=int(query.get("min_ownership_years") or 10),
+            houses_only=houses or not types,
+            cities=query.get("cities") or None, zips=query.get("zips") or None)
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources.collin import CollinReader
+        r = CollinReader()
+        return {"dataset": r.dataset(), "rows": r.count()}
+
+
 class CensusGeocoderSource(PublicRecordSource):
     key = "census_geocoder"
     label = "U.S. Census geocoder"
@@ -723,7 +776,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), TadSource(), DcadSource(), CensusGeocoderSource(),
+    TarrantTaxRollSource(), TadSource(), DcadSource(), CollinCadSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(),
@@ -1353,6 +1406,7 @@ def accept_upload(db, key: str, tmp_path: str, *, source_date: Optional[str] = N
     meta = SB_.store_upload(key, tmp_path, {
         "uploaded_at": C.now().isoformat() + "Z", "source_date": source_date or None,
         "by": by, "via": via, **detail})
+    meta["durable"] = persist_upload(db, key, SB_.uploaded_path(key), meta)
     clear_platform_block(db, key)
     p = PROVIDERS.get(key)
     cap = getattr(p, "lookup_capability", None)
@@ -1364,6 +1418,71 @@ def accept_upload(db, key: str, tmp_path: str, *, source_date: Optional[str] = N
     return {"key": key, "ok": True, **meta}
 
 
+DURABLE_CHUNK = 4 * 1024 * 1024
+
+
+def persist_upload(db, key: str, path: str, meta: Dict[str, Any]) -> bool:
+    """Keep the uploaded file in the database (chunked), replacing the previous
+    copy, so a deploy that wipes the disk does not lose it."""
+    import hashlib
+    from app.models.evosense_models import EvoSenseSourceFile
+    size = os.path.getsize(path)
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(DURABLE_CHUNK), b""):
+            h.update(block)
+    digest = h.hexdigest()
+    count = max(1, -(-size // DURABLE_CHUNK))
+    db.query(EvoSenseSourceFile).filter(EvoSenseSourceFile.provider_key == key).delete()
+    with open(path, "rb") as fh:
+        for i in range(count):
+            db.add(EvoSenseSourceFile(provider_key=key, chunk_index=i, chunk_count=count,
+                                      data=fh.read(DURABLE_CHUNK), sha256=digest, size=size,
+                                      meta=C.jdump(meta)))
+            db.flush()
+    db.commit()
+    return True
+
+
+def restore_upload(key: str, factory=None) -> bool:
+    """Rebuild the disk copy from the durable one. True when restored.
+    `factory` makes the database session (default: the app's own)."""
+    import hashlib
+    import json as _json
+    import tempfile as _tf
+    from app.deps import SessionLocal
+    from app.models.evosense_models import EvoSenseSourceFile
+    from app.services.evosense.sources import base as SB_
+    if key not in UPLOADABLE:
+        return False
+    db = (factory or SessionLocal)()
+    try:
+        ids = [r[0] for r in db.query(EvoSenseSourceFile.id).filter(EvoSenseSourceFile.provider_key == key)
+               .order_by(EvoSenseSourceFile.chunk_index).all()]
+        if not ids:
+            return False
+        fd, tmp = _tf.mkstemp(dir=SB_.upload_dir(), suffix=".part")
+        h, meta, want, count = hashlib.sha256(), {}, None, 0
+        with os.fdopen(fd, "wb") as out:
+            for rid in ids:                       # one chunk in memory at a time
+                row = db.query(EvoSenseSourceFile).filter(EvoSenseSourceFile.id == rid).one()
+                out.write(row.data)
+                h.update(row.data)
+                want, count = row.sha256, row.chunk_count
+                meta = _json.loads(row.meta or "{}")
+                db.expunge(row)
+        if len(ids) != count or h.hexdigest() != want:
+            os.remove(tmp)
+            C.log.warning("evosense: durable copy of %s is incomplete - not restored", key)
+            return False
+        meta = dict(meta, restored_at=C.now().isoformat() + "Z")
+        SB_.store_upload(key, tmp, meta)
+        C.log.info("evosense: %s file restored from durable storage (%s bytes)", key, meta.get("size"))
+        return True
+    finally:
+        db.close()
+
+
 def upload_status(key: str) -> Dict[str, Any]:
     from app.services.evosense.sources import base as SB_
     info = UPLOADABLE.get(key)
@@ -1371,3 +1490,13 @@ def upload_status(key: str) -> Dict[str, Any]:
         return {"key": key, "uploadable": False}
     return {"key": key, "uploadable": True, **{k: v for k, v in info.items() if k != "max_bytes"},
             "max_mb": info["max_bytes"] // (1024 * 1024), "current": SB_.uploaded_info(key)}
+
+
+# The adapters read the uploaded copy from disk; after a deploy wiped it, they
+# rebuild it from the durable copy through this hook.
+def _install_restore_hook():
+    from app.services.evosense.sources import base as SB_
+    SB_.set_restore_hook(restore_upload)
+
+
+_install_restore_hook()
