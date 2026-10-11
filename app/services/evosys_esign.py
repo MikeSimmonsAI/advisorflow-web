@@ -492,3 +492,40 @@ def void(db: Session, env: EsignEnvelope, reason: Optional[str], user=None) -> D
             doc.status, doc.signature_status = esign.STATUS_VOIDED, "none"
     db.commit()
     return {"voided": True}
+
+
+def change_signer_email(db: Session, env: EsignEnvelope, role: str, email: str, user=None) -> Dict[str, Any]:
+    """Point a signer who has not signed yet at a different email address.
+
+    Signatures already given stay. The changed signer must prove the NEW
+    address: any verification they did is cleared, and if it is their turn
+    a fresh link goes to the new address (the old link stops working)."""
+    if env.status != "sent":
+        raise EsignError("Only a document still out for signature can be changed.", 409)
+    email = (email or "").strip().lower()
+    if not EMAIL_RE.match(email):
+        raise EsignError("Enter a valid email address.", 400)
+    signers = signers_of(db, env)
+    s = next((x for x in signers if x.role.lower() == (role or "").strip().lower()), None)
+    if s is None:
+        raise EsignError("No signer with that role on this document.", 404)
+    if s.status == "signed":
+        raise EsignError("%s has already signed; their email can't change now." % s.role, 409)
+    if s.email == email:
+        return {"changed": False, "role": s.role, "email": s.email}
+    old = s.email
+    s.email = email
+    s.verified_at = None
+    s.code_hash, s.code_expires_at, s.code_attempts = None, None, 0
+    s.codes_sent, s.code_sent_at = 0, None
+    s.viewed_at = None
+    if s.status in ("viewed", "verified"):
+        s.status = "sent"
+    _event(db, env, "signer_email_changed", signer=s,
+           detail={"from": old, "to": email, "by": getattr(user, "email", None)})
+    delivered = None
+    if _current(signers) is s:
+        s.token_hash = None                     # the old link dies before the new one is sent
+        delivered = _email_link(db, env, s)
+    db.commit()
+    return {"changed": True, "role": s.role, "email": s.email, "link_sent": delivered}

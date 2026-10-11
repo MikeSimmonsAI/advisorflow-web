@@ -127,6 +127,8 @@ function SigningProgress({ doc, act, busy }) {
   const [env, setEnv] = useState(null)
   const [open, setOpen] = useState(false)
   const [err, setErr] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [newEmail, setNewEmail] = useState('')
 
   const load = useCallback(async () => {
     try { setEnv(await api.get(`/wholesale/documents/${doc.id}/esign`)); setErr(null) }
@@ -176,9 +178,29 @@ function SigningProgress({ doc, act, busy }) {
       {open ? (
         <div className="ws-comp__sub" style={{ marginTop: 6 }}>
           {env.signers.map((s) => (
-            <div key={s.role}><b>{s.role}</b> {s.name || s.email}: {SIGNER_LABEL[s.status] || s.status}
+            <div key={s.role} style={{ marginBottom: 4 }}><b>{s.role}</b> {s.name ? `${s.name} · ` : ''}{s.email}: {SIGNER_LABEL[s.status] || s.status}
               {s.signed_at ? ` · ${new Date(s.signed_at + (String(s.signed_at).endsWith('Z') ? '' : 'Z')).toLocaleString()}` : ''}
-              {s.decline_reason ? ` · "${s.decline_reason}"` : ''}</div>
+              {s.decline_reason ? ` · "${s.decline_reason}"` : ''}
+              {out && s.status !== 'signed' ? (
+                editing === s.role ? (
+                  <span style={{ display: 'inline-flex', gap: 6, marginLeft: 6, flexWrap: 'wrap' }}>
+                    <input className="ws-input ws-input--inline" type="email" value={newEmail}
+                           onChange={(e) => setNewEmail(e.target.value)} placeholder="new email"
+                           aria-label={`New email for ${s.role}`} />
+                    <button className="btn btn--primary btn--sm" disabled={busy || !newEmail.includes('@')}
+                            onClick={async () => {
+                              await act(() => api.post(`/wholesale/documents/${doc.id}/esign/signer-email`,
+                                { role: s.role, email: newEmail }),
+                              `${s.role}'s email changed. If it's their turn, a new link was sent.`)
+                              setEditing(null); setNewEmail(''); load()
+                            }}>Save</button>
+                    <button className="btn btn--secondary btn--sm" onClick={() => setEditing(null)}>Cancel</button>
+                  </span>
+                ) : (
+                  <button className="btn btn--secondary btn--sm" style={{ marginLeft: 6 }}
+                          onClick={() => { setEditing(s.role); setNewEmail(s.email || '') }}>Change email</button>
+                )
+              ) : null}</div>
           ))}
           {env.final_sha256 ? <div style={{ wordBreak: 'break-all' }}>Signed PDF fingerprint: {env.final_sha256}</div> : null}
         </div>
