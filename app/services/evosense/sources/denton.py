@@ -122,7 +122,7 @@ class DentonReader:
         by instrument-number year. One page per hunt; `rotate` (default day of
         year) moves the window so successive hunts reach new owners."""
         today = today or datetime.utcnow()
-        where = ["confidential = 0"]
+        where = ["confidential = 0", "situs_num IS NOT NULL", "situs_num <> ''"]
         if houses_only:
             where += ["state_cd LIKE 'A1%'", "main_imprv_val > 0"]
         if absentee:

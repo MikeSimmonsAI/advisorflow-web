@@ -158,8 +158,12 @@ class TarrantTaxRollReader:
             raise B.SourceError(B.SOURCE_FORMAT_CHANGED, "no TaxRollYYYYMMDD.zip link on the tax-roll page")
         return TAX_ROLL_BASE + found[-1]
 
-    def discover(self, *, limit: int, scan_limit: int = 600_000, min_due: float = 250.0,
-                 today: Optional[datetime] = None) -> Dict[str, Any]:
+    def discover(self, *, limit: int, scan_limit: int = 800_000, min_due: float = 250.0,
+                 today: Optional[datetime] = None, skip: int = 0) -> Dict[str, Any]:
+        """`skip` passes over the first N qualifying accounts so successive hunts
+        reach different delinquent accounts; if the roll runs out first, the
+        window wraps to the start (never returns fewer because of rotation)."""
+        head: List[Dict[str, Any]] = []
         today = today or datetime.utcnow()
         url = self.locate()
         oz = B.open_zip("tarrant_tax_roll", url)
@@ -200,7 +204,14 @@ class TarrantTaxRollReader:
                     stats["no_situs"] += 1
                     continue
                 stats["delinquent"] += 1
+                if stats["delinquent"] <= skip:
+                    if len(head) < limit:
+                        head.append(self.record(r, c, line, url, as_of))
+                    continue
                 records.append(self.record(r, c, line, url, as_of))
+            if len(records) < limit and head:
+                stats["wrapped"] = min(len(head), limit - len(records))
+                records.extend(head[:limit - len(records)])
         finally:
             fetched = oz.bytes_fetched()
             oz.close()

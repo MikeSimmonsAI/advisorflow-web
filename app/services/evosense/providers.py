@@ -356,6 +356,18 @@ class PublicRecordSource(AcquisitionProvider):
         raise NotImplementedError
 
 
+# Bulk files are read top to bottom; without rotation every daily hunt re-read
+# the same first accounts (live: 334 of 500 were "seen" again). Each day starts
+# a different window; the readers wrap to the top when a window runs past the end.
+ROTATE_TARRANT_POOL = 9000     # delinquent residential accounts on the roll (approx.)
+ROTATE_DCAD_POOL = 7000        # POOR / VERY POOR / UNDESIRABLE residences (approx.)
+
+
+def rotation_skip(window: int, pool: int, today: Optional[datetime] = None) -> int:
+    day = (today or datetime.utcnow()).timetuple().tm_yday
+    return (day * max(1, window)) % max(1, pool)
+
+
 def _county(q: Dict[str, Any]) -> List[str]:
     return [re.sub(r"\s+county$", "", (c or "").strip().lower()) for c in q.get("counties") or []]
 
@@ -389,9 +401,11 @@ class TarrantTaxRollSource(PublicRecordSource):
         if not _wants(query, "tarrant"):
             out.stats = {"skipped": "strategy does not include Tarrant County"}
             return out
-        res = TarrantTaxRollReader().discover(limit=int(query.get("limit") or 25),
-                                              scan_limit=int(query.get("scan_limit") or 600_000),
-                                              min_due=float(query.get("min_tax_due") or 250))
+        limit = int(query.get("limit") or 25)
+        res = TarrantTaxRollReader().discover(limit=limit,
+                                              scan_limit=int(query.get("scan_limit") or 800_000),
+                                              min_due=float(query.get("min_tax_due") or 250),
+                                              skip=rotation_skip(limit, ROTATE_TARRANT_POOL))
         out.extend(res["records"])
         out.stats, out.source_url = res["stats"], res["source_url"]
         return out
@@ -486,7 +500,8 @@ class DcadSource(PublicRecordSource):
         if capability != C.PROPERTY_SEARCH or not _wants(query, "dallas"):
             out.stats = {"skipped": "strategy does not include Dallas County"}
             return out
-        res = DcadReader().discover(limit=int(query.get("limit") or 25))
+        limit = int(query.get("limit") or 25)
+        res = DcadReader().discover(limit=limit, skip=rotation_skip(limit * 3, ROTATE_DCAD_POOL))
         out.extend(res["records"])
         out.stats, out.source_url = res["stats"], res["source_url"]
         return out
