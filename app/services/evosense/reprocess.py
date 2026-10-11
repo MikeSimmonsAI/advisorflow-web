@@ -24,6 +24,7 @@ exactly what the engine will write, and computing it cannot change anything.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
@@ -113,6 +114,23 @@ def _legacy_payload(obs) -> Dict[str, Any]:
     return rec
 
 
+def _trw_v1_payload(obs) -> Dict[str, Any]:
+    """dallas_trw/1 dated a multi-year delinquency by its OLDEST year, so the
+    longer the debt the staler it read. The file proves the balance is still
+    owed as of its own date: a prior-year balance carries no event date."""
+    rec = _legacy_payload(obs)
+    sigs = []
+    for s in rec.get("signals") or []:
+        s = dict(s)
+        years = re.search(r"YEARS=([\d,]+)", s.get("raw") or "")
+        if s.get("type") == "TAX_DELINQUENT" and years and "," in years.group(1):
+            s["effective_at"] = None
+            s["evidence_basis"] = "Dallas County Tax Office TRW file: prior-year balance still owed"
+        sigs.append(s)
+    rec["signals"] = sigs
+    return rec
+
+
 def rebuild_record(obs, prop) -> Tuple[Optional[Dict[str, Any]], str]:
     """(record, how). `how` says whether the record came from the preserved
     RAW evidence under the current adapter, or from the stored normalized
@@ -130,6 +148,12 @@ def rebuild_record(obs, prop) -> Tuple[Optional[Dict[str, Any]], str]:
         if key == "collin_cad" and raw:
             from app.services.evosense.sources.collin import CollinReader
             return CollinReader().record(json.loads(raw)), "raw"
+        if key == "dallas_trw":
+            from app.services.evosense.sources.dallas_trw import TrwReader, PAGE, _d
+            j = json.loads(raw) if raw else {}
+            if isinstance(j, dict) and isinstance(j.get("acc"), dict):
+                return TrwReader().record(j["acc"], obs.source_url or PAGE, _d((j.get("as_of") or "").replace("-", ""))), "raw"
+            return _trw_v1_payload(obs), "stored payload (prior-year balance re-dated to the file)"
         if key == "tarrant_tax_roll" and raw:
             from app.services.evosense.sources.tarrant import TarrantTaxRollReader
             return TarrantTaxRollReader().record_from_raw(raw, obs.source_url or "", obs.source_updated_at), "raw"

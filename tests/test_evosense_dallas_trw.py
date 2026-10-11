@@ -115,3 +115,34 @@ def test_provider_registered_and_scoped_to_dallas(trw):
     assert len(got) == 2
     v = p.verify()
     assert v["county_unit"] == "1002" and any("flat404" in n for n in v["members"])
+
+
+
+def test_prior_year_balance_is_dated_by_the_file_not_the_oldest_year(trw):
+    trw(ROWS)
+    by = {r["source_reference"]: r for r in T.TrwReader().discover(limit=10, today=TODAY)["records"]}
+    multi = by["DALTRW:A1"]["signals"][0]                                # 2022-2024 still owed
+    assert multi["effective_at"] is None and "still owed" in multi["evidence_basis"]
+    single = by["DALTRW:A7"]["signals"][0]                               # only 2024
+    assert single["effective_at"] == "2025-02-01"
+
+
+def test_reprocess_rebuilds_v2_from_raw_and_redates_v1(trw):
+    import json
+    from types import SimpleNamespace
+    from app.services.evosense import ingest as IN
+    from app.services.evosense import reprocess as RP
+    trw(ROWS)
+    rec = {r["source_reference"]: r for r in T.TrwReader().discover(limit=10, today=TODAY)["records"]}["DALTRW:A1"]
+    raw = IN.raw_evidence(rec)
+    obs = SimpleNamespace(provider_key="dallas_trw", raw_payload=raw["raw_payload"],
+                          payload=json.dumps(IN._sanitize(rec), default=str), source_url=T.PAGE)
+    again, how = RP.rebuild_record(obs, None)
+    assert how == "raw" and again["_evidence"]["years"] == ["2022", "2023", "2024"]
+    # a dallas_trw/1 observation: raw was one row, the signal dated by the oldest year
+    v1 = dict(IN._sanitize(rec))
+    v1["signals"] = [dict(v1["signals"][0], effective_at="2023-02-01")]
+    old = SimpleNamespace(provider_key="dallas_trw", raw_payload=json.dumps({"account": "A1"}),
+                          payload=json.dumps(v1, default=str), source_url=T.PAGE)
+    fixed, how = RP.rebuild_record(old, None)
+    assert fixed["signals"][0]["effective_at"] is None and how.startswith("stored payload")

@@ -67,7 +67,7 @@ def _d(v: str) -> Optional[datetime]:
 
 
 class TrwReader:
-    adapter_version = "dallas_trw/1"
+    adapter_version = "dallas_trw/2"
 
     def locate(self) -> str:
         override = B.local_override("dallas_trw")
@@ -192,16 +192,25 @@ class TrwReader:
                    ("%s-%s" % (years[0], years[-1])) if len(years) > 1 else years[0]))
         if acc["agreement"]:
             what += " (on a payment agreement)"
+        # The file says the balance is STILL owed as of its date, so the
+        # evidence is as fresh as the file (like the Tarrant roll: a prior-year
+        # balance is dated by the roll, not by the year it first went unpaid -
+        # otherwise a longer delinquency would read as staler evidence).
+        # Only a single, latest-year delinquency carries its Feb 1 date.
+        newest = max((int(y) for y in years if y.isdigit()), default=None)
+        single = len(years) == 1 and newest is not None
+        observed = max(0, (datetime.utcnow() - as_of).days) if as_of else 0
         sigs = [{"type": "TAX_DELINQUENT", "confidence": 90, "value": what,
                  "raw": "ACCOUNT=%s;YEARS=%s;TOTAL_DUE=%s" % (acc["account"], ",".join(years), acc["total_due"]),
-                 "effective_at": "%s-02-01" % (int(years[0]) + 1) if years and years[0].isdigit() else None,
-                 "evidence_basis": "Dallas County Tax Office TRW file (DUE-DATE passed, balance remaining)",
-                 "observed_days_ago": 0}]
+                 "effective_at": "%s-02-01" % (newest + 1) if single else None,
+                 "evidence_basis": ("Dallas County Tax Office TRW file (DUE-DATE passed, balance remaining)"
+                                    if single else "Dallas County Tax Office TRW file: prior-year balance still owed"),
+                 "observed_days_ago": observed}]
         if acc["suit"]:
             sigs.append({"type": "TAX_SUIT", "confidence": 90,
                          "value": "delinquent-tax lawsuit pending (cause %s)" % (acc["cause"] or "on file"),
                          "raw": "SUIT=%s;CAUSE=%s" % (acc["suit"], acc["cause"]),
-                         "evidence_basis": "Dallas County Tax Office TRW suit flag", "observed_days_ago": 0})
+                         "evidence_basis": "Dallas County Tax Office TRW suit flag", "observed_days_ago": observed})
         return {
             "source_reference": "DALTRW:%s" % acc["account"],
             "street_address": street, "unit": None,
@@ -209,7 +218,10 @@ class TrwReader:
             "county": "Dallas", "parcel_apn": acc["cad_account"] or None,
             "owner": owner, "signals": sigs,
             "occupancy": "owner_occupied" if r["homestead"] == "Y" else None,
-            "_raw": {k: v for k, v in r.items()}, "_source_url": PAGE,
+            # The whole per-account sum (every year's row folded in), so a
+            # reprocess can rebuild the record exactly under a newer adapter.
+            "_raw": {"acc": acc, "as_of": as_of.strftime("%Y-%m-%d") if as_of else None},
+            "_source_url": PAGE,
             "_source_updated_at": as_of, "_adapter_version": self.adapter_version,
             "_evidence": {"years": years, "total_due_county_unit": amount, "suit": acc["suit"],
                           "cause": acc["cause"], "payment_agreement": acc["agreement"]},
