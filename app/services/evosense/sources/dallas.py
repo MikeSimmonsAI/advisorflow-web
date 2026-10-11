@@ -150,6 +150,57 @@ class DcadReader:
         stats["matched"] = len(recs)
         return {"records": recs, "stats": dict(stats), "source_url": DCAD_PAGE}
 
+    def accounts_for_addresses(self, targets: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """{target_id: {street, unit, zip_code, city}} -> {target_id: DCAD account}.
+
+        One pass over ACCOUNT_INFO.CSV. An account counts only when it is the ONE
+        DCAD account whose situs is the same address (same house number and
+        street, suffix spelled either way, ZIP not contradicting, same unit).
+        Two or more candidates is AMBIGUOUS and gets no account - never a guess."""
+        from app.services.evosense.identity import normalize_street, _split_suffix, same_address
+        stats: Counter = Counter()
+        cores: Dict[str, List[str]] = {}
+        for tid, t in targets.items():
+            norm, unit = normalize_street(t.get("street_address"))
+            if not norm or not re.match(r"^\d", norm):
+                stats["no_house_number"] += 1
+                continue
+            t["_unit"] = (t.get("unit") or unit or "").strip().upper().lstrip("#") or None
+            cores.setdefault(_split_suffix(norm)[0], []).append(tid)
+        hits: Dict[str, List[Dict[str, str]]] = {tid: [] for ids in cores.values() for tid in ids}
+        if not cores:
+            return {"accounts": {}, "stats": dict(stats)}
+        url = self.locate()
+        oz = B.open_zip("dcad", url)
+        try:
+            for header, vals in _csv_rows(oz.zip, "ACCOUNT_INFO.CSV"):
+                row = dict(zip(header, vals))
+                street = " ".join(x for x in ((row.get("STREET_NUM") or "").strip(),
+                                              re.sub(r"\s+", " ", row.get("FULL_STREET_NAME") or "").strip()) if x)
+                if not street:
+                    continue
+                core = _split_suffix(normalize_street(street)[0])[0]
+                for tid in cores.get(core, ()):
+                    t = targets[tid]
+                    if same_address(t.get("street_address"), street,
+                                    t.get("zip_code"), row.get("PROPERTY_ZIPCODE")) is not True:
+                        continue
+                    unit = (row.get("UNIT_ID") or "").strip().upper() or None
+                    if (t["_unit"] or None) != unit:
+                        continue
+                    hits[tid].append(row)
+        finally:
+            oz.close()
+        accounts = {}
+        for tid, rows in hits.items():
+            accts = {(r.get("ACCOUNT_NUM") or "").strip() for r in rows}
+            if len(accts) == 1:
+                accounts[tid] = accts.pop()
+            else:
+                stats["ambiguous" if accts else "no_match"] += 1
+        stats["matched"] = len(accounts)
+        return {"accounts": accounts, "stats": dict(stats)}
+
     def _join(self, zf, member, cands, slot, stats):
         need = {a for a, c in cands.items() if slot not in c}
         if not need:

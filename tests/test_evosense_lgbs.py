@@ -169,3 +169,64 @@ def test_hunt_finds_tax_sale_properties_and_joins_the_owner(client, db_session, 
             .filter(EvoSenseSignal.property_id == p.id, EvoSenseSignal.active.is_(True)).all()}
     assert {"TAX_SUIT", "TAX_DELINQUENT"} <= sigs
     assert (p.opportunity_score or 0) > 20                         # absentee / out-of-state from the join
+
+
+def test_dcad_finds_the_account_from_an_exact_address(tmp_path, monkeypatch, no_network):  # noqa: F811
+    monkeypatch.setenv("EVOSENSE_SRC_DCAD_PATH", _dcad_zip(tmp_path))
+    got = DcadReader().accounts_for_addresses({
+        "a": {"street_address": "100 Held Street", "zip_code": "75210"},      # suffix spelled out
+        "b": {"street_address": "200 SOON ST", "city": "Dallas"},
+        "c": {"street_address": "100 HELD ST", "zip_code": "75999"},          # ZIP contradicts
+        "d": {"street_address": "999 NOWHERE LN", "zip_code": "75210"},
+        "e": {"street_address": "HELD ST", "zip_code": "75210"},              # no house number
+    })
+    assert got["accounts"] == {"a": "00000555000000000", "b": "00000555100000000"}
+    assert got["stats"]["no_match"] == 2 and got["stats"]["no_house_number"] == 1
+    src = PV.PROVIDERS["dcad"]
+    assert src.applies({"county": "Dallas", "street_address": "100 Held St"})
+    out = src.lookup_many([{"id": "p1", "county": "Dallas", "street_address": "100 Held Street",
+                            "zip_code": "75210", "parcel_apn": None},
+                           {"id": "p2", "county": "Dallas", "street_address": "999 Nowhere Ln",
+                            "zip_code": "75210", "parcel_apn": None}])
+    assert out["results"]["p1"]["owner"]["name"] == "HELD HANNAH"
+    assert out["results"]["p1"]["parcel_apn"] == "00000555000000000"
+    assert out["results"]["p2"] is None                                       # no match, not a guess
+
+
+def test_two_accounts_at_one_address_is_ambiguous(tmp_path, monkeypatch, no_network):  # noqa: F811
+    import zipfile
+    src_zip = _dcad_zip(tmp_path)
+    with zipfile.ZipFile(src_zip) as z:
+        files = {n: z.read(n).decode("latin-1") for n in z.namelist()}
+    info = files["ACCOUNT_INFO.CSV"].rstrip("\r\n").splitlines()
+    dup = info[1].replace("00000555000000000", "00000555900000000")
+    files["ACCOUNT_INFO.CSV"] = "\n".join(info + [dup]) + "\n"
+    monkeypatch.setenv("EVOSENSE_SRC_DCAD_PATH", write_zip(tmp_path / "dup.zip", files))
+    got = DcadReader().accounts_for_addresses({"a": {"street_address": "100 HELD ST", "zip_code": "75210"}})
+    assert got["accounts"] == {} and got["stats"]["ambiguous"] == 1
+
+
+def test_imported_foreclosure_house_gets_its_owner_on_the_next_hunt(client, db_session, sample_org, tmp_path,
+                                                                    monkeypatch, lgbs_api):
+    monkeypatch.setenv("EVOSENSE_SRC_DCAD_PATH", _dcad_zip(tmp_path))
+    _, h = _admin(db_session, sample_org)
+    _enable(client, h, "dcad")
+    csv_body = ("county,street_address,city,zip_code,state,signal_date,case_status,case_number\n"
+                "Dallas,100 HELD STREET,Dallas,75210,TX,2026-10-01,2026-11-03,202600009999\n")
+    r = client.post("/wholesale/evosense/import", headers=h,
+                    files={"file": ("dallas.csv", csv_body, "text/csv")},
+                    data={"list_kind": "foreclosure_filing", "list_source": "clerk postings"})
+    assert r.status_code == 200, r.text
+    p = (db_session.query(EvoSenseProperty)
+         .filter(EvoSenseProperty.organization_id == sample_org.id,
+                 EvoSenseProperty.street_address.ilike("100 HELD%")).one())
+    assert p.parcel_apn is None
+    s = _pilot(client, h, counties=["Dallas"], property_types=["single_family"], min_opportunity_score=10)
+    out = ok(client.post("/wholesale/evosense/strategies/%s/hunt" % s["id"], headers=h))
+    assert out["status"] == "succeeded", out
+    assert out["counts"].get("lookup_backlog", 0) >= 1
+    db_session.refresh(p)
+    assert p.parcel_apn == "00000555000000000" and p.square_feet == 1120
+    sigs = {x.signal_type for x in db_session.query(EvoSenseSignal)
+            .filter(EvoSenseSignal.property_id == p.id, EvoSenseSignal.active.is_(True)).all()}
+    assert "PRE_FORECLOSURE" in sigs
