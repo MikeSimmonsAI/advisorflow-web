@@ -137,3 +137,12 @@ def test_paid_lookup_caps_still_apply(client, auth_headers, imported, monkeypatc
     r = client.post("/wholesale/buyers/skip-trace/run", headers=auth_headers,
                     json={"buyer_ids": est["buyer_ids"], "max_cost_cents": 20})
     assert r.status_code == 429 and FakeTracerfy.calls == []
+
+
+def test_estimate_checks_whole_list_against_daily_caps_not_the_per_run_limit():
+    class S:
+        enrichment_max_records_per_run = 25
+        enrichment_daily_cap = None
+        enrichment_monthly_cap = None
+    assert BT.cap_refusal(None, "org", S(), 97, whole_list=True) is None
+    assert "per run" in BT.cap_refusal(None, "org", S(), 97)
