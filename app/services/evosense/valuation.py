@@ -37,7 +37,7 @@ def _year_from(text: Optional[str]) -> Optional[int]:
     return int(m.group(0)) if m else None
 
 
-DISTRICTS = {"dcad": "DCAD", "tad": "TAD", "collin_cad": "Collin CAD"}
+DISTRICTS = {"dcad": "DCAD", "tad": "TAD", "collin_cad": "Collin CAD", "denton_gis": "Denton CAD"}
 
 
 def _district(text: Optional[str]) -> Optional[str]:

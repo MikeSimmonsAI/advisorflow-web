@@ -40,7 +40,7 @@ INT_FIELDS = ("min_value", "max_value", "min_equity_pct", "min_ownership_years",
               "target_fee", "daily_budget_cents", "monthly_budget_cents",
               "max_cost_per_property_cents", "approval_over_cents",
               "pilot_max_properties", "pilot_max_spend_cents")
-BOOL_FIELDS = ("pilot_mode", "pilot_allow_paid")
+BOOL_FIELDS = ("pilot_mode", "pilot_allow_paid", "houses_only")
 # A pilot is a CAP, never a target. The Wholesale pilot (Building Equity) runs
 # its first controlled batch at 250-500 records; 500 is the most any pilot run
 # may touch, whatever the strategy says.
@@ -237,6 +237,8 @@ def summary(strategy) -> str:
     if strategy.min_equity_pct:
         parts.append("with at least %s%% estimated equity" % strategy.min_equity_pct)
     s1 = " ".join(parts) + "."
+    if getattr(strategy, "houses_only", False):
+        s1 += " Houses only: vacant lots, land-only accounts and commercial property are skipped."
     pref = [SIGNALS[x]["label"].lower() for x in lst(strategy, "preferred_signals") if x in SIGNALS]
     s2 = ""
     if pref:
@@ -266,6 +268,86 @@ def summary(strategy) -> str:
                    "paid data up to %s" % C.money(pilot_spend_cap(strategy)) if pilot_spend_cap(strategy)
                    else "no paid data"))
     return s1 + s2 + s3 + s4 + s5
+
+
+# ── READY-MADE STARTER SEARCHES ─────────────────────────────────────────────
+# One click creates a DRAFT the person reviews and activates; nothing here
+# starts a hunt. Every starter: houses only, the DFW counties, $0 paid data,
+# no automatic outreach, best scores first.
+
+DFW_COUNTIES = ["Dallas", "Tarrant", "Collin", "Denton", "Ellis", "Kaufman", "Rockwall",
+                "Parker", "Johnson"]
+HOUSE_TYPES = ["single_family", "duplex", "triplex", "fourplex", "townhouse", "condo"]
+
+STARTERS = {
+    "behind_on_taxes": {
+        "name": "Behind on Taxes",
+        "description": "Houses with unpaid property taxes or a tax lawsuit.",
+        "data": "Works today on free data: county tax-sale lists (9 DFW counties) and the Tarrant tax roll.",
+        "free_today": True,
+        "fields": {"preferred_signals": ["TAX_DELINQUENT", "TAX_SUIT", "LIEN"]},
+    },
+    "tired_landlord": {
+        "name": "Tired Landlord",
+        "description": "Rental houses held 10+ years by an owner who lives somewhere else.",
+        "data": "Works today on free data: Dallas, Tarrant and Collin owner records.",
+        "free_today": True,
+        "fields": {"owner_geography": "absentee", "min_ownership_years": 10,
+                   "occupancy_preferences": ["non_owner_occupied"],
+                   "preferred_signals": ["ABSENTEE_OWNER", "OUT_OF_STATE_OWNER", "TIRED_LANDLORD",
+                                         "CODE_COMPLAINT", "CODE_VIOLATION", "TAX_DELINQUENT"]},
+    },
+    "problem_property": {
+        "name": "Problem Property",
+        "description": "Houses with code complaints or a poor condition rating from the appraiser.",
+        "data": "Works today on free data inside Dallas and Fort Worth (city code records, Dallas appraiser rating).",
+        "free_today": True,
+        "fields": {"counties": ["Dallas", "Tarrant"],
+                   "preferred_signals": ["CODE_VIOLATION", "CODE_COMPLAINT", "CDU_POOR",
+                                         "DISTRESSED_CONDITION", "VACANT"]},
+    },
+    "long_time_owner": {
+        "name": "Long-Time Owner",
+        "description": ("Houses owned 20+ years. Long ownership does NOT prove the house is paid off - "
+                        "mortgage status stays unverified until a lender record or the owner says so."),
+        "data": "Works today on free data: deed dates from Dallas, Tarrant and Collin owner records.",
+        "free_today": True,
+        "fields": {"min_ownership_years": 20,
+                   "preferred_signals": ["FREE_AND_CLEAR", "ABSENTEE_OWNER", "TAX_DELINQUENT"]},
+    },
+    "pre_foreclosure": {
+        "name": "Pre-Foreclosure",
+        "description": "Houses with a posted foreclosure notice.",
+        "data": ("Fed by foreclosure-notice lists you import (Properties > Import list, list type "
+                 "Foreclosure notices) - county postings, or a PropStream export if you ever have one."),
+        "free_today": False,
+        "fields": {"preferred_signals": ["PRE_FORECLOSURE", "TAX_DELINQUENT", "VACANT"]},
+    },
+    "probate": {
+        "name": "Probate / Inherited",
+        "description": ("Houses in an estate or probate case. A matching last name alone is never treated "
+                        "as an inheritance."),
+        "data": "Fed by probate / estate lists you import (Properties > Import list), or a PropStream export.",
+        "free_today": False,
+        "fields": {"preferred_signals": ["PROBATE", "ESTATE", "VACANT", "TAX_DELINQUENT"]},
+    },
+}
+
+
+def starter_values(key: str) -> Dict[str, Any]:
+    st = STARTERS[key]
+    base = {"name": st["name"], "description": st["description"], "states": ["TX"],
+            "counties": list(DFW_COUNTIES), "property_types": list(HOUSE_TYPES), "houses_only": True,
+            "min_opportunity_score": 45, "min_contact_confidence": 60, "handoff_intent_threshold": 70,
+            "daily_budget_cents": 0, "owner_geography": "any",
+            "outreach_policy": dict(DEFAULT_OUTREACH), "nurture_policy": dict(DEFAULT_NURTURE)}
+    base.update(st["fields"])
+    return base
+
+
+def starters_payload() -> List[Dict[str, Any]]:
+    return [{"key": k, "name": v["name"], "description": v["description"], "data": v["data"],
+             "free_today": v["free_today"]} for k, v in STARTERS.items()]
 
 
 def is_pilot(strategy) -> bool:

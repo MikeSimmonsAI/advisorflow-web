@@ -51,6 +51,20 @@ export function EvoStrategies() {
   const [busy, setBusy] = useState(false)
   const [confirmArchive, setConfirmArchive] = useState(null)
   const [notice, setNotice] = useState(null)
+  const [starters, setStarters] = useState(null)
+  const [showStarters, setShowStarters] = useState(false)
+
+  useEffect(() => {
+    api.get('/wholesale/evosense/strategy-starters').then((r) => setStarters(r.items)).catch(() => setStarters([]))
+  }, [])
+
+  async function addStarter(st) {
+    setBusy(true); setError(null)
+    try {
+      const s = await api.post('/wholesale/evosense/strategy-starters', { key: st.key })
+      navigate(`/wholesale/evosense/strategies/${s.id}`)
+    } catch (e) { setError(errText(e)) } finally { setBusy(false) }
+  }
 
   const load = useCallback(async () => {
     // Archived strategies are fetched too, so every tab count is real; the
@@ -103,10 +117,34 @@ export function EvoStrategies() {
                 { key: 'paused', label: 'Paused & drafts', count: data ? all.filter((x) => x.status === 'paused' || x.status === 'draft').length : null },
                 { key: 'archived', label: 'Archived', count: data ? all.filter((x) => x.status === 'archived').length : null },
               ]}
-              actions={<button type="button" className="evo-btn evo-btn--primary" onClick={() => navigate('/wholesale/evosense/strategies/new')}>
-                + New Strategy</button>} />
+              actions={<>
+                <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowStarters((v) => !v)}>
+                  Ready-made searches</button>
+                <button type="button" className="evo-btn evo-btn--primary" onClick={() => navigate('/wholesale/evosense/strategies/new')}>
+                  + New Strategy</button></>} />
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>
+      {showStarters || (data && !all.length) ? (
+        <Panel title="Ready-made searches" hint="One click adds a draft you can review. Nothing hunts until you activate it, and your other searches are not changed.">
+          {!starters ? <PageSkeleton /> : (
+            <div className="evo-form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
+              {starters.map((st) => (
+                <div key={st.key} className="evo-panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <strong>{st.name}</strong>
+                  <span className="evo-small">{st.description}</span>
+                  <span className="evo-small evo-muted">{st.data}</span>
+                  <span className="evo-chips">
+                    <Tag>Houses only</Tag>
+                    {st.free_today ? <Tag kind="live">Free data today</Tag> : <Tag kind="info">Needs an imported list</Tag>}
+                  </span>
+                  <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy}
+                          onClick={() => addStarter(st)} style={{ alignSelf: 'flex-start' }}>Add this search</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      ) : null}
       {!data ? <PageSkeleton /> : !shown.length && all.length ? (
         <Panel><Empty title="No strategies here">Nothing in this view. The other tabs hold the rest.</Empty></Panel>
       ) : !shown.length ? (
@@ -142,6 +180,7 @@ export function EvoStrategies() {
                   <span className="evo-chips" style={{ justifyContent: 'flex-end', flexShrink: 0 }}>
                     <Status status={s.status} />
                     {s.is_test ? <Tag kind="sandbox">Test</Tag> : null}
+                    {s.houses_only ? <Tag>Houses only</Tag> : null}
                     {s.pilot_mode ? <Tag kind="info">Pilot · {s.pilot?.record_cap} max</Tag> : null}
                   </span>
                 </div>
@@ -207,6 +246,7 @@ const EMPTY = {
   nurture_policy: { allow_nurture: true, default_days: 60 },
   hunt_cadence: 'daily', hunt_interval_hours: 12,
   pilot_mode: false, pilot_max_properties: 50, pilot_allow_paid: false, pilot_max_spend: '',
+  houses_only: true,
 }
 
 const toList = (s) => String(s || '').split(/[,\n;]/).map((x) => x.trim()).filter(Boolean)
@@ -224,6 +264,7 @@ function fromServer(s) {
     min_ownership_years: s.min_ownership_years ?? '', target_fee: s.target_fee ?? '',
     pilot_mode: !!s.pilot_mode, pilot_max_properties: s.pilot_max_properties ?? 50,
     pilot_allow_paid: !!s.pilot_allow_paid, pilot_max_spend: dollars(s.pilot_max_spend_cents),
+    houses_only: !!s.houses_only,
   }
 }
 
@@ -243,6 +284,7 @@ function toServer(f) {
     hunt_interval_hours: f.hunt_cadence === 'interval' ? Number(f.hunt_interval_hours) || 12 : null,
     pilot_mode: !!f.pilot_mode, pilot_max_properties: f.pilot_mode ? Number(f.pilot_max_properties) || 50 : f.pilot_max_properties,
     pilot_allow_paid: !!f.pilot_allow_paid, pilot_max_spend_cents: toCents(f.pilot_max_spend),
+    houses_only: !!f.houses_only,
   }
   if (out.pilot_mode) out.hunt_cadence = 'manual'
   Object.keys(out).forEach((k) => { if (out[k] === '') out[k] = null })
@@ -387,6 +429,14 @@ export function EvoStrategyBuilder() {
           </Step>
           <Step n={2} q="What property are you looking for?">
             <Picks options={types} value={form.property_types} onChange={(v) => set('property_types', v)} label="Property types" />
+            <div style={{ marginTop: 10 }}>
+              <Check checked={form.houses_only} onChange={(v) => set('houses_only', v)}>
+                <strong>Houses only - skip vacant lots</strong>
+                <span className="evo-small evo-muted" style={{ display: 'block' }}>
+                  Vacant lots, land-only accounts and commercial property are scored 0 and kept out of your top results.
+                  They are not deleted - turn this off to see them again.</span>
+              </Check>
+            </div>
             <div className="evo-form-grid" style={{ marginTop: 14 }}>
               <NumIn id="sb-minv" label="Value at least" prefix="$" value={form.min_value} onChange={(v) => set('min_value', v)} />
               <NumIn id="sb-maxv" label="Value at most" prefix="$" value={form.max_value} onChange={(v) => set('max_value', v)} />
