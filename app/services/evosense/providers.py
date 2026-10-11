@@ -361,6 +361,7 @@ class PublicRecordSource(AcquisitionProvider):
 # a different window; the readers wrap to the top when a window runs past the end.
 ROTATE_TARRANT_POOL = 9000     # delinquent residential accounts on the roll (approx.)
 ROTATE_DCAD_POOL = 7000        # POOR / VERY POOR / UNDESIRABLE residences (approx.)
+ROTATE_FW_OPEN_POOL = 1_000_000     # wrapped by the reader to the open-case count
 ROTATE_DALLAS_TRW_POOL = 1_000_000  # wrapped again by the reader to the real pool size
 
 
@@ -494,13 +495,20 @@ class TadSource(PublicRecordSource):
     adapter_version = "tad_property_data/2"
 
     def applies(self, target):
-        return (target.get("county") or "").lower() == "tarrant" and bool(target.get("parcel_apn"))
+        if (target.get("county") or "").lower() != "tarrant":
+            return False
+        # No account number: only a Fort Worth house, matched by its exact situs address.
+        return bool(target.get("parcel_apn")) or (
+            bool(target.get("street_address")) and (target.get("city") or "").lower() == "fort worth")
 
     def lookup_many(self, targets):
-        from app.services.evosense.sources.tarrant import TadReader, apn
+        from app.services.evosense.sources.tarrant import TadReader, apn, _norm_addr
         by_apn = {apn(t["parcel_apn"]): t["id"] for t in targets if t.get("parcel_apn")}
-        res = TadReader().lookup_many(list(by_apn))
+        by_addr = {_norm_addr(t["street_address"]): t["id"] for t in targets
+                   if not t.get("parcel_apn") and t.get("street_address")}
+        res = TadReader().lookup_many(list(by_apn), addresses=list(by_addr))
         results = {tid: res["records"].get(a) for a, tid in by_apn.items()}
+        results.update({tid: (res.get("by_address") or {}).get(a) for a, tid in by_addr.items()})
         return {"results": results, "errors": {}, "stats": res["stats"]}
 
     def verify(self):
@@ -703,6 +711,39 @@ class CensusGeocoderSource(PublicRecordSource):
         from app.services.evosense.sources.census import CensusGeocoder
         res = CensusGeocoder().geocode("100 E Weatherford St", "Fort Worth", "TX", None, "Tarrant")
         return {"matches": res["matches"]}
+
+
+class FortWorthOpenCasesSource(PublicRecordSource):
+    scope, counties, scope_name = "city", ("Tarrant",), "City of Fort Worth"
+    key = "fw_open_cases"
+    label = "Fort Worth open code cases (substandard, neglect, high grass)"
+    capabilities = (C.CODE_VIOLATION,)
+    discovery = True
+    coverage = "City of Fort Worth, TX - open city code cases of distress types"
+    jurisdiction = "City of Fort Worth, TX"
+    source_type = "City code-enforcement case table (open data)"
+    access_method = "Public ArcGIS feature service query"
+    public_url = "https://data.fortworthtexas.gov/"
+    refresh = "Updated daily by the city"
+    freshness_days = 30
+    adapter_version = "fw_open_cases/1"
+
+    def search(self, capability, query):
+        from app.services.evosense.sources import fortworth as FW
+        out = Records()
+        if not _wants(query, "tarrant"):
+            out.stats = {"skipped": "strategy does not include Tarrant County (Fort Worth)"}
+            return out
+        limit = int(query.get("limit") or 25)
+        res = FW.discover(limit, skip=rotation_skip(limit, ROTATE_FW_OPEN_POOL))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import fortworth as FW
+        res = FW.discover(1)
+        return {"url": FW.LAYER, "open_cases": res["stats"].get("open_cases")}
 
 
 class FortWorthCodeSource(PublicRecordSource):
@@ -931,7 +972,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
     TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), CensusGeocoderSource(),
-    FortWorthCodeSource(), Dallas311Source(), LgbsTaxSaleSource(),
+    FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
 )}

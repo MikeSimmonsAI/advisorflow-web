@@ -320,13 +320,16 @@ class TadReader:
 
     adapter_version = "tad_property_data/2"
 
-    def lookup_many(self, accounts: Iterable[str], *, scan_limit: int = 1_500_000) -> Dict[str, Any]:
+    def lookup_many(self, accounts: Iterable[str], *, scan_limit: int = 1_500_000,
+                    addresses: Iterable[str] = (), address_city: str = "FORT WORTH") -> Dict[str, Any]:
         wanted = {apn(a) for a in accounts if a}
+        wanted_addr = {_norm_addr(a) for a in addresses if a}
+        addr_hits: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         found: Dict[str, Dict[str, Any]] = {}
         votes: Dict[str, Counter] = defaultdict(Counter)
         stats: Counter = Counter()
-        if not wanted:
-            return {"records": {}, "stats": {}, "source_url": TAD_URL}
+        if not wanted and not wanted_addr:
+            return {"records": {}, "by_address": {}, "stats": {}, "source_url": TAD_URL}
         oz = B.open_zip("tad", TAD_URL)
         as_of = B.parse_http_date(oz.meta.get("last_modified"))
         header: Optional[List[str]] = None
@@ -363,11 +366,15 @@ class TadReader:
                     city, _st = _split_citystate(row["Owner_CityState"])
                     if city:
                         votes[row["City"].strip()][city.upper()] += 1
+                if wanted_addr:
+                    sa = _norm_addr(row["Situs_Address"])
+                    if sa in wanted_addr:
+                        addr_hits[sa].append({"row": row, "line": line})
                 if acct in wanted and acct not in found:
                     found[acct] = {"row": row, "line": line}
-                    if len(found) == len(wanted):
+                    if len(found) == len(wanted) and not wanted_addr:
                         break
-                if ascending and max_wanted is not None and acct.isdigit() and int(acct) > max_wanted \
+                if not wanted_addr and ascending and max_wanted is not None and acct.isdigit() and int(acct) > max_wanted \
                         and stats["scanned"] > 1000:
                     break
         finally:
@@ -386,7 +393,15 @@ class TadReader:
                 city_map[code] = name
         recs = {a: self.record(v["row"], v["line"], city_map, as_of) for a, v in found.items()}
         stats["matched"] = len(recs)
-        return {"records": recs, "stats": dict(stats), "source_url": TAD_URL,
+        by_address: Dict[str, Dict[str, Any]] = {}
+        for a, hits in addr_hits.items():
+            in_city = [h for h in hits if city_map.get(h["row"]["City"].strip()) == address_city]
+            if len(in_city) == 1:
+                by_address[a] = self.record(in_city[0]["row"], in_city[0]["line"], city_map, as_of)
+            else:
+                stats["address_ambiguous" if in_city else "address_other_city"] += 1
+        stats["address_matched"] = len(by_address)
+        return {"records": recs, "by_address": by_address, "stats": dict(stats), "source_url": TAD_URL,
                 "source_updated_at": as_of, "city_map_size": len(city_map)}
 
     def record(self, row, line, city_map, as_of) -> Dict[str, Any]:
