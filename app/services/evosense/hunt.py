@@ -148,14 +148,26 @@ def _finish_failed(db, org_id, strategy, run, ctl, counts, error, user):
     return run
 
 
-def _discovery_routes(db, org_id):
+def discovery_focus(strategy) -> List[str]:
+    """The discovery sources a strategy asked for: capabilities (TAX,
+    PROPERTY_SEARCH, CODE_VIOLATION, ...) or source keys. Empty = every
+    connected discovery source (the behaviour of searches that never set it)."""
+    prefs = C.jload(getattr(strategy, "provider_preferences", None), {}) or {}
+    focus = prefs.get("discovery") if isinstance(prefs, dict) else None
+    return [str(x) for x in focus if x] if isinstance(focus, list) else []
+
+
+def _discovery_routes(db, org_id, focus: Optional[List[str]] = None):
     """(capability, provider, cfg) for every connected DISCOVERY source. A
     public-record LOOKUP source (TAD, geocoder, code cases) is never asked to
-    discover; it is called per property in the lookup stage."""
+    discover; it is called per property in the lookup stage. With a focus,
+    only the named capabilities / sources discover."""
     out, seen = [], set()
     for cap in DISCOVERY:
         for provider, cfg, _cost in PV.route(db, org_id, cap):
             if not getattr(provider, "discovery", True):
+                continue
+            if focus and cap not in focus and provider.key not in focus:
                 continue
             if (provider.key, cap) in seen:
                 continue
@@ -188,7 +200,10 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
         counts["pilot"] = {"record_cap": max_properties, "spend_cap_cents": ST.pilot_spend_cap(strategy),
                            "outreach": "off", "paid_data": "on" if ST.pilot_spend_cap(strategy) else "off"}
     touched: Dict[str, EvoSenseProperty] = {}
-    routes = _discovery_routes(db, org_id)
+    focus = discovery_focus(strategy)
+    routes = _discovery_routes(db, org_id, focus)
+    if focus:
+        counts["discovery_focus"] = focus
     real = [r for r in routes if r[1].connector_kind == C.REAL]
     share = max(1, -(-max_properties // max(1, len(real))))      # ceil: a fair share per real source
     counts["sources"] = {}
