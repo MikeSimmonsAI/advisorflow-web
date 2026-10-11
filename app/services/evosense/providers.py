@@ -442,7 +442,7 @@ class DallasTrwSource(PublicRecordSource):
     public_url = "https://www.dallascounty.org/departments/tax/tax-roll.php"
     refresh = "Published weekly"
     freshness_days = 30
-    adapter_version = "dallas_trw/1"
+    adapter_version = "dallas_trw/2"
 
     def search(self, capability, query):
         from app.services.evosense.sources.dallas_trw import TrwReader
