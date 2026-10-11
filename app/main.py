@@ -186,6 +186,7 @@ from app.routers import qualification_router  # noqa: E402
 # second contact database.
 from app.routers.wholesale_router import router as wholesale_router  # noqa: E402
 from app.routers.wholesale_buyers_router import router as wholesale_buyers_router  # noqa: E402
+from app.routers.wholesale_contact_lookup_router import router as wholesale_contact_lookup_router  # noqa: E402
 from app.routers.wholesale_funding_router import router as wholesale_funding_router  # noqa: E402
 from app.routers.wholesale_exceptions_router import router as wholesale_exceptions_router  # noqa: E402
 from app.routers.wholesale_files_router import router as wholesale_files_router  # noqa: E402
@@ -1182,6 +1183,7 @@ app.include_router(ai_workforce_intelligence_god_router)
 # be invisible in review.
 app.include_router(wholesale_router)
 app.include_router(wholesale_buyers_router)
+app.include_router(wholesale_contact_lookup_router)
 app.include_router(wholesale_funding_router)
 app.include_router(wholesale_exceptions_router)
 from app.routers.wholesale_ops_router import router as wholesale_ops_router  # noqa: E402

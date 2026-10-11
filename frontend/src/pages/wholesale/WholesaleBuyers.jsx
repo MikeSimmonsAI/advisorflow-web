@@ -14,6 +14,7 @@ import {
   fmtWhen, Note, Standing, Why,
 } from './wsShared'
 import { ConfirmDelete } from './wsFiles'
+import ContactLookup from './wsContactLookup'
 import { Alert, Drawer, Empty as EvoEmpty, EvoApp, Hero, Metric, Metrics, Panel, Skeleton, Tag } from './ds/ds'
 import './ds/evo-pages.css'
 
@@ -35,7 +36,8 @@ export default function WholesaleBuyers() {
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showFind, setShowFind] = useState(false)
-  const [showTrace, setShowTrace] = useState(false)
+  const [picked, setPicked] = useState({})
+  const [lookupIds, setLookupIds] = useState(null)
   const [expanded, setExpanded] = useState(null)
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
@@ -64,6 +66,9 @@ export default function WholesaleBuyers() {
   const pof = buyers.filter((b) => b.proof_of_funds_on_file).length
   const boxes = buyers.reduce((n, b) => n + (b.buy_boxes || []).length, 0)
   // Buyers not yet in the shared contact database (sandbox buyers never are).
+  const shown = buyers.filter((b) => !verifiedOnly || b.cash_verified || b.proof_of_funds_on_file)
+  const nPicked = Object.values(picked).filter(Boolean).length
+  const allPicked = shown.length > 0 && shown.every((b) => picked[b.id])
   const unlinked = buyers.filter((b) => !b.org_contact_id && !b.is_test && (b.email || b.phone)).length
 
   async function linkContacts() {
@@ -96,8 +101,10 @@ export default function WholesaleBuyers() {
               ) : null}
               <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowFind(true)}
                       title="Local investors from the county records: owners of several houses who keep buying">Find cash buyers</button>
-              <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowTrace(true)}
-                      title="Look up phone numbers and emails for buyers that only have a mailing address">Get phones &amp; emails</button>
+              <button type="button" className="evo-btn evo-btn--secondary" disabled={!nPicked}
+                      onClick={() => setLookupIds(Object.keys(picked).filter((k) => picked[k]))}
+                      title={nPicked ? 'Look up phone numbers and emails for the buyers you ticked' : 'Tick the buyers to look up first'}>
+                Get phones &amp; emails{nPicked ? ` (${nPicked})` : ''}</button>
               <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowImport(true)}>Import buyers</button>
               <button type="button" className="evo-btn evo-btn--primary" onClick={() => setShowAdd(true)}>+ Add buyer</button>
             </>} />
@@ -146,14 +153,22 @@ export default function WholesaleBuyers() {
               <caption className="evo-sr">{total} cash buyers</caption>
               <thead>
                 <tr>
+                  <th scope="col" style={{ width: 32 }}>
+                    <input type="checkbox" aria-label="Select all buyers shown" checked={allPicked}
+                           onChange={(e) => setPicked(e.target.checked ? Object.fromEntries(shown.map((b) => [b.id, true])) : {})} />
+                  </th>
                   <th scope="col">Buyer</th><th scope="col">Buys in</th><th scope="col">Funds</th>
                   <th scope="col">Track record</th><th scope="col" className="is-num">Close</th>
                   <th scope="col" className="is-num">Rating</th><th scope="col"><span className="evo-sr">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
-                {buyers.filter((b) => !verifiedOnly || b.cash_verified || b.proof_of_funds_on_file).map((b) => (
+                {shown.map((b) => (
                   <tr key={b.id}>
+                    <td data-label="">
+                      <input type="checkbox" aria-label={`Select ${b.display_name}`} checked={!!picked[b.id]}
+                             onChange={(e) => setPicked((p) => ({ ...p, [b.id]: e.target.checked }))} />
+                    </td>
                     <td className="is-lead" data-label="">
                       <span className="evo-strong" style={{ fontSize: 14 }}>{b.display_name}</span>
                       <span className="evo-prop__sub">{b.email || 'no email'} · {b.phone || 'no phone'}</span>
@@ -214,7 +229,8 @@ export default function WholesaleBuyers() {
       {showAdd ? <AddBuyer onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); setNotice('Buyer added. Give them a buy box so they appear in matches.'); load() }} /> : null}
       {showImport ? <BuyerImport onClose={() => setShowImport(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
       {showFind ? <FindBuyers onClose={() => setShowFind(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
-      {showTrace ? <TraceBuyers onClose={() => setShowTrace(false)} onDone={(msg) => { setNotice(msg); load() }} /> : null}
+      {lookupIds ? <ContactLookup kind="buyer" what="buyer" ids={lookupIds} onClose={() => setLookupIds(null)}
+                                  onDone={(msg) => { setNotice(msg); setPicked({}); load() }} /> : null}
       {editing ? <EditBuyer buyer={buyers.find((b) => b.id === editing)} onDone={() => { setEditing(null); load() }} /> : null}
       {expanded ? <BuyBoxes buyer={buyers.find((b) => b.id === expanded)} onChanged={load} onClose={() => setExpanded(null)} /> : null}
     </EvoApp>
@@ -630,95 +646,6 @@ function FindBuyers({ onClose, onDone }) {
           </div>
         </>
       ) : null}
-    </Drawer>
-  )
-}
-
-
-/* GET PHONES & EMAILS: looks up buyers that have only a mailing address (the
- * county records have no phone or email). Shows the most it can cost first,
- * then runs in small batches so the progress - and the spend - is visible. */
-function TraceBuyers({ onClose, onDone }) {
-  const [est, setEst] = useState(null)
-  const [error, setError] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [progress, setProgress] = useState(null)
-  const [limit, setLimit] = useState('')
-
-  const check = useCallback(async () => {
-    setError(null)
-    try { setEst(await api.post('/wholesale/buyers/skip-trace/estimate', {})) }
-    catch (e) { setError(errText(e)) }
-  }, [])
-  useEffect(() => { check() }, [check])
-
-  const all = (est && est.buyer_ids) || []
-  const n = Math.min(all.length, Number(limit) > 0 ? Number(limit) : all.length)
-  const each = (est && est.cost_per_find_cents) || 10
-  const most = n * each
-  const money = (c) => '$' + (c / 100).toFixed(2)
-
-  async function run() {
-    const ids = all.slice(0, n)
-    const size = Math.min((est && est.batch_size) || 25, 10)
-    let looked = 0, found = 0, spent = 0
-    setBusy(true); setError(null)
-    setProgress({ looked, found, spent, total: ids.length })
-    try {
-      for (let i = 0; i < ids.length; i += size) {
-        const chunk = ids.slice(i, i + size)
-        const r = await api.post('/wholesale/buyers/skip-trace/run',
-                                 { buyer_ids: chunk, max_cost_cents: chunk.length * each })
-        looked += r.looked_up; found += r.found; spent += r.cost_cents
-        setProgress({ looked, found, spent, total: ids.length })
-        if (r.looked_up < chunk.length) break
-      }
-      onDone(`Looked up ${looked} buyer(s): found a phone or email for ${found}. Cost ${money(spent)}.`)
-      await check()
-    } catch (e) { setError(errText(e)) } finally { setBusy(false) }
-  }
-
-  const sk = (est && est.skipped) || {}
-  return (
-    <Drawer open onClose={onClose} title="Get phones & emails"
-            sub={`Looks each buyer up by their mailing address · ${money(each)} per buyer found · misses are free`}>
-      <ErrorBox error={error} />
-      {!est ? <Skeleton rows={3} /> : (
-        <>
-          {!est.configured ? (
-            <Note>Not connected yet. Buy credit at Tracerfy, copy your API token, and add it in Render
-              (advisorflow-backend → Environment) as <b>TRACERFY_API_TOKEN</b>. Then come back here.</Note>
-          ) : null}
-          {est.cap_refusal ? <Note>{est.cap_refusal}</Note> : null}
-          <p className="evo-small">
-            <b>{all.length}</b> buyer(s) need a phone or email and have a mailing address.
-            {sk.has_phone_and_email ? ` ${sk.has_phone_and_email} already have both.` : ''}
-            {sk.already_looked_up ? ` ${sk.already_looked_up} were already looked up.` : ''}
-            {sk.no_mailing_address ? ` ${sk.no_mailing_address} have no mailing address to look up.` : ''}
-            {sk.do_not_contact ? ` ${sk.do_not_contact} are marked do-not-contact.` : ''}
-          </p>
-          {all.length ? (
-            <div className="ws-actions" style={{ flexWrap: 'wrap', gap: 8, margin: '8px 0' }}>
-              <label className="evo-small">How many
-                <input className="ws-input ws-input--inline" type="number" min="1" max={all.length}
-                       placeholder={String(all.length)} value={limit} disabled={busy}
-                       onChange={(e) => setLimit(e.target.value)} style={{ maxWidth: 90, marginLeft: 6 }} />
-              </label>
-              <button className="btn btn--primary btn--sm" disabled={busy || !est.configured || !!est.cap_refusal || !n}
-                      onClick={run}>
-                {busy ? 'Looking up…' : `Look up ${n} buyer(s) - up to ${money(most)}`}</button>
-            </div>
-          ) : null}
-          {progress ? (
-            <div className="ws-hint">
-              {progress.looked} of {progress.total} looked up · {progress.found} found · {money(progress.spent)} spent
-            </div>
-          ) : null}
-          <Note>A phone or email you typed is never replaced. If the lookup finds a different person at a
-            buyer's address, nothing is filled in and the buyer's notes say who was found. Numbers on the
-            Do Not Call list are flagged in the notes.</Note>
-        </>
-      )}
     </Drawer>
   )
 }

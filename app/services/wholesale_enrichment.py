@@ -190,6 +190,50 @@ class ManualProvider(EnrichmentProvider):
         )
 
 
+class TracerfyProvider(EnrichmentProvider):
+    """Tracerfy instant lookup by street address (the owner / resident there).
+
+    Charged only when it finds someone (5 credits = $0.10); a miss is free.
+    Numbers on the Do Not Call list are NEVER handed on as a phone to use: they
+    are kept out of `phones` and listed in `match_evidence["dnc_numbers"]`, so a
+    person sees them and decides, and no automatic outreach can dial them.
+    Emails come back as plain strings. Never raises.
+    """
+
+    key = "tracerfy"
+    label = "Tracerfy (paid lookup)"
+    billable = True
+    required_env = ("TRACERFY_API_TOKEN",)
+    cost_per_find_cents = 10
+
+    def lookup(self, data: EnrichmentInput) -> EnrichmentResult:
+        if not self.is_configured():
+            return EnrichmentResult(status=STATUS_NOT_CONFIGURED, provider=self.key,
+                                    message="TRACERFY_API_TOKEN is not set.")
+        try:
+            from app.services.evosense.vendors import TracerfySkipTrace
+            res = TracerfySkipTrace().enrich(data)
+        except Exception as exc:                                   # noqa: BLE001
+            name = type(exc).__name__
+            msg = ("Tracerfy asked us to slow down - try again in a few minutes."
+                   if name == "ProviderRateLimited" else "%s: %s" % (name, str(exc)[:200]))
+            return EnrichmentResult(status=STATUS_FAILED, provider=self.key, message=msg)
+        ev = dict(res.match_evidence or {})
+        dnc = [p.number for p in res.phones if p.dnc_flag]
+        ok = [p for p in res.phones if not p.dnc_flag]
+        ok.sort(key=lambda p: 0 if p.phone_type == "mobile" else 1)
+        if dnc:
+            ev["dnc_numbers"] = dnc
+        res.phones = ok
+        res.emails = [e.address if hasattr(e, "address") else str(e) for e in res.emails or []]
+        res.emails = [e for e in res.emails if e and "@" in e]
+        res.match_evidence = ev
+        if res.status == STATUS_SUCCEEDED and not (res.phones or res.emails):
+            res.status = STATUS_NO_MATCH
+            res.message = ("Only Do Not Call numbers came back." if dnc else res.message)
+        return res
+
+
 # The registry. A real adapter is added here and nowhere else.
 #
 # A worked example of what the next entry looks like, kept as a comment rather
@@ -215,6 +259,7 @@ class ManualProvider(EnrichmentProvider):
 #
 PROVIDERS: Dict[str, EnrichmentProvider] = {
     ManualProvider.key: ManualProvider(),
+    TracerfyProvider.key: TracerfyProvider(),
 }
 
 

@@ -1855,70 +1855,77 @@ def run_enrichment(payload: EnrichIn, request: Request,
         if prop is None:
             results.append({"property_id": property_id, "status": "not_found"})
             continue
-
-        data = enrichment.EnrichmentInput(
-            street_address=prop.street_address, city=prop.city, state=prop.state,
-            zip_code=prop.zip_code, county=prop.county, parcel_apn=prop.parcel_apn,
-            owner_name=prop.owner_name,
-            business_name=prop.owner_name if prop.ownership_type == "llc" else None,
-            mailing_street=prop.owner_mailing_street,
-            mailing_city=prop.owner_mailing_city,
-            mailing_state=prop.owner_mailing_state,
-            mailing_zip=prop.owner_mailing_zip)
-
-        record = WholesaleEnrichmentRequest(
-            organization_id=org_id, property_id=prop.id, provider=provider.key,
-            requested_by_id=user.id, requested_by_actor=ACTOR_USER,
-            inputs=data.to_json(), billable=provider.billable)
-        db.add(record)
-        db.flush()
-
-        try:
-            result = provider.lookup(data)
-        except Exception as exc:                                # noqa: BLE001
-            # A provider that raises is a provider that failed. The workflow is
-            # not destroyed: the row records the failure and a person can retry
-            # or enter the details by hand.
-            log.warning("wholesale enrichment provider %s raised: %s", provider.key, exc)
-            result = enrichment.EnrichmentResult(
-                status=enrichment.STATUS_FAILED, provider=provider.key,
-                message="%s: %s" % (type(exc).__name__, str(exc)[:200]))
-
-        record.status = result.status
-        record.result = result.to_json()
-        record.confidence = result.confidence
-        record.error = result.message if result.status in (
-            enrichment.STATUS_FAILED, enrichment.STATUS_NOT_CONFIGURED) else None
-        record.billable = bool(result.billable)
-        record.cost_cents = result.cost_cents
-        record.completed_at = datetime.utcnow()
-
-        deal = svc.deal_for_property(db, org_id, prop.id)
-        if result.found_anything:
-            applied = _apply_enrichment(db, org_id, user, prop, result)
-            if deal is not None and settings.auto_stage_on_enrichment:
-                svc._set_stage_unchecked(db, deal, "ready_for_outreach",
-                                         actor_type=ACTOR_AUTOMATION)
-            record.lead_id = applied
-        elif deal is not None and deal.stage in ("new_property", "owner_identified"):
-            svc._set_stage_unchecked(db, deal, "enrichment_needed",
-                                     actor_type=ACTOR_AUTOMATION)
-
-        svc.log_event(db, org_id, "enrichment.returned",
-                      actor_type=ACTOR_USER, actor_user_id=user.id,
-                      property_id=prop.id, deal_id=getattr(deal, "id", None),
-                      summary="%s: %s" % (provider.key, result.status),
-                      after={"status": result.status,
-                             "phones": len(result.phones),
-                             "emails": len(result.emails)})
-        results.append({"property_id": prop.id, "status": result.status,
-                        "message": result.message,
-                        "phones": [p.number for p in result.phones],
-                        "emails": list(result.emails)})
+        results.append(enrich_property(db, org_id, user, settings, provider, prop))
 
     db.commit()
     return {"provider": provider.key, "provider_label": provider.label,
             "configured": provider.is_configured(), "results": results}
+
+
+def enrich_property(db: Session, org_id: str, user: User, settings, provider,
+                    prop: WholesaleProperty) -> Dict[str, Any]:
+    """One property through one provider: record the attempt, write what was
+    found onto the seller (never over a person), move the deal, log it."""
+    data = enrichment.EnrichmentInput(
+        street_address=prop.street_address, city=prop.city, state=prop.state,
+        zip_code=prop.zip_code, county=prop.county, parcel_apn=prop.parcel_apn,
+        owner_name=prop.owner_name,
+        business_name=prop.owner_name if prop.ownership_type == "llc" else None,
+        mailing_street=prop.owner_mailing_street,
+        mailing_city=prop.owner_mailing_city,
+        mailing_state=prop.owner_mailing_state,
+        mailing_zip=prop.owner_mailing_zip)
+
+    record = WholesaleEnrichmentRequest(
+        organization_id=org_id, property_id=prop.id, provider=provider.key,
+        requested_by_id=user.id, requested_by_actor=ACTOR_USER,
+        inputs=data.to_json(), billable=provider.billable)
+    db.add(record)
+    db.flush()
+
+    try:
+        result = provider.lookup(data)
+    except Exception as exc:                                # noqa: BLE001
+        # A provider that raises is a provider that failed. The workflow is
+        # not destroyed: the row records the failure and a person can retry
+        # or enter the details by hand.
+        log.warning("wholesale enrichment provider %s raised: %s", provider.key, exc)
+        result = enrichment.EnrichmentResult(
+            status=enrichment.STATUS_FAILED, provider=provider.key,
+            message="%s: %s" % (type(exc).__name__, str(exc)[:200]))
+
+    record.status = result.status
+    record.result = result.to_json()
+    record.confidence = result.confidence
+    record.error = result.message if result.status in (
+        enrichment.STATUS_FAILED, enrichment.STATUS_NOT_CONFIGURED) else None
+    record.billable = bool(result.billable)
+    record.cost_cents = result.cost_cents
+    record.completed_at = datetime.utcnow()
+
+    deal = svc.deal_for_property(db, org_id, prop.id)
+    if result.found_anything:
+        applied = _apply_enrichment(db, org_id, user, prop, result)
+        if deal is not None and settings.auto_stage_on_enrichment:
+            svc._set_stage_unchecked(db, deal, "ready_for_outreach",
+                                     actor_type=ACTOR_AUTOMATION)
+        record.lead_id = applied
+    elif deal is not None and deal.stage in ("new_property", "owner_identified"):
+        svc._set_stage_unchecked(db, deal, "enrichment_needed",
+                                 actor_type=ACTOR_AUTOMATION)
+
+    svc.log_event(db, org_id, "enrichment.returned",
+                  actor_type=ACTOR_USER, actor_user_id=user.id,
+                  property_id=prop.id, deal_id=getattr(deal, "id", None),
+                  summary="%s: %s" % (provider.key, result.status),
+                  after={"status": result.status,
+                         "phones": len(result.phones),
+                         "emails": len(result.emails)})
+    return {"property_id": prop.id, "status": result.status,
+            "message": result.message,
+            "phones": [p.number for p in result.phones],
+            "emails": [str(e) for e in result.emails],
+            "cost_cents": result.cost_cents or 0}
 
 
 def _apply_enrichment(db: Session, org_id: str, user: User,

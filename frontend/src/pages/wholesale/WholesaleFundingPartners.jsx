@@ -10,6 +10,7 @@ import './wholesale.css'
 import { Alert, EvoApp, Hero, Panel, Tag } from './ds/ds'
 import './ds/evo-pages.css'
 import { errText, fmtMoney, fmtWhen } from './wsShared'
+import ContactLookup from './wsContactLookup'
 
 const BLANK = { name: '', contact_person: '', email: '', phone: '', products: [], states: '', markets: '',
                 property_types: '', min_loan: '', max_loan: '', max_ltv_pct: '', max_ltc_pct: '',
@@ -79,6 +80,9 @@ export default function WholesaleFundingPartners() {
   const [editing, setEditing] = useState(null)      // 'new' | partner id
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [note, setNote] = useState('')
+  const [picked, setPicked] = useState({})
+  const [lookupIds, setLookupIds] = useState(null)
 
   const load = useCallback(async () => {
     setErr('')
@@ -97,13 +101,22 @@ export default function WholesaleFundingPartners() {
 
   const partners = data?.partners || []
   const products = meta?.products || []
+  const nPicked = partners.filter((p) => picked[p.id]).length
+  const allPicked = partners.length > 0 && partners.every((p) => picked[p.id])
   return (
     <EvoApp world="operations">
       <Hero scene="capital" eyebrow="Capital Network" title="Funding Partners"
             sub="Lenders and capital sources you work with — what they say they fund, and what they actually did with the deals you sent."
-            actions={<button className="btn btn--primary" onClick={() => setEditing('new')}>+ Add funding partner</button>} />
+            actions={<>
+              <button className="btn btn--secondary" disabled={!nPicked}
+                      title={nPicked ? 'Look up phone numbers and emails for the partners you ticked' : 'Tick the partners first'}
+                      onClick={() => setLookupIds(partners.filter((p) => picked[p.id]).map((p) => p.id))}>
+                Get phones &amp; emails{nPicked ? ` (${nPicked})` : ''}</button>
+              <button className="btn btn--primary" onClick={() => setEditing('new')}>+ Add funding partner</button>
+            </>} />
       {meta?.disclaimer ? <Alert kind="info">{meta.disclaimer}</Alert> : null}
       {err ? <Alert kind="warn">{err}</Alert> : null}
+      {note ? <Alert kind="ok">{note}</Alert> : null}
       {editing === 'new' ? (
         <Panel title="New funding partner" hint="Saved as a contact classified partner — never a lead">
           <PartnerForm products={products} initial={BLANK} busy={busy} onCancel={() => setEditing(null)}
@@ -117,15 +130,19 @@ export default function WholesaleFundingPartners() {
           <p className="ws-muted">No funding partners yet. Add the lenders and capital sources you work with.</p>
         ) : (
           <table className="ws-table">
-            <thead><tr><th>Partner</th><th>Says they fund</th><th>Loan range</th><th>Track record here</th><th /></tr></thead>
+            <thead><tr><th style={{ width: 32 }}><input type="checkbox" aria-label="Select all partners" checked={allPicked}
+                   onChange={(e) => setPicked(e.target.checked ? Object.fromEntries(partners.map((p) => [p.id, true])) : {})} /></th>
+              <th>Partner</th><th>Says they fund</th><th>Loan range</th><th>Track record here</th><th /></tr></thead>
             <tbody>
               {partners.map(p => editing === p.id ? (
-                <tr key={p.id}><td colSpan={5}>
+                <tr key={p.id}><td colSpan={6}>
                   <PartnerForm products={products} initial={toForm(p)} busy={busy} onCancel={() => setEditing(null)}
                                onSave={body => run(() => api.patch(`/wholesale/funding/partners/${p.id}`, body))} />
                 </td></tr>
               ) : (
                 <tr key={p.id} className={p.is_active ? '' : 'is-excluded'}>
+                  <td><input type="checkbox" aria-label={`Select ${p.name}`} checked={!!picked[p.id]}
+                             onChange={(e) => setPicked((x) => ({ ...x, [p.id]: e.target.checked }))} /></td>
                   <td>
                     <div className="ws-comp__addr">{p.name}</div>
                     <div className="ws-comp__sub">{[p.contact_person, p.email, p.phone].filter(Boolean).join(' · ') || '—'}</div>
@@ -166,6 +183,9 @@ export default function WholesaleFundingPartners() {
           </table>
         )}
       </Panel>
+      {lookupIds ? <ContactLookup kind="funding_partner" what="funding partner" ids={lookupIds}
+                                  onClose={() => setLookupIds(null)}
+                                  onDone={(msg) => { setNote(msg); setPicked({}); load() }} /> : null}
     </EvoApp>
   )
 }
