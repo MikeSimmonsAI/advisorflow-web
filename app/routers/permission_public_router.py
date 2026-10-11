@@ -8,8 +8,9 @@ from __future__ import annotations
 import html
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db
@@ -54,6 +55,52 @@ def _closed(link) -> HTMLResponse:
 def _client_ip(request: Request) -> str:
     fwd = request.headers.get("x-forwarded-for") or ""
     return (fwd.split(",")[0].strip() or (request.client.host if request.client else "")) or ""
+
+
+class AnswerIn(BaseModel):
+    answer: str
+    agree: bool = False
+
+
+def _state(link) -> dict:
+    if link is None:
+        return {"status": "not_found"}
+    out = {"status": link.status, "business": link.business_name or "our office"}
+    if link.status == "sent":
+        out.update(first_name=(link.owner_name or "").split()[0].title() if link.owner_name else None,
+                   street=link.street, phone_last4=PM.last4(link.phone_normalized),
+                   disclosure=PM.disclosure(link.business_name or "our office", link.street,
+                                            link.phone_normalized))
+    return out
+
+
+@router.get("/{token}/data")
+def data(token: str, db: Session = Depends(get_db)):
+    """What the owner's page shows (app domain). Street + last four digits only."""
+    link = PM.find(db, token)
+    if link is not None and link.status == "sent" and link.viewed_at is None:
+        link.viewed_at = datetime.utcnow()
+    db.commit()
+    return _state(link)
+
+
+@router.post("/{token}/answer")
+def answer_json(token: str, payload: AnswerIn, request: Request, db: Session = Depends(get_db)):
+    link = PM.find(db, token)
+    if link is None or link.status != "sent":
+        db.commit()
+        return _state(link)
+    if payload.answer == "decline":
+        PM.decline(db, link)
+        db.commit()
+        return _state(link)
+    if payload.answer != "confirm" or payload.agree is not True:
+        raise HTTPException(status_code=400, detail="Tick the box to confirm.")
+    page_url = str(request.base_url).rstrip("/") + "/permission/link-" + link.id
+    PM.confirm(db, link, ip=_client_ip(request)[:64], user_agent=(request.headers.get("user-agent") or "")[:400],
+               page_url=page_url)
+    db.commit()
+    return _state(link)
 
 
 @router.get("/{token}", response_class=HTMLResponse)

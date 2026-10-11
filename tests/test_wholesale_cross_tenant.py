@@ -175,6 +175,13 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
         "es_contact_id": db_session.query(EvoSenseContactPoint).filter(
             EvoSenseContactPoint.organization_id == sample_org.id).first().id,
     }
+    from datetime import datetime as _dt, timedelta as _td
+    from app.models.evosense_models import EvoSenseFollowUp
+    _fu = EvoSenseFollowUp(organization_id=sample_org.id, property_id=es_prop.id,
+                           due_at=_dt.utcnow() + _td(days=1), status="due", note="A's promise")
+    db_session.add(_fu)
+    db_session.commit()
+    es_ids["es_followup_id"] = _fu.id
     # DFW acquisition: raw source evidence behind one of A's observations.
     from app.models.evosense_models import EvoSenseObservation
     es_ids["es_observation_id"] = db_session.query(EvoSenseObservation).filter(
@@ -507,6 +514,9 @@ def evosense_attacks(ids):
         ("post", "%s/properties/%s/feedback" % (base, ep), {"kind": "BAD_FIT"}),
         ("post", "%s/properties/%s/contacts" % (base, ep), {"kind": "phone", "value": "2145559999"}),
         ("post", "%s/properties/%s/permission-link" % (base, ep), {"phone": "2145559999"}),
+        ("post", "%s/properties/%s/follow-up" % (base, ep), {"due_at": "2030-01-01T15:00:00Z"}),
+        ("post", "%s/follow-ups/%s/complete" % (base, ids["es_followup_id"]), {"note": "x"}),
+        ("post", "%s/follow-ups/%s/cancel" % (base, ids["es_followup_id"]), {"note": "x"}),
         ("post", "%s/properties/%s/contacts/%s/wrong-party" % (base, ep, ids["es_contact_id"]), None),
         ("post", "%s/properties/%s/contacts/%s/verify" % (base, ep, ids["es_contact_id"]), {"note": "x"}),
         ("post", "%s/properties/%s/signals" % (base, ep), {"signal_type": "VACANT"}),

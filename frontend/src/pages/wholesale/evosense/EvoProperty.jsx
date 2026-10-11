@@ -28,13 +28,15 @@ import {
 import '../ds/evo-pages.css'
 import EvoActions from './EvoActions'
 import EvoPermission from './EvoPermission'
+import EvoFollowUp from './EvoFollowUp'
 import PropertyPhoto from './PropertyPhoto'
 
 /** Free links: Google Maps, Street View, and the county's own record page. */
 function PlaceLinks({ links }) {
   if (!links) return null
   const items = [[links.maps_url, 'Open in Google Maps'], [links.street_view_url, 'Street View'],
-    [links.county_record_url, links.county_record_label || 'County record']].filter(([u]) => u)
+    [links.county_record_url, links.county_record_label || 'County record'],
+    [links.zillow_url, 'Zillow'], [links.redfin_url, 'Redfin']].filter(([u]) => u)
   if (!items.length) return null
   return (
     <p className="evo-small" style={{ margin: '8px 0 0', display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>
@@ -664,6 +666,9 @@ export default function EvoProperty() {
               </details>
             ) : null}
           </Panel>
+
+          {/* 4a ── CALL-BACKS ───────────────────────────────────────────── */}
+          <EvoFollowUp propertyId={propertyId} items={d.follow_ups} onChange={load} />
 
           {/* 4b ── PERMISSION TO FOLLOW UP ─────────────────────────────── */}
           <EvoPermission propertyId={propertyId} permission={d.permission}

@@ -50,6 +50,12 @@ def disclosure(business: str, street: Optional[str], e164: str) -> str:
 
 
 def business_name(db, org_id: str) -> str:
+    """The name owners see: Wholesale Settings' seller-facing name, else the
+    organization's own name."""
+    from app.services import wholesale_sms as WS
+    s = WS.settings_row(db, org_id)
+    if s is not None and (getattr(s, "public_business_name", None) or "").strip():
+        return s.public_business_name.strip()
     from app.models.models import Organization
     org = db.query(Organization).filter(Organization.id == org_id).first()
     return (getattr(org, "name", None) or "our office").strip()

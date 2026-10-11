@@ -168,6 +168,8 @@ def property_detail(property_id: str, db: Session = Depends(get_db),
     out["summary"] = ACT.summary(db, org_id, prop, out, acts)
     out["links"] = _public_links(prop)
     from app.services.evosense import permission as PM
+    from app.services.evosense import followups as FU
+    out["follow_ups"] = FU.open_for(db, org_id, prop)
     out["permission"] = PM.status_for(db, org_id, prop, [c["value"] for c in out.get("contacts") or []
                                                          if c.get("kind") == "phone"])
     return out
@@ -187,7 +189,20 @@ def _public_links(prop) -> dict:
     elif apn and county == "tarrant":
         links["county_record_url"] = "https://www.tad.org/property?account=%s" % apn
         links["county_record_label"] = "TAD account %s" % apn
+    # One click to the same address on the big listing sites - a person looks
+    # (beds, baths, photos); nothing here fetches those pages.
+    import urllib.parse as _up
+    addr = ", ".join(x for x in (prop.street_address, prop.city, prop.state, prop.zip_code) if x)
+    if prop.street_address:
+        slug = _re_slug(addr)
+        links["zillow_url"] = "https://www.zillow.com/homes/%s_rb/" % slug
+        links["redfin_url"] = "https://www.google.com/search?q=%s" % _up.quote_plus("site:redfin.com " + addr)
     return links
+
+
+def _re_slug(addr: str) -> str:
+    import re as _re
+    return _re.sub(r"[^A-Za-z0-9]+", "-", addr).strip("-")
 
 
 @router.get("/properties/{property_id}/photo")
@@ -636,10 +651,17 @@ class PermissionLinkIn(BaseModel):
 
 
 def _link_base(request) -> str:
+    """Where the owner's page lives: the app the caller is using (its own
+    domain, e.g. app.evosyspro.live, which serves /permission/:token), else
+    this server's own page."""
     import os
+    import re as _re
     base = (os.environ.get("PERMISSION_LINK_BASE_URL") or "").strip().rstrip("/")
     if base:
         return base
+    origin = (request.headers.get("origin") or "").strip().rstrip("/")
+    if _re.match(r"^https://[A-Za-z0-9.-]+$", origin):
+        return origin
     proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "https").split(",")[0].strip()
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
     return "%s://%s" % (proto, host)
@@ -685,6 +707,57 @@ def create_permission_link(property_id: str, payload: PermissionLinkIn, request:
     out = PM.link_json(link)
     out.update(url=url, contact_added=contact_added, **PM.message_text(link.business_name, link.owner_name, url))
     return out
+
+
+class FollowUpIn(BaseModel):
+    due_at: str
+    note: Optional[str] = None
+    assigned_to_id: Optional[str] = None
+
+
+class FollowUpDoneIn(BaseModel):
+    note: Optional[str] = None
+
+
+@router.post("/properties/{property_id}/follow-up")
+def create_follow_up(property_id: str, payload: FollowUpIn, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    """A promised call-back to this property's owner. Shows in the Callback Center."""
+    from app.services.evosense import followups as FU
+    org_id = svc.write_org_id(db, user)
+    prop = _prop(db, org_id, property_id)
+    fu = FU.create(db, org_id, prop, user, due_at=payload.due_at, note=payload.note,
+                   assigned_to_id=payload.assigned_to_id)
+    C.log_event(db, org_id, "followup.scheduled", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
+                is_test=prop.is_test, summary="Call-back scheduled")
+    db.commit()
+    from datetime import datetime as _dt
+    return FU.item(db, fu, _dt.utcnow(), prop)
+
+
+def _finish_follow_up(followup_id: str, status: str, payload, db, user):
+    from datetime import datetime as _dt
+    from app.services.evosense import followups as FU
+    org_id = svc.write_org_id(db, user)
+    fu = FU.get(db, org_id, followup_id)
+    FU.finish(db, fu, user, status, getattr(payload, "note", None))
+    C.log_event(db, org_id, "followup.%s" % status, property_id=fu.property_id, user=user,
+                actor_type=C.ACTOR_USER, is_test=fu.is_test,
+                summary="Call-back %s" % ("done" if status == "completed" else "cancelled"))
+    db.commit()
+    return FU.item(db, fu, _dt.utcnow())
+
+
+@router.post("/follow-ups/{followup_id}/complete")
+def complete_follow_up(followup_id: str, payload: Optional[FollowUpDoneIn] = None, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    return _finish_follow_up(followup_id, "completed", payload, db, user)
+
+
+@router.post("/follow-ups/{followup_id}/cancel")
+def cancel_follow_up(followup_id: str, payload: Optional[FollowUpDoneIn] = None, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    return _finish_follow_up(followup_id, "cancelled", payload, db, user)
 
 
 @router.get("/permission-links")

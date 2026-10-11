@@ -949,6 +949,33 @@ class EvoSenseApiUsage(Base):
     )
 
 
+class EvoSenseFollowUp(Base):
+    """A promised call-back to an owner of an EvoSense property (before any
+    Wholesale deal exists). Shown in the Callback Center. Never deleted:
+    completed or cancelled rows stay as the record of what was done."""
+
+    __tablename__ = "evosense_followups"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    property_id = Column(String, ForeignKey("evosense_properties.id", ondelete="CASCADE"), nullable=False)
+    due_at = Column(DateTime, nullable=False)
+    status = Column(String, nullable=False, default="due")      # due | completed | cancelled
+    note = Column(Text, nullable=True)
+    outcome_note = Column(Text, nullable=True)
+    assigned_to_id = Column(String, nullable=True)
+    created_by_id = Column(String, nullable=True)
+    completed_by_id = Column(String, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_evosense_followups_org", "organization_id", "status", "due_at"),
+        Index("ix_evosense_followups_prop", "property_id"),
+    )
+
+
 class EvoSensePermissionLink(Base):
     """A personal link a caller sends an owner so the OWNER can give written
     permission for follow-up (texts and calls, including automated / AI).
