@@ -28,7 +28,7 @@ exactly like `WholesaleProperty.is_test` and `Lead.is_test`.
 import threading
 from datetime import datetime, timedelta
 
-from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Index, Integer,
+from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, LargeBinary,
                         Numeric, String, Text, UniqueConstraint)
 
 from app.models.models import Base, gen_uuid
@@ -892,6 +892,34 @@ class EvoSenseHuntSchedule(Base):
 # ─────────────────────────────────────────────────────────────────────────────
 # Platform layer — shared public-source reachability
 # ─────────────────────────────────────────────────────────────────────────────
+
+class EvoSenseSourceFile(Base):
+    """A DURABLE copy of a public file an operator uploaded for a source (TAD).
+
+    The server's disk is wiped on every deploy; this table is not. The upload
+    is kept here in chunks, and the adapter restores its working copy from it
+    whenever the disk copy is missing - so a redeploy no longer loses the file.
+
+    Platform-level, like `evosense_source_access`: the file is the publisher's
+    own public export, identical for every tenant. It holds NO tenant data.
+    """
+
+    __tablename__ = "evosense_source_files"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    provider_key = Column(String, nullable=False)
+    chunk_index = Column(Integer, nullable=False, default=0)
+    chunk_count = Column(Integer, nullable=False, default=1)
+    data = Column(LargeBinary, nullable=False)
+    sha256 = Column(String, nullable=False)          # of the WHOLE file
+    size = Column(Integer, nullable=False)           # of the WHOLE file
+    meta = Column(Text, nullable=True)               # JSON: source_date, uploaded_at, via...
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_evosense_source_files_key", "provider_key", "chunk_index"),
+    )
+
 
 class EvoSenseSourceAccess(Base):
     """PLATFORM-LEVEL access state of one PUBLIC source adapter.
