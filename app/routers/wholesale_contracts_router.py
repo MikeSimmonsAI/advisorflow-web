@@ -666,6 +666,36 @@ def contract_send(deal_id: str, kind: str, payload: ContractIn, request: Request
                             notes="Generated from the EvoSys starter template (%s)." % kind)
     db.add(doc)
     db.flush()
+    if getattr(provider, "builtin", False):
+        from app.services import evosys_esign as ev
+        try:
+            env, delivered = ev.create_envelope(db, org_id=org_id, title=title,
+                                                document_html=docs.render(kind, values), signers=signers,
+                                                kind=kind, deal_id=deal.id, document_id=doc.id,
+                                                message=payload.message, sender=user)
+        except ev.EsignError as exc:
+            db.rollback()
+            raise HTTPException(status_code=exc.status, detail=exc.message)
+        doc.status = esign.transition(doc.status, esign.STATUS_SENT)
+        doc.signature_status = "out_for_signature"
+        doc.signature_provider, doc.external_ref = provider.key, env.id
+        if kind == "purchase_agreement":
+            deal.contract_status = "sent"
+        elif kind == "assignment_agreement":
+            deal.assignment_status = "sent"
+        svc.log_event(db, org_id, "document.sent_for_signature", actor_type=ACTOR_USER,
+                      actor_user_id=user.id, deal_id=deal.id,
+                      summary="%s sent for signature (EvoSys e-signature): %s" % (
+                          docs.KINDS[kind]["short"], ", ".join("%s (%s)" % (p["role"], p["email"]) for p in signers)))
+        db.commit()
+        first = signers[0]
+        return {"sent": True, "document_id": doc.id, "provider": provider.key, "external_ref": env.id,
+                "delivered": delivered,
+                "message": ("Emailed the signing link to %s (%s). Everyone signs in order; the signed PDF "
+                            "is emailed to all of you when the last person signs." % (first["role"], first["email"]))
+                if delivered else
+                ("Saved and ready, but the email to %s did not go out. Use \"Resend link\" under Documents "
+                 "once email is working." % first["email"])}
     result = provider.send(esign.SignatureRequest(document_id=doc.id, title=title, parties=signers,
                                                   html=docs.render(kind, values, for_signature=True),
                                                   message=payload.message))
@@ -711,7 +741,7 @@ def apply_signature_outcome(db: Session, doc: WholesaleDocument, outcome: Dict[s
         if deal is not None and doc.doc_type == "purchase_contract":
             deal.contract_status = "signed"
             deal.contract_signed_at = deal.contract_signed_at or datetime.utcnow()
-        if deal is not None and doc.doc_type == "assignment":
+        if deal is not None and doc.doc_type in ("assignment_agreement", "assignment"):
             deal.assignment_status = "signed"
             deal.assignment_signed_at = deal.assignment_signed_at or datetime.utcnow()
     elif target == esign.STATUS_DECLINED:
@@ -737,6 +767,15 @@ def signature_refresh(document_id: str, db: Session = Depends(get_db),
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
     provider = esign.PROVIDERS.get(doc.signature_provider or "")
+    if doc.signature_provider == "evosys":
+        from app.services import evosys_esign as ev
+        env = ev.for_document(db, org_id, doc.id)
+        if env is None:
+            raise HTTPException(status_code=404, detail="No signing record for this document.")
+        s = ev.summary(db, env)
+        st = esign.normalise(doc.status)
+        return {"changed": False, "status": st, "status_label": esign.STATUS_LABEL[st],
+                "signers": s["signers"], "envelope": s}
     if not doc.external_ref or not hasattr(provider, "fetch_submission") or not provider.is_configured():
         raise HTTPException(status_code=409, detail="This document was not sent through a connected e-signature provider.")
     try:
@@ -748,3 +787,82 @@ def signature_refresh(document_id: str, db: Session = Depends(get_db),
     return {"changed": changed, "status": esign.normalise(doc.status),
             "status_label": esign.STATUS_LABEL[esign.normalise(doc.status)], "signers": outcome["signers"],
             "signed_pdf_url": doc.file_url if esign.normalise(doc.status) == esign.STATUS_SIGNED else None}
+
+
+
+# ── EvoSys e-signature: the sender's controls ──────────────────────────────
+
+def _own_doc(db: Session, org_id: str, document_id: str) -> WholesaleDocument:
+    doc = (db.query(WholesaleDocument).filter(WholesaleDocument.id == document_id,
+                                              WholesaleDocument.organization_id == org_id).first())
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+def _envelope(db: Session, org_id: str, document_id: str):
+    from app.services import evosys_esign as ev
+    _own_doc(db, org_id, document_id)
+    env = ev.for_document(db, org_id, document_id)
+    if env is None:
+        raise HTTPException(status_code=404, detail="This document was not sent with EvoSys e-signature.")
+    return ev, env
+
+
+@router.get("/documents/{document_id}/esign")
+def esign_status(document_id: str, db: Session = Depends(get_db),
+                 user: User = Depends(require_tenant_or_observer)):
+    """Who has signed, who is next, and every step with time and IP."""
+    org_id = svc.read_org_id(db, user)
+    if not org_id:
+        raise HTTPException(status_code=409, detail="No customer organization selected.")
+    ev, env = _envelope(db, org_id, document_id)
+    return ev.summary(db, env)
+
+
+@router.post("/documents/{document_id}/esign/remind")
+def esign_remind(document_id: str, db: Session = Depends(get_db),
+                 user: User = Depends(require_tenant_user), _guard: User = Depends(require_not_observation)):
+    """Email the person whose turn it is a fresh link (the old one stops working)."""
+    org_id = svc.write_org_id(db, user)
+    ev, env = _envelope(db, org_id, document_id)
+    try:
+        return ev.remind(db, env)
+    except ev.EsignError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message)
+
+
+class VoidIn(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/documents/{document_id}/esign/void")
+def esign_void(document_id: str, payload: VoidIn, db: Session = Depends(get_db),
+               user: User = Depends(require_tenant_user), _guard: User = Depends(require_not_observation)):
+    """Withdraw a document that is still out for signature. Links stop working."""
+    org_id = svc.write_org_id(db, user)
+    ev, env = _envelope(db, org_id, document_id)
+    try:
+        out = ev.void(db, env, payload.reason, user)
+    except ev.EsignError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message)
+    svc.log_event(db, org_id, "document.signature_voided", actor_type=ACTOR_USER, actor_user_id=user.id,
+                  deal_id=env.deal_id, summary="Signature request withdrawn: %s" % env.title)
+    db.commit()
+    return out
+
+
+@router.get("/documents/{document_id}/signed.pdf")
+def esign_signed_pdf(document_id: str, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_or_observer)):
+    """The sealed PDF (document + signatures + certificate page)."""
+    from fastapi.responses import Response
+    org_id = svc.read_org_id(db, user)
+    if not org_id:
+        raise HTTPException(status_code=409, detail="No customer organization selected.")
+    ev, env = _envelope(db, org_id, document_id)
+    if env.status != "completed" or not env.final_pdf:
+        raise HTTPException(status_code=409, detail="The signed PDF exists once everyone has signed.")
+    return Response(content=env.final_pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": 'inline; filename="%s"' % ev._filename(env.title),
+                             "X-Document-SHA256": env.final_sha256 or "", "Cache-Control": "private, no-store"})

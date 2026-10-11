@@ -30,6 +30,9 @@ stripe==11.1.1
 python-dateutil>=2.8.0
 websockets>=12.0
 slowapi==0.1.9
+# EvoSys e-signature: builds the signed contract PDF and its certificate page
+# (app/services/esign_pdf.py). Pure-Python wheel; pulls in pillow + chardet.
+reportlab==4.2.5
 
 # pytest and alembic moved to requirements-dev.txt — neither is imported by any
 # module under app/, neither is invoked by deploy.ps1 or by any Render build or

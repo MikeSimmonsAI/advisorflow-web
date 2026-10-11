@@ -34,6 +34,7 @@ FULL = {"price": "95000", "earnest_money": "1000", "option_days": "10", "title_c
 @pytest.fixture
 def docuseal(monkeypatch):
     monkeypatch.setenv("WHOLESALE_DOCUSEAL_API_KEY", "test-key")
+    monkeypatch.setenv("WHOLESALE_ESIGN_DEFAULT", "docuseal")
     calls = []
     state = {"submission": {"id": 501, "status": "pending", "submitters": [
         {"role": "Seller", "status": "sent"}, {"role": "Buyer", "status": "sent"}]}}
@@ -54,7 +55,8 @@ def test_kits_list_the_three_documents_and_say_they_are_starters(client, auth_he
     k = ok(client.get("/wholesale/contract-kits", headers=auth_headers))
     assert [x["kind"] for x in k["kits"]] == ["purchase_agreement", "assignment_agreement", "assignee_disclosure"]
     assert "attorney" in k["notice"].lower()
-    assert k["signature"]["electronic"] is False          # no key in the test environment
+    assert k["signature"]["electronic"] is True           # EvoSys e-signature is built in
+    assert k["signature"]["provider"] == "evosys"
 
 
 def test_preview_fills_from_the_deal_and_shows_blanks(client, auth_headers, deal):
@@ -70,12 +72,14 @@ def test_preview_fills_from_the_deal_and_shows_blanks(client, auth_headers, deal
     assert pv2["missing"] == [] and "$95,000" in pv2["html"] and "November 20, 2026" in pv2["html"]
 
 
-def test_send_without_a_provider_stores_and_sends_nothing(client, auth_headers, deal):
-    r = ok(client.post("/wholesale/deals/%s/contracts/purchase_agreement/send" % deal,
-                       headers=auth_headers, json={"values": FULL}))
-    assert r["sent"] is False and "html" in r
-    docs = client.get("/wholesale/deals/%s" % deal, headers=auth_headers).json().get("documents") or []
-    assert not [d for d in docs if d.get("signature_provider") == "docuseal"]
+def test_docuseal_is_used_only_when_chosen(client, auth_headers, deal, monkeypatch):
+    from app.services import wholesale_esign as esign
+    monkeypatch.setenv("WHOLESALE_DOCUSEAL_API_KEY", "k")
+    assert esign.active_provider("manual").key == "evosys"          # built-in is the default
+    monkeypatch.setenv("WHOLESALE_ESIGN_DEFAULT", "docuseal")
+    assert esign.active_provider("manual").key == "docuseal"        # a deployment can choose DocuSeal
+    monkeypatch.delenv("WHOLESALE_DOCUSEAL_API_KEY")
+    assert esign.active_provider("manual").key == "evosys"          # ...only while it is connected
 
 
 def test_send_refuses_while_a_required_blank_is_open(client, auth_headers, deal, docuseal):

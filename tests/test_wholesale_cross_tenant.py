@@ -428,6 +428,12 @@ def attacks(ids):
         ("post", "/wholesale/deals/%s/contracts/purchase_agreement/send" % d,
          {"values": {"price": "1", "seller_email": "a@example.com"}}),
         ("post", "/wholesale/documents/%s/signature-refresh" % ids["document_id"], {}),
+        # EvoSys e-signature: a stranger must not read who signed, re-send a
+        # link to someone else's seller, withdraw their contract, or download it.
+        ("get", "/wholesale/documents/%s/esign" % ids["document_id"], None),
+        ("post", "/wholesale/documents/%s/esign/remind" % ids["document_id"], {}),
+        ("post", "/wholesale/documents/%s/esign/void" % ids["document_id"], {"reason": "x"}),
+        ("get", "/wholesale/documents/%s/signed.pdf" % ids["document_id"], None),
     ] + evosense_attacks(ids) + funding_and_exception_attacks(ids) + ops_attacks(ids)
 
 

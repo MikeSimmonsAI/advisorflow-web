@@ -203,6 +203,7 @@ from app.routers.wholesale_contracts_router import router as wholesale_contracts
 from app.routers.evosense_router import router as evosense_router  # noqa: E402
 from app.routers.source_feed_router import router as source_feed_router  # noqa: E402
 from app.routers.esign_webhook_router import router as esign_webhook_router  # noqa: E402
+from app.routers.esign_public_router import router as esign_public_router  # noqa: E402
 # Executive Suite — brand-scoped read-only portal for brand executives.
 # Separate from god_router (owner control plane) and sales_router (brand sales
 # workspace). No tenant Layout; no god controls; no cross-brand visibility.
@@ -1207,6 +1208,7 @@ app.include_router(wholesale_contracts_router)
 app.include_router(evosense_router)
 app.include_router(source_feed_router)   # /source-feeds - token-only file feed (TAD from the operator's PC)
 app.include_router(esign_webhook_router)  # /esign/docuseal/webhook - provider callback; status re-read from DocuSeal
+app.include_router(esign_public_router)   # /esign/sign/{token} - EvoSys e-signature, signer side; the link token IS the authorization
 # Location outreach programs (SCI): /program, hosted /program-assets/{token}, /god/programs.
 from app.routers.program_router import (router as program_router,
                                         public_router as program_public_router,
