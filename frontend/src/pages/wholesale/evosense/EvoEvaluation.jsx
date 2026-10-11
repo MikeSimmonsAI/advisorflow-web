@@ -285,6 +285,9 @@ export default function EvoEvaluation() {
 /* GROUND TRUTH: only what the workspace already lawfully knows, with how it
  * is known. Never inferred. Used only to score evaluations. Admin only. */
 function GroundTruth({ sample }) {
+  // Its own copy: `isAdmin` in EvoEvaluation is out of scope here, and reading
+  // it threw a ReferenceError that took down the whole Provider Evaluation tab.
+  const isAdmin = isWholesaleAdmin()
   const [items, setItems] = useState(null)
   const [f, setF] = useState({ kind: 'contact', property_id: '', phones: '', emails: '', street_address: '',
                                sale_price: '', sale_date: '', source_note: '' })
