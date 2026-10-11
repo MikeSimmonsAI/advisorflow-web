@@ -164,6 +164,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/wholesale', label: 'Deal Operations', icon: 'activity', featureKey: 'wholesale_real_estate', end: true },
       { to: '/wholesale/properties', label: 'Properties', icon: 'home', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/calculator', label: 'Deal Calculator', icon: 'calculator', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/buyers', label: 'Cash Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/funding', label: 'Funding Partners', icon: 'credit-card', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/exceptions', label: 'Exceptions', icon: 'check-square', featureKey: 'wholesale_real_estate' },
@@ -289,6 +290,8 @@ function Icon({ name }) {
     // does not hold renders an EMPTY svg, so the entry would look like a broken
     // link and nothing anywhere would say why.
     home: <><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" /></>,
+    // Added with the Deal Calculator nav item, per the note above.
+    calculator: <><rect x="4" y="2" width="16" height="20" rx="2" /><line x1="8" y1="6" x2="16" y2="6" /><line x1="8" y1="11" x2="8" y2="11.01" /><line x1="12" y1="11" x2="12" y2="11.01" /><line x1="16" y1="11" x2="16" y2="11.01" /><line x1="8" y1="15" x2="8" y2="15.01" /><line x1="12" y1="15" x2="12" y2="15.01" /><line x1="16" y1="15" x2="16" y2="18" /><line x1="8" y1="18" x2="12" y2="18" /></>,
     // Added with the "My Work" nav item, per the note above.
     'check-square': <><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
     // NAMED BY CONFIGURATION, SO THEY HAVE TO EXIST HERE.

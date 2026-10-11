@@ -30,6 +30,8 @@ import EvoActions from './EvoActions'
 import EvoPermission from './EvoPermission'
 import EvoFollowUp from './EvoFollowUp'
 import PropertyPhoto from './PropertyPhoto'
+import DealCalculator from '../calc/DealCalculator'
+import { prefillFromProperty } from '../calc/prefill'
 
 /** Free links: Google Maps, Street View, and the county's own record page. */
 function PlaceLinks({ links }) {
@@ -545,6 +547,12 @@ export default function EvoProperty() {
             <p className="evo-muted evo-small" style={{ margin: '10px 0 0' }}>{eco.notice}</p>
             <ManualComp propertyId={p.id} arv={eco.arv} busy={busy} act={act} />
             <AcquisitionCost c={d.acquisition_cost} />
+            <details className="evo-calc-open" style={{ marginTop: 16 }}>
+              <summary className="evo-btn evo-btn--ghost evo-btn--sm" style={{ display: 'inline-flex', cursor: 'pointer' }}>Run the numbers (deal calculator)</summary>
+              <DealCalculator compact prefill={prefillFromProperty(d)} />
+              <p className="evo-muted evo-small" style={{ margin: '8px 0 0' }}>
+                <Link className="evo-link" to={`/wholesale/calculator?property=${p.id}`}>Open full-page calculator</Link></p>
+            </details>
           </Panel>
 
           {/* 3 ── WHY FOUND ────────────────────────────────────────────── */}
