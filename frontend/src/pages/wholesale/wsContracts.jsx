@@ -158,11 +158,11 @@ export function ContractDesk({ deal, act, busy }) {
  * Fields the deal does not hold yet can be typed here; a document cannot be
  * sent while a required blank or a signer's email is missing. */
 const EDITABLE = {
-  purchase_agreement: ['seller_name', 'seller_email', 'price', 'earnest_money', 'option_days',
+  purchase_agreement: ['seller_name', 'seller_email', 'buyer_email', 'price', 'earnest_money', 'option_days',
     'title_company', 'closing_date', 'additional_terms'],
-  assignment_agreement: ['assignee_name', 'assignee_signer', 'assignee_email', 'contract_date',
+  assignment_agreement: ['assignee_name', 'assignee_signer', 'assignee_email', 'buyer_email', 'contract_date',
     'assignment_fee', 'assignee_deposit', 'title_company', 'closing_date', 'additional_terms'],
-  assignee_disclosure: ['assignee_name', 'assignee_signer', 'assignee_email'],
+  assignee_disclosure: ['assignee_name', 'assignee_signer', 'assignee_email', 'buyer_email'],
 }
 
 function ReadyContracts({ deal, onSent }) {
