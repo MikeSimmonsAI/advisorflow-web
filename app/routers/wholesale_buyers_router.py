@@ -1448,7 +1448,7 @@ def buyer_trace_estimate(payload: BuyerTraceIn, db: Session = Depends(get_db),
         raise HTTPException(status_code=400, detail="Pick an organization first.")
     out = BT.plan(db, org_id, payload.buyer_ids, again=payload.again)
     settings = svc.resolve_settings(db, org_id, commit=False)
-    out["cap_refusal"] = BT.cap_refusal(db, org_id, settings, out["count"]) if out["count"] else None
+    out["cap_refusal"] = BT.cap_refusal(db, org_id, settings, out["count"], whole_list=True) if out["count"] else None
     out["batch_size"] = BT.MAX_PER_CALL
     return out
 

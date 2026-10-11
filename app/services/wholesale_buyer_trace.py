@@ -125,8 +125,23 @@ class _Billable:
     billable = True
 
 
-def cap_refusal(db, org_id: str, settings: Any, n: int) -> Optional[str]:
-    return WE.admit(db, org_id, _Billable(), settings, requested=n)
+class _NoPerRunLimit:
+    """The settings, minus the per-run record limit. The screen sends batches of
+    10, so a list of 97 is checked against the daily / monthly caps as a whole
+    and against the per-run limit one batch at a time."""
+
+    def __init__(self, settings: Any):
+        self._s = settings
+
+    def __getattr__(self, name):
+        if name == "enrichment_max_records_per_run":
+            return None
+        return getattr(self._s, name)
+
+
+def cap_refusal(db, org_id: str, settings: Any, n: int, *, whole_list: bool = False) -> Optional[str]:
+    return WE.admit(db, org_id, _Billable(), _NoPerRunLimit(settings) if whole_list else settings,
+                    requested=n)
 
 
 def _pick_phone(phones) -> Optional[Any]:
