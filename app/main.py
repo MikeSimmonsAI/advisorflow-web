@@ -888,6 +888,10 @@ app.include_router(brand_site_inquiry_router.router)
 from app.routers import wholesale_seller_intake_router  # noqa: E402
 app.include_router(wholesale_seller_intake_router.public_router)
 app.include_router(wholesale_seller_intake_router.ops_router)
+# /permission/{token} - an owner gives (or declines) written permission for
+# follow-up on a link a caller sent. Public: the link token IS the authorization.
+from app.routers.permission_public_router import router as permission_public_router  # noqa: E402
+app.include_router(permission_public_router)
 
 # A CUSTOMER'S OWN PUBLIC WEBSITE, and the enquiries it takes. Different
 # surface from the one above and the difference is the destination: the brand's

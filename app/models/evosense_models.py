@@ -949,6 +949,41 @@ class EvoSenseApiUsage(Base):
     )
 
 
+class EvoSensePermissionLink(Base):
+    """A personal link a caller sends an owner so the OWNER can give written
+    permission for follow-up (texts and calls, including automated / AI).
+
+    The link is not the permission. Permission exists only when the owner
+    opens the page and ticks the box themselves; that writes a consent record
+    through the one consent writer (wholesale_sms.record_consent) with the
+    exact wording shown, the server time, the IP and the browser. Only the
+    sha256 of the token is stored; the token itself is shown once."""
+
+    __tablename__ = "evosense_permission_links"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    property_id = Column(String, ForeignKey("evosense_properties.id", ondelete="CASCADE"), nullable=False)
+    token_hash = Column(String, nullable=False, unique=True)
+    phone_raw = Column(String, nullable=True)
+    phone_normalized = Column(String, nullable=False)
+    owner_name = Column(String, nullable=True)
+    street = Column(String, nullable=True)
+    business_name = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="sent")   # sent | confirmed | declined | expired
+    created_by_user_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    viewed_at = Column(DateTime, nullable=True)
+    answered_at = Column(DateTime, nullable=True)
+    consent_record_id = Column(String, nullable=True)
+
+    __table_args__ = (
+        Index("ix_evosense_permission_links_org", "organization_id", "status"),
+        Index("ix_evosense_permission_links_prop", "property_id"),
+    )
+
+
 class EvoSenseSourceAccess(Base):
     """PLATFORM-LEVEL access state of one PUBLIC source adapter.
 

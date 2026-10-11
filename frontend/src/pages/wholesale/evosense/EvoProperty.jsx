@@ -27,6 +27,7 @@ import {
 } from '../ds/ds'
 import '../ds/evo-pages.css'
 import EvoActions from './EvoActions'
+import EvoPermission from './EvoPermission'
 import PropertyPhoto from './PropertyPhoto'
 
 /** Free links: Google Maps, Street View, and the county's own record page. */
@@ -663,6 +664,12 @@ export default function EvoProperty() {
               </details>
             ) : null}
           </Panel>
+
+          {/* 4b ── PERMISSION TO FOLLOW UP ─────────────────────────────── */}
+          <EvoPermission propertyId={propertyId} permission={d.permission}
+                         ownerName={(d.owners.find((o) => o.current) || d.owners[0] || {}).name}
+                         defaultPhone={(d.contacts.find((c) => c.kind === 'phone') || {}).value}
+                         onChange={load} />
 
           {/* 8 ── DATA INTELLIGENCE ────────────────────────────────────── */}
           <Panel title="Data intelligence" id="data" action={<span className="evo-money">{cents(d.spent_cents)}</span>}>

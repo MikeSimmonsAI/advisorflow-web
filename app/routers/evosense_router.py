@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -167,6 +167,9 @@ def property_detail(property_id: str, db: Session = Depends(get_db),
     out["next"] = acts["next"]
     out["summary"] = ACT.summary(db, org_id, prop, out, acts)
     out["links"] = _public_links(prop)
+    from app.services.evosense import permission as PM
+    out["permission"] = PM.status_for(db, org_id, prop, [c["value"] for c in out.get("contacts") or []
+                                                         if c.get("kind") == "phone"])
     return out
 
 
@@ -625,6 +628,73 @@ def add_contact(property_id: str, payload: ContactIn, db: Session = Depends(get_
     EV.rescore(db, prop)
     db.commit()
     return {"contacts": [c.id for c in touched], "status": prop.status}
+
+
+class PermissionLinkIn(BaseModel):
+    phone: str
+    owner_name: Optional[str] = None
+
+
+def _link_base(request) -> str:
+    import os
+    base = (os.environ.get("PERMISSION_LINK_BASE_URL") or "").strip().rstrip("/")
+    if base:
+        return base
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "https").split(",")[0].strip()
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return "%s://%s" % (proto, host)
+
+
+@router.post("/properties/{property_id}/permission-link")
+def create_permission_link(property_id: str, payload: PermissionLinkIn, request: Request,
+                           db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                           _g: User = Depends(require_not_observation)):
+    """A personal link the caller sends the owner. Creating it grants NOTHING:
+    permission exists only once the owner ticks the box on the page."""
+    from app.services.evosense import permission as PM
+    org_id = svc.write_org_id(db, user)
+    prop = _prop(db, org_id, property_id)
+    try:
+        made = PM.create(db, org_id, prop, payload.phone, owner_name=payload.owner_name,
+                         user_id=getattr(user, "id", None))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    link = made["link"]
+    # The number the owner gave on the call becomes a contact on the property
+    # (if it is not one already), so follow-up uses the number they approved.
+    owner = CT.primary_owner(db, prop)
+    contact_added = False
+    if owner is not None:
+        have = {CT.normalize_phone(cp.value) for cp, _ in CT.contact_points_for(db, prop)
+                if getattr(cp, "kind", None) == "phone"}
+        if CT.normalize_phone(payload.phone) not in have:
+            from app.services import wholesale_enrichment as WE
+            res = WE.EnrichmentResult(status=WE.STATUS_SUCCEEDED, provider="manual",
+                                      phones=[WE.EnrichmentPhone(number=payload.phone, confidence=None,
+                                                                 source="manual")],
+                                      message="person:%s|owner" % payload.owner_name if payload.owner_name else None)
+            CT.apply_result(db, owner, res, PV.PROVIDERS["manual"])
+            contact_added = True
+    url = "%s/permission/%s" % (_link_base(request), made["token"])
+    C.log_event(db, org_id, "permission.link_created", property_id=prop.id, user=user, actor_type=C.ACTOR_USER,
+                is_test=prop.is_test, summary="Permission link created for the number ending %s"
+                % PM.last4(link.phone_normalized))
+    if contact_added:
+        EV.rescore(db, prop)
+    db.commit()
+    out = PM.link_json(link)
+    out.update(url=url, contact_added=contact_added, **PM.message_text(link.business_name, link.owner_name, url))
+    return out
+
+
+@router.get("/permission-links")
+def pending_permission_links(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Links sent and not yet answered, oldest first - the caller's chase list."""
+    from app.services.evosense import permission as PM
+    org_id = _read_org(db, user)
+    rows = PM.pending(db, org_id)
+    db.commit()
+    return {"items": rows}
 
 
 @router.post("/properties/{property_id}/contacts/{contact_id}/wrong-party")
