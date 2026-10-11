@@ -17,6 +17,7 @@ import PortalAccess from './pages/portal/PortalAccess'
 import DemoSite from './pages/portal/DemoSite'
 import PortalViewer from './pages/portal/PortalViewer'
 import SignDocument from './pages/portal/SignDocument'
+import PermissionPage from './pages/PermissionPage'
 // AdvisorFlow LAUNCH ENGINE — the customer's Launch Pad. A platform
 // capability, worn by whichever white-label brand owns the customer
 // relationship (EvoSys Pro today, BookaBoost next). STAGE 1 IS A UI PROTOTYPE:
@@ -1036,6 +1037,9 @@ export default function App() {
         {/* EvoSys e-signature: the signer's page. The private link is the
             whole authorization; see app/routers/esign_public_router.py. */}
         <Route path="/sign/:token" element={<SignDocument />} />
+        {/* An owner gives (or declines) permission for follow-up. The private
+            link is the whole authorization; see permission_public_router.py. */}
+        <Route path="/permission/:token" element={<PermissionPage />} />
         <Route path="/demo/:token" element={<DemoSite />} />
         <Route path="/portal/access/:token" element={<PortalAccess />} />
         <Route path="/portal/view/:proposalId" element={<PortalViewer />} />

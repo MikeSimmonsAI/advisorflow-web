@@ -216,6 +216,9 @@ class WholesaleSettings(Base):
     # public contact rather than somebody else's. NULL = not configured.
     public_contact_phone = Column(String, nullable=True)
     public_contact_email = Column(String, nullable=True)
+    # The name OWNERS see (permission page, its wording). NULL = the
+    # organization's own name.
+    public_business_name = Column(String, nullable=True)
 
     # ── Public seller inquiry + seller SMS program ──────────────────────────
     # `public_intake_key` is how a public seller-inquiry form reaches THIS

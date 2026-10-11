@@ -288,9 +288,16 @@ def callback_center(db, org_id: str, *, user=None, mine: bool = False, include_t
         if mine and user is not None and item["assigned_to_id"] != user.id:
             continue
         buckets[item["bucket"]].append(item)
+    from app.services.evosense import followups as FU
+    fu_done = 0
+    for item in FU.center_items(db, org_id, now, user=user, mine=mine, include_test=include_test,
+                                completed_limit=max(1, min(int(completed_limit or 50), 200))):
+        if item["bucket"]:
+            buckets[item["bucket"]].append(item)
+            fu_done += 1 if item["bucket"] == "completed" else 0
     for b in ("due_now", "upcoming", "overdue"):
         buckets[b].sort(key=lambda i: i["due_at"] or "")
-    completed_total = q.filter(WholesaleSellerCallback.status == "completed").count()
+    completed_total = q.filter(WholesaleSellerCallback.status == "completed").count() + fu_done
     return {"now": _iso(now), "buckets": buckets,
             "counts": {b: (completed_total if b == "completed" else len(buckets[b])) for b in BUCKETS},
             "window_minutes": int(DUE_NOW_AFTER.total_seconds() // 60)}

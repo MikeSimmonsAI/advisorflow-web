@@ -28,18 +28,23 @@ function CallbackItem({ it, onDone }) {
   const [err, setErr] = useState('')
   async function finish(kind) {
     setBusy(true); setErr('')
-    try { await api.post(`/wholesale/ops/callbacks/${encodeURIComponent(it.id)}/${kind}`, { note }); onDone() }
+    const url = it.kind === 'followup'
+      ? `/wholesale/evosense/follow-ups/${encodeURIComponent(it.followup_id)}/${kind}`
+      : `/wholesale/ops/callbacks/${encodeURIComponent(it.id)}/${kind}`
+    try { await api.post(url, { note }); onDone() }
     catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
   const open = it.status === 'due'
   return (
     <li className="wso-item">
       <div className="wso-row">
-        <span className="wso-item__title">{it.seller_name || 'Seller'}</span>
+        <span className="wso-item__title">{it.kind === 'followup' ? (it.address || 'Property') : (it.seller_name || 'Seller')}</span>
+        {it.kind === 'followup' && it.seller_name ? <span className="wso-small">{it.seller_name}</span> : null}
         {it.kind === 'requested' ? <Tag kind="info">Seller asked</Tag> : null}
         {it.dnc ? <Tag kind="danger">Do Not Contact</Tag> : null}
         {it.is_test ? <Tag kind="sandbox">Test</Tag> : null}
         {it.deal_id ? <Link className="wso-small" to={`/wholesale/deals/${it.deal_id}`}>Open deal</Link> : null}
+        {it.kind === 'followup' ? <Link className="wso-small" to={`/wholesale/evosense/property/${it.evosense_property_id}`}>Open property</Link> : null}
       </div>
       <div className="wso-muted">
         {it.status === 'completed' ? `completed ${fmtWhen(it.completed_at)}` : `due ${fmtWhen(it.due_at)}`}
@@ -100,7 +105,7 @@ export default function CallbackCenter() {
         </span>
       </div>
       <Panel title={BUCKETS.find(b => b[0] === bucket)[1]} count={items.length}
-             hint="Schedule new callbacks from a deal's Callbacks & notes tab.">
+             hint="Schedule call-backs from a property's Call-backs box, or a deal's Callbacks & notes tab.">
         {!data ? <p className="wso-muted">Loading…</p> : !items.length ? (
           <p className="wso-muted">Nothing here.</p>
         ) : (

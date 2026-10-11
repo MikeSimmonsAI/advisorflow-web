@@ -473,6 +473,7 @@ class SettingsPatch(BaseModel):
     # the Investor Deal Room and the Seller Portal. Empty string clears it.
     public_contact_phone: Optional[str] = None
     public_contact_email: Optional[str] = None
+    public_business_name: Optional[str] = None
     # Public seller inquiry + seller SMS program. Admin-only (see patch).
     public_intake_key: Optional[str] = None
     sms_program_enabled: Optional[bool] = None
@@ -602,6 +603,7 @@ def settings_json(s: WholesaleSettings) -> Dict[str, Any]:
         "ai_tones": list(wholesale_ai.TONES),
         "public_contact_phone": getattr(s, "public_contact_phone", None),
         "public_contact_email": getattr(s, "public_contact_email", None),
+        "public_business_name": getattr(s, "public_business_name", None),
         # The intake key lets a server post seller inquiries into this org, so
         # it is never echoed back in full - only whether it is set.
         "public_intake_key_set": bool(getattr(s, "public_intake_key", None)),
@@ -698,6 +700,9 @@ def patch_settings(payload: SettingsPatch, request: Request,
     for key in ("public_contact_phone", "public_contact_email"):
         if key in data:
             data[key] = _clean_public_contact(key, data[key])
+    if "public_business_name" in data:
+        name = " ".join(str(data["public_business_name"] or "").split())[:120]
+        data["public_business_name"] = name or None
     if any(k in data for k in _SMS_PROGRAM_FIELDS):
         # Who may switch on texting, or point a public form at this workspace,
         # is an administrator question, not an advisor one.

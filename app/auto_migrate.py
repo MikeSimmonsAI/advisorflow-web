@@ -1325,6 +1325,7 @@ COLUMNS_TO_ADD = [
     # defaults OFF, so an existing organization texts nobody under it until an
     # admin configures a Messaging Service and switches it on.
     ("wholesale_settings", "public_intake_key", "VARCHAR"),
+    ("wholesale_settings", "public_business_name", "VARCHAR"),
     # Intake reconciliation: who a public seller inquiry is assigned to.
     ("wholesale_settings", "inquiry_assignee_id", "VARCHAR"),
     ("wholesale_settings", "inquiry_email_enabled", "BOOLEAN DEFAULT FALSE"),

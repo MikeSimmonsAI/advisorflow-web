@@ -478,6 +478,7 @@ const ASSISTANT_READS = [
 function PublicContactPanel({ value, set }) {
   const phone = value('public_contact_phone') || ''
   const email = value('public_contact_email') || ''
+  const bizName = value('public_business_name') || ''
   return (
     <div className="panel ws-panel">
       <div className="panel-title ws-panel-title">
@@ -501,6 +502,11 @@ function PublicContactPanel({ value, set }) {
           <label htmlFor="ws-public-email">Public email</label>
           <input id="ws-public-email" className="ws-input" type="email" autoComplete="off"
                  value={email} onChange={(e) => set('public_contact_email', e.target.value)} />
+        </div>
+        <div className="ws-field">
+          <label htmlFor="ws-public-name">Name owners see</label>
+          <input id="ws-public-name" className="ws-input" type="text" autoComplete="off" placeholder="e.g. EvoSense Properties"
+                 value={bizName} onChange={(e) => set('public_business_name', e.target.value)} />
         </div>
       </div>
     </div>
