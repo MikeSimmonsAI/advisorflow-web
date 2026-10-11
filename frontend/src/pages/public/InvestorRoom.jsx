@@ -419,6 +419,15 @@ export default function InvestorRoom() {
           </div>
         ) : null}
 
+        {room.disclosure ? (
+          <div className="wr__panel" role="note" aria-label={room.disclosure.title}
+               style={{ borderLeft: '4px solid #d97706' }}>
+            <div className="wr__panel-title">{room.disclosure.title}</div>
+            <p className="wr__prose">{room.disclosure.text}</p>
+            <p className="wr__hint" style={{ marginTop: 6 }}>{room.disclosure.law}</p>
+          </div>
+        ) : null}
+
         {rest.length ? (
           <div className="wr__panel">
             <div className="wr__panel-title">More photos ({photos.length})</div>

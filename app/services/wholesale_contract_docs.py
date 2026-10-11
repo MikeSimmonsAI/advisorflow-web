@@ -208,6 +208,7 @@ h2{font-size:11.5pt;margin:14px 0 4px}
 p{margin:0 0 7px}
 .blank{display:inline-block;min-width:150px;border-bottom:1px solid #b45309;background:#fef3c7;color:#92400e;font-size:9pt;padding:0 4px}
 .sig{margin-top:22px;display:flex;gap:28px;flex-wrap:wrap}
+.notice{border:1.5px solid #000;padding:8px 10px}
 .sig>div{flex:1 1 260px;border-top:1px solid #999;padding-top:6px;font-size:10pt}
 .sigbox{height:56px}
 .small{font-size:9.5pt;color:#333}
@@ -278,11 +279,16 @@ those paid at closing. Closing will take place at the Title Company on or before
 year are prorated to the closing date.</p>
 <h2>7. Possession</h2>
 <p>{r('possession')}</p>
-<h2>8. Assignment</h2>
+<h2>8. Assignment, and notice to Seller (Texas Occupations Code Section 1101.0045)</h2>
 <p>Buyer may assign this agreement, or its rights under it, without Seller's consent. Seller
 understands that Buyer may assign this agreement to another buyer for a fee, and that Buyer may
 receive money from that buyer in addition to the purchase price. The price Seller receives does not
 change if Buyer assigns.</p>
+<p class="notice"><b>Notice to Seller.</b> Under this agreement Buyer holds only an equitable
+interest in the Property - the right to buy it. Buyer may offer that interest (this contract) to
+other buyers and may sell or assign it instead of buying the Property itself. Buyer is not acting
+as Seller's real estate broker or agent and does not represent Seller. By signing, Seller
+acknowledges receiving this written notice before signing this agreement.</p>
 <h2>9. If someone does not perform</h2>
 <p>If Buyer fails to close for a reason not allowed by this agreement, Seller may keep the earnest
 money as Seller's only remedy. If Seller fails to close, Buyer may ask a court to require Seller to

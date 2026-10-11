@@ -158,6 +158,24 @@ def branding(db: Session, deal) -> Dict[str, Any]:
     }
 
 
+BUYER_DISCLOSURE_TITLE = "Notice: this is the sale of a contract interest"
+
+
+def buyer_disclosure(name: Optional[str]) -> Dict[str, str]:
+    """The Texas Occupations Code 1101.0045 notice shown to every investor."""
+    who = (name or "").strip() or "The party offering this deal"
+    return {
+        "title": BUYER_DISCLOSURE_TITLE,
+        "law": "Texas Occupations Code Section 1101.0045",
+        "text": ("%s does not own this property and does not hold legal title to it. It holds only an "
+                 "equitable interest - the right to buy the property under a purchase contract with the "
+                 "owner. What is offered here is that contract right, which a buyer takes over by an "
+                 "assignment. %s is not acting as your real estate broker or agent. Do your own "
+                 "inspection, check title and comparable sales, and get any advice you want before "
+                 "agreeing to anything." % (who, who)),
+    }
+
+
 def public_contact(db: Session, organization_id: str) -> Dict[str, Any]:
     """This organization's configured public Wholesale contact.
 
@@ -333,6 +351,9 @@ def buyer_room_payload(db: Session, deal, link=None,
             "title_company": deal.title_company,
         },
     }
+    # The written notice Texas requires (Occupations Code 1101.0045) to anyone
+    # offered a contract interest: on every investor page, not left to memory.
+    payload["disclosure"] = buyer_disclosure((payload.get("brand") or {}).get("name"))
 
     # Our workings, published only if a person switched them on.
     if deal.buyer_room_show_arv:
