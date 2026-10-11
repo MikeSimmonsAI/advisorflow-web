@@ -728,6 +728,14 @@ def _acq(db, prop):
         return None
 
 
+def _neighborhood(db, prop):
+    try:
+        from app.services.evosense.value_lookup import neighborhood_tax_estimate
+        return neighborhood_tax_estimate(db, prop)
+    except Exception:  # noqa: BLE001 - an advisory figure never breaks the page
+        return None
+
+
 def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
     from app.services.evosense import evaluate as EV
     strategy = EV.strategy_for(db, prop)
@@ -866,6 +874,8 @@ def property_detail(db, org_id: str, prop: EvoSenseProperty) -> Dict[str, Any]:
             "ranks": ranks,
             # The person's own entries: {field: {value, county_value, by_name, at}}.
             "entered_by_you": C.jload(getattr(prop, "user_facts", None), {}) or {},
+            "value_estimate": C.jload(getattr(prop, "valuation_detail", None), None),
+            "neighborhood_tax_estimate": _neighborhood(db, prop),
         },
         "conflicts": C.jload(prop.conflicts, []) or [],
         "review_flags": review_flags(db, org_id, prop),

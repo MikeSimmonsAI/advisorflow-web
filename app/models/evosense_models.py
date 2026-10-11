@@ -237,6 +237,9 @@ class EvoSenseProperty(Base):
     # {field: {value, county_value, by_id, by_name, at}}. The field above holds the
     # working value; the county value stays in the observations and here.
     user_facts = Column(Text, nullable=True)
+    # The last automated value ESTIMATE with its listing comparables (JSON) -
+    # labelled, cached, never a sale price and never an ARV input.
+    valuation_detail = Column(Text, nullable=True)
     bedrooms = Column(Numeric(5, 1), nullable=True)
     bathrooms = Column(Numeric(5, 1), nullable=True)          # FULL baths as the source counts them
     half_bathrooms = Column(Integer, nullable=True)           # half baths, kept apart (never folded in)
@@ -925,6 +928,24 @@ class EvoSenseSourceFile(Base):
 
     __table_args__ = (
         Index("ix_evosense_source_files_key", "provider_key", "chunk_index"),
+    )
+
+
+class EvoSenseApiUsage(Base):
+    """Platform-wide count of requests to a QUOTA-LIMITED free API, per month
+    (RentCast's free plan). Incremented atomically BEFORE a request is sent, so
+    the free allowance can never be overrun into paid overage. No tenant data."""
+
+    __tablename__ = "evosense_api_usage"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    provider_key = Column(String, nullable=False)
+    period = Column(String, nullable=False)          # YYYY-MM
+    count = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("provider_key", "period", name="uq_evosense_api_usage"),
     )
 
 

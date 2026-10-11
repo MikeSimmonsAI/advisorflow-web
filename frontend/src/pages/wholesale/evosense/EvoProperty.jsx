@@ -132,6 +132,49 @@ function PublicRecord({ p, f, owners, links, propertyId, busy, act }) {
   )
 }
 
+/* VALUE ESTIMATES - each labelled for what it is. Neither is a sale price or an ARV:
+ *  - RentCast: a modelled estimate from nearby LISTINGS (asking prices), only
+ *    when a person asks or the property scores 65+, inside a hard free budget;
+ *  - the county figure: this ZIP's median tax value per sq ft x living area. */
+function ValueEstimate({ f, propertyId, busy, act }) {
+  const [usage, setUsage] = useState(null)
+  useEffect(() => { api.get('/wholesale/evosense/valuation/usage').then(setUsage).catch(() => setUsage(null)) }, [])
+  const v = f.value_estimate
+  const n = f.neighborhood_tax_estimate
+  const money = (x) => (x === null || x === undefined ? '-' : `$${Number(x).toLocaleString()}`)
+  return (
+    <Panel title="Value estimates" id="value" hint="Estimates only. Texas does not publish sale prices.">
+      {n ? (
+        <p style={{ margin: '0 0 10px' }}><strong>{money(n.value)}</strong> - county tax-value figure
+          <span className="evo-muted evo-small" style={{ display: 'block' }}>{n.truth}</span></p>
+      ) : <p className="evo-muted evo-small" style={{ margin: '0 0 10px' }}>County tax-value figure: needs living area and at least 5 nearby houses on file.</p>}
+      {v ? (
+        <div>
+          <p style={{ margin: '0 0 6px' }}><strong>{money(v.estimate)}</strong> ({money(v.low)} - {money(v.high)}) - RentCast estimate
+            <span className="evo-muted evo-small" style={{ display: 'block' }}>{v.truth}</span></p>
+          {(v.comparables || []).length ? (
+            <div className="evo-table-wrap"><table className="evo-table">
+              <thead><tr><th>Nearby home</th><th>What it is</th><th className="is-num">Price</th><th className="is-num">Miles</th></tr></thead>
+              <tbody>{v.comparables.map((c, i) => (
+                <tr key={i}><td className="evo-small">{c.address}</td><td className="evo-small">{c.label}</td>
+                  <td className="is-num">{money(c.price)}</td><td className="is-num">{c.distance_miles ?? '-'}</td></tr>))}</tbody>
+            </table></div>
+          ) : null}
+        </div>
+      ) : null}
+      <div style={{ marginTop: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm"
+                disabled={busy || !usage || !usage.configured || usage.left <= 0}
+                onClick={() => act(() => api.post(`/wholesale/evosense/properties/${propertyId}/valuation`, {}), () => 'Value estimate added.')}>
+          {v ? 'Refresh RentCast estimate' : 'Get RentCast estimate'}</button>
+        <span className="evo-muted evo-small">
+          {!usage ? '' : !usage.configured ? 'RentCast is not connected (free plan key not added).'
+            : `${usage.left} of ${usage.limit} free estimates left this month - it stops before the free limit, so it never bills.`}</span>
+      </div>
+    </Panel>
+  )
+}
+
 /** Plain facts that follow directly from the county record (never a guess):
  *  - a land-only parcel: the county values the building at $0 and has no
  *    building on file, so there are no beds, baths or square feet to show;
@@ -338,6 +381,7 @@ export default function EvoProperty() {
       </section>
 
       <PublicRecord p={p} f={f} owners={d.owners || []} links={d.links} propertyId={propertyId} busy={busy} act={act} />
+      <ValueEstimate f={f} propertyId={propertyId} busy={busy} act={act} />
 
       {(d.review_flags || []).length ? (
         <Alert kind="warn">

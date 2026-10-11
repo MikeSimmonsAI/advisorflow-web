@@ -1117,6 +1117,13 @@ PROPERTY_CSV_ALIASES = {
     "mailing zip": "owner_mailing_zip", "owner_mailing_zip": "owner_mailing_zip",
     "occupancy": "occupancy_status", "occupancy_status": "occupancy_status",
     "notes": "notes",
+    # PropStream export spellings (a file a person exported; nothing calls PropStream).
+    "property city": "city", "property state": "state", "property zip": "zip_code",
+    "parcel number": "parcel_apn", "total bathrooms": "bathrooms", "living sqft": "square_feet",
+    "est. value": "estimated_value", "est value": "estimated_value",
+    "total loan balance": "mortgage_balance", "est. remaining balance of open loans": "mortgage_balance",
+    "owner 1 full name": "owner_name", "mailing zip code": "owner_mailing_zip",
+    "owner 1 first name": "_first_name", "owner 1 last name": "_last_name",
     # Contact columns, which create the seller as well as the property.
     "phone": "_phone", "phone number": "_phone", "owner phone": "_phone",
     "email": "_email", "owner email": "_email",

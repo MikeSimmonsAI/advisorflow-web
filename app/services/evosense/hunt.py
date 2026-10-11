@@ -250,6 +250,18 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
     above = sorted([p for p in mine if (p.opportunity_score or 0) >= strategy.min_opportunity_score],
                    key=lambda p: -(p.opportunity_score or 0))
     counts["above_threshold"] = len(above)
+    from app.services.evosense import value_lookup as VL
+    from app.services.evosense.sources import rentcast as RC
+    if RC.configured() and not pilot:
+        valued = 0
+        for prop in above:
+            if valued >= VL.AUTO_PER_HUNT or (prop.opportunity_score or 0) < VL.AUTO_MIN_SCORE or RC.fresh(prop):
+                continue
+            res = VL.value_property(db, prop, auto=True)
+            valued += 0 if res.get("cached") else 1
+            if not res.get("ok") and "used up" in (res.get("reason") or ""):
+                break
+        counts["value_estimates"] = valued
     if enrich:
         from app.models.evosense_models import EvoSenseEnrichmentDecision
         for prop in above:
@@ -467,7 +479,8 @@ def add_manual(db, org_id: str, data: Dict[str, Any], *, user, strategy=None) ->
 CSV_COLUMNS = ("street_address", "unit", "city", "state", "zip_code", "county", "parcel_apn",
                "property_type", "owner_name", "mailing_street", "mailing_city", "mailing_state",
                "mailing_zip", "estimated_value", "mortgage_balance", "last_sale_date", "signals",
-               "record_id")
+               "record_id", "bedrooms", "bathrooms", "square_feet", "year_built")
+BUILDING_COLUMNS = ("bedrooms", "bathrooms", "square_feet", "year_built")
 # Evidence columns a DISTRESS LIST may carry. They describe the list's claim;
 # they are stored as the signal's evidence, never as verified fact.
 EVIDENCE_COLUMNS = ("signal_date", "case_number", "case_status", "amount")
@@ -514,6 +527,12 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
     if list_kind is not None and list_kind not in DISTRESS_LISTS:
         raise ValueError("Unknown list kind %r. Known: %s" % (list_kind, ", ".join(DISTRESS_LISTS)))
     kind = DISTRESS_LISTS.get(list_kind) if list_kind else None
+    from app.services.evosense import propstream_csv as PS
+    fmt = None
+    head = csv.DictReader(io.StringIO(content))
+    if PS.is_propstream(head.fieldnames or []):
+        content, fmt = PS.convert(content)
+        list_source = list_source or "PropStream export"
     reader = csv.DictReader(io.StringIO(content))
     missing = [c for c in ("street_address",) if c not in (reader.fieldnames or [])]
     if missing:
@@ -535,6 +554,12 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
             row.get(c, "") for c in CSV_COLUMNS[:8]).lower().encode()).hexdigest()[:20]
         rec = {k: row.get(k) or None for k in ("street_address", "unit", "city", "state", "zip_code",
                                                "county", "parcel_apn", "property_type", "last_sale_date")}
+        for k in BUILDING_COLUMNS:
+            try:
+                v = float(str(row.get(k) or "").replace(",", ""))
+                rec[k] = (int(v) if k in ("square_feet", "year_built") else v) if v > 0 else None
+            except ValueError:
+                rec[k] = None
         rec["source_reference"] = ("csv:%s:%s" % (list_kind, ref)) if list_kind else "csv:%s" % ref
         try:
             if row.get("estimated_value"):
@@ -572,6 +597,13 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
                 "limitations": "As stated by an imported %s (%s); not verified against the "
                                "primary record." % (kind["label"].lower(), list_source or filename),
             } for s in sigs if s in CATALOG]
+        elif fmt:
+            rec["signals"] = [{"type": s, "confidence": 55,
+                               "value": "As stated by a PropStream export (%s)" % (list_source or filename),
+                               "evidence_basis": "imported PropStream export",
+                               "limitations": "The export's own flag - not verified against the primary "
+                                              "record (county clerk / court)."}
+                              for s in sigs if s in CATALOG]
         else:
             rec["signals"] = [{"type": s, "confidence": 60, "value": "from imported list"}
                               for s in sigs if s in CATALOG]
@@ -587,7 +619,45 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
                 % (counts["rows"], filename, (" as %s" % kind["label"]) if kind else "",
                    counts["created"], counts["merged"], counts["review"], counts["rejected"]),
                 details=dict(counts, list_kind=list_kind, list_source=list_source))
-    return {"counts": counts, "rejected": rejected[:50], "list_kind": list_kind}
+    return {"counts": counts, "rejected": rejected[:50], "list_kind": list_kind, "format": fmt}
+
+
+def preview_csv(db, org_id: str, content: str, *, filename: str = "upload.csv") -> Dict[str, Any]:
+    """What an import WOULD do - nothing is written: the detected format, which
+    columns were understood, rows that would be rejected, rows already
+    imported (duplicates), and the distress signals the file asserts."""
+    from app.models.evosense_models import EvoSenseObservation
+    from app.services.evosense import propstream_csv as PS
+    head = csv.DictReader(io.StringIO(content))
+    fmt = None
+    if PS.is_propstream(head.fieldnames or []):
+        content, fmt = PS.convert(content)
+    reader = csv.DictReader(io.StringIO(content))
+    if "street_address" not in (reader.fieldnames or []):
+        return {"ok": False, "format": fmt, "reason": "No street address column was recognised.",
+                "columns": reader.fieldnames}
+    out = {"ok": True, "format": (fmt or {}).get("format") or "evosense", "rows": 0, "would_reject": 0,
+           "already_imported": 0, "new": 0, "signals": {}, "sample": [], "mapping": fmt}
+    for i, row in enumerate(reader, start=2):
+        if out["rows"] >= 5000:
+            break
+        out["rows"] += 1
+        row = {k: (v or "").strip() for k, v in row.items() if k}
+        if not row.get("street_address") or not (row.get("zip_code") or row.get("city")):
+            out["would_reject"] += 1
+            continue
+        ref = row.get("record_id") or hashlib.sha1("|".join(
+            row.get(c, "") for c in CSV_COLUMNS[:8]).lower().encode()).hexdigest()[:20]
+        seen = (db.query(EvoSenseObservation.id)
+                .filter(EvoSenseObservation.organization_id == org_id,
+                        EvoSenseObservation.source_reference == "csv:%s" % ref).first())
+        out["already_imported" if seen else "new"] += 1
+        for sig in [x for x in (row.get("signals") or "").split(";") if x]:
+            out["signals"][sig] = out["signals"].get(sig, 0) + 1
+        if len(out["sample"]) < 5:
+            out["sample"].append({k: row.get(k) for k in ("street_address", "city", "zip_code", "owner_name",
+                                                          "signals")})
+    return out
 
 
 def _parse_list_date(value):
