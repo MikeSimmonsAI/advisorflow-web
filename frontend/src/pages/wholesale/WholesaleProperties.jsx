@@ -21,6 +21,7 @@ import {
   useEnvironment,
 } from './ds/ds'
 import './ds/evo-pages.css'
+import ContactLookup from './wsContactLookup'
 
 const PROPERTY_TYPES = ['single_family', 'duplex', 'triplex', 'fourplex',
                         'multi_family', 'condo', 'townhouse', 'mobile', 'land',
@@ -47,6 +48,7 @@ export default function WholesaleProperties() {
   const [showImport, setShowImport] = useState(false)
   const [selected, setSelected] = useState({})
   const [busy, setBusy] = useState(false)
+  const [lookupIds, setLookupIds] = useState(null)
 
   const stageFilter = searchParams.get('stage') || ''
   const [bandFilter, setBandFilter] = useState('')
@@ -77,30 +79,6 @@ export default function WholesaleProperties() {
   useEffect(() => { load() }, [load])
 
   const chosen = Object.keys(selected).filter((k) => selected[k])
-
-  async function runEnrichment() {
-    if (!chosen.length) return
-    setBusy(true); setError(null); setNotice(null)
-    try {
-      const result = await api.post('/wholesale/enrichment/run', { property_ids: chosen })
-      const manual = result.results.filter((r) => r.status === 'manual').length
-      // A property no longer in the workspace comes back as {property_id, status: 'not_found'}
-      // with no phones/emails; reading .length on it threw after a committed run.
-      const found = result.results.filter((r) => (r.phones || []).length || (r.emails || []).length).length
-      setNotice(
-        `Provider: ${result.provider_label}. ${found} of ${result.results.length} returned contact details.`
-        + (manual
-          ? ' No skip-trace provider is connected, so nothing was looked up — open a '
-            + 'property and enter the phone or email, or import a file that carries it.'
-          : ''))
-      setSelected({})
-      load()
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   function closeAdd() {
     setShowAdd(false)
@@ -145,8 +123,10 @@ export default function WholesaleProperties() {
             <input type="checkbox" checked={includeTest} onChange={(e) => setIncludeTest(e.target.checked)} style={{ margin: 0 }} />
             Sandbox records
           </label>
-          <button type="button" className="evo-btn evo-btn--secondary" disabled={!chosen.length || busy} onClick={runEnrichment}>
-            {busy ? 'Working…' : chosen.length ? `Enrich ${chosen.length} selected` : 'Enrich selected'}
+          <button type="button" className="evo-btn evo-btn--secondary" disabled={!chosen.length || busy}
+                  onClick={() => setLookupIds(chosen)}
+                  title={chosen.length ? 'Look up the owner phone and email for the properties you ticked' : 'Tick the properties first'}>
+            {chosen.length ? `Get phones & emails (${chosen.length})` : 'Get phones & emails'}
           </button>
         </div>
         {stageFilter ? (
@@ -244,6 +224,9 @@ export default function WholesaleProperties() {
 
       <AddProperty open={showAdd} onClose={closeAdd} onDone={() => { closeAdd(); setNotice('Property added.'); load() }} />
       <ImportPanel open={showImport} onClose={() => setShowImport(false)} onDone={(summary) => { setNotice(summary); load() }} />
+      {lookupIds ? <ContactLookup kind="property" what="property owner" ids={lookupIds}
+                                  onClose={() => setLookupIds(null)}
+                                  onDone={(msg) => { setNotice(msg); setSelected({}); load() }} /> : null}
     </EvoApp>
   )
 }
