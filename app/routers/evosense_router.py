@@ -367,6 +367,21 @@ def import_list_kinds(user: User = Depends(require_tenant_or_observer)):
             "evidence_columns": list(HU.EVIDENCE_COLUMNS)}
 
 
+@router.post("/import/preview")
+async def import_preview(file: UploadFile = File(...), db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    """What an import would do (format, columns, rejects, duplicates, signals) - writes nothing."""
+    org_id = svc.write_org_id(db, user)
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File is larger than 5 MB.")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    return HU.preview_csv(db, org_id, text, filename=file.filename or "upload.csv")
+
+
 @router.post("/import")
 async def import_properties(file: UploadFile = File(...), strategy_id: Optional[str] = Form(None),
                             list_kind: Optional[str] = Form(None), list_source: Optional[str] = Form(None),
@@ -882,6 +897,29 @@ def edit_property_facts(property_id: str, payload: FactsIn, db: Session = Depend
     out = UF.set_facts(db, prop, user, sent)
     db.commit()
     return out
+
+
+@router.post("/properties/{property_id}/valuation")
+def estimate_property_value(property_id: str, db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_user),
+                            _g: User = Depends(require_not_observation)):
+    """A person asks for a RentCast value estimate (inside the hard free budget)."""
+    from app.services.evosense import value_lookup as VL
+    org_id = svc.write_org_id(db, user)
+    prop = (db.query(EvoSenseProperty).filter(EvoSenseProperty.id == property_id,
+                                              EvoSenseProperty.organization_id == org_id).first())
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+    out = VL.value_property(db, prop, user=user)
+    if not out.get("ok"):
+        raise HTTPException(status_code=409, detail=out.get("reason"))
+    return out
+
+
+@router.get("/valuation/usage")
+def valuation_usage(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.services.evosense.sources import rentcast as RC
+    return RC.usage(db)
 
 
 @router.get("/strategy-starters")
