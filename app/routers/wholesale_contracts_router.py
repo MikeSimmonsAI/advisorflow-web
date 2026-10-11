@@ -866,3 +866,27 @@ def esign_signed_pdf(document_id: str, db: Session = Depends(get_db),
     return Response(content=env.final_pdf, media_type="application/pdf",
                     headers={"Content-Disposition": 'inline; filename="%s"' % ev._filename(env.title),
                              "X-Document-SHA256": env.final_sha256 or "", "Cache-Control": "private, no-store"})
+
+
+class SignerEmailIn(BaseModel):
+    role: str
+    email: str
+
+
+@router.post("/documents/{document_id}/esign/signer-email")
+def esign_signer_email(document_id: str, payload: SignerEmailIn, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user),
+                       _guard: User = Depends(require_not_observation)):
+    """Change the email of a signer who has not signed yet (keeps signatures
+    already given). If it is their turn, a fresh link goes to the new address."""
+    org_id = svc.write_org_id(db, user)
+    ev, env = _envelope(db, org_id, document_id)
+    try:
+        out = ev.change_signer_email(db, env, payload.role, payload.email, user)
+    except ev.EsignError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message)
+    if out.get("changed"):
+        svc.log_event(db, org_id, "document.signer_email_changed", actor_type=ACTOR_USER, actor_user_id=user.id,
+                      deal_id=env.deal_id, summary="%s's signing email changed to %s" % (out["role"], out["email"]))
+        db.commit()
+    return out

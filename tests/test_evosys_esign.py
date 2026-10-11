@@ -214,3 +214,31 @@ def test_bad_drawing_is_refused(client, mail, sent):
     r = client.post("/esign/sign/%s/sign" % tok, json={"consent": True, "typed_name": "Elizabeth Bryant",
                                                        "drawn_png": "data:image/png;base64,bm90IGEgcG5n"})
     assert r.status_code == 400
+
+
+def test_change_email_of_waiting_signer_keeps_the_signature_already_given(client, auth_headers, mail, sent, db_session):
+    # seller signs, buyer's link goes out
+    sign_as(client, mail, link_token(mail[0]))
+    old_buyer = link_token([m for m in mail if m["type"] == "esign_link"][-1])
+    r = ok(client.post("/wholesale/documents/%s/esign/signer-email" % sent["document_id"], headers=auth_headers,
+                       json={"role": "Buyer", "email": "info@example.com"}))
+    assert r["changed"] and r["link_sent"] is True
+    newest = [m for m in mail if m["type"] == "esign_link"][-1]
+    assert newest["to"] == "info@example.com"
+    assert client.get("/esign/sign/%s" % old_buyer).status_code == 404          # old link dead
+    v = ok(client.get("/esign/sign/%s" % link_token(newest)))
+    assert v["signer"]["role"] == "Buyer" and v["signer"]["verified"] is False
+    assert [p["status"] for p in v["parties"]][0] == "signed"                  # seller's signature kept
+    done = sign_as(client, mail, link_token(newest), name="Test Buyer")
+    assert done["completed"] is True
+    assert any(m["type"] == "esign_completed" and m["to"] == "info@example.com" for m in mail)
+
+
+def test_cannot_change_email_of_someone_who_signed(client, auth_headers, mail, sent):
+    sign_as(client, mail, link_token(mail[0]))
+    r = client.post("/wholesale/documents/%s/esign/signer-email" % sent["document_id"], headers=auth_headers,
+                    json={"role": "Seller", "email": "x@example.com"})
+    assert r.status_code == 409
+    r = client.post("/wholesale/documents/%s/esign/signer-email" % sent["document_id"], headers=auth_headers,
+                    json={"role": "Buyer", "email": "not-an-email"})
+    assert r.status_code == 400

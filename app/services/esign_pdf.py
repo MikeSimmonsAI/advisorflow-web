@@ -150,6 +150,7 @@ ACTION_LABEL = {
     "consented": "Agreed to sign electronically", "signed": "Signed", "declined": "Declined to sign",
     "voided": "Voided by sender", "completed": "All parties signed; document sealed",
     "reminder": "Reminder sent", "code_failed": "Wrong verification code entered",
+    "signer_email_changed": "Signer's email changed by sender",
 }
 
 

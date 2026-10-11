@@ -433,6 +433,8 @@ def attacks(ids):
         ("get", "/wholesale/documents/%s/esign" % ids["document_id"], None),
         ("post", "/wholesale/documents/%s/esign/remind" % ids["document_id"], {}),
         ("post", "/wholesale/documents/%s/esign/void" % ids["document_id"], {"reason": "x"}),
+        ("post", "/wholesale/documents/%s/esign/signer-email" % ids["document_id"],
+         {"role": "Seller", "email": "attacker@example.com"}),
         ("get", "/wholesale/documents/%s/signed.pdf" % ids["document_id"], None),
     ] + evosense_attacks(ids) + funding_and_exception_attacks(ids) + ops_attacks(ids)
 
