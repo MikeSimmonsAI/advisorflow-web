@@ -41,7 +41,12 @@ RUN_LOCK = timedelta(minutes=30)
 
 
 def _query(strategy) -> Dict[str, Any]:
-    return {k: ST.lst(strategy, k) for k in ("states", "counties", "cities", "zips", "markets")}
+    q: Dict[str, Any] = {k: ST.lst(strategy, k) for k in ("states", "counties", "cities", "zips", "markets",
+                                                          "property_types")}
+    q["houses_only"] = bool(getattr(strategy, "houses_only", False))
+    if getattr(strategy, "min_ownership_years", None):
+        q["min_ownership_years"] = strategy.min_ownership_years
+    return q
 
 
 def run_strategy(db, org_id: str, strategy: EvoSenseStrategy, *, trigger: str = "manual",

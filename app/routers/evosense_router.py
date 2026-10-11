@@ -856,6 +856,47 @@ def list_strategies(include_archived: bool = False, db: Session = Depends(get_db
             "owner_geography": list(ST.OWNER_GEO)}
 
 
+@router.get("/strategy-starters")
+def strategy_starters(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """The ready-made searches a person can add with one click."""
+    return {"items": ST.starters_payload()}
+
+
+class StarterIn(BaseModel):
+    key: str
+
+
+@router.post("/strategy-starters")
+def create_from_starter(payload: StarterIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_tenant_user),
+                        _g: User = Depends(require_not_observation)):
+    """Create a DRAFT strategy from a starter. It does not hunt until a person
+    activates it, and it never changes any existing strategy. (The starter key
+    travels in the body: it names a template, not anybody's record.)"""
+    starter_key = payload.key
+    if starter_key not in ST.STARTERS:
+        raise HTTPException(status_code=404, detail="Unknown starter")
+    org_id = svc.write_org_id(db, user)
+    data = ST.starter_values(starter_key)
+    taken = {n for (n,) in db.query(EvoSenseStrategy.name).filter(EvoSenseStrategy.organization_id == org_id)}
+    name, n = data["name"], 2
+    while name in taken:
+        name, n = "%s (%s)" % (data["name"], n), n + 1
+    data["name"] = name
+    clean, problems = ST.validate(data)
+    if problems:
+        raise HTTPException(status_code=500, detail=" ".join(problems))
+    s = EvoSenseStrategy(organization_id=org_id, created_by_id=user.id, status="draft")
+    ST.apply(s, clean)
+    db.add(s)
+    db.flush()
+    C.log_event(db, org_id, "strategy.created", strategy_id=s.id, user=user, actor_type=C.ACTOR_USER,
+                is_test=False, summary="Strategy created from the %s starter (draft)" % ST.STARTERS[starter_key]["name"])
+    _apply_cadence(db, s, {"hunt_cadence": "daily"})
+    db.commit()
+    return {**ST.payload(s), "automation": _automation(db, org_id, s)}
+
+
 @router.post("/strategies/preview")
 def preview_strategy(payload: StrategyIn, db: Session = Depends(get_db),
                      user: User = Depends(require_tenant_or_observer)):

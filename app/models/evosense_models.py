@@ -112,6 +112,9 @@ class EvoSenseStrategy(Base):
     pilot_max_properties = Column(Integer, nullable=True)
     pilot_max_spend_cents = Column(Integer, nullable=True)
     pilot_allow_paid = Column(Boolean, nullable=False, default=False)
+    # HOUSES ONLY: vacant lots, land-only accounts and commercial property are
+    # scored 0 ("excluded") for this strategy - still visible, never deleted.
+    houses_only = Column(Boolean, nullable=False, default=False)
 
     is_test = Column(Boolean, nullable=False, default=False)
     created_by_id = Column(String, ForeignKey("users.id"), nullable=True)

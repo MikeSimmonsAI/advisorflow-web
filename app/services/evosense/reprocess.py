@@ -124,6 +124,9 @@ def rebuild_record(obs, prop) -> Tuple[Optional[Dict[str, Any]], str]:
             from app.services.evosense.sources.dallas import DcadReader
             ev = (C.jload(obs.payload, {}) or {}).get("evidence") or {}
             return DcadReader().record_from_raw(json.loads(raw), homestead=bool(ev.get("homestead"))), "raw"
+        if key == "denton_gis" and raw:
+            from app.services.evosense.sources.denton import DentonReader
+            return DentonReader().record(json.loads(raw)), "raw"
         if key == "collin_cad" and raw:
             from app.services.evosense.sources.collin import CollinReader
             return CollinReader().record(json.loads(raw)), "raw"

@@ -1411,6 +1411,7 @@ COLUMNS_TO_ADD = [
     ("evosense_strategies", "pilot_max_properties", "INTEGER"),
     ("evosense_strategies", "pilot_max_spend_cents", "INTEGER"),
     ("evosense_strategies", "pilot_allow_paid", "BOOLEAN DEFAULT FALSE"),
+    ("evosense_strategies", "houses_only", "BOOLEAN DEFAULT FALSE"),
     ("evosense_observations", "raw_payload", "TEXT"),
     ("evosense_observations", "content_hash", "VARCHAR"),
     ("evosense_observations", "adapter_version", "VARCHAR"),

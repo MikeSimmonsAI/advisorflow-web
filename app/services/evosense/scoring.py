@@ -118,6 +118,20 @@ def version_for(weights: Optional[Dict[str, int]] = None, options: Optional[Dict
     return globals()["PO_VERSION"] + ("+w" + fp if fp else "") + ("+o" + ofp if ofp else "")
 
 
+def land_only_reason(prop) -> Optional[str]:
+    """Why a property is NOT a house, from what the record actually says - or None.
+    A MISSING building value is not evidence of a vacant lot; a documented $0 is,
+    unless the record also carries building facts (living area / year built)."""
+    t = (getattr(prop, "property_type", None) or "").strip().lower()
+    if t in ("land", "commercial"):
+        return "the record lists it as %s" % t
+    impr = getattr(prop, "appraisal_improvement_value", None)
+    if impr is not None and int(impr) == 0 and not getattr(prop, "square_feet", None) \
+            and not getattr(prop, "year_built", None):
+        return "the appraisal district shows $0 for buildings (vacant lot / land-only account)"
+    return None
+
+
 def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
                          weights: Optional[Dict[str, int]] = None, *, owner=None,
                          options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -143,6 +157,13 @@ def property_opportunity(prop, stacked: List[Dict[str, Any]], strategy,
         return {"value": 0, "label": "excluded", "version": PO_VERSION, "inputs": inputs,
                 "factors": [_f(0, "Institutional owner (%s) — excluded by default; a workspace admin can change "
                                   "this" % OWNER_TYPE_LABELS.get(owner.owner_type, owner.owner_type).lower())]}
+
+    if strategy is not None and getattr(strategy, "houses_only", False):
+        why_not = land_only_reason(prop)
+        if why_not:
+            return {"value": 0, "label": "excluded", "version": PO_VERSION, "inputs": inputs,
+                    "factors": [_f(0, "Houses only - skipped: %s. Turn off \"Houses only\" on the "
+                                      "strategy to score it." % why_not)]}
 
     if strategy is not None:
         inside, why = ST.geography_match(strategy, prop)

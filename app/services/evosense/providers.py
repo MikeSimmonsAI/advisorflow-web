@@ -556,6 +556,58 @@ class CollinCadSource(PublicRecordSource):
         return {"dataset": r.dataset(), "rows": r.count()}
 
 
+class DentonGisSource(PublicRecordSource):
+    scope, counties = "county", ("Denton",)
+    key = "denton_gis"
+    label = "Denton County GIS parcel layer (Denton CAD roll fields)"
+    capabilities = (C.PROPERTY_SEARCH, C.ASSESSOR, C.OWNERSHIP)
+    discovery = True
+    coverage = ("Denton County, TX - owner of record and mailing address, situs, category, certified "
+                "value, homestead, year built, living area; deed YEAR from the instrument number "
+                "(no deed date, no beds / baths)")
+    jurisdiction = "Denton County, TX"
+    source_type = "County public GIS map service"
+    access_method = "ArcGIS REST query on gis.dentoncounty.gov (one property, or one page of <=1,000)"
+    public_url = "https://gis.dentoncounty.gov/arcgis/rest/services/CAD/MapServer/0"
+    refresh = "Maintained by Denton County GIS from the appraisal roll"
+    freshness_days = 120
+    adapter_version = "denton_county_gis/1"
+    lookup_capability = C.ASSESSOR
+    terms_note = ("Public county map service, no account. The Denton CAD website itself says its property "
+                  "search is not for bulk transfer, so EvoSense never uses that site and never mirrors the "
+                  "layer: it asks small questions (one property, or one page per hunt).")
+
+    def applies(self, target):
+        return (target.get("county") or "").lower() == "denton" and bool(target.get("parcel_apn"))
+
+    def lookup_many(self, targets):
+        from app.services.evosense.sources.denton import DentonReader
+        by_acct = {re.sub(r"\D", "", t["parcel_apn"] or ""): t["id"] for t in targets if t.get("parcel_apn")}
+        by_acct.pop("", None)
+        res = DentonReader().lookup_many(list(by_acct))
+        return {"results": {tid: res["records"].get(a) for a, tid in by_acct.items()},
+                "errors": {}, "stats": res["stats"]}
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.denton import DentonReader
+        out = Records()
+        if capability != C.PROPERTY_SEARCH or not _wants(query, "denton"):
+            out.stats = {"skipped": "strategy does not include Denton County"}
+            return out
+        types = [t for t in query.get("property_types") or []]
+        houses = bool(query.get("houses_only")) or not types or ("land" not in types and "commercial" not in types)
+        res = DentonReader().discover(limit=int(query.get("limit") or 25), houses_only=houses,
+                                      min_years=int(query.get("min_ownership_years") or 10),
+                                      cities=query.get("cities") or None, zips=query.get("zips") or None)
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources.denton import DentonReader
+        return {"layer": "Denton County GIS CAD/0", "rows": DentonReader().count()}
+
+
 class CensusGeocoderSource(PublicRecordSource):
     key = "census_geocoder"
     label = "U.S. Census geocoder"
@@ -776,7 +828,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), TadSource(), DcadSource(), CollinCadSource(), CensusGeocoderSource(),
+    TarrantTaxRollSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(),
