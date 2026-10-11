@@ -1425,3 +1425,78 @@ def buyer_finder_import(payload: FinderImportIn, db: Session = Depends(get_db),
                   after={"source": "county_roll:%s" % payload.county, "skipped": len(skipped)})
     db.commit()
     return {"created": created, "skipped": skipped}
+
+
+# ── Phone / email lookup for buyers (skip trace) ──────────────────────────
+#
+# Two steps on purpose: /estimate says who would be looked up and the most it
+# can cost; /run does it only when the caller sends that cost back. The screen
+# sends small batches so a person watches the progress (and the spend).
+
+class BuyerTraceIn(BaseModel):
+    buyer_ids: Optional[List[str]] = None      # None = every buyer that needs it
+    again: bool = False                        # look up buyers already tried
+    max_cost_cents: Optional[int] = None       # required by /run
+
+
+@router.post("/buyers/skip-trace/estimate")
+def buyer_trace_estimate(payload: BuyerTraceIn, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_or_observer)):
+    from app.services import wholesale_buyer_trace as BT
+    org_id = svc.read_org_id(db, user)
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Pick an organization first.")
+    out = BT.plan(db, org_id, payload.buyer_ids, again=payload.again)
+    settings = svc.resolve_settings(db, org_id, commit=False)
+    out["cap_refusal"] = BT.cap_refusal(db, org_id, settings, out["count"]) if out["count"] else None
+    out["batch_size"] = BT.MAX_PER_CALL
+    return out
+
+
+@router.post("/buyers/skip-trace/run")
+def buyer_trace_run(payload: BuyerTraceIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user),
+                    _guard: User = Depends(require_not_observation)):
+    """Look up phones and emails for up to 25 buyers. Charges only for finds."""
+    from app.services import wholesale_buyer_trace as BT
+    org_id = svc.write_org_id(db, user)
+    if not BT.configured():
+        raise HTTPException(status_code=400, detail=(
+            "Phone/email lookup is not connected yet. Add your Tracerfy API token "
+            "as TRACERFY_API_TOKEN on the server, then try again."))
+    if payload.buyer_ids is not None and len(payload.buyer_ids) > BT.MAX_PER_CALL:
+        raise HTTPException(status_code=400, detail="Send at most %d buyers at a time." % BT.MAX_PER_CALL)
+    p = BT.plan(db, org_id, payload.buyer_ids, again=payload.again)
+    ids = p["buyer_ids"][:BT.MAX_PER_CALL]
+    if not ids:
+        return {"looked_up": 0, "found": 0, "cost_cents": 0, "results": [], "remaining": 0}
+    most = len(ids) * BT.COST_PER_HIT_CENTS
+    if payload.max_cost_cents is None or payload.max_cost_cents < most:
+        raise HTTPException(status_code=409, detail=(
+            "This batch can cost up to $%.2f, more than you approved. Check the cost again."
+            % (most / 100.0)))
+    settings = svc.resolve_settings(db, org_id, commit=False)
+    refusal = BT.cap_refusal(db, org_id, settings, len(ids))
+    if refusal:
+        raise HTTPException(status_code=429, detail=refusal)
+
+    provider = BT.provider_factory()
+    results, found, spent = [], 0, 0
+    for bid in ids:
+        b = _get_buyer(db, org_id, bid)
+        r = BT.lookup_one(db, org_id, b, user, provider)
+        db.flush()
+        if r["filled"]:
+            BC.write_through(db, b, r["filled"], user)
+            found += 1
+        spent += r["cost_cents"]
+        svc.log_event(db, org_id, "buyer.skip_traced", actor_type=ACTOR_USER, actor_user_id=user.id,
+                      summary="Phone/email lookup for %s: %s" % (r["name"], r["status"]),
+                      after={"status": r["status"], "filled": sorted(r["filled"]),
+                             "cost_cents": r["cost_cents"]})
+        db.commit()                       # a paid answer is never lost to a later failure
+        results.append({k: v for k, v in r.items() if k != "stop"})
+        if r["stop"]:
+            break
+    return {"looked_up": len(results), "found": found, "cost_cents": spent,
+            "results": results, "remaining": max(0, p["count"] - len(results))}
