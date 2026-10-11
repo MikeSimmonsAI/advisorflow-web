@@ -283,14 +283,14 @@ STARTERS = {
     "behind_on_taxes": {
         "name": "Behind on Taxes",
         "description": "Houses with unpaid property taxes or a tax lawsuit.",
-        "data": "Works today on free data: county tax-sale lists (9 DFW counties) and the Tarrant tax roll.",
+        "data": "Works today on free data: county tax-sale lists (9 DFW counties) and the Tarrant and Dallas County tax rolls.",
         "free_today": True,
         "fields": {"preferred_signals": ["TAX_DELINQUENT", "TAX_SUIT", "LIEN"]},
     },
     "tired_landlord": {
         "name": "Tired Landlord",
         "description": "Rental houses held 10+ years by an owner who lives somewhere else.",
-        "data": "Works today on free data: Dallas, Tarrant and Collin owner records.",
+        "data": "Works today on free data: Dallas, Tarrant, Collin and Denton owner records.",
         "free_today": True,
         "fields": {"owner_geography": "absentee", "min_ownership_years": 10,
                    "occupancy_preferences": ["non_owner_occupied"],
@@ -310,7 +310,7 @@ STARTERS = {
         "name": "Long-Time Owner",
         "description": ("Houses owned 20+ years. Long ownership does NOT prove the house is paid off - "
                         "mortgage status stays unverified until a lender record or the owner says so."),
-        "data": "Works today on free data: deed dates from Dallas, Tarrant and Collin owner records.",
+        "data": "Works today on free data: deed dates from Dallas, Tarrant, Collin and Denton owner records.",
         "free_today": True,
         "fields": {"min_ownership_years": 20,
                    "preferred_signals": ["FREE_AND_CLEAR", "ABSENTEE_OWNER", "TAX_DELINQUENT"]},

@@ -361,6 +361,8 @@ class PublicRecordSource(AcquisitionProvider):
 # a different window; the readers wrap to the top when a window runs past the end.
 ROTATE_TARRANT_POOL = 9000     # delinquent residential accounts on the roll (approx.)
 ROTATE_DCAD_POOL = 7000        # POOR / VERY POOR / UNDESIRABLE residences (approx.)
+ROTATE_FW_OPEN_POOL = 1_000_000     # wrapped by the reader to the open-case count
+ROTATE_DALLAS_TRW_POOL = 1_000_000  # wrapped again by the reader to the real pool size
 
 
 def rotation_skip(window: int, pool: int, today: Optional[datetime] = None) -> int:
@@ -427,6 +429,56 @@ class TarrantTaxRollSource(PublicRecordSource):
         return {"url": url, "members": names, "mode": oz.meta.get("mode"), "size": oz.meta.get("size")}
 
 
+class DallasTrwSource(PublicRecordSource):
+    scope, counties = "county", ("Dallas",)
+    key = "dallas_trw"
+    label = "Dallas County tax roll (TRW delinquency file)"
+    capabilities = (C.TAX,)
+    discovery = True
+    coverage = "Dallas County, TX - every account the county Tax Office collects for"
+    jurisdiction = "Dallas County, TX"
+    source_type = "County tax assessor-collector roll"
+    access_method = "Bulk fixed-width file (weekly zip, free), read with HTTP byte ranges"
+    public_url = "https://www.dallascounty.org/departments/tax/tax-roll.php"
+    refresh = "Published weekly"
+    freshness_days = 30
+    adapter_version = "dallas_trw/1"
+
+    def search(self, capability, query):
+        from app.services.evosense.sources.dallas_trw import TrwReader
+        out = Records()
+        if not _wants(query, "dallas"):
+            out.stats = {"skipped": "strategy does not include Dallas County"}
+            return out
+        limit = int(query.get("limit") or 25)
+        # The reader adds up the whole county block, so the window can move
+        # through every delinquent account: day-of-year x window, wrapped there.
+        res = TrwReader().discover(limit=limit,
+                                   min_due_cents=int(float(query.get("min_tax_due") or 250) * 100),
+                                   skip=rotation_skip(limit, ROTATE_DALLAS_TRW_POOL))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import base as SB_
+        from app.services.evosense.sources.dallas_trw import TrwReader, parse, COUNTY_UNIT
+        url = TrwReader().locate()
+        oz = SB_.open_zip(self.key, url, allow_download=False)
+        try:
+            names = oz.zip.namelist()
+            member = next((n for n in names if "flat404" in n.lower()), None)
+            if member is None:
+                raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "flat404 member missing from the TRW zip")
+            first = parse(next(SB_.text_lines(oz.zip, member)))
+            if not first["jurisdiction"].isdigit() or not first["year"].isdigit():
+                raise SB_.SourceError(SB_.SOURCE_FORMAT_CHANGED, "TRW line does not match layout TRW-02")
+        finally:
+            oz.close()
+        return {"url": url, "members": names, "mode": oz.meta.get("mode"), "size": oz.meta.get("size"),
+                "county_unit": COUNTY_UNIT}
+
+
 class TadSource(PublicRecordSource):
     scope, counties = "county", ("Tarrant",)
     key = "tad"
@@ -443,13 +495,20 @@ class TadSource(PublicRecordSource):
     adapter_version = "tad_property_data/2"
 
     def applies(self, target):
-        return (target.get("county") or "").lower() == "tarrant" and bool(target.get("parcel_apn"))
+        if (target.get("county") or "").lower() != "tarrant":
+            return False
+        # No account number: only a Fort Worth house, matched by its exact situs address.
+        return bool(target.get("parcel_apn")) or (
+            bool(target.get("street_address")) and (target.get("city") or "").lower() == "fort worth")
 
     def lookup_many(self, targets):
-        from app.services.evosense.sources.tarrant import TadReader, apn
+        from app.services.evosense.sources.tarrant import TadReader, apn, _norm_addr
         by_apn = {apn(t["parcel_apn"]): t["id"] for t in targets if t.get("parcel_apn")}
-        res = TadReader().lookup_many(list(by_apn))
+        by_addr = {_norm_addr(t["street_address"]): t["id"] for t in targets
+                   if not t.get("parcel_apn") and t.get("street_address")}
+        res = TadReader().lookup_many(list(by_apn), addresses=list(by_addr))
         results = {tid: res["records"].get(a) for a, tid in by_apn.items()}
+        results.update({tid: (res.get("by_address") or {}).get(a) for a, tid in by_addr.items()})
         return {"results": results, "errors": {}, "stats": res["stats"]}
 
     def verify(self):
@@ -652,6 +711,39 @@ class CensusGeocoderSource(PublicRecordSource):
         from app.services.evosense.sources.census import CensusGeocoder
         res = CensusGeocoder().geocode("100 E Weatherford St", "Fort Worth", "TX", None, "Tarrant")
         return {"matches": res["matches"]}
+
+
+class FortWorthOpenCasesSource(PublicRecordSource):
+    scope, counties, scope_name = "city", ("Tarrant",), "City of Fort Worth"
+    key = "fw_open_cases"
+    label = "Fort Worth open code cases (substandard, neglect, high grass)"
+    capabilities = (C.CODE_VIOLATION,)
+    discovery = True
+    coverage = "City of Fort Worth, TX - open city code cases of distress types"
+    jurisdiction = "City of Fort Worth, TX"
+    source_type = "City code-enforcement case table (open data)"
+    access_method = "Public ArcGIS feature service query"
+    public_url = "https://data.fortworthtexas.gov/"
+    refresh = "Updated daily by the city"
+    freshness_days = 30
+    adapter_version = "fw_open_cases/1"
+
+    def search(self, capability, query):
+        from app.services.evosense.sources import fortworth as FW
+        out = Records()
+        if not _wants(query, "tarrant"):
+            out.stats = {"skipped": "strategy does not include Tarrant County (Fort Worth)"}
+            return out
+        limit = int(query.get("limit") or 25)
+        res = FW.discover(limit, skip=rotation_skip(limit, ROTATE_FW_OPEN_POOL))
+        out.extend(res["records"])
+        out.stats, out.source_url = res["stats"], res["source_url"]
+        return out
+
+    def verify(self):
+        from app.services.evosense.sources import fortworth as FW
+        res = FW.discover(1)
+        return {"url": FW.LAYER, "open_cases": res["stats"].get("open_cases")}
 
 
 class FortWorthCodeSource(PublicRecordSource):
@@ -879,8 +971,8 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     SandboxPropertyRecords(), SandboxVacancy(), SandboxTaxRoll(), SandboxPublicRecords(),
     SandboxSkipTrace(), SandboxSkipTraceBackup(), SandboxPhoneValidation(),
     ManualSource(), CsvImportSource(),
-    TarrantTaxRollSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), CensusGeocoderSource(),
-    FortWorthCodeSource(), Dallas311Source(), LgbsTaxSaleSource(),
+    TarrantTaxRollSource(), DallasTrwSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), CensusGeocoderSource(),
+    FortWorthCodeSource(), FortWorthOpenCasesSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
     RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
 )}
