@@ -543,15 +543,28 @@ class DcadSource(PublicRecordSource):
     lookup_capability = C.ASSESSOR
 
     def applies(self, target):
-        # Lookup by account for a Dallas property another source found.
-        return (target.get("county") or "").lower() == "dallas" and bool(target.get("parcel_apn"))
+        # Lookup by account for a Dallas property another source found; with no
+        # account (a clerk posting, an imported list), by its exact situs address.
+        if (target.get("county") or "").lower() != "dallas":
+            return False
+        return bool(target.get("parcel_apn")) or bool(target.get("street_address"))
 
     def lookup_many(self, targets):
         from app.services.evosense.sources.dallas import DcadReader
+        reader = DcadReader()
         by_acct = {(t["parcel_apn"] or "").strip(): t["id"] for t in targets if t.get("parcel_apn")}
-        res = DcadReader().lookup_many(list(by_acct))
-        return {"results": {tid: res["records"].get(a) for a, tid in by_acct.items()},
-                "errors": {}, "stats": res["stats"]}
+        need = {t["id"]: dict(t) for t in targets if not t.get("parcel_apn") and t.get("street_address")}
+        stats = {}
+        if need:
+            found = reader.accounts_for_addresses(need)
+            stats["address"] = found["stats"]
+            for tid, acct in found["accounts"].items():
+                by_acct.setdefault(acct, tid)
+        res = reader.lookup_many(list(by_acct))
+        stats.update(res["stats"])
+        results = {tid: res["records"].get(a) for a, tid in by_acct.items()}
+        results.update({tid: None for tid in need if tid not in results})
+        return {"results": results, "errors": {}, "stats": stats}
 
     def search(self, capability, query):
         from app.services.evosense.sources.dallas import DcadReader

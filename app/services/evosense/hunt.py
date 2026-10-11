@@ -245,6 +245,15 @@ def _hunt_body(db, org_id, strategy, run, ctl, counts, finish, *, user, max_prop
 
     if touched:
         free_lookups(db, org_id, strategy, run, list(touched.values()), counts)
+    backlog = lookup_backlog(db, org_id, exclude=set(touched))
+    if backlog:
+        # Houses that arrived with no owner (an imported clerk list): each hunt
+        # gives the free county lookups another pass at them.
+        counts["lookup_backlog"] = len(backlog)
+        free_lookups(db, org_id, strategy, run, backlog, counts)
+        for prop in backlog:
+            EV.rescore(db, prop, EV.strategy_for(db, prop))
+        db.commit()
 
     for prop in touched.values():
         if prop.best_strategy_id and prop.best_strategy_id != strategy.id:
@@ -331,6 +340,23 @@ def _lookup_decision(db, prop, strategy, provider, cap, decision, reason, outcom
         estimated_cost_cents=0, outcome=outcome, decided_by="engine")
     db.add(row)
     return row
+
+
+BACKLOG_LIMIT = 150
+
+
+def lookup_backlog(db, org_id: str, exclude=(), limit: int = BACKLOG_LIMIT) -> List[EvoSenseProperty]:
+    """Recent properties in a county with a free address lookup that still have
+    no account number - newest first. The lookups' own freshness rule keeps a
+    property that was just looked up from being looked up again."""
+    q = (db.query(EvoSenseProperty)
+         .filter(EvoSenseProperty.organization_id == org_id,
+                 EvoSenseProperty.parcel_apn.is_(None),
+                 EvoSenseProperty.street_address.isnot(None),
+                 EvoSenseProperty.archived_at.is_(None),
+                 EvoSenseProperty.county.in_(("Dallas", "Tarrant")))
+         .order_by(EvoSenseProperty.discovered_at.desc()))
+    return [p for p in q.limit(limit + len(exclude or ())).all() if p.id not in (exclude or ())][:limit]
 
 
 def free_lookups(db, org_id, strategy, run, props: List[EvoSenseProperty], counts) -> None:
