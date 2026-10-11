@@ -285,7 +285,8 @@ STARTERS = {
         "description": "Houses with unpaid property taxes or a tax lawsuit.",
         "data": "Works today on free data: county tax-sale lists (9 DFW counties) and the Tarrant and Dallas County tax rolls.",
         "free_today": True,
-        "fields": {"preferred_signals": ["TAX_DELINQUENT", "TAX_SUIT", "LIEN"]},
+        "fields": {"preferred_signals": ["TAX_DELINQUENT", "TAX_SUIT", "LIEN"],
+                   "provider_preferences": {"discovery": ["TAX"]}},
     },
     "tired_landlord": {
         "name": "Tired Landlord",
@@ -295,7 +296,8 @@ STARTERS = {
         "fields": {"owner_geography": "absentee", "min_ownership_years": 10,
                    "occupancy_preferences": ["non_owner_occupied"],
                    "preferred_signals": ["ABSENTEE_OWNER", "OUT_OF_STATE_OWNER", "TIRED_LANDLORD",
-                                         "CODE_COMPLAINT", "CODE_VIOLATION", "TAX_DELINQUENT"]},
+                                         "CODE_COMPLAINT", "CODE_VIOLATION", "TAX_DELINQUENT"],
+                   "provider_preferences": {"discovery": ["collin_cad", "denton_gis", "TAX"]}},
     },
     "problem_property": {
         "name": "Problem Property",
@@ -304,7 +306,8 @@ STARTERS = {
         "free_today": True,
         "fields": {"counties": ["Dallas", "Tarrant"],
                    "preferred_signals": ["CODE_VIOLATION", "CODE_COMPLAINT", "CDU_POOR",
-                                         "DISTRESSED_CONDITION", "VACANT"]},
+                                         "DISTRESSED_CONDITION", "VACANT"],
+                   "provider_preferences": {"discovery": ["CODE_VIOLATION", "VACANCY", "dcad"]}},
     },
     "long_time_owner": {
         "name": "Long-Time Owner",
@@ -313,7 +316,8 @@ STARTERS = {
         "data": "Works today on free data: deed dates from Dallas, Tarrant, Collin and Denton owner records.",
         "free_today": True,
         "fields": {"min_ownership_years": 20,
-                   "preferred_signals": ["FREE_AND_CLEAR", "ABSENTEE_OWNER", "TAX_DELINQUENT"]},
+                   "preferred_signals": ["FREE_AND_CLEAR", "ABSENTEE_OWNER", "TAX_DELINQUENT"],
+                   "provider_preferences": {"discovery": ["PROPERTY_SEARCH"]}},
     },
     "pre_foreclosure": {
         "name": "Pre-Foreclosure",
@@ -321,7 +325,8 @@ STARTERS = {
         "data": ("Fed by foreclosure-notice lists you import (Properties > Import list, list type "
                  "Foreclosure notices) - county postings, or a PropStream export if you ever have one."),
         "free_today": False,
-        "fields": {"preferred_signals": ["PRE_FORECLOSURE", "TAX_DELINQUENT", "VACANT"]},
+        "fields": {"preferred_signals": ["PRE_FORECLOSURE", "TAX_DELINQUENT", "VACANT"],
+                   "provider_preferences": {"discovery": ["FORECLOSURE"]}},
     },
     "probate": {
         "name": "Probate / Inherited",
@@ -329,7 +334,8 @@ STARTERS = {
                         "as an inheritance."),
         "data": "Fed by probate / estate lists you import (Properties > Import list), or a PropStream export.",
         "free_today": False,
-        "fields": {"preferred_signals": ["PROBATE", "ESTATE", "VACANT", "TAX_DELINQUENT"]},
+        "fields": {"preferred_signals": ["PROBATE", "ESTATE", "VACANT", "TAX_DELINQUENT"],
+                   "provider_preferences": {"discovery": ["PROBATE"]}},
     },
 }
 
