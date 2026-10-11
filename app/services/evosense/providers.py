@@ -748,6 +748,42 @@ class LgbsTaxSaleSource(PublicRecordSource):
         return {"dallas_listed": j["count"]}
 
 
+class TracerfyContactSource(AcquisitionProvider):
+    """Owner phone / email for EvoSense's automatic lookups - the SAME Tracerfy
+    provider the "Get phones & emails" button uses (wholesale_enrichment), so
+    there is one Tracerfy integration, one set of Do Not Call rules and one
+    set of paid-lookup limits. Do Not Call numbers never come back as a phone
+    to use. A miss is free; a find costs 5 credits ($0.10).
+
+    Every automatic lookup is ALSO held to the organization's Wholesale
+    Settings paid-lookup limits (per day / per month; 0 = off) and counted
+    against them - see enrichment.decide / execute."""
+    connector_kind = C.REAL
+    key = "tracerfy_contact"
+    label = "Tracerfy owner lookup"
+    capabilities = (C.CONTACT_ENRICHMENT,)
+    required_env = ("TRACERFY_API_TOKEN",)
+    costs = {C.CONTACT_ENRICHMENT: 10}
+    charge_on_miss = False
+    scope = "national"
+    coverage = "US owner lookup by property address (Tracerfy instant API)"
+    jurisdiction = "United States"
+    source_type = "Commercial data vendor (paid, per find)"
+    access_method = "Vendor REST API (TRACERFY_API_TOKEN)"
+    public_url = "https://www.tracerfy.com/skip-tracing-api-documentation/"
+    terms_note = "Paid per find. Results are evidence, not verified ownership."
+
+    def enrich(self, data):
+        res = WE.PROVIDERS["tracerfy"].lookup(data)
+        if res.status == WE.STATUS_NOT_CONFIGURED:
+            raise ProviderFailure("Tracerfy is not connected (TRACERFY_API_TOKEN).")
+        if res.status == WE.STATUS_FAILED:
+            if "slow down" in (res.message or ""):
+                raise ProviderRateLimited(900)
+            raise ProviderFailure(res.message or "Tracerfy failed")
+        return res
+
+
 class ManualOnlySource(AcquisitionProvider):
     """A real source EvoSense will not automate (no free bulk export, or a
     portal behind search forms / CAPTCHA). Fed through manual entry or CSV."""
@@ -831,7 +867,7 @@ PROVIDERS: Dict[str, AcquisitionProvider] = {p.key: p for p in (
     TarrantTaxRollSource(), TadSource(), DcadSource(), CollinCadSource(), DentonGisSource(), CensusGeocoderSource(),
     FortWorthCodeSource(), Dallas311Source(), LgbsTaxSaleSource(),
     DallasForeclosureManual(), DallasTaxManual(),
-    RentCastInterface(), RegridInterface(), AttomInterface(),
+    RentCastInterface(), RegridInterface(), AttomInterface(), TracerfyContactSource(),
 )}
 # Commercial vendor adapters: EVALUATION ONLY until Mike approves a vendor.
 from app.services.evosense.vendors import VENDOR_PROVIDERS  # noqa: E402

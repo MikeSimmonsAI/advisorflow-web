@@ -408,10 +408,15 @@ def attach_to(db, prop, provider, capability, rec, obs, rank, *, user=None, cost
         prop.situs_city_basis = basis or "%s situs record" % provider.key
     if rec.get("zip_code") and prop.zip_code and "-" in str(rec["zip_code"]) and "-" not in prop.zip_code:
         pass   # ZIP+4 from a feed does not replace a clean ZIP5
+    user_entered = C.jload(getattr(prop, "user_facts", None), {}) or {}
     for f in FACTS:
         v = rec.get(f)
         if f == "county" and v:
             v = re.sub(r"\s+county$", "", str(v).strip(), flags=re.I).title()
+        if f in user_entered and rank < RANK_HUMAN:
+            from app.services.evosense.user_facts import note_county_refresh
+            note_county_refresh(prop, f, v)        # the person's entry stands
+            continue
         _set_fact(prop, f, v, rank, provider.key, ranks)
     prop.fact_ranks = C.jdump(ranks)
     if prop.street_address:

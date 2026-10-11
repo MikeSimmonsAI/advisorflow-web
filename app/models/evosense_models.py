@@ -233,6 +233,10 @@ class EvoSenseProperty(Base):
 
     # physical
     property_type = Column(String, nullable=True)
+    # A PERSON'S OWN ENTRIES for building facts, kept apart from the county's:
+    # {field: {value, county_value, by_id, by_name, at}}. The field above holds the
+    # working value; the county value stays in the observations and here.
+    user_facts = Column(Text, nullable=True)
     bedrooms = Column(Numeric(5, 1), nullable=True)
     bathrooms = Column(Numeric(5, 1), nullable=True)          # FULL baths as the source counts them
     half_bathrooms = Column(Integer, nullable=True)           # half baths, kept apart (never folded in)

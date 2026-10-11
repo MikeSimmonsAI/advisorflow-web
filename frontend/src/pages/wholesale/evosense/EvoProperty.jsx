@@ -44,8 +44,32 @@ function PlaceLinks({ links }) {
 
 /** Every public-record fact on file for this property, each with where it came
  *  from. Unknown stays "not on record" - nothing is filled in by guess. */
-function PublicRecord({ p, f, owners, links }) {
+function PublicRecord({ p, f, owners, links, propertyId, busy, act }) {
   const phys = f.physical || {}
+  const mine = f.entered_by_you || {}
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState({})
+  const yours = (k, shown) => (mine[k] ? (
+    <>{shown} <span className="evo-tag evo-tag--info" title={`Entered by ${mine[k].by_name || 'you'}${mine[k].at ? ` on ${shortDate(mine[k].at)}` : ''}`}>Entered by you</span>
+      <span className="evo-muted evo-small" style={{ display: 'block', fontWeight: 400 }}>County record: {mine[k].county_value ?? 'none'}</span></>
+  ) : shown)
+  function startEdit() {
+    setForm({ bedrooms: phys.bedrooms ?? '', bathrooms: phys.bathrooms ?? '', square_feet: phys.square_feet ?? '', year_built: phys.year_built ?? '' })
+    setEditing(true)
+  }
+  async function save() {
+    const body = {}
+    for (const k of ['bedrooms', 'bathrooms', 'square_feet', 'year_built']) {
+      const was = phys[k] ?? ''
+      if (String(form[k]) !== String(was)) body[k] = form[k] === '' ? null : Number(form[k])
+    }
+    if (!Object.keys(body).length) { setEditing(false); return }
+    const r = await act(() => api.patch(`/wholesale/evosense/properties/${propertyId}/facts`, body), () => 'Saved. The county record is kept as it was.')
+    if (r) setEditing(false)
+  }
+  async function revert(k) {
+    await act(() => api.patch(`/wholesale/evosense/properties/${propertyId}/facts`, { [k]: null }), () => 'Back to the county record.')
+  }
   const ap = f.appraisal || null
   const none = <span className="evo-muted">not on record</span>
   const num = (v, suffix = '') => (v === null || v === undefined || v === '' ? none : `${Number(v).toLocaleString()}${suffix}`)
@@ -59,11 +83,11 @@ function PublicRecord({ p, f, owners, links }) {
     ['City / ZIP', p.city || p.zip_code ? [p.city, p.zip_code].filter(Boolean).join(' ') : none],
     ['Property type', phys.property_type ? humanize(phys.property_type)
       : (recordFacts(p, f, owners).landOnly ? 'Vacant land (building valued at $0)' : none)],
-    ['Bedrooms', num(phys.bedrooms)],
-    ['Full baths', num(phys.bathrooms)],
+    ['Bedrooms', yours('bedrooms', num(phys.bedrooms))],
+    ['Full baths', yours('bathrooms', num(phys.bathrooms))],
     ['Half baths', phys.half_bathrooms != null ? num(phys.half_bathrooms) : none],
-    ['Living area', num(phys.square_feet, ' sq ft')],
-    ['Year built', phys.year_built ? `${phys.year_built}${age}` : none],
+    ['Living area', yours('square_feet', num(phys.square_feet, ' sq ft'))],
+    ['Year built', yours('year_built', phys.year_built ? `${phys.year_built}${age}` : none)],
     ['Tax value (total)', ap ? `${money(ap.value)} · ${ap.year || ''}` : none],
     ['Land value', ap && ap.land != null ? money(ap.land) : none],
     ['Improvement value', ap && ap.improvements != null ? money(ap.improvements) : none],
@@ -82,6 +106,28 @@ function PublicRecord({ p, f, owners, links }) {
           <div key={k}><dt className="evo-muted evo-small">{k}</dt><dd style={{ margin: 0, fontWeight: 600 }}>{v}</dd></div>
         ))}
       </dl>
+      {propertyId && act ? (
+        editing ? (
+          <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+            {[['bedrooms', 'Bedrooms', '1'], ['bathrooms', 'Full baths', '0.5'], ['square_feet', 'Living area (sq ft)', '1'], ['year_built', 'Year built', '1']].map(([k, label, step]) => (
+              <label key={k} className="evo-field" style={{ maxWidth: 150 }}><span className="evo-field__label">{label}</span>
+                <input className="evo-input" type="number" step={step} value={form[k]} disabled={busy}
+                       onChange={(e) => setForm((x) => ({ ...x, [k]: e.target.value }))} /></label>
+            ))}
+            <button type="button" className="evo-btn evo-btn--primary evo-btn--sm" disabled={busy} onClick={save}>Save</button>
+            <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => setEditing(false)}>Cancel</button>
+            <span className="evo-muted evo-small" style={{ flexBasis: '100%' }}>Your numbers are kept separate. The county record is never changed, and a county refresh will not overwrite what you enter.</span>
+          </div>
+        ) : (
+          <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy} onClick={startEdit}>Edit beds, baths, size, year</button>
+            {Object.keys(mine).map((k) => (
+              <button key={k} type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => revert(k)}>
+                Use county {k === 'square_feet' ? 'living area' : k === 'year_built' ? 'year built' : k}</button>
+            ))}
+          </div>
+        )
+      ) : null}
     </Panel>
   )
 }
@@ -291,7 +337,7 @@ export default function EvoProperty() {
         </div>
       </section>
 
-      <PublicRecord p={p} f={f} owners={d.owners || []} links={d.links} />
+      <PublicRecord p={p} f={f} owners={d.owners || []} links={d.links} propertyId={propertyId} busy={busy} act={act} />
 
       {(d.review_flags || []).length ? (
         <Alert kind="warn">

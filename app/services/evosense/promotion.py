@@ -31,6 +31,21 @@ from app.services.evosense import contacts as CT
 from app.services.evosense import signals as SIG
 
 
+def _entered_note(prop) -> str:
+    """Which building facts a person entered (vs the county record)."""
+    from app.services.evosense.user_facts import EDITABLE, entries
+    mine = entries(prop)
+    if not mine:
+        return ""
+    parts = []
+    for f, e in mine.items():
+        if f in EDITABLE:
+            parts.append("%s %s (entered by %s; county record: %s)" % (
+                EDITABLE[f][2], e.get("value"), e.get("by_name") or "a person",
+                e.get("county_value") if e.get("county_value") is not None else "none"))
+    return "Building facts entered on the acquisition page: %s. " % "; ".join(parts)
+
+
 def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
     if user is None:
         raise HTTPException(status_code=403, detail="Only a person can promote an opportunity.")
@@ -69,8 +84,8 @@ def promote(db, org_id: str, prop, user, *, note: str = None) -> Dict[str, Any]:
         "occupancy_status": prop.occupancy,
         "acquisition_source": "evosense",
         "source_detail": "EvoSense discovery %s" % prop.id,
-        "notes": "Found by EvoSense. Signals: %s. %s%s" % (
-            ", ".join(s["label"] for s in stacked) or "none", tax_note,
+        "notes": "Found by EvoSense. Signals: %s. %s%s%s" % (
+            ", ".join(s["label"] for s in stacked) or "none", tax_note, _entered_note(prop),
             "SANDBOX DATA — not live." if prop.is_test else ""),
         "is_test": bool(prop.is_test),
         "test_note": "EvoSense sandbox promotion" if prop.is_test else None,

@@ -212,6 +212,11 @@ def decide(db, prop: EvoSenseProperty, strategy, *, user=None,
                               % C.money(min(r[2] for r in routes))], user=user)
         routes = free
     provider, cfg, cost = routes[0]
+    if provider.key == "tracerfy_contact":
+        stop = tracerfy_gate(db, prop, approved=approved)
+        if stop:
+            return _decision(db, prop, strategy, owner, stop[0], [stop[1]], provider=provider, cost=cost,
+                             user=user)
     if cost == 0:
         return _decision(db, prop, strategy, owner, C.D_FREE,
                          ["%s answers at no cost." % provider.label], provider=provider, cost=0, user=user)
@@ -252,6 +257,46 @@ def decide(db, prop: EvoSenseProperty, strategy, *, user=None,
                       % (prop.opportunity_score, provider.label, C.money(cost),
                          C.money(left) if left is not None else "unlimited")],
                      provider=provider, cost=cost, user=user)
+
+
+AUTO_LOOKUP_MIN_SCORE = 65
+
+
+def tracerfy_gate(db, prop, *, approved: bool = False):
+    """(decision, reason) when an automatic Tracerfy lookup must not run, else None.
+    Only properties scoring 65+ (unless a person approved it), and only inside
+    the organization's Wholesale Settings paid-lookup limits - where 0 means OFF,
+    never unlimited."""
+    if not approved and (prop.opportunity_score or 0) < AUTO_LOOKUP_MIN_SCORE:
+        return (C.D_INSUFFICIENT, "Automatic paid lookups start at Property Opportunity %s; this one is %s."
+                % (AUTO_LOOKUP_MIN_SCORE, prop.opportunity_score if prop.opportunity_score is not None
+                   else "not scored"))
+    from app.services import wholesale_service as WS
+    settings = WS.resolve_settings(db, prop.organization_id, commit=False)
+    refusal = WE.admit(db, prop.organization_id, WE.PROVIDERS["tracerfy"], settings, requested=1)
+    if refusal:
+        return (C.D_BUDGET, "Wholesale Settings paid-lookup limit: " + refusal)
+    return None
+
+
+def record_wholesale_lookup(db, prop, owner, result, *, cost_cents: int = 0, error: str = None) -> None:
+    """Count an automatic Tracerfy lookup against the organization's Wholesale
+    paid-lookup limits, exactly like a lookup from the Get phones & emails button."""
+    import json as _json
+    from datetime import datetime as _dt
+    from app.models.wholesale_models import ACTOR_AUTOMATION, WholesaleEnrichmentRequest
+    data = _input_for(prop, owner)
+    inputs = _json.loads(data.to_json())
+    inputs["evosense_property_id"] = prop.id
+    row = WholesaleEnrichmentRequest(
+        organization_id=prop.organization_id, property_id=None, provider="tracerfy",
+        requested_by_actor=ACTOR_AUTOMATION, inputs=_json.dumps(inputs),
+        status=(result.status if result is not None else WE.STATUS_FAILED),
+        result=result.to_json() if result is not None else None,
+        billable=bool(result is not None and result.billable), cost_cents=cost_cents,
+        error=error, completed_at=_dt.utcnow())
+    db.add(row)
+    db.flush()
 
 
 def _input_for(prop, owner) -> WE.EnrichmentInput:
@@ -312,6 +357,8 @@ def execute(db, prop, strategy, decision: EvoSenseEnrichmentDecision, *, user=No
             break
         try:
             result = provider.enrich(_input_for(prop, owner))
+            if provider.key == "tracerfy_contact":
+                record_wholesale_lookup(db, prop, owner, result, cost_cents=result.cost_cents or 0)
         except PV.ProviderRateLimited as exc:
             B.refund(db, entry)
             PV.record_failure(cfg, "rate limited", rate_limited_for=exc.retry_after_seconds,
@@ -320,6 +367,8 @@ def execute(db, prop, strategy, decision: EvoSenseEnrichmentDecision, *, user=No
             continue
         except (PV.ProviderTimeout, PV.ProviderFailure, Exception) as exc:  # noqa: BLE001
             B.refund(db, entry)
+            if provider.key == "tracerfy_contact":
+                record_wholesale_lookup(db, prop, owner, None, error="%s: %s" % (type(exc).__name__, str(exc)[:160]))
             PV.record_failure(cfg, "%s: %s" % (type(exc).__name__, str(exc)[:160]),
                               capability=C.CONTACT_ENRICHMENT)
             attempts.append({"provider": provider.key, "result": "failed",
@@ -331,12 +380,17 @@ def execute(db, prop, strategy, decision: EvoSenseEnrichmentDecision, *, user=No
             continue
         PV.record_success(cfg, capability=C.CONTACT_ENRICHMENT)
         if result.status == WE.STATUS_SUCCEEDED and (result.phones or result.emails):
-            B.charge(db, entry, success=True)
+            if result.cost_cents is not None and getattr(provider, "charge_on_miss", True) is False:
+                B.settle(db, entry, result.cost_cents, success=True)     # what the vendor billed
+            else:
+                B.charge(db, entry, success=True)
             touched = CT.apply_result(db, owner, result, provider)
             for cp in touched:
                 if entry.contact_point_id is None:
                     entry.contact_point_id = cp.id
-            attempts.append({"provider": provider.key, "result": "found", "charged": cost,
+            attempts.append({"provider": provider.key, "result": "found",
+                             "charged": result.cost_cents if (result.cost_cents is not None and
+                                                              getattr(provider, "charge_on_miss", True) is False) else cost,
                              "contacts": len(touched)})
             outcome = "found"
             decision.provider_key = provider.key
@@ -345,9 +399,14 @@ def execute(db, prop, strategy, decision: EvoSenseEnrichmentDecision, *, user=No
         # NO MATCH: the provider answered and found nobody. That is a billable
         # answer (vendors charge for it) and it is NOT a failure: a fallback is
         # for a provider that could not answer, not a second paid opinion.
-        B.charge(db, entry, success=False)
+        if getattr(provider, "charge_on_miss", True) is False:
+            B.settle(db, entry, result.cost_cents or 0, success=False)   # a miss is free
+        else:
+            B.charge(db, entry, success=False)
         owner.last_enriched_at = C.now()
-        attempts.append({"provider": provider.key, "result": "no_match", "charged": cost})
+        attempts.append({"provider": provider.key, "result": "no_match",
+                         "charged": (result.cost_cents or 0) if getattr(provider, "charge_on_miss", True) is False
+                         else cost})
         outcome = "no_match"
         decision.provider_key = provider.key
         decision.ledger_id = entry.id
