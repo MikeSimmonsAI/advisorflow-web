@@ -137,7 +137,7 @@ class CollinReader:
         day of year) moves the window so successive hunts reach new owners."""
         today = today or datetime.utcnow()
         cut = (today - timedelta(days=365 * max(1, min_years))).strftime("%Y-%m-%d")
-        where = ["deedeffdate < %s" % _q(cut)]
+        where = ["deedeffdate < %s" % _q(cut), "situsbldgnum IS NOT NULL"]
         if houses_only:
             where += ["propcategorycode = 'A'", "currvalimprv > 0"]
         if absentee:

@@ -67,12 +67,13 @@ class DcadReader:
     def locate(self, year: Optional[int] = None) -> str:
         return DCAD_BASE + urllib.parse.quote(DCAD_PATH.format(year=year or datetime.utcnow().year))
 
-    def discover(self, *, limit: int, candidate_factor: int = 3) -> Dict[str, Any]:
+    def discover(self, *, limit: int, candidate_factor: int = 3, skip: int = 0) -> Dict[str, Any]:
         url = self.locate()
         oz = B.open_zip("dcad", url)
         stats: Counter = Counter()
         try:
             cands: Dict[str, Dict[str, Any]] = {}
+            head: Dict[str, Dict[str, Any]] = {}
             want = max(limit * candidate_factor, limit)
             for header, vals in _csv_rows(oz.zip, "RES_DETAIL.CSV"):
                 if "CDU_RATING_DESC" not in header:
@@ -81,9 +82,18 @@ class DcadReader:
                 stats["res_scanned"] += 1
                 cdu = (row.get("CDU_RATING_DESC") or "").strip().upper()
                 if cdu in DISTRESSED_CDU and row["ACCOUNT_NUM"] not in cands:
+                    stats["condition_seen"] += 1
+                    if stats["condition_seen"] <= skip:      # rotation: a different window each hunt
+                        if len(head) < want:
+                            head[row["ACCOUNT_NUM"]] = {"res": row}
+                        continue
                     cands[row["ACCOUNT_NUM"]] = {"res": row}
                     if len(cands) >= want:
                         break
+            for a, c0 in head.items():                         # wrap when the file ran out first
+                if len(cands) >= want:
+                    break
+                cands.setdefault(a, c0)
             stats["condition_candidates"] = len(cands)
             self._join(oz.zip, "ACCOUNT_APPRL_YEAR.CSV", cands, "val", stats)
             # single-family only, with a value
