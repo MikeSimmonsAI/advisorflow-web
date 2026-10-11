@@ -248,16 +248,21 @@ def test_no_provider_means_no_signature_and_the_screen_is_told_why(
                                                "email": "d@example.com"}]}))
 
     assert result["sent"] is False
-    assert result["status"] == esign.SEND_MANUAL
+    # An UPLOADED form cannot be carried by the built-in signer (it signs the
+    # ready-made contracts it generates), so the honest answer is still "not
+    # from here" - and nothing moves.
+    assert result["status"] in (esign.SEND_MANUAL, esign.SEND_FAILED)
     assert result["external_ref"] is None
-    assert "No e-signature provider is connected" in result["message"]
+    assert "upload the signed copy" in result["message"]
 
     # THE POINT OF THIS TEST. The document did not move. A product that set
     # `sent` here would be telling its own audit trail that a contract left the
     # building when nothing did.
     assert result["document_status"] == esign.STATUS_DRAFT
     fresh = ok(client.get("/wholesale/documents/lifecycle", headers=auth_headers))
-    assert fresh["signature"]["electronic_signature"] is False
+    # Electronic signing exists (the built-in signer), but only for the
+    # contracts it generates - which is why this uploaded form did not move.
+    assert fresh["signature"]["electronic_signature"] is True
 
 
 def test_the_manual_provider_mints_nothing(client, auth_headers):
@@ -277,12 +282,13 @@ def test_an_unknown_provider_falls_back_instead_of_breaking_the_screen():
     assert esign.get_provider("some-vendor-we-removed").key == "manual"
 
 
-def test_capability_refuses_to_claim_an_electronic_signature():
+def test_capability_names_the_built_in_signer_and_never_overclaims():
     cap = esign.capability()
-    assert cap["electronic_signature"] is False
-    assert "signed outside this system" in cap["reason"].lower()
-    # Every listed provider is honest about whether it can carry a signature.
-    # An electronic provider may be LISTED (DocuSeal), but without its key it is
-    # not connected and nothing claims it can sign.
-    assert all(not (p["electronic"] and p["configured"]) for p in cap["providers"])
-    assert {p["key"] for p in cap["providers"] if p["electronic"]} <= {"docuseal"}
+    # EvoSys e-signature is built in, so electronic signing is available...
+    assert cap["electronic_signature"] is True
+    keys = {p["key"]: p for p in cap["providers"]}
+    assert keys["evosys"]["electronic"] and keys["evosys"]["configured"]
+    # ...the manual path still exists and never claims to sign anything...
+    assert keys["manual"]["electronic"] is False
+    # ...and DocuSeal is listed but not connected without its key.
+    assert keys["docuseal"]["configured"] is False

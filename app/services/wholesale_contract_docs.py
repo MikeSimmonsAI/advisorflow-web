@@ -39,8 +39,8 @@ ROLE_ASSIGNOR, ROLE_ASSIGNEE = "Assignor", "Assignee"
 
 # The deal's document type for each kind (WholesaleDocument.doc_type vocabulary).
 DOC_TYPE = {"purchase_agreement": "purchase_contract",
-            "assignment_agreement": "assignment",
-            "assignee_disclosure": "disclosure"}
+            "assignment_agreement": "assignment_agreement",
+            "assignee_disclosure": "buyer_doc"}
 
 KINDS: Dict[str, Dict[str, Any]] = {
     "purchase_agreement": {

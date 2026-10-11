@@ -197,7 +197,7 @@ function ReadyContracts({ deal, onSent }) {
     setBusy(true); setError(null); setNotice(null)
     try {
       const r = await api.post(`/wholesale/deals/${deal.id}/contracts/${kind}/send`, { values: vals })
-      if (r.sent) { setNotice(`${r.message} You'll see it under Documents; it moves to Signed on its own.`); onSent && onSent() }
+      if (r.sent) { setNotice(`${r.message} Track it under Documents.`); onSent && onSent() }
       else setError(r.message)
     } catch (e) { setError(errText(e)) }
     finally { setBusy(false) }
@@ -250,13 +250,14 @@ function ReadyContracts({ deal, onSent }) {
             <button className="btn btn--secondary btn--sm" disabled={busy} onClick={printIt}>Print / save PDF</button>
             <button className="btn btn--primary btn--sm" disabled={busy || !sig.electronic || blocked.length > 0}
                     onClick={send}
-                    title={!sig.electronic ? (sig.reason || 'Connect DocuSeal to send for signature')
-                      : blocked.length ? `Missing: ${blocked.join(', ')}` : 'Email it to the signers in order'}>
+                    title={!sig.electronic ? (sig.reason || 'E-signing is not available')
+                      : blocked.length ? `Missing: ${blocked.join(', ')}`
+                      : 'Each signer gets a private link by email, confirms a code, and signs - in order'}>
               Send for e-signature</button>
           </div>
           {blocked.length ? <div className="ws-hint">Still needed before sending: {blocked.join(' · ')}</div> : null}
           {!sig.electronic ? (
-            <div className="ws-hint">To sign electronically, add a DocuSeal API key in Render (WHOLESALE_DOCUSEAL_API_KEY). Until then, print it and upload the signed copy under Documents.</div>
+            <div className="ws-hint">E-signing is not available right now. Print it and upload the signed copy under Documents.</div>
           ) : null}
           <iframe title="Contract preview" srcDoc={pv.html} sandbox=""
                   style={{ width: '100%', height: 560, border: '1px solid #ddd', borderRadius: 8, background: '#fff', marginTop: 8 }} />

@@ -285,6 +285,7 @@ import app.models.energy_models  # noqa: F401  (imported for side effects)
 import app.models.push_models  # noqa: F401  (push_subscriptions, push_events â€” web push)
 import app.models.idempotency_models  # noqa: F401  (idempotency_keys - database-level at-most-once)
 import app.models.conversation_models  # noqa: F401  (conversation_memory_items, conversation_states)
+import app.models.esign_models  # noqa: F401  (esign_envelopes, esign_signers, esign_events - EvoSys e-signature)
 """
 Model registry - the one place every SQLAlchemy model module is imported.
 
@@ -559,3 +560,4 @@ import app.models.push_models  # noqa: F401  (push_subscriptions, push_events â€
 import app.models.idempotency_models  # noqa: F401  (idempotency_keys - database-level at-most-once)
 import app.models.conversation_models  # noqa: F401  (conversation_memory_items, conversation_states)
 import app.models.program_models  # noqa: F401  (outreach programs: location profiles, source records, responses, assets)
+import app.models.esign_models  # noqa: F401  (esign_envelopes, esign_signers, esign_events - EvoSys e-signature)

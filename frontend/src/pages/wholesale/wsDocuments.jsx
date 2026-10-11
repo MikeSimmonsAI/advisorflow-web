@@ -19,7 +19,7 @@
  * provider would report from is named and visibly empty rather than mocked up
  * as though it were working.
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { errText, fmtDate, fmtLabel, fmtWhen, Note, Why } from './wsShared'
 import { UploadZone, ConfirmDelete, openFile } from './wsFiles'
@@ -115,6 +115,76 @@ function Held({ doc }) {
     )
   }
   return <span className="ws-muted">Nothing attached</span>
+}
+
+
+/* EVOSYS E-SIGNATURE PROGRESS: who has signed, who is next, and the sender's
+ * three moves - resend the link, withdraw, download the sealed PDF. */
+const SIGNER_LABEL = { waiting: 'waiting', sent: 'link sent', viewed: 'opened', verified: 'verified',
+  signed: 'signed', declined: 'declined' }
+
+function SigningProgress({ doc, act, busy }) {
+  const [env, setEnv] = useState(null)
+  const [open, setOpen] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const load = useCallback(async () => {
+    try { setEnv(await api.get(`/wholesale/documents/${doc.id}/esign`)); setErr(null) }
+    catch (e) { setErr(errText(e)) }
+  }, [doc.id])
+  useEffect(() => { load() }, [load, doc.status])
+
+  async function download() {
+    try {
+      const blob = await api.get(`/wholesale/documents/${doc.id}/signed.pdf`, { asBlob: true })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = (doc.title || 'signed') + '.pdf'; a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 4000)
+    } catch (e) { setErr(errText(e)) }
+  }
+
+  if (err) return <div className="ws-comp__sub ws-error">{err}</div>
+  if (!env) return null
+  const out = env.status === 'sent'
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div className="ws-comp__sub">
+        {env.status === 'completed' ? 'Everyone signed · sealed PDF ready'
+          : env.status === 'sent' ? `Waiting on ${env.waiting_on}`
+          : env.status === 'declined' ? 'Declined' : env.status === 'voided' ? 'Withdrawn' : env.status}
+      </div>
+      <div className="ws-actions" style={{ flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+        {env.status === 'completed' ? (
+          <button className="btn btn--primary btn--sm" onClick={download}>Download signed PDF</button>
+        ) : null}
+        {out ? (
+          <button className="btn btn--secondary btn--sm" disabled={busy}
+                  onClick={async () => { await act(() => api.post(`/wholesale/documents/${doc.id}/esign/remind`, {}),
+                    'A fresh signing link was emailed.'); load() }}>Resend link</button>
+        ) : null}
+        {out ? (
+          <button className="btn btn--secondary btn--sm" disabled={busy}
+                  onClick={async () => {
+                    if (!window.confirm('Withdraw this document? The signing links stop working.')) return
+                    await act(() => api.post(`/wholesale/documents/${doc.id}/esign/void`, {}), 'Withdrawn.'); load()
+                  }}>Withdraw</button>
+        ) : null}
+        <button className="btn btn--secondary btn--sm" onClick={() => setOpen(!open)}>
+          {open ? 'Hide details' : 'Details'}</button>
+      </div>
+      {open ? (
+        <div className="ws-comp__sub" style={{ marginTop: 6 }}>
+          {env.signers.map((s) => (
+            <div key={s.role}><b>{s.role}</b> {s.name || s.email}: {SIGNER_LABEL[s.status] || s.status}
+              {s.signed_at ? ` · ${new Date(s.signed_at + (String(s.signed_at).endsWith('Z') ? '' : 'Z')).toLocaleString()}` : ''}
+              {s.decline_reason ? ` · "${s.decline_reason}"` : ''}</div>
+          ))}
+          {env.final_sha256 ? <div style={{ wordBreak: 'break-all' }}>Signed PDF fingerprint: {env.final_sha256}</div> : null}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 
@@ -231,7 +301,8 @@ function Row({ doc, busy, act, capability, onAttach, onDelete }) {
           {doc.signature_provider ? (
             <div className="ws-comp__sub">via {doc.signature_provider}</div>
           ) : null}
-          {doc.signature_provider && doc.signature_provider !== 'manual' && doc.external_ref
+          {doc.signature_provider === 'evosys' ? <SigningProgress doc={doc} act={act} busy={busy} /> : null}
+          {doc.signature_provider && !['manual', 'evosys'].includes(doc.signature_provider) && doc.external_ref
             && ['sent', 'viewed'].includes(doc.status_key || doc.status) ? (
             <button className="btn btn--secondary btn--sm" disabled={busy} style={{ marginTop: 4 }}
                     onClick={() => act(() => api.post(`/wholesale/documents/${doc.id}/signature-refresh`, {}),

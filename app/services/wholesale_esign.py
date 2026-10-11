@@ -433,22 +433,49 @@ def submission_outcome(sub: Dict[str, Any]) -> Dict[str, Any]:
                          "completed_at": s.get("completed_at")} for s in subs]}
 
 
+class EvoSysSignatureProvider(SignatureProvider):
+    """Signing built into the platform (app/services/evosys_esign.py): emailed
+    private link, one-time email code, e-sign consent, typed or drawn
+    signature, signing order, sealed PDF with a certificate page. No vendor,
+    no per-document fee. It needs the database and the sender, so the routes
+    call evosys_esign directly; `send` here only answers for documents it
+    cannot carry (an uploaded file rather than a generated contract)."""
+
+    key = "evosys"
+    label = "EvoSys e-signature"
+    electronic = True
+    builtin = True
+
+    def is_configured(self) -> bool:
+        return True
+
+    def send(self, req: SignatureRequest) -> SignatureResult:
+        return SignatureResult(
+            status=SEND_FAILED, provider=self.key,
+            message=("EvoSys e-signature sends the ready-made contracts (Contracts panel on the deal). "
+                     "For your own uploaded form, send it however you normally do and upload the signed copy."))
+
+
 PROVIDERS: Dict[str, SignatureProvider] = {
     ManualSignatureProvider.key: ManualSignatureProvider(),
+    EvoSysSignatureProvider.key: EvoSysSignatureProvider(),
     DocuSealProvider.key: DocuSealProvider(),
 }
 
 
 def active_provider(setting_key: Optional[str]) -> SignatureProvider:
-    """The org's chosen provider; when it is still the default ("manual") and
-    an electronic provider is connected on this deployment, that one - adding
-    the key IS the choice. An explicit non-manual setting always wins."""
-    if setting_key and setting_key != ManualSignatureProvider.key:
-        return get_provider(setting_key)
-    for p in PROVIDERS.values():
-        if p.electronic and p.is_configured():
+    """The org's chosen provider. An explicit setting other than the default
+    ("manual") wins - e.g. "docuseal" when its key is connected. Otherwise
+    EvoSys e-signature, which is always available."""
+    # A deployment may make another connected provider its default
+    # (WHOLESALE_ESIGN_DEFAULT=docuseal); an organization's own setting wins.
+    if not setting_key or setting_key == ManualSignatureProvider.key:
+        setting_key = os.environ.get("WHOLESALE_ESIGN_DEFAULT") or setting_key
+    if setting_key and setting_key not in (ManualSignatureProvider.key, EvoSysSignatureProvider.key):
+        p = get_provider(setting_key)
+        if p.is_configured():
             return p
-    return PROVIDERS[ManualSignatureProvider.key]
+    return PROVIDERS[EvoSysSignatureProvider.key]
 
 
 def get_provider(key: Optional[str]) -> SignatureProvider:
