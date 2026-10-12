@@ -13,6 +13,8 @@ in a review state:
                       "wrong person"
     LOCATION CONFLICT rows auto-linked as one person name two different
                       locations, so no single facility can speak for them
+    SOURCE STATUS     the customer's own record says Not Interested,
+                      Disqualified or Do Not Contact
 """
 import json
 from collections import defaultdict
@@ -22,6 +24,11 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.models.program_models import ProgramSourceRecord
+
+# The customer already said no (or the record was disqualified) in their
+# own system: never worked from here until a person releases it.
+DO_NOT_WORK_STATUSES = {"not interested", "disqualified", "do not contact", "dnc",
+                        "do not call", "deceased"}
 
 
 def review_reasons(rec: ProgramSourceRecord, conflict: bool = False) -> List[str]:
@@ -34,6 +41,9 @@ def review_reasons(rec: ProgramSourceRecord, conflict: bool = False) -> List[str
         out.append("DATA REVIEW")
     if conflict:
         out.append("LOCATION CONFLICT")
+    status = (rec.source_status or "").strip().lower()
+    if status in DO_NOT_WORK_STATUSES:
+        out.append("SOURCE STATUS: %s" % rec.source_status.strip())
     return out
 
 
