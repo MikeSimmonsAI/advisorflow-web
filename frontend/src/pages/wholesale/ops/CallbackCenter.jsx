@@ -13,6 +13,8 @@ import '../wholesale.css'
 import { Alert, EvoApp, Hero, Panel, Tag } from '../ds/ds'
 import '../ds/evo-pages.css'
 import { errText, fmtWhen } from '../wsShared'
+import BookAppointment from '../appts/BookAppointment'
+import { getBranding } from '../../../api/client'
 import './ops.css'
 
 const BUCKETS = [
@@ -26,6 +28,9 @@ function CallbackItem({ it, onDone }) {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [book, setBook] = useState(false)
+  const [booked, setBooked] = useState(null)
+  const canBook = !getBranding()?.wholesale_team?.field
   async function finish(kind) {
     setBusy(true); setErr('')
     const url = it.kind === 'followup'
@@ -60,8 +65,20 @@ function CallbackItem({ it, onDone }) {
           <div className="wso-row" style={{ marginTop: 8 }}>
             <button className="btn btn--primary" disabled={busy} onClick={() => finish('complete')}>Mark completed</button>
             <button className="btn btn--secondary" disabled={busy} onClick={() => finish('cancel')}>Cancel callback</button>
+            {canBook ? <button className="btn btn--secondary" onClick={() => setBook(true)}>Book a visit</button> : null}
           </div>
         </>
+      ) : null}
+      {booked ? <Alert kind="ok">Visit booked for {booked.local_date} at {booked.local_time}{booked.assigned_to_name ? ` with ${booked.assigned_to_name}` : ''}.</Alert> : null}
+      {canBook ? (
+        <BookAppointment open={book} onClose={() => setBook(false)} onBooked={setBooked}
+                         what={it.seller_name || it.address || 'Seller'}
+                         address={it.address || ''}
+                         link={{
+                           evosense_property_id: it.evosense_property_id || undefined,
+                           deal_id: it.deal_id || undefined, lead_id: it.lead_id || undefined,
+                           source: 'callback', source_ref: it.id,
+                         }} />
       ) : null}
       {err ? <Alert kind="warn">{err}</Alert> : null}
     </li>

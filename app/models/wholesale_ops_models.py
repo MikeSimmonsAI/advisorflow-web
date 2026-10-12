@@ -179,3 +179,49 @@ class WholesalePilotControl(Base):
     updated_by_id = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── FIELD APPOINTMENTS (build list #8-#10) ──────────────────────────────────
+#
+# A visit to a seller by someone on the Wholesale team. Booked from a property,
+# from the Callback Center, or by hand; assigned to one rep; shows up in that
+# rep's "today". Like the callback above it POINTS AT the seller (lead) and the
+# property - it never copies a phone number or consent. The address is the
+# place to drive to, kept so the rep's list still reads right if the property
+# record is edited later.
+
+APPOINTMENT_STATUSES = ("scheduled", "completed", "no_show", "cancelled")
+APPOINTMENT_SOURCES = ("manual", "property", "callback", "call")
+
+
+class WholesaleFieldAppointment(Base):
+    __tablename__ = "wholesale_field_appointments"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    evosense_property_id = Column(String, nullable=True)     # wholesale/evosense/property/<id>
+    property_id = Column(String, nullable=True)              # Wholesale Operations property
+    deal_id = Column(String, nullable=True)
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True)
+    assigned_to_id = Column(String, ForeignKey("users.id"), nullable=True)
+    starts_at = Column(DateTime, nullable=False)              # UTC
+    duration_minutes = Column(Integer, nullable=False, default=60)
+    address = Column(String, nullable=True)
+    title = Column(String, nullable=True)                     # e.g. "Walkthrough - 123 Main St"
+    notes = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="scheduled")
+    outcome = Column(String, nullable=True)                   # set by #16 (signed | follow_up | dead)
+    outcome_note = Column(Text, nullable=True)
+    source = Column(String, nullable=False, default="manual")
+    source_ref = Column(String, nullable=True)                # e.g. the callback it was booked from
+    created_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_ws_appt_org_starts", "organization_id", "starts_at"),
+        Index("ix_ws_appt_org_rep_starts", "organization_id", "assigned_to_id", "starts_at"),
+        Index("ix_ws_appt_org_esprop", "organization_id", "evosense_property_id"),
+    )

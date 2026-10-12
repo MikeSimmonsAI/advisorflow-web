@@ -19,7 +19,8 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api } from '../../../api/client'
+import { api, getBranding } from '../../../api/client'
+import BookAppointment from '../appts/BookAppointment'
 import { errText } from '../wsShared'
 import { canRunHunts } from '../../../auth/workspaceAuthority'
 import {
@@ -241,6 +242,7 @@ export default function EvoProperty() {
   const [nurtureDate, setNurtureDate] = useState('')
   const [explain, setExplain] = useState(null)
   const [promoteOpen, setPromoteOpen] = useState(false)
+  const [bookOpen, setBookOpen] = useState(false)
   const [raw, setRaw] = useState(null)
 
   async function showRaw(obsId) {
@@ -314,7 +316,17 @@ export default function EvoProperty() {
         <button type="button" className={`evo-btn ${handoffOpen ? 'evo-btn--primary' : 'evo-btn--ghost'}`} disabled={busy}
                 onClick={() => setPromoteOpen(true)}>Promote to Deal Operations</button>
       ) : null}
+      {!getBranding()?.wholesale_team?.field ? (
+        <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setBookOpen(true)}>Book appointment</button>
+      ) : null}
     </>
+  )
+  const bookDrawer = (
+    <BookAppointment open={bookOpen} onClose={() => setBookOpen(false)}
+                     link={{ evosense_property_id: propertyId, source: 'property' }}
+                     address={[`${p.address || ''}${p.unit ? ` #${p.unit}` : ''}`, place, p.zip_code].filter(Boolean).join(', ')}
+                     title={`Visit - ${p.address || 'property'}`}
+                     onBooked={(a) => setNotice(`Appointment booked: ${a.local_date} at ${a.local_time}${a.assigned_to_name ? ` with ${a.assigned_to_name}` : ''}. It is on the Appointments page.`)} />
   )
 
   return (
@@ -787,6 +799,7 @@ export default function EvoProperty() {
         </aside>
       </div>
 
+      {bookDrawer}
       <Drawer open={promoteOpen} onClose={() => setPromoteOpen(false)} title="Promote to Deal Operations"
               sub={`${p.address}, ${place}`}
               footer={<>
