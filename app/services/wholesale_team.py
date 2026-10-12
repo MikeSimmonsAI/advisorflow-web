@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
+import re as _re
+
 from fastapi import Request
 from sqlalchemy.orm import Session
 
@@ -252,13 +254,30 @@ def fence(path: str, method: str, role: Optional[str]) -> Optional[str]:
     if role in FIELD_ROLES:
         if "export" in path.lower():
             return "Field logins cannot export."
-        if _under(path, FIELD_ALLOWED_TEAM):
+        if not path.startswith("/wholesale"):
+            return None                                  # the app shell (sign-in, branding, settings)
+        # On the Wholesale side a field login has an ALLOW-list, not a block-list:
+        # their appointments, their own team role, and the properties on their
+        # appointments (checked against the database in fence_user).
+        if _under(path, FIELD_OPEN):
             return None
-        if _starts(path, FIELD_BLOCKED_PREFIXES) or _under(path, ("/wholesale/team",)):
+        m = FIELD_PROPERTY.match(path)
+        if m and (method == "GET" or (method == "PATCH" and path.rstrip("/").endswith("/facts"))):
+            return None
+        if _starts(path, FIELD_BLOCKED_PREFIXES) or (method != "GET" and path.endswith(FIELD_BLOCKED_ACTIONS)):
             return "Field logins cannot use this. Ask your manager."
-        if method != "GET" and path.startswith("/wholesale/evosense/") and path.endswith(FIELD_BLOCKED_ACTIONS):
-            return "Field logins cannot run lookups or send messages. Ask your manager."
+        return "Field logins can open their appointments and the properties on them."
     return None
+
+
+FIELD_OPEN = ("/wholesale/appointments", "/wholesale/team/me")
+FIELD_PROPERTY = _re.compile(
+    r"^/wholesale/evosense/properties/([^/]+)(/(photo|photo\.jpg|facts|observations/[^/]+/raw))?/?$")
+
+
+def field_property_id(path: str) -> Optional[str]:
+    m = FIELD_PROPERTY.match(path or "")
+    return m.group(1) if m else None
 
 
 # ── WHAT ONLY AN ADMIN (OR A TEAM MANAGER) MAY START ────────────────────────
@@ -291,7 +310,19 @@ def fence_user(db: Session, user: User, path: str, method: str) -> Optional[str]
     the lookup."""
     if getattr(user, "role", None) not in ("advisor", "viewer"):
         return None
-    return fence(path, method, role_of(db, user))
+    role = role_of(db, user)
+    refusal = fence(path, method, role)
+    if refusal or role not in FIELD_ROLES:
+        return refusal
+    pid = field_property_id(path)
+    if pid:
+        from app.models.wholesale_ops_models import WholesaleFieldAppointment as _A
+        mine = (db.query(_A.id).filter(_A.organization_id == user.organization_id,
+                                       _A.evosense_property_id == pid, _A.assigned_to_id == user.id,
+                                       _A.status != "cancelled").first())
+        if mine is None:
+            return "This property is not on any of your appointments."
+    return None
 
 
 def hunt_refusal(db: Session, user: User, path: str, method: str) -> Optional[str]:

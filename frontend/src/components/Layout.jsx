@@ -58,9 +58,9 @@ const PLATFORM_BRAND = BRAND_CONFIG[PLATFORM_THEME]
 //     place. God/platform functions live under Platform Admin, below.
 
 // What a field specialist or canvasser sees in the rail (see wholesale_team.py).
-const FIELD_NAV = new Set(['/wholesale/appointments', '/wholesale/properties', '/wholesale/calculator', '/wholesale/callbacks', '/settings'])
+const FIELD_NAV = new Set(['/wholesale/appointments', '/settings'])
 // The pages a field login may open at all (the server refuses the rest too).
-const FIELD_PAGES = ['/wholesale/appointments', '/wholesale/properties', '/wholesale/calculator', '/wholesale/callbacks', '/wholesale/evosense/property/', '/settings']
+const FIELD_PAGES = ['/wholesale/appointments', '/wholesale/evosense/property/', '/settings']
 const fieldMayOpen = (p) => FIELD_PAGES.some((x) => p === x.replace(/\/$/, '') || p.startsWith(x.endsWith('/') ? x : x + '/'))
 
 const NAV_GROUPS = [

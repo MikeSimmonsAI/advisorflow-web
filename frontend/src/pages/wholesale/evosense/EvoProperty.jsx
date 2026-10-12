@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, getBranding } from '../../../api/client'
 import BookAppointment from '../appts/BookAppointment'
+import FieldPropertyCard from '../appts/FieldPropertyCard'
 import { errText } from '../wsShared'
 import { canRunHunts } from '../../../auth/workspaceAuthority'
 import {
@@ -266,6 +267,8 @@ export default function EvoProperty() {
   if (!d) {
     return <EvoApp world="acquisition">{error ? <Alert>{error}</Alert> : <PageSkeleton />}</EvoApp>
   }
+  // A field specialist or canvasser gets the one-screen field card instead.
+  if (getBranding()?.wholesale_team?.field) return <FieldPropertyCard d={d} propertyId={propertyId} />
 
   const p = d.property
   const f = d.facts

@@ -108,9 +108,17 @@ def test_fence_rules_by_role():
     # field: the shell and their own work, nothing that hunts, buys, sends or exports
     for role in ("field_specialist", "canvasser"):
         for ok_path in ("/auth/me", "/branding/org", "/notifications/", "/settings/profile",
-                        "/wholesale/properties", "/wholesale/evosense/properties/p1",
-                        "/wholesale/ops/callbacks", "/wholesale/team/me"):
+                        "/wholesale/appointments", "/wholesale/appointments/reps",
+                        "/wholesale/evosense/properties/p1", "/wholesale/evosense/properties/p1/photo.jpg",
+                        "/wholesale/team/me"):
             assert fence(ok_path, "GET", role) is None, ok_path
+        assert fence("/wholesale/evosense/properties/p1/facts", "PATCH", role) is None
+        for only_theirs in ("/wholesale/properties", "/wholesale/ops/callbacks", "/wholesale/deals/d1",
+                            "/wholesale/evosense/inbox", "/wholesale/evosense/properties",
+                            "/wholesale/evosense/command-center"):
+            assert fence(only_theirs, "GET", role), only_theirs
+        for write in ("reply", "promote", "valuation", "comps", "feedback"):
+            assert fence("/wholesale/evosense/properties/p1/%s" % write, "POST", role), write
         for bad in ("/wholesale/evosense/strategies", "/wholesale/evosense/strategies/s1/hunt",
                     "/wholesale/skip-trace/estimate", "/wholesale/contact-lookup/run",
                     "/wholesale/buyers", "/wholesale/funding/partners", "/wholesale/settings",
@@ -169,3 +177,24 @@ def test_a_plain_advisor_cannot_start_a_hunt_but_a_team_manager_can(
                    json={"user_id": sample_advisor.id, "role": "manager", "confirm_lock": True}))
     assert client.post("/wholesale/evosense/strategies/does-not-exist/hunt",
                        headers=auth_headers, json={}).status_code != 403
+
+
+
+def test_a_field_login_opens_only_properties_on_their_appointments(
+        client, admin_auth_headers, auth_headers, sample_advisor, sample_org, db_session):
+    from app.models.evosense_models import EvoSenseProperty
+    ok(client.post("/wholesale/team/members", headers=admin_auth_headers,
+                   json={"user_id": sample_advisor.id, "role": "field_specialist", "confirm_lock": True}))
+    mine = EvoSenseProperty(organization_id=sample_org.id, street_address="10 Mine St", city="Dallas",
+                            state="TX", zip_code="75201", is_test=True)
+    other = EvoSenseProperty(organization_id=sample_org.id, street_address="20 Other St", city="Dallas",
+                             state="TX", zip_code="75201", is_test=True)
+    db_session.add_all([mine, other]); db_session.commit()
+    ok(client.post("/wholesale/appointments", headers=admin_auth_headers, json={
+        "starts_at": "2026-10-12T10:00:00-05:00", "evosense_property_id": mine.id,
+        "assigned_to_id": sample_advisor.id}))
+    r_other = client.get("/wholesale/evosense/properties/%s" % other.id, headers=auth_headers)
+    assert r_other.status_code == 403 and "not on any of your appointments" in r_other.json()["detail"]
+    assert client.get("/wholesale/evosense/properties/%s" % mine.id, headers=auth_headers).status_code != 403
+    assert client.get("/wholesale/evosense/inbox", headers=auth_headers).status_code == 403
+    assert client.get("/wholesale/ops/callbacks", headers=auth_headers).status_code == 403
