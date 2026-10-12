@@ -92,7 +92,10 @@ def send_checks(db: Session, prog: OutreachProgram, actor_id: str, *, location_i
         token_id = "placement-%s" % row.id
         body = text_to_html(sample["message"]["body"]) + footer_html(token_id, sample["postal"])
         try:
-            res = send_email_via_provider(
+            from app.services.programs import mailbox_send as _mbx
+            res = _mbx.send(db, prog, to_email=address, subject=sample["message"]["subject"], body_html=body,
+                            reply_to=getattr(ident, "reply_to_email", None))
+            res = res if res is not None else send_email_via_provider(
                 to_email=address, subject=sample["message"]["subject"], body_html=body, org=ident,
                 headers={"List-Unsubscribe": "<%s>" % url_for(token_id),
                          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"})

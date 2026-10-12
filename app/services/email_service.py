@@ -521,14 +521,24 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     # org's verified domain is cleaner, more reliable, and scales properly.
     # Keyword arguments, so a caller inspecting this call - or a test asserting
     # on what actually went out - sees named fields rather than positions.
-    result = send_email_via_provider(
-        to_email=lead.email,
-        subject=rendered["subject"],
-        body_html=rendered["body_html"],
-        org=org,
-        **({"headers": _program_headers} if _program_headers else {}),
-        **({"attachments": attachments} if attachments else {}),
-    )
+    # A program that sends from its own Microsoft 365 mailbox
+    # (programs/mailbox_send.py) uses that path for its contacts; None = not set.
+    result = None
+    _prog_for_send = _program_identity.program_for_org(db, lead.organization_id)
+    if _prog_for_send is not None:
+        from app.services.programs import mailbox_send as _mbx
+        result = _mbx.send(db, _prog_for_send, to_email=lead.email, subject=rendered["subject"],
+                           body_html=rendered["body_html"], reply_to=getattr(org, "reply_to_email", None),
+                           attachments=attachments)
+    if result is None:
+        result = send_email_via_provider(
+            to_email=lead.email,
+            subject=rendered["subject"],
+            body_html=rendered["body_html"],
+            org=org,
+            **({"headers": _program_headers} if _program_headers else {}),
+            **({"attachments": attachments} if attachments else {}),
+        )
 
     email_msg = EmailMessage(
         lead_id=lead.id,
