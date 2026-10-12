@@ -18,7 +18,8 @@ Training guide: Google Doc "EvoSys Field – Training Guide and Script" (ID 1YCd
 | #60 | #26 | EvoSys Field home-screen app (manifest-field.webmanifest, PNG icons), swapped in on /wholesale pages. |
 | #61 | #15 | Owner permission link from the field card; purchase agreement from Visit notes (price = standing offer, company signer = an admin, never the rep; promotes the property, then the existing contract send). |
 | #62 | #19 | Team Board (/wholesale/board). |
-| (this PR) | #17, #18 | Canvassing routes by ZIP + door-knock form; hot door -> call-back to the canvasser's manager. |
+| #63 | #17, #18 | Canvassing routes by ZIP + door-knock form; hot door -> call-back to the canvasser's manager. |
+| #64 | polish | Rep gets a bell when a visit is booked / moved / handed over / cancelled (notificationtype.WHOLESALE_APPOINTMENT); Field visits panel on the office property page; Offer tab pre-fills the verified (comps) ARV. |
 
 ## Where the code is
 
