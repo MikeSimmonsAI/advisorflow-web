@@ -13,3 +13,4 @@ Rules: no pushes to main/sci-program, no deploys, no sends/approvals/activations
 | 14:29 | Locations (directory + profile tabs, review bucket apart) and Campaigns (catalog/preview/controls, typed-name activation dialog) rebuilt. |
 | 14:33 | Assets (library + upload panel + version drawer, empty state truthful), Launch (A–G gates, Go/No-Go, synthetic test), Health (8 modules, texting facts, Not tracked when events off, diagnostics drawer). |
 | 14:46 | QA: 36/36 click-through checks pass (no approve/activate/settings save made); 4 sizes, no page overflow after Launch fix; axe: 0 serious/critical after contrast fixes; backend SCI tests 134 passed; frontend build OK. |
+| 14:51 | Rebased on main @7485c0a (PR #93, booking). Final screenshots + comparison sheets. Handoff doc written. Pushing branch, draft PR. |
