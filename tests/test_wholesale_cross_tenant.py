@@ -262,8 +262,13 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     db_session.add(st_est)
     db_session.commit()
 
+    appt = ok(client.post("/wholesale/appointments", headers=auth_headers,
+                          json={"starts_at": "2026-10-12T10:00:00-05:00", "address": "1 Victim Ave",
+                                "notes": "victim visit"}))
+
     return {
         **es_ids,
+        "appointment_id": appt["id"],
         "ops_lead_id": seller["lead_id"],
         "ops_callback_id": ops_cb.id,
         "ops_note_id": ops_note.id,
@@ -468,6 +473,7 @@ def ops_attacks(ids):
         ("patch", "/wholesale/ops/notes/%s" % ids["ops_note_id"], {"body": "stolen"}),
         ("delete", "/wholesale/ops/notes/%s" % ids["ops_note_id"], None),
         ("delete", "/wholesale/team/members/%s" % ids["team_user_id"], None),
+        ("patch", "/wholesale/appointments/%s" % ids["appointment_id"], {"notes": "stolen"}),
         ("get", "/wholesale/skip-trace/estimates/%s" % ids["skiptrace_estimate_id"], None),
         ("post", "/wholesale/skip-trace/estimates/%s/confirm" % ids["skiptrace_estimate_id"],
          {"confirm": "APPROVE SKIP TRACE %s" % ids["skiptrace_estimate_id"]}),

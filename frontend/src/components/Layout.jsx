@@ -58,9 +58,9 @@ const PLATFORM_BRAND = BRAND_CONFIG[PLATFORM_THEME]
 //     place. God/platform functions live under Platform Admin, below.
 
 // What a field specialist or canvasser sees in the rail (see wholesale_team.py).
-const FIELD_NAV = new Set(['/wholesale/properties', '/wholesale/calculator', '/wholesale/callbacks', '/settings'])
+const FIELD_NAV = new Set(['/wholesale/appointments', '/wholesale/properties', '/wholesale/calculator', '/wholesale/callbacks', '/settings'])
 // The pages a field login may open at all (the server refuses the rest too).
-const FIELD_PAGES = ['/wholesale/properties', '/wholesale/calculator', '/wholesale/callbacks', '/wholesale/evosense/property/', '/settings']
+const FIELD_PAGES = ['/wholesale/appointments', '/wholesale/properties', '/wholesale/calculator', '/wholesale/callbacks', '/wholesale/evosense/property/', '/settings']
 const fieldMayOpen = (p) => FIELD_PAGES.some((x) => p === x.replace(/\/$/, '') || p.startsWith(x.endsWith('/') ? x : x + '/'))
 
 const NAV_GROUPS = [
@@ -170,6 +170,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/wholesale', label: 'Deal Operations', icon: 'activity', featureKey: 'wholesale_real_estate', end: true },
       { to: '/wholesale/properties', label: 'Properties', icon: 'home', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/appointments', label: 'Appointments', icon: 'calendar', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/calculator', label: 'Deal Calculator', icon: 'calculator', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/buyers', label: 'Cash Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/funding', label: 'Funding Partners', icon: 'credit-card', featureKey: 'wholesale_real_estate' },
@@ -491,7 +492,7 @@ export default function Layout({ children }) {
     if (!wsOnly) return
     const p = location.pathname
     if (wsTeam.field) {
-      if (!fieldMayOpen(p)) navigate('/wholesale/properties', { replace: true })
+      if (!fieldMayOpen(p)) navigate('/wholesale/appointments', { replace: true })
       return
     }
     if (isWholesalePath(p) || p === '/settings' || p.startsWith('/settings/')) return

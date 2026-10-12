@@ -1,0 +1,26 @@
+/* Field appointments (ap-). Phone-first: the rep reads this in a truck. */
+.ap-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ap-lab { display: grid; gap: 4px; font-size: 13px; font-weight: 600; color: #334155; }
+.ap-lab--full { grid-column: 1 / -1; }
+.ap-input { width: 100%; min-height: 42px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; font-weight: 400; background: #fff; color: #0f172a; box-sizing: border-box; }
+.ap-input:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+.ap-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 14px; }
+.ap-bar .ap-input { width: auto; min-width: 150px; }
+.ap-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.ap-card { border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; padding: 14px; display: grid; gap: 8px; }
+.ap-card.is-done { opacity: .75; }
+.ap-card__top { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.ap-time { font-size: 20px; font-weight: 800; color: #0f172a; min-width: 92px; }
+.ap-title { font-weight: 700; font-size: 15px; }
+.ap-addr { color: #334155; font-size: 14px; }
+.ap-meta { color: #475569; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.ap-notes { background: #f8fafc; border-radius: 8px; padding: 8px 10px; font-size: 14px; margin: 0; white-space: pre-wrap; }
+.ap-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ap-actions .evo-btn { min-height: 40px; }
+.ap-more { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: end; }
+.ap-day { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #475569; margin: 18px 0 8px; }
+@media (max-width: 640px) {
+  .ap-form, .ap-more { grid-template-columns: 1fr; }
+  .ap-actions .evo-btn { flex: 1 1 auto; }
+  .ap-bar .ap-input { flex: 1 1 140px; min-width: 0; }
+}
