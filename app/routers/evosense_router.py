@@ -48,8 +48,12 @@ from app.services.evosense import strategy as ST
 from app.services.evosense import views as V
 
 FEATURE = "wholesale_real_estate"
+from app.services.wholesale_team import require_hunt_rights  # noqa: E402
+
+# require_hunt_rights: only admins and team managers start hunts, run lookups
+# or change strategies (app/services/wholesale_team.py). After the plan check.
 router = APIRouter(prefix="/wholesale/evosense", tags=["wholesale-evosense"],
-                   dependencies=[Depends(require_feature(FEATURE))])
+                   dependencies=[Depends(require_feature(FEATURE)), Depends(require_hunt_rights())])
 
 ADMIN_ROLES = ("org_admin", "super_admin", "god_admin", "admin", "owner")
 

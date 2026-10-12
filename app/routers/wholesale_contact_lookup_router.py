@@ -21,8 +21,11 @@ from app.services import wholesale_buyer_contacts as BC
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
 
+from app.services import wholesale_team as _wt  # noqa: E402
+
 router = APIRouter(prefix="/wholesale/contact-lookup", tags=["wholesale-contact-lookup"],
-                   dependencies=[Depends(require_feature("wholesale_real_estate"))])
+                   dependencies=[Depends(require_feature("wholesale_real_estate")),
+                                 Depends(_wt.require_hunt_rights())])  # admins and team managers only
 
 
 class LookupIn(BaseModel):

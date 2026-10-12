@@ -62,7 +62,7 @@ def _finding(client, H, street="4410 Bluebonnet Ln"):
     return out["property_id"]
 
 
-def test_finding_to_fee_through_the_api(client, auth_headers, db_session, sample_org):
+def test_finding_to_fee_through_the_api(client, auth_headers, db_session, sample_org, admin_auth_headers):
     H = auth_headers
 
     # ── DISCOVERY: a finding exists and is not a dead end ─────────────────
@@ -90,7 +90,7 @@ def test_finding_to_fee_through_the_api(client, auth_headers, db_session, sample
         "mailing_state": "TX", "mailing_zip": "75023"}), "owner")
 
     # ── ENRICHMENT: not configured -> truthful refusal, no vendor call ────
-    enr = ok(client.post(ES + "/properties/%s/enrich" % pid, headers=H,
+    enr = ok(client.post(ES + "/properties/%s/enrich" % pid, headers=admin_auth_headers,
                          json={"approved": True}), "enrich")
     assert enr["decision"] != "PURCHASE" and "manual" in " ".join(enr["reasons"]).lower()
     enrich_action = [a for a in ok(client.get(ES + "/properties/%s" % pid, headers=H))["actions"]

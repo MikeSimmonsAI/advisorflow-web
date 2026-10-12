@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { Drawer, Skeleton, Tag } from './ds/ds'
 import { ErrorBox, errText, Note } from './wsShared'
+import { canRunHunts } from '../../auth/workspaceAuthority'
 
 const STATUS = {
   ready: ['Will look up', 'live'],
@@ -80,8 +81,9 @@ export default function ContactLookup({ kind, ids, what = 'record', onClose, onD
               as <b>TRACERFY_API_TOKEN</b>, then come back here.</Note>
           ) : null}
           {est.cap_refusal ? <Note>{est.cap_refusal}</Note> : null}
+          {!canRunHunts() ? <Note>Looking up phones and emails costs money, so only an admin or a team manager can run it.</Note> : null}
           <div className="ws-actions" style={{ flexWrap: 'wrap', gap: 10, margin: '8px 0', alignItems: 'center' }}>
-            <button className="btn btn--primary btn--sm" disabled={busy || !est.configured || !!est.cap_refusal || !n}
+            <button className="btn btn--primary btn--sm" disabled={busy || !est.configured || !!est.cap_refusal || !n || !canRunHunts()}
                     onClick={run}>
               {busy && progress ? 'Looking up…' : n ? `Look up ${n} - up to ${money(est.max_cost_cents)}` : 'Nothing to look up'}
             </button>
@@ -111,7 +113,7 @@ export default function ContactLookup({ kind, ids, what = 'record', onClose, onD
                             <input className="ws-input ws-input--inline" placeholder="street, city, TX zip"
                                    value={addr[r.id] || ''} disabled={busy}
                                    onChange={(e) => setAddr((a) => ({ ...a, [r.id]: e.target.value }))} />
-                            <button className="btn btn--secondary btn--sm" disabled={busy || !(addr[r.id] || '').trim()}
+                            <button className="btn btn--secondary btn--sm" disabled={busy || !(addr[r.id] || '').trim() || !canRunHunts()}
                                     onClick={() => saveAddress(r.id)}>Save</button>
                           </span>
                         ) : (r.address || '—')}

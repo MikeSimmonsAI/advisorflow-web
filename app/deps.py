@@ -419,6 +419,17 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
                 request.client.host if request.client else "unknown",
             )
 
+    # ── WHOLESALE TEAM FENCE ─────────────────────────────────────────────────
+    # Manager and field logins (app/services/wholesale_team.py) are for the
+    # Wholesale side only, and field logins cannot run hunts, paid lookups,
+    # sends, buyers, settings or exports - even from a pasted link. Only
+    # advisor/viewer accounts can hold such a role, so nobody else is looked up.
+    if user.role in ("advisor", "viewer"):
+        from app.services import wholesale_team as _wt
+        _refusal = _wt.fence_user(db, user, request.url.path, request.method)
+        if _refusal:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
+
     return user
 
 
