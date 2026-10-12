@@ -57,5 +57,6 @@ def test_one_link_per_family_and_page_shows_location(client, program, monkeypatc
     page = client.get("/calendar/booking/%s" % links[0].token).json()
     assert page["org_name"] == "Alabama Heritage Funeral Home" and page["org_phone"] == "+12565550199"
     assert page["branding"]["name"] == "Alabama Heritage Funeral Home"
-    assert [m["key"] for m in page["meeting_options"]] == ["phone", "visit"]
+    assert page["meeting_options"] is None
+    assert page["appt_label"] == "Visit at Alabama Heritage Funeral Home" and page["appt_duration"] == 60
     assert "Service Corporation" not in str(page)

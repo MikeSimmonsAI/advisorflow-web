@@ -43,3 +43,4 @@ reportlab==4.2.5
 pywebpush==2.0.3
 py-vapid==1.9.2
 http-ece==1.2.1
+phonenumbers>=8.13,<9

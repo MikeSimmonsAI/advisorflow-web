@@ -200,6 +200,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
                               : <span className="sci-micro sci-muted">Waiting on Mike</span>}
                       </td>
                       <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <a className="sci-btn sm" href={`/leads/${r.lead_id}`} style={{ marginRight: 6 }}>Open</a>
                         {isManager && r.approved && <button type="button" className="sci-btn sm danger" onClick={() => unapprove(r)}>Stop</button>}
                       </td>
                     </tr>

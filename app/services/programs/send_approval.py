@@ -55,6 +55,20 @@ def _master(rows: List[ProgramSourceRecord]) -> ProgramSourceRecord:
     return next((r for r in rows if r.contact_master_key and r.source_lead_id == r.contact_master_key), rows[0])
 
 
+def _real_us_number(raw) -> bool:
+    """10 digits (after a leading 1) whose area code and exchange can exist."""
+    d = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    if len(d) == 11 and d[0] == "1":
+        d = d[1:]
+    if not (len(d) == 10 and d[0] not in "01" and d[3] not in "01"):
+        return False
+    try:   # assigned area codes / exchanges - the same rules carriers use
+        import phonenumbers
+        return phonenumbers.is_valid_number(phonenumbers.parse("+1" + d))
+    except ImportError:
+        return True
+
+
 def blocker(db: Session, lead: Lead) -> Optional[str]:
     """Why this contact can't be approved right now, in plain words, or None."""
     from app.services import test_records
@@ -64,6 +78,8 @@ def blocker(db: Session, lead: Lead) -> Optional[str]:
         return "Do not contact"
     if not (lead.phone or (lead.email or "").strip()):
         return "No phone or email"
+    if lead.phone and not _real_us_number(lead.phone):
+        return "Bad phone number"
     from app.services import send_source as _ss
     r = identity.send_refusal(db, lead, _ss.MANUAL)
     if r:

@@ -1393,7 +1393,7 @@ def update_campaign(family_id: str, body: FamilyIn, db: Session = Depends(get_db
     for k in ("first_touch_email_mode", "followup_email_mode"):
         if k in data and data[k] not in EMAIL_MODES:
             raise HTTPException(status_code=422, detail="Email mode must be one of %s." % ", ".join(EMAIL_MODES))
-    for k in ("sms_template", "email_body_template"):
+    for k in ("email_body_template",):
         if k in data and data[k] and "call us" in data[k].lower():
             raise HTTPException(status_code=422, detail="Families are asked to reply, not to call.")
     for k, v in data.items():

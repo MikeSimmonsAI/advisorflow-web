@@ -214,12 +214,9 @@ def get_booking_by_token(request: Request, token: str, db: Session = Depends(get
         _branding = dict(_branding, name=_org_name, phone=_org_phone, address="", logo_url="",
                          tagline="", brand_color=_brand_color, document_title=_org_name)
         if _org_name:
-            _meeting_options = [
-                {"key": "phone", "label": "Phone call", "note": "About 30 minutes, we call you",
-                 "appt_label": "Phone Call"},
-                {"key": "visit", "label": "Visit in person", "note": "About an hour at %s" % _org_name,
-                 "appt_label": "Visit at %s" % _org_name},
-            ]
+            # ON-SITE ONLY (Mike, 2026-10-12): the family books a visit at the location.
+            appt_label = "Visit at %s" % _org_name
+            appt_duration = 60
 
     return {
         "token": token,
