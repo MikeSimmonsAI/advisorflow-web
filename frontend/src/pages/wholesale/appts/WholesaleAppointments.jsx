@@ -8,6 +8,7 @@ import { api } from '../../../api/client'
 import { Alert, Empty, EvoApp, PageHead, Seg, Skeleton, Tag } from '../ds/ds'
 import '../ds/evo-pages.css'
 import BookAppointment from './BookAppointment'
+import VisitDrawer from './VisitDrawer'
 import { centralToIso, dayLabel, isoToCentral, todayCentral } from './apptTime'
 import './appts.css'
 
@@ -17,6 +18,7 @@ export function ApptCard({ a, isField, reps, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [more, setMore] = useState(false)
+  const [visit, setVisit] = useState(false)
   const start = isoToCentral(a.starts_at)
   const [day, setDay] = useState(start.day)
   const [time, setTime] = useState(start.time)
@@ -49,6 +51,7 @@ export function ApptCard({ a, isField, reps, onChanged }) {
       {a.notes ? <p className="ap-notes">{a.notes}</p> : null}
       <div className="ap-actions">
         {a.directions_url ? <a className="evo-btn evo-btn--secondary evo-btn--sm" href={a.directions_url} target="_blank" rel="noreferrer">Directions</a> : null}
+        <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={() => setVisit(true)}>Visit notes</button>
         {a.evosense_property_id ? <Link className="evo-btn evo-btn--ghost evo-btn--sm" to={`/wholesale/evosense/property/${a.evosense_property_id}`}>Open property</Link> : null}
         {open ? <button type="button" className="evo-btn evo-btn--primary evo-btn--sm" disabled={busy} onClick={() => patch(withNote({ status: 'completed' }))}>Mark done</button> : null}
         {open ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => patch(withNote({ status: 'no_show' }))}>No-show</button> : null}
@@ -76,6 +79,7 @@ export function ApptCard({ a, isField, reps, onChanged }) {
         </div>
       ) : null}
       <Alert>{err}</Alert>
+      {visit ? <VisitDrawer open={visit} onClose={() => setVisit(false)} appt={a} /> : null}
     </li>
   )
 }
