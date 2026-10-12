@@ -12,7 +12,7 @@ function Stars({ n }) {
   )
 }
 
-export default function Surveys({ locationId, navigate, isManager = true }) {
+export default function Surveys({ locationId, navigate, isManager = true, compact = false }) {
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
@@ -33,7 +33,7 @@ export default function Surveys({ locationId, navigate, isManager = true }) {
   const open = rec => rec.lead_id && navigate && navigate(`/leads/${rec.lead_id}`)
 
   return (
-    <div id="sci-surveys">
+    <div id="sci-surveys" style={{ minWidth: 0 }}>
       <Panel title="Surveys" labelledBy="sci-surveys-h"
         aside={s ? <span className="sci-micro sci-muted">
           {s.count ? <>Average <b>{s.average}</b> of 5 · {s.count} answered{s.share_ok ? ` · ${s.share_ok} OK to share` : ''}</> : 'No answers yet'}
@@ -67,11 +67,11 @@ export default function Surveys({ locationId, navigate, isManager = true }) {
                 </div>
               </div>
             )}
-            {data.recent.length === 0
-              ? <Empty title="No survey answers yet.">Answers show here, and on each person's record, as they come in.</Empty>
+            {(compact ? data.recent.slice(0, 4) : data.recent).length === 0
+              ? <Empty icon="star" title="No survey answers yet.">Answers show here, and on each person's record, as they come in.</Empty>
               : (
                 <div className="sci-rows">
-                  {data.recent.map(r => (
+                  {(compact ? data.recent.slice(0, 4) : data.recent).map(r => (
                     <div className="sci-kv" key={r.id}>
                       <span style={{ minWidth: 0 }}>
                         <button type="button" onClick={() => open(r)}

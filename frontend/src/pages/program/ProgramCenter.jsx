@@ -10,16 +10,22 @@
  *   GET  /program/assets, POST, /active    logos, facility images, approved flyers
  *   PATCH /program/settings, POST /program/import (dry-run / stage only)
  *
- * Nine screens, one shell (2026-10 redesign). Deep links are unchanged:
- * /program?tab=responses|review|locations|campaigns|assets|launch|health|settings
- * plus ?location=, ?queue= and ?q=. Every number is read from the server; every
- * send is decided by the server's gates, never by this page.
+ * Ten screens, one shell (2026-10 EvoSys Pro command-center redesign). Deep
+ * links are unchanged: /program?tab=send|responses|review|locations|campaigns|
+ * assets|launch|health|settings plus ?location=, ?queue= and ?q=. Every number
+ * is read from the server; every send is decided by the server's gates, never
+ * by this page.
+ *
+ * IDENTITY: the top-right chip names the SIGNED-IN PERSON (refreshed from
+ * /settings/profile) and the SCI workspace from this program's own server
+ * record - never a cached brand name from another workspace (the old chip
+ * could show "EvoSys Wholesale" inside SCI).
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, getCurrentUser } from '../../api/client'
+import { api, getCurrentUser, refreshCurrentUser } from '../../api/client'
 import { readAuthority } from '../../auth/workspaceAuthority'
-import { Icon, errText, initials, Loading } from './sci/ui'
+import { Icon, SearchBox, errText, initials, Loading } from './sci/ui'
 import Dashboard from './sci/Dashboard'
 import Responses from './sci/Responses'
 import Review from './sci/Review'
@@ -34,7 +40,7 @@ import './ProgramCenter.css'
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { key: 'send', label: 'Choose & Send', icon: 'campaigns' },
+  { key: 'send', label: 'Choose & Send', icon: 'send' },
   { key: 'responses', label: 'Responses', icon: 'responses' },
   { key: 'review', label: 'Review', icon: 'review' },
   { key: 'locations', label: 'Locations', icon: 'locations' },
@@ -44,11 +50,16 @@ const TABS = [
   { key: 'health', label: 'Health', icon: 'health' },
   { key: 'settings', label: 'Settings', icon: 'settings' },
 ]
+const COLLAPSE_KEY = 'sci_nav_collapsed'
 
 /** Open Review on the first queue that has work in it, most urgent first. */
 function firstOpenQueue(att) {
   const order = ['location_review', 'data_review', 'duplicate_review', 'on_hold']
   return order.find(k => (att?.[k] || 0) > 0) || 'all'
+}
+
+function readCollapsed() {
+  try { return localStorage.getItem(COLLAPSE_KEY) === '1' } catch { return false }
 }
 
 export default function ProgramCenter() {
@@ -58,23 +69,33 @@ export default function ProgramCenter() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(readCollapsed)
   const [search, setSearch] = useState(params.get('q') || '')
+  const [me, setMe] = useState(() => getCurrentUser() || {})
   const isManager = readAuthority().isWorkspaceManager
   const navigate = useNavigate()
-  const user = getCurrentUser() || {}
-  const userName = user.full_name || [user.first_name, user.last_name].filter(Boolean).join(' ') || user.email || 'Signed in'
+
+  // The stored user can be stale (another workspace, an older name). Ask the
+  // server who is signed in; the stored copy is only the first paint.
+  useEffect(() => {
+    let alive = true
+    refreshCurrentUser().then(p => { if (alive && p) setMe(m => ({ ...m, ...p })) })
+    return () => { alive = false }
+  }, [])
+  const userName = me.full_name || [me.first_name, me.last_name].filter(Boolean).join(' ') || me.email || 'Signed in'
 
   /** Change several query parameters at once; empty values are removed. */
-  const setMany = useCallback(changes => {
+  const setMany = useCallback((changes, { push = false } = {}) => {
     setParams(prev => {
       const next = new URLSearchParams(prev)
       Object.entries(changes).forEach(([k, v]) => { if (v) next.set(k, v); else next.delete(k) })
       return next
-    }, { replace: true })
+    }, { replace: !push })
   }, [setParams])
   const setParam = useCallback((key, value) => setMany({ [key]: value }), [setMany])
   const goTab = useCallback((key, extra = {}) => {
-    setMany({ tab: key === 'dashboard' ? '' : key, ...extra })
+    // Tab changes are real history entries so Back/Forward move between screens.
+    setMany({ tab: key === 'dashboard' ? '' : key, queue: '', q: '', ...extra }, { push: true })
     setMenuOpen(false)
     window.scrollTo?.({ top: 0 })
   }, [setMany])
@@ -91,8 +112,15 @@ export default function ProgramCenter() {
 
   useEffect(() => {
     const label = TABS.find(t => t.key === tab)?.label || 'Dashboard'
-    document.title = `${label} · Family Service Center`
+    document.title = `${label} · SCI Family Service Center · EvoSys Pro`
   }, [tab])
+  useEffect(() => { setSearch(params.get('q') || '') }, [params])
+
+  const toggleCollapsed = () => setCollapsed(v => {
+    const n = !v
+    try { localStorage.setItem(COLLAPSE_KEY, n ? '1' : '0') } catch { /* storage blocked */ }
+    return n
+  })
 
   const submitSearch = e => {
     e.preventDefault()
@@ -102,50 +130,66 @@ export default function ProgramCenter() {
   if (err && !data) {
     return (
       <div className="sci-app" style={{ display: 'block' }}>
-        <div className="sci-work"><div className="sci-alert" role="alert">{err}</div></div>
+        <div className="sci-work">
+          <div className="sci-alert" role="alert">{err}</div>
+          <button type="button" className="sci-btn" onClick={load}><Icon name="refresh" />Try again</button>{' '}
+          <button type="button" className="sci-btn" onClick={() => navigate('/')}><Icon name="back" />Back to main menu</button>
+        </div>
       </div>
     )
   }
-  if (!data) return <div className="sci-app" style={{ display: 'block' }}><Loading /></div>
+  if (!data) return <div className="sci-app" style={{ display: 'block' }}><Loading label="Loading the Family Service Center…" /></div>
 
   const prog = data.program
   const att = data.attention
   const realLocations = data.locations.filter(l => !l.is_review_bucket)
+  const bucket = data.locations.find(l => l.is_review_bucket)
   const reviewCount = (att.data_review || 0) + (att.location_review || 0) + (att.duplicate_review || 0)
   const counts = { responses: att.hot_responses || 0, review: reviewCount }
   const progName = prog.name || 'Service Corporation International'
+  const sendingOn = (data.automation?.active_campaign_families || 0) > 0
+  const workspaceLabel = 'SCI Family Service Center'
 
   return (
-    <div className={`sci-app${menuOpen ? ' sci-menu-open' : ''}`}>
+    <div className={`sci-app${menuOpen ? ' sci-menu-open' : ''}${collapsed ? ' sci-collapsed' : ''}`}>
+      <a className="sci-skip" href="#sci-main">Skip to content</a>
       <aside className="sci-side" aria-label="Family Service Center navigation">
         <div className="sci-brand">
-          <span className="sci-brand-mark" aria-hidden="true">SCI</span>
-          <div>
-            <div className="sci-brand-name">{progName}</div>
-            <div className="sci-brand-sub">Family Service Center</div>
-          </div>
+          <div className="sci-brand-word">EvoSys<span>Pro</span></div>
+          <div className="sci-brand-tag">People · Outreach · Appointments · Results</div>
+          <div className="sci-brand-mini" aria-hidden="true">E<span>P</span></div>
         </div>
-        <div className="sci-navlabel">Workspace</div>
-        <nav className="sci-nav">
+        <nav className="sci-nav" aria-label="Workspace pages">
           {TABS.map(t => (
-            <button key={t.key} type="button" aria-current={tab === t.key ? 'page' : undefined} onClick={() => goTab(t.key)}>
+            <button key={t.key} type="button" aria-current={tab === t.key ? 'page' : undefined} onClick={() => goTab(t.key)}
+              title={collapsed ? t.label : undefined}>
               <Icon name={t.icon} />
               <span>{t.label}</span>
               {counts[t.key] > 0 && (
-                <span className={`sci-count${t.key === 'review' ? ' warn' : ''}`}
-                  aria-label={t.key === 'review' ? `${counts[t.key]} records to review` : `${counts[t.key]} HOT responses`}>
+                <em className={`sci-count${t.key === 'responses' ? ' hot' : ''}`} style={{ fontStyle: 'normal' }}
+                  aria-label={t.key === 'review' ? `${counts[t.key]} records to review` : `${counts[t.key]} new HOT responses`}>
                   {counts[t.key]}
-                </span>
+                </em>
               )}
             </button>
           ))}
         </nav>
         <div className="sci-side-foot">
-          <button type="button" onClick={() => navigate('/')}>← Back to main menu</button>
-          <div className="sci-side-state" style={{ '--dot': data.automation?.active_campaign_families ? '#67c5ae' : '#d1a76c' }}>
-            {data.automation?.active_campaign_families
-              ? `${data.automation.active_campaign_families} campaign(s) on`
-              : 'All campaigns off · nothing sends'}
+          <button type="button" className="sci-collapse-btn" onClick={toggleCollapsed} aria-pressed={collapsed}
+            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}>
+            <Icon name={collapsed ? 'expand' : 'collapse'} /><span>Collapse menu</span>
+          </button>
+          <button type="button" className="sci-side-link" onClick={() => navigate('/')} title="Back to main menu">
+            <Icon name="back" /><span>Back to main menu</span>
+          </button>
+          <div className="sci-scicard" style={{ '--dot': sendingOn ? '#3fc28f' : '#e9a54a' }}
+            title={sendingOn ? `${data.automation.active_campaign_families} campaign(s) switched on` : 'All campaigns off — nothing sends automatically'}>
+            <b aria-hidden="true">SCI</b>
+            <span>
+              {progName}
+              <small><Icon name="pin" size={11} />{realLocations.length} locations</small>
+              <small><i />{sendingOn ? `${data.automation.active_campaign_families} campaign(s) on` : 'All campaigns off'}</small>
+            </span>
           </div>
         </div>
       </aside>
@@ -155,48 +199,55 @@ export default function ProgramCenter() {
         <header className="sci-top">
           <button type="button" className="sci-iconbtn sci-menubtn" aria-label="Open menu" aria-expanded={menuOpen}
             onClick={() => setMenuOpen(true)}><Icon name="menu" /></button>
-          <div className="sci-top-title">
-            Family Service Center
-            <small>{progName}{data.selected_location ? ` · ${data.selected_location.official_name}` : ''}</small>
-          </div>
+          <div className="sci-top-logo">EvoSys <b>PRO</b></div>
           <div className="sci-top-spacer" />
-          <form className="sci-search" role="search" onSubmit={submitSearch}>
-            <Icon name="search" />
-            <label htmlFor="sci-search" className="sci-sr">Search contacts</label>
-            <input id="sci-search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search contacts, Lead IDs…" />
+          <form role="search" onSubmit={submitSearch}>
+            <SearchBox id="sci-search" value={search} onChange={setSearch} label="Search contacts or Lead IDs"
+              placeholder="Search contacts, Lead IDs, phone or email…" />
           </form>
-          <label htmlFor="sci-location" className="sci-sr">Location</label>
-          <select id="sci-location" className="sci-topselect" value={locationId} onChange={e => setParam('location', e.target.value)}>
-            <option value="">All locations ({realLocations.length})</option>
-            {data.locations.map(l => (
-              <option key={l.location_id} value={l.location_id}>{l.name}</option>
-            ))}
-          </select>
+          <div className="sci-topselect-wrap">
+            <Icon name="pin" />
+            <label htmlFor="sci-location" className="sci-sr">Location filter</label>
+            <select id="sci-location" className="sci-topselect" value={locationId} onChange={e => setParam('location', e.target.value)}>
+              <option value="">All locations ({realLocations.length})</option>
+              {realLocations.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
+              {bucket && <option value={bucket.location_id}>{bucket.name} — not a facility</option>}
+            </select>
+          </div>
           <button type="button" className="sci-iconbtn" onClick={() => goTab('responses')}
-            aria-label={`${att.hot_responses || 0} HOT responses. Open Responses`}>
+            aria-label={`${att.hot_responses || 0} new HOT responses. Open Responses`} title="Responses">
             <Icon name="bell" />
             {att.hot_responses > 0 && <span className="sci-dot" aria-hidden="true">{att.hot_responses}</span>}
           </button>
-          <div className="sci-profile">
+          <div className="sci-profile" title={me.email ? `Signed in as ${me.email}` : undefined}>
             <span className="sci-avatar" aria-hidden="true">{initials(userName)}</span>
-            <span className="sci-profile-text">{userName}<small>{isManager ? 'Workspace manager' : 'Team member'}</small></span>
+            <span className="sci-profile-text">
+              {userName}
+              <small>{workspaceLabel} · {isManager ? 'Workspace manager' : 'Team member'}</small>
+            </span>
           </div>
         </header>
 
-        <main className="sci-work" id="sci-main">
+        <main className="sci-work" id="sci-main" tabIndex={-1}>
+          <form className="sci-mobile-search" role="search" onSubmit={submitSearch}>
+            <SearchBox id="sci-search-m" value={search} onChange={setSearch} label="Search contacts or Lead IDs" placeholder="Search contacts or Lead IDs…" />
+          </form>
           {err && <div className="sci-alert" role="alert">{err}</div>}
-          {tab === 'dashboard' && <Dashboard data={data} goTab={goTab} setParam={setParam} />}
-          {tab === 'responses' && <Responses locationId={locationId} onChange={load} navigate={navigate} />}
+          {tab === 'dashboard' && <Dashboard data={data} goTab={goTab} setParam={setParam} isManager={isManager} />}
+          {tab === 'responses' && <Responses locationId={locationId} onChange={load} navigate={navigate} isManager={isManager} />}
           {tab === 'review' && <Review locationId={locationId} locations={data.locations} isManager={isManager}
-            attention={att} initialQueue={params.get('queue') || firstOpenQueue(att)} initialSearch={params.get('q') || ''} onChange={load} />}
-          {tab === 'locations' && <Locations isManager={isManager} selected={locationId} onChange={load} />}
-          {tab === 'campaigns' && <Campaigns isManager={isManager} locationId={locationId} locations={data.locations} />}
+            attention={att} initialQueue={params.get('queue') || firstOpenQueue(att)} initialSearch={params.get('q') || ''}
+            onChange={load} goTab={goTab} navigate={navigate} />}
+          {tab === 'locations' && <Locations isManager={isManager} selected={locationId} onChange={load} setParam={setParam}
+            performance={data.location_performance} goTab={goTab} />}
+          {tab === 'campaigns' && <Campaigns isManager={isManager} locationId={locationId} locations={data.locations}
+            performance={data.campaign_performance} goTab={goTab} />}
           {tab === 'assets' && <Assets isManager={isManager} locations={data.locations} />}
           {tab === 'launch' && <Launch isManager={isManager} onChange={load} goTab={goTab} />}
-          {tab === 'send' && <Send locations={data.locations} isManager={isManager} locationId={locationId} />}
-          {tab === 'health' && <Health />}
+          {tab === 'send' && <Send locations={data.locations} isManager={isManager} locationId={locationId} goTab={goTab} automation={data.automation} />}
+          {tab === 'health' && <Health goTab={goTab} />}
           {tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness}
-            locations={realLocations} onChange={load} />}
+            locations={realLocations} onChange={load} goTab={goTab} automation={data.automation} />}
         </main>
       </div>
     </div>
