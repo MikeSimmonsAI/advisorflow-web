@@ -59,6 +59,16 @@ def build_sample(db: Session, prog: OutreachProgram, prof: LocationProfile, fami
               "campaign_family": family, "display_name": identity.display_name(prog, prof),
               "postal": postal_for(prof.official_name, loc)}
     msg = brain.compose(packet, 1, "email")
+    # THE SAME FIRST EMAIL A FAMILY GETS: when a person has edited the
+    # campaign's own first-email copy, the real touch 1 uses it
+    # (email_touches.build_message), so the inbox test must send it too.
+    from app.models.program_models import CampaignFamily
+    from app.services.programs import email_touches as _et
+    fam = (db.query(CampaignFamily)
+           .filter(CampaignFamily.organization_id == prog.organization_id, CampaignFamily.key == family).first())
+    if fam is not None and not _et._family_copy_is_default(fam):
+        r = _et.render_touch(db, prog, fam, prof, None, "first")
+        msg = dict(msg, subject=r["subject"], body=r["body"], source="family copy")
     return {"message": msg, "postal": packet["postal"], "display_name": packet["display_name"]}
 
 
