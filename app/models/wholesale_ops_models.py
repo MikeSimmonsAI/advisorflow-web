@@ -24,7 +24,7 @@ decision are frozen onto the row for the audit trail.
 """
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 
 from app.models.models import Base, gen_uuid
 
@@ -301,6 +301,9 @@ class WholesaleFieldRules(Base):
     # How far a rep may raise their own opening offer on a visit without
     # asking (10 = up to 10% above it). 100 = no raise rule.
     raise_limit_pct = Column(Integer, nullable=True, default=10)
+    # The team's commission: a % of the assignment fee on each deal that came
+    # from a rep's visit (Mike, Oct 12: 5% for everyone). Shown on the Team Board.
+    commission_pct = Column(Numeric(5, 2), nullable=True, default=5)
     updated_by_id = Column(String, ForeignKey("users.id"), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

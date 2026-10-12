@@ -50,7 +50,7 @@ def _int(v, what: str, *, required: bool = True) -> Optional[int]:
 def rules(db: Session, org_id: str) -> WholesaleFieldRules:
     row = db.query(WholesaleFieldRules).filter(WholesaleFieldRules.organization_id == org_id).first()
     if row is None:
-        row = WholesaleFieldRules(organization_id=org_id, offer_limit_pct=100, raise_limit_pct=10)
+        row = WholesaleFieldRules(organization_id=org_id, offer_limit_pct=100, raise_limit_pct=10, commission_pct=5)
         db.add(row)
         db.flush()
     return row
@@ -66,11 +66,17 @@ def rules_json(row: WholesaleFieldRules) -> Dict[str, Any]:
     raise_txt = (" Once they make an opening offer, they can raise it by up to %d%% on their own." % r) if r else (
         " Once they make an opening offer, any raise comes to you." if r == 0 else "")
     return {"offer_limit_pct": row.offer_limit_pct, "raise_limit_pct": 100 if r is None else r,
+            "commission_pct": commission_pct(row),
             "explained": ("A rep can offer up to %d%% of the max offer from your formula without asking you."
                           % row.offer_limit_pct) + raise_txt}
 
 
-def set_rules(db: Session, org_id: str, user: User, pct, raise_pct=None) -> Dict[str, Any]:
+def commission_pct(row: WholesaleFieldRules) -> float:
+    v = getattr(row, "commission_pct", None)
+    return float(v) if v is not None else 0.0
+
+
+def set_rules(db: Session, org_id: str, user: User, pct, raise_pct=None, commission=None) -> Dict[str, Any]:
     p = _int(pct, "limit")
     if p < 50 or p > 110:
         raise HTTPException(422, "Pick between 50% and 110% of the max offer.")
@@ -81,6 +87,14 @@ def set_rules(db: Session, org_id: str, user: User, pct, raise_pct=None) -> Dict
         if rp > 100:
             raise HTTPException(422, "Pick between 0% and 100% for the raise limit.")
         row.raise_limit_pct = rp
+    if commission is not None:
+        try:
+            c = float(commission)
+        except (TypeError, ValueError):
+            raise HTTPException(422, "The commission must be a number.")
+        if c < 0 or c > 50:
+            raise HTTPException(422, "Pick a commission between 0% and 50% of the assignment fee.")
+        row.commission_pct = round(c, 2)
     row.updated_by_id = user.id
     db.commit()
     return rules_json(row)

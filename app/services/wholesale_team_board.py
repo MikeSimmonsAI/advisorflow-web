@@ -21,6 +21,30 @@ from app.services import wholesale_appointments as A
 METRICS = ("booked", "ran", "no_show", "signed", "follow_up", "dead", "offers", "waiting")
 
 
+def _commissions(db: Session, org_id: str, appts) -> Dict[str, Any]:
+    """Commission by rep: the workspace's % of the assignment fee on each
+    deal that came from one of their visits. 'earned' = the fee was
+    collected at closing; 'coming' = signed, fee set, not closed yet. One
+    deal counts once, for the rep on its latest visit."""
+    from app.models.wholesale_models import WholesaleDeal
+    from app.services import wholesale_field_offers as O
+    pct = O.commission_pct(O.rules(db, org_id))
+    out: Dict[str, Dict[str, float]] = defaultdict(lambda: {"earned": 0.0, "coming": 0.0})
+    by_deal = {}
+    for a in sorted((x for x in appts if x.deal_id), key=lambda x: x.starts_at):
+        by_deal[a.deal_id] = a
+    if pct and by_deal:
+        for d in db.query(WholesaleDeal).filter(WholesaleDeal.organization_id == org_id,
+                                               WholesaleDeal.id.in_(list(by_deal))).all():
+            a = by_deal[d.id]
+            rep = a.assigned_to_id or "unassigned"
+            if d.wholesale_fee_collected:
+                out[rep]["earned"] += float(d.wholesale_fee_collected) * pct / 100
+            elif d.assignment_fee and a.outcome == "signed":
+                out[rep]["coming"] += float(d.assignment_fee) * pct / 100
+    return {"pct": pct, "by_rep": out}
+
+
 def _week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
@@ -68,6 +92,8 @@ def board(db: Session, org_id: str, user: User, weeks: int = 4, include_test: bo
             if o.status == "pending":
                 c["waiting"] += 1
 
+    comm = _commissions(db, org_id, appts)
+
     # Everyone on the team who could have had appointments shows, even with zeros.
     people = {r["user_id"]: r for r in A.reps(db, org_id, user)}
     for uid in list(people):
@@ -79,9 +105,13 @@ def board(db: Session, org_id: str, user: User, weeks: int = 4, include_test: bo
         per_week = [{"week": s.isoformat(), **weeks_map.get(s.isoformat(), dict.fromkeys(METRICS, 0))} for s in starts]
         total = {m: sum(w[m] for w in per_week) for m in METRICS}
         total["signed_rate"] = round(100.0 * total["signed"] / total["ran"]) if total["ran"] else None
+        c = comm["by_rep"].get(uid) or {"earned": 0.0, "coming": 0.0}
         rows.append({"user_id": uid if uid != "unassigned" else None, "name": name,
-                     "role_label": (p or {}).get("role_label"), "weeks": per_week, "total": total})
+                     "role_label": (p or {}).get("role_label"), "weeks": per_week, "total": total,
+                     "commission": {"earned": round(c["earned"]), "coming": round(c["coming"])}})
     rows.sort(key=lambda r: (-r["total"]["signed"], -r["total"]["ran"], (r["name"] or "").lower()))
     team = {m: sum(r["total"][m] for r in rows) for m in METRICS}
     team["signed_rate"] = round(100.0 * team["signed"] / team["ran"]) if team["ran"] else None
-    return {"weeks": [s.isoformat() for s in starts], "rows": rows, "team": team}
+    team["commission"] = {k: sum(r["commission"][k] for r in rows) for k in ("earned", "coming")}
+    return {"weeks": [s.isoformat() for s in starts], "rows": rows, "team": team,
+            "commission_pct": comm["pct"]}

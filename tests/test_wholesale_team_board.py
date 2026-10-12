@@ -34,3 +34,44 @@ def test_board_counts_by_rep(client, admin_auth_headers, auth_headers, sample_ad
     # A field login sees only their own row
     mine = ok(client.get("/wholesale/appointments/board", headers=auth_headers))
     assert {r["user_id"] for r in mine["rows"]} == {sample_advisor.id}
+
+
+def test_commission_is_five_percent_of_the_assignment_fee(
+        client, admin_auth_headers, auth_headers, sample_advisor, second_advisor, sample_org, db_session):
+    from app.models.wholesale_models import WholesaleDeal, WholesaleProperty
+    from app.models.wholesale_ops_models import WholesaleFieldAppointment
+    ok(client.post("/wholesale/team/members", headers=admin_auth_headers,
+                   json={"user_id": sample_advisor.id, "role": "field_specialist", "confirm_lock": True}))
+    assert ok(client.get("/wholesale/team/rules", headers=admin_auth_headers))["commission_pct"] == 5
+
+    def deal(fee=None, collected=None):
+        p = WholesaleProperty(organization_id=sample_org.id, street_address="5 Fee St", city="Dallas",
+                              state="TX", zip_code="75201")
+        db_session.add(p); db_session.flush()
+        d = WholesaleDeal(organization_id=sample_org.id, property_id=p.id, stage="new_property",
+                          assignment_fee=fee, wholesale_fee_collected=collected)
+        db_session.add(d); db_session.commit()
+        return d.id
+
+    book = lambda h: ok(client.post("/wholesale/appointments", headers=admin_auth_headers, json={
+        "starts_at": _today(h), "address": "%d Fee St" % h, "assigned_to_id": sample_advisor.id}))
+    closed, signed = book(9), book(11)
+    for appt, d in ((closed, deal(collected=23000)), (signed, deal(fee=10000))):
+        ok(client.patch("/wholesale/appointments/%s" % appt["id"], headers=auth_headers, json={"outcome": "signed"}))
+        db_session.query(WholesaleFieldAppointment).filter_by(id=appt["id"]).update({"deal_id": d})
+    db_session.commit()
+
+    b = ok(client.get("/wholesale/appointments/board", headers=admin_auth_headers))
+    me = next(r for r in b["rows"] if r["user_id"] == sample_advisor.id)
+    assert me["commission"] == {"earned": 1150, "coming": 500}      # 5% of 23k closed, 5% of 10k signed
+    assert b["team"]["commission"] == {"earned": 1150, "coming": 500} and b["commission_pct"] == 5
+    # The rep sees their own
+    mine = ok(client.get("/wholesale/appointments/board", headers=auth_headers))
+    assert mine["rows"][0]["commission"]["earned"] == 1150
+    # Mike can change the rate
+    ok(client.put("/wholesale/team/rules", headers=admin_auth_headers,
+                  json={"offer_limit_pct": 90, "commission_pct": 7.5}))
+    b = ok(client.get("/wholesale/appointments/board", headers=admin_auth_headers))
+    assert next(r for r in b["rows"] if r["user_id"] == sample_advisor.id)["commission"]["earned"] == 1725
+    assert client.put("/wholesale/team/rules", headers=admin_auth_headers,
+                      json={"offer_limit_pct": 90, "commission_pct": 80}).status_code == 422
