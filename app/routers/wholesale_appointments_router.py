@@ -65,6 +65,7 @@ class ChangeIn(BaseModel):
     outcome: Optional[str] = None            # signed | follow_up | dead (build list #16)
     outcome_note: Optional[str] = None
     follow_up_at: Optional[str] = None
+    client_ref: Optional[str] = None          # the phone's id for this change (#28)
 
 
 @router.get("")

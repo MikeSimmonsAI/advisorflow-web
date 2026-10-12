@@ -164,9 +164,20 @@ async def add_photo(db: Session, org_id: str, user: User, appt_id: str, upload, 
     from app.services import wholesale_files as files
     appt = A.get_visible(db, org_id, user, appt_id)
     _may_write(db, user, appt)
+    data, content_type, original = await files.read_upload(upload, images_only=True)
+    # A photo the phone kept through a dead zone may arrive twice (the first
+    # try got through but the answer never came back). Same bytes on the same
+    # visit: hand back the one already saved.
+    import hashlib
+    same = (db.query(WholesaleFieldVisitPhoto)
+            .filter(WholesaleFieldVisitPhoto.organization_id == org_id,
+                    WholesaleFieldVisitPhoto.appointment_id == appt.id,
+                    WholesaleFieldVisitPhoto.checksum == hashlib.sha256(data).hexdigest())
+            .first())
+    if same is not None:
+        return photo_json(same)
     if len(_photos(db, org_id, appt.id)) >= MAX_PHOTOS:
         raise HTTPException(422, "That visit already has %d photos." % MAX_PHOTOS)
-    data, content_type, original = await files.read_upload(upload, images_only=True)
     stored = files.put(org_id, "field_photo", data, content_type, db=db)
     p = WholesaleFieldVisitPhoto(organization_id=org_id, appointment_id=appt.id,
                                  room=(room if room in ROOMS else None), caption=(caption or None),

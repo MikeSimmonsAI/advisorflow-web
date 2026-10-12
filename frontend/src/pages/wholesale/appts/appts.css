@@ -91,3 +91,15 @@
 .cv-n { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #0f172a; color: #fff; font-weight: 700; font-size: 13px; }
 .cv-h { font-size: 20px; margin: 10px 0 6px; }
 .pa-bell { font-size: 28px; line-height: 1; flex: none; }
+
+/* The signal bar (build list #28) */
+.ob-bar { border: 1px solid var(--evo-line-strong, #d3dbe7); background: var(--evo-surface-inset, #f6f8fc);
+  border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; display: grid; gap: 8px; font-size: 14px; }
+.ob-bar.is-off { background: var(--evo-warning-soft, #fdf1dc); border-color: var(--evo-warning, #d97706); color: var(--evo-warning-ink, #9a5200); }
+.ob-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ob-row > span:not(.ob-dot) { flex: 1 1 200px; }
+.ob-row--bad { color: var(--evo-danger-ink, #b3203a); }
+.ob-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--evo-warning, #d97706); flex: none; }
+.ob-bar:not(.is-off) .ob-dot { background: #2f7de1; }
+.vd-photo.is-waiting img { opacity: .6; }
+.vd-wait { display: block; font-size: 12px; color: var(--evo-warning-ink, #9a5200); }
