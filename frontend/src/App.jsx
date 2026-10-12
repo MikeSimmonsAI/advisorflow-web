@@ -8,6 +8,7 @@ import StagingBanner from './components/StagingBanner'
 import ContextBanner from './components/ContextBanner'
 import DemoConsole from './pages/DemoConsole'
 import Login from './pages/Login'
+import TeamPrices from './pages/TeamPrices'
 import Onboarding from './pages/Onboarding'
 // Public customer-facing surfaces. DealRoom is the Checkpoint 4 sales deal
 // room; PortalAccess/PortalViewer are the pre-existing customer portal pages
@@ -1015,6 +1016,8 @@ export default function App() {
       <PageBoundary>
       <Suspense fallback={<div role="status" aria-live="polite" style={{ padding: 24, color: 'var(--text-secondary)' }}>Loading…</div>}>
       <Routes>
+        {/* Independent show-and-tell page: no workspace auth, dashboards or sales navigation. */}
+        <Route path="/team-prices" element={<TeamPrices />} />
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
         {/* MOBILE / PWA SHELL. Own auth gate (/m/login), own chrome; every call is an existing, server-enforced endpoint. */}
         <Route path="/m/*" element={<MobileApp />} />
