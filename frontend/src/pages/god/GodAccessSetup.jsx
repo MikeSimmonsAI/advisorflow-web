@@ -6,6 +6,10 @@
  *    login (the one with Atlantis and the Wholesaler) is easy to confirm.
  * 2. EvoSys Wholesale: the named logins who may use it. God mode always can.
  *    The lock turns on with the first name and never reopens by itself.
+ * 3. SCI contacts: the owner picks the source file, previews it, then loads
+ *    it (POST /god/programs/{org}/load-source). Loading stages every row,
+ *    holds anything that needs review and makes the clean contacts live.
+ *    It never sends, never enrols and never records consent.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
@@ -23,6 +27,7 @@ export default function GodAccessSetup() {
       <p style={{ margin: '0 0 20px', color: '#5b6b75' }}>Put SCI under a login, and decide who may use EvoSys Wholesale.</p>
       <SciSetup />
       <WholesaleAccess />
+      <SciContacts />
     </div>
   )
 }
@@ -122,6 +127,93 @@ function WholesaleAccess() {
             <button type="submit" style={primary} disabled={!email.trim()}>{d.lock_on ? 'Add' : 'Add and lock'}</button>
           </form>
           {err && <p role="alert" style={{ color: '#a9423c', fontSize: 14 }}>{err}</p>}
+        </>
+      )}
+    </section>
+  )
+}
+
+
+const SUMMARY_LABELS = {
+  rows: 'Rows in the file', unique_lead_ids: 'Lead IDs', staged: 'Rows saved',
+  mapped: 'Matched to a location', location_review: 'Location review', duplicate_review: 'Duplicate review',
+  data_review: 'Data review', auto_linked: 'Same person, linked', errors: 'Errors',
+}
+
+function Counts({ data }) {
+  const rows = Object.entries(data || {}).filter(([, v]) => typeof v === 'number' || typeof v === 'boolean')
+  if (!rows.length) return null
+  return (
+    <table style={{ borderCollapse: 'collapse', fontSize: 14, margin: '6px 0 10px' }}>
+      <tbody>
+        {rows.map(([k, v]) => (
+          <tr key={k}><td style={{ padding: '2px 16px 2px 0', color: '#5b6b75' }}>{SUMMARY_LABELS[k] || k.replace(/_/g, ' ')}</td>
+            <td style={{ padding: '2px 0', fontWeight: 600 }}>{String(v)}</td></tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function SciContacts() {
+  const [orgId, setOrgId] = useState(null)
+  const [file, setFile] = useState(null)
+  const [preview, setPreview] = useState(null)
+  const [done, setDone] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    api.get('/god/access-setup/sci').then(r => setOrgId(r.organization?.exists ? r.organization.id : null)).catch(e => setErr(errText(e)))
+  }, [])
+  const send = async apply => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    fd.append('apply', apply ? 'true' : 'false')
+    return api.upload(`/god/programs/${orgId}/load-source`, fd)
+  }
+  const check = async () => {
+    setErr(''); setDone(null); setBusy(true)
+    try { setPreview(await send(false)) } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
+  }
+  const load = async () => {
+    const c = window.prompt('This loads the contacts into SCI. Nothing is sent and every campaign stays off. Type LOAD to confirm.')
+    if (c !== 'LOAD') return
+    setErr(''); setBusy(true)
+    try { setDone(await send(true)) } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
+  }
+  return (
+    <section style={box} aria-labelledby="sci-load-h">
+      <h2 id="sci-load-h" style={{ margin: '0 0 6px', fontSize: 18 }}>3. SCI contacts: load the file</h2>
+      <p style={{ margin: '0 0 14px', color: '#5b6b75', fontSize: 14 }}>
+        Pick the SCI contact file (CSV, the same columns as the SCI export). Check it first; nothing is saved by the check.
+        Loading saves every row, puts on hold anything that needs a person to look at it (unknown location, duplicates,
+        Not Interested / Disqualified) and makes the clean contacts live. <b>Nothing is sent</b> - every campaign stays off.
+      </p>
+      {!orgId ? <p style={{ fontSize: 14 }}>{err || 'Finding the SCI workspace…'}</p> : (
+        <>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <label htmlFor="sci-file" style={{ fontWeight: 600, fontSize: 14 }}>Contact file</label>
+            <input id="sci-file" type="file" accept=".csv,text/csv" onChange={e => { setFile(e.target.files[0] || null); setPreview(null); setDone(null) }} />
+            <button type="button" style={btn} disabled={busy || !file} onClick={check}>{busy && !preview ? 'Checking…' : 'Check (saves nothing)'}</button>
+          </div>
+          {err && <p role="alert" style={{ color: '#a9423c', fontSize: 14 }}>{err}</p>}
+          {preview && (
+            <div style={{ marginTop: 14 }}>
+              <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>What loading would do</h3>
+              <Counts data={preview.stage} />
+              <Counts data={preview.promotion_plan} />
+              {preview.stage?.refused
+                ? <p role="alert" style={{ color: '#a9423c', fontSize: 14 }}>{preview.stage.refused}</p>
+                : <button type="button" style={primary} disabled={busy} onClick={load}>{busy ? 'Loading…' : 'Load into SCI (sends nothing)'}</button>}
+            </div>
+          )}
+          {done && (
+            <div role="status" style={{ marginTop: 14, padding: 12, borderRadius: 10, background: '#f0f8f3', border: '1px solid #cfe6da', fontSize: 14 }}>
+              <b>Loaded.</b> {done.stage?.staged} rows saved · {done.held?.held} put on hold for review · {done.promotion?.created} contacts now live.
+              Nothing was sent.
+              <Counts data={done.held?.by_reason} />
+            </div>
+          )}
         </>
       )}
     </section>
