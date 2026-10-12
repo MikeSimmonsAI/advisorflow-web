@@ -13,6 +13,7 @@ import WorkspaceAdminMenu from './WorkspaceAdminMenu'
 // A render error inside one page unmounts React's whole tree, rail included.
 // This keeps the failure inside the content area. See PageBoundary.
 import PageBoundary from './PageBoundary'
+import { applyFieldAppHead } from '../pages/wholesale/appts/fieldApp'
 import { isWholesalePath, WholesaleSearch, WholesaleEnvironment, WholesaleUser, useWholesaleCanvas, useWholesaleTitle, WholesaleProductLine } from './WholesaleShell'
 // A VERTICAL'S OWN PRESENTATION. Nav labels, groups and skin for a workspace
 // whose industry has one configured; null for everybody else, which is what
@@ -482,6 +483,9 @@ export default function Layout({ children }) {
   // visibility rules, one click further away. See WholesaleShell.jsx.
   const inWholesale = !vertical && isWholesalePath(location.pathname)
   const [platformOpen, setPlatformOpen] = useState(false)
+  // On the Wholesale side "Add to Home Screen" installs EvoSys Field (opens at
+  // Appointments) instead of the advisor mobile workspace. Build list #26.
+  useEffect(() => { applyFieldAppHead(inWholesale) }, [inWholesale])
   // WHOLESALE-ONLY LOGINS (managers, team leads, field specialists,
   // canvassers - /wholesale/team). They never see the advisor side: the rail
   // shows only Wholesale screens and My Settings, and any other address
