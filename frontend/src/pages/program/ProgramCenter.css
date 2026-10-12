@@ -163,7 +163,10 @@ button.sci-kpi:hover { border-color: var(--line-2); box-shadow: 0 2px 4px rgba(1
 .sci-grid-dash-b { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, .8fr); gap: 14px; margin-bottom: 14px; }
 .sci-grid-send { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; align-items: start; }
 .sci-grid-review { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; align-items: start; }
-.sci-grid-camp { display: grid; grid-template-columns: 300px minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
+.sci-grid-camp { display: grid; grid-template-columns: 280px minmax(0, 1fr) 290px; gap: 14px; align-items: start; }
+.sci-preview-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1700px) { .sci-preview-pair { grid-template-columns: minmax(0, 1fr); gap: 4px; } .sci-grid-camp { grid-template-columns: 250px minmax(0, 1fr) 270px; } }
+@media (max-width: 1280px) and (min-width: 1101px) { .sci-grid-camp { grid-template-columns: 240px minmax(0, 1fr); } .sci-grid-camp > :last-child { grid-column: 1 / -1; } }
 
 /* ── chips ── */
 .sci-app .sci-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 99px; background: var(--slate-soft); color: #5a6f80; font-weight: 700; font-size: 11px; white-space: nowrap; line-height: 1.7; margin-left: 0; border: 0; }
@@ -452,8 +455,6 @@ button.sci-tile[aria-expanded="true"] { border-color: var(--gold); box-shadow: 0
 /* ── responsive ── */
 @media (max-width: 1500px) {
   .sci-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .sci-grid-camp { grid-template-columns: 270px minmax(0, 1fr); }
-  .sci-grid-camp > :last-child { grid-column: 1 / -1; }
   .sci-settings { grid-template-columns: 210px minmax(0, 1fr); }
   .sci-settings-aside { grid-column: 2; position: static; }
 }
@@ -584,3 +585,8 @@ button.sci-tile[aria-expanded="true"] { border-color: var(--gold); box-shadow: 0
 .sci-seg button { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 8px; font-size: 12px; font-weight: 700; color: var(--sub); min-height: 32px; }
 .sci-seg button:hover { border-color: var(--line-2); color: var(--ink); }
 .sci-seg button[aria-pressed="true"] { background: #0f3a54; border-color: #0f3a54; color: #fff; }
+
+/* locations */
+.sci-listsep { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; font-weight: 800; color: var(--muted); padding: 12px 10px 4px; border-top: 1px solid #edf1f4; margin-top: 6px; }
+.sci-missing { color: var(--warn); font-style: italic; }
+@media (max-width: 1700px) { .sci-camp-ico { display: none; } }

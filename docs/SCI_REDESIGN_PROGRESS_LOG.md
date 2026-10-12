@@ -10,3 +10,4 @@ Rules: no pushes to main/sci-program, no deploys, no sends/approvals/activations
 | 14:09 | Worktree created from origin/main @ 0376868. sci-program staging is 170 commits behind main (stale). |
 | 14:21 | Shared design system (ui.jsx, ProgramCenter.css), shell (collapsible nav, dark top bar, identity fix), Dashboard rebuilt. Local synthetic backend + Vite running for screenshots. |
 | 14:27 | Choose & Send (stepper, per-contact preview, typed SEND N), Responses (KPIs, searchable 3-pane), Review (queue + inspector, mark-reviewed vs hold) rebuilt and screenshotted. |
+| 14:30 | Locations (directory + profile tabs, review bucket apart) and Campaigns (catalog/preview/controls, typed-name activation dialog) rebuilt. |
