@@ -8,6 +8,7 @@ import { api } from '../../../api/client'
 import { EvoApp, Panel, Tag } from '../ds/ds'
 import PropertyPhoto from '../evosense/PropertyPhoto'
 import { ApptCard } from './WholesaleAppointments'
+import PermissionLink from './PermissionLink'
 import './appts.css'
 
 function Links({ links }) {
@@ -68,6 +69,9 @@ export default function FieldPropertyCard({ d, propertyId }) {
           {!phones.length && !email ? <span className="evo-muted">No phone or email on file - ask the office.</span> : null}
         </div>
       </Panel>
+
+      <PermissionLink propertyId={propertyId} phone={phones[0] && !(p.is_test || phones[0].is_test) ? phones[0].value : ''}
+                      owner={owners[0] ? owners[0].name : ''} />
 
       <Panel title="Why we are here">
         {signals.length ? (

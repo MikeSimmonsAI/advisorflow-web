@@ -262,7 +262,8 @@ def fence(path: str, method: str, role: Optional[str]) -> Optional[str]:
         if _under(path, FIELD_OPEN):
             return None
         m = FIELD_PROPERTY.match(path)
-        if m and (method == "GET" or (method == "PATCH" and path.rstrip("/").endswith("/facts"))):
+        if m and (method == "GET" or (method == "PATCH" and path.rstrip("/").endswith("/facts"))
+                  or (method == "POST" and path.rstrip("/").endswith("/permission-link"))):
             return None
         if _starts(path, FIELD_BLOCKED_PREFIXES) or (method != "GET" and path.endswith(FIELD_BLOCKED_ACTIONS)):
             return "Field logins cannot use this. Ask your manager."
@@ -272,7 +273,7 @@ def fence(path: str, method: str, role: Optional[str]) -> Optional[str]:
 
 FIELD_OPEN = ("/wholesale/appointments", "/wholesale/team/me")
 FIELD_PROPERTY = _re.compile(
-    r"^/wholesale/evosense/properties/([^/]+)(/(photo|photo\.jpg|facts|observations/[^/]+/raw))?/?$")
+    r"^/wholesale/evosense/properties/([^/]+)(/(photo|photo\.jpg|facts|permission-link|observations/[^/]+/raw))?/?$")
 
 
 def field_property_id(path: str) -> Optional[str]:
