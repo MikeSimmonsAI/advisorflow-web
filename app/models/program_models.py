@@ -73,6 +73,9 @@ class OutreachProgram(Base):
     reply_instructions_email = Column(Text, nullable=True)
     # A send with no resolved location is refused and parked in Location Review.
     require_location_to_send = Column(Boolean, nullable=False, default=True)
+    # APPROVAL MODE: automated sends go only to contacts a manager approved on
+    # Choose & Send. Switched on by the first approval; never switched off by code.
+    require_send_approval = Column(Boolean, nullable=False, default=False)
     # Staff SMS alerts are a real send; off until someone turns them on.
     staff_sms_alerts_enabled = Column(Boolean, nullable=False, default=False)
     logo_asset_id = Column(String, nullable=True)
@@ -192,6 +195,11 @@ class ProgramSourceRecord(Base):
     hold_reason = Column(Text, nullable=True)
     held_at = Column(DateTime, nullable=True)
     held_by = Column(String, nullable=True)
+    # CHOOSE & SEND: a manager ticked this contact and approved it to receive
+    # outreach (programs/send_approval.py). With the program in approval mode,
+    # no automated message goes to a contact without this.
+    approved_to_send_at = Column(DateTime, nullable=True)
+    approved_to_send_by = Column(String, nullable=True)
     # Set only when the staged row is later committed to a live contact/lead.
     org_contact_id = Column(String, nullable=True)
     lead_id = Column(String, ForeignKey("leads.id"), nullable=True)

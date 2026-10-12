@@ -29,10 +29,12 @@ import Assets from './sci/Assets'
 import Launch from './sci/Launch'
 import Health from './sci/Health'
 import Settings from './sci/Settings'
+import Send from './sci/Send'
 import './ProgramCenter.css'
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+  { key: 'send', label: 'Choose & Send', icon: 'campaigns' },
   { key: 'responses', label: 'Responses', icon: 'responses' },
   { key: 'review', label: 'Review', icon: 'review' },
   { key: 'locations', label: 'Locations', icon: 'locations' },
@@ -191,6 +193,7 @@ export default function ProgramCenter() {
           {tab === 'campaigns' && <Campaigns isManager={isManager} locationId={locationId} locations={data.locations} />}
           {tab === 'assets' && <Assets isManager={isManager} locations={data.locations} />}
           {tab === 'launch' && <Launch isManager={isManager} onChange={load} goTab={goTab} />}
+          {tab === 'send' && <Send locations={data.locations} isManager={isManager} locationId={locationId} />}
           {tab === 'health' && <Health />}
           {tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness}
             locations={realLocations} onChange={load} />}

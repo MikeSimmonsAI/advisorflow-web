@@ -1247,6 +1247,61 @@ def _family_json(f: CampaignFamily) -> dict:
             "email_body_template": f.email_body_template}
 
 
+# ── Choose & Send: a manager picks exactly who gets outreach ───────────────
+
+class PickIn(BaseModel):
+    lead_ids: List[str]
+    confirm: Optional[str] = None
+
+
+@router.get("/send/contacts")
+def send_contacts(search: Optional[str] = Query(None), location_id: Optional[str] = Query(None),
+                  family: Optional[str] = Query(None), show: str = Query("all"),
+                  limit: int = Query(100, ge=1, le=300), offset: int = Query(0, ge=0),
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Every loaded contact, one row per person, approved or not. Reads only."""
+    from app.services.programs import send_approval
+    prog = _program(db, user)
+    return send_approval.list_contacts(db, prog, search=search or "", location_id=location_id or "",
+                                       family=family or "", show=show, limit=limit, offset=offset)
+
+
+@router.post("/send/preview")
+def send_preview(body: PickIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Exactly what the first text says for each ticked contact. Sends nothing."""
+    from app.services.programs import send_approval
+    prog = _program(db, user)
+    if len(body.lead_ids or []) > 300:
+        raise HTTPException(status_code=422, detail="Preview at most 300 at a time.")
+    return send_approval.preview(db, prog, body.lead_ids)
+
+
+@router.post("/send/approve")
+def send_approve(body: PickIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """EXPLICIT HUMAN ACTION: approve the ticked contacts and start their
+    outreach. confirm must read "SEND <n>" for the n contacts ticked."""
+    from app.services.programs import send_approval
+    prog = _program(db, user)
+    _require_manager(db, user)
+    ids = list(dict.fromkeys(i for i in (body.lead_ids or []) if i))
+    if not ids:
+        raise HTTPException(status_code=422, detail="Tick at least one contact.")
+    if len(ids) > send_approval.MAX_PER_APPROVAL:
+        raise HTTPException(status_code=422, detail="Approve at most %d at a time." % send_approval.MAX_PER_APPROVAL)
+    if (body.confirm or "").strip().upper() != "SEND %d" % len(ids):
+        raise HTTPException(status_code=422, detail="Confirm with SEND %d." % len(ids))
+    return send_approval.approve(db, prog, user, ids)
+
+
+@router.post("/send/unapprove")
+def send_unapprove(body: PickIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Take approval back: no more automated messages to these contacts."""
+    from app.services.programs import send_approval
+    prog = _program(db, user)
+    _require_manager(db, user)
+    return send_approval.unapprove(db, prog, user, body.lead_ids)
+
+
 @router.get("/campaigns")
 def list_campaigns(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     prog = _program(db, user)
