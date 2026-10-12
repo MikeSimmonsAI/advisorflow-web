@@ -31,6 +31,8 @@ def _mount_router(client):
 def no_vapid(monkeypatch):
     for k in ("VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT"):
         monkeypatch.delenv(k, raising=False)
+    # "No keys" also means the server may not make its own (web_push_service).
+    monkeypatch.setenv("WEB_PUSH_AUTO_KEYS", "0")
 
 
 @pytest.fixture()

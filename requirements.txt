@@ -39,3 +39,7 @@ reportlab==4.2.5
 # start command, and schema changes are applied at startup by
 # app/auto_migrate.py, not by `alembic upgrade`. Install them locally with:
 #   pip install -r requirements-dev.txt
+# Phone alerts (web push). py-vapid pinned to the release that accepts cryptography 43.
+pywebpush==2.0.3
+py-vapid==1.9.2
+http-ece==1.2.1

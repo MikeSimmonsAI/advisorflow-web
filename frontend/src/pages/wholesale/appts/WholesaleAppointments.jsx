@@ -11,6 +11,7 @@ import BookAppointment from './BookAppointment'
 import VisitDrawer from './VisitDrawer'
 import PendingOffers from './PendingOffers'
 import InstallTip from './InstallTip'
+import PhoneAlerts from './PhoneAlerts'
 import { centralToIso, dayLabel, isoToCentral, todayCentral } from './apptTime'
 import './appts.css'
 
@@ -168,6 +169,7 @@ export default function WholesaleAppointments() {
       <Alert>{err}</Alert>
       {data && !isField ? <PendingOffers /> : null}
       {isField ? <InstallTip /> : null}
+      {data ? <PhoneAlerts compact={!isField} /> : null}
       {!data && !err ? <Skeleton rows={4} height={60} /> : null}
       {data && !items.length ? (
         <Empty title={when === 'today' ? (isToday ? 'Nothing booked today' : `Nothing booked ${dayLabel(day)}`) : 'Nothing here'}>

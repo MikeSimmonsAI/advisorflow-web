@@ -48,10 +48,23 @@ def notify(db, org_id: str, *, kind, message: str, lead_id: Optional[str] = None
         users = recipients(db, org_id, assignee_id)
         if not users:
             return 0
+        made = []
         with db.begin_nested():
             for uid in users:
-                db.add(Notification(user_id=uid, lead_id=lead_id, type=kind,
-                                    message=message[:1000], link=link))
+                n = Notification(user_id=uid, lead_id=lead_id, type=kind,
+                                 message=message[:1000], link=link)
+                db.add(n)
+                made.append(n)
+        # The same alert on the person's phone, when they turned phone alerts
+        # on (web_push_service). A generic title and the screen to open - never
+        # the message itself. Queued here, sent by the web push loop.
+        try:
+            from app.services.web_push_service import enqueue_for_notification
+            db.flush()
+            for n in made:
+                enqueue_for_notification(db, n, organization_id=org_id)
+        except Exception:  # noqa: BLE001 - a phone alert must never lose the bell
+            log.exception("wholesale notify: phone alert not queued for org %s", org_id)
         return len(users)
     except Exception:  # noqa: BLE001 - a missing badge must never lose an inquiry
         log.exception("wholesale notify failed for org %s", org_id)

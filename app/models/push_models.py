@@ -146,3 +146,18 @@ class PushEvent(Base):
             "last_error": self.last_error, "created_at": self.created_at,
             "sent_at": self.sent_at,
         }
+
+
+class WebPushVapidKey(Base):
+    """The server's own VAPID key pair, made once on first use when the
+    VAPID_* environment settings are absent (web_push_service.vapid_settings).
+    The private half is encrypted with the app's ENCRYPTION_KEY and never
+    leaves the server; only the public half is published by GET /push/config.
+    Environment settings, when present, always win over this row."""
+    __tablename__ = "web_push_vapid_keys"
+
+    id = Column(String, primary_key=True, default="default")
+    public_key = Column(String, nullable=False)
+    private_key_enc = Column(Text, nullable=False)
+    subject = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)

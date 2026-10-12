@@ -86,10 +86,15 @@ if (typeof self !== 'undefined' && self.addEventListener) {
     var data = {};
     try { data = event.data ? event.data.json() : {}; } catch (e) { data = {}; }
     var title = data.title || 'New activity';
+    // Deep links stay inside the app: the mobile workspace (/m) or the
+    // Wholesale field app (/wholesale). Anything else opens the default screen.
+    var url = typeof data.url === 'string' ? data.url : '';
+    var field = url.indexOf('/wholesale') === 0;
+    var safeUrl = (url.indexOf('/m') === 0 || field) ? url : '/m';
     event.waitUntil(self.registration.showNotification(title, {
       body: 'Open the app to view details.',
-      icon: '/icons/icon.svg', badge: '/icons/icon.svg',
-      data: { url: typeof data.url === 'string' && data.url.indexOf('/m') === 0 ? data.url : '/m' },
+      icon: field ? '/icons/field-192.png' : '/icons/icon.svg', badge: field ? '/icons/field-192.png' : '/icons/icon.svg',
+      data: { url: safeUrl },
     }));
   });
 
