@@ -40,10 +40,10 @@ def upload(client, headers, path, data=PNG, name="shot.png", ctype="image/png",
 
 # ── What the deployment can do, said out loud ───────────────────────────────
 
-def test_with_no_storage_configured_the_product_says_so_and_refuses(
+def test_with_uploads_switched_off_the_product_says_so_and_refuses(
         client, auth_headers, prop, monkeypatch):
     """A 200 that evaporates is the failure this whole design exists to avoid."""
-    monkeypatch.delenv("MEDIA_STORAGE_BACKEND", raising=False)
+    monkeypatch.setenv("MEDIA_STORAGE_BACKEND", "none")
 
     cap = ok(client.get("/wholesale/files/capability", headers=auth_headers))
     assert cap["uploads_enabled"] is False
@@ -53,7 +53,32 @@ def test_with_no_storage_configured_the_product_says_so_and_refuses(
     response = upload(client, auth_headers,
                       "/wholesale/properties/%s/photos" % prop["id"])
     assert response.status_code == 503
-    assert "not configured" in response.json()["detail"]
+    assert "switched off" in response.json()["detail"]
+
+
+def test_with_nothing_configured_files_live_in_the_database(
+        client, auth_headers, prop, monkeypatch, db_session):
+    """No setting means the app's own database: durable across restarts and
+    deploys, no extra service, and the bytes come back exactly as stored -
+    including a file bigger than one stored piece."""
+    from app.models.wholesale_models import WholesaleFileBlob
+    from app.services import wholesale_files as WF
+    monkeypatch.delenv("MEDIA_STORAGE_BACKEND", raising=False)
+    cap = ok(client.get("/wholesale/files/capability", headers=auth_headers))
+    assert cap["uploads_enabled"] is True and cap["durable"] is True
+    assert cap["where"] == "the app's database" and cap["reason"] is None
+
+    big = PNG + bytes(range(256)) * (5 * 1024 * 1024 // 256)   # > one 4 MB piece
+    doc = ok(upload(client, auth_headers, "/wholesale/properties/%s/photos" % prop["id"],
+                    data=big, name="front.png", ctype="image/png"))
+    parts = db_session.query(WholesaleFileBlob).all()
+    assert len(parts) == 2
+    key = parts[0].storage_key
+    assert WF.fetch("database", key, db=db_session) == big
+    WF.remove("database", key, db=db_session)
+    db_session.commit()
+    assert db_session.query(WholesaleFileBlob).count() == 0
+    assert doc
 
 
 def test_local_storage_is_offered_and_says_exactly_what_it_is(

@@ -10,6 +10,7 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://advisorflo
 // copy the value to the new key, and delete the old one so existing sessions
 // survive the rename without being logged out.
 
+import { shrinkFormData } from './shrinkImages'
 import { orgOverrideFor } from '../auth/routeAuthority'
 import { applyWorkspaceTheme } from '../theme.js'
 const KEY_TOKEN    = 'af_token'
@@ -387,7 +388,9 @@ export const api = {
   put: (path, body) => request(path, { method: 'PUT', body: body instanceof FormData ? body : JSON.stringify(body) }),
   patch: (path, body) => request(path, { method: 'PATCH', body: body instanceof FormData ? body : JSON.stringify(body) }),
   delete: (path) => request(path, { method: 'DELETE' }),
-  upload: (path, formData) => request(path, { method: 'POST', body: formData }),
+  // A large phone photo is shrunk before it leaves the browser (api/shrinkImages.js);
+  // documents, lists and zips are sent exactly as chosen.
+  upload: async (path, formData) => request(path, { method: 'POST', body: await shrinkFormData(formData) }),
 }
 
 // ── Authenticated binary fetch ───────────────────────────────────────────────

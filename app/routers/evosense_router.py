@@ -391,8 +391,8 @@ async def import_preview(file: UploadFile = File(...), db: Session = Depends(get
     """What an import would do (format, columns, rejects, duplicates, signals) - writes nothing."""
     org_id = svc.write_org_id(db, user)
     raw = await file.read()
-    if len(raw) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File is larger than 5 MB.")
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File is larger than 25 MB. Split it into smaller files.")
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -407,8 +407,8 @@ async def import_properties(file: UploadFile = File(...), strategy_id: Optional[
                             _g: User = Depends(require_not_observation)):
     org_id = svc.write_org_id(db, user)
     raw = await file.read()
-    if len(raw) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File is larger than 5 MB.")
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File is larger than 25 MB. Split it into smaller files.")
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:

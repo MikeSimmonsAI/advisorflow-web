@@ -591,8 +591,8 @@ async def import_buyers(request: Request, file: UploadFile = File(...),
     """
     org_id = svc.write_org_id(db, user)
     raw = await file.read()
-    if len(raw) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="That file is larger than 10MB.")
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="That file is larger than 25 MB. Split it into smaller files.")
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:

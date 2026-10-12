@@ -57,6 +57,9 @@ const PLATFORM_BRAND = BRAND_CONFIG[PLATFORM_THEME]
 //     platform-wide reach and a platform owner to look for it in the wrong
 //     place. God/platform functions live under Platform Admin, below.
 
+// What a field specialist or canvasser sees in the rail (see wholesale_team.py).
+const FIELD_NAV = new Set(['/wholesale/properties', '/wholesale/calculator', '/wholesale/callbacks', '/settings'])
+
 const NAV_GROUPS = [
   {
     label: 'Workspace',
@@ -172,6 +175,7 @@ const NAV_GROUPS = [
       { to: '/wholesale/pilot', label: 'Pilot Controls', icon: 'sliders', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/closing', label: 'Contracts & Closing', icon: 'file-text', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/dispositions', label: 'Dispositions', icon: 'send', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/team', label: 'Team', icon: 'users', adminOnly: true, workspaceAdminOnly: true, featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/settings', label: 'Wholesale Settings', icon: 'sliders', adminOnly: true, featureKey: 'wholesale_real_estate' },
     ],
   },
@@ -474,6 +478,18 @@ export default function Layout({ children }) {
   // visibility rules, one click further away. See WholesaleShell.jsx.
   const inWholesale = !vertical && isWholesalePath(location.pathname)
   const [platformOpen, setPlatformOpen] = useState(false)
+  // WHOLESALE-ONLY LOGINS (managers, team leads, field specialists,
+  // canvassers - /wholesale/team). They never see the advisor side: the rail
+  // shows only Wholesale screens and My Settings, and any other address
+  // lands them back in Wholesale. The server says who they are.
+  const wsTeam = (!isGodAdmin && branding?.wholesale_team) || null
+  const wsOnly = !!wsTeam?.wholesale_only
+  useEffect(() => {
+    if (!wsOnly) return
+    const p = location.pathname
+    if (isWholesalePath(p) || p === '/settings' || p.startsWith('/settings/')) return
+    navigate(wsTeam.field ? '/wholesale/properties' : '/wholesale', { replace: true })
+  }, [wsOnly, location.pathname])
   useWholesaleCanvas(inWholesale)
 
   // WHICH WORKSPACE THE ROUTED PAGE BELONGS TO.
@@ -911,6 +927,10 @@ export default function Layout({ children }) {
               // A capability item is NEVER shown on the strength of a role.
               // That is the whole difference: `adminOnly` asks who you are,
               // `capability` asks what the server says you may administer.
+              if (wsOnly) {
+                if (!(isWholesalePath(item.to) || item.to === '/settings')) return false
+                if (wsTeam.field && !FIELD_NAV.has(item.to)) return false
+              }
               if (item.capability) return hasCapability(item.capability)
               if (item.adminOnly && !isOrgAdmin) return false
               if (item.workspaceAdminOnly && !isWorkspaceAdmin) return false

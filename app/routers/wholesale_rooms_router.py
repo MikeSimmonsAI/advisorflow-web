@@ -606,7 +606,7 @@ def buyer_photo(token: str, file_id: str, request: Request,
                    WholesaleFile.buyer_visible.is_(True)).first())
     if row is None:
         raise HTTPException(status_code=404, detail="Not found")
-    return _bytes(row)
+    return _bytes(row, db)
 
 
 @public_router.get("/buyer/{token}/document/{document_id}")
@@ -652,7 +652,7 @@ def seller_photo(token: str, file_id: str, request: Request,
                    WholesaleFile.seller_visible.is_(True)).first())
     if row is None:
         raise HTTPException(status_code=404, detail="Not found")
-    return _bytes(row)
+    return _bytes(row, db)
 
 
 @public_router.get("/seller/{token}/document/{document_id}")
@@ -665,8 +665,8 @@ def seller_document(token: str, document_id: str, request: Request,
 
 # ── Byte serving, shared by both audiences ─────────────────────────────────
 
-def _bytes(row: WholesaleFile) -> Response:
-    data = files.fetch(row.storage_backend, row.storage_key)
+def _bytes(row: WholesaleFile, db=None) -> Response:
+    data = files.fetch(row.storage_backend, row.storage_key, db=db)
     safe = (row.original_filename or "file").replace('"', "").replace("\n", "")
     inline = (row.content_type or "").startswith("image/")
     return Response(
@@ -701,4 +701,4 @@ def _document_bytes(db: Session, link: WholesaleShareLink, deal: WholesaleDeal,
     if doc.viewed_at is None:
         doc.viewed_at = datetime.utcnow()
         db.commit()
-    return _bytes(row)
+    return _bytes(row, db)

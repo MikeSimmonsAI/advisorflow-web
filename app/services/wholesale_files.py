@@ -25,7 +25,9 @@ Two things it does NOT do, which a wholesaler's document drawer needs:
 
 ENVIRONMENT
 -----------
-    MEDIA_STORAGE_BACKEND   "s3" (durable, production) | "local" (development)
+    MEDIA_STORAGE_BACKEND   unset / "database" (default: the app's own database)
+                            | "s3" (object store) | "local" (development disk)
+                            | "none" (uploads refused)
     MEDIA_S3_BUCKET         required for s3      } already defined by the
     AWS_ACCESS_KEY_ID       required for s3      } platform; not invented here
     AWS_SECRET_ACCESS_KEY   required for s3      }
@@ -33,7 +35,9 @@ ENVIRONMENT
     WHOLESALE_LOCAL_MEDIA_ROOT   optional; where `local` writes.
                                  Default: <repo>/.local_media
 
-Unset means no uploads, and the product says so rather than failing quietly.
+Unset means the database: files are kept in the app's own Postgres, in
+pieces, so they survive restarts and deploys at no extra cost. "none" turns
+uploads off, and the product says so rather than failing quietly.
 """
 
 from __future__ import annotations
@@ -50,7 +54,10 @@ from app.services import mobile_storage
 
 BACKEND_S3 = "s3"
 BACKEND_LOCAL = "local"
+BACKEND_DB = "database"
 BACKEND_NONE = "none"
+# Pieces a file is kept in when stored in the database.
+DB_CHUNK = 4 * 1024 * 1024
 
 # 25 MB. Larger than the phone ceiling because a scanned settlement statement
 # is a bigger thing than a photo taken to be uploaded immediately, and smaller
@@ -74,14 +81,17 @@ IMAGE_TYPES = tuple(k for k in CONTENT_TYPES if k.startswith("image/"))
 # ── What this deployment can actually do ────────────────────────────────────
 
 def backend() -> str:
-    """s3, local, or none. Never guesses: a half-configured bucket is `none`."""
+    """s3, local, database or none. Never guesses: a half-configured bucket is
+    `none`. Nothing configured means the database, which needs no setup."""
     configured = str(os.environ.get("MEDIA_STORAGE_BACKEND", "")).strip().lower()
     if configured == BACKEND_S3:
         # The platform's own completeness check, not a second opinion.
         return BACKEND_S3 if mobile_storage._s3_configured() else BACKEND_NONE
     if configured == BACKEND_LOCAL:
         return BACKEND_LOCAL
-    return BACKEND_NONE
+    if configured == BACKEND_NONE:
+        return BACKEND_NONE
+    return BACKEND_DB
 
 
 def local_root() -> str:
@@ -100,7 +110,7 @@ def capability() -> Dict[str, Any]:
     operator concludes the feature is broken rather than unconfigured.
     """
     b = backend()
-    if b == BACKEND_S3:
+    if b in (BACKEND_S3, BACKEND_DB):
         reason = None
     elif b == BACKEND_LOCAL:
         # Phase 4: this used to read "it is not durable", which was wrong in the
@@ -112,12 +122,10 @@ def capability() -> Dict[str, Any]:
                   "restart, but they are not replicated \u2014 production should set "
                   "MEDIA_STORAGE_BACKEND=s3.")
     else:
-        reason = ("File storage is not configured for this deployment, so "
-                  "uploads are refused rather than accepted and lost. Set "
-                  "MEDIA_STORAGE_BACKEND=s3 with MEDIA_S3_BUCKET, "
-                  "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY for durable "
-                  "storage, or MEDIA_STORAGE_BACKEND=local for a development "
-                  "machine.")
+        reason = ("File uploads are switched off for this deployment "
+                  "(MEDIA_STORAGE_BACKEND=none). Remove that setting to keep "
+                  "files in the database, or set MEDIA_STORAGE_BACKEND=s3 with "
+                  "MEDIA_S3_BUCKET, AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.")
     return {
         "backend": b,
         "uploads_enabled": b != BACKEND_NONE,
@@ -125,9 +133,10 @@ def capability() -> Dict[str, Any]:
         # local case wrong:
         #   durable    \u2014 does the file survive this process restarting?
         #   replicated \u2014 does it survive this machine being lost?
-        "durable": b in (BACKEND_S3, BACKEND_LOCAL),
+        "durable": b in (BACKEND_S3, BACKEND_LOCAL, BACKEND_DB),
         "replicated": b == BACKEND_S3,
         "where": ("Amazon S3" if b == BACKEND_S3
+                  else "the app's database" if b == BACKEND_DB
                   else "this server's disk" if b == BACKEND_LOCAL else None),
         "max_bytes": MAX_UPLOAD_BYTES,
         "allowed_types": sorted(CONTENT_TYPES),
@@ -224,12 +233,61 @@ async def read_upload(upload: UploadFile, *, images_only: bool = False
     return data, actual, clean
 
 
-def put(org_id: str, kind: str, data: bytes, content_type: str) -> Dict[str, Any]:
+def _session(db):
+    """The caller's session when it has one (the file joins its transaction),
+    otherwise a short-lived one of our own."""
+    if db is not None:
+        return db, False
+    from app.deps import SessionLocal
+    return SessionLocal(), True
+
+
+def _db_put(key: str, data: bytes, db=None) -> None:
+    from app.models.wholesale_models import WholesaleFileBlob
+    s, own = _session(db)
+    try:
+        for i in range(0, max(len(data), 1), DB_CHUNK):
+            s.add(WholesaleFileBlob(storage_key=key, seq=i // DB_CHUNK, data=data[i:i + DB_CHUNK]))
+        s.flush()
+        if own:
+            s.commit()
+    finally:
+        if own:
+            s.close()
+
+
+def _db_fetch(key: str, db=None) -> Optional[bytes]:
+    from app.models.wholesale_models import WholesaleFileBlob
+    s, own = _session(db)
+    try:
+        parts = (s.query(WholesaleFileBlob).filter(WholesaleFileBlob.storage_key == key)
+                 .order_by(WholesaleFileBlob.seq.asc()).all())
+        return b"".join(p.data for p in parts) if parts else None
+    finally:
+        if own:
+            s.close()
+
+
+def _db_remove(key: str, db=None) -> None:
+    from app.models.wholesale_models import WholesaleFileBlob
+    s, own = _session(db)
+    try:
+        s.query(WholesaleFileBlob).filter(WholesaleFileBlob.storage_key == key).delete(synchronize_session=False)
+        if own:
+            s.commit()
+    finally:
+        if own:
+            s.close()
+
+
+def put(org_id: str, kind: str, data: bytes, content_type: str, db=None) -> Dict[str, Any]:
     """Write the bytes. Returns what the caller must store to find them again."""
     b = backend()
     key = _object_key(org_id, kind, content_type)
 
-    if b == BACKEND_S3:
+    if b == BACKEND_DB:
+        _db_put(key, data, db)
+    elif b == BACKEND_S3:
         # The platform's own S3 writer. Reused, not reimplemented, so there is
         # exactly one place that knows how this install talks to a bucket.
         mobile_storage._put_object(key, data, content_type)
@@ -261,8 +319,15 @@ def _local_path(key: str) -> str:
     return path
 
 
-def fetch(storage_backend: str, storage_key: str) -> bytes:
+def fetch(storage_backend: str, storage_key: str, db=None) -> bytes:
     """The bytes back. The caller has ALREADY checked who is asking."""
+    if storage_backend == BACKEND_DB:
+        data = _db_fetch(storage_key, db)
+        if data is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail="The stored file is missing.")
+        return data
+
     if storage_backend == BACKEND_LOCAL:
         path = _local_path(storage_key)
         if not os.path.exists(path):
@@ -284,12 +349,14 @@ def fetch(storage_backend: str, storage_key: str) -> bytes:
                                "longer configured.")
 
 
-def remove(storage_backend: str, storage_key: str) -> None:
+def remove(storage_backend: str, storage_key: str, db=None) -> None:
     """Best effort. A row the user deleted must disappear from the product even
     if the object store is briefly unreachable; an orphaned object is a cleanup
     problem, a file the user still sees after deleting it is a trust problem."""
     try:
-        if storage_backend == BACKEND_LOCAL:
+        if storage_backend == BACKEND_DB:
+            _db_remove(storage_key, db)
+        elif storage_backend == BACKEND_LOCAL:
             path = _local_path(storage_key)
             if os.path.exists(path):
                 os.remove(path)
