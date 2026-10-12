@@ -279,6 +279,9 @@ def list_templates(request: Request, db: Session = Depends(get_db), current_user
         _or(
             CadenceTemplate.industry == _cadence_industry,
             CadenceTemplate.industry == "general",
+            # A location program's own cadence (e.g. "SCI 10-Day Aggressive"). It was
+            # hidden here, so nobody could open it or make it the default.
+            CadenceTemplate.industry == "program",
             CadenceTemplate.industry == None,
         )
     ).order_by(CadenceTemplate.is_default.desc(), CadenceTemplate.created_at.asc()).all()
