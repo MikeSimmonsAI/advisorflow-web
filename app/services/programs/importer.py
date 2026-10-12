@@ -172,8 +172,25 @@ def analyze(rows: List[Dict[str, str]], profiles: Dict[str, LocationProfile],
             else:
                 d["dup_review"] = None
 
+    # Phone numbers that can never be texted or called, caught BEFORE loading
+    # (a short number, an area code that doesn't exist). The person can still
+    # be emailed; the list goes back to the customer to correct.
+    from app.services.programs.send_approval import _real_us_number
+    bad_phones, no_phone = [], 0
+    for r, d in zip(rows, decisions):
+        raw = (r.get(COL["phone"]) or "").strip()
+        if not raw:
+            no_phone += 1
+        elif not _real_us_number(raw):
+            bad_phones.append({"lead_id": d["lead_id"], "row": d["row"], "phone": raw,
+                               "name": " ".join(x for x in (r.get(COL["first"]), r.get(COL["last"])) if x),
+                               "has_email": bool(d["email"])})
+
     status = Counter((r.get(COL["status"]) or "").strip() or "(blank)" for r in rows)
     summary = {
+        "bad_phone_rows": len(bad_phones),
+        "bad_phones": bad_phones[:100],
+        "no_phone_rows": no_phone,
         "source_rows": len(rows),
         "distinct_lead_ids": len([k for k in seen if k]),
         "errors": errors,

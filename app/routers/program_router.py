@@ -1698,6 +1698,14 @@ async def god_load_source(organization_id: str, file: UploadFile = File(...),
     except HTTPException:
         db.rollback()
         raise
+    # Mobile or landline for every new number, right away, so a landline is
+    # never texted (Twilio Lookup, about $0.008 a number; approved by Mike).
+    try:
+        from app.services.programs import line_check
+        out["line_check"] = line_check.run_for_org(db, org.id, limit=2000)
+    except Exception as exc:                             # noqa: BLE001
+        db.rollback()
+        out["line_check"] = {"error": str(exc)[:200]}
     try:
         from app.routers.audit_log_router import log_action
         log_action(db, org.id, god.id, "program.source_loaded", "organization", org.id,
