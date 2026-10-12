@@ -103,6 +103,15 @@ export default function Send({ locations, isManager, locationId, goTab, automati
       setMsg(parts.join(' ')); setPicked({}); setPreview(null); setConfirming(false); load(); loadTotals()
     } catch (e) { setErr(errText(e)); setConfirming(false) } finally { setBusy(false) }
   }
+  const approveOne = async row => {
+    setBusy(true); setErr('')
+    try {
+      const r = await api.post('/program/send/approve', { lead_ids: [row.lead_id], confirm: 'SEND 1' })
+      setMsg(r.approved ? `${row.name} is good to go — first text at the next allowed hour in their time zone.`
+        : `${row.name} was not sent: ${(r.skipped || []).map(s => s.reason).join(', ') || 'blocked by a send check'}.`)
+      load(); loadTotals()
+    } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
+  }
   const unapprove = async row => {
     try {
       await api.post('/program/send/unapprove', { lead_ids: [row.lead_id] })
@@ -184,9 +193,11 @@ export default function Send({ locations, isManager, locationId, goTab, automati
                       <td className="sci-small">{r.location || <Chip tone="warn" plain>No location</Chip>}</td>
                       <td className="sci-small">{r.campaign || '—'}</td>
                       <td>
-                        {r.approved ? <Chip tone="ok" plain>Approved {when(r.approved_at)}</Chip>
+                        {r.approved ? <Chip tone="ok" plain>Good to go ✓ {when(r.approved_at)}</Chip>
                           : r.blocked ? <Chip tone="bad" plain title="The server will not send to this contact">{r.blocked}</Chip>
-                            : <Chip tone="info" plain>Not approved</Chip>}
+                            : isManager
+                              ? <button type="button" className="sci-btn sm gold" disabled={busy} onClick={() => approveOne(r)}>✓ Good to go</button>
+                              : <span className="sci-micro sci-muted">Waiting on Mike</span>}
                       </td>
                       <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {isManager && r.approved && <button type="button" className="sci-btn sm danger" onClick={() => unapprove(r)}>Stop</button>}
@@ -212,8 +223,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
           {!isManager ? (
             <div className="sci-banner info"><div className="sci-banner-body sci-micro">Only a workspace manager can approve contacts for outreach. You can still read each contact's message.</div></div>
           ) : (
-            <div className="sci-banner"><span className="sci-banner-icon" aria-hidden="true"><Icon name="shield" /></span>
-              <div className="sci-banner-body sci-micro">Each selected contact must pass the server's consent, suppression, location and send-gate checks.</div></div>
+            null
           )}
           {overMax && <div className="sci-alert" role="alert"><Icon name="alert" />Approve at most {max} at a time — untick {ids.length - max}.</div>}
 
