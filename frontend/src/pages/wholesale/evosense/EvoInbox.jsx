@@ -1,4 +1,4 @@
-/* EVOSENSE â€” DISCOVERY INBOX (Phase 7.3 light rebuild; board screen 2).
+/* EVOSENSE — DISCOVERY INBOX (Phase 7.3 light rebuild; board screen 2).
  *
  * Answers three questions for every property EvoSense has evaluated:
  *   WHAT HAS EVOSENSE FOUND?   the address dominates each row
@@ -188,7 +188,7 @@ export default function EvoInbox() {
       <Panel flush>
         <div className="evo-bucketnav evo-bucketnav--tabs" role="group" aria-label="Filter by state">
           <button type="button" className="evo-bucketbtn" aria-pressed={!bucket} onClick={() => set('bucket', '')}>
-            All Properties <span className="evo-seg__n">({allCount ?? 'â€¦'})</span>
+            All Properties <span className="evo-seg__n">({allCount ?? '…'})</span>
           </button>
           {orderedBuckets.filter((b) => b.count || bucket === b.key).map((b) => (
             <button key={b.key} type="button" className="evo-bucketbtn" aria-pressed={bucket === b.key}
@@ -253,7 +253,7 @@ export default function EvoInbox() {
               <option value="owned_longest">Owned longest</option>
               <option value="oldest">Oldest built</option>
               <option value="largest">Largest</option>
-              <option value="address">Address Aâ€“Z</option>
+              <option value="address">Address A–Z</option>
             </select>
           </label>
           <button type="button" className={`evo-btn evo-btn--sm ${showMore ? 'evo-btn--secondary' : 'evo-btn--ghost'}`}
@@ -270,7 +270,7 @@ export default function EvoInbox() {
         {loading && !data ? <div style={{ padding: 20 }}><Skeleton rows={6} height={28} /></div> : null}
         {data && !data.items.length ? (
           <Empty title={bucket ? 'Nothing in this state' : 'No properties match'}>
-            {bucket ? 'No property is in this state right now.' : 'Try a different search or filter â€” or let the next hunt run.'}
+            {bucket ? 'No property is in this state right now.' : 'Try a different search or filter — or let the next hunt run.'}
           </Empty>
         ) : null}
         {data && data.items.length ? (
@@ -285,7 +285,7 @@ export default function EvoInbox() {
                     <th scope="col" className="is-num">Contact</th>
                     <th scope="col" className="is-num">Intent</th>
                     <th scope="col">Signals</th>
-                    <th scope="col">Status Â· next action</th>
+                    <th scope="col">Status · next action</th>
                     <th scope="col">Found</th>
                   </tr>
                 </thead>
@@ -301,15 +301,15 @@ export default function EvoInbox() {
                                   onClick={(e) => e.stopPropagation()}>{p.address}{p.unit ? ` #${p.unit}` : ''}</Link>
                             <span className="evo-prop__sub">
                               {[p.city || (p.county ? `${p.county} County` : null), p.state].filter(Boolean).join(', ')} {p.zip_code}
-                              {p.appraisal ? ` Â· ${moneyK(p.appraisal.value)} tax value` : p.estimated_value ? ` Â· ${moneyK(p.estimated_value)} est.` : ''}
-                              {p.equity_pct !== null && p.equity_pct !== undefined ? ` Â· ${p.equity_pct}% equity` : ''}
+                              {p.appraisal ? ` · ${moneyK(p.appraisal.value)} tax value` : p.estimated_value ? ` · ${moneyK(p.estimated_value)} est.` : ''}
+                              {p.equity_pct !== null && p.equity_pct !== undefined ? ` · ${p.equity_pct}% equity` : ''}
                             </span>
                             {(p.bedrooms || p.square_feet || p.year_built || p.ownership_years != null) ? (
                               <span className="evo-prop__sub">
                                 {[p.bedrooms ? `${p.bedrooms} bd` : null, p.bathrooms ? `${p.bathrooms} ba` : null,
                                   p.square_feet ? `${Number(p.square_feet).toLocaleString()} sq ft` : null,
                                   p.year_built ? `built ${p.year_built}` : null,
-                                  p.ownership_years != null ? `owned ${p.ownership_years} yrs` : null].filter(Boolean).join(' Â· ')}
+                                  p.ownership_years != null ? `owned ${p.ownership_years} yrs` : null].filter(Boolean).join(' · ')}
                               </span>
                             ) : null}
                             {((mixed && p.is_test) || p.has_conflicts) ? (
@@ -328,7 +328,7 @@ export default function EvoInbox() {
                       <td data-label="Status">
                         <span className="evo-statusnext">
                           <Status status={p.status} />
-                          <span className="evo-next">{p.next_action || 'â€”'}</span>
+                          <span className="evo-next">{p.next_action || '—'}</span>
                         </span>
                         {p.next_step ? (
                           <Link className={`evo-nextstep evo-nextstep--${p.next_step.tone || 'default'}`}
@@ -336,7 +336,7 @@ export default function EvoInbox() {
                                 to={p.next_step.href || `/wholesale/evosense/property/${p.id}#actions`}
                                 title={p.next_step.reason || 'Open the property to do this'}
                                 onClick={(e) => e.stopPropagation()}>
-                            {p.next_step.label} â†’
+                            {p.next_step.label} →
                           </Link>
                         ) : null}
                       </td>
@@ -347,7 +347,7 @@ export default function EvoInbox() {
               </table>
             </div>
             <div className="evo-pager">
-              <span>{offset + 1}â€“{offset + data.items.length} of {data.total}</span>
+              <span>{offset + 1}–{offset + data.items.length} of {data.total}</span>
               <span style={{ display: 'flex', gap: 8 }}>
                 <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={offset === 0}
                         onClick={() => set('offset', String(Math.max(0, offset - PAGE)))}>Previous</button>
