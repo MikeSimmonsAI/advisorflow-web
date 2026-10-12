@@ -88,9 +88,20 @@ def run_review_request_cron(engine) -> int:
                 survey_url = public_survey_url(db, row.organization_id,
                                                survey_token)
 
+                # OUTREACH PROGRAM (SCI): thank them for choosing the funeral
+                # home or cemetery they dealt with, not the corporation.
+                from app.models.models import Lead as _Lead
+                from app.services import survey_identity as _si
+                loc = _si.location_identity(db, db.query(_Lead).filter(_Lead.id == row.lead_id).first())
+                held = None
+                if loc is not None and not loc["resolved"]:
+                    held = _si.HELD_NO_LOCATION
+                elif not survey_url:
+                    held = _si.HELD_NO_LINK
+
                 body = SURVEY_SMS.format(
-                    first_name=row.first_name or "there",
-                    org_name=row.org_name or "our team",
+                    first_name=_si.proper_name(row.first_name) or "there",
+                    org_name=(loc["name"] if loc and loc["name"] else row.org_name) or "our team",
                     survey_url=survey_url,
                 )
 
@@ -134,8 +145,15 @@ def run_review_request_cron(engine) -> int:
                     survey_token=survey_token,
                     survey_link_sent=False,
                 )
+                if held:
+                    # Claimed and recorded, never sent: no text goes out under
+                    # an unknown name or with an empty link.
+                    followup.error = held[:500]
                 db.add(followup)
                 db.commit()
+                if held:
+                    logger.warning("review_request_cron: booking %s %s", row.booking_id, held)
+                    continue
             except Exception as exc:
                 # One bad row must not poison the shared session for the rest.
                 db.rollback()

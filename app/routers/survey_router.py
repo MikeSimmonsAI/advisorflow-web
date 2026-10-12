@@ -163,14 +163,26 @@ def get_survey_context_json(request: Request, token: str, db: Session = Depends(
     _org_id = (org.id if org else None) or getattr(lead, "organization_id", None)
     ident = identity_for_org(db, _org_id)
     branding = public_branding(db, _org_id)
+    business_name = ident.customer_facing_name or (org.name if org else "our team")
+    business_phone = ident.business_phone
+    # OUTREACH PROGRAM (SCI): the family dealt with one funeral home or
+    # cemetery. Its name and ITS phone only - never the corporate name or a
+    # person's number. Unresolved location: no name, no number.
+    from app.services.survey_identity import location_identity, proper_name
+    loc = location_identity(db, lead)
+    if loc is not None:
+        business_name = loc["name"] or ""
+        business_phone = loc["phone"]
+        branding = dict(branding, name=business_name, phone=business_phone or "", logo_url="",
+                        address="", tagline="", document_title=business_name)
 
     return {
         "token": token,
         "already_submitted": _already_submitted(db, followup.id),
-        "first_name": (lead.first_name if lead else "") or "there",
+        "first_name": proper_name(lead.first_name if lead else "") or "there",
         # The BUSINESS, never the platform.
-        "business_name": ident.customer_facing_name or (org.name if org else "our team"),
-        "business_phone": ident.business_phone,
+        "business_name": business_name,
+        "business_phone": business_phone,
         # Same resolved block the booking page uses, so the two pages a family
         # sees in one week cannot end up branded differently.
         "branding": branding,
@@ -193,6 +205,17 @@ def get_survey_page(request: Request, token: str, db: Session = Depends(get_db))
     the branded route on the organization's own domain.
     """
     followup, lead, advisor, org = _get_survey_context(db, token)
+    # Links already delivered land here. The branded page is the one that is
+    # kept current (location name, location phone), so send them there.
+    try:
+        from fastapi.responses import RedirectResponse
+        from app.services.public_identity import survey_url as _branded_survey_url
+        _org_id = (org.id if org else None) or getattr(lead, "organization_id", None)
+        _to = _branded_survey_url(db, _org_id, token)
+        if _to:
+            return RedirectResponse(_to, status_code=302)
+    except Exception as exc:   # the page below is still a working fallback
+        logger.warning("survey: branded redirect failed for token %s: %s", token, exc)
     already_done = _already_submitted(db, followup.id)
 
     # HTML-escape user-derived strings before interpolating into the page.

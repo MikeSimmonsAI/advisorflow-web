@@ -218,6 +218,16 @@ def _send_followup(db: Session, booking: BookingLink, lead: Lead, advisor: User)
         org_name = _get_org_name(db, advisor)
         from app.services.public_identity import survey_url as public_survey_url
         survey_url = public_survey_url(db, advisor.organization_id, survey_token)
+        # OUTREACH PROGRAM (SCI): the location, never the corporation; and no
+        # message at all under an unknown name or with an empty link.
+        from app.services import survey_identity as _si
+        _loc = _si.location_identity(db, lead)
+        if _loc is not None and not _loc["resolved"]:
+            raise ValueError(_si.HELD_NO_LOCATION)
+        if not survey_url:
+            raise ValueError(_si.HELD_NO_LINK)
+        if _loc is not None:
+            org_name = _loc["name"]
         message = _build_thank_you(lead, advisor, org_name, survey_url)
 
         # Prefer SMS; fall back to email
