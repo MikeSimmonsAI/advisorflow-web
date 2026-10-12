@@ -393,6 +393,16 @@ def _survey_alerts(db, org_id, location_id):
         return 0
 
 
+@router.post("/line-check/run")
+def program_line_check(limit: int = Query(100, ge=1, le=200), db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    """Mobile/landline lookup for not-yet-checked contacts (Twilio, ~$0.008 each)."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    from app.services.programs import line_check
+    return line_check.run_for_org(db, prog.organization_id, limit=limit)
+
+
 @router.get("/surveys")
 def program_surveys(location_id: Optional[str] = Query(None), db: Session = Depends(get_db),
                     user: User = Depends(require_tenant_or_observer)):

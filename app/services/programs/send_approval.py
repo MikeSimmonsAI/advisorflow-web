@@ -80,6 +80,10 @@ def blocker(db: Session, lead: Lead) -> Optional[str]:
         return "No phone or email"
     if lead.phone and not _real_us_number(lead.phone):
         return "Bad phone number"
+    if getattr(lead, "phone_line_type", None) == "invalid":
+        return "Bad phone number"
+    if getattr(lead, "phone_line_type", None) == "landline" and not (lead.email or "").strip():
+        return "Landline - call instead"
     from app.services import send_source as _ss
     r = identity.send_refusal(db, lead, _ss.MANUAL)
     if r:
@@ -136,6 +140,7 @@ def list_contacts(db: Session, prog: OutreachProgram, *, search: str = "", locat
             "location": pname.get(m.location_id), "location_id": m.location_id,
             "campaign": fname.get(m.campaign_family, m.campaign_family), "campaign_key": m.campaign_family,
             "phone": lead.phone, "email": lead.email,
+            "line_type": getattr(lead, "phone_line_type", None),
             "approved": approved, "approved_at": when.isoformat() + "Z" if when else None,
             "in_campaign": lead.id in enrolled,
             "blocked": None if approved else blocker(db, lead),
@@ -191,6 +196,11 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str])
         if lead is None or not recs:
             skipped.append({"lead_id": lid, "reason": "Not a contact in this program"})
             continue
+        try:
+            from app.services.programs import line_check
+            line_check.check_lead(db, lead)
+        except Exception:                               # never block an approval on the lookup
+            pass
         b = blocker(db, lead)
         if b:
             skipped.append({"lead_id": lid, "reason": b})
@@ -213,7 +223,7 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str])
     db.commit()
     texting, email_only = 0, 0
     for lead in approved:
-        if lead.phone and lead.contact_channel != "email_only":
+        if lead.phone and lead.contact_channel != "email_only" and getattr(lead, "phone_line_type", None) != "landline":
             if start_cadence(db, lead) is not None:
                 texting += 1
         else:
