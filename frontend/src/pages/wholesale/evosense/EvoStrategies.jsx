@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../api/client'
-import { isWholesaleAdmin } from '../../../auth/workspaceAuthority'
+import { canRunHunts, isWholesaleAdmin } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
 import {
   Alert, Drawer, Empty, EvoApp, Hero, PageSkeleton, Panel, Status, TabBar, Tag, ago, cents, humanize, moneyK, when,
@@ -53,6 +53,7 @@ export function EvoStrategies() {
   const [notice, setNotice] = useState(null)
   const [starters, setStarters] = useState(null)
   const [showStarters, setShowStarters] = useState(false)
+  const canHunt = canRunHunts()
 
   useEffect(() => {
     api.get('/wholesale/evosense/strategy-starters').then((r) => setStarters(r.items)).catch(() => setStarters([]))
@@ -117,14 +118,15 @@ export function EvoStrategies() {
                 { key: 'paused', label: 'Paused & drafts', count: data ? all.filter((x) => x.status === 'paused' || x.status === 'draft').length : null },
                 { key: 'archived', label: 'Archived', count: data ? all.filter((x) => x.status === 'archived').length : null },
               ]}
-              actions={<>
+              actions={canHunt ? <>
                 <button type="button" className="evo-btn evo-btn--secondary" onClick={() => setShowStarters((v) => !v)}>
                   Ready-made searches</button>
                 <button type="button" className="evo-btn evo-btn--primary" onClick={() => navigate('/wholesale/evosense/strategies/new')}>
-                  + New Strategy</button></>} />
+                  + New Strategy</button></> : null} />
+      {!canHunt ? <Alert kind="info">You can see every strategy and pause one. Starting hunts and changing strategies is for an admin or a team manager.</Alert> : null}
       <Alert>{error}</Alert>
       <Alert kind="ok">{notice}</Alert>
-      {showStarters || (data && !all.length) ? (
+      {canHunt && (showStarters || (data && !all.length)) ? (
         <Panel title="Ready-made searches" hint="One click adds a draft you can review. Nothing hunts until you activate it, and your other searches are not changed.">
           {!starters ? <PageSkeleton /> : (
             <div className="evo-form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
@@ -149,7 +151,7 @@ export function EvoStrategies() {
         <Panel><Empty title="No strategies here">Nothing in this view. The other tabs hold the rest.</Empty></Panel>
       ) : !shown.length ? (
         <Panel>
-          <Empty page title="No strategies yet" action={
+          <Empty page title="No strategies yet" action={!canHunt ? null :
             <button type="button" className="evo-btn evo-btn--primary" onClick={() => navigate('/wholesale/evosense/strategies/new')}>Tell EvoSense what to hunt</button>}>
             A strategy tells EvoSense where to look, what makes a property interesting, how much it may spend finding
             the owner, and when to bring you in.
@@ -209,14 +211,14 @@ export function EvoStrategies() {
                   {s.status !== 'archived' ? (
                     <Link className="evo-btn evo-btn--primary evo-btn--sm" to={`/wholesale/evosense/strategies/${s.id}`}>Open strategy</Link>
                   ) : null}
-                  {s.status === 'draft' ? <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy} onClick={() => act(s, 'activate')}>Activate</button> : null}
-                  {s.status === 'active' ? <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy} onClick={() => hunt(s)}>Run hunt</button> : null}
+                  {canHunt && s.status === 'draft' ? <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy} onClick={() => act(s, 'activate')}>Activate</button> : null}
+                  {canHunt && s.status === 'active' ? <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy} onClick={() => hunt(s)}>Run hunt</button> : null}
                   {s.status === 'active' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'pause')}>Pause</button> : null}
-                  {s.pilot_mode ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'pilot-archive')}>Roll back pilot</button> : null}
-                  {s.pilot_mode ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'pilot-restore')}>Restore pilot</button> : null}
-                  {s.status === 'paused' ? <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy} onClick={() => act(s, 'resume')}>Resume</button> : null}
-                  <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'clone')}>Clone</button>
-                  {s.status !== 'archived' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => setConfirmArchive(s)}>Archive</button> : null}
+                  {canHunt && s.pilot_mode ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'pilot-archive')}>Roll back pilot</button> : null}
+                  {canHunt && s.pilot_mode ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'pilot-restore')}>Restore pilot</button> : null}
+                  {canHunt && s.status === 'paused' ? <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy} onClick={() => act(s, 'resume')}>Resume</button> : null}
+                  {canHunt ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => act(s, 'clone')}>Clone</button> : null}
+                  {canHunt && s.status !== 'archived' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => setConfirmArchive(s)}>Archive</button> : null}
                 </div>
               </section>
             )
@@ -532,8 +534,10 @@ export function EvoStrategyBuilder() {
               </div>
             ) : null}
             <div className="evo-actionbar" style={{ marginTop: 16 }}>
-              <button type="button" className="evo-btn evo-btn--ghost" disabled={busy || !form.name} onClick={() => save(false)}>Save draft</button>
-              <button type="button" className="evo-btn evo-btn--primary" disabled={busy || !form.name || problems.length > 0} onClick={() => save(true)}>
+              <button type="button" className="evo-btn evo-btn--ghost" disabled={busy || !form.name || !canRunHunts()} onClick={() => save(false)}
+                      title={canRunHunts() ? undefined : 'Only an admin or a team manager can do this.'}>Save draft</button>
+              <button type="button" className="evo-btn evo-btn--primary" disabled={busy || !form.name || problems.length > 0 || !canRunHunts()} onClick={() => save(true)}
+                      title={canRunHunts() ? undefined : 'Only an admin or a team manager can do this.'}>
                 {status === 'active' ? 'Save strategy' : 'Save and start hunting'}</button>
             </div>
             <p className="evo-muted evo-small" style={{ margin: '12px 0 0' }}>Written by the server from your actual settings.</p>

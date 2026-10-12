@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../api/client'
-import { isWholesaleAdmin } from '../../../auth/workspaceAuthority'
+import { canRunHunts, isWholesaleAdmin } from '../../../auth/workspaceAuthority'
 import { errText } from '../wsShared'
 import {
   Alert, Chips, Empty, EvoApp, Feed, Hero, Metric, Metrics, Num, PageSkeleton, Panel, PropCard,
@@ -129,8 +129,8 @@ export default function EvoCommand() {
             {paused ? 'Resume EvoSense' : 'Pause EvoSense'}
           </button>
           <button type="button" className="evo-btn evo-btn--primary" onClick={huntAll}
-                  disabled={busy || paused || !(cc.strategies || []).length}
-                  title={paused ? 'EvoSense is paused' : 'Runs every active strategy now — the same hunt the scheduler runs'}>
+                  disabled={busy || paused || !(cc.strategies || []).length || !canRunHunts()}
+                  title={!canRunHunts() ? 'Only an admin or a team manager can do this.' : paused ? 'EvoSense is paused' : 'Runs every active strategy now — the same hunt the scheduler runs'}>
             {busy ? 'Hunting…' : 'Run hunt now'}
           </button>
         </>}

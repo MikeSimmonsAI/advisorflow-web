@@ -20,9 +20,9 @@ grants access by itself.
 """
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
+from fastapi import Request
 from sqlalchemy.orm import Session
 
 from app.models.models import User
@@ -192,3 +192,132 @@ def remove(db: Session, org_id: str, actor: User, user_id: str) -> Dict:
     row.is_active = False
     db.commit()
     return team(db, org_id)
+
+
+# ── THE SERVER FENCE (app/deps.get_current_user calls this) ─────────────────
+#
+# The menu hides things; this is what makes hiding them mean something. A
+# wholesale-only login that types an address, or a field login that pastes a
+# link someone sent them, is refused here before any route runs.
+
+# What the app shell itself loads for anyone (sign-in, the brand, the bell,
+# My Settings), plus the Wholesale side.
+WHOLESALE_ONLY_ALLOWED = (
+    "/auth/", "/branding", "/notifications", "/settings", "/program/status",
+    "/launch/me", "/workspace-views", "/work/identity", "/me",
+    "/wholesale", "/wholesale-rooms", "/site-intake/wholesale", "/health",
+)
+ORG_SETTINGS_READ = "/org-settings"          # read-only, the shell reads the brand from it
+
+# Inside Wholesale, what a field specialist or canvasser may never do:
+# hunts and strategies, paid lookups and skip tracing, sending, buyers,
+# funding, settings, provider controls, imports, team admin, exports.
+FIELD_BLOCKED_PREFIXES = (
+    "/wholesale/skip-trace", "/wholesale/contact-lookup", "/wholesale/buyers",
+    "/wholesale/funding", "/wholesale/settings", "/wholesale/sms", "/wholesale/ops/pilot",
+    "/wholesale/evosense/strategies", "/wholesale/evosense/strategy-starters",
+    "/wholesale/evosense/provider", "/wholesale/evosense/providers", "/wholesale/evosense/controls",
+    "/wholesale/evosense/sources", "/wholesale/evosense/ground-truth", "/wholesale/evosense/truth-gate",
+    "/wholesale/evosense/reprocess", "/wholesale/evosense/import", "/wholesale/evosense/routing-reviews",
+    "/wholesale/evosense/identity-reviews", "/wholesale/evosense/usage", "/wholesale/import",
+    "/wholesale/properties/import",
+)
+FIELD_BLOCKED_ACTIONS = ("/enrich", "/outreach", "/nurture")   # paid lookups and sending
+FIELD_ALLOWED_TEAM = ("/wholesale/team/me",)
+
+
+def _under(path: str, prefixes) -> bool:
+    """Whole path segments: "/me" covers "/me" and "/me/x", never "/messages"."""
+    for p in prefixes:
+        base = p.rstrip("/")
+        if path == base or path.startswith(base + "/"):
+            return True
+    return False
+
+
+def _starts(path: str, prefixes) -> bool:
+    """Plain prefix: "/wholesale/evosense/provider" also covers "provider-evaluations"."""
+    return any(path.startswith(p) for p in prefixes)
+
+
+def fence(path: str, method: str, role: Optional[str]) -> Optional[str]:
+    """None when the request may go ahead, else the refusal to show."""
+    if role not in WHOLESALE_ONLY:
+        return None
+    path = path or "/"
+    method = (method or "GET").upper()
+    ok = _under(path, WHOLESALE_ONLY_ALLOWED) or (method == "GET" and _under(path, (ORG_SETTINGS_READ,)))
+    if not ok:
+        return "This login is for the Wholesale side only."
+    if role in FIELD_ROLES:
+        if "export" in path.lower():
+            return "Field logins cannot export."
+        if _under(path, FIELD_ALLOWED_TEAM):
+            return None
+        if _starts(path, FIELD_BLOCKED_PREFIXES) or _under(path, ("/wholesale/team",)):
+            return "Field logins cannot use this. Ask your manager."
+        if method != "GET" and path.startswith("/wholesale/evosense/") and path.endswith(FIELD_BLOCKED_ACTIONS):
+            return "Field logins cannot run lookups or send messages. Ask your manager."
+    return None
+
+
+# ── WHAT ONLY AN ADMIN (OR A TEAM MANAGER) MAY START ────────────────────────
+#
+# Found in the VA check: a plain advisor login could start hunts, change and
+# clone strategies, run contact lookups and enrichment, and upload the TAD
+# source file. Budgets and provider switches were already admin-only; these
+# were not. They spend money or change what the whole workspace hunts for.
+import re as _re
+_ADMIN_ONLY_WRITES = [_re.compile(p) for p in (
+    r"^/wholesale/evosense/strategies/?$",                       # create
+    r"^/wholesale/evosense/strategies/(?!preview/?$)[^/]+/?$",   # change (preview only reads)
+    r"^/wholesale/evosense/strategies/[^/]+/(clone|hunt|activate|resume|archive|pilot-archive|pilot-restore)/?$",
+    # (pause is left open to anyone: stopping spending is always safe)
+    r"^/wholesale/evosense/strategy-starters/?$",
+    r"^/wholesale/evosense/properties/[^/]+/enrich/?$",
+    r"^/wholesale/evosense/sources/",
+    r"^/wholesale/contact-lookup/(address|run)/?$",
+)]
+ADMIN_ONLY_REFUSAL = "Only an admin or a team manager can start hunts, run lookups or change strategies."
+
+
+def admin_only_write(path: str, method: str) -> bool:
+    return (method or "GET").upper() != "GET" and any(p.match(path or "") for p in _ADMIN_ONLY_WRITES)
+
+
+def fence_user(db: Session, user: User, path: str, method: str) -> Optional[str]:
+    """The check for one signed-in request. Only advisor/viewer accounts can
+    hold a team role (admins are refused at add time), so nobody else pays for
+    the lookup."""
+    if getattr(user, "role", None) not in ("advisor", "viewer"):
+        return None
+    return fence(path, method, role_of(db, user))
+
+
+def hunt_refusal(db: Session, user: User, path: str, method: str) -> Optional[str]:
+    """Admins and team managers may start hunts, run lookups and change
+    strategies; nobody else. Runs as a route dependency AFTER the plan check,
+    so a workspace without Wholesale still hears "not in your plan"."""
+    if not admin_only_write(path, method):
+        return None
+    from app.services.lead_scope import effective_role
+    if getattr(user, "role", None) in ("god_admin", "super_admin"):
+        return None
+    if (effective_role(user, db) or "").lower() in ("org_admin", "super_admin", "god_admin"):
+        return None
+    if role_of(db, user) == MANAGER:
+        return None
+    return ADMIN_ONLY_REFUSAL
+
+
+def require_hunt_rights():
+    """FastAPI dependency for the EvoSense and contact-lookup routers."""
+    from fastapi import Depends, HTTPException
+    from app.deps import get_current_user, get_db
+
+    def _dep(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+        refusal = hunt_refusal(db, user, request.url.path, request.method)
+        if refusal:
+            raise HTTPException(status_code=403, detail=refusal)
+        return user
+    return _dep

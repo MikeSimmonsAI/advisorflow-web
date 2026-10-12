@@ -86,18 +86,18 @@ def test_parse_address():
     assert CL.parse_address("just a street") is None
 
 
-def test_only_the_ticked_buyers_are_looked_up(client, auth_headers, buyers):
+def test_only_the_ticked_buyers_are_looked_up(client, auth_headers, buyers, admin_auth_headers):
     oak, john = buyers["OAK CLIFF HOLDINGS LLC"], buyers["JOHN Q INVESTOR"]
     picked = [oak["id"], john["id"]]                       # Hazel is NOT ticked
     est = ok(client.post("/wholesale/contact-lookup/estimate", headers=auth_headers,
                          json={"kind": "buyer", "ids": picked}))
     assert est["count"] == 2 and est["max_cost_cents"] == 20 and len(est["rows"]) == 2
 
-    r = client.post("/wholesale/contact-lookup/run", headers=auth_headers,
+    r = client.post("/wholesale/contact-lookup/run", headers=admin_auth_headers,
                     json={"kind": "buyer", "ids": picked, "max_cost_cents": 10})
     assert r.status_code == 409 and FakeTracerfy.calls == []      # more than approved
 
-    out = ok(client.post("/wholesale/contact-lookup/run", headers=auth_headers,
+    out = ok(client.post("/wholesale/contact-lookup/run", headers=admin_auth_headers,
                          json={"kind": "buyer", "ids": picked, "max_cost_cents": 20}))
     assert out["looked_up"] == 2 and out["found"] == 1 and out["cost_cents"] == 20
     assert {c.owner_name for c in FakeTracerfy.calls} == {"OAK CLIFF HOLDINGS LLC", "JOHN Q INVESTOR"}
@@ -118,10 +118,10 @@ def test_only_the_ticked_buyers_are_looked_up(client, auth_headers, buyers):
     assert {r["status"] for r in again["rows"]} == {"has_both", "looked_up"}
 
 
-def test_not_connected_and_caps(client, auth_headers, buyers, monkeypatch):
+def test_not_connected_and_caps(client, auth_headers, buyers, monkeypatch, admin_auth_headers):
     ids = [buyers["HAZEL HOMES LLC"]["id"]]
     FakeTracerfy.on = False
-    r = client.post("/wholesale/contact-lookup/run", headers=auth_headers,
+    r = client.post("/wholesale/contact-lookup/run", headers=admin_auth_headers,
                     json={"kind": "buyer", "ids": ids, "max_cost_cents": 10})
     assert r.status_code == 400 and "TRACERFY_API_TOKEN" in r.json()["detail"]
     FakeTracerfy.on = True
@@ -129,10 +129,10 @@ def test_not_connected_and_caps(client, auth_headers, buyers, monkeypatch):
     est = ok(client.post("/wholesale/contact-lookup/estimate", headers=auth_headers,
                          json={"kind": "buyer", "ids": ids}))
     assert est["cap_refusal"] and "cap" in est["cap_refusal"]
-    r = client.post("/wholesale/contact-lookup/run", headers=auth_headers,
+    r = client.post("/wholesale/contact-lookup/run", headers=admin_auth_headers,
                     json={"kind": "buyer", "ids": ids, "max_cost_cents": 10})
     assert r.status_code == 429 and FakeTracerfy.calls == []
-    r = client.post("/wholesale/contact-lookup/run", headers=auth_headers,
+    r = client.post("/wholesale/contact-lookup/run", headers=admin_auth_headers,
                     json={"kind": "buyer", "ids": ["x"] * 26, "max_cost_cents": 1000})
     assert r.status_code == 400
 
@@ -146,29 +146,29 @@ def test_whole_selection_is_checked_against_daily_caps_not_the_per_run_limit():
     assert "per run" in REAL_CAP_CHECK(None, "org", S(), 97)
 
 
-def test_a_person_entry_is_never_overwritten(client, auth_headers, buyers):
+def test_a_person_entry_is_never_overwritten(client, auth_headers, buyers, admin_auth_headers):
     oak = buyers["OAK CLIFF HOLDINGS LLC"]
     ok(client.patch("/wholesale/buyers/%s" % oak["id"], headers=auth_headers, json={"phone": "(214) 000-1111"}))
-    ok(client.post("/wholesale/contact-lookup/run", headers=auth_headers,
+    ok(client.post("/wholesale/contact-lookup/run", headers=admin_auth_headers,
                    json={"kind": "buyer", "ids": [oak["id"]], "max_cost_cents": 10}))
     oak = _buyer(client, auth_headers, "OAK CLIFF HOLDINGS LLC")
     assert oak["phone"] == "(214) 000-1111" and oak["email"] == "rick@example.com"
 
 
-def test_funding_partner_needs_an_address_then_gets_looked_up(client, auth_headers):
+def test_funding_partner_needs_an_address_then_gets_looked_up(client, auth_headers, admin_auth_headers):
     p = ok(client.post("/wholesale/funding/partners", headers=auth_headers,
                        json={"name": "Lone Star Lending LLC", "email": "deals@lonestar.test"}))
     est = ok(client.post("/wholesale/contact-lookup/estimate", headers=auth_headers,
                          json={"kind": "funding_partner", "ids": [p["id"]]}))
     assert est["rows"][0]["status"] == "no_address" and est["count"] == 0
-    bad = client.post("/wholesale/contact-lookup/address", headers=auth_headers,
+    bad = client.post("/wholesale/contact-lookup/address", headers=admin_auth_headers,
                       json={"kind": "funding_partner", "id": p["id"], "address": "somewhere"})
     assert bad.status_code == 400
-    row = ok(client.post("/wholesale/contact-lookup/address", headers=auth_headers,
+    row = ok(client.post("/wholesale/contact-lookup/address", headers=admin_auth_headers,
                          json={"kind": "funding_partner", "id": p["id"],
                                "address": "100 Main St, Dallas, TX 75201"}))
     assert row["status"] == "ready" and row["address"].startswith("100 Main St, Dallas, TX")
-    out = ok(client.post("/wholesale/contact-lookup/run", headers=auth_headers,
+    out = ok(client.post("/wholesale/contact-lookup/run", headers=admin_auth_headers,
                          json={"kind": "funding_partner", "ids": [p["id"]], "max_cost_cents": 10}))
     assert out["found"] == 1
     got = next(x for x in ok(client.get("/wholesale/funding/partners", headers=auth_headers))["partners"]
@@ -177,7 +177,7 @@ def test_funding_partner_needs_an_address_then_gets_looked_up(client, auth_heade
     assert got["contact_person"] == "Rick Castro"
 
 
-def test_property_owner_lookup_writes_the_seller(client, auth_headers, db_session):
+def test_property_owner_lookup_writes_the_seller(client, auth_headers, db_session, admin_auth_headers):
     prop = ok(client.post("/wholesale/properties", headers=auth_headers,
                           json={"street_address": "2620 Kirby St", "city": "Dallas", "state": "TX",
                                 "county": "Dallas", "zip_code": "75203", "owner_name": "Elizabeth Bryant"}))
@@ -185,7 +185,7 @@ def test_property_owner_lookup_writes_the_seller(client, auth_headers, db_sessio
     est = ok(client.post("/wholesale/contact-lookup/estimate", headers=auth_headers,
                          json={"kind": "property", "ids": [pid]}))
     assert est["count"] == 1
-    out = ok(client.post("/wholesale/contact-lookup/run", headers=auth_headers,
+    out = ok(client.post("/wholesale/contact-lookup/run", headers=admin_auth_headers,
                          json={"kind": "property", "ids": [pid], "max_cost_cents": 10}))
     assert out["looked_up"] == 1 and out["found"] == 1 and out["cost_cents"] == 10
     from app.models.models import Lead

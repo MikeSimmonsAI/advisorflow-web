@@ -87,3 +87,85 @@ def test_branding_tells_the_app_shell_the_role(client, admin_auth_headers, auth_
                    json={"user_id": sample_advisor.id, "role": "canvasser", "confirm_lock": True}))
     b = ok(client.get("/branding/org", headers=auth_headers))
     assert b["wholesale_team"] == {"role": "canvasser", "wholesale_only": True, "field": True}
+
+
+# ── the server fence ────────────────────────────────────────────────────────
+
+def test_fence_rules_by_role():
+    from app.services.wholesale_team import fence
+    # full access and no role: never fenced
+    for role in (None, "member"):
+        assert fence("/leads", "GET", role) is None
+        assert fence("/wholesale/skip-trace/estimate", "POST", role) is None
+    # managers: Wholesale side only, but all of it
+    assert fence("/leads", "GET", "manager")
+    assert fence("/crm/contacts", "GET", "team_lead")
+    assert fence("/messages", "GET", "manager")                 # "/me" is a whole segment
+    assert fence("/wholesale/buyers", "GET", "manager") is None
+    assert fence("/wholesale/evosense/strategies/x/hunt", "POST", "manager") is None
+    assert fence("/org-settings/", "GET", "manager") is None
+    assert fence("/org-settings/", "PUT", "manager")
+    # field: the shell and their own work, nothing that hunts, buys, sends or exports
+    for role in ("field_specialist", "canvasser"):
+        for ok_path in ("/auth/me", "/branding/org", "/notifications/", "/settings/profile",
+                        "/wholesale/properties", "/wholesale/evosense/properties/p1",
+                        "/wholesale/ops/callbacks", "/wholesale/team/me"):
+            assert fence(ok_path, "GET", role) is None, ok_path
+        for bad in ("/wholesale/evosense/strategies", "/wholesale/evosense/strategies/s1/hunt",
+                    "/wholesale/skip-trace/estimate", "/wholesale/contact-lookup/run",
+                    "/wholesale/buyers", "/wholesale/funding/partners", "/wholesale/settings",
+                    "/wholesale/ops/pilot", "/wholesale/evosense/provider-evaluations",
+                    "/wholesale/evosense/controls", "/wholesale/team", "/wholesale/properties/export.csv",
+                    "/leads"):
+            assert fence(bad, "GET", role), bad
+        assert fence("/wholesale/evosense/properties/p1/enrich", "POST", role)
+        assert fence("/wholesale/evosense/properties/p1/outreach", "POST", role)
+
+
+def test_a_field_login_is_refused_by_the_server_not_just_the_menu(
+        client, admin_auth_headers, auth_headers, sample_advisor):
+    ok(client.post("/wholesale/team/members", headers=admin_auth_headers,
+                   json={"user_id": sample_advisor.id, "role": "canvasser", "confirm_lock": True}))
+    assert client.get("/leads", headers=auth_headers).status_code == 403
+    r = client.get("/wholesale/evosense/strategies", headers=auth_headers)
+    assert r.status_code == 403 and "Field logins" in r.json()["detail"]
+    assert client.get("/wholesale/team/me", headers=auth_headers).status_code == 200
+    assert client.get("/branding/org", headers=auth_headers).status_code == 200
+    # Back to full access: everything they had before comes back
+    ok(client.post("/wholesale/team/members", headers=admin_auth_headers,
+                   json={"user_id": sample_advisor.id, "role": "member"}))
+    assert client.get("/leads", headers=auth_headers).status_code == 200
+
+
+# ── hunts, lookups and strategy changes: admins and team managers only ──────
+
+def test_admin_only_writes_are_recognised():
+    from app.services.wholesale_team import admin_only_write as a
+    assert a("/wholesale/evosense/strategies", "POST")
+    assert a("/wholesale/evosense/strategies/s1", "PATCH")
+    assert a("/wholesale/evosense/strategies/s1/hunt", "POST")
+    assert a("/wholesale/evosense/strategies/s1/clone", "POST")
+    assert a("/wholesale/evosense/strategy-starters", "POST")
+    assert a("/wholesale/evosense/properties/p1/enrich", "POST")
+    assert a("/wholesale/contact-lookup/run", "POST")
+    assert a("/wholesale/evosense/sources/tad/upload", "POST")
+    assert not a("/wholesale/evosense/strategies", "GET")
+    assert not a("/wholesale/evosense/strategies/preview", "POST")
+    assert not a("/wholesale/evosense/properties/p1/follow-up", "POST")
+    assert not a("/wholesale/evosense/properties/p1/dismiss", "POST")
+
+
+def test_a_plain_advisor_cannot_start_a_hunt_but_a_team_manager_can(
+        client, admin_auth_headers, auth_headers, sample_advisor):
+    r = client.post("/wholesale/evosense/strategies/does-not-exist/hunt", headers=auth_headers, json={})
+    assert r.status_code == 403 and "admin or a team manager" in r.json()["detail"]
+    r = client.post("/wholesale/contact-lookup/run", headers=auth_headers, json={})
+    assert r.status_code == 403
+    # The admin is not stopped by the fence (the route itself answers: no such strategy)
+    assert client.post("/wholesale/evosense/strategies/does-not-exist/hunt",
+                       headers=admin_auth_headers, json={}).status_code != 403
+    # Made a team manager: the fence lets them through
+    ok(client.post("/wholesale/team/members", headers=admin_auth_headers,
+                   json={"user_id": sample_advisor.id, "role": "manager", "confirm_lock": True}))
+    assert client.post("/wholesale/evosense/strategies/does-not-exist/hunt",
+                       headers=auth_headers, json={}).status_code != 403

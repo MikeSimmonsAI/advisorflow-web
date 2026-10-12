@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../../../api/client'
 import { errText } from '../wsShared'
+import { canRunHunts } from '../../../auth/workspaceAuthority'
 import {
   Alert, Drawer, Empty, EvoApp, Feed, Hero, Num, PageSkeleton, Panel, PropertyThumb, Ring, SandboxTag,
   Score, ScoreWhy, Status, Tag, ago, cents, humanize, money, shortDate, statusLabel,
@@ -302,7 +303,8 @@ export default function EvoProperty() {
         ) : <a className="evo-btn evo-btn--secondary" href={`tel:${topContact.value}`}>Call seller</a>
       ) : null}
       {canEnrich ? (
-        <button type="button" className="evo-btn evo-btn--secondary" disabled={busy} onClick={enrich}>
+        <button type="button" className="evo-btn evo-btn--secondary" disabled={busy || !canRunHunts()} onClick={enrich}
+                title={canRunHunts() ? undefined : 'Only an admin or a team manager can do this.'}>
           {p.status === 'needs_enrichment' ? 'Approve lookup' : 'Look up contact'}</button>
       ) : null}
       {p.status === 'ready_for_outreach' ? (

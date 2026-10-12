@@ -45,8 +45,8 @@ def test_every_starter_names_its_sources():
     assert ST.starter_values("behind_on_taxes")["provider_preferences"]["discovery"] == ["TAX"]
 
 
-def test_starter_api_stores_the_focus(client, auth_headers):
-    r = client.post("/wholesale/evosense/strategy-starters", headers=auth_headers, json={"key": "behind_on_taxes"})
+def test_starter_api_stores_the_focus(client, auth_headers, admin_auth_headers):
+    r = client.post("/wholesale/evosense/strategy-starters", headers=admin_auth_headers, json={"key": "behind_on_taxes"})
     assert r.status_code in (200, 201), r.text[:300]
     s = r.json()
     assert s["provider_preferences"]["discovery"] == ["TAX"]

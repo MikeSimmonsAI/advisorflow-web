@@ -82,6 +82,16 @@ export function isWholesaleAdmin() {
   return a.isManager || ['super_admin', 'god_admin'].includes(a.user?.role)
 }
 
+/**
+ * Who may start hunts, run paid lookups and change strategies: workspace
+ * admins and anyone set as Manager on Wholesale > Team (server:
+ * app/services/wholesale_team.hunt_refusal). Pausing stays open to everyone.
+ */
+export function canRunHunts() {
+  if (isWholesaleAdmin()) return true
+  return getBranding()?.wholesale_team?.role === 'manager'
+}
+
 /* ── the whole answer ─────────────────────────────────────────────────────── */
 
 export function readAuthority({ capabilities = null } = {}) {

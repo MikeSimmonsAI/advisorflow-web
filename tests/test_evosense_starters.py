@@ -80,18 +80,18 @@ def test_six_starters_with_safe_defaults():
     assert "paid off" in ST.STARTERS["long_time_owner"]["description"]
 
 
-def test_starter_creates_a_draft_and_leaves_existing_strategies_alone(client, auth_headers):
-    mine = ok(client.post("/wholesale/evosense/strategies", headers=auth_headers,
+def test_starter_creates_a_draft_and_leaves_existing_strategies_alone(client, auth_headers, admin_auth_headers):
+    mine = ok(client.post("/wholesale/evosense/strategies", headers=admin_auth_headers,
                           json={"name": "New Check Out", "states": ["TX"],
                                 "property_types": ["single_family", "land", "commercial"]}))
     items = ok(client.get("/wholesale/evosense/strategy-starters", headers=auth_headers))["items"]
     assert len(items) == 6
-    s = ok(client.post("/wholesale/evosense/strategy-starters", headers=auth_headers, json={"key": "tired_landlord"}))
+    s = ok(client.post("/wholesale/evosense/strategy-starters", headers=admin_auth_headers, json={"key": "tired_landlord"}))
     assert s["status"] == "draft" and s["houses_only"] is True and s["name"] == "Tired Landlord"
     assert "Houses only" in s["summary"] and "Collin" in s["counties"]
-    again = ok(client.post("/wholesale/evosense/strategy-starters", headers=auth_headers, json={"key": "tired_landlord"}))
+    again = ok(client.post("/wholesale/evosense/strategy-starters", headers=admin_auth_headers, json={"key": "tired_landlord"}))
     assert again["name"] == "Tired Landlord (2)"
     after = ok(client.get("/wholesale/evosense/strategies/%s" % mine["id"], headers=auth_headers))
     assert after["version"] == mine["version"] and after["houses_only"] is False
     assert after["property_types"] == ["single_family", "land", "commercial"]
-    assert client.post("/wholesale/evosense/strategy-starters", headers=auth_headers, json={"key": "nope"}).status_code == 404
+    assert client.post("/wholesale/evosense/strategy-starters", headers=admin_auth_headers, json={"key": "nope"}).status_code == 404

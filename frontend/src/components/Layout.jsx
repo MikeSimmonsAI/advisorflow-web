@@ -59,6 +59,9 @@ const PLATFORM_BRAND = BRAND_CONFIG[PLATFORM_THEME]
 
 // What a field specialist or canvasser sees in the rail (see wholesale_team.py).
 const FIELD_NAV = new Set(['/wholesale/properties', '/wholesale/calculator', '/wholesale/callbacks', '/settings'])
+// The pages a field login may open at all (the server refuses the rest too).
+const FIELD_PAGES = ['/wholesale/properties', '/wholesale/calculator', '/wholesale/callbacks', '/wholesale/evosense/property/', '/settings']
+const fieldMayOpen = (p) => FIELD_PAGES.some((x) => p === x.replace(/\/$/, '') || p.startsWith(x.endsWith('/') ? x : x + '/'))
 
 const NAV_GROUPS = [
   {
@@ -487,8 +490,12 @@ export default function Layout({ children }) {
   useEffect(() => {
     if (!wsOnly) return
     const p = location.pathname
+    if (wsTeam.field) {
+      if (!fieldMayOpen(p)) navigate('/wholesale/properties', { replace: true })
+      return
+    }
     if (isWholesalePath(p) || p === '/settings' || p.startsWith('/settings/')) return
-    navigate(wsTeam.field ? '/wholesale/properties' : '/wholesale', { replace: true })
+    navigate('/wholesale', { replace: true })
   }, [wsOnly, location.pathname])
   useWholesaleCanvas(inWholesale)
 
