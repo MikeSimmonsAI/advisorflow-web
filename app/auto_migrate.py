@@ -176,6 +176,10 @@ COLUMNS_TO_ADD = [
     ("outreach_programs", "require_send_approval", "BOOLEAN DEFAULT FALSE"),
     ("outreach_programs", "send_via_mailbox", "VARCHAR"),
     ("outreach_programs", "email_hold_providers", "TEXT"),
+    ("survey_responses", "location_id", "VARCHAR"),
+    ("survey_responses", "share_ok", "BOOLEAN"),
+    ("survey_responses", "handled_at", "TIMESTAMP"),
+    ("survey_responses", "handled_by", "VARCHAR"),
     # @@PROGRAM_COLUMNS@@
     # ── Telephony (2026-09-28): human dialer, AMD, number record ──
     ("voice_calls", "is_human_call", "BOOLEAN"),

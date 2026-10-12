@@ -92,9 +92,25 @@ def run_review_request_cron(engine) -> int:
                 # home or cemetery they dealt with, not the corporation.
                 from app.models.models import Lead as _Lead
                 from app.services import survey_identity as _si
-                loc = _si.location_identity(db, db.query(_Lead).filter(_Lead.id == row.lead_id).first())
+                _lead_obj = db.query(_Lead).filter(_Lead.id == row.lead_id).first()
+                # TEXTING HOURS (9 AM - 8 PM in the family's own time zone):
+                # outside them, leave it unclaimed - the next pass after 9 AM sends it.
+                from app.services import contact_hours as _ch
+                if _lead_obj is not None and not _ch.check(_lead_obj)["permitted"]:
+                    db.rollback()
+                    continue
+                loc = _si.location_identity(db, _lead_obj)
                 held = None
-                if loc is not None and not loc["resolved"]:
+                # NO-SHOW / CANCELLED: no "thanks for choosing us" for a visit
+                # that never happened.
+                from app.models.models import LeadOutcome as _Outcome
+                if db.query(_Outcome.id).filter(_Outcome.booking_link_id == row.booking_id,
+                                                _Outcome.attendance.in_(("no_show", "cancelled"))).first():
+                    held = "held: appointment marked no-show or cancelled - no survey"
+
+                if held:
+                    pass
+                elif loc is not None and not loc["resolved"]:
                     held = _si.HELD_NO_LOCATION
                 elif not survey_url:
                     held = _si.HELD_NO_LINK

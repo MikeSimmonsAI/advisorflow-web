@@ -378,6 +378,34 @@ def update_location(profile_id: str, body: ProfileIn, db: Session = Depends(get_
 
 # ── dashboard ────────────────────────────────────────────────────────────────
 
+def _survey_alerts(db, org_id, location_id):
+    try:
+        from app.services import survey_results
+        return survey_results.alert_count(db, org_id, location_id)
+    except Exception:
+        return 0
+
+
+@router.get("/surveys")
+def program_surveys(location_id: Optional[str] = Query(None), db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_or_observer)):
+    """Survey totals, the latest answers, and 1-3 star alerts not yet handled."""
+    prog = _program(db, user)
+    from app.services import survey_results
+    return survey_results.for_org(db, prog.organization_id, location_id)
+
+
+@router.post("/surveys/{response_id}/handled")
+def program_survey_handled(response_id: str, db: Session = Depends(get_db),
+                           user: User = Depends(require_tenant_user)):
+    prog = _program(db, user)
+    from app.services import survey_results
+    out = survey_results.mark_handled(db, prog.organization_id, response_id, user.id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Survey answer not found.")
+    return out
+
+
 @router.get("/dashboard")
 def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(get_db),
               user: User = Depends(require_tenant_or_observer)):
@@ -484,6 +512,7 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
             "duplicate_review": sum(1 for r in recs if r.duplicate_review_reason),
             "on_hold": sum(1 for r in recs if r.on_hold),
             "unmatched_replies": _unmatched_open(db, prog.organization_id),
+            "survey_alerts": _survey_alerts(db, org_id, location_id),
         },
         "recent_conversations": recent,
         "location_performance": loc_perf,

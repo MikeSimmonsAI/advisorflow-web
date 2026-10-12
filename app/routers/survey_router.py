@@ -37,6 +37,7 @@ class SurveySubmission(BaseModel):
     feedback: Optional[str] = None
     facebook_handle: Optional[str] = None
     instagram_handle: Optional[str] = None
+    share_ok: Optional[bool] = None
 
 
 def _get_survey_context(db: Session, token: str):
@@ -127,6 +128,11 @@ def get_survey_results(
         .order_by(SurveyResponse.submitted_at.desc())
         .all()
     )
+    _loc_names = {}
+    if any(r.location_id for r in responses):
+        from app.models.program_models import LocationProfile
+        _loc_names = {p.location_id: p.official_name for p in db.query(LocationProfile).filter(
+            LocationProfile.organization_id == lead.organization_id).all()}
     return {
         "lead_id": lead_id,
         "responses": [
@@ -135,6 +141,9 @@ def get_survey_results(
                 "rating": r.rating,
                 "feedback": r.feedback,
                 "submitted_at": iso_utc(r.submitted_at),
+                "share_ok": bool(r.share_ok),
+                "location": _loc_names.get(r.location_id),
+                "handled_at": iso_utc(r.handled_at) if r.handled_at else None,
             }
             for r in responses
         ],
@@ -366,7 +375,15 @@ def submit_survey(request: Request, token: str, payload: SurveySubmission, db: S
         feedback=payload.feedback,
         facebook_handle=payload.facebook_handle,
         instagram_handle=payload.instagram_handle,
+        share_ok=bool(payload.share_ok) if payload.share_ok is not None else None,
     )
+    try:
+        from app.services.survey_identity import location_identity
+        _loc = location_identity(db, lead)
+        if _loc and _loc.get("location_id"):
+            response.location_id = _loc["location_id"]
+    except Exception as exc:   # never lose the answer over the location lookup
+        logger.warning("survey: location lookup failed lead=%s: %s", followup.lead_id, exc)
     db.add(response)
     db.commit()
     logger.info("Survey submitted lead=%s rating=%s", followup.lead_id, payload.rating)

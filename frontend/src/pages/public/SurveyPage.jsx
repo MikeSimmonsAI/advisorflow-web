@@ -78,6 +78,7 @@ export default function SurveyPage() {
   const [hover, setHover] = useState(0);
   const [chips, setChips] = useState([]);
   const [feedback, setFeedback] = useState('');
+  const [shareOk, setShareOk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [done, setDone] = useState(false);
@@ -145,7 +146,7 @@ export default function SurveyPage() {
       const res = await fetch(`${API_BASE}/survey/${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rating, feedback: parts.join('\n\n') || null }),
+        body: JSON.stringify({ rating, feedback: parts.join('\n\n') || null, share_ok: rating >= HIGH_RATING && shareOk }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -303,6 +304,13 @@ export default function SurveyPage() {
                     style={S.textarea}
                     placeholder={high ? 'Optional' : 'This goes straight to our team'}
                   />
+                  {high ? (
+                    <label style={S.share}>
+                      <input type="checkbox" checked={shareOk} onChange={(e) => setShareOk(e.target.checked)}
+                             style={{ width: 20, height: 20, accentColor: C.deep, flex: '0 0 auto', marginTop: 1 }} />
+                      <span>It's OK to share my review{business ? ` on ${business}'s website` : ''} (first name and last initial only).</span>
+                    </label>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -411,6 +419,10 @@ const S = {
   linkButton: {
     display: 'block', textAlign: 'center', padding: '13px 14px', borderRadius: 12,
     background: C.deep, color: '#fff', fontSize: 15.5, fontWeight: 600, textDecoration: 'none',
+  },
+  share: {
+    display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 14.5, lineHeight: 1.45,
+    color: '#3f4644', margin: '-4px 0 18px', cursor: 'pointer',
   },
   foot: { textAlign: 'center', fontSize: 12.5, color: '#8b877e', marginTop: 18, letterSpacing: '.02em' },
 };
