@@ -9,6 +9,7 @@ import { dayLabel } from './apptTime'
 import './appts.css'
 
 const pct = (n) => (n === null || n === undefined ? '-' : `${n}%`)
+const money = (n) => '$' + Number(n || 0).toLocaleString()
 
 export default function TeamBoard() {
   const [weeks, setWeeks] = useState('4')
@@ -22,7 +23,7 @@ export default function TeamBoard() {
   return (
     <EvoApp world="operations">
       <PageHead world="operations" eyebrow="Wholesale" title="Team Board"
-                sub="Appointments set and run, and contracts signed - by rep and by week (weeks start Monday)." />
+                sub="Appointments set and run, contracts signed and commission - by rep and by week (weeks start Monday)." />
       <div className="ap-bar">
         <Seg label="How many weeks" value={weeks} onChange={setWeeks}
              items={[{ key: '1', label: 'This week' }, { key: '4', label: '4 weeks' }, { key: '12', label: '12 weeks' }]} />
@@ -36,6 +37,8 @@ export default function TeamBoard() {
           <Metric label="Signed" value={t.signed} sub={`${pct(t.signed_rate)} of visits run`} />
           <Metric label="Follow up" value={t.follow_up} />
           <Metric label="Offers waiting on you" value={t.waiting} attention={t.waiting > 0} />
+          {t.commission ? <Metric label={`Commission (${data.commission_pct}% of the fee)`} value={money(t.commission.earned)}
+                                  sub={t.commission.coming ? `${money(t.commission.coming)} more on signed deals not closed yet` : 'earned on closed deals'} /> : null}
         </Metrics>
       ) : null}
       {data ? (
@@ -60,6 +63,7 @@ export default function TeamBoard() {
                   <td data-label="Total">
                     <span className="tb-cell"><b>{r.total.booked}</b> set · <b>{r.total.ran}</b> ran · <b className={r.total.signed ? 'tb-win' : ''}>{r.total.signed}</b> signed</span>
                     <span className="evo-muted evo-small"> · {pct(r.total.signed_rate)} close · {r.total.no_show} no-show</span>
+                    {r.commission ? <div className="evo-small"><b className={r.commission.earned ? 'tb-win' : ''}>{money(r.commission.earned)}</b> earned{r.commission.coming ? <span className="evo-muted"> · {money(r.commission.coming)} coming</span> : null}</div> : null}
                   </td>
                 </tr>
               ))}

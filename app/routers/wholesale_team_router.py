@@ -54,6 +54,7 @@ def my_role(db: Session = Depends(get_db), user: User = Depends(require_tenant_u
 class RulesIn(BaseModel):
     offer_limit_pct: int
     raise_limit_pct: Optional[int] = None
+    commission_pct: Optional[float] = None
 
 
 @router.get("/rules")
@@ -69,7 +70,8 @@ def get_rules(db: Session = Depends(get_db), user: User = Depends(require_tenant
 def put_rules(body: RulesIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     _admin(db, user)
     from app.services import wholesale_field_offers as O
-    return O.set_rules(db, svc.write_org_id(db, user), user, body.offer_limit_pct, body.raise_limit_pct)
+    return O.set_rules(db, svc.write_org_id(db, user), user, body.offer_limit_pct, body.raise_limit_pct,
+                       body.commission_pct)
 
 
 @router.get("")
