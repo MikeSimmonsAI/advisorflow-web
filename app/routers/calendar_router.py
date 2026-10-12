@@ -193,6 +193,33 @@ def get_booking_by_token(request: Request, token: str, db: Session = Depends(get
                or (org.id if org else None))
     _ident = identity_for_org(db, _org_id)
     _branding = public_branding(db, _org_id)
+    _org_name = _ident.customer_facing_name or (org.name if org else "")
+    _org_address = _ident.business_address or (org.org_address if org and hasattr(org, 'org_address') else "")
+    _org_phone = _ident.business_phone or (org.org_phone if org and hasattr(org, 'org_phone') else "")
+    _brand_color = _branding["brand_color"] or (getattr(org, "brand_color_primary", None) if org else None)
+    _meeting_options = None
+    # OUTREACH PROGRAM (SCI): the family is booking with ONE funeral home or
+    # cemetery - its name and its own number, never the corporation - and
+    # chooses a phone call or a visit there.
+    try:
+        from app.services.survey_identity import location_identity
+        _loc = location_identity(db, lead)
+    except Exception:
+        _loc = None
+    if _loc is not None:
+        _org_name = _loc["name"] or ""
+        _org_phone = _loc["phone"] or ""
+        _org_address = ""
+        _brand_color = "#1f3b3f"
+        _branding = dict(_branding, name=_org_name, phone=_org_phone, address="", logo_url="",
+                         tagline="", brand_color=_brand_color, document_title=_org_name)
+        if _org_name:
+            _meeting_options = [
+                {"key": "phone", "label": "Phone call", "note": "About 30 minutes, we call you",
+                 "appt_label": "Phone Call"},
+                {"key": "visit", "label": "Visit in person", "note": "About an hour at %s" % _org_name,
+                 "appt_label": "Visit at %s" % _org_name},
+            ]
 
     return {
         "token": token,
@@ -202,10 +229,11 @@ def get_booking_by_token(request: Request, token: str, db: Session = Depends(get
         "lead_first_name": (lead.first_name if lead else "") or "",
         "lead_phone": lead_phone,
         "advisor_name": advisor.full_name if advisor else "Your Advisor",
-        "org_name": _ident.customer_facing_name or (org.name if org else ""),
-        "org_address": _ident.business_address or (org.org_address if org and hasattr(org, 'org_address') else ""),
-        "org_phone": _ident.business_phone or (org.org_phone if org and hasattr(org, 'org_phone') else ""),
-        "brand_color": _branding["brand_color"] or (getattr(org, "brand_color_primary", None) if org else None),
+        "org_name": _org_name,
+        "org_address": _org_address,
+        "org_phone": _org_phone,
+        "brand_color": _brand_color,
+        "meeting_options": _meeting_options,
         # The whole family-facing identity in one object, resolved once. The
         # flat fields above are kept because live links already read them.
         "branding": _branding,
@@ -291,6 +319,11 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
             }
 
         booking.status = "booked"
+        if appt_label and body.get("appt_label"):
+            try:
+                booking.appt_label = str(appt_label)[:120]
+            except Exception:
+                pass
         if lead:
             lead.status = "booked"
         if advisor:
@@ -596,7 +629,37 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
 
     # ── Send confirmation SMS to lead ─────────────────────────────────────────
     lead_sms_result = {"success": False, "note": "skipped"}
-    if lead and lead.phone and advisor:
+    try:
+        from app.services.survey_identity import location_identity as _li
+        _prog_loc = _li(db, lead) if lead else None
+    except Exception:
+        _prog_loc = None
+    if _prog_loc is not None and lead and lead.phone and advisor:
+        # OUTREACH PROGRAM (SCI): sent through send_sms, so it goes out on the
+        # program's own approved line with every program gate, signed by the
+        # location - never from an advisor's or another organization's number.
+        try:
+            from app.services.sms_service import send_sms as _send_sms
+            from app.services import send_source as _ss
+            _when = slot_display
+            try:
+                _dt = datetime.fromisoformat(str(slot_display)[:19])
+                _when = _dt.strftime("%A, %B %-d at %-I:%M %p") if os.name != "nt" else _dt.strftime("%A, %B %d at %I:%M %p")
+            except Exception:
+                pass
+            _first = (lead.first_name or "").strip().title() or "there"
+            _txt = ("Hi %s, your %s with %s is confirmed for %s. If anything changes, just reply here."
+                    % (_first, (appt_label or "appointment").lower() if appt_label and appt_label.startswith("Phone")
+                       else "visit", _prog_loc["name"] or "us", _when))
+            _send_sms(db, advisor, lead, _txt, include_booking_link=False,
+                      send_source=_ss.APPOINTMENT_FOLLOWUP)
+            if booking:
+                booking.confirmation_sent = True
+            lead_sms_result = {"success": True, "via": "program line"}
+        except Exception as e:
+            logger.warning("booking-confirmed: program confirmation not sent: %s", e)
+            lead_sms_result = {"success": False, "error": str(e)}
+    elif lead and lead.phone and advisor:
         try:
             from twilio.rest import Client as TwilioClient
             from app.utils.crypto import decrypt_value
@@ -651,7 +714,11 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
 
     # ── Send confirmation email to lead ───────────────────────────────────────
     lead_email_result = {"success": False, "note": "skipped"}
-    if lead and getattr(lead, 'email', None) and org:
+    # A program family gets the text above; an email from the booking user's
+    # own organization would carry the wrong business name.
+    if _prog_loc is not None:
+        lead_email_result = {"success": False, "note": "program family - confirmed by text"}
+    elif lead and getattr(lead, 'email', None) and org:
         try:
             import resend as _resend
             from app.services.public_identity import identity_for_org

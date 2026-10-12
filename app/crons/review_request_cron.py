@@ -121,7 +121,8 @@ def run_review_request_cron(engine) -> int:
                     survey_url=survey_url,
                 )
 
-                auth_token = decrypt_value(row.twilio_auth_token_encrypted)
+                auth_token = (decrypt_value(row.twilio_auth_token_encrypted)
+                              if loc is None and row.twilio_auth_token_encrypted else None)
 
                 msg_kwargs = {"body": body, "to": row.phone}
                 if row.twilio_messaging_service_sid:
@@ -182,8 +183,17 @@ def run_review_request_cron(engine) -> int:
             # ── Phase 2: send. The claim stays either way - a failed send is
             # recorded on the followup, never unclaimed into a resend loop. ──
             try:
-                client = Client(row.twilio_account_sid, auth_token)
-                client.messages.create(**msg_kwargs)
+                if loc is not None:
+                    # OUTREACH PROGRAM (SCI): the program's own line and gates.
+                    from app.models.models import User as _User
+                    from app.services.sms_service import send_sms as _send_sms
+                    from app.services import send_source as _ss
+                    _adv = db.query(_User).filter(_User.id == row.user_id).first()
+                    _send_sms(db, _adv, _lead_obj, body.replace(" Reply STOP to opt out.", ""),
+                              include_booking_link=False, send_source=_ss.APPOINTMENT_FOLLOWUP)
+                else:
+                    client = Client(row.twilio_account_sid, auth_token)
+                    client.messages.create(**msg_kwargs)
             except Exception as exc:
                 logger.error(
                     "review_request_cron: send failed for booking %s — %s",
@@ -248,7 +258,12 @@ def _eligible_rows(db):
               AND bl.review_request_sent_at IS NULL
               AND l.status != 'dnc'
               AND l.phone IS NOT NULL
-              AND u.twilio_account_sid IS NOT NULL
-              AND u.twilio_auth_token_encrypted IS NOT NULL
-              AND u.twilio_phone_number IS NOT NULL
+              AND (
+                    (u.twilio_account_sid IS NOT NULL
+                     AND u.twilio_auth_token_encrypted IS NOT NULL
+                     AND u.twilio_phone_number IS NOT NULL)
+                    OR EXISTS (SELECT 1 FROM outreach_programs op
+                               WHERE op.organization_id = l.organization_id
+                                 AND op.is_active = TRUE)
+              )
         """)).fetchall()

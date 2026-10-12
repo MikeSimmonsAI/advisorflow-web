@@ -368,6 +368,36 @@ def program_touch_text(db: Session, organization_id: str, touch_number: int) -> 
     return t.message_template
 
 
+def program_booking_url(db: Session, lead: Lead) -> str:
+    """This family's own link to the branded booking page, or "".
+
+    Minted for the program's booking user (whose calendar the appointment
+    lands on). The same pending link is reused, so a family that gets three
+    texts gets one link. "" when no booking user is set or no branded host."""
+    from app.models.models import User
+    prog = program_for_org(db, lead.organization_id)
+    uid = getattr(prog, "booking_user_id", None) if prog else None
+    user = db.query(User).filter(User.id == uid, User.is_active.is_(True)).first() if uid else None
+    if user is None:
+        return ""
+    from app.services.sms_service import get_or_create_booking_link
+    from app.services.public_identity import booking_url
+    link = get_or_create_booking_link(db, lead, user)
+    return booking_url(db, lead.organization_id, link.token) or ""
+
+
+def _with_booking(db: Session, lead: Lead, template: str, fields: Dict[str, str]) -> Dict[str, str]:
+    """{booking_line} -> "Pick a time that works for you: <link>" (or nothing);
+    {booking_link} -> the bare link. A link is minted only when the text uses one."""
+    if "{booking_line}" not in (template or "") and "{booking_link}" not in (template or ""):
+        return dict(fields, booking_line="")
+    url = program_booking_url(db, lead)
+    out = dict(fields, booking_line=("Pick a time that works for you: %s" % url) if url else "")
+    if url:
+        out["booking_link"] = url
+    return out
+
+
 def cadence_text(db: Session, lead: Lead, touch_number: int) -> Optional[str]:
     """The program's own text for a cadence touch, rendered for the lead's location.
 
@@ -391,11 +421,11 @@ def cadence_text(db: Session, lead: Lead, touch_number: int) -> Optional[str]:
     if touch_number > 1:
         own = program_touch_text(db, lead.organization_id, touch_number)
         if own:
-            return render(own, ctx["fields"])
+            return render(own, _with_booking(db, lead, own, ctx["fields"]))
     key = (rec.campaign_family if (rec and touch_number <= 1) else "re_engagement") or "re_engagement"
     fam = (db.query(CampaignFamily)
            .filter(CampaignFamily.organization_id == lead.organization_id,
                    CampaignFamily.key == key).first())
     if fam is None or not fam.sms_template:
         return None
-    return render(fam.sms_template, ctx["fields"])
+    return render(fam.sms_template, _with_booking(db, lead, fam.sms_template, ctx["fields"]))

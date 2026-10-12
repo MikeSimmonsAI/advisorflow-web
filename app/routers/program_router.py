@@ -136,6 +136,7 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "customer_identity_locked": identity.locked(prog),
         "send_via_mailbox": getattr(prog, "send_via_mailbox", None),
         "email_hold_providers": sorted(_et_hold(prog)),
+        "booking_user_id": getattr(prog, "booking_user_id", None),
         "primary_contact_title": prog.primary_contact_title,
         "primary_contact_user_id": prog.primary_contact_user_id,
         "alert_email": prog.alert_email, "alert_phone": prog.alert_phone,
@@ -185,6 +186,7 @@ class SettingsIn(BaseModel):
     placement_seed_addresses: Optional[dict] = None
     send_via_mailbox: Optional[str] = None
     email_hold_providers: Optional[List[str]] = None
+    booking_user_id: Optional[str] = None
 
 
 _EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -255,6 +257,11 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db),
             if e:
                 clean[k] = e
         prog.placement_seed_addresses = json.dumps(clean)
+    if "booking_user_id" in data:
+        uid = (data.pop("booking_user_id") or "").strip() or None
+        if uid and db.query(User).filter(User.id == uid, User.is_active.is_(True)).first() is None:
+            raise HTTPException(status_code=422, detail="Booking user not found or not active.")
+        prog.booking_user_id = uid
     if "email_hold_providers" in data:
         from app.services.programs.email_touches import PROVIDER_LABELS
         held = sorted({str(x).strip().lower() for x in (data.pop("email_hold_providers") or []) if str(x).strip()})
