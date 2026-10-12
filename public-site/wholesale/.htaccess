@@ -1,0 +1,10 @@
+Options -Indexes
+DirectoryIndex index.html
+<IfModule mod_headers.c>
+ Header always set X-Content-Type-Options "nosniff"
+ Header always set Referrer-Policy "strict-origin-when-cross-origin"
+ Header always set X-Frame-Options "SAMEORIGIN"
+</IfModule>
+<FilesMatch "^(build\.py|DEPLOYMENT\.md|CLAUDE_HANDOFF\.md)$">
+ Require all denied
+</FilesMatch>

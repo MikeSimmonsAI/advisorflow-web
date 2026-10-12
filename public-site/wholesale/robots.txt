@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://wholesale.evosyspro.live/sitemap.xml
