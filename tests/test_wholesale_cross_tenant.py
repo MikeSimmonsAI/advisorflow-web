@@ -270,6 +270,12 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     vphoto = ok(client.post("/wholesale/appointments/%s/photos" % appt["id"], headers=auth_headers,
                             files={"file": ("k.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png")},
                             data={"room": "Kitchen"}))
+    from app.models.evosense_models import EvoSenseProperty as _EP
+    db_session.add(_EP(organization_id=sample_org.id, street_address="9 Canvass Ct", city="Dallas", state="TX",
+                       zip_code="75299", opportunity_score=80, is_test=True))
+    db_session.commit()
+    croute = ok(client.post("/wholesale/canvass/routes", headers=auth_headers,
+                            json={"zips": "75299", "include_test": True}))
     voffer = ok(client.post("/wholesale/appointments/%s/offers" % appt["id"], headers=auth_headers,
                             json={"arv": 200000, "repairs": 30000, "offer": 150000}))
 
@@ -278,6 +284,8 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
         "appointment_id": appt["id"],
         "visit_photo_id": vphoto["id"],
         "field_offer_id": voffer["id"],
+        "canvass_route_id": croute["id"],
+        "canvass_door_id": croute["doors"][0]["id"],
         "ops_lead_id": seller["lead_id"],
         "ops_callback_id": ops_cb.id,
         "ops_note_id": ops_note.id,
@@ -492,6 +500,9 @@ def ops_attacks(ids):
         ("post", "/wholesale/appointments/%s/offers" % ids["appointment_id"], {"arv": 1, "repairs": 0, "offer": 1}),
         ("post", "/wholesale/appointments/offers/%s/decide" % ids["field_offer_id"], {"approve": True}),
         ("post", "/wholesale/appointments/%s/agreement" % ids["appointment_id"], {"action": "preview"}),
+        ("get", "/wholesale/canvass/routes/%s" % ids["canvass_route_id"], None),
+        ("patch", "/wholesale/canvass/routes/%s" % ids["canvass_route_id"], {"status": "done"}),
+        ("patch", "/wholesale/canvass/doors/%s" % ids["canvass_door_id"], {"result": "hot", "notes": "planted"}),
         ("get", "/wholesale/skip-trace/estimates/%s" % ids["skiptrace_estimate_id"], None),
         ("post", "/wholesale/skip-trace/estimates/%s/confirm" % ids["skiptrace_estimate_id"],
          {"confirm": "APPROVE SKIP TRACE %s" % ids["skiptrace_estimate_id"]}),

@@ -323,3 +323,61 @@ class WholesaleFieldOffer(Base):
         Index("ix_ws_offer_org_status", "organization_id", "status"),
         Index("ix_ws_offer_org_appt", "organization_id", "appointment_id"),
     )
+
+
+# ── CANVASSING (build list #17 route by area, #18 door-knock form) ──────────
+#
+# A route is a list of doors in one ZIP picked from EvoSense's own findings
+# (best first), given to a canvasser for a day. Each door keeps what the
+# canvasser needs at the curb - the address, the owner of record, why it was
+# flagged - so they never need access to the property records themselves.
+# What they learn at the door is written on the door row; a hot lead becomes
+# a call-back for the person who sends the field specialist.
+
+CANVASS_RESULTS = ("not_home", "talked", "not_interested", "hot", "bad_address")
+
+
+class WholesaleCanvassRoute(Base):
+    __tablename__ = "wholesale_canvass_routes"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    name = Column(String, nullable=False)
+    area = Column(String, nullable=True)              # the ZIP (or ZIPs) it was built from
+    route_date = Column(DateTime, nullable=True)      # the day it is for (Central midnight, as UTC)
+    assigned_to_id = Column(String, ForeignKey("users.id"), nullable=True)
+    status = Column(String, nullable=False, default="open")    # open | done
+    created_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_ws_canvass_org_rep", "organization_id", "assigned_to_id"),
+    )
+
+
+class WholesaleCanvassDoor(Base):
+    __tablename__ = "wholesale_canvass_doors"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    route_id = Column(String, ForeignKey("wholesale_canvass_routes.id", ondelete="CASCADE"), nullable=False)
+    evosense_property_id = Column(String, nullable=True)
+    sort = Column(Integer, nullable=False, default=0)
+    address = Column(String, nullable=False)
+    owner_of_record = Column(String, nullable=True)
+    why = Column(String, nullable=True)
+    # what happened at the door
+    result = Column(String, nullable=True)            # CANVASS_RESULTS
+    talked_to = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    permission = Column(String, nullable=True)        # yes | no | (blank)
+    interest = Column(String, nullable=True)          # hot | warm | cold
+    notes = Column(Text, nullable=True)
+    knocked_at = Column(DateTime, nullable=True)
+    knocked_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    handed_off_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_ws_canvass_door_org_route", "organization_id", "route_id"),
+    )

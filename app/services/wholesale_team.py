@@ -271,7 +271,7 @@ def fence(path: str, method: str, role: Optional[str]) -> Optional[str]:
     return None
 
 
-FIELD_OPEN = ("/wholesale/appointments", "/wholesale/team/me")
+FIELD_OPEN = ("/wholesale/appointments", "/wholesale/team/me", "/wholesale/canvass")
 FIELD_PROPERTY = _re.compile(
     r"^/wholesale/evosense/properties/([^/]+)(/(photo|photo\.jpg|facts|permission-link|observations/[^/]+/raw))?/?$")
 

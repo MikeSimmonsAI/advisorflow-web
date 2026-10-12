@@ -86,3 +86,7 @@
   .tb-table td { border: 0; padding: 4px 10px; }
   .tb-table td::before { content: attr(data-label); display: block; font-size: 11px; color: #64748b; }
 }
+
+/* Canvassing (cv-) */
+.cv-n { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #0f172a; color: #fff; font-weight: 700; font-size: 13px; }
+.cv-h { font-size: 20px; margin: 10px 0 6px; }
