@@ -1452,7 +1452,8 @@ def preview_campaign(family_id: str, location_id: Optional[str] = Query(None),
     r = _et.render_touch(db, prog, f, prof, rec.first_name if rec else "Pat",
                          "first" if touch == "first" else "followup")
     fields = r["fields"]
-    sms = identity.render(f.sms_template, dict(fields, reply_instructions=prog.reply_instructions_sms or ""))
+    sms = identity.render(f.sms_template, dict(fields, reply_instructions=prog.reply_instructions_sms or "",
+                                                   call_line=identity._call_line(prof.facility_phone)))
     sms = "%s %s" % (sms, identity.sms_signoff(prog, prof))
     return {
         "ok": True, "family": f.key, "location": prof.official_name, "email_mode": r["email_mode"],
