@@ -1504,6 +1504,54 @@ async def import_source(file: UploadFile = File(...), dry_run: bool = Form(True)
     return importer.stage(db, org, content, filename=file.filename, dry_run=dry_run, actor_id=user.id)
 
 
+# ── owner: load a source file into production (the server-side version of
+#    scripts/program_setup.py --stage --hold-reviews --promote) ──────────────
+
+@god_router.post("/{organization_id}/load-source")
+async def god_load_source(organization_id: str, file: UploadFile = File(...),
+                          apply: bool = Form(False),
+                          db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Platform owner only. apply=False (the default) analyses the file and
+    writes only the import audit row. apply=True, in order: stages every row
+    (one ProgramSourceRecord per source Lead ID, originals never changed),
+    HOLDS every record still in a review state (location, duplicate, data,
+    conflict, and source statuses such as Not Interested / Disqualified),
+    then promotes the clean contacts to live leads. It never records consent,
+    never enrols anyone in a campaign and never sends anything.
+    Unknown location names go to Location Review - no location is created."""
+    from app.models.program_models import OutreachProgram
+    from app.services.programs import holds, promote
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == organization_id).first() \
+        if org else None
+    if org is None or prog is None:
+        raise HTTPException(status_code=404, detail="No outreach program for that organization.")
+    content = await file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Files up to 10 MB.")
+    staged = importer.stage(db, org, content, filename=file.filename, dry_run=not apply, actor_id=god.id)
+    out = {"apply": apply, "stage": staged["summary"], "run_id": staged["run_id"]}
+    if not apply or staged["summary"].get("refused"):
+        out["promotion_plan"] = {k: v for k, v in promote.plan(db, org).items() if k != "groups"}
+        return out
+    held = holds.hold_open_reviews(db, org.id, god.id)
+    db.commit()
+    out["held"] = {k: v for k, v in held.items() if k != "source_lead_ids"}
+    try:
+        out["promotion"] = promote.promote(db, org, god, apply=True)
+    except HTTPException:
+        db.rollback()
+        raise
+    try:
+        from app.routers.audit_log_router import log_action
+        log_action(db, org.id, god.id, "program.source_loaded", "organization", org.id,
+                   details={"file": file.filename, "staged": staged["summary"].get("staged"),
+                            "held": held.get("held"), "created": out["promotion"].get("created")})
+    except Exception:                                    # noqa: BLE001
+        db.rollback()
+    return out
+
+
 # ── owner: configure a customer as a program ─────────────────────────────────
 
 class GodSetupIn(BaseModel):
