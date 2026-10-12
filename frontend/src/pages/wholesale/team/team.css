@@ -1,0 +1,42 @@
+/* Wholesale > Team (wt-). */
+.wt-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+.wt-main { display: grid; gap: 16px; min-width: 0; }
+.wt-h2 { font-size: 16px; font-weight: 700; margin: 0 0 12px; }
+.wt-h3 { font-size: 13px; font-weight: 700; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .04em; color: #475569; }
+.wt-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.wt-table th { text-align: left; font-size: 12px; color: #475569; font-weight: 600; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+.wt-table td { padding: 10px 8px; border-bottom: 1px solid #eef2f7; vertical-align: top; }
+.wt-who { font-weight: 600; }
+.wt-actions { white-space: nowrap; text-align: right; }
+.wt-actions .evo-btn + .evo-btn { margin-left: 6px; }
+.wt-select, .wt-input { width: 100%; min-height: 38px; padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; background: #fff; color: #0f172a; box-sizing: border-box; }
+.wt-select:focus-visible, .wt-input:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+.wt-add { display: grid; gap: 12px; }
+.wt-tabs { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+.wt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.wt-lab { display: grid; gap: 4px; font-size: 13px; font-weight: 600; color: #334155; }
+.wt-warn { border: 1px solid #f59e0b; border-left-width: 4px; background: #fffbeb; border-radius: 8px; padding: 10px 12px; font-size: 14px; color: #78350f; }
+.wt-check { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-weight: 600; }
+.wt-err { color: #b91c1c; font-size: 13px; margin: 4px 0; }
+.wt-link { border: 1px solid #22c55e; background: #f0fdf4; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.wt-link p { margin: 0 0 8px; }
+.wt-link__row { display: flex; gap: 8px; }
+.wt-tree { list-style: none; margin: 0; padding: 0; }
+.wt-node__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; font-size: 14px; }
+.wt-node__elbow { color: #94a3b8; }
+.wt-node__name { font-weight: 600; }
+.wt-roles { margin: 0; display: grid; gap: 8px; font-size: 13px; }
+.wt-roles dt { font-weight: 700; }
+.wt-roles dd { margin: 0; color: #475569; }
+@media (max-width: 1000px) {
+  .wt-layout { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .wt-grid { grid-template-columns: 1fr; }
+  .wt-table thead { display: none; }
+  .wt-table, .wt-table tbody, .wt-table tr, .wt-table td { display: block; width: 100%; }
+  .wt-table tr { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; margin-bottom: 10px; }
+  .wt-table td { border: 0; padding: 6px 4px; }
+  .wt-table td[data-label]:not([data-label=""])::before { content: attr(data-label); display: block; font-size: 12px; color: #475569; margin-bottom: 2px; }
+  .wt-actions { text-align: left; white-space: normal; }
+}

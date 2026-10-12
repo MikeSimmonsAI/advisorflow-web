@@ -1190,6 +1190,8 @@ app.include_router(wholesale_buyers_router)
 app.include_router(wholesale_contact_lookup_router)
 app.include_router(wholesale_funding_router)
 app.include_router(wholesale_exceptions_router)
+from app.routers.wholesale_team_router import router as wholesale_team_router  # noqa: E402
+app.include_router(wholesale_team_router)   # /wholesale/team - team roles and who reports to whom
 from app.routers.wholesale_ops_router import router as wholesale_ops_router  # noqa: E402
 app.include_router(wholesale_ops_router)   # /wholesale/ops — callbacks, temperature overrides, conversation control, pilot
 from app.routers.skiptrace_cost_router import router as skiptrace_cost_router  # noqa: E402

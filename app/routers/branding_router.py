@@ -167,6 +167,17 @@ def _with_product_lock(db, user, platform):
     return platform
 
 
+def _wholesale_team(db, user):
+    """The caller's Wholesale team role. Manager and field logins are
+    wholesale-only, and the app shell keeps them on the Wholesale side."""
+    try:
+        from app.services import wholesale_team as _wt
+        return {"role": _wt.role_of(db, user), "wholesale_only": _wt.is_wholesale_only(db, user),
+                "field": _wt.is_field(db, user)}
+    except Exception:  # noqa: BLE001 - branding must not break a login
+        return {"role": None, "wholesale_only": False, "field": False}
+
+
 def _platform_brand(db, org):
     """The presentation of the platform (white-label brand) an organization
     belongs to, or None. Never raises: branding must not break a login."""
@@ -345,6 +356,7 @@ def get_org_branding(
         # than one) and sends the selection back as `header` - which is null
         # when this deployment's CORS allow-list does not include it yet, so
         # the browser never sends a header that would fail every preflight.
+        "wholesale_team": _wholesale_team(db, current_user),
         "workspace_location": (loc_ctx.as_payload(
             header_supported=_wl.header_allowed_by_cors(request))
             if loc_ctx is not None else None),
