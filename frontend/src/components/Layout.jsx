@@ -59,9 +59,9 @@ const PLATFORM_BRAND = BRAND_CONFIG[PLATFORM_THEME]
 //     place. God/platform functions live under Platform Admin, below.
 
 // What a field specialist or canvasser sees in the rail (see wholesale_team.py).
-const FIELD_NAV = new Set(['/wholesale/appointments', '/settings'])
+const FIELD_NAV = new Set(['/wholesale/appointments', '/wholesale/canvass', '/settings'])
 // The pages a field login may open at all (the server refuses the rest too).
-const FIELD_PAGES = ['/wholesale/appointments', '/wholesale/evosense/property/', '/settings']
+const FIELD_PAGES = ['/wholesale/appointments', '/wholesale/canvass', '/wholesale/evosense/property/', '/settings']
 const fieldMayOpen = (p) => FIELD_PAGES.some((x) => p === x.replace(/\/$/, '') || p.startsWith(x.endsWith('/') ? x : x + '/'))
 
 const NAV_GROUPS = [
@@ -173,6 +173,7 @@ const NAV_GROUPS = [
       { to: '/wholesale/properties', label: 'Properties', icon: 'home', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/appointments', label: 'Appointments', icon: 'calendar', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/board', label: 'Team Board', icon: 'activity', featureKey: 'wholesale_real_estate' },
+      { to: '/wholesale/canvass', label: 'Canvassing', icon: 'home', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/calculator', label: 'Deal Calculator', icon: 'calculator', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/buyers', label: 'Cash Buyers', icon: 'users', featureKey: 'wholesale_real_estate' },
       { to: '/wholesale/funding', label: 'Funding Partners', icon: 'credit-card', featureKey: 'wholesale_real_estate' },

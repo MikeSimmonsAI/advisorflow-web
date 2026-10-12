@@ -109,6 +109,7 @@ const CallbackCenter = lazyPage(() => import('./pages/wholesale/ops/CallbackCent
 const WholesaleTeam = lazyPage(() => import('./pages/wholesale/team/WholesaleTeam'))
 const WholesaleAppointments = lazyPage(() => import('./pages/wholesale/appts/WholesaleAppointments'))
 const WholesaleTeamBoard = lazyPage(() => import('./pages/wholesale/appts/TeamBoard'))
+const WholesaleCanvass = lazyPage(() => import('./pages/wholesale/appts/Canvass'))
 const WholesaleCalculator = lazyPage(() => import('./pages/wholesale/calc/WholesaleCalculator'))
 const PilotControls = lazyPage(() => import('./pages/wholesale/ops/PilotControls'))
 const WholesaleFundingPartners = lazyPage(() => import('./pages/wholesale/WholesaleFundingPartners'))
@@ -1299,6 +1300,7 @@ export default function App() {
             <Route path="/wholesale/team" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleTeam /></ProtectedRoute>} />
             <Route path="/wholesale/appointments" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleAppointments /></ProtectedRoute>} />
             <Route path="/wholesale/board" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleTeamBoard /></ProtectedRoute>} />
+            <Route path="/wholesale/canvass" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleCanvass /></ProtectedRoute>} />
             <Route path="/wholesale/calculator" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleCalculator /></ProtectedRoute>} />
         <Route path="/wholesale/pilot" element={<ProtectedRoute feature="wholesale_real_estate"><PilotControls /></ProtectedRoute>} />
         <Route path="/wholesale/funding" element={<ProtectedRoute feature="wholesale_real_estate"><WholesaleFundingPartners /></ProtectedRoute>} />
