@@ -195,6 +195,9 @@ const NAV_GROUPS = [
       { to: '/admin', label: 'Team Performance', icon: 'shield', adminOnly: true, featureKey: 'master_dashboard' },
       { to: '/reports', label: 'Reports', icon: 'activity', adminOnly: true, featureKey: 'reports' },
       { to: '/imports', label: 'Import Center', icon: 'upload', adminOnly: true, featureKey: 'imports' },
+      // Contacts sits with the Import Center: an import makes contacts, and this is
+      // where they are found and promoted to leads. Same gate as the route.
+      { to: '/contacts', label: 'Contacts', icon: 'database', adminOnly: true, featureKey: 'imports' },
     ],
   },
   {
