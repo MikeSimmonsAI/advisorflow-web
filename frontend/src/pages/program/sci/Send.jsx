@@ -268,7 +268,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
             <FocusPreview f={focus} onClose={() => setFocus(null)} />
           ) : (
             <div className="sci-identity" style={{ alignItems: 'flex-start' }}>
-              <span className="sci-identity-mark">SCI</span>
+              <span className="sci-identity-mark" aria-hidden="true"><Icon name="pin" /></span>
               <div className="sci-micro sci-muted">Click a contact's name to load their exact message, or tick contacts and press <b>Preview selected</b>. Nothing is sent from a preview.</div>
             </div>
           )}

@@ -104,7 +104,7 @@ export function Icon({ name, title, size }) {
 }
 
 /** The navy page header band. Replaces the old serif heading and the big hero. */
-export function PageHead({ title, sub, children, eyebrow = 'SCI / Family Service Center · EvoSys Pro' }) {
+export function PageHead({ title, sub, children, eyebrow = 'Family Service Center · EvoSys Pro' }) {
   return (
     <header className="sci-head">
       <div className="sci-head-text">
@@ -114,6 +114,25 @@ export function PageHead({ title, sub, children, eyebrow = 'SCI / Family Service
       </div>
       {children && <div className="sci-head-actions">{children}</div>}
     </header>
+  )
+}
+
+const MARK_SKIP = new Set(['funeral', 'home', 'homes', 'cemetery', 'memorial', 'park', 'gardens', 'garden', 'chapel', 'mortuary',
+  'the', 'of', 'and', '&', 'funeral-home', 'parlors', 'center', 'care', 'mausoleum'])
+/** Two letters for a location: its distinctive words, not "Funeral Home". */
+export const locationInitials = name => {
+  const words = String(name || '').replace(/[()]/g, ' ').split(/[\s\-]+/).filter(Boolean)
+  const key = words.filter(w => !MARK_SKIP.has(w.toLowerCase()) && /^[A-Za-z]/.test(w))
+  const use = (key.length ? key : words).slice(0, 2)
+  return use.map(w => w[0]).join('').toUpperCase() || '?'
+}
+
+/** The location's own mark: its uploaded logo, otherwise its initials. Never a corporate badge. */
+export function LocationMark({ name, logoUrl, size = 38 }) {
+  return (
+    <span className="sci-identity-mark" style={{ width: size, height: size }} aria-hidden="true" title={name}>
+      {logoUrl ? <img src={assetSrc(logoUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 8, background: '#fff' }} /> : locationInitials(name)}
+    </span>
   )
 }
 

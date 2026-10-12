@@ -25,7 +25,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, getCurrentUser, refreshCurrentUser } from '../../api/client'
 import { readAuthority } from '../../auth/workspaceAuthority'
-import { Icon, SearchBox, errText, initials, Loading } from './sci/ui'
+import { Icon, LocationMark, SearchBox, errText, initials, Loading } from './sci/ui'
 import Dashboard from './sci/Dashboard'
 import Responses from './sci/Responses'
 import Review from './sci/Review'
@@ -112,7 +112,7 @@ export default function ProgramCenter() {
 
   useEffect(() => {
     const label = TABS.find(t => t.key === tab)?.label || 'Dashboard'
-    document.title = `${label} · SCI Family Service Center · EvoSys Pro`
+    document.title = `${label} · Family Service Center · EvoSys Pro`
   }, [tab])
   useEffect(() => { setSearch(params.get('q') || '') }, [params])
 
@@ -146,9 +146,9 @@ export default function ProgramCenter() {
   const bucket = data.locations.find(l => l.is_review_bucket)
   const reviewCount = (att.data_review || 0) + (att.location_review || 0) + (att.duplicate_review || 0)
   const counts = { responses: att.hot_responses || 0, review: reviewCount }
-  const progName = prog.name || 'Service Corporation International'
   const sendingOn = (data.automation?.active_campaign_families || 0) > 0
-  const workspaceLabel = 'SCI Family Service Center'
+  const selLoc = realLocations.find(l => l.location_id === locationId)
+  const workspaceLabel = 'Family Service Center'
 
   return (
     <div className={`sci-app${menuOpen ? ' sci-menu-open' : ''}${collapsed ? ' sci-collapsed' : ''}`}>
@@ -184,10 +184,10 @@ export default function ProgramCenter() {
           </button>
           <div className="sci-scicard" style={{ '--dot': sendingOn ? '#3fc28f' : '#e9a54a' }}
             title={sendingOn ? `${data.automation.active_campaign_families} campaign(s) switched on` : 'All campaigns off — nothing sends automatically'}>
-            <b aria-hidden="true">SCI</b>
+            {selLoc ? <LocationMark name={selLoc.name} size={34} /> : <b aria-hidden="true"><Icon name="pin" size={20} /></b>}
             <span>
-              {progName}
-              <small><Icon name="pin" size={11} />{realLocations.length} locations</small>
+              {selLoc ? selLoc.name : 'Family Service Center'}
+              <small><Icon name="pin" size={11} />{selLoc ? 'Selected location' : `${realLocations.length} locations`}</small>
               <small><i />{sendingOn ? `${data.automation.active_campaign_families} campaign(s) on` : 'All campaigns off'}</small>
             </span>
           </div>
