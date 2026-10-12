@@ -31,6 +31,13 @@ export default function Send({ locations, isManager, locationId, goTab, automati
   const [focus, setFocus] = useState(null)          // { row, item } single-contact preview
   const [confirming, setConfirming] = useState(false)
   const [mode, setMode] = useState('text_email')
+  const [drip, setDrip] = useState('now')
+  // Slow drip: tomorrow 9:00 AM (this computer's clock), one contact every 20 minutes.
+  const dripBody = () => {
+    if (drip !== 'tomorrow') return {}
+    const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0)
+    return { start_at: d.toISOString(), spacing_minutes: 20 }
+  }
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
@@ -95,9 +102,10 @@ export default function Send({ locations, isManager, locationId, goTab, automati
   const approve = async typed => {
     setBusy(true); setErr('')
     try {
-      const r = await api.post('/program/send/approve', { lead_ids: ids, confirm: typed, mode })
+      const r = await api.post('/program/send/approve', { lead_ids: ids, confirm: typed, mode, ...dripBody() })
       const parts = [`${num(r.approved)} approved.`]
-      if (r.texting) parts.push(`${num(r.texting)} will get their first text at the next allowed hour in their own time zone (never at night).`)
+      if (r.start_at) parts.push(`Slow drip: the first one starts ${when(r.start_at)}, then one every ${r.spacing_minutes} minutes. Nothing goes out before then.`)
+      else if (r.texting) parts.push(`${num(r.texting)} will get their first text at the next allowed hour in their own time zone (never at night).`)
       if (r.email_only) parts.push(`${num(r.email_only)} have email only.`)
       parts.push(r.email_sending_on ? 'Emails go out on the email schedule.' : 'Emails are switched off on the server right now, so only texts go for now.')
       if (r.skipped?.length) parts.push(`${num(r.skipped.length)} skipped: ${r.skipped.map(s => s.reason).join(', ')}.`)
@@ -107,7 +115,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
   const approveOne = async row => {
     setBusy(true); setErr('')
     try {
-      const r = await api.post('/program/send/approve', { lead_ids: [row.lead_id], confirm: 'SEND 1', mode })
+      const r = await api.post('/program/send/approve', { lead_ids: [row.lead_id], confirm: 'SEND 1', mode, ...dripBody() })
       setMsg(r.approved ? `${row.name} is good to go — first text at the next allowed hour in their time zone.`
         : `${row.name} was not sent: ${(r.skipped || []).map(s => s.reason).join(', ') || 'blocked by a send check'}.`)
       load(); loadTotals()
@@ -195,7 +203,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
                       <td className="sci-small">{r.location || <Chip tone="warn" plain>No location</Chip>}</td>
                       <td className="sci-small">{r.campaign || '—'}
                         <span className="sci-micro sci-muted" style={{ display: 'block' }}>
-                          {r.reaches}{r.last_text_at ? ` · Last text ${when(r.last_text_at)}` : ''}{r.last_email_at ? ` · Last email ${when(r.last_email_at)}` : ''}
+                          {r.reaches}{r.starts_at ? ` · Starts ${when(r.starts_at)}` : ''}{r.last_text_at ? ` · Last text ${when(r.last_text_at)}` : ''}{r.last_email_at ? ` · Last email ${when(r.last_email_at)}` : ''}
                         </span>
                       </td>
                       <td>
@@ -284,6 +292,14 @@ export default function Send({ locations, isManager, locationId, goTab, automati
                 <option value="text_email">Text + Email (10-day)</option>
                 <option value="email_only">Email only</option>
                 <option value="call">Call list (no automated messages)</option>
+              </select>
+            </label>
+          )}
+          {isManager && (
+            <label className="sci-micro" style={{ display: 'block', marginTop: 8 }}>When{' '}
+              <select value={drip} onChange={e => setDrip(e.target.value)} style={{ marginLeft: 6 }}>
+                <option value="now">Right away</option>
+                <option value="tomorrow">Slow drip — tomorrow 9 AM, one every 20 min</option>
               </select>
             </label>
           )}

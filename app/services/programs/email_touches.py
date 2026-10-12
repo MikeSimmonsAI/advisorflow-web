@@ -461,6 +461,8 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
             continue
         if getattr(master, "send_mode", None) == "call":
             continue                                   # call list: a person calls, nothing automated
+        if getattr(master, "scheduled_start_at", None) and now < master.scheduled_start_at:
+            continue                                   # slow drip: not their start time yet
         mine = touches.get(lead_id, {})
         for t in (mine.values() if mark_stale else ()):   # surface claims that never resolved
             if t.status == "claimed" and t.attempted_at and now - t.attempted_at >= STALE_CLAIM_AFTER:

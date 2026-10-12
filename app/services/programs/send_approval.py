@@ -211,6 +211,8 @@ def list_contacts(db: Session, prog: OutreachProgram, *, search: str = "", locat
             "last_text_at": sent[lead.id]["text"], "last_email_at": sent[lead.id]["email"],
             "approved": approved, "approved_at": when.isoformat() + "Z" if when else None,
             "in_campaign": lead.id in enrolled,
+            "starts_at": (m.scheduled_start_at.isoformat() + "Z")
+            if getattr(m, "scheduled_start_at", None) and m.scheduled_start_at > datetime.utcnow() else None,
             "blocked": None if approved else blocker(db, lead),
         })
     return {"total": total, "items": items, "approval_mode": bool(getattr(prog, "require_send_approval", False))}
@@ -250,7 +252,12 @@ def _clean(ids: List[str]) -> List[str]:
 
 
 def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
-            mode: str = "text_email") -> Dict:
+            mode: str = "text_email", start_at: Optional[datetime] = None,
+            spacing_minutes: int = 0) -> Dict:
+    """start_at (naive UTC) = slow drip: the first contact starts then, each
+    next one spacing_minutes later. Nothing - text or email - goes out before
+    a contact's start time."""
+    from datetime import timedelta
     mode = mode if mode in MODES else "text_email"
     from app.services.cadence_service import start_cadence
     from app.services.programs import email_touches
@@ -275,10 +282,12 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
         if b:
             skipped.append({"lead_id": lid, "reason": b})
             continue
+        starts = (start_at + timedelta(minutes=max(0, spacing_minutes) * len(approved))) if start_at else None
         for r in recs:
             if r.approved_to_send_at is None:
                 r.approved_to_send_at, r.approved_to_send_by = now, user.id
             r.send_mode = mode
+            r.scheduled_start_at = starts
         if not lead.assigned_to_id:
             sender = email_touches._sender(db, prog, lead)
             if sender is not None:
@@ -295,8 +304,13 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
     texting, email_only = 0, 0
     for lead in approved:
         if mode == "text_email" and textable(lead):
-            if start_cadence(db, lead) is not None:
+            state = start_cadence(db, lead)
+            if state is not None:
                 texting += 1
+                starts = _master(identity.records_for_lead(db, lead)).scheduled_start_at
+                if starts is not None and (state.current_touch_number or 0) == 0:
+                    state.next_touch_due_at = starts
+                    db.commit()
         else:
             email_only += 1
     from app.routers.audit_log_router import log_action
@@ -306,6 +320,8 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
                         "lead_ids": [l.id for l in approved], "campaigns_switched_on": switched_on})
     db.commit()
     return {"approved": len(approved), "texting": texting, "email_only": email_only, "mode": mode,
+            "start_at": start_at.isoformat() + "Z" if start_at else None,
+            "spacing_minutes": spacing_minutes if start_at else 0,
             "skipped": skipped, "campaigns_switched_on": switched_on,
             "email_sending_on": email_touches.sending_enabled()}
 
