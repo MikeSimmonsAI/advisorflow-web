@@ -13,6 +13,7 @@
  *   4. Profile photo (headshot)
  */
 
+import { photoDataUrl } from '../api/shrinkImages'
 import { useState, useEffect, useRef } from 'react'
 import { api, getCurrentUser } from '../api/client'
 
@@ -104,22 +105,20 @@ export default function ProfileOnboarding() {
     }
   }
 
-  function handlePhotoFile(file) {
+  // Any phone photo works: it is redrawn at 900 px as a JPEG before saving
+  // (the same as Settings) instead of refusing anything over 500 KB.
+  async function handlePhotoFile(file) {
     if (!file) return
-    if (file.size > 500 * 1024) { alert('Photo must be under 500KB'); return }
-    const reader = new FileReader()
-    reader.onload = async (e) => {
-      const b64 = e.target.result
-      setSaving(true)
-      try {
-        await api.patch('/settings/profile-photo', { photo_data_url: b64 })
-        const updated = await api.get('/settings/profile')
-        setProfile(updated)
-        setActiveField(null)
-      } catch (err) { console.error(err) }
-      finally { setSaving(false) }
-    }
-    reader.readAsDataURL(file)
+    let b64
+    try { b64 = await photoDataUrl(file, 900) } catch { alert('That photo could not be read. Try a JPG or PNG.'); return }
+    setSaving(true)
+    try {
+      await api.patch('/settings/profile-photo', { photo_data_url: b64 })
+      const updated = await api.get('/settings/profile')
+      setProfile(updated)
+      setActiveField(null)
+    } catch (err) { console.error(err) }
+    finally { setSaving(false) }
   }
 
   // ── Minimized tab ──────────────────────────────────────────────────────

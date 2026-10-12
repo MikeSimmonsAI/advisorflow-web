@@ -51,7 +51,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, String, Boolean, DateTime, Date, ForeignKey, Text, Integer,
-    Numeric, Index, UniqueConstraint,
+    Numeric, Index, UniqueConstraint, LargeBinary,
 )
 from sqlalchemy.orm import relationship
 
@@ -1528,3 +1528,20 @@ class WholesaleWorkException(Base):
         Index("ix_ws_exceptions_assignee", "organization_id", "assigned_to_id", "status"),
         Index("ix_ws_exceptions_subject", "organization_id", "subject_type", "subject_id"),
     )
+
+
+class WholesaleFileBlob(Base):
+    """The bytes of a wholesale file kept in the database, in pieces of a few
+    MB (app/services/wholesale_files.py, backend "database"). Free, durable
+    across restarts and deploys, and backed up with the database - the default
+    when no object store is configured. The key is the same unguessable,
+    organization-namespaced key the other backends use."""
+    __tablename__ = "wholesale_file_blobs"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    storage_key = Column(String, nullable=False, index=True)
+    seq = Column(Integer, nullable=False, default=0)
+    data = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (UniqueConstraint("storage_key", "seq", name="uq_wholesale_file_blob_part"),)

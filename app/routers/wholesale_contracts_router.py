@@ -153,7 +153,7 @@ async def upload_template(
         raise HTTPException(status_code=400, detail="A template needs a name.")
 
     data, content_type, original = await files.read_upload(file)
-    stored = files.put(org_id, KIND_TEMPLATE, data, content_type)
+    stored = files.put(org_id, KIND_TEMPLATE, data, content_type, db=db)
 
     blob = WholesaleFile(organization_id=org_id, kind=KIND_TEMPLATE,
                          original_filename=original, uploaded_by_id=user.id,

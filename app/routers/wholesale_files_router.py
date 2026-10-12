@@ -135,7 +135,7 @@ def serve_file(file_id: str, db: Session = Depends(get_db),
         raise HTTPException(status_code=409,
                             detail="No customer organization selected.")
     row = _own_file(db, org_id, file_id)
-    data = files.fetch(row.storage_backend, row.storage_key)
+    data = files.fetch(row.storage_backend, row.storage_key, db=db)
     # `inline` for images so a thumbnail renders; the filename is quoted and
     # stripped of quotes so a crafted upload name cannot break the header.
     safe_name = (row.original_filename or "file").replace('"', "").replace("\n", "")
@@ -164,7 +164,7 @@ async def upload_property_photo(
     prop = _own_property(db, org_id, property_id)
 
     data, content_type, original = await files.read_upload(file, images_only=True)
-    stored = files.put(org_id, KIND_PROPERTY_PHOTO, data, content_type)
+    stored = files.put(org_id, KIND_PROPERTY_PHOTO, data, content_type, db=db)
 
     existing = (db.query(WholesaleFile)
                 .filter(WholesaleFile.organization_id == org_id,
@@ -327,7 +327,7 @@ def delete_file(file_id: str, request: Request, db: Session = Depends(get_db),
     # The object goes last: a failed delete here leaves an orphan in the bucket,
     # which is a cleanup job. The reverse order leaves a row pointing at nothing,
     # which is a broken screen.
-    files.remove(backend, key)
+    files.remove(backend, key, db=db)
     return {"deleted": True, "id": file_id}
 
 
@@ -352,7 +352,7 @@ async def upload_deal_document(
     _own_deal(db, org_id, deal_id)
 
     data, content_type, original = await files.read_upload(file)
-    stored = files.put(org_id, KIND_DOCUMENT, data, content_type)
+    stored = files.put(org_id, KIND_DOCUMENT, data, content_type, db=db)
 
     row = WholesaleFile(organization_id=org_id, deal_id=deal_id,
                         kind=KIND_DOCUMENT, original_filename=original,
@@ -407,7 +407,7 @@ async def upload_comp_photo(
         raise HTTPException(status_code=404, detail="Comp not found")
 
     data, content_type, original = await files.read_upload(file, images_only=True)
-    stored = files.put(org_id, KIND_COMP_PHOTO, data, content_type)
+    stored = files.put(org_id, KIND_COMP_PHOTO, data, content_type, db=db)
 
     previous = (db.query(WholesaleFile)
                 .filter(WholesaleFile.organization_id == org_id,
@@ -422,7 +422,7 @@ async def upload_comp_photo(
     db.flush()
 
     for old in previous:
-        files.remove(old.storage_backend, old.storage_key)
+        files.remove(old.storage_backend, old.storage_key, db=db)
         db.delete(old)
 
     svc.log_event(db, org_id, "comp.photo_uploaded", actor_type=ACTOR_USER,
@@ -459,7 +459,7 @@ async def upload_proof_of_funds(
         raise HTTPException(status_code=404, detail="Outreach not found")
 
     data, content_type, original = await files.read_upload(file)
-    stored = files.put(org_id, KIND_DOCUMENT, data, content_type)
+    stored = files.put(org_id, KIND_DOCUMENT, data, content_type, db=db)
 
     stored_file = WholesaleFile(organization_id=org_id, deal_id=row.deal_id,
                                 buyer_id=row.buyer_id, kind=KIND_DOCUMENT,
@@ -523,7 +523,7 @@ async def upload_property_photos(
             rejected.append({"filename": upload.filename,
                              "reason": exc.detail})
             continue
-        stored = files.put(org_id, KIND_PROPERTY_PHOTO, data, content_type)
+        stored = files.put(org_id, KIND_PROPERTY_PHOTO, data, content_type, db=db)
         row = WholesaleFile(
             organization_id=org_id, property_id=property_id,
             kind=KIND_PROPERTY_PHOTO, original_filename=original,
