@@ -265,10 +265,16 @@ def theirs(client, auth_headers, local_storage, db_session, sample_org, sample_a
     appt = ok(client.post("/wholesale/appointments", headers=auth_headers,
                           json={"starts_at": "2026-10-12T10:00:00-05:00", "address": "1 Victim Ave",
                                 "notes": "victim visit"}))
+    ok(client.put("/wholesale/appointments/%s/visit" % appt["id"], headers=auth_headers,
+                  json={"interview": {"motivation": "victim's private reasons", "owed": 90000}}))
+    vphoto = ok(client.post("/wholesale/appointments/%s/photos" % appt["id"], headers=auth_headers,
+                            files={"file": ("k.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png")},
+                            data={"room": "Kitchen"}))
 
     return {
         **es_ids,
         "appointment_id": appt["id"],
+        "visit_photo_id": vphoto["id"],
         "ops_lead_id": seller["lead_id"],
         "ops_callback_id": ops_cb.id,
         "ops_note_id": ops_note.id,
@@ -474,6 +480,10 @@ def ops_attacks(ids):
         ("delete", "/wholesale/ops/notes/%s" % ids["ops_note_id"], None),
         ("delete", "/wholesale/team/members/%s" % ids["team_user_id"], None),
         ("patch", "/wholesale/appointments/%s" % ids["appointment_id"], {"notes": "stolen"}),
+        ("get", "/wholesale/appointments/%s/visit" % ids["appointment_id"], None),
+        ("put", "/wholesale/appointments/%s/visit" % ids["appointment_id"], {"interview": {"notes": "planted"}}),
+        ("get", "/wholesale/appointments/%s/photos/%s" % (ids["appointment_id"], ids["visit_photo_id"]), None),
+        ("delete", "/wholesale/appointments/%s/photos/%s" % (ids["appointment_id"], ids["visit_photo_id"]), None),
         ("get", "/wholesale/skip-trace/estimates/%s" % ids["skiptrace_estimate_id"], None),
         ("post", "/wholesale/skip-trace/estimates/%s/confirm" % ids["skiptrace_estimate_id"],
          {"confirm": "APPROVE SKIP TRACE %s" % ids["skiptrace_estimate_id"]}),
@@ -580,6 +590,7 @@ def upload_attacks(ids):
         ("/wholesale/properties/%s/photos/batch" % ids["property_id"], png, {},
          "files"),
         ("/wholesale/comps/%s/photo" % ids["comp_id"], png, {}, "file"),
+        ("/wholesale/appointments/%s/photos" % ids["appointment_id"], png, {"room": "Kitchen"}, "file"),
         ("/wholesale/deals/%s/documents/upload" % ids["deal_id"], png,
          {"doc_type": "purchase_contract"}, "file"),
         ("/wholesale/outreach/%s/proof-of-funds" % ids["outreach_id"], png, {},

@@ -225,3 +225,55 @@ class WholesaleFieldAppointment(Base):
         Index("ix_ws_appt_org_rep_starts", "organization_id", "assigned_to_id", "starts_at"),
         Index("ix_ws_appt_org_esprop", "organization_id", "evosense_property_id"),
     )
+
+
+# ── THE VISIT RECORD (build list #12 interview, #13 walkthrough) ────────────
+#
+# What the rep learned at the kitchen table and saw walking the house, kept
+# with the appointment it belongs to. The answers are the rep's notes about
+# the visit - they are not the seller's consent or contact details, which
+# stay on the Lead.
+
+class WholesaleFieldVisit(Base):
+    __tablename__ = "wholesale_field_visits"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    appointment_id = Column(String, ForeignKey("wholesale_field_appointments.id", ondelete="CASCADE"),
+                            nullable=False, unique=True)
+    evosense_property_id = Column(String, nullable=True)
+    interview = Column(Text, nullable=True)        # JSON: motivation, timeline, owed, price wanted ...
+    repairs = Column(Text, nullable=True)          # JSON: condition + room-by-room lines
+    updated_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_ws_visit_org_esprop", "organization_id", "evosense_property_id"),
+    )
+
+
+class WholesaleFieldVisitPhoto(Base):
+    """A walkthrough photo. The bytes live wherever wholesale_files keeps
+    files (the database when nothing else is set); `storage_key` never
+    leaves the server - photos are served through an authenticated route."""
+    __tablename__ = "wholesale_field_visit_photos"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    appointment_id = Column(String, ForeignKey("wholesale_field_appointments.id", ondelete="CASCADE"),
+                            nullable=False)
+    room = Column(String, nullable=True)
+    caption = Column(String, nullable=True)
+    storage_backend = Column(String, nullable=False)
+    storage_key = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    byte_size = Column(Integer, nullable=False, default=0)
+    checksum = Column(String, nullable=True)
+    original_filename = Column(String, nullable=True)
+    created_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_ws_visit_photo_org_appt", "organization_id", "appointment_id"),
+    )
