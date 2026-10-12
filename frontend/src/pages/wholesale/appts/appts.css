@@ -60,3 +60,9 @@
 .of-over { margin: 0; padding: 8px 10px; border-radius: 8px; background: #fffbeb; border: 1px solid #f59e0b; color: #78350f; font-size: 14px; }
 .of-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .of-list li { border-top: 1px solid #e2e8f0; padding-top: 6px; }
+
+/* Install tip (it-) */
+.it-tip { display: flex; gap: 12px; align-items: center; padding: 12px 14px; margin: 0 0 14px; border-radius: 12px; background: #eff6ff; border: 1px solid #bfdbfe; }
+.it-tip img { border-radius: 10px; flex: none; }
+.it-text { display: grid; gap: 2px; font-size: 14px; flex: 1; min-width: 0; }
+.it-x { border: 0; background: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; padding: 4px; }
