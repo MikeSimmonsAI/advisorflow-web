@@ -277,3 +277,49 @@ class WholesaleFieldVisitPhoto(Base):
     __table_args__ = (
         Index("ix_ws_visit_photo_org_appt", "organization_id", "appointment_id"),
     )
+
+
+# ── FIELD OFFERS (build list #14 locked calculator, #20 approvals) ──────────
+#
+# A field login never sees the investor percentage or the fee. The server
+# works out the most they may offer (the workspace's own MAO formula times the
+# workspace's field limit) and records every offer they make: inside the limit
+# it simply stands; above it, it waits for an admin to approve or decline.
+
+OFFER_STATUSES = ("within", "pending", "approved", "declined")
+
+
+class WholesaleFieldRules(Base):
+    __tablename__ = "wholesale_field_rules"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, unique=True)
+    offer_limit_pct = Column(Integer, nullable=False, default=100)   # % of the formula's max offer
+    updated_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WholesaleFieldOffer(Base):
+    __tablename__ = "wholesale_field_offers"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    appointment_id = Column(String, ForeignKey("wholesale_field_appointments.id", ondelete="CASCADE"),
+                            nullable=False)
+    requested_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    arv = Column(Integer, nullable=False)
+    repairs = Column(Integer, nullable=False, default=0)
+    mao = Column(Integer, nullable=True)          # the formula's answer (never shown to a field login)
+    offer_limit = Column(Integer, nullable=True)  # the most the rep could offer on their own
+    offer = Column(Integer, nullable=False)
+    note = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="within")
+    decided_by_id = Column(String, ForeignKey("users.id"), nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+    decision_note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_ws_offer_org_status", "organization_id", "status"),
+        Index("ix_ws_offer_org_appt", "organization_id", "appointment_id"),
+    )

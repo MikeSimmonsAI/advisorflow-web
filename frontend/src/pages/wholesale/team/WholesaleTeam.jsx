@@ -177,6 +177,36 @@ function MemberRow({ m, data, onSaved }) {
   )
 }
 
+function FieldRules() {
+  const [pct, setPct] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [err, setErr] = useState(null)
+  useEffect(() => { api.get('/wholesale/team/rules').then((r) => setPct(r.offer_limit_pct)).catch(() => setPct(null)) }, [])
+  if (pct === null) return null
+  async function save() {
+    setBusy(true); setErr(null); setMsg(null)
+    try { const r = await api.put('/wholesale/team/rules', { offer_limit_pct: Number(pct) }); setPct(r.offer_limit_pct); setMsg(r.explained) }
+    catch (e) { setErr(e.message || 'That did not save.') } finally { setBusy(false) }
+  }
+  return (
+    <section className="evo-panel">
+      <h2 className="wt-h2">Offer limit for field reps</h2>
+      <p className="evo-muted evo-small" style={{ marginTop: 0 }}>Reps never see your investor % or fee - only the most they may offer.
+        Anything above this comes to you to approve.</p>
+      <div className="wt-grid">
+        <label className="wt-lab" htmlFor="wt-limit">Most a rep can offer without asking
+          <select id="wt-limit" className="wt-select" value={pct} onChange={(e) => setPct(e.target.value)}>
+            {[80, 85, 90, 95, 100, 105].map((p) => <option key={p} value={p}>{p}% of the max offer{p === 100 ? ' (the formula, exactly)' : ''}</option>)}
+          </select></label>
+        <div style={{ alignSelf: 'end' }}><button type="button" className="evo-btn evo-btn--primary" disabled={busy} onClick={save}>Save</button></div>
+      </div>
+      {msg ? <p className="evo-small" role="status">{msg}</p> : null}
+      {err ? <p className="wt-err" role="alert">{err}</p> : null}
+    </section>
+  )
+}
+
 export default function WholesaleTeam() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
@@ -204,6 +234,7 @@ export default function WholesaleTeam() {
               <p className="evo-muted evo-small">Taking someone off the team keeps their login and their work; they just can no longer open Wholesale. Anyone who reported to them moves up a level.</p>
             </section>
             <AddPerson data={data} onSaved={setData} />
+            <FieldRules />
           </div>
           <aside className="evo-panel wt-side">
             <h2 className="wt-h2">Who reports to whom</h2>

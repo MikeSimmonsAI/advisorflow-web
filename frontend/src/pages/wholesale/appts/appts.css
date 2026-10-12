@@ -52,3 +52,11 @@
 @media (max-width: 640px) { .vd-line { grid-template-columns: 1fr; } }
 
 .ap-outcome { display: grid; gap: 8px; border-top: 1px dashed #cbd5e1; padding-top: 10px; }
+
+/* Offer tab (of-) */
+.of-wrap { display: grid; gap: 12px; }
+.of-max { display: grid; gap: 2px; padding: 12px 14px; border-radius: 12px; background: #eff6ff; border: 1px solid #bfdbfe; }
+.of-max strong { font-size: 28px; color: #1e3a8a; }
+.of-over { margin: 0; padding: 8px 10px; border-radius: 8px; background: #fffbeb; border: 1px solid #f59e0b; color: #78350f; font-size: 14px; }
+.of-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.of-list li { border-top: 1px solid #e2e8f0; padding-top: 6px; }

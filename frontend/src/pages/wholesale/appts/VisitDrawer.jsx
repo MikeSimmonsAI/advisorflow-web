@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../../api/client'
 import { Alert, Drawer, Seg } from '../ds/ds'
+import OfferTab from './OfferTab'
 import './appts.css'
 
 const LABELS = {
@@ -172,12 +173,13 @@ export default function VisitDrawer({ open, onClose, appt }) {
               <button type="button" className="evo-btn evo-btn--primary" disabled={busy || !data} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
             </>}>
       <Seg label="Visit notes" value={tab} onChange={setTab}
-           items={[{ key: 'interview', label: 'Seller interview' }, { key: 'repairs', label: 'Repairs' }, { key: 'photos', label: 'Photos', count: photos.length }]} />
+           items={[{ key: 'interview', label: 'Interview' }, { key: 'repairs', label: 'Repairs' }, { key: 'photos', label: 'Photos', count: photos.length }, { key: 'offer', label: 'Offer' }]} />
       <div style={{ marginTop: 14 }}>
         {!data ? (err ? null : <p className="evo-muted">Loading…</p>)
           : tab === 'interview' ? <Interview v={interview} set={setInterview} />
             : tab === 'repairs' ? <Repairs r={repairs} set={setRepairs} items={data.questions.repair_items} />
-              : <Photos apptId={appt.id} photos={photos} setPhotos={setPhotos} rooms={data.questions.rooms} />}
+              : tab === 'offer' ? <OfferTab apptId={appt.id} repairsTotal={repairs.total} />
+                : <Photos apptId={appt.id} photos={photos} setPhotos={setPhotos} rooms={data.questions.rooms} />}
       </div>
       {tab === 'photos' ? <p className="evo-muted evo-small">Photos save as soon as they upload.</p> : null}
       <Alert kind="ok">{msg}</Alert>

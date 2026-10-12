@@ -9,6 +9,7 @@ import { Alert, Empty, EvoApp, PageHead, Seg, Skeleton, Tag } from '../ds/ds'
 import '../ds/evo-pages.css'
 import BookAppointment from './BookAppointment'
 import VisitDrawer from './VisitDrawer'
+import PendingOffers from './PendingOffers'
 import { centralToIso, dayLabel, isoToCentral, todayCentral } from './apptTime'
 import './appts.css'
 
@@ -164,6 +165,7 @@ export default function WholesaleAppointments() {
       </div>
       <Alert kind="ok">{notice}</Alert>
       <Alert>{err}</Alert>
+      {data && !isField ? <PendingOffers /> : null}
       {!data && !err ? <Skeleton rows={4} height={60} /> : null}
       {data && !items.length ? (
         <Empty title={when === 'today' ? (isToday ? 'Nothing booked today' : `Nothing booked ${dayLabel(day)}`) : 'Nothing here'}>

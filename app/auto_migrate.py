@@ -1569,6 +1569,7 @@ ENUM_VALUES_TO_ADD = [
     ("notificationtype", "REPLY_RECEIVED"),
     ("notificationtype", "WHOLESALE_INQUIRY"),
     ("notificationtype", "DEMO_REQUEST"),
+    ("notificationtype", "WHOLESALE_OFFER"),
 ]
 
 

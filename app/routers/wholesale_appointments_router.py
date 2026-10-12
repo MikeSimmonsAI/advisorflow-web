@@ -9,13 +9,18 @@
     POST   /wholesale/appointments/{id}/photos  one walkthrough photo (multipart: file, room, caption)
     GET    /wholesale/appointments/{id}/photos/{photo_id}
     DELETE /wholesale/appointments/{id}/photos/{photo_id}
+    POST   /wholesale/appointments/{id}/offer-quote   the most this person may offer (#14)
+    GET    /wholesale/appointments/{id}/offers        offers made on this visit
+    POST   /wholesale/appointments/{id}/offers        record an offer; above the limit it waits (#20)
+    GET    /wholesale/appointments/offers/pending     admins: offers waiting for an answer
+    POST   /wholesale/appointments/offers/{offer_id}/decide   admins: approve or decline
 
 Visibility and who-may-change rules: app/services/wholesale_appointments.py.
 Nothing here sends a message or calls anyone.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from pydantic import BaseModel
@@ -24,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, require_not_observation, require_tenant_user
 from app.models.models import User
 from app.services import wholesale_appointments as A
+from app.services import wholesale_field_offers as O
 from app.services import wholesale_field_visits as V
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
@@ -120,3 +126,46 @@ def delete_photo(appt_id: str, photo_id: str, db: Session = Depends(get_db),
                  user: User = Depends(require_tenant_user)):
     V.remove_photo(db, svc.write_org_id(db, user), user, appt_id, photo_id)
     return {"ok": True}
+
+
+class QuoteIn(BaseModel):
+    arv: Optional[Union[str, float]] = None
+    repairs: Optional[Union[str, float]] = None
+
+
+class OfferIn(QuoteIn):
+    offer: Optional[Union[str, float]] = None
+    note: Optional[str] = None
+
+
+class DecideIn(BaseModel):
+    approve: bool
+    note: Optional[str] = None
+
+
+@router.get("/offers/pending")
+def offers_pending(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    return {"items": O.pending(db, svc.read_org_id(db, user), user)}
+
+
+@router.post("/offers/{offer_id}/decide", dependencies=[Depends(require_not_observation)])
+def offers_decide(offer_id: str, body: DecideIn, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_user)):
+    return O.decide(db, svc.write_org_id(db, user), user, offer_id, body.approve, body.note)
+
+
+@router.post("/{appt_id}/offer-quote")
+def offer_quote(appt_id: str, body: QuoteIn, db: Session = Depends(get_db),
+                user: User = Depends(require_tenant_user)):
+    return O.quote(db, svc.read_org_id(db, user), user, appt_id, body.arv, body.repairs)
+
+
+@router.get("/{appt_id}/offers")
+def offers_list(appt_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    return {"items": O.for_appointment(db, svc.read_org_id(db, user), user, appt_id)}
+
+
+@router.post("/{appt_id}/offers", dependencies=[Depends(require_not_observation)])
+def offers_submit(appt_id: str, body: OfferIn, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_user)):
+    return O.submit(db, svc.write_org_id(db, user), user, appt_id, body.arv, body.repairs, body.offer, body.note)
