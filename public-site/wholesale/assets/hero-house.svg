@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 770 640" role="img" aria-labelledby="title desc">
+<title id="title">Modern home illustration</title><desc id="desc">Architectural illustration of a modern two-story home surrounded by landscaping.</desc>
+<defs>
+<linearGradient id="sky" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#dcece9"/><stop offset="1" stop-color="#eae5d4"/></linearGradient>
+<linearGradient id="a" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#f9f8f2"/><stop offset="1" stop-color="#c8cdc4"/></linearGradient>
+<linearGradient id="side" x1="0" x2="1"><stop stop-color="#223d46"/><stop offset="1" stop-color="#405d62"/></linearGradient>
+<linearGradient id="window" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#89afaf"/><stop offset=".55" stop-color="#284954"/><stop offset="1" stop-color="#102c38"/></linearGradient>
+<linearGradient id="lawn" x1="0" x2="1"><stop stop-color="#789f86"/><stop offset="1" stop-color="#abc4a4"/></linearGradient>
+<filter id="blur"><feGaussianBlur stdDeviation="13"/></filter>
+</defs>
+<rect width="770" height="640" fill="url(#sky)"/>
+<circle cx="600" cy="99" r="72" fill="#fff8dd" opacity=".88"/>
+<path d="M0 405Q160 340 340 393T770 374V640H0Z" fill="#acc5b0" opacity=".5"/>
+<path d="M0 470Q230 405 420 458T770 440V640H0Z" fill="url(#lawn)"/>
+<path d="M156 546L480 475 769 543V640H0Z" fill="#d6d7c9"/>
+<path d="M213 543L475 486 682 536 391 612Z" fill="#b6b6a8" opacity=".45" filter="url(#blur)"/>
+<!-- house left volume -->
+<path d="M171 282L390 220 390 506 171 546Z" fill="url(#a)"/>
+<path d="M171 282L390 220 390 250 171 311Z" fill="#f9fbf7"/>
+<path d="M151 285L392 216 405 227 165 297Z" fill="#24414a"/>
+<!-- stone feature -->
+<path d="M292 259L352 243V518L292 527Z" fill="#c0c0b5"/>
+<g stroke="#a4a49b" stroke-width="1.7" opacity=".8"><path d="M292 284 352 270M292 322 352 309M292 359 352 345M292 395 352 382M292 431 352 417M292 467 352 453M292 502 352 489"/></g>
+<!-- right volume -->
+<path d="M390 221L651 276V526L390 506Z" fill="#e8e9e2"/>
+<path d="M390 221L651 276 666 289 390 239Z" fill="#2d4c51"/>
+<path d="M390 246L656 299 656 315 390 264Z" fill="#fefef8"/>
+<!-- giant second story glass -->
+<path d="M414 294L628 337V430L414 397Z" fill="url(#window)"/>
+<path d="M480 309L485 410M551 322L555 421M414 346L628 378" stroke="#b7d6ce" stroke-width="5"/>
+<path d="M421 300 470 310 432 394 415 392Z" fill="#ecf7f4" opacity=".23"/>
+<!-- left windows -->
+<path d="M194 322L272 302V415L194 434Z" fill="url(#window)"/>
+<path d="M232 312V425M194 367L272 347" stroke="#c5dcd6" stroke-width="5"/>
+<path d="M204 331L224 326 195 418 195 394Z" fill="#d6eff1" opacity=".24"/>
+<!-- main level -->
+<path d="M414 437L628 470V521L414 502Z" fill="#d2d8cd"/>
+<path d="M421 441L485 453V510L421 503Z" fill="url(#window)"/>
+<path d="M498 455L626 479V522L498 513Z" fill="url(#window)"/>
+<path d="M544 465V517M585 473V520" stroke="#a7cbc9" stroke-width="4"/>
+<path d="M176 445L287 421V518L176 539Z" fill="#dce1d7"/>
+<path d="M200 442L272 426V524L200 538Z" fill="#3d5554"/>
+<path d="M259 477 264 476" stroke="#eac68a" stroke-width="5" stroke-linecap="round"/>
+<!-- patio -->
+<path d="M385 512L662 535 708 562 393 544Z" fill="#e7e4d6"/>
+<path d="M391 543L708 561V575L392 559Z" fill="#bab5a6"/>
+<!-- trees -->
+<g><path d="M99 526V380" stroke="#63594b" stroke-width="16" stroke-linecap="round"/><path d="M96 399L60 359M101 429L142 383" stroke="#63594b" stroke-width="8"/><ellipse cx="72" cy="343" rx="53" ry="66" fill="#4e7b65"/><ellipse cx="120" cy="359" rx="59" ry="74" fill="#668e70"/><ellipse cx="83" cy="308" rx="48" ry="58" fill="#7a9f80"/></g>
+<g opacity=".94"><path d="M714 519V400" stroke="#78634e" stroke-width="12"/><ellipse cx="702" cy="381" rx="39" ry="57" fill="#4f7964"/><ellipse cx="737" cy="389" rx="35" ry="52" fill="#779b79"/></g>
+<!-- plants -->
+<path d="M175 549Q159 512 149 505M176 550Q180 519 192 505M179 550Q198 516 210 518" stroke="#4c7766" stroke-width="8" fill="none" stroke-linecap="round"/>
+<path d="M655 561Q635 526 628 517M657 559Q666 528 686 516" stroke="#4c7766" stroke-width="8" fill="none" stroke-linecap="round"/>
+<path d="M0 574Q105 558 164 578T373 589 770 570V640H0Z" fill="#729b7d" opacity=".65"/>
+</svg>
