@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "live.evosyspro.field",
+      "sha256_cert_fingerprints": [
+        "83:CC:23:AB:7A:DD:8D:F5:73:DE:07:D7:04:4C:99:D3:3B:1D:32:C1:BF:31:5D:F9:1E:EE:7F:39:F7:34:8E:D0"
+      ]
+    }
+  }
+]

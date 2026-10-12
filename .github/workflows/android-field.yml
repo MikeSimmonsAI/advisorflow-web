@@ -1,0 +1,62 @@
+# Builds the EvoSys Field Android app (android/, build list #29) on GitHub's
+# servers: a signed .apk (installed straight onto a rep's phone) and a signed
+# .aab (for Google Play). Runs when android/ changes on main, or by hand from
+# the Actions tab. The signing key comes from the repo's Actions secrets and is
+# never written into the repo. Fork pull requests never see the secrets.
+name: Android field app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-field.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          test -n "$KEYSTORE_B64" || { echo "ANDROID_KEYSTORE_B64 secret is missing"; exit 1; }
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.p12"
+
+      - name: Build the app
+        working-directory: android
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/upload.p12
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: gradle --no-daemon assembleRelease bundleRelease
+
+      - name: Name the files
+        run: |
+          mkdir out
+          cp android/app/build/outputs/apk/release/app-release.apk out/evosys-field.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab out/evosys-field.aab
+          sha256sum out/* > out/SHA256SUMS.txt
+          cat out/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evosys-field-${{ github.run_number }}
+          path: out/
+          retention-days: 30
