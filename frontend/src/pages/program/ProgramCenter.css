@@ -590,3 +590,13 @@ button.sci-tile[aria-expanded="true"] { border-color: var(--gold); box-shadow: 0
 .sci-listsep { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; font-weight: 800; color: var(--muted); padding: 12px 10px 4px; border-top: 1px solid #edf1f4; margin-top: 6px; }
 .sci-missing { color: var(--warn); font-style: italic; }
 @media (max-width: 1700px) { .sci-camp-ico { display: none; } }
+
+/* assets */
+.sci-asset-open { background: none; border: 0; padding: 0; display: block; width: 100%; border-radius: 8px; }
+.sci-asset-open:hover .sci-asset-cover { border-color: var(--gold); }
+.sci-asset-title { display: block; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* health */
+.sci-kvbtn { width: 100%; background: none; border: 0; border-top: 1px solid #edf1f4; color: inherit; text-align: left; border-radius: 0; }
+.sci-rows > .sci-kvbtn:first-child { border-top: 0; }
+.sci-kvbtn:hover { background: #f7fafc; }

@@ -11,3 +11,4 @@ Rules: no pushes to main/sci-program, no deploys, no sends/approvals/activations
 | 14:21 | Shared design system (ui.jsx, ProgramCenter.css), shell (collapsible nav, dark top bar, identity fix), Dashboard rebuilt. Local synthetic backend + Vite running for screenshots. |
 | 14:27 | Choose & Send (stepper, per-contact preview, typed SEND N), Responses (KPIs, searchable 3-pane), Review (queue + inspector, mark-reviewed vs hold) rebuilt and screenshotted. |
 | 14:30 | Locations (directory + profile tabs, review bucket apart) and Campaigns (catalog/preview/controls, typed-name activation dialog) rebuilt. |
+| 14:35 | Assets (library + upload panel + version drawer, empty state truthful), Launch (A–G gates, Go/No-Go, synthetic test), Health (8 modules, texting facts, Not tracked when events off, diagnostics drawer). |

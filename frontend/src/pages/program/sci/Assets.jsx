@@ -1,33 +1,66 @@
 /* Assets & Flyers: the real library only (GET /program/assets). Thumbnails are
    the actual files (GET /program/assets/{id}/preview). Each upload is a new
-   version; only the active version is used by campaigns. No sample covers are
-   shown as if they were uploaded files. */
-import { useEffect, useMemo, useState } from 'react'
+   version; only the active version is used by campaigns. No sample covers or
+   placeholder flyers are ever shown as if they were uploaded files - an empty
+   library says so. Uploading and activating are manager-only on the server. */
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, fetchObjectUrl } from '../../../api/client'
-import { Chip, Empty, ErrorLine, Field, Icon, Loading, PageHead, errText } from './ui'
+import {
+  Chip, Drawer, Empty, ErrorLine, Field, FilterChips, Icon, Kpi, Loading, Notice, PageHead, Panel, SearchBox,
+  errText, num, when,
+} from './ui'
 
 const KIND_LABEL = { flyer: 'Flyer', logo: 'Logo', facility_image: 'Facility image' }
+const ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.svg'
+const MAX_MB = 20
+const groupKey = a => [a.kind, a.category || '', a.location_id || '', (a.title || '').trim().toLowerCase()].join('|')
 
 export default function Assets({ isManager, locations }) {
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
-  const [showUpload, setShowUpload] = useState(false)
-  const [filter, setFilter] = useState({ kind: '', category: '', location: '', activeOnly: false })
-  const [form, setForm] = useState({ kind: 'flyer', title: '', category: 'veteran_planning_guide', location_id: '', activate: false })
+  const [kind, setKind] = useState('')
+  const [q, setQ] = useState('')
+  const [filter, setFilter] = useState({ category: '', location: '', activeOnly: false })
+  const [form, setForm] = useState({ kind: 'flyer', title: '', category: '', location_id: '', activate: false })
   const [file, setFile] = useState(null)
-  const load = () => api.get('/program/assets').then(setData).catch(e => setErr(errText(e)))
+  const [over, setOver] = useState(false)
+  const [open, setOpen] = useState(null)
+  const fileRef = useRef(null)
+  const load = () => api.get('/program/assets').then(d => {
+    setData(d)
+    setForm(f => (f.category ? f : { ...f, category: Object.keys(d.categories || {})[0] || '' }))
+  }).catch(e => setErr(errText(e)))
   useEffect(() => { load() }, [])
 
   const cats = data?.categories || {}
   const homes = locations.filter(l => !l.is_review_bucket)
   const locName = useMemo(() => Object.fromEntries(locations.map(l => [l.location_id, l.name])), [locations])
-  const items = (data?.items || []).filter(a =>
-    (!filter.kind || a.kind === filter.kind) && (!filter.category || a.category === filter.category)
+  const all = data?.items || []
+  const groups = useMemo(() => {
+    const g = {}
+    all.forEach(a => { (g[groupKey(a)] = g[groupKey(a)] || []).push(a) })
+    Object.values(g).forEach(v => v.sort((x, y) => y.version - x.version))
+    return g
+  }, [all])
+  const term = q.trim().toLowerCase()
+  const items = all.filter(a =>
+    (!kind || a.kind === kind) && (!filter.category || a.category === filter.category)
     && (!filter.location || (filter.location === 'shared' ? !a.location_id : a.location_id === filter.location))
-    && (!filter.activeOnly || a.is_active))
+    && (!filter.activeOnly || a.is_active)
+    && (!term || `${a.title} ${a.filename || ''} ${cats[a.category] || ''}`.toLowerCase().includes(term)))
+  const activeCount = all.filter(a => a.is_active).length
+  const locSpecific = new Set(all.filter(a => a.location_id).map(a => a.location_id)).size
 
+  const pickFile = f => {
+    setErr('')
+    if (!f) { setFile(null); return }
+    if (f.size > MAX_MB * 1024 * 1024) { setErr(`That file is larger than ${MAX_MB} MB.`); return }
+    if (!/\.(pdf|png|jpe?g|webp|svg)$/i.test(f.name)) { setErr('PDF, PNG, JPEG, WebP or SVG only.'); return }
+    setFile(f)
+    setForm(fm => (fm.title ? fm : { ...fm, title: f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') }))
+  }
   const upload = async e => {
     e.preventDefault(); setErr(''); setMsg('')
     if (!file || !form.title.trim()) { setErr('Choose a file and give it a title.'); return }
@@ -39,113 +72,160 @@ export default function Assets({ isManager, locations }) {
     setBusy(true)
     try {
       const a = await api.upload('/program/assets', fd)
-      setMsg(`Uploaded ${a.title} (version ${a.version}).`); setFile(null); setForm(f => ({ ...f, title: '' })); setShowUpload(false); load()
+      setMsg(`Uploaded ${a.title} (version ${a.version})${a.is_active ? ' — active' : ' — not active yet'}.`)
+      setFile(null); setForm(f => ({ ...f, title: '', activate: false })); if (fileRef.current) fileRef.current.value = ''
+      load()
     } catch (er) { setErr(errText(er)) } finally { setBusy(false) }
   }
   const toggle = async a => {
-    try { await api.post(`/program/assets/${a.id}/active`, { active: !a.is_active }); load() } catch (e) { setErr(errText(e)) }
+    try { await api.post(`/program/assets/${a.id}/active`, { active: !a.is_active }); setMsg(`${a.title} v${a.version} ${a.is_active ? 'deactivated' : 'activated'}.`); load() } catch (e) { setErr(errText(e)) }
   }
-  const open = async a => {
+  const view = async a => {
     try { const url = await fetchObjectUrl(`/program/assets/${a.id}/preview`); window.open(url, '_blank', 'noopener') } catch (e) { setErr(errText(e)) }
   }
 
   return (
     <>
-      <PageHead title="Assets & flyers" sub="Approved marketing materials, versions and location-specific content.">
-        {isManager && <button type="button" className="sci-btn primary" aria-expanded={showUpload} onClick={() => setShowUpload(v => !v)}><Icon name="upload" />{showUpload ? 'Close upload' : 'Upload a file'}</button>}
+      <PageHead title="Assets & Flyers" sub="A clean, version-controlled library of approved location marketing materials.">
+        <Chip tone="info">Library · real files only</Chip>
+        {isManager && <button type="button" className="sci-btn gold" onClick={() => fileRef.current?.click()}><Icon name="upload" />Upload asset</button>}
       </PageHead>
+
+      <section className="sci-kpis four" aria-label="Asset numbers">
+        <Kpi icon="assets" tone="blue" value={data ? all.length : null} label="Total uploaded files" note="All versions" onClick={() => { setKind(''); setFilter(f => ({ ...f, activeOnly: false })) }} />
+        <Kpi icon="check" tone="green" value={data ? activeCount : null} label="Active versions" note="Used by campaigns" onClick={() => setFilter(f => ({ ...f, activeOnly: true }))} />
+        <Kpi icon="pin" tone="purple" value={data ? locSpecific : null} label="Locations with their own files" note={`of ${homes.length} facilities`} />
+        <Kpi icon="doc" tone="gold" value={3} label="Asset types" note="Flyers, logos, facility images" />
+      </section>
+
       <ErrorLine text={err} />
-      {msg && <div className="sci-okmsg" role="status">{msg}</div>}
+      <Notice text={msg} onClose={() => setMsg('')} />
 
-      {isManager && showUpload && (
-        <section className="sci-panel sci-pad" style={{ marginBottom: 16 }} aria-labelledby="sci-upload">
-          <h2 id="sci-upload" className="sci-h2" style={{ marginBottom: 14 }}>Upload a file</h2>
-          <form className="sci-form" onSubmit={upload}>
-            <Field label="Type">
-              <select value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value }))}>
-                <option value="flyer">Flyer (PDF or image)</option><option value="logo">Logo</option><option value="facility_image">Facility image</option>
-              </select>
-            </Field>
-            <Field label="Title"><input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Veteran Planning Guide" /></Field>
-            {form.kind === 'flyer' && (
-              <Field label="Flyer category">
-                <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
-                  {Object.entries(cats).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
-              </Field>
-            )}
-            <Field label="Location" hint="A location's own flyer is used first, then the shared one">
-              <select value={form.location_id} onChange={e => setForm(f => ({ ...f, location_id: e.target.value }))}>
-                <option value="">Every location (shared)</option>
-                {homes.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
-              </select>
-            </Field>
-            <Field label="File" hint="PDF, PNG, JPEG, WebP or SVG · up to 20 MB">
-              <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.svg" onChange={e => setFile(e.target.files?.[0] || null)} />
-            </Field>
-            <label className="sci-check" style={{ alignSelf: 'end', paddingBottom: 10 }}>
-              <input type="checkbox" checked={form.activate} onChange={e => setForm(f => ({ ...f, activate: e.target.checked }))} /> Make this the active version
-            </label>
-            <div className="full sci-savebar" style={{ marginTop: 0 }}>
-              <button className="sci-btn primary" type="submit" disabled={busy}>{busy ? 'Uploading…' : 'Upload'}</button>
-            </div>
-          </form>
-        </section>
-      )}
-
-      <section className="sci-panel sci-pad" aria-labelledby="sci-library">
-        <div className="sci-panel-head">
-          <h2 id="sci-library">Library</h2>
-          <div className="sci-row-gap">
-            <label className="sci-sr" htmlFor="sci-a-kind">Type</label>
-            <select id="sci-a-kind" className="sci-input" style={{ width: 'auto', minHeight: 36, fontSize: 13 }} value={filter.kind} onChange={e => setFilter(f => ({ ...f, kind: e.target.value }))}>
-              <option value="">All types</option>{Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-            <label className="sci-sr" htmlFor="sci-a-cat">Category</label>
-            <select id="sci-a-cat" className="sci-input" style={{ width: 'auto', minHeight: 36, fontSize: 13 }} value={filter.category} onChange={e => setFilter(f => ({ ...f, category: e.target.value }))}>
-              <option value="">All categories</option>{Object.entries(cats).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+      <div className={isManager ? 'sci-grid-send' : ''}>
+        <Panel title="Asset library" labelledBy="sci-library" aside={<span className="sci-micro sci-muted">{data ? `${num(items.length)} shown` : ''}</span>}>
+          <div className="sci-toolbar">
+            <div className="sci-grow"><SearchBox id="sci-a-q" value={q} onChange={setQ} placeholder="Search assets by name" label="Search assets" width="100%" /></div>
+            <label className="sci-sr" htmlFor="sci-a-cat">Campaign category</label>
+            <select id="sci-a-cat" className="sci-input sm" value={filter.category} onChange={e => setFilter(f => ({ ...f, category: e.target.value }))}>
+              <option value="">All campaigns</option>{Object.entries(cats).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
             <label className="sci-sr" htmlFor="sci-a-loc">Location</label>
-            <select id="sci-a-loc" className="sci-input" style={{ width: 'auto', minHeight: 36, fontSize: 13, maxWidth: 220 }} value={filter.location} onChange={e => setFilter(f => ({ ...f, location: e.target.value }))}>
+            <select id="sci-a-loc" className="sci-input sm" style={{ maxWidth: 200 }} value={filter.location} onChange={e => setFilter(f => ({ ...f, location: e.target.value }))}>
               <option value="">All locations</option><option value="shared">Shared (every location)</option>
               {homes.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
             </select>
+          </div>
+          <div className="sci-row-gap" style={{ marginBottom: 12, justifyContent: 'space-between' }}>
+            <FilterChips items={[['', 'All assets'], ['flyer', 'Flyers'], ['logo', 'Logos'], ['facility_image', 'Facility images']]} value={kind} onChange={setKind} label="Asset type" />
             <label className="sci-check"><input type="checkbox" checked={filter.activeOnly} onChange={e => setFilter(f => ({ ...f, activeOnly: e.target.checked }))} /> Active only</label>
           </div>
-        </div>
-        {!data ? <Loading /> : (data.items || []).length === 0 ? (
-          <Empty title="No files uploaded yet.">
-            Approved flyers, logos and facility images will appear here as real files with their versions.
-            {isManager ? ' Use “Upload a file” to add the first one.' : ''}
-          </Empty>
-        ) : items.length === 0 ? <Empty>No file matches these filters.</Empty> : (
-          <div className="sci-gallery">
-            {items.map(a => (
-              <article key={a.id} className="sci-asset" aria-label={`${a.title} version ${a.version}`}>
-                <Thumb a={a} />
-                <div>
-                  <b style={{ fontSize: 15 }}>{a.title}</b>
-                  <div className="sci-micro sci-muted">{KIND_LABEL[a.kind] || a.kind}{a.category ? ` · ${cats[a.category] || a.category}` : ''}</div>
-                  <div className="sci-micro sci-muted">{a.location_id ? locName[a.location_id] : 'Every location'} · v{a.version} · {Math.round((a.size_bytes || 0) / 1024)} KB</div>
+          {!data ? <Loading /> : all.length === 0 ? (
+            <Empty icon="image" title="Your approved asset library"
+              action={isManager ? <button type="button" className="sci-btn gold" onClick={() => fileRef.current?.click()}><Icon name="upload" />Upload your first asset</button> : null}>
+              No files are uploaded yet. Approved flyers, logos and facility images will appear here as the real files, with version history and location assignment.
+            </Empty>
+          ) : items.length === 0 ? <Empty icon="filter">No file matches these filters.</Empty> : (
+            <div className="sci-gallery">
+              {items.map(a => {
+                const versions = groups[groupKey(a)] || [a]
+                return (
+                  <article key={a.id} className="sci-asset" aria-label={`${a.title} version ${a.version}`}>
+                    <button type="button" className="sci-asset-open" onClick={() => setOpen(a)} aria-label={`Details for ${a.title}`}><Thumb a={a} /></button>
+                    <div style={{ minWidth: 0 }}>
+                      <b className="sci-asset-title" title={a.title}>{a.title}</b>
+                      <div className="sci-micro sci-muted">{KIND_LABEL[a.kind] || a.kind}{a.category ? ` · ${cats[a.category] || a.category}` : ''}</div>
+                      <div className="sci-micro sci-muted">{a.location_id ? locName[a.location_id] || 'Location' : 'Every location'} · v{a.version}{versions.length > 1 ? ` of ${versions.length}` : ''}</div>
+                    </div>
+                    <div className="sci-row-gap" style={{ justifyContent: 'space-between' }}>
+                      <Chip tone={a.is_active ? 'ok' : ''} plain>{a.is_active ? 'Active' : 'Inactive'}</Chip>
+                      <button type="button" className="sci-btn sm" onClick={() => setOpen(a)}>Details</button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          )}
+          <p className="sci-footnote"><Icon name="info" />Counts come from the uploaded library. Nothing here is example artwork.</p>
+        </Panel>
+
+        {isManager && (
+          <Panel title="Upload new asset" labelledBy="sci-upload" className="sci-sticky">
+            <form className="sci-form one" onSubmit={upload}>
+              <div className={`sci-drop${over ? ' over' : ''}`} role="button" tabIndex={0}
+                onClick={() => fileRef.current?.click()} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click() } }}
+                onDragOver={e => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)}
+                onDrop={e => { e.preventDefault(); setOver(false); pickFile(e.dataTransfer.files?.[0]) }}>
+                <Icon name="upload" />
+                <b style={{ color: 'var(--ink)' }}>{file ? file.name : 'Drop a file here'}</b>
+                <span>{file ? `${Math.round(file.size / 1024)} KB · click to change` : `or browse — PDF, PNG, JPEG, WebP or SVG up to ${MAX_MB} MB`}</span>
+              </div>
+              <input ref={fileRef} type="file" accept={ACCEPT} className="sci-sr" aria-label="Choose a file" onChange={e => pickFile(e.target.files?.[0] || null)} />
+              <Field label="Asset type">
+                <select value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value }))}>
+                  <option value="flyer">Flyer (PDF or image)</option><option value="logo">Logo</option><option value="facility_image">Facility image</option>
+                </select>
+              </Field>
+              <Field label="Asset title"><input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Veteran Planning Guide" /></Field>
+              {form.kind === 'flyer' && (
+                <Field label="Campaign category">
+                  <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+                    {Object.entries(cats).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </Field>
+              )}
+              <Field label="Assign location" hint="A location's own file is used first, then the shared one">
+                <select value={form.location_id} onChange={e => setForm(f => ({ ...f, location_id: e.target.value }))}>
+                  <option value="">Shared to all locations</option>
+                  {homes.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
+                </select>
+              </Field>
+              <label className="sci-check"><input type="checkbox" checked={form.activate} onChange={e => setForm(f => ({ ...f, activate: e.target.checked }))} /> Make this the active version</label>
+              <div className="sci-banner" style={{ margin: 0 }}>
+                <span className="sci-banner-icon" aria-hidden="true"><Icon name="info" /></span>
+                <div className="sci-banner-body sci-micro">Uploading creates a new version. Activation is a separate choice — campaigns keep using the current active version until you switch.</div>
+              </div>
+              <button className="sci-btn gold" type="submit" disabled={busy || !file}><Icon name="upload" />{busy ? 'Uploading…' : 'Upload version'}</button>
+            </form>
+          </Panel>
+        )}
+      </div>
+
+      <Drawer open={!!open} onClose={() => setOpen(null)} title={open?.title || ''} sub={open ? `${KIND_LABEL[open.kind] || open.kind} · version ${open.version}` : ''}
+        footer={open && (
+          <>
+            <button type="button" className="sci-btn" onClick={() => view(open)}><Icon name="external" />Open file</button>
+            {isManager && <button type="button" className={`sci-btn ${open.is_active ? 'danger' : 'gold'}`} onClick={() => { toggle(open); setOpen(null) }}>{open.is_active ? 'Deactivate' : 'Make active'}</button>}
+          </>
+        )}>
+        {open && (
+          <div className="sci-stack" style={{ gap: 12 }}>
+            <Thumb a={open} big />
+            <dl className="sci-kvlist">
+              <div><dt>Status</dt><dd>{open.is_active ? 'Active' : 'Inactive'}</dd></div>
+              <div><dt>Location</dt><dd>{open.location_id ? locName[open.location_id] || 'Location' : 'Every location (shared)'}</dd></div>
+              <div><dt>Category</dt><dd className={open.category ? '' : 'missing'}>{open.category ? cats[open.category] || open.category : 'Not provided'}</dd></div>
+              <div><dt>File</dt><dd>{open.filename || '—'} · {Math.round((open.size_bytes || 0) / 1024)} KB</dd></div>
+              <div><dt>Uploaded</dt><dd>{when(open.created_at)}</dd></div>
+              <div><dt>Type</dt><dd>{open.content_type || '—'}</dd></div>
+            </dl>
+            <h3 className="sci-h3">Version history</h3>
+            <div className="sci-rows">
+              {(groups[groupKey(open)] || [open]).map(v => (
+                <div className="sci-kv" key={v.id}>
+                  <span>v{v.version} · {when(v.created_at)}</span>
+                  <span><Chip tone={v.is_active ? 'ok' : ''} plain>{v.is_active ? 'Active' : 'Inactive'}</Chip></span>
                 </div>
-                <div className="sci-row-gap" style={{ justifyContent: 'space-between' }}>
-                  <Chip tone={a.is_active ? 'ok' : ''}>{a.is_active ? 'Active' : 'Inactive'}</Chip>
-                  <span className="sci-row-gap">
-                    <button type="button" className="sci-btn sm" onClick={() => open(a)}>Open</button>
-                    {isManager && <button type="button" className="sci-btn sm" onClick={() => toggle(a)}>{a.is_active ? 'Deactivate' : 'Activate'}</button>}
-                  </span>
-                </div>
-              </article>
-            ))}
+              ))}
+            </div>
           </div>
         )}
-      </section>
+      </Drawer>
     </>
   )
 }
 
 /** The real file as a thumbnail; PDFs and failed loads show a document icon. */
-function Thumb({ a }) {
+function Thumb({ a, big = false }) {
   const [url, setUrl] = useState(null)
   const isImage = /^image\//.test(a.content_type || '') || /\.(png|jpe?g|webp|svg)$/i.test(a.filename || '')
   useEffect(() => {
@@ -156,7 +236,7 @@ function Thumb({ a }) {
     return () => { alive = false; if (made) URL.revokeObjectURL?.(made) }
   }, [a.id, isImage])
   return (
-    <div className="sci-asset-cover">
+    <div className="sci-asset-cover" style={big ? { aspectRatio: '4 / 3' } : undefined}>
       {url ? <img src={url} alt={a.title} loading="lazy" /> : <span style={{ display: 'grid', placeItems: 'center', gap: 6 }}><Icon name="doc" />{isImage ? 'Loading…' : (a.filename || 'Document')}</span>}
     </div>
   )
