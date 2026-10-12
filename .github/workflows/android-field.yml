@@ -14,7 +14,7 @@ on:
       - '.github/workflows/android-field.yml'
 
 permissions:
-  contents: read
+  contents: write      # to publish the download (a release with the .apk)
 
 jobs:
   build:
@@ -54,6 +54,16 @@ jobs:
           cp android/app/build/outputs/bundle/release/app-release.aab out/evosys-field.aab
           sha256sum out/* > out/SHA256SUMS.txt
           cat out/SHA256SUMS.txt
+
+      # The download reps use (app.evosyspro.live/field-app.html links here).
+      # Only the .apk is published; the .aab stays a build file for Google Play.
+      - name: Publish the download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "field-v1.0.${{ github.run_number }}" out/evosys-field.apk \
+            --title "EvoSys Field 1.0.${{ github.run_number }}" --latest \
+            --notes "EvoSys Field for Android. Install: https://app.evosyspro.live/field-app.html"
 
       - uses: actions/upload-artifact@v4
         with:
