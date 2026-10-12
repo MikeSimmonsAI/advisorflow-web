@@ -15,6 +15,7 @@
     GET    /wholesale/appointments/offers/pending     admins: offers waiting for an answer
     POST   /wholesale/appointments/offers/{offer_id}/decide   admins: approve or decline
     POST   /wholesale/appointments/{id}/agreement  prepare (action=preview) or send the purchase agreement (#15)
+    GET    /wholesale/appointments/board?weeks=4      the team board: set, run, signed by rep and week (#19)
 
 Visibility and who-may-change rules: app/services/wholesale_appointments.py.
 Nothing here sends a message or calls anyone.
@@ -72,6 +73,13 @@ def list_appointments(when: str = Query("today"), day: Optional[str] = None, rep
                       db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     return A.listing(db, svc.read_org_id(db, user), user, when=when, day=day, rep_id=rep,
                      property_id=property, include_test=include_test)
+
+
+@router.get("/board")
+def team_board(weeks: int = 4, include_test: bool = False, db: Session = Depends(get_db),
+               user: User = Depends(require_tenant_user)):
+    from app.services import wholesale_team_board as TB
+    return TB.board(db, svc.read_org_id(db, user), user, weeks=weeks, include_test=include_test)
 
 
 @router.get("/reps")
