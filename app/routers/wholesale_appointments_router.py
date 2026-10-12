@@ -14,6 +14,7 @@
     POST   /wholesale/appointments/{id}/offers        record an offer; above the limit it waits (#20)
     GET    /wholesale/appointments/offers/pending     admins: offers waiting for an answer
     POST   /wholesale/appointments/offers/{offer_id}/decide   admins: approve or decline
+    POST   /wholesale/appointments/{id}/agreement  prepare (action=preview) or send the purchase agreement (#15)
 
 Visibility and who-may-change rules: app/services/wholesale_appointments.py.
 Nothing here sends a message or calls anyone.
@@ -22,7 +23,7 @@ from __future__ import annotations
 
 from typing import Optional, Union
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -169,3 +170,21 @@ def offers_list(appt_id: str, db: Session = Depends(get_db), user: User = Depend
 def offers_submit(appt_id: str, body: OfferIn, db: Session = Depends(get_db),
                   user: User = Depends(require_tenant_user)):
     return O.submit(db, svc.write_org_id(db, user), user, appt_id, body.arv, body.repairs, body.offer, body.note)
+
+
+class AgreementIn(BaseModel):
+    action: str = "preview"                  # preview | send
+    seller_name: Optional[str] = None
+    seller_email: Optional[str] = None
+    earnest_money: Optional[Union[str, float]] = None
+    option_days: Optional[Union[str, int]] = None
+    title_company: Optional[str] = None
+    closing_date: Optional[str] = None
+    message: Optional[str] = None
+
+
+@router.post("/{appt_id}/agreement", dependencies=[Depends(require_not_observation)])
+def agreement(appt_id: str, body: AgreementIn, request: Request, db: Session = Depends(get_db),
+              user: User = Depends(require_tenant_user)):
+    from app.services import wholesale_field_agreement as FA
+    return FA.handle(db, svc.write_org_id(db, user), user, appt_id, body.model_dump(), request)

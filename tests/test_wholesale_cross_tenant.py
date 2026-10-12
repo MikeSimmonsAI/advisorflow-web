@@ -491,6 +491,7 @@ def ops_attacks(ids):
         ("get", "/wholesale/appointments/%s/offers" % ids["appointment_id"], None),
         ("post", "/wholesale/appointments/%s/offers" % ids["appointment_id"], {"arv": 1, "repairs": 0, "offer": 1}),
         ("post", "/wholesale/appointments/offers/%s/decide" % ids["field_offer_id"], {"approve": True}),
+        ("post", "/wholesale/appointments/%s/agreement" % ids["appointment_id"], {"action": "preview"}),
         ("get", "/wholesale/skip-trace/estimates/%s" % ids["skiptrace_estimate_id"], None),
         ("post", "/wholesale/skip-trace/estimates/%s/confirm" % ids["skiptrace_estimate_id"],
          {"confirm": "APPROVE SKIP TRACE %s" % ids["skiptrace_estimate_id"]}),
