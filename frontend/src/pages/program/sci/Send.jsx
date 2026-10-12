@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../../api/client'
 import {
   Chip, Empty, ErrorLine, FilterChips, Icon, Kpi, Loading, Notice, PageHead, Panel, SearchBox,
-  TypedConfirm, errText, num, when,
+  errText, num, when,
 } from './ui'
 
 const SHOW = [['not_approved', 'Not sent yet'], ['approved', 'Approved'], ['all', 'Everyone']]
@@ -113,7 +113,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
   const homes = (locations || []).filter(l => !l.is_review_bucket)
   const ready = (preview?.items || []).filter(i => !i.blocked)
   const blockedInPreview = (preview?.items || []).filter(i => i.blocked)
-  const step = confirming ? 3 : preview ? 2 : 1
+  const step = ids.length ? 2 : 1
   const sendingOn = (automation?.active_campaign_families || 0) > 0
   const showLabel = useMemo(() => SHOW.find(s => s[0] === show)?.[1], [show])
 
@@ -125,7 +125,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
       </PageHead>
 
       <ol className="sci-steps" aria-label="Approval steps">
-        {[['Choose contacts', 1], ['Preview messages', 2], ['Approve recipients', 3]].map(([label, n]) => (
+        {[['Choose contacts', 1], ['Good to go', 2]].map(([label, n]) => (
           <li key={n} className={step === n ? 'on' : step > n ? 'done' : ''} aria-current={step === n ? 'step' : undefined}>
             <span>{step > n ? <Icon name="check" size={13} /> : `0${n}`}</span>{label}
           </li>
@@ -135,7 +135,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
       <section className="sci-kpis four" aria-label="Send numbers">
         <Kpi icon="users" tone="blue" value={totals.all} label="Contacts in program" note="One row per person" onClick={() => setShow('all')} />
         <Kpi icon="check" tone="green" value={totals.approved} label="Approved for outreach" note="Getting automated messages" onClick={() => setShow('approved')} />
-        <Kpi icon="review" tone="gold" value={ids.length} label="Selected in this session" note={ids.length ? 'Not approved until step 03' : 'Tick contacts below'} />
+        <Kpi icon="review" tone="gold" value={ids.length} label="Selected in this session" note={ids.length ? 'Not sent until you press Good to go' : 'Tick contacts below'} />
         <Kpi icon="shield" tone="purple" value={max ?? '—'} label="Max per approval" note="Set by the server" />
       </section>
 
@@ -263,33 +263,20 @@ export default function Send({ locations, isManager, locationId, goTab, automati
 
           {isManager && (
             <div className="sci-row-gap" style={{ marginTop: 14 }}>
-              {!preview ? (
-                <button type="button" className="sci-btn gold" disabled={!ids.length || overMax || busy} onClick={openPreview}>
-                  <Icon name="doc" />{busy ? 'Loading…' : `Preview selected (${num(ids.length)})`}
-                </button>
-              ) : (
-                <>
-                  <button type="button" className="sci-btn" onClick={() => setPreview(null)} disabled={busy}>Back</button>
-                  <button type="button" className="sci-btn gold" disabled={busy || !ready.length || overMax} onClick={() => setConfirming(true)}>
-                    <Icon name="check" />Approve selected…
-                  </button>
-                </>
-              )}
+              <button type="button" className="sci-btn gold" disabled={!ids.length || overMax || busy}
+                onClick={() => approve(`SEND ${ids.length}`)}>
+                <Icon name="check" />{busy ? 'Sending…' : `Good to go — send (${num(ids.length)})`}
+              </button>
+              {!preview
+                ? <button type="button" className="sci-btn sm" disabled={!ids.length || overMax || busy} onClick={openPreview}>Preview first</button>
+                : <button type="button" className="sci-btn sm" onClick={() => setPreview(null)} disabled={busy}>Hide preview</button>}
               {ids.length > 0 && <button type="button" className="sci-btn sm" onClick={() => { setPicked({}); setPreview(null) }}>Clear</button>}
             </div>
           )}
-          <p className="sci-footnote">Approval is confirmation-gated. Follow-up texts continue on the SCI cadence; a reply or STOP ends them.</p>
+          <p className="sci-footnote">Good to go starts their texts right away (first text at the next allowed hour in their time zone). A reply or STOP ends them.</p>
         </Panel>
       </div>
 
-      <TypedConfirm open={confirming} title={`Approve ${num(ids.length)} contact${ids.length === 1 ? '' : 's'} for outreach?`}
-        phrase={`SEND ${ids.length}`} actionLabel={`Approve & send to ${num(ready.length)}`} tone="gold" busy={busy}
-        onCancel={() => setConfirming(false)} onConfirm={approve}>
-        <p style={{ margin: 0 }}>
-          {num(ready.length)} {ready.length === 1 ? 'person' : 'people'} will start getting automated outreach: their first text at the next allowed hour in their own time zone.
-          {blockedInPreview.length ? ` ${blockedInPreview.length} blocked contact(s) will be skipped by the server.` : ''}
-        </p>
-      </TypedConfirm>
     </>
   )
 }
