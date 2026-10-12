@@ -64,7 +64,7 @@ export default function Launch({ isManager, onChange, goTab }) {
       </section>
       <ErrorLine text={err} />
 
-      <div className="sci-grid-review" style={{ gridTemplateColumns: 'minmax(0, 1fr) 380px' }}>
+      <div className="sci-grid-review">
         <Panel title="Readiness gates" labelledBy="sci-gates" aside={<span className="sci-micro sci-muted">Live from the server</span>}>
           <div className={`sci-banner ${cleared ? 'ok' : 'bad'}`} style={{ marginBottom: 12 }}>
             <span className="sci-banner-icon" aria-hidden="true"><Icon name={cleared ? 'check' : 'ban'} /></span>
