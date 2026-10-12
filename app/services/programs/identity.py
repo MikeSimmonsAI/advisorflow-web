@@ -338,6 +338,30 @@ def channels(prog: OutreachProgram):
         return []
 
 
+PROGRAM_CADENCE_INDUSTRY = "program"
+
+
+def program_touch_text(db: Session, organization_id: str, touch_number: int) -> Optional[str]:
+    """The text a program cadence gives this touch, or None.
+
+    Only the organization's default, active cadence whose industry is
+    "program" counts: a platform template (Funeral Home 9-Touch, ...) speaks in
+    {advisor_name}/{org_name}, which a location program never uses."""
+    from app.models.models import CadenceTemplate, CadenceTemplateTouch
+    tpl = (db.query(CadenceTemplate)
+           .filter(CadenceTemplate.organization_id == organization_id,
+                   CadenceTemplate.is_default.is_(True), CadenceTemplate.is_active.is_(True),
+                   CadenceTemplate.industry == PROGRAM_CADENCE_INDUSTRY).first())
+    if tpl is None:
+        return None
+    t = (db.query(CadenceTemplateTouch)
+         .filter(CadenceTemplateTouch.template_id == tpl.id,
+                 CadenceTemplateTouch.touch_number == touch_number).first())
+    if t is None or t.is_active is False or not (t.message_template or "").strip():
+        return None
+    return t.message_template
+
+
 def cadence_text(db: Session, lead: Lead, touch_number: int) -> Optional[str]:
     """The program's own text for a cadence touch, rendered for the lead's location.
 
@@ -351,6 +375,17 @@ def cadence_text(db: Session, lead: Lead, touch_number: int) -> Optional[str]:
     if not ctx or not ctx.get("ok"):
         return None
     rec = source_record_for_lead(db, lead)
+    # FOLLOW-UP TOUCHES WITH THEIR OWN WORDS. Every follow-up used to send the
+    # one re-engagement line, so a 10-day campaign said "checking in" six times.
+    # When the organization's DEFAULT cadence is a program cadence
+    # (industry "program", e.g. "SCI 10-Day Aggressive") and that touch carries
+    # its own text, that text is used - rendered with the same location fields
+    # and refused by send_sms exactly like the family text. Touch 1 always stays
+    # the contact's own campaign family.
+    if touch_number > 1:
+        own = program_touch_text(db, lead.organization_id, touch_number)
+        if own:
+            return render(own, ctx["fields"])
     key = (rec.campaign_family if (rec and touch_number <= 1) else "re_engagement") or "re_engagement"
     fam = (db.query(CampaignFamily)
            .filter(CampaignFamily.organization_id == lead.organization_id,
