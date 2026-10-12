@@ -99,6 +99,9 @@ os.environ.setdefault("BOOKING_BASE_URL", "https://book.restland.com")
 os.environ.setdefault("APP_BASE_URL", "https://app.evosyspro.live")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-google-client-id")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-google-client-secret")
+# The server makes its own web push keys on first use; tests opt in
+# (tests/test_wholesale_web_push.py) so nothing touches app.deps' database.
+os.environ.setdefault("WEB_PUSH_AUTO_KEYS", "0")
 if "ENCRYPTION_KEY" not in os.environ:
     from cryptography.fernet import Fernet
     os.environ["ENCRYPTION_KEY"] = Fernet.generate_key().decode()

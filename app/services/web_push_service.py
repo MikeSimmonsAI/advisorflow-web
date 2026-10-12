@@ -23,6 +23,11 @@ THE FLOW
 CONFIGURATION (env, never code): VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY,
 VAPID_SUBJECT (a mailto: or https: contact). All three plus an importable
 pywebpush = configured. Anything less = configured:false.
+
+WITHOUT THE ENV SETTINGS the server makes its own key pair once and keeps it
+in `web_push_vapid_keys` (private half encrypted with ENCRYPTION_KEY), so push
+works without anyone visiting the hosting dashboard. Set
+WEB_PUSH_AUTO_KEYS=0 to turn that off; env settings always win.
 """
 
 from __future__ import annotations
@@ -57,6 +62,14 @@ TITLES = {
 }
 
 
+# The Wholesale field app's notification kinds -> the only words on the lock screen.
+WHOLESALE_TITLES = {
+    "wholesale_appointment": "Appointment update",
+    "wholesale_offer": "Offer update",
+    "wholesale_inquiry": "New seller lead",
+}
+
+
 class PushSendError(Exception):
     """Normalised delivery failure. `status_code` is the push service's HTTP
     status when there was one (404/410 = subscription gone)."""
@@ -77,13 +90,73 @@ def _now():
 
 # ── configuration ───────────────────────────────────────────────────────────
 
+DEFAULT_SUBJECT = "https://app.evosyspro.live"
+_AUTO_CACHE: Dict[str, Optional[str]] = {}
+
+
+def auto_keys_allowed() -> bool:
+    return str(os.environ.get("WEB_PUSH_AUTO_KEYS", "1")).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _make_keypair() -> Dict[str, str]:
+    """A P-256 key pair in the two shapes web push wants: the public key as
+    the uncompressed point and the private key as the raw 32-byte scalar,
+    both base64url without padding."""
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    key = ec.generate_private_key(ec.SECP256R1())
+    raw_priv = key.private_numbers().private_value.to_bytes(32, "big")
+    raw_pub = key.public_key().public_bytes(serialization.Encoding.X962,
+                                            serialization.PublicFormat.UncompressedPoint)
+    b64 = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")  # noqa: E731
+    return {"public_key": b64(raw_pub), "private_key": b64(raw_priv)}
+
+
+def _auto_settings() -> Dict[str, Optional[str]]:
+    """The stored key pair, made on first use. Cached per process. Never
+    raises: anything going wrong means "not configured", never a crash."""
+    if _AUTO_CACHE.get("public_key"):
+        return dict(_AUTO_CACHE)
+    try:
+        from app.deps import SessionLocal
+        from app.models.push_models import WebPushVapidKey
+        from app.utils.crypto import decrypt_value, encrypt_value
+        db = SessionLocal()
+        try:
+            row = db.query(WebPushVapidKey).filter(WebPushVapidKey.id == "default").first()
+            if row is None:
+                pair = _make_keypair()
+                db.add(WebPushVapidKey(id="default", public_key=pair["public_key"],
+                                       private_key_enc=encrypt_value(pair["private_key"]),
+                                       subject=DEFAULT_SUBJECT))
+                try:
+                    db.commit()
+                except Exception:  # noqa: BLE001 - another process made it first
+                    db.rollback()
+                row = db.query(WebPushVapidKey).filter(WebPushVapidKey.id == "default").first()
+            if row is None:
+                return {"public_key": None, "private_key": None, "subject": None}
+            _AUTO_CACHE.update(public_key=row.public_key, private_key=decrypt_value(row.private_key_enc),
+                               subject=row.subject or DEFAULT_SUBJECT)
+            return dict(_AUTO_CACHE)
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001
+        _log.exception("web push: could not load or make the server's key pair")
+        return {"public_key": None, "private_key": None, "subject": None}
+
+
 def vapid_settings() -> Dict[str, Optional[str]]:
     def _env(k):
         v = (os.environ.get(k) or "").strip()
         return v or None
-    return {"public_key": _env("VAPID_PUBLIC_KEY"),
-            "private_key": _env("VAPID_PRIVATE_KEY"),
-            "subject": _env("VAPID_SUBJECT")}
+    env = {"public_key": _env("VAPID_PUBLIC_KEY"),
+           "private_key": _env("VAPID_PRIVATE_KEY"),
+           "subject": _env("VAPID_SUBJECT")}
+    if env["public_key"] or env["private_key"] or not auto_keys_allowed():
+        return env
+    return _auto_settings()
 
 
 def sender_available() -> bool:
@@ -224,7 +297,7 @@ def enqueue(db: Session, *, target_user_id: str, organization_id: Optional[str],
                 return obj
     if existing is not None:
         return existing
-    safe_url = url if (isinstance(url, str) and url.startswith("/m")) else DEFAULT_URL
+    safe_url = url if (isinstance(url, str) and (url.startswith("/m") or url.startswith("/wholesale"))) else DEFAULT_URL
     ev = PushEvent(id=str(uuid.uuid4()), organization_id=organization_id,
                    target_user_id=target_user_id, type=event_type,
                    title=(title or TITLES.get(event_type) or TITLES[TYPE_GENERIC])[:80],
@@ -251,6 +324,14 @@ def enqueue_for_notification(db: Session, notification, *, organization_id: Opti
                                "reply_received": TYPE_REPLY}.get(ntype, TYPE_GENERIC)
         lead_id = getattr(notification, "lead_id", None)
         url = ("/m/conversations/%s" % lead_id) if lead_id else "/m/notifications"
+        title = None
+        if ntype in WHOLESALE_TITLES:
+            # The field app's alerts: a generic title and the screen to open.
+            # The notification's own message (addresses, amounts) never rides along.
+            title = WHOLESALE_TITLES[ntype]
+            link = getattr(notification, "link", None) or ""
+            url = link if link.startswith("/wholesale") else "/wholesale/appointments"
+            lead_id = None
         org_id = organization_id
         if org_id is None and lead_id:
             from app.models.models import Lead
@@ -258,7 +339,7 @@ def enqueue_for_notification(db: Session, notification, *, organization_id: Opti
             org_id = getattr(lead, "organization_id", None)
         return enqueue(db, target_user_id=notification.user_id, organization_id=org_id,
                        event_type=etype, idempotency_key="notif:%s" % notification.id,
-                       url=url, notification_id=notification.id,
+                       title=title, url=url, notification_id=notification.id,
                        record_type="lead" if lead_id else None, record_id=lead_id)
     except Exception:  # noqa: BLE001
         _log.exception("web push enqueue failed")
@@ -362,9 +443,16 @@ def send_test(db: Session, user, *, organization_id: Optional[str],
               sender: Optional[Sender] = None) -> dict:
     """A test alert to the CALLER's own live subscriptions only."""
     subs = live_subscriptions(db, user.id, any_workspace=True)
+    url = "/m/more"
+    try:
+        from app.services import wholesale_team as _wt
+        if _wt.is_wholesale_only(db, user):
+            url = "/wholesale/appointments"     # the field app, not the advisor one
+    except Exception:  # noqa: BLE001
+        pass
     ev = enqueue(db, target_user_id=user.id, organization_id=organization_id,
                  event_type=TYPE_TEST, idempotency_key="test:%s:%s" % (user.id, uuid.uuid4()),
-                 url="/m/more")
+                 url=url)
     db.flush()
     result = deliver_event(db, ev, sender=sender, subscriptions=subs)
     result["event_id"] = ev.id

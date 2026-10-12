@@ -1680,6 +1680,50 @@ async def _wholesale_exception_loop():
         await asyncio.sleep(wholesale_ex.AUTO_INTERVAL_SECONDS)
 
 
+async def _web_push_loop():
+    """Phone alerts: deliver what notifications queued (web_push_service).
+
+    Every 20 seconds, one pass across instances (the same lease the other
+    loops use). Does nothing at all until push is configured. The job ledger
+    is written for a pass that had something to send, and once an hour while
+    idle, so a quiet system neither fills job_runs nor reads as stopped.
+    """
+    from app.services import web_push_service as wps
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.models.push_models import EVENT_PENDING, PushEvent
+    from app.deps import SessionLocal
+    import logging as _log
+    _logger = _log.getLogger("web_push_loop")
+    await asyncio.sleep(45)  # startup delay - offset from every other loop
+    import time as _time
+    _last_logged = 0.0
+    while True:
+        try:
+            def _pending() -> bool:
+                db = SessionLocal()
+                try:
+                    return db.query(PushEvent.id).filter(PushEvent.status == EVENT_PENDING).first() is not None
+                finally:
+                    db.close()
+            _due_checkin = (_time.monotonic() - _last_logged) >= 3600
+            if await _off_loop(wps.is_configured) and (_due_checkin or await _off_loop(_pending)) \
+                    and await _pass_claimed(JobName.WEB_PUSH, 20):
+                _last_logged = _time.monotonic()
+                async with record_job_run(JobName.WEB_PUSH, db_factory=SessionLocal) as _m:
+                    def _one_pass():
+                        db = SessionLocal()
+                        try:
+                            return wps.deliver_pending(db)
+                        finally:
+                            db.close()
+                    report = await _off_loop(_one_pass)
+                    _m.update(report)
+        except Exception as exc:                               # noqa: BLE001
+            _logger.error("web_push error: %s", exc, exc_info=True)
+        await asyncio.sleep(20)
+
+
 async def _program_sla_loop():
     """Location outreach programs: re-alert HOT replies past their SLA, and
     (only when PROGRAM_EMAIL_TOUCHES_SENDING is on) send due campaign emails.
@@ -2132,6 +2176,7 @@ async def on_startup():
         JobName.EVOSENSE_HUNT:        _evosense_hunt_loop,
         JobName.WHOLESALE_EXCEPTIONS: _wholesale_exception_loop,
         JobName.PROGRAM_SLA:          _program_sla_loop,
+        JobName.WEB_PUSH:             _web_push_loop,
     }
     for _job_name in _plan["start"]:
         _factory = _loop_factories.get(_job_name)

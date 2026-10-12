@@ -90,3 +90,4 @@
 /* Canvassing (cv-) */
 .cv-n { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #0f172a; color: #fff; font-weight: 700; font-size: 13px; }
 .cv-h { font-size: 20px; margin: 10px 0 6px; }
+.pa-bell { font-size: 28px; line-height: 1; flex: none; }

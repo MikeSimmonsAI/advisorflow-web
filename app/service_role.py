@@ -116,6 +116,8 @@ SCHEDULER_OWNER: Dict[str, str] = {
     JobName.WHOLESALE_EXCEPTIONS: ROLE_BACKEND,
     # Program HOT-response SLA re-alerts. Once, so a breach alerts once.
     JobName.PROGRAM_SLA: ROLE_BACKEND,
+    # Phone alerts. Once, so an alert buzzes a phone once.
+    JobName.WEB_PUSH: ROLE_BACKEND,
 }
 
 # A guard rather than a comment: a loop added to JobName without an owner here

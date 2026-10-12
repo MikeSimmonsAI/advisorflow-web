@@ -208,6 +208,7 @@ WHOLESALE_ONLY_ALLOWED = (
     "/auth/", "/branding", "/notifications", "/settings", "/program/status",
     "/launch/me", "/workspace-views", "/work/identity", "/me",
     "/wholesale", "/wholesale-rooms", "/site-intake/wholesale", "/health",
+    "/push",          # phone alerts for this login's own phone (web_push_service)
 )
 ORG_SETTINGS_READ = "/org-settings"          # read-only, the shell reads the brand from it
 
