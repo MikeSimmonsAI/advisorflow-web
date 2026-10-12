@@ -368,6 +368,28 @@ def read_token() -> Optional[str]:
     return os.environ.get("RELAY_GITHUB_READ_TOKEN") or os.environ.get("RELAY_GITHUB_WRITE_TOKEN") or None
 
 
+def relay_is_on() -> bool:
+    """Whether the Control Room should watch the relay at all.
+
+    Mike moved day-to-day work off the ChatGPT <-> Claude relay. With no read
+    credential the server was polling GitHub unauthenticated every 20 seconds,
+    getting rate-limited, and filling the screen with red errors about a relay
+    nobody uses. So: OFF unless a read credential is configured, or
+    RELAY_ENABLED=1 forces it on. RELAY_ENABLED=0 forces it off. Nothing is
+    deleted - adding the credential (or the flag) switches it straight back on."""
+    flag = (os.environ.get("RELAY_ENABLED") or "").strip().lower()
+    if flag in ("0", "false", "no", "off"):
+        return False
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    return bool(read_token() or os.environ.get("RELAY_READ_TOKEN") or os.environ.get("GITHUB_TOKEN"))
+
+
+RELAY_OFF_MESSAGE = ("Relay is off - work runs directly with Claude. Nothing here is checking GitHub. "
+                     "To switch it back on, add a read-only GitHub key (RELAY_GITHUB_READ_TOKEN) "
+                     "or set RELAY_ENABLED=1 on the server.")
+
+
 def write_token() -> Optional[str]:
     return os.environ.get("RELAY_GITHUB_WRITE_TOKEN") or None
 
