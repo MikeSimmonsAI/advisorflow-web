@@ -175,6 +175,7 @@ COLUMNS_TO_ADD = [
     ("program_source_records", "approved_to_send_by", "VARCHAR"),
     ("outreach_programs", "require_send_approval", "BOOLEAN DEFAULT FALSE"),
     ("outreach_programs", "send_via_mailbox", "VARCHAR"),
+    ("outreach_programs", "email_hold_providers", "TEXT"),
     # @@PROGRAM_COLUMNS@@
     # ── Telephony (2026-09-28): human dialer, AMD, number record ──
     ("voice_calls", "is_human_call", "BOOLEAN"),
