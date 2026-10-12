@@ -49,6 +49,10 @@ def test_short_link_opens_only_under_its_own_location(client, program, monkeypat
     ok = client.get("/" + link.short_code, headers={"host": "alabamaheritage.evosyspro.live"},
                     follow_redirects=False)
     assert ok.status_code == 302 and ok.headers["location"] == "https://app.example.test/book/" + link.token
-    assert client.get("/" + link.short_code, headers={"host": "easterngate.evosyspro.live"},
-                      follow_redirects=False).status_code == 404
+    wrong = client.get("/" + link.short_code, headers={"host": "easterngate.evosyspro.live"},
+                       follow_redirects=False)
+    assert wrong.status_code == 404 and "text/html" in wrong.headers["content-type"]
+    assert "isn't active" in wrong.text and "detail" not in wrong.text
+    home = client.get("/", headers={"host": "alabamaheritage.evosyspro.live"})
+    assert home.status_code == 200 and "Alabama Heritage Funeral Home" in home.text
     assert client.get("/" + link.short_code, follow_redirects=False).status_code == 404
