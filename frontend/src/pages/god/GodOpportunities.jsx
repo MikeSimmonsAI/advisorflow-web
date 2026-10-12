@@ -58,7 +58,10 @@ export default function GodOpportunities() {
         <div className="god-filter-bar">
           <select aria-label="Filter by brand" value={brandId} onChange={e => set('brand', e.target.value)}>
             <option value="">All brands</option>
-            {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            {brands.map(b => {
+              const id = b.brand_sales_org_id || b.id
+              return <option key={id} value={id}>{b.brand_sales_org_name || b.name}</option>
+            })}
           </select>
           <div className="god-filter-tabs">
             {FILTERS.map(f => (
