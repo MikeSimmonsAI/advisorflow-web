@@ -278,6 +278,12 @@ def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None) -> 
     if prog.require_location_to_send and location_profile_for_lead(db, lead) is None:
         return LOCATION_REVIEW_REFUSAL
     from app.services import send_source as _ss
+    # CHOOSE & SEND: in approval mode an automated send needs a person's approval
+    # of this very contact. A person replying by hand (MANUAL) is not blocked.
+    if send_source != _ss.MANUAL and getattr(prog, "require_send_approval", False):
+        from app.services.programs import send_approval as _sa
+        if not _sa.is_approved(recs):
+            return _sa.NOT_APPROVED_REFUSAL
     if send_source != _ss.MANUAL and rec is not None:
         from app.models.program_models import CampaignFamily
         key = rec.campaign_family or "re_engagement"

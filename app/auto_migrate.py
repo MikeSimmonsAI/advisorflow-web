@@ -170,6 +170,10 @@ COLUMNS_TO_ADD = [
     ("outreach_programs", "placement_seed_addresses", "TEXT"),
     ("location_profiles", "campus_key", "VARCHAR"),
     ("location_profiles", "campus_label", "VARCHAR"),
+    # Choose & Send (2026-10-12): only approved contacts get automated outreach
+    ("program_source_records", "approved_to_send_at", "TIMESTAMP"),
+    ("program_source_records", "approved_to_send_by", "VARCHAR"),
+    ("outreach_programs", "require_send_approval", "BOOLEAN DEFAULT FALSE"),
     # @@PROGRAM_COLUMNS@@
     # ── Telephony (2026-09-28): human dialer, AMD, number record ──
     ("voice_calls", "is_human_call", "BOOLEAN"),
