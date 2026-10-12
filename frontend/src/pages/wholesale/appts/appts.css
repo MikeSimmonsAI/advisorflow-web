@@ -50,3 +50,5 @@
 .vd-x { border: 0; background: none; font-size: 18px; line-height: 1; cursor: pointer; color: #64748b; }
 .evo-btn input[hidden] { display: none; }
 @media (max-width: 640px) { .vd-line { grid-template-columns: 1fr; } }
+
+.ap-outcome { display: grid; gap: 8px; border-top: 1px dashed #cbd5e1; padding-top: 10px; }

@@ -12,6 +12,7 @@ import VisitDrawer from './VisitDrawer'
 import { centralToIso, dayLabel, isoToCentral, todayCentral } from './apptTime'
 import './appts.css'
 
+const OUTCOME = { signed: ['Signed', 'live'], follow_up: ['Follow up', 'info'], dead: ['Dead', 'danger'] }
 const STATUS = { scheduled: ['Scheduled', 'info'], completed: ['Done', 'live'], no_show: ['No-show', 'danger'], cancelled: ['Cancelled', null] }
 
 export function ApptCard({ a, isField, reps, onChanged }) {
@@ -19,6 +20,9 @@ export function ApptCard({ a, isField, reps, onChanged }) {
   const [err, setErr] = useState(null)
   const [more, setMore] = useState(false)
   const [visit, setVisit] = useState(false)
+  const [logging, setLogging] = useState(false)
+  const [fuDay, setFuDay] = useState('')
+  const [fuTime, setFuTime] = useState('10:00')
   const start = isoToCentral(a.starts_at)
   const [day, setDay] = useState(start.day)
   const [time, setTime] = useState(start.time)
@@ -28,7 +32,7 @@ export function ApptCard({ a, isField, reps, onChanged }) {
 
   async function patch(body) {
     setBusy(true); setErr(null)
-    try { onChanged(await api.patch(`/wholesale/appointments/${a.id}`, body)); setMore(false); setNote('') }
+    try { onChanged(await api.patch(`/wholesale/appointments/${a.id}`, body)); setMore(false); setLogging(false); setNote('') }
     catch (e) { setErr(e.message || 'That did not save.') } finally { setBusy(false) }
   }
   const withNote = (body) => (note.trim() ? { ...body, notes: [a.notes, note.trim()].filter(Boolean).join('\n') } : body)
@@ -39,6 +43,7 @@ export function ApptCard({ a, isField, reps, onChanged }) {
         <span className="ap-time">{a.local_time}</span>
         <span className="ap-title">{a.title || 'Visit'}</span>
         <Tag kind={tone || undefined}>{label}</Tag>
+        {a.outcome ? <Tag kind={(OUTCOME[a.outcome] || [])[1] || undefined}>{(OUTCOME[a.outcome] || [a.outcome])[0]}</Tag> : null}
         {a.is_test ? <Tag kind="sandbox">Test</Tag> : null}
       </div>
       {a.address ? <div className="ap-addr">{a.address}</div> : null}
@@ -49,17 +54,37 @@ export function ApptCard({ a, isField, reps, onChanged }) {
         <span>{a.assigned_to_name ? `Rep: ${a.assigned_to_name}` : 'No rep yet'}</span>
       </div>
       {a.notes ? <p className="ap-notes">{a.notes}</p> : null}
+      {a.outcome_note ? <p className="ap-notes"><strong>How it went:</strong> {a.outcome_note}</p> : null}
       <div className="ap-actions">
         {a.directions_url ? <a className="evo-btn evo-btn--secondary evo-btn--sm" href={a.directions_url} target="_blank" rel="noreferrer">Directions</a> : null}
         <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" onClick={() => setVisit(true)}>Visit notes</button>
         {a.evosense_property_id ? <Link className="evo-btn evo-btn--ghost evo-btn--sm" to={`/wholesale/evosense/property/${a.evosense_property_id}`}>Open property</Link> : null}
-        {open ? <button type="button" className="evo-btn evo-btn--primary evo-btn--sm" disabled={busy} onClick={() => patch(withNote({ status: 'completed' }))}>Mark done</button> : null}
+        {open || (a.status === 'completed' && !a.outcome) ? <button type="button" className="evo-btn evo-btn--primary evo-btn--sm" disabled={busy} onClick={() => setLogging((v) => !v)} aria-expanded={logging}>Log outcome</button> : null}
         {open ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" disabled={busy} onClick={() => patch(withNote({ status: 'no_show' }))}>No-show</button> : null}
         {!isField ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => setMore((v) => !v)} aria-expanded={more}>{more ? 'Close' : 'Change'}</button> : null}
       </div>
-      {open ? (
-        <input className="ap-input" placeholder="Add a note (optional) - saved with Mark done / No-show"
+      {open && !logging ? (
+        <input className="ap-input" placeholder="Add a note (optional) - saved with No-show"
                value={note} onChange={(e) => setNote(e.target.value)} aria-label="Note" />
+      ) : null}
+      {logging ? (
+        <div className="ap-outcome">
+          <textarea className="ap-input" rows={2} placeholder="How did it go? (what they said, next step)"
+                    value={note} onChange={(e) => setNote(e.target.value)} aria-label="How it went" />
+          <div className="ap-actions">
+            <button type="button" className="evo-btn evo-btn--success evo-btn--sm" disabled={busy}
+                    onClick={() => patch({ outcome: 'signed', outcome_note: note })}>Signed</button>
+            <button type="button" className="evo-btn evo-btn--danger evo-btn--sm" disabled={busy}
+                    onClick={() => patch({ outcome: 'dead', outcome_note: note })}>Dead</button>
+          </div>
+          <div className="ap-more">
+            <label className="ap-lab">Follow up on<input type="date" className="ap-input" value={fuDay} onChange={(e) => setFuDay(e.target.value)} /></label>
+            <label className="ap-lab">at<input type="time" step="900" className="ap-input" value={fuTime} onChange={(e) => setFuTime(e.target.value)} /></label>
+            <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm" disabled={busy || !fuDay}
+                    onClick={() => patch({ outcome: 'follow_up', outcome_note: note, follow_up_at: centralToIso(fuDay, fuTime) })}>Follow up</button>
+          </div>
+          <p className="evo-muted evo-small" style={{ margin: 0 }}>Follow up puts a call-back in the Callback Center for whoever booked this visit.</p>
+        </div>
       ) : null}
       {more && !isField ? (
         <div className="ap-more">
