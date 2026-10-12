@@ -189,6 +189,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
                       <td className="sci-cell-main">
                         <button type="button" className="sci-namebtn" onClick={() => inspect(r)} title="See exactly what this person would receive">{r.name}</button>
                         <small>{[r.phone, r.email].filter(Boolean).join(' · ') || 'No contact details'} · Lead {r.source_lead_id}</small>
+                        {r.line_type === 'landline' && <Chip tone="warn" plain>Landline — no texts, call instead</Chip>}
                       </td>
                       <td className="sci-small">{r.location || <Chip tone="warn" plain>No location</Chip>}</td>
                       <td className="sci-small">{r.campaign || '—'}</td>

@@ -935,6 +935,11 @@ class Lead(Base):
     engagement_temperature = Column(SAEnum(EngagementTemperature), default=EngagementTemperature.UNKNOWN)
     message_track = Column(String, nullable=True)  # which offer/template track applies
     contact_channel = Column(String, default="sms")  # "sms" or "email_only" - drives queue routing
+    # Twilio Lookup line type of `phone` (mobile / landline / voip / unknown / invalid),
+    # the 10 digits it was checked for, and when. See app/services/programs/line_check.py.
+    phone_line_type = Column(String, nullable=True)
+    phone_line_number = Column(String, nullable=True)
+    phone_line_checked_at = Column(DateTime, nullable=True)
     status = Column(String, default="new")  # new, sent, replied, hot, booked, dnc, etc
     source_year = Column(Integer, nullable=True)  # e.g. 2012, 2013 (which cohort batch)
     source_file = Column(String, nullable=True)  # original upload filename for traceability

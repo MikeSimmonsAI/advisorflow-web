@@ -512,6 +512,9 @@ COLUMNS_TO_ADD = [
     # rewriting `leads.phone`, which every prior message, suppression check and
     # attempt count is reconciled against.
     ("leads", "callback_phone", "VARCHAR"),
+    ("leads", "phone_line_type", "VARCHAR"),
+    ("leads", "phone_line_number", "VARCHAR"),
+    ("leads", "phone_line_checked_at", "TIMESTAMP"),
     ("leads", "callback_phone_source", "VARCHAR"),
     ("leads", "callback_phone_at", "TIMESTAMP"),
 
