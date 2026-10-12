@@ -80,6 +80,10 @@ class OutreachProgram(Base):
     # EMAIL PROVIDER HOLD: JSON list of provider families (gmail, yahoo, outlook,
     # icloud, other) whose campaign email waits; texts still go. NULL = none held.
     email_hold_providers = Column(Text, nullable=True)
+    # BOOKINGS: the user whose calendar a family's booking lands on (their
+    # booking link is minted for this user). NULL = program texts carry no
+    # booking link.
+    booking_user_id = Column(String, nullable=True)
     # APPROVAL MODE: automated sends go only to contacts a manager approved on
     # Choose & Send. Switched on by the first approval; never switched off by code.
     require_send_approval = Column(Boolean, nullable=False, default=False)

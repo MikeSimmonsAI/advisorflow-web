@@ -94,6 +94,8 @@ export default function BookingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [confirmed, setConfirmed] = useState(null);
+  // Outreach program families choose a phone call or a visit first.
+  const [meeting, setMeeting] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -181,6 +183,7 @@ export default function BookingPage() {
 
   async function confirmBooking() {
     if (!selectedSlot || submitting) return;   // guards double submit
+    if (meetingOptions && !chosenMeeting) return;
     setSubmitting(true);
     setSubmitError('');
     try {
@@ -194,7 +197,7 @@ export default function BookingPage() {
           slot_display: selectedSlot,
           lead_name: context?.lead_name || '',
           lead_phone: context?.lead_phone || '',
-          appt_label: context?.appt_label || 'Appointment',
+          appt_label: chosenMeeting ? chosenMeeting.appt_label : (context?.appt_label || 'Appointment'),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -225,7 +228,10 @@ export default function BookingPage() {
   const rawPhone = brand.phone || context?.org_phone || '';
   const businessPhone = formatPhone(rawPhone);
   const firstName = context?.lead_first_name || '';
-  const apptLabel = context?.appt_label || 'appointment';
+  const meetingOptions = Array.isArray(context?.meeting_options) && context.meeting_options.length
+    ? context.meeting_options : null;
+  const chosenMeeting = meetingOptions ? meetingOptions.find((m) => m.key === meeting) : null;
+  const apptLabel = chosenMeeting ? chosenMeeting.appt_label : (context?.appt_label || 'appointment');
   const S = styles(accent);
 
   if (loading) {
@@ -300,8 +306,28 @@ export default function BookingPage() {
                 : 'Choose a time that works for you'}
             </h1>
             <p style={S.body}>
-              Pick a day, then a time. There is no cost or obligation to speak with us.
+              {meetingOptions ? 'Choose how you would like to meet, then a day and a time.' : 'Pick a day, then a time.'}
+              {' '}There is no cost or obligation to speak with us.
             </p>
+
+            {meetingOptions ? (
+              <div style={{ display: 'flex', gap: 10, margin: '6px 0 18px', flexWrap: 'wrap' }} role="radiogroup" aria-label="How would you like to meet?">
+                {meetingOptions.map((m) => {
+                  const on = m.key === meeting;
+                  return (
+                    <button key={m.key} type="button" role="radio" aria-checked={on} onClick={() => setMeeting(m.key)}
+                      style={{
+                        flex: '1 1 200px', textAlign: 'left', padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
+                        border: on ? `2px solid ${accent}` : '1.5px solid #dcdfe3', background: on ? '#f6ecd6' : '#fff',
+                        font: 'inherit', fontFamily: 'inherit', color: '#1c1d1f',
+                      }}>
+                      <div style={{ fontWeight: 700, fontSize: 16 }}>{m.label}</div>
+                      <div style={{ fontSize: 13.5, color: '#5f6368', marginTop: 3 }}>{m.note}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
 
             <div style={S.dayRow}>
               {days.map((d) => {
@@ -351,15 +377,17 @@ export default function BookingPage() {
 
             <button
               type="button"
-              disabled={!selectedSlot || submitting}
+              disabled={!selectedSlot || submitting || (meetingOptions && !chosenMeeting)}
               onClick={confirmBooking}
-              style={(!selectedSlot || submitting) ? S.ctaDisabled : S.cta}
+              style={(!selectedSlot || submitting || (meetingOptions && !chosenMeeting)) ? S.ctaDisabled : S.cta}
             >
               {submitting
                 ? 'Confirming…'
-                : selectedSlot
-                  ? `Confirm ${formatSlotLabel(selectedSlot)}`
-                  : 'Select a time'}
+                : meetingOptions && !chosenMeeting
+                  ? 'Choose a phone call or a visit'
+                  : selectedSlot
+                    ? `Confirm ${formatSlotLabel(selectedSlot)}`
+                    : 'Select a time'}
             </button>
           </section>
         )}
