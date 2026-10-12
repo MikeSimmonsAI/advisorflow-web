@@ -383,7 +383,10 @@ def program_booking_url(db: Session, lead: Lead) -> str:
     from app.services.sms_service import get_or_create_booking_link
     from app.services.public_identity import booking_url
     link = get_or_create_booking_link(db, lead, user)
-    return booking_url(db, lead.organization_id, link.token) or ""
+    # Location first when switched on: https://easterngate.evosyspro.live/k7q2x
+    from app.services.programs.location_links import short_url
+    short = short_url(db, location_profile_for_lead(db, lead), link)
+    return short or booking_url(db, lead.organization_id, link.token) or ""
 
 
 def _with_booking(db: Session, lead: Lead, template: str, fields: Dict[str, str]) -> Dict[str, str]:

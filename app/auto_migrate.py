@@ -177,6 +177,8 @@ COLUMNS_TO_ADD = [
     ("outreach_programs", "send_via_mailbox", "VARCHAR"),
     ("outreach_programs", "email_hold_providers", "TEXT"),
     ("outreach_programs", "booking_user_id", "VARCHAR"),
+    ("booking_links", "short_code", "VARCHAR"),
+    ("location_profiles", "link_key", "VARCHAR"),
     ("survey_responses", "location_id", "VARCHAR"),
     ("survey_responses", "share_ok", "BOOLEAN"),
     ("survey_responses", "handled_at", "TIMESTAMP"),
