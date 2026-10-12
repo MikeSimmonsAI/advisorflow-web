@@ -171,7 +171,10 @@ def offer_quote(appt_id: str, body: QuoteIn, db: Session = Depends(get_db),
 
 @router.get("/{appt_id}/offers")
 def offers_list(appt_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
-    return {"items": O.for_appointment(db, svc.read_org_id(db, user), user, appt_id)}
+    org_id = svc.read_org_id(db, user)
+    items = O.for_appointment(db, org_id, user, appt_id)
+    appt = A.get_visible(db, org_id, user, appt_id)
+    return {"items": items, "arv_on_file": O.arv_on_file(db, org_id, appt)}
 
 
 @router.post("/{appt_id}/offers", dependencies=[Depends(require_not_observation)])

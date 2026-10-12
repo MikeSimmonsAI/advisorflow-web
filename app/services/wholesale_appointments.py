@@ -251,8 +251,24 @@ def book(db: Session, org_id: str, user: User, data: Dict[str, Any]) -> Wholesal
     if a.source not in ("manual", "property", "callback", "call"):
         a.source = "manual"
     db.add(a)
+    db.flush()
+    _tell_rep(db, org_id, user, a, "New appointment")
     db.commit()
     return a
+
+
+def _tell_rep(db: Session, org_id: str, user: User, a: WholesaleFieldAppointment, what: str) -> None:
+    """A bell notification for the rep on the visit - never for the person
+    who made the change themselves. Nothing is texted or emailed."""
+    if not a.assigned_to_id or a.assigned_to_id == getattr(user, "id", None):
+        return
+    from app.models.models import NotificationType
+    from app.services import wholesale_notify as N
+    local = a.starts_at.replace(tzinfo=timezone.utc).astimezone(CENTRAL)
+    when = "%s %s" % (local.strftime("%a %b ") + str(local.day), local.strftime("%I:%M %p").lstrip("0"))
+    N.notify(db, org_id, kind=NotificationType.WHOLESALE_APPOINTMENT, assignee_id=a.assigned_to_id,
+             message="%s: %s at %s." % (what, when, a.address or "the property"),
+             link="/wholesale/appointments")
 
 
 def get_visible(db: Session, org_id: str, user: User, appt_id: str) -> WholesaleFieldAppointment:
@@ -317,12 +333,17 @@ def change(db: Session, org_id: str, user: User, appt_id: str, data: Dict[str, A
             raise HTTPException(403, "Ask your manager to move or reassign this appointment.")
         if data.get("status") not in (None, "completed", "no_show"):
             raise HTTPException(403, "You can mark a visit done or a no-show. Ask your manager to cancel it.")
+    before_rep, before_time = a.assigned_to_id, a.starts_at
     if "assigned_to_id" in data and data["assigned_to_id"] is not None:
         a.assigned_to_id = _rep(db, org_id, user, data["assigned_to_id"]) if data["assigned_to_id"] else None
     if data.get("starts_at"):
         a.starts_at = parse_when(data["starts_at"])
         if a.status in ("no_show", "cancelled"):
             a.status = "scheduled"          # moved to a new time: it is back on
+    if a.assigned_to_id and a.assigned_to_id != before_rep:
+        _tell_rep(db, org_id, user, a, "Appointment handed to you")
+    elif a.assigned_to_id and a.starts_at != before_time:
+        _tell_rep(db, org_id, user, a, "Appointment moved")
     if data.get("duration_minutes"):
         if int(data["duration_minutes"]) not in DURATIONS:
             raise HTTPException(422, "Length must be 15, 30, 45, 60, 90 or 120 minutes.")
@@ -335,8 +356,11 @@ def change(db: Session, org_id: str, user: User, appt_id: str, data: Dict[str, A
     if status is not None:
         if status not in APPOINTMENT_STATUSES:
             raise HTTPException(422, "Unknown status.")
+        was = a.status
         a.status = status
         a.completed_at = _now() if status == "completed" else None
+        if status == "cancelled" and was != "cancelled":
+            _tell_rep(db, org_id, user, a, "Appointment cancelled")
     if data.get("outcome") is not None:
         log_outcome(db, org_id, user, a, data["outcome"], data.get("outcome_note"), data.get("follow_up_at"))
     db.commit()

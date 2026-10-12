@@ -146,6 +146,8 @@ class NotificationType(str, enum.Enum):
     # A field rep's offer above their limit waits for an admin, and the
     # admin's answer goes back to the rep (wholesale_field_offers).
     WHOLESALE_OFFER = "wholesale_offer"
+    # A field appointment was booked for, moved for, or handed to a rep.
+    WHOLESALE_APPOINTMENT = "wholesale_appointment"
 
 
 # ---------------------------------------------------------------------------

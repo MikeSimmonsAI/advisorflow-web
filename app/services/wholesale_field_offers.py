@@ -140,6 +140,22 @@ def submit(db: Session, org_id: str, user: User, appt_id: str, arv, repairs, off
     return offer_json(db, o, field=field)
 
 
+def arv_on_file(db: Session, org_id: str, appt) -> Optional[int]:
+    """The property's VERIFIED ARV (closed comparable sales), if it has one.
+    Never the appraisal district tax value and never a modelled estimate."""
+    if not getattr(appt, "evosense_property_id", None):
+        return None
+    try:
+        from app.models.evosense_models import EvoSenseProperty
+        from app.services.evosense import valuation as VAL
+        prop = db.query(EvoSenseProperty).filter(EvoSenseProperty.id == appt.evosense_property_id,
+                                                 EvoSenseProperty.organization_id == org_id).first()
+        v = (VAL.arv(db, prop) or {}).get("value") if prop is not None else None
+        return int(v) if v else None
+    except Exception:  # noqa: BLE001 - a missing hint must never break the tab
+        return None
+
+
 def for_appointment(db: Session, org_id: str, user: User, appt_id: str) -> List[Dict[str, Any]]:
     appt = A.get_visible(db, org_id, user, appt_id)
     field = T.is_field(db, user)
