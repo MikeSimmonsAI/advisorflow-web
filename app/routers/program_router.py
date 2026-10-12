@@ -408,6 +408,18 @@ def _survey_alerts(db, org_id, location_id):
         return 0
 
 
+@router.get("/reach/{lead_id}")
+def program_reach(lead_id: str, db: Session = Depends(get_db),
+                  user: User = Depends(require_tenant_or_observer)):
+    """'Reaches by' and 'Last sent' for one person's record."""
+    prog = _program(db, user)
+    from app.services.programs import send_approval
+    out = send_approval.reach_for_lead(db, prog, lead_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Not on the program.")
+    return out
+
+
 @router.post("/line-check/run")
 def program_line_check(limit: int = Query(100, ge=1, le=200), db: Session = Depends(get_db),
                        user: User = Depends(require_tenant_user)):
@@ -1337,6 +1349,7 @@ def _family_json(f: CampaignFamily) -> dict:
 class PickIn(BaseModel):
     lead_ids: List[str]
     confirm: Optional[str] = None
+    mode: Optional[str] = None
 
 
 @router.get("/send/contacts")
@@ -1375,7 +1388,9 @@ def send_approve(body: PickIn, db: Session = Depends(get_db), user: User = Depen
         raise HTTPException(status_code=422, detail="Approve at most %d at a time." % send_approval.MAX_PER_APPROVAL)
     if (body.confirm or "").strip().upper() != "SEND %d" % len(ids):
         raise HTTPException(status_code=422, detail="Confirm with SEND %d." % len(ids))
-    return send_approval.approve(db, prog, user, ids)
+    if body.mode and body.mode not in send_approval.MODES:
+        raise HTTPException(status_code=422, detail="Mode must be text_email, email_only or call.")
+    return send_approval.approve(db, prog, user, ids, mode=body.mode or "text_email")
 
 
 @router.post("/send/unapprove")

@@ -69,6 +69,71 @@ def _real_us_number(raw) -> bool:
         return True
 
 
+MODES = ("text_email", "email_only", "call")
+MODE_LABEL = {"text_email": "Text + Email", "email_only": "Email only", "call": "Call only"}
+
+
+def textable(lead) -> bool:
+    """A real number that is not a landline."""
+    return bool(lead.phone) and _real_us_number(lead.phone) \
+        and getattr(lead, "phone_line_type", None) not in ("landline", "invalid") \
+        and lead.contact_channel != "email_only"
+
+
+def reaches(lead, mode: Optional[str]) -> str:
+    """How this person is reached, in plain words."""
+    if mode == "call":
+        return "Call only"
+    t = textable(lead) and mode != "email_only"
+    e = bool((lead.email or "").strip()) and lead.allow_email is not False
+    if t and e:
+        return "Text + Email"
+    if t:
+        return "Text only"
+    if e:
+        return "Email only"
+    return "Call only" if lead.phone else "No way to reach"
+
+
+def _last_sent(db: Session, lead_ids: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
+    from sqlalchemy import func
+    from app.models.models import EmailMessage, Message
+    out: Dict[str, Dict[str, Optional[str]]] = {i: {"text": None, "email": None} for i in lead_ids}
+    if not lead_ids:
+        return out
+    from sqlalchemy import or_
+    for lid, at in (db.query(Message.lead_id, func.max(Message.sent_at))
+                    .filter(Message.lead_id.in_(lead_ids),
+                            or_(Message.delivery_status.is_(None),
+                                Message.delivery_status.notin_(("failed", "undelivered"))))
+                    .group_by(Message.lead_id).all()):
+        out[lid]["text"] = at.isoformat() + "Z" if at else None
+    for lid, at in (db.query(EmailMessage.lead_id, func.max(EmailMessage.sent_at))
+                    .filter(EmailMessage.lead_id.in_(lead_ids), EmailMessage.status != "failed")
+                    .group_by(EmailMessage.lead_id).all()):
+        out[lid]["email"] = at.isoformat() + "Z" if at else None
+    return out
+
+
+def reach_for_lead(db: Session, prog: OutreachProgram, lead_id: str) -> Optional[Dict]:
+    """How one person on the program is reached, and when we last texted / emailed them."""
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        return None
+    rows = (db.query(ProgramSourceRecord)
+            .filter(ProgramSourceRecord.organization_id == prog.organization_id,
+                    ProgramSourceRecord.lead_id == lead_id)
+            .order_by(ProgramSourceRecord.row_number, ProgramSourceRecord.id).all())
+    if not rows:
+        return None
+    m = _master(rows)
+    mode = getattr(m, "send_mode", None) or "text_email"
+    sent = _last_sent(db, [lead_id])[lead_id]
+    return {"lead_id": lead_id, "mode": mode, "mode_label": MODE_LABEL.get(mode, mode),
+            "reaches": reaches(lead, mode), "line_type": getattr(lead, "phone_line_type", None),
+            "last_text_at": sent["text"], "last_email_at": sent["email"]}
+
+
 def blocker(db: Session, lead: Lead) -> Optional[str]:
     """Why this contact can't be approved right now, in plain words, or None."""
     from app.services import test_records
@@ -78,12 +143,11 @@ def blocker(db: Session, lead: Lead) -> Optional[str]:
         return "Do not contact"
     if not (lead.phone or (lead.email or "").strip()):
         return "No phone or email"
-    if lead.phone and not _real_us_number(lead.phone):
+    has_email = bool((lead.email or "").strip()) and lead.allow_email is not False
+    if not textable(lead) and not has_email:
+        if getattr(lead, "phone_line_type", None) == "landline":
+            return "Landline - call instead"
         return "Bad phone number"
-    if getattr(lead, "phone_line_type", None) == "invalid":
-        return "Bad phone number"
-    if getattr(lead, "phone_line_type", None) == "landline" and not (lead.email or "").strip():
-        return "Landline - call instead"
     from app.services import send_source as _ss
     r = identity.send_refusal(db, lead, _ss.MANUAL)
     if r:
@@ -132,6 +196,7 @@ def list_contacts(db: Session, prog: OutreachProgram, *, search: str = "", locat
     total = len(rows)
     page = rows[offset:offset + limit]
     items = []
+    sent = _last_sent(db, [lead.id for lead, _m, _r, _a in page])
     for lead, m, recs, approved in page:
         when = max((r.approved_to_send_at for r in recs if getattr(r, "approved_to_send_at", None)), default=None)
         items.append({
@@ -141,6 +206,9 @@ def list_contacts(db: Session, prog: OutreachProgram, *, search: str = "", locat
             "campaign": fname.get(m.campaign_family, m.campaign_family), "campaign_key": m.campaign_family,
             "phone": lead.phone, "email": lead.email,
             "line_type": getattr(lead, "phone_line_type", None),
+            "mode": getattr(m, "send_mode", None) or "text_email",
+            "reaches": reaches(lead, getattr(m, "send_mode", None)),
+            "last_text_at": sent[lead.id]["text"], "last_email_at": sent[lead.id]["email"],
             "approved": approved, "approved_at": when.isoformat() + "Z" if when else None,
             "in_campaign": lead.id in enrolled,
             "blocked": None if approved else blocker(db, lead),
@@ -181,7 +249,9 @@ def _clean(ids: List[str]) -> List[str]:
     return list(dict.fromkeys(i for i in (ids or []) if i))
 
 
-def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str]) -> Dict:
+def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str],
+            mode: str = "text_email") -> Dict:
+    mode = mode if mode in MODES else "text_email"
     from app.services.cadence_service import start_cadence
     from app.services.programs import email_touches
     ids = _clean(lead_ids)
@@ -208,6 +278,7 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str])
         for r in recs:
             if r.approved_to_send_at is None:
                 r.approved_to_send_at, r.approved_to_send_by = now, user.id
+            r.send_mode = mode
         if not lead.assigned_to_id:
             sender = email_touches._sender(db, prog, lead)
             if sender is not None:
@@ -223,7 +294,7 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str])
     db.commit()
     texting, email_only = 0, 0
     for lead in approved:
-        if lead.phone and lead.contact_channel != "email_only" and getattr(lead, "phone_line_type", None) != "landline":
+        if mode == "text_email" and textable(lead):
             if start_cadence(db, lead) is not None:
                 texting += 1
         else:
@@ -234,7 +305,7 @@ def approve(db: Session, prog: OutreachProgram, user: User, lead_ids: List[str])
                details={"approved": len(approved), "skipped": len(skipped),
                         "lead_ids": [l.id for l in approved], "campaigns_switched_on": switched_on})
     db.commit()
-    return {"approved": len(approved), "texting": texting, "email_only": email_only,
+    return {"approved": len(approved), "texting": texting, "email_only": email_only, "mode": mode,
             "skipped": skipped, "campaigns_switched_on": switched_on,
             "email_sending_on": email_touches.sending_enabled()}
 
