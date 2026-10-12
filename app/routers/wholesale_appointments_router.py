@@ -54,6 +54,9 @@ class ChangeIn(BaseModel):
     address: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    outcome: Optional[str] = None            # signed | follow_up | dead (build list #16)
+    outcome_note: Optional[str] = None
+    follow_up_at: Optional[str] = None
 
 
 @router.get("")

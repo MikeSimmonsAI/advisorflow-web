@@ -30,6 +30,7 @@ from app.models.models import Lead, User
 from app.models.wholesale_ops_models import APPOINTMENT_STATUSES, WholesaleFieldAppointment
 from app.services import wholesale_team as T
 
+OUTCOMES = ("signed", "follow_up", "dead")
 CENTRAL = ZoneInfo("America/Chicago")
 DIRECTIONS = "https://www.google.com/maps/dir/?api=1&destination="
 DURATIONS = (15, 30, 45, 60, 90, 120)
@@ -311,7 +312,7 @@ def change(db: Session, org_id: str, user: User, appt_id: str, data: Dict[str, A
     if field:
         if a.assigned_to_id != user.id:
             raise HTTPException(404, "Appointment not found")
-        allowed = {"status", "notes"}
+        allowed = {"status", "notes", "outcome", "outcome_note", "follow_up_at"}
         if set(k for k, v in data.items() if v is not None) - allowed:
             raise HTTPException(403, "Ask your manager to move or reassign this appointment.")
         if data.get("status") not in (None, "completed", "no_show"):
@@ -336,5 +337,43 @@ def change(db: Session, org_id: str, user: User, appt_id: str, data: Dict[str, A
             raise HTTPException(422, "Unknown status.")
         a.status = status
         a.completed_at = _now() if status == "completed" else None
+    if data.get("outcome") is not None:
+        log_outcome(db, org_id, user, a, data["outcome"], data.get("outcome_note"), data.get("follow_up_at"))
     db.commit()
     return a
+
+
+def log_outcome(db: Session, org_id: str, user: User, a: WholesaleFieldAppointment, outcome: str,
+                note: Optional[str], follow_up_at) -> None:
+    """Build list #16. The visit is done; say how it went. A follow-up date
+    becomes a call-back in the Callback Center for whoever booked the visit
+    (the office calls back; the rep is in the field)."""
+    if outcome not in OUTCOMES:
+        raise HTTPException(422, "Outcome must be signed, follow up or dead.")
+    if outcome == "follow_up" and not follow_up_at:
+        raise HTTPException(422, "When should someone follow up? Pick a date.")
+    a.outcome = outcome
+    a.outcome_note = (note or "").strip()[:2000] or None
+    if a.status in ("scheduled", "no_show"):
+        a.status = "completed"
+        a.completed_at = _now()
+    if outcome != "follow_up":
+        return
+    who = a.created_by_id or user.id
+    text = "Follow up after field visit%s%s" % (
+        " (%s)" % (a.address or "") if a.address else "", ": %s" % a.outcome_note if a.outcome_note else "")
+    if a.evosense_property_id:
+        from app.models.evosense_models import EvoSenseProperty
+        from app.services.evosense import followups as FU
+        prop = db.query(EvoSenseProperty).filter(EvoSenseProperty.id == a.evosense_property_id,
+                                                 EvoSenseProperty.organization_id == org_id).first()
+        if prop is not None:
+            FU.create(db, org_id, prop, user, due_at=follow_up_at, note=text, assigned_to_id=who)
+            return
+    if a.lead_id or a.deal_id:
+        from app.services import wholesale_ops as OPS
+        OPS.create_callback(db, org_id, user, lead_id=a.lead_id, deal_id=a.deal_id, due_at=follow_up_at,
+                            notes=text, assigned_to_id=who, source="manual", source_ref="appt:%s" % a.id)
+        return
+    # Nothing to hang a call-back on: keep the date with the outcome so it is not lost.
+    a.outcome_note = ((a.outcome_note or "") + "\nFollow up on %s" % str(follow_up_at)[:16]).strip()

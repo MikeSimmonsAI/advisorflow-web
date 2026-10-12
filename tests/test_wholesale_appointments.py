@@ -115,3 +115,37 @@ def test_another_company_cannot_see_or_touch_it(client, admin_auth_headers, db_s
     assert client.patch("/wholesale/appointments/%s" % a["id"], headers=h, json={"notes": "x"}).status_code == 404
     listed = client.get("/wholesale/appointments?when=all", headers=h)
     assert listed.status_code != 200 or a["id"] not in {x["id"] for x in listed.json()["items"]}
+
+
+# ── build list #16: log the visit outcome ───────────────────────────────────
+
+def test_rep_logs_signed_dead_or_follow_up_and_the_office_gets_the_call_back(
+        client, admin_auth_headers, auth_headers, sample_advisor, second_advisor, sample_org, db_session):
+    from app.models.evosense_models import EvoSenseFollowUp, EvoSenseProperty
+    _team(client, admin_auth_headers, sample_advisor, second_advisor)
+    admin = db_session.query(User).filter(User.role == "org_admin").first()
+    prop = EvoSenseProperty(organization_id=sample_org.id, street_address="3 Outcome Ct", city="Dallas",
+                            state="TX", zip_code="75201", is_test=True)
+    db_session.add(prop); db_session.commit()
+    book = lambda: ok(client.post("/wholesale/appointments", headers=admin_auth_headers, json={
+        "starts_at": _today_at(10), "evosense_property_id": prop.id, "assigned_to_id": sample_advisor.id}))
+
+    signed = ok(client.patch("/wholesale/appointments/%s" % book()["id"], headers=auth_headers,
+                             json={"outcome": "signed", "outcome_note": "Signed at 128k"}))
+    assert signed["outcome"] == "signed" and signed["status"] == "completed" and signed["completed_at"]
+
+    a = book()
+    r = client.patch("/wholesale/appointments/%s" % a["id"], headers=auth_headers, json={"outcome": "follow_up"})
+    assert r.status_code == 422                                    # a follow up needs a date
+    fu = ok(client.patch("/wholesale/appointments/%s" % a["id"], headers=auth_headers, json={
+        "outcome": "follow_up", "outcome_note": "Wants to talk to her brother",
+        "follow_up_at": "2026-10-15T10:00:00-05:00"}))
+    assert fu["outcome"] == "follow_up"
+    call = db_session.query(EvoSenseFollowUp).filter(EvoSenseFollowUp.property_id == prop.id).one()
+    assert call.assigned_to_id == admin.id and "brother" in call.note    # the office calls back
+
+    dead = ok(client.patch("/wholesale/appointments/%s" % book()["id"], headers=auth_headers,
+                           json={"outcome": "dead"}))
+    assert dead["outcome"] == "dead"
+    assert client.patch("/wholesale/appointments/%s" % book()["id"], headers=auth_headers,
+                        json={"outcome": "maybe"}).status_code == 422
