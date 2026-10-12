@@ -315,6 +315,16 @@ function ImportAndAlerts({ onChange }) {
           <button type="button" className="sci-btn primary" disabled={busy} onClick={() => run(false)}>Stage rows</button>
         </div>
         <ErrorLine text={err} />
+        {res?.summary && (res.summary.bad_phone_rows > 0 || res.summary.no_phone_rows > 0) && (
+          <div className="sci-card" style={{ marginTop: 10, borderColor: '#d97706' }}>
+            <strong>{res.summary.bad_phone_rows} phone number{res.summary.bad_phone_rows === 1 ? '' : 's'} won't work</strong>
+            {res.summary.no_phone_rows ? <span> · {res.summary.no_phone_rows} with no phone</span> : null}
+            <p className="sci-micro sci-muted" style={{ margin: '4px 0' }}>These people get email only until the customer sends a corrected number.</p>
+            {(res.summary.bad_phones || []).map(b => (
+              <div className="sci-kv" key={b.lead_id || b.row}><span>{b.name || '(no name)'} · {b.lead_id}</span><span>{b.phone}{b.has_email ? '' : ' · no email either'}</span></div>
+            ))}
+          </div>
+        )}
         {res && <pre className="sci-preview-email" style={{ marginTop: 10, fontSize: 12 }}>{JSON.stringify(res.summary, null, 2)}</pre>}
       </div>
       <div className="sci-card">
