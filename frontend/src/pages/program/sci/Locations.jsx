@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../../api/client'
 import {
-  LANDSCAPE, Chip, Empty, ErrorLine, Field, FilterChips, Icon, KV, Kpi, Loading, Notice, PageHead, Panel,
+  LANDSCAPE, Chip, Empty, LocationMark, ErrorLine, Field, FilterChips, Icon, KV, Kpi, Loading, Notice, PageHead, Panel,
   SearchBox, Tabs, assetSrc, errText, num, when,
 } from './ui'
 
@@ -37,7 +37,7 @@ function completeness(p) {
 
 function formOf(p) {
   return {
-    official_name: p.official_name || '', website: p.website || '', facility_phone: p.facility_phone || '',
+    official_name: p.official_name || '', website: p.website_is_reference ? '' : (p.website || ''), facility_phone: p.facility_phone || '',
     manager_name: p.manager_name || '', address_line1: p.address?.address_line1 || '', city: p.address?.city || '',
     state: p.address?.state || '', postal_code: p.address?.postal_code || '', appointment_link: p.appointment_link || '',
     email_alias: p.email_alias || '', mailbox_folder: p.mailbox_folder || '',
@@ -109,7 +109,7 @@ export default function Locations({ isManager, selected, onChange, setParam, per
 
   return (
     <>
-      <PageHead title="Locations" sub={`Manage identity, readiness and messaging across ${real.length} SCI facilities.`}>
+      <PageHead title="Locations" sub={`Manage identity, readiness and messaging across ${real.length} facilities.`}>
         <Chip tone="info">{real.length} mapped locations</Chip>
         {held.length > 0 && <Chip tone="bad">{held.length} held</Chip>}
       </PageHead>
@@ -135,6 +135,7 @@ export default function Locations({ isManager, selected, onChange, setParam, per
               const pr = perf[p.location_id]
               return (
                 <button key={p.id} type="button" className="sci-listitem" aria-current={cur?.id === p.id} onClick={() => { choose(p); setTab('overview') }}>
+                  <LocationMark name={p.official_name} logoUrl={p.logo_url} size={32} />
                   <span className="sci-listitem-body">
                     <b>{p.official_name}</b>
                     <small>{pr ? `${num(pr.leads)} leads · ${num(pr.qualified)} qualified` : 'No contacts yet'} · {p.verification_held ? 'held' : lc.n === lc.total ? 'complete' : `${lc.n}/${lc.total} details`}</small>
@@ -206,11 +207,11 @@ export default function Locations({ isManager, selected, onChange, setParam, per
                         ['Official name', cur.official_name], ['Facility phone', cur.facility_phone],
                         ['Address', addressOf(cur)], ['Booking link', cur.appointment_link],
                         ['Location email', cur.email_alias], ['Manager', cur.manager_name],
-                        ['Website', cur.website], ['Source names', (cur.source_names || []).join(', ')],
+                        ['Website', cur.website ? <><a className="sci-link" href={cur.website} target="_blank" rel="noopener noreferrer">{cur.website_is_reference ? 'Official Dignity Memorial page' : cur.website}</a>{cur.website_is_reference && <span className="sci-micro sci-muted"> · public reference</span>}</> : null], ['Source names', (cur.source_names || []).join(', ')],
                       ]} />
                       <h3 className="sci-h3" style={{ marginTop: 14 }}>Location-specific sender identity</h3>
                       <div className="sci-identity">
-                        <span className="sci-identity-mark">SCI</span>
+                        <LocationMark name={cur.official_name} logoUrl={cur.logo_url} />
                         <div style={{ minWidth: 0 }}>
                           <b>{cur.email_display_name || 'Not provided'}</b>
                           <div className="sci-micro sci-muted">Email "from" name · text sign-off: {cur.sms_signoff || 'Not provided'}</div>

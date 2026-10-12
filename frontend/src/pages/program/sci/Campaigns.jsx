@@ -88,7 +88,7 @@ export default function Campaigns({ isManager, locationId, locations, performanc
       {blocked ? (
         <Banner tone="bad" icon="ban" title="Texting is blocked on the server">{sms.detail}. No campaign text can go out until this is fixed (see Health).</Banner>
       ) : active === 0 ? (
-        <Banner icon="pause" title="All SCI campaigns are off">
+        <Banner icon="pause" title="All campaigns are off">
           Nothing is sent automatically.{sms?.approved_scope ? ` The texting line's approved scope is ${sms.approved_scope}.` : ''} Each text is still checked for consent, STOP and do-not-call before it goes out.
         </Banner>
       ) : (

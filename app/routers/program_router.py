@@ -87,7 +87,8 @@ def _profile_json(db: Session, prog: OutreachProgram, p: LocationProfile) -> dic
         "address": {k: getattr(loc, k, None) for k in
                     ("address_line1", "address_line2", "city", "state", "postal_code")} if loc else {},
         "facility_phone": p.facility_phone or (loc.phone if loc else None),
-        "website": p.website, "manager_name": p.manager_name,
+        "website": p.website or _reference_website(p), "manager_name": p.manager_name,
+        "website_is_reference": not p.website and bool(_reference_website(p)),
         "advisor_names": json.loads(p.advisor_names or "[]"),
         "appointment_link": p.appointment_link,
         "email_display_name": identity.display_name(prog, p) if not p.is_review_bucket else None,
@@ -103,6 +104,20 @@ def _profile_json(db: Session, prog: OutreachProgram, p: LocationProfile) -> dic
         "brand_settings": json.loads(p.brand_settings or "{}"),
         "verification_held": _held_location(p),
     }
+
+
+def _reference_website(p) -> Optional[str]:
+    """The location's official public page from scripts/sci_campuses.csv
+    (Website column), used only when no website has been entered on the
+    profile. Read-only reference: nothing is written to the profile."""
+    if p.is_review_bucket:
+        return None
+    try:
+        from app.services.programs import campuses
+        row = next((r for r in campuses.load_grouping() if r.get("Location") == p.official_name), None)
+        return ((row or {}).get("Website") or "").strip() or None
+    except Exception:                                   # noqa: BLE001
+        return None
 
 
 def _held_location(p) -> bool:
