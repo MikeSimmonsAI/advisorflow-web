@@ -1850,7 +1850,9 @@ function ClassicLeads() {
                   onClick={handleBulkSend}
                   disabled={bulkSending || !bulkMessage.trim() || sendableSelectedIds.length === 0}
                 >
-                  {bulkSending ? 'Sending…' : `${bulkMediaUrl ? '📸 Send MMS' : aiChannel === 'email' ? '✉️ Send Email' : '💬 Send SMS'} to ${sendableSelectedIds.length}`}
+                  {/* This box always sends a TEXT (/sms/send-batch or /sms/send-mms). The label used to
+                      borrow the AI channel pill and could read "Send Email" while texting. */}
+                  {bulkSending ? 'Sending…' : `${bulkMediaUrl ? '📸 Send MMS' : '💬 Send SMS'} to ${sendableSelectedIds.length}`}
                 </button>
               </div>
 
