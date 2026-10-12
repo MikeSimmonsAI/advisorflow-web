@@ -215,6 +215,8 @@ class ProgramSourceRecord(Base):
     approved_to_send_by = Column(String, nullable=True)
     # How Mike chose to work this person on Good to go: text_email | email_only | call.
     send_mode = Column(String, nullable=True)
+    # Slow drip: approved now, nothing goes out before this time (UTC).
+    scheduled_start_at = Column(DateTime, nullable=True)
     # Set only when the staged row is later committed to a live contact/lead.
     org_contact_id = Column(String, nullable=True)
     lead_id = Column(String, ForeignKey("leads.id"), nullable=True)

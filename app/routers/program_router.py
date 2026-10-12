@@ -1350,6 +1350,8 @@ class PickIn(BaseModel):
     lead_ids: List[str]
     confirm: Optional[str] = None
     mode: Optional[str] = None
+    start_at: Optional[str] = None          # ISO time; slow drip starts then
+    spacing_minutes: Optional[int] = None   # minutes between each contact's start
 
 
 @router.get("/send/contacts")
@@ -1390,7 +1392,23 @@ def send_approve(body: PickIn, db: Session = Depends(get_db), user: User = Depen
         raise HTTPException(status_code=422, detail="Confirm with SEND %d." % len(ids))
     if body.mode and body.mode not in send_approval.MODES:
         raise HTTPException(status_code=422, detail="Mode must be text_email, email_only or call.")
-    return send_approval.approve(db, prog, user, ids, mode=body.mode or "text_email")
+    start = None
+    if body.start_at:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        try:
+            start = _dt.fromisoformat(body.start_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Start time is not a valid date/time.")
+        if start.tzinfo is not None:
+            start = start.astimezone(_tz.utc).replace(tzinfo=None)
+        now = _dt.utcnow()
+        if start <= now:
+            start = None                         # in the past: start right away
+        elif start > now + _td(days=14):
+            raise HTTPException(status_code=422, detail="Start within the next 14 days.")
+    spacing = max(0, min(240, int(body.spacing_minutes or 0)))
+    return send_approval.approve(db, prog, user, ids, mode=body.mode or "text_email",
+                                 start_at=start, spacing_minutes=spacing)
 
 
 @router.post("/send/unapprove")
