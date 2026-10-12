@@ -1,118 +1,183 @@
-/* Health: compact service tiles first, technical detail below
-   (GET /program/health, refreshed every minute). Texting is shown as four
-   separate facts - configured, approved, switched on, seen working live - so
-   "configured" is never mistaken for "tested". A block the server did not
-   report is shown as Unknown. */
+/* Health: eight compact service modules first, then texting fact by fact,
+   operational checks and technical diagnostics on demand
+   (GET /program/health, refreshed every minute). Texting is four separate
+   facts - configured, carrier approved, switched on, proven by a live inbound
+   text - so "configured" is never mistaken for "tested". A block the server
+   did not report is "Unknown". When delivery events are off, bounce/complaint
+   counts are "Not tracked" - never a green zero. No secret ever reaches the
+   browser: the server reports status and detail only. */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
-import { Chip, Empty, ErrorLine, Loading, PageHead, STATUS_TONE, errText, when } from './ui'
+import { Chip, Drawer, Empty, ErrorLine, Icon, Kpi, Loading, PageHead, Panel, STATUS_TONE, errText, ago, when } from './ui'
 
 const TILES = [
-  ['email_system', 'Email'], ['sender_domain', 'Sender domain'], ['mailbox', 'Reply mailbox'], ['aliases', 'Location emails'],
-  ['sms', 'Texting · 844 line'], ['webhook', 'Delivery events'], ['campaigns', 'Campaigns'], ['held_contacts', 'Held contacts'],
+  ['email_system', 'Email system', 'mail'], ['sender_domain', 'Sender domain', 'globe'], ['mailbox', 'Reply mailbox', 'inbox'],
+  ['aliases', 'Location aliases', 'pin'], ['sms', 'Texting line', 'sms'], ['webhook', 'Delivery events', 'bolt'],
+  ['campaigns', 'Campaign runner', 'campaigns'], ['held_contacts', 'Held contacts', 'pause'],
 ]
 const CHECKS = [
-  ['failed_sends', 'Failed sends'], ['bounces', 'Bounces'], ['complaints', 'Complaints'], ['unmatched_replies', 'Unmatched replies'],
-  ['hot_responses', 'HOT responses (open)'], ['unhandled_hot', 'Unhandled HOT (past SLA)'], ['response_time', 'Response time'],
+  ['failed_sends', 'Failed sends'], ['bounces', 'Bounces', true], ['complaints', 'Complaints', true], ['unmatched_replies', 'Unmatched replies'],
+  ['hot_responses', 'HOT responses (open)'], ['unhandled_hot', 'HOT past SLA'], ['response_time', 'Response time'],
   ['automation_errors', 'Automation errors'], ['outlook_filing', 'Outlook filing'],
 ]
-const MARK = { ok: '✓', warn: '!', fail: '!', off: '–' }
+const MARK = { ok: 'check', warn: 'alert', fail: 'alert', off: 'pause' }
 const LABEL = { ok: 'Working', warn: 'Check', fail: 'Needs attention', off: 'Off' }
 
 const detailOf = b => b?.detail ?? (b?.count !== undefined ? `${b.count}` : b?.open !== undefined ? `${b.open} open` : '')
 
-export default function Health() {
+export default function Health({ goTab }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(null)
   const load = useCallback(() => {
     setBusy(true)
     api.get('/program/health').then(x => { setD(x); setErr('') }).catch(e => setErr(errText(e))).finally(() => setBusy(false))
   }, [])
   useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t) }, [load])
-  if (!d) return <><PageHead title="System health" />{err ? <ErrorLine text={err} /> : <Loading label="Checking…" />}</>
+  if (!d) return <><PageHead title="System Health" />{err ? <ErrorLine text={err} /> : <Loading label="Checking…" />}</>
 
   const sms = d.sms || null
+  const eventsOn = d.webhook ? d.webhook.status !== 'off' && d.webhook.status !== 'fail' : false
+  const tiles = TILES.map(([k, label, icon]) => ({ k, label, icon, b: d[k] }))
+  const attention = tiles.filter(t => t.b?.status === 'fail').length
+  const warn = tiles.filter(t => t.b?.status === 'warn').length
+  const working = tiles.filter(t => t.b?.status === 'ok').length
+  const openTile = open ? tiles.find(t => t.k === open) || { k: open, label: (CHECKS.find(c => c[0] === open) || [])[1], b: d[open] } : null
+
   return (
     <>
-      <PageHead title="System health" sub="Operational clarity first. Technical diagnostics when needed.">
-        <Chip tone={STATUS_TONE[d.overall]}>{d.overall === 'ok' ? 'All working' : d.overall === 'fail' ? 'Needs attention' : 'Check warnings'}</Chip>
-        <button type="button" className="sci-btn sm" disabled={busy} onClick={load}>{busy ? 'Checking…' : 'Check now'}</button>
+      <PageHead title="System Health" sub="Operational truth first, technical diagnostics on demand.">
+        <Chip tone={STATUS_TONE[d.overall]}>{d.overall === 'ok' ? 'All working' : d.overall === 'fail' ? 'Some services need attention' : 'Check warnings'}</Chip>
+        <button type="button" className="sci-btn" disabled={busy} onClick={load}><Icon name="refresh" />{busy ? 'Checking…' : 'Refresh checks'}</button>
       </PageHead>
-      <p className="sci-micro sci-muted" style={{ marginTop: -12, marginBottom: 16 }}>Checked {when(d.generated_at)} · refreshes every minute</p>
+
+      <section className="sci-kpis four" aria-label="Health summary">
+        <Kpi icon="check" tone="green" value={working} label="Modules working" note={`of ${TILES.length}`} />
+        <Kpi icon="alert" tone="red" value={attention} label="Need attention" note={warn ? `${warn} more to check` : 'Failing now'} />
+        <Kpi icon="bolt" tone={eventsOn ? 'blue' : 'gold'} value={eventsOn ? 'On' : 'Off'} label="Delivery events" note={eventsOn ? 'Bounces and complaints tracked' : 'Delivery not tracked'} />
+        <Kpi icon="clock" tone="slate" value={ago(d.generated_at) || '—'} label="Last checked" note="Refreshes every minute" />
+      </section>
       <ErrorLine text={err} />
 
       <section className="sci-tiles" aria-label="Services">
-        {TILES.map(([k, label]) => {
-          const b = d[k]
+        {tiles.map(({ k, label, icon, b }) => {
           const st = b?.status
           const tone = st ? (st === 'fail' ? 'bad' : st) : 'off'
           return (
-            <div className="sci-tile" key={k}>
-              <span className={`sci-tile-icon ${tone}`} aria-hidden="true">{st ? MARK[st] || '•' : '?'}</span>
-              <h3>{label}</h3>
-              <p><Chip tone={STATUS_TONE[st] || ''} plain>{st ? LABEL[st] || st : 'Unknown'}</Chip></p>
-              <p style={{ marginTop: 6 }}>{b ? (k === 'sms' ? smsLine(b) : detailOf(b) || '—') : 'Not reported by the server'}</p>
-            </div>
+            <button type="button" className="sci-tile" key={k} onClick={() => setOpen(k)} aria-expanded={open === k}>
+              <span className={`sci-tile-icon ${tone}`} aria-hidden="true"><Icon name={st ? icon : 'info'} /></span>
+              <span className="sci-tile-body">
+                <h3>{label}</h3>
+                <p><Chip tone={STATUS_TONE[st] || ''} plain>{st ? LABEL[st] || st : 'Unknown'}</Chip></p>
+                <p style={{ marginTop: 4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {b ? (k === 'sms' ? smsLine(b) : detailOf(b) || '—') : 'Not reported by the server'}
+                </p>
+              </span>
+            </button>
           )
         })}
       </section>
 
-      {sms && (
-        <section className="sci-panel sci-pad" style={{ marginBottom: 16 }} aria-labelledby="sci-texting">
-          <h2 id="sci-texting" className="sci-h2" style={{ marginBottom: 6 }}>Texting, fact by fact</h2>
+      <div className="sci-grid-even" style={{ marginBottom: 14 }}>
+        <Panel title="Texting — verify each fact separately" labelledBy="sci-texting">
+          {!sms ? <Empty icon="sms">Texting was not reported by the server.</Empty> : (
+            <>
+              <div className="sci-rows">
+                <Fact k="Line" v={sms.number || 'None'} ok={!!sms.number} />
+                <Fact k="Configured on this server" v={sms.configured ? 'Yes' : 'No'} ok={!!sms.configured} />
+                <Fact k="Approved by the carrier" v={sms.approved == null ? 'Unknown' : sms.approved ? `Yes${sms.approved_scope ? ` · ${sms.approved_scope}` : ''}` : 'No'} ok={sms.approved} />
+                <Fact k="Sending switched on" v={sms.sending_enabled ? 'On' : 'Off'} ok={!!sms.sending_enabled} />
+                <Fact k="Proven by a live inbound text" v={sms.last_inbound_at ? `Last inbound ${when(sms.last_inbound_at)}` : 'Not seen yet'} ok={sms.last_inbound_at ? true : null} />
+              </div>
+              <div className="sci-banner" style={{ margin: '10px 0 0' }}>
+                <span className="sci-banner-icon" aria-hidden="true"><Icon name="info" /></span>
+                <div className="sci-banner-body sci-micro">Configured does not mean approved, switched on or tested. Each fact is checked separately.</div>
+              </div>
+            </>
+          )}
+        </Panel>
+        <Panel title="Operational checks" labelledBy="sci-opchecks">
           <div className="sci-rows">
-            <Fact k="Number" v={sms.number || 'None'} ok={!!sms.number} />
-            <Fact k="Account configured on this server" v={sms.configured ? 'Yes' : 'No'} ok={!!sms.configured} />
-            <Fact k="Approved by the carrier / Twilio" v={sms.approved == null ? 'Unknown' : sms.approved ? `Yes${sms.approved_scope ? ` · ${sms.approved_scope}` : ''}` : 'No'} ok={sms.approved} />
-            <Fact k="Sending switched on" v={sms.sending_enabled ? 'On' : 'Off'} ok={!!sms.sending_enabled} />
-            <Fact k="Seen working live" v={sms.last_inbound_at ? `Last inbound text ${when(sms.last_inbound_at)}` : 'No inbound text seen yet'} ok={sms.last_inbound_at ? true : null} />
+            {CHECKS.map(([k, label, needsEvents]) => {
+              const b = d[k]
+              if (!b) return <div className="sci-kv" key={k}><span>{label}</span><span><Chip plain>Unknown</Chip></span></div>
+              const untracked = needsEvents && !eventsOn
+              return (
+                <button type="button" className="sci-kv sci-kvbtn" key={k} onClick={() => setOpen(k)}>
+                  <span>{label}</span>
+                  <span>{untracked ? <Chip tone="warn" plain title="Delivery events are off, so this cannot be counted">Not tracked</Chip>
+                    : <><Chip tone={STATUS_TONE[b.status] || ''} plain>{LABEL[b.status] || b.status}</Chip> <span className="sci-micro">{shortOf(k, b)}</span></>}</span>
+                </button>
+              )
+            })}
           </div>
-        </section>
-      )}
-
-      <div className="sci-grid-even">
-        <section className="sci-panel sci-pad" aria-labelledby="sci-opchecks">
-          <h2 id="sci-opchecks" className="sci-h2" style={{ marginBottom: 6 }}>Operational checks</h2>
-          <div className="sci-rows">
-            {CHECKS.map(([k, label]) => d[k] ? (
-              <div className="sci-kv" key={k}><span>{label}</span><span><Chip tone={STATUS_TONE[d[k].status] || ''} plain>{d[k].status}</Chip> {detailOf(d[k])}</span></div>
-            ) : null)}
-            <div className="sci-kv"><span>Last successful</span>
-              <span>inbound sync {when(d.last_successful?.inbound_sync)} · email send {when(d.last_successful?.email_send)} · webhook event {when(d.last_successful?.webhook_event)}</span>
-            </div>
-          </div>
-        </section>
-        <section className="sci-panel sci-pad" aria-labelledby="sci-tech">
-          <h2 id="sci-tech" className="sci-h2" style={{ marginBottom: 6 }}>Technical diagnostics</h2>
-          <div className="sci-rows">
-            {[...TILES, ...CHECKS].filter(([k]) => d[k]).map(([k, label]) => (
-              <details className="sci-details" key={k}>
-                <summary>{label}</summary>
-                <div className="sci-details-body">
-                  <div>{detailOf(d[k]) || 'No detail.'}</div>
-                  <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: '8px 0 0', background: '#f6f8f8', padding: 10, borderRadius: 8 }}>{JSON.stringify(d[k], null, 2)}</pre>
-                </div>
-              </details>
-            ))}
-          </div>
-        </section>
+          <p className="sci-footnote"><Icon name="info" />"Not tracked" means the server cannot see it - it is not zero delivered or zero bounced.</p>
+        </Panel>
       </div>
 
-      <Placement />
-
-      <section className="sci-panel sci-pad" style={{ marginTop: 16 }} aria-labelledby="sci-decisions-feed">
-        <h2 id="sci-decisions-feed" className="sci-h2" style={{ marginBottom: 6 }}>Recent automated decisions</h2>
-        {(d.decisions || []).length === 0 ? <Empty>Nothing yet.</Empty> : (
-          <div className="sci-rows">
-            {d.decisions.map((x, i) => (
-              <div className="sci-kv" key={i}><span>{x.kind.replace(/_/g, ' ')} · {x.text}</span><span>{when(x.at)}</span></div>
+      <Panel title="Technical diagnostics" labelledBy="sci-tech" aside={<span className="sci-micro sci-muted">Checked {when(d.generated_at)}</span>}>
+        <details className="sci-details">
+          <summary>Last successful events</summary>
+          <div className="sci-details-body">
+            Inbound sync {when(d.last_successful?.inbound_sync)} · email send {when(d.last_successful?.email_send)} · delivery event {when(d.last_successful?.webhook_event)}
+          </div>
+        </details>
+        <details className="sci-details">
+          <summary>Recent automated decisions ({(d.decisions || []).length})</summary>
+          <div className="sci-details-body">
+            {(d.decisions || []).length === 0 ? 'Nothing yet.' : (
+              <div className="sci-rows">
+                {d.decisions.map((x, i) => (
+                  <div className="sci-kv" key={i}><span>{x.kind.replace(/_/g, ' ')} · {x.text}</span><span>{when(x.at)}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
+        <details className="sci-details">
+          <summary>Inbox placement</summary>
+          <div className="sci-details-body"><Placement /></div>
+        </details>
+        <details className="sci-details">
+          <summary>Raw module output (no secrets)</summary>
+          <div className="sci-details-body">
+            {[...TILES, ...CHECKS].filter(([k]) => d[k]).map(([k, label]) => (
+              <div key={k} style={{ marginBottom: 8 }}><b>{label}</b><pre className="sci-pre">{JSON.stringify(d[k], null, 2)}</pre></div>
             ))}
           </div>
+        </details>
+      </Panel>
+
+      <Drawer open={!!openTile} onClose={() => setOpen(null)} title={openTile?.label || ''} sub={openTile?.b ? `Status: ${LABEL[openTile.b.status] || openTile.b.status || 'Unknown'}` : 'Not reported by the server'}
+        footer={openTile && ['campaigns'].includes(openTile.k) ? <button type="button" className="sci-btn" onClick={() => goTab('campaigns')}>Open Campaigns</button>
+          : openTile && ['held_contacts'].includes(openTile.k) ? <button type="button" className="sci-btn" onClick={() => goTab('review', { queue: 'on_hold' })}>Open held records</button>
+            : openTile && ['unmatched_replies', 'hot_responses', 'unhandled_hot'].includes(openTile.k) ? <button type="button" className="sci-btn" onClick={() => goTab('responses')}>Open Responses</button>
+              : openTile && openTile.k === 'aliases' ? <button type="button" className="sci-btn" onClick={() => goTab('settings')}>Location email settings</button> : null}>
+        {openTile && (
+          openTile.b ? (
+            <div className="sci-stack" style={{ gap: 10 }}>
+              <p className="sci-small">{openTile.k === 'sms' ? smsLine(openTile.b) : detailOf(openTile.b) || 'No detail.'}</p>
+              {(openTile.k === 'bounces' || openTile.k === 'complaints') && !eventsOn && (
+                <div className="sci-banner"><div className="sci-banner-body sci-micro">Delivery events are off, so this count is not tracked.</div></div>
+              )}
+              <pre className="sci-pre">{JSON.stringify(openTile.b, null, 2)}</pre>
+            </div>
+          ) : <Empty>Not reported by the server.</Empty>
         )}
-      </section>
+      </Drawer>
     </>
   )
+}
+
+function shortOf(k, b) {
+  if (k === 'response_time') return b.median_minutes_all == null ? 'not measured yet' : `${b.median_minutes_all} min median`
+  if (k === 'hot_responses') return `${b.open ?? 0} open`
+  if (k === 'unhandled_hot') return `${b.count ?? 0} · SLA ${b.sla_minutes} min`
+  if (k === 'failed_sends') return `${b.provider_failed_7d ?? 0} in 7 days`
+  if (k === 'outlook_filing') return b.folder_root ? `${b.filed} filed · ${b.failed} failed` : 'off'
+  if (b.count !== undefined) return `${b.count}`
+  return ''
 }
 
 function smsLine(b) {
@@ -153,7 +218,7 @@ function Placement() {
     try { await api.post(`/program/placement-checks/${id}/result`, { folder }); load() } catch (e) { setMsg(errText(e)) }
   }
   return (
-    <section className="sci-panel sci-pad" style={{ marginTop: 16 }} aria-labelledby="sci-placement">
+    <section aria-labelledby="sci-placement">
       <div className="sci-panel-head"><h2 id="sci-placement">Inbox placement</h2><Chip tone={d.readiness.ok ? 'ok' : 'warn'}>{d.readiness.ok ? 'Ready' : 'Not proven'}</Chip></div>
       <p className="sci-small sci-muted" style={{ marginTop: 0 }}>{d.readiness.detail}. Seeds are inboxes you own — never customers.</p>
       <div className="sci-form">

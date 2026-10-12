@@ -5,11 +5,12 @@
    suppression, DNC, consent, the SCI switch) decide - never this page. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../api/client'
-import { CLASS_LABEL, CLASS_TONE, Chip, Empty, ErrorLine, PageHead, errText, initials, when } from './ui'
+import { CLASS_LABEL, CLASS_TONE, Chip, Empty, ErrorLine, FilterChips, Icon, Kpi, PageHead, SearchBox, ago, errText, initials, when } from './ui'
 
 const OPTED_OUT_STATUSES = ['dnc', 'opted_out', 'do_not_contact', 'unsubscribed']
 
 export default function Responses({ locationId, onChange, navigate }) {
+  const [q, setQ] = useState('')
   const [channel, setChannel] = useState('all')        // all | sms | email | calls | unknown
   const [status, setStatus] = useState('open')
   const [cls, setCls] = useState('')
@@ -51,82 +52,98 @@ export default function Responses({ locationId, onChange, navigate }) {
     try { await api.post(`/program/unmatched-replies/${u.id}/handled`, {}); setSel(null); loadSide(); onChange() } catch (e) { setErr(errText(e)) }
   }
 
-  const list = (rows || []).filter(r => channel === 'all' || r.channel === channel)
-  const newCount = (rows || []).filter(r => r.status === 'new').length
+  const term = q.trim().toLowerCase()
+  const hit = (...xs) => !term || xs.some(x => String(x || '').toLowerCase().includes(term))
+  const list = (rows || []).filter(r => (channel === 'all' || r.channel === channel) && hit(r.name, r.body, r.summary, r.location, r.source_lead_id))
+  const callList = (calls || []).filter(c => hit(c.lead_name, c.from, c.transcript))
+  const unkList = unknown.filter(u => hit(u.from, u.subject, u.body, u.alias))
+  const all = rows || []
+  const newCount = all.filter(r => r.status === 'new').length
+  const hotCount = all.filter(r => r.class === 'hot' && r.status !== 'closed').length
+  const activeCount = all.filter(r => r.status === 'active').length
+  const slaCount = all.filter(r => r.sla_breached).length
   const chips = [
-    ['all', 'All', (rows || []).length], ['sms', 'Text', (rows || []).filter(r => r.channel === 'sms').length],
-    ['email', 'Email', (rows || []).filter(r => r.channel === 'email').length],
-    ['calls', 'Calls', calls ? calls.length : null], ['unknown', 'Unknown senders', unknown.length],
+    ['all', 'All', all.length], ['sms', 'Text', all.filter(r => r.channel === 'sms').length],
+    ['email', 'Email', all.filter(r => r.channel === 'email').length],
+    ['calls', 'Voicemail', calls ? calls.length : null], ['unknown', 'Unknown', unknown.length],
   ]
+  const statusLabel = { open: 'open', new: 'new', opened: 'opened', responded: 'responded', active: 'active', closed: 'closed', '': 'any status' }[status]
 
   return (
     <>
-      <PageHead title="Conversations" sub="One connected inbox for text replies, email replies and voicemails." />
+      <PageHead title="Responses" sub="One connected inbox for text messages, email replies and voicemails.">
+        <Chip tone={newCount ? 'info' : ''}>{newCount} new {newCount === 1 ? 'reply' : 'replies'}</Chip>
+        <button type="button" className="sci-btn" onClick={() => { setChannel('unknown'); setSel(null) }}><Icon name="alert" />View unmatched{unknown.length ? ` (${unknown.length})` : ''}</button>
+      </PageHead>
+      <section className="sci-kpis four" aria-label="Response numbers">
+        <Kpi icon="mail" tone="blue" value={rows ? newCount : null} label="New messages" note={`In ${statusLabel} view`} onClick={() => { setStatus('new'); setChannel('all') }} />
+        <Kpi icon="alert" tone="red" value={rows ? hotCount : null} label="HOT responses" note="Open, need a person" onClick={() => { setCls('hot'); setChannel('all') }} />
+        <Kpi icon="responses" tone="purple" value={rows ? activeCount : null} label="Active conversations" onClick={() => { setStatus('active'); setChannel('all') }} />
+        <Kpi icon="clock" tone="gold" value={rows ? slaCount : null} label="Past response SLA" note="Waiting longer than the target" />
+      </section>
       <ErrorLine text={err} />
       <section className="sci-panel sci-convo" aria-label="Conversations">
         <div className="sci-convo-col">
-          <div className="sci-panel-head" style={{ marginBottom: 10 }}>
-            <h2 className="sci-h2">Inbox</h2>
+          <div className="sci-panel-head" style={{ marginBottom: 8 }}>
+            <h2 className="sci-h2">Unified inbox</h2>
             {newCount > 0 && <Chip tone="bad">{newCount} new</Chip>}
           </div>
-          <div className="sci-filterchips" role="group" aria-label="Channel">
-            {chips.map(([k, label, n]) => (
-              <button key={k} type="button" aria-pressed={channel === k} onClick={() => { setChannel(k); setSel(null) }}>
-                {label}{n != null && <span className="n">{n}</span>}
-              </button>
-            ))}
-          </div>
+          <div style={{ marginBottom: 8 }}><SearchBox id="sci-r-q" value={q} onChange={setQ} placeholder="Search conversations" label="Search conversations" width="100%" /></div>
+          <FilterChips items={chips} value={channel} onChange={k => { setChannel(k); setSel(null) }} label="Channel" />
           {(channel === 'all' || channel === 'sms' || channel === 'email') && (
-            <div className="sci-row-gap" style={{ margin: '12px 0' }}>
+            <div className="sci-row-gap" style={{ margin: '8px 0 4px', flexWrap: 'nowrap' }}>
               <label className="sci-sr" htmlFor="sci-r-status">Status</label>
-              <select id="sci-r-status" className="sci-input" style={{ flex: 1, minHeight: 36, padding: '6px 10px', fontSize: 13 }} value={status} onChange={e => setStatus(e.target.value)}>
-                <option value="open">Open</option><option value="new">New</option><option value="opened">Opened</option>
+              <select id="sci-r-status" className="sci-input sm" style={{ flex: 1, width: 0 }} value={status} onChange={e => setStatus(e.target.value)}>
+                <option value="open">Open</option><option value="new">New</option><option value="opened">Opened (follow-up)</option>
                 <option value="responded">Responded</option><option value="active">Active</option><option value="closed">Closed</option>
                 <option value="">All statuses</option>
               </select>
               <label className="sci-sr" htmlFor="sci-r-class">Class</label>
-              <select id="sci-r-class" className="sci-input" style={{ flex: 1, minHeight: 36, padding: '6px 10px', fontSize: 13 }} value={cls} onChange={e => setCls(e.target.value)}>
+              <select id="sci-r-class" className="sci-input sm" style={{ flex: 1, width: 0 }} value={cls} onChange={e => setCls(e.target.value)}>
                 <option value="">All classes</option>
                 {Object.entries(CLASS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
           )}
-          <div className="sci-list" aria-label="Messages" style={{ marginTop: 8 }}>
+          <div className="sci-list" aria-label="Messages" style={{ marginTop: 6 }}>
             {channel === 'calls' ? (
-              calls === null ? <p className="sci-loading">Loading…</p> : calls.length === 0 ? <Empty>No voicemails.</Empty> : calls.map(c => (
+              calls === null ? <p className="sci-loading">Loading…</p> : callList.length === 0 ? <Empty icon="voicemail">No voicemails.</Empty> : callList.map(c => (
                 <button key={c.id} type="button" className="sci-listitem" aria-current={sel?.kind === 'call' && sel.item.id === c.id}
                   onClick={() => setSel({ kind: 'call', item: c })}>
-                  <span className="sci-initials">VM</span>
+                  <span className="sci-initials vm"><Icon name="voicemail" /></span>
                   <span className="sci-listitem-body">
                     <b>{c.lead_name || c.from || 'Unknown caller'}</b>
                     <small>{c.transcript ? c.transcript : c.has_recording ? 'Recording saved' : 'Voicemail'}</small>
-                    <small>{when(c.received_at)}{c.duration_seconds ? ` · ${c.duration_seconds}s` : ''}</small>
+                    <small>{ago(c.received_at)}{c.duration_seconds ? ` · ${c.duration_seconds}s` : ''}</small>
                   </span>
                 </button>
               ))
             ) : channel === 'unknown' ? (
-              unknown.length === 0 ? <Empty>No replies from unknown senders.</Empty> : unknown.map(u => (
+              unkList.length === 0 ? <Empty icon="inbox">No replies from unknown senders.</Empty> : unkList.map(u => (
                 <button key={u.id} type="button" className="sci-listitem" aria-current={sel?.kind === 'unknown' && sel.item.id === u.id}
                   onClick={() => setSel({ kind: 'unknown', item: u })}>
-                  <span className="sci-initials">?</span>
+                  <span className="sci-initials unk">?</span>
                   <span className="sci-listitem-body">
                     <b>{u.from || 'Unknown sender'}</b>
                     <small>{u.subject || u.body}</small>
-                    <small>to {u.alias} · {when(u.received_at)}</small>
+                    <small>to {u.alias} · {ago(u.received_at)}</small>
                   </span>
                 </button>
               ))
             ) : (
-              rows === null ? <p className="sci-loading">Loading…</p> : list.length === 0 ? <Empty>Nothing here.</Empty> : list.map(r => (
+              rows === null ? <p className="sci-loading">Loading…</p> : list.length === 0 ? (
+                <Empty icon="responses" title={all.length ? 'Nothing matches.' : 'No replies received yet.'}>
+                  {all.length ? 'Try another filter or search.' : 'New conversations will appear here the moment a family replies.'}
+                </Empty>
+              ) : list.map(r => (
                 <button key={r.id} type="button" className="sci-listitem" aria-current={sel?.kind === 'response' && sel.item.id === r.id} onClick={() => view(r)}>
                   <span className={`sci-initials${r.class === 'hot' ? ' hot' : ''}`}>{initials(r.name)}</span>
                   <span className="sci-listitem-body">
-                    <b>{r.name || 'Contact'}{r.location ? ` · ${r.location}` : ''}</b>
+                    <b>{r.name || 'Contact'}{r.status === 'new' && <span className="sci-newdot" aria-label="new" />}</b>
                     <small>{r.body || r.summary}</small>
                     <small>
                       <Chip tone={CLASS_TONE[r.class]} plain>{r.label || CLASS_LABEL[r.class]}</Chip>{' '}
-                      {when(r.received_at)} · {r.channel === 'sms' ? 'Text' : 'Email'}
-                      {r.status === 'new' && ' · new'}{r.sla_breached && ' · past SLA'}
+                      {r.channel === 'sms' ? 'Text' : 'Email'} · {ago(r.received_at)}{r.sla_breached && ' · past SLA'}
                     </small>
                   </span>
                 </button>
@@ -137,7 +154,8 @@ export default function Responses({ locationId, onChange, navigate }) {
 
         {!sel ? (
           <div className="sci-convo-col sci-convo-empty" style={{ display: 'grid', placeItems: 'center' }}>
-            <Empty title="Select a conversation">The full thread, the contact's location and the next step appear here.</Empty>
+            <Empty icon="responses" title="Every family deserves a timely reply.">Select a conversation to see the full timeline, the family's location, consent and the next step.</Empty>
+            <p className="sci-footnote"><Icon name="lock" />STOP and suppression rules always apply.</p>
           </div>
         ) : sel.kind === 'response' ? (
           <ConversationPane r={sel.item} mark={mark} navigate={navigate} onSent={() => { load(); onChange() }} />
@@ -237,7 +255,7 @@ function ConversationPane({ r, mark, navigate, onSent }) {
       </div>
 
       <aside className="sci-convo-col sci-convo-ctx" aria-label="Contact context">
-        <h2 className="sci-h2" style={{ marginBottom: 8 }}>Contact context</h2>
+        <h2 className="sci-h2" style={{ marginBottom: 4 }}>Family context</h2>
         <dl className="sci-ctx" style={{ margin: 0 }}>
           <dt>Location</dt><dd>{r.location || 'Location review — nothing is sent until assigned'}</dd>
           <dt>Channel</dt><dd>{r.channel === 'sms' ? 'Inbound text' : 'Inbound email'}{r.reply_to_alias ? ` · to ${r.reply_to_alias}` : ''}</dd>
@@ -261,11 +279,11 @@ function ConversationPane({ r, mark, navigate, onSent }) {
             </div>
           </div>
         )}
-        <div className="sci-row-gap" style={{ marginTop: 16 }}>
-          <button type="button" className="sci-btn sm" onClick={() => mark(r, 'opened')}>Mark opened</button>
-          <button type="button" className="sci-btn sm" onClick={() => mark(r, 'responded')}>I responded</button>
-          <button type="button" className="sci-btn sm" onClick={() => mark(r, 'active')}>Active</button>
-          <button type="button" className="sci-btn sm" onClick={() => mark(r, 'closed')}>Close</button>
+        <h3 className="sci-h3" style={{ marginTop: 14 }}>Mark this conversation</h3>
+        <div className="sci-seg" role="group" aria-label="Conversation status">
+          {[['opened', 'Opened'], ['responded', 'I responded'], ['active', 'Active'], ['closed', 'Closed']].map(([k, label]) => (
+            <button key={k} type="button" aria-pressed={r.status === k} onClick={() => mark(r, k)}>{label}</button>
+          ))}
         </div>
         {r.lead_id && <button type="button" className="sci-btn primary" style={{ marginTop: 12, width: '100%' }} onClick={() => navigate(`/leads/${r.lead_id}`)}>Open full record</button>}
       </aside>

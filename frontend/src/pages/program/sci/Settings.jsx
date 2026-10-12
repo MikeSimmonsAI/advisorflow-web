@@ -4,11 +4,11 @@
    Kerry Allan stays a sender profile until a real user account exists. */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../../api/client'
-import { Chip, Empty, ErrorLine, Field, PageHead, errText, num, when } from './ui'
+import { Chip, Empty, ErrorLine, Field, Icon, PageHead, Panel, errText, num, when } from './ui'
 
 const CATS = [
-  ['general', 'General'], ['communications', 'Communications'], ['email', 'Email'],
-  ['access', 'Users & Access'], ['integrations', 'Integrations'], ['safety', 'Safety & Launch'],
+  ['general', 'General', 'settings'], ['communications', 'Communications', 'responses'], ['email', 'Email', 'mail'],
+  ['access', 'Users & Access', 'users'], ['integrations', 'Integrations', 'link'], ['safety', 'Safety & Launch', 'shield'],
 ]
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const LABELS = {
@@ -46,7 +46,7 @@ function validate(f) {
   return e
 }
 
-export default function Settings({ isManager, program, readiness, locations, onChange }) {
+export default function Settings({ isManager, program, readiness, locations, onChange, goTab, automation }) {
   const [cat, setCat] = useState('general')
   const [form, setForm] = useState(() => formFrom(program))
   const [saved, setSaved] = useState(() => formFrom(program))
@@ -85,17 +85,25 @@ export default function Settings({ isManager, program, readiness, locations, onC
 
   return (
     <>
-      <PageHead title="Program settings" sub="Configuration grouped by purpose, not buried in one long form." />
+      <PageHead title="Program Settings" sub="Keep identities, communications, permissions and safety controls organized.">
+        <Chip tone={isManager ? 'info' : ''}>{isManager ? 'Workspace manager' : 'Read-only'}</Chip>
+        {isManager && savable && (
+          <button type="button" className="sci-btn gold" disabled={!dirty || state.kind === 'saving'} onClick={save}>
+            <Icon name="check" />{state.kind === 'saving' ? 'Saving…' : 'Save changes'}
+          </button>
+        )}
+      </PageHead>
       <div className="sci-settings">
         <nav className="sci-panel sci-settings-nav" aria-label="Settings categories">
-          {CATS.map(([k, label]) => (
-            <button key={k} type="button" aria-current={cat === k} onClick={() => setCat(k)}>{label}</button>
+          {CATS.map(([k, label, icon]) => (
+            <button key={k} type="button" aria-current={cat === k} onClick={() => setCat(k)}><Icon name={icon} />{label}</button>
           ))}
+          {!isManager && <p className="sci-micro sci-muted" style={{ padding: '8px 12px 0', margin: 0 }}>Only a workspace manager can change settings.</p>}
         </nav>
 
         <section className="sci-panel sci-pad" aria-labelledby="sci-set-title">
           <div className="sci-panel-head">
-            <h2 id="sci-set-title">{CATS.find(c => c[0] === cat)[1]}</h2>
+            <h2 id="sci-set-title">{CATS.find(c => c[0] === cat)[1]}{cat === 'general' ? ' — program identity' : ''}</h2>
             {savable && dirty && <Chip tone="warn">Unsaved changes</Chip>}
           </div>
 
@@ -164,6 +172,10 @@ export default function Settings({ isManager, program, readiness, locations, onC
               <div className="sci-rows">
                 {['email_sender', 'email_reply_mailbox', 'sms_number', 'sms_reply_routing', 'link_domain', 'location_email_aliases']
                   .map(k => <StatusRow key={k} item={items[k]} label={LABELS[k]} />)}
+                <div className="sci-kv">
+                  <span>Booking calendar owner<span className="sci-micro sci-muted" style={{ display: 'block' }}>Set from the booking & calendar setup; shown here read-only</span></span>
+                  <span><Chip tone={program.booking_user_id ? 'ok' : ''} plain>{program.booking_user_id ? 'Linked' : 'Not set'}</Chip></span>
+                </div>
               </div>
               <p className="sci-micro sci-muted" style={{ margin: 0 }}>Keys and tokens live on the server only; this page shows whether each connection works, never the secret itself.</p>
             </div>
@@ -190,6 +202,24 @@ export default function Settings({ isManager, program, readiness, locations, onC
             </div>
           )}
         </section>
+
+        <aside className="sci-settings-aside sci-stack">
+          <Panel title="Workspace summary" labelledBy="sci-ws-sum">
+            <div className="sci-ctrl"><span>Facilities</span><b>{num(locations.length)}{held.length ? ` · ${held.length} held` : ''}</b></div>
+            <div className="sci-ctrl"><span>Primary sender</span><b>{program.primary_contact_name || 'Not provided'}</b></div>
+            <div className="sci-ctrl"><span>Sender identity</span><Chip tone={program.customer_identity_locked ? 'ok' : 'warn'} plain>{program.customer_identity_locked ? 'Locked' : 'Unlocked'}</Chip></div>
+            <div className="sci-ctrl"><span>Campaigns</span><Chip tone={automation?.active_campaign_families ? 'ok' : ''} plain>{automation?.active_campaign_families ? `${automation.active_campaign_families} on` : 'All off'}</Chip></div>
+            <div className="sci-ctrl"><span>Texting</span><span className="sci-muted">{sms ? (sms.sending_enabled ? 'Sending on' : 'Sending off') : 'Checking…'}</span></div>
+            <div className="sci-ctrl" style={{ borderBottom: 0 }}><span>HOT reply SLA</span><b>{program.hot_sla_minutes ?? '—'} min</b></div>
+          </Panel>
+          <Panel title="Need to change outbound settings?" labelledBy="sci-ws-out">
+            <p className="sci-micro sci-muted" style={{ margin: '0 0 10px' }}>Campaign activation, launch readiness and safety controls live in their own screens with typed confirmations.</p>
+            <div className="sci-row-gap">
+              <button type="button" className="sci-btn sm" onClick={() => setCat('safety')}><Icon name="shield" />Safety & Launch</button>
+              <button type="button" className="sci-btn sm" onClick={() => goTab('launch')}><Icon name="launch" />Launch readiness</button>
+            </div>
+          </Panel>
+        </aside>
       </div>
     </>
   )
