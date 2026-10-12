@@ -192,6 +192,25 @@ PLAYBOOKS: Dict[str, Dict] = {
         subjects={1: ["Following up from {location}"], 2: ["Why families plan ahead"],
                   3: ["Where to start"], 4: ["A short conversation at {location}?"],
                   5: ["Should I keep this open for you?"], REACTIVATION: ["Still here if you need us - {location}"]}),
+    # Seminar and Web Lead had no playbook and fell back to re-engagement, so a
+    # first email that rightly said "you signed up for one of our seminars" was
+    # HELD by the quality gate for not saying why we were writing.
+    "seminar": _pb(
+        "seminar", "Seminar",
+        "you signed up for one of our planning seminars", "planning ahead",
+        "Families who came to a seminar often tell us the most useful part was simply writing "
+        "their wishes down, so nobody has to guess at a hard time.",
+        "A common question is where to start after a seminar. Usually it's one short "
+        "conversation about what matters to you - nothing has to be decided then.",
+        ["the person signed up for a planning seminar"]),
+    "web_lead": _pb(
+        "web_lead", "Website Request",
+        "you asked for information on our website", "planning ahead",
+        "Families who plan ahead usually tell us the biggest benefit is that their wishes are "
+        "written down, so nobody has to guess at a hard time.",
+        "A common question is where to even start. Usually it's one short conversation about "
+        "what matters to you.",
+        ["the person asked for information on the location's website"]),
 }
 FAMILY_FALLBACK = "re_engagement"
 
@@ -206,16 +225,16 @@ TOUCH_STRATEGY = {
 }
 
 _EMAIL = {
-    1: ("Hi {first_name},\n\nThis is {contact} with {location}. {Why}, and I wanted to personally "
-        "make sure you received what you needed.\n\n{flyer_line}"
-        "Is there anything specific you'd like to know? Just reply to this email and I'll get back "
-        "to you myself.\n\n{contact}\n{location}"),
-    2: ("Hi {first_name},\n\n{useful}\n\nIf a question comes up as you look things over, just reply "
-        "here - I read every reply myself.\n\n{contact}\n{location}"),
+    1: ("Hi {first_name},\n\nIt's {contact} at {location}. {Why}, and I want to make sure it "
+        "actually got to you.\n\n{flyer_line}"
+        "Is there anything I can send you or help with? Just reply here and I'll take care of it."
+        "\n\n{contact}\n{location}"),
+    2: ("Hi {first_name},\n\nIt's {contact} again at {location}. {useful}\n\nIf a question comes "
+        "up, just reply here. I read every reply myself.\n\n{contact}\n{location}"),
     3: ("Hi {first_name},\n\n{question}\n\nWhat would be most helpful to know? A one-line reply is "
         "plenty.\n\n{contact}\n{location}"),
     4: ("Hi {first_name},\n\nSometimes it's easier to talk things through in person. I'd be glad to "
-        "set aside a few unhurried minutes with you at {location} - no decisions needed.\n\n"
+        "set aside a few unhurried minutes with you at {location}, no decisions needed.\n\n"
         "If that would help, just reply with a day that tends to work for you.\n\n{contact}\n{location}"),
     5: ("Hi {first_name},\n\nI don't want to keep filling your inbox. Would you like me to keep your "
         "request open, or close it out for now? A one-word reply either way is perfect.\n\n"
@@ -225,6 +244,22 @@ _EMAIL = {
                    "the timing is right for you.\n\nIf there's anything you'd like to know, just "
                    "reply here.\n\n{contact}\n{location}"),
 }
+# Subjects read like one person writing to another. The playbooks' older
+# subject lists ("A quick tip from ...", "Why families plan ahead") read like a
+# newsletter, and Yahoo filed them under Offers or Spam (inbox tests 2026-10-12).
+PERSONAL_SUBJECTS = {
+    1: "Following up, {first_name}",
+    2: "A thought for you, {first_name}",
+    3: "{first_name}, a quick question",
+    4: "Would a short visit help, {first_name}?",
+    5: "Should I keep this open, {first_name}?",
+    REACTIVATION: "Still here for you, {first_name}",
+}
+PERSONAL_SUBJECTS_NO_NAME = {
+    1: "Following up", 2: "A thought for you", 3: "A quick question",
+    4: "Would a short visit help?", 5: "Should I keep this open?", REACTIVATION: "Still here for you",
+}
+
 _SMS = {
     1: "Hi {first_name}, this is {contact} with {location}. {Why} - did you get what you needed? Just reply here.",
     2: "Hi {first_name}, {contact} at {location}. Quick tip on {topic}: reply and I'll send it over.",
@@ -354,9 +389,7 @@ def compose(packet: Dict, touch, channel: str = "email", *, flyer_line: str = ""
         "location": packet.get("location") or "",
         "why": pb["why"], "Why": _cap(pb["why"]),
         "topic": pb["topic"], "useful": pb["useful_info"], "question": pb["common_question"],
-        "flyer_line": (flyer_line.strip() + "\n\n") if flyer_line and flyer_line.strip() else (
-            "If you'd like me to send the information again, just say so and I'll send it to you "
-            "personally.\n\n" if touch == 1 and channel == "email" else ""),
+        "flyer_line": (flyer_line.strip() + "\n\n") if flyer_line and flyer_line.strip() else "",
     }
     from app.services.programs.identity import render
     tmpl = (_EMAIL if channel == "email" else _SMS).get(touch)
@@ -365,8 +398,9 @@ def compose(packet: Dict, touch, channel: str = "email", *, flyer_line: str = ""
     body = render(tmpl, fields)
     subject = None
     if channel == "email":
-        options = pb["subjects"].get(touch) or ["A note from {location}"]
-        subject = render(options[variant % len(options)], fields)
+        named = bool((packet.get("first_name") or "").strip())
+        subject = render((PERSONAL_SUBJECTS if named else PERSONAL_SUBJECTS_NO_NAME).get(
+            touch, "A note from {location}"), fields)
     return {"touch": touch, "channel": channel, "strategy": TOUCH_STRATEGY.get(touch),
             "subject": subject, "body": body, "family": pb["key"]}
 
