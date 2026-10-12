@@ -77,6 +77,9 @@ class OutreachProgram(Base):
     # this program's email goes out from, instead of the email service.
     # NULL = the email service. See programs/mailbox_send.py.
     send_via_mailbox = Column(String, nullable=True)
+    # EMAIL PROVIDER HOLD: JSON list of provider families (gmail, yahoo, outlook,
+    # icloud, other) whose campaign email waits; texts still go. NULL = none held.
+    email_hold_providers = Column(Text, nullable=True)
     # APPROVAL MODE: automated sends go only to contacts a manager approved on
     # Choose & Send. Switched on by the first approval; never switched off by code.
     require_send_approval = Column(Boolean, nullable=False, default=False)

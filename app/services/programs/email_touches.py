@@ -43,6 +43,7 @@ go out" view.
 """
 import base64
 import html
+import json
 import logging
 import os
 import re
@@ -261,11 +262,62 @@ def _sender(db: Session, prog: OutreachProgram, lead: Lead) -> Optional[User]:
     return admins[0] if admins else None
 
 
-def _skip_reason(db: Session, lead: Lead, replied: bool) -> Optional[str]:
+# EMAIL PROVIDER HOLD: a program can hold email to whole provider families
+# (Yahoo filters new senders hard, and AOL / AT&T / SBCGlobal run on Yahoo's
+# mail system). Held contacts still get their texts; their email waits until
+# the provider is taken off hold. Nothing is recorded, so nothing is burned.
+PROVIDER_DOMAINS = {
+    "gmail": {"gmail.com", "googlemail.com"},
+    "yahoo": {"yahoo.com", "ymail.com", "rocketmail.com", "aol.com", "aim.com", "att.net",
+              "sbcglobal.net", "bellsouth.net", "pacbell.net", "swbell.net", "flash.net",
+              "prodigy.net", "ameritech.net", "nvbell.net", "wans.net", "snet.net",
+              "frontiernet.net", "verizon.net"},
+    "outlook": {"outlook.com", "hotmail.com", "live.com", "msn.com", "passport.com"},
+    "icloud": {"icloud.com", "me.com", "mac.com"},
+}
+PROVIDER_LABELS = {"gmail": "Gmail", "yahoo": "Yahoo / AOL / AT&T", "outlook": "Outlook / Hotmail",
+                   "icloud": "Apple iCloud", "other": "other"}
+
+
+def email_provider(addr: Optional[str]) -> Optional[str]:
+    """gmail / yahoo / outlook / icloud / other, or None for no address."""
+    a = (addr or "").strip().lower()
+    if "@" not in a:
+        return None
+    domain = a.rsplit("@", 1)[1]
+    for key, domains in PROVIDER_DOMAINS.items():
+        if domain in domains:
+            return key
+    first = domain.split(".", 1)[0]
+    if first in ("yahoo", "aol"):
+        return "yahoo"
+    if first in ("hotmail", "outlook", "live"):
+        return "outlook"
+    return "other"
+
+
+def held_providers(prog) -> set:
+    try:
+        return set(json.loads(getattr(prog, "email_hold_providers", None) or "[]"))
+    except (ValueError, TypeError):
+        return set()
+
+
+def provider_hold_reason(prog, addr: Optional[str]) -> Optional[str]:
+    p = email_provider(addr)
+    if p and p in held_providers(prog):
+        return "texts only for now - %s email is on hold" % PROVIDER_LABELS.get(p, p)
+    return None
+
+
+def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[str]:
     if not (lead.email or "").strip():
         return "no email address"
     if lead.allow_email is False:
         return "email opt-out of record"
+    hold = provider_hold_reason(prog, lead.email) if prog is not None else None
+    if hold:
+        return hold
     status = (lead.status or "").strip().lower()
     if status == "dnc":
         return "do not contact"
@@ -417,7 +469,7 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
             continue
         out.append({"lead": lead, "record": master, "family": fam, "touch": touch,
                     "existing": mine.get(touch), "replied": lead_id in replied,
-                    "skip": _skip_reason(db, lead, lead_id in replied) if with_skip else None})
+                    "skip": _skip_reason(db, lead, lead_id in replied, prog) if with_skip else None})
     return out
 
 
@@ -508,7 +560,7 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
                     report["held_no_flyer"] += 1
                     continue
             if item["skip"] is None and not dry_run:
-                item["skip"] = _skip_reason(db, lead, item["replied"])
+                item["skip"] = _skip_reason(db, lead, item["replied"], prog)
             if item["skip"]:
                 report["skipped"] += 1
                 continue

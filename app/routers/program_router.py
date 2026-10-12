@@ -121,6 +121,11 @@ def _iso(dt):
     return dt.isoformat() + "Z" if dt else None
 
 
+def _et_hold(prog):
+    from app.services.programs.email_touches import held_providers
+    return held_providers(prog)
+
+
 def _program_json(db: Session, prog: OutreachProgram) -> dict:
     logo = db.query(ProgramAsset).filter(ProgramAsset.id == prog.logo_asset_id).first() \
         if prog.logo_asset_id else None
@@ -130,6 +135,7 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "primary_contact_name": prog.primary_contact_name,
         "customer_identity_locked": identity.locked(prog),
         "send_via_mailbox": getattr(prog, "send_via_mailbox", None),
+        "email_hold_providers": sorted(_et_hold(prog)),
         "primary_contact_title": prog.primary_contact_title,
         "primary_contact_user_id": prog.primary_contact_user_id,
         "alert_email": prog.alert_email, "alert_phone": prog.alert_phone,
@@ -178,6 +184,7 @@ class SettingsIn(BaseModel):
     customer_identity_locked: Optional[bool] = None
     placement_seed_addresses: Optional[dict] = None
     send_via_mailbox: Optional[str] = None
+    email_hold_providers: Optional[List[str]] = None
 
 
 _EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -248,6 +255,13 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db),
             if e:
                 clean[k] = e
         prog.placement_seed_addresses = json.dumps(clean)
+    if "email_hold_providers" in data:
+        from app.services.programs.email_touches import PROVIDER_LABELS
+        held = sorted({str(x).strip().lower() for x in (data.pop("email_hold_providers") or []) if str(x).strip()})
+        bad = [h for h in held if h not in PROVIDER_LABELS]
+        if bad:
+            raise HTTPException(status_code=422, detail="Email hold providers: %s." % ", ".join(PROVIDER_LABELS))
+        prog.email_hold_providers = json.dumps(held) if held else None
     if "send_via_mailbox" in data:
         addr = (data.pop("send_via_mailbox") or "").strip().lower()
         if addr:
