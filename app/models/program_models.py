@@ -213,6 +213,8 @@ class ProgramSourceRecord(Base):
     # no automated message goes to a contact without this.
     approved_to_send_at = Column(DateTime, nullable=True)
     approved_to_send_by = Column(String, nullable=True)
+    # How Mike chose to work this person on Good to go: text_email | email_only | call.
+    send_mode = Column(String, nullable=True)
     # Set only when the staged row is later committed to a live contact/lead.
     org_contact_id = Column(String, nullable=True)
     lead_id = Column(String, ForeignKey("leads.id"), nullable=True)

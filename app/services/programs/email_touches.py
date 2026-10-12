@@ -459,6 +459,8 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
         fam = fams.get(master.campaign_family)
         if fam is None:
             continue
+        if getattr(master, "send_mode", None) == "call":
+            continue                                   # call list: a person calls, nothing automated
         mine = touches.get(lead_id, {})
         for t in (mine.values() if mark_stale else ()):   # surface claims that never resolved
             if t.status == "claimed" and t.attempted_at and now - t.attempted_at >= STALE_CLAIM_AFTER:

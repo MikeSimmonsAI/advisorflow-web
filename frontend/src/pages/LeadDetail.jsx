@@ -1,4 +1,5 @@
 import SurveyCard from '../components/SurveyCard'
+import ReachCard from '../components/ReachCard'
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
@@ -1896,6 +1897,8 @@ export default function LeadDetail() {
               <p className="lcc-small lcc-muted">{aiStartBlockedReason}</p>
             )}
           </section>
+
+          <ReachCard leadId={leadId} />
 
           <SurveyCard leadId={leadId} />
 

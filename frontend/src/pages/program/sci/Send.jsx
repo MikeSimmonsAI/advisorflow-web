@@ -30,6 +30,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
   const [preview, setPreview] = useState(null)      // preview of the ticked set
   const [focus, setFocus] = useState(null)          // { row, item } single-contact preview
   const [confirming, setConfirming] = useState(false)
+  const [mode, setMode] = useState('text_email')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
@@ -94,7 +95,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
   const approve = async typed => {
     setBusy(true); setErr('')
     try {
-      const r = await api.post('/program/send/approve', { lead_ids: ids, confirm: typed })
+      const r = await api.post('/program/send/approve', { lead_ids: ids, confirm: typed, mode })
       const parts = [`${num(r.approved)} approved.`]
       if (r.texting) parts.push(`${num(r.texting)} will get their first text at the next allowed hour in their own time zone (never at night).`)
       if (r.email_only) parts.push(`${num(r.email_only)} have email only.`)
@@ -106,7 +107,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
   const approveOne = async row => {
     setBusy(true); setErr('')
     try {
-      const r = await api.post('/program/send/approve', { lead_ids: [row.lead_id], confirm: 'SEND 1' })
+      const r = await api.post('/program/send/approve', { lead_ids: [row.lead_id], confirm: 'SEND 1', mode })
       setMsg(r.approved ? `${row.name} is good to go — first text at the next allowed hour in their time zone.`
         : `${row.name} was not sent: ${(r.skipped || []).map(s => s.reason).join(', ') || 'blocked by a send check'}.`)
       load(); loadTotals()
@@ -192,7 +193,11 @@ export default function Send({ locations, isManager, locationId, goTab, automati
                         {r.line_type === 'landline' && <Chip tone="warn" plain>Landline — no texts, call instead</Chip>}
                       </td>
                       <td className="sci-small">{r.location || <Chip tone="warn" plain>No location</Chip>}</td>
-                      <td className="sci-small">{r.campaign || '—'}</td>
+                      <td className="sci-small">{r.campaign || '—'}
+                        <span className="sci-micro sci-muted" style={{ display: 'block' }}>
+                          {r.reaches}{r.last_text_at ? ` · Last text ${when(r.last_text_at)}` : ''}{r.last_email_at ? ` · Last email ${when(r.last_email_at)}` : ''}
+                        </span>
+                      </td>
                       <td>
                         {r.approved ? <Chip tone="ok" plain>Good to go ✓ {when(r.approved_at)}</Chip>
                           : r.blocked ? <Chip tone="bad" plain title="The server will not send to this contact">{r.blocked}</Chip>
@@ -274,10 +279,19 @@ export default function Send({ locations, isManager, locationId, goTab, automati
           )}
 
           {isManager && (
+            <label className="sci-micro" style={{ display: 'block', marginTop: 12 }}>Campaign type{' '}
+              <select value={mode} onChange={e => setMode(e.target.value)} style={{ marginLeft: 6 }}>
+                <option value="text_email">Text + Email (10-day)</option>
+                <option value="email_only">Email only</option>
+                <option value="call">Call list (no automated messages)</option>
+              </select>
+            </label>
+          )}
+          {isManager && (
             <div className="sci-row-gap" style={{ marginTop: 14 }}>
               <button type="button" className="sci-btn gold" disabled={!ids.length || overMax || busy}
                 onClick={() => approve(`SEND ${ids.length}`)}>
-                <Icon name="check" />{busy ? 'Sending…' : `Good to go — send (${num(ids.length)})`}
+                <Icon name="check" />{busy ? 'Sending…' : `Good to go — ${mode === 'email_only' ? 'email' : mode === 'call' ? 'call list' : 'send'} (${num(ids.length)})`}
               </button>
               {!preview
                 ? <button type="button" className="sci-btn sm" disabled={!ids.length || overMax || busy} onClick={openPreview}>Preview first</button>
