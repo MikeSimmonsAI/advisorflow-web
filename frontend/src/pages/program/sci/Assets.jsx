@@ -77,6 +77,40 @@ export default function Assets({ isManager, locations }) {
       load()
     } catch (er) { setErr(errText(er)) } finally { setBusy(false) }
   }
+  // ── many flyers at once: each file is matched to a location by its file name ──
+  const norm = s => (s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '')
+  const [bulk, setBulk] = useState([])
+  const [bulkCat, setBulkCat] = useState('')
+  const [bulkActive, setBulkActive] = useState(true)
+  const [bulkDone, setBulkDone] = useState('')
+  const pickMany = list => {
+    setBulkDone(''); setErr('')
+    const byName = Object.fromEntries(homes.map(l => [norm(l.name), l]))
+    setBulk(Array.from(list || []).map(f => ({ f, loc: byName[norm(f.name)] || null, status: '' })))
+  }
+  const uploadMany = async () => {
+    const cat = bulkCat || Object.keys(cats)[0] || ''
+    setBusy(true); setErr(''); setBulkDone('')
+    let ok = 0
+    const rows = [...bulk]
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i]
+      if (!r.loc || r.status === 'done') continue
+      const fd = new FormData()
+      fd.append('file', r.f); fd.append('kind', 'flyer')
+      fd.append('title', `${cats[cat] || 'Flyer'} - ${r.loc.name}`)
+      if (cat) fd.append('category', cat)
+      fd.append('location_id', r.loc.location_id)
+      fd.append('activate', bulkActive ? 'true' : 'false')
+      try { await api.upload('/program/assets', fd); rows[i] = { ...r, status: 'done' }; ok++ }
+      catch (er) { rows[i] = { ...r, status: errText(er) } }
+      setBulk([...rows])
+    }
+    setBusy(false)
+    setBulkDone(`${ok} flyer${ok === 1 ? '' : 's'} uploaded${bulkActive ? ' and active' : ''}.`)
+    load()
+  }
+
   const toggle = async a => {
     try { await api.post(`/program/assets/${a.id}/active`, { active: !a.is_active }); setMsg(`${a.title} v${a.version} ${a.is_active ? 'deactivated' : 'activated'}.`); load() } catch (e) { setErr(errText(e)) }
   }
@@ -186,6 +220,34 @@ export default function Assets({ isManager, locations }) {
               </div>
               <button className="sci-btn gold" type="submit" disabled={busy || !file}><Icon name="upload" />{busy ? 'Uploading…' : 'Upload version'}</button>
             </form>
+          </Panel>
+        )}
+        {isManager && (
+          <Panel title="Upload many flyers at once" labelledBy="sci-bulk">
+            <p className="sci-micro sci-muted" style={{ marginTop: 0 }}>Pick all the flyer files together. Each file name must be the location's name (for example <b>Leak Memory Chapel.jpg</b>) — that's how each flyer lands on its own location.</p>
+            <input type="file" multiple accept={ACCEPT} aria-label="Choose flyer files" onChange={e => pickMany(e.target.files)} />
+            {bulk.length > 0 && (
+              <>
+                <Field label="Campaign category">
+                  <select value={bulkCat || Object.keys(cats)[0] || ''} onChange={e => setBulkCat(e.target.value)}>
+                    {Object.entries(cats).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </Field>
+                <label className="sci-check"><input type="checkbox" checked={bulkActive} onChange={e => setBulkActive(e.target.checked)} /> Make them the active flyers</label>
+                <div className="sci-rows" style={{ maxHeight: 260, overflow: 'auto', marginTop: 8 }}>
+                  {bulk.map((r, i) => (
+                    <div className="sci-kv" key={i}>
+                      <span>{r.f.name}</span>
+                      <span>{r.status === 'done' ? '✓ uploaded' : r.status ? r.status : r.loc ? `→ ${r.loc.name}` : 'No matching location — skipped'}</span>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" className="sci-btn gold" style={{ marginTop: 10 }} disabled={busy || !bulk.some(r => r.loc && r.status !== 'done')} onClick={uploadMany}>
+                  <Icon name="upload" />{busy ? 'Uploading…' : `Upload ${bulk.filter(r => r.loc && r.status !== 'done').length} flyers`}
+                </button>
+              </>
+            )}
+            {bulkDone && <p className="sci-micro" style={{ marginTop: 8 }}>{bulkDone}</p>}
           </Panel>
         )}
       </div>
