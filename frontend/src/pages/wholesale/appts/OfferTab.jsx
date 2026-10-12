@@ -17,11 +17,15 @@ export default function OfferTab({ apptId, repairsTotal }) {
   const [offer, setOffer] = useState('')
   const [note, setNote] = useState('')
   const [list, setList] = useState([])
+  const [arvOnFile, setArvOnFile] = useState(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
   const [err, setErr] = useState(null)
 
-  const load = () => api.get(`/wholesale/appointments/${apptId}/offers`).then((r) => setList(r.items || [])).catch(() => null)
+  const load = () => api.get(`/wholesale/appointments/${apptId}/offers`).then((r) => {
+    setList(r.items || [])
+    if (r.arv_on_file) { setArvOnFile(r.arv_on_file); setArv((cur) => cur || String(r.arv_on_file)) }
+  }).catch(() => null)
   useEffect(() => { load() }, [apptId])
   useEffect(() => {
     setQuote(null)
@@ -48,7 +52,8 @@ export default function OfferTab({ apptId, repairsTotal }) {
     <div className="of-wrap">
       <div className="ap-form">
         <label className="ap-lab">After-repair value (ARV)
-          <input className="ap-input" inputMode="decimal" placeholder="$ from the office or comps" value={arv} onChange={(e) => setArv(e.target.value)} /></label>
+          <input className="ap-input" inputMode="decimal" placeholder="$ from the office or comps" value={arv} onChange={(e) => setArv(e.target.value)} />
+          {arvOnFile ? <span className="evo-muted evo-small" style={{ fontWeight: 400 }}>{money(arvOnFile)} on file from verified sold comps</span> : null}</label>
         <label className="ap-lab">Repairs
           <input className="ap-input" inputMode="decimal" placeholder="$ from your walkthrough" value={repairs} onChange={(e) => setRepairs(e.target.value)} /></label>
       </div>

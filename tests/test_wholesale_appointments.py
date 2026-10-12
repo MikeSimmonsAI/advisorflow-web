@@ -149,3 +149,33 @@ def test_rep_logs_signed_dead_or_follow_up_and_the_office_gets_the_call_back(
     assert dead["outcome"] == "dead"
     assert client.patch("/wholesale/appointments/%s" % book()["id"], headers=auth_headers,
                         json={"outcome": "maybe"}).status_code == 422
+
+
+
+# ── the rep hears about it ───────────────────────────────────────────────────
+
+def test_the_rep_is_told_when_booked_moved_handed_or_cancelled(
+        client, admin_auth_headers, auth_headers, sample_advisor, second_advisor, db_session):
+    from app.models.models import Notification, NotificationType
+    _team(client, admin_auth_headers, sample_advisor, second_advisor)
+    bells = lambda uid: [n.message for n in db_session.query(Notification).filter(
+        Notification.user_id == uid, Notification.type == NotificationType.WHOLESALE_APPOINTMENT)
+        .order_by(Notification.created_at.asc()).all()]
+    a = ok(client.post("/wholesale/appointments", headers=admin_auth_headers, json={
+        "starts_at": _today_at(10), "address": "7 Bell St, Dallas, TX", "assigned_to_id": sample_advisor.id}))
+    assert bells(sample_advisor.id)[-1].startswith("New appointment") and "7 Bell St" in bells(sample_advisor.id)[-1]
+    ok(client.patch("/wholesale/appointments/%s" % a["id"], headers=admin_auth_headers, json={"starts_at": _today_at(15)}))
+    assert bells(sample_advisor.id)[-1].startswith("Appointment moved")
+    ok(client.patch("/wholesale/appointments/%s" % a["id"], headers=admin_auth_headers,
+                    json={"assigned_to_id": second_advisor.id}))
+    assert bells(second_advisor.id)[-1].startswith("Appointment handed to you")
+    ok(client.patch("/wholesale/appointments/%s" % a["id"], headers=admin_auth_headers, json={"status": "cancelled"}))
+    assert bells(second_advisor.id)[-1].startswith("Appointment cancelled")
+    # the rep's own change does not ping themselves
+    b = ok(client.post("/wholesale/appointments", headers=admin_auth_headers, json={
+        "starts_at": _today_at(11), "address": "8 Bell St", "assigned_to_id": sample_advisor.id}))
+    n = len(bells(sample_advisor.id))
+    ok(client.patch("/wholesale/appointments/%s" % b["id"], headers=auth_headers, json={"status": "completed"}))
+    assert len(bells(sample_advisor.id)) == n
+    offers = ok(client.get("/wholesale/appointments/%s/offers" % b["id"], headers=auth_headers))
+    assert offers["items"] == [] and offers["arv_on_file"] is None      # no property, no ARV hint

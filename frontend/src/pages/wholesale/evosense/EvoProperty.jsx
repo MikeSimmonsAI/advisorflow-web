@@ -22,6 +22,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api, getBranding } from '../../../api/client'
 import BookAppointment from '../appts/BookAppointment'
 import FieldPropertyCard from '../appts/FieldPropertyCard'
+import FieldVisitsPanel from '../appts/FieldVisitsPanel'
 import { errText } from '../wsShared'
 import { canRunHunts } from '../../../auth/workspaceAuthority'
 import {
@@ -571,6 +572,8 @@ export default function EvoProperty() {
                 <Link className="evo-link" to={`/wholesale/calculator?property=${p.id}`}>Open full-page calculator</Link></p>
             </details>
           </Panel>
+
+          <FieldVisitsPanel propertyId={propertyId} refreshKey={notice} />
 
           {/* 3 ── WHY FOUND ────────────────────────────────────────────── */}
           <Panel title="Why EvoSense found it" id="signals" hint="Evidence, not truth · aging counts half, stale counts nothing · dates are the source's own">
