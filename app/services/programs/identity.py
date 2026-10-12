@@ -127,6 +127,15 @@ def record_on_behalf(db: Session, lead: Lead, *, channel: str, actor_user_id: Op
             pass
 
 
+def _call_line(phone) -> str:
+    d = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    if len(d) == 11 and d[0] == "1":
+        d = d[1:]
+    if len(d) == 10:
+        return "Just reply to this text, or call us at (%s) %s-%s." % (d[:3], d[3:6], d[6:])
+    return "Just reply to this text."
+
+
 def context_for(db: Session, lead: Lead, channel: str = "sms",
                 flyer_link: Optional[str] = None) -> Optional[Dict]:
     """Everything a message needs, or None if the lead is not in a program.
@@ -159,6 +168,7 @@ def context_for(db: Session, lead: Lead, channel: str = "sms",
             # the family only if the SENDER is approved to carry them: the
             # content policy strips links / phone numbers otherwise.
             "location_phone": prof.facility_phone or "",
+            "call_line": _call_line(prof.facility_phone),
             "booking_link": prof.appointment_link or "",
             "planning_guide_link": planning_guide_link(prof, db=db, family=(rec.campaign_family if rec else None)),
         },

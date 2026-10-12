@@ -69,8 +69,8 @@ from datetime import datetime, time, timezone as _timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 # The permitted window, local to the recipient. One place.
-WINDOW_START = time(9, 0)
-WINDOW_END = time(20, 0)
+WINDOW_START = time(8, 30)
+WINDOW_END = time(19, 45)
 
 # Why a lead was refused - stable codes, so a diagnostic can group by them.
 PERMITTED = "permitted"
