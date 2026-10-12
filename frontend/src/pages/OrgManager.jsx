@@ -34,6 +34,14 @@ const PLANS = [
   { value: 'enterprise',   label: 'Enterprise' },
 ]
 
+// The plan badge's label. It was called but never defined, so the page threw
+// as soon as one organization was listed.
+function getPlanLabel(plan) {
+  const v = String(plan || 'trial').toLowerCase()
+  const hit = PLANS.find(p => p.value === v)
+  return hit ? hit.label : v.charAt(0).toUpperCase() + v.slice(1)
+}
+
 // Features each plan tier includes by default — FETCHED, NOT COPIED.
 //
 // This file used to carry its own PLAN_FEATURES map, and it had already drifted

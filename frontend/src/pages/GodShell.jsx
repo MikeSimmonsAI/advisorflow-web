@@ -278,8 +278,8 @@ function LiveClock() {
   }, [])
   return (
     <span style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '0.04em' }}>
-      {now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-      &nbsp;UTC
+      {now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
+                                         timeZoneName: 'short' })}
     </span>
   )
 }

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db
 from app.services import evosys_esign as ev
+from app.utils.content_disposition import content_disposition
 
 router = APIRouter(prefix="/esign/sign", tags=["esign-public"])
 
@@ -87,5 +88,5 @@ def decline(token: str, payload: DeclineIn, request: Request, db: Session = Depe
 def signed_pdf(token: str, db: Session = Depends(get_db)):
     title, pdf = _run(ev.signed_pdf_for_token, db, token)
     return Response(content=pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": 'attachment; filename="%s"' % ev._filename(title),
+                    headers={"Content-Disposition": content_disposition(ev._filename(title)),
                              "Cache-Control": "private, no-store"})

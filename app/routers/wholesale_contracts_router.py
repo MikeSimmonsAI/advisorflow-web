@@ -59,6 +59,7 @@ from app.services import wholesale_files as files
 from app.services import wholesale_service as svc
 from app.services.entitlements import require_feature
 from app.utils.time_fmt import iso_utc  # S17: explicit-UTC timestamps
+from app.utils.content_disposition import content_disposition
 
 log = logging.getLogger(__name__)
 
@@ -864,7 +865,7 @@ def esign_signed_pdf(document_id: str, db: Session = Depends(get_db),
     if env.status != "completed" or not env.final_pdf:
         raise HTTPException(status_code=409, detail="The signed PDF exists once everyone has signed.")
     return Response(content=env.final_pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": 'inline; filename="%s"' % ev._filename(env.title),
+                    headers={"Content-Disposition": content_disposition(ev._filename(env.title), "inline"),
                              "X-Document-SHA256": env.final_sha256 or "", "Cache-Control": "private, no-store"})
 
 

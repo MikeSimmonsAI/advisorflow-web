@@ -276,8 +276,9 @@ export default function SendOnboarding({ orgId, orgName, onClose, onSent }) {
           <div style={{ fontSize: 12.5, border: '1px solid var(--god-border, #e5e7eb)',
                         borderRadius: 10, padding: '10px 12px', margin: '12px 0' }}>
             They will be invited as <b>{ctx.brand.name}</b>, into{' '}
-            <b>{ctx.organization_name}</b>. Nothing is emailed or texted — you
-            get a link to send yourself.
+            <b>{ctx.organization_name}</b>. "Send invitation email" emails them
+            the invitation. "Generate link only" sends nothing — you get a link
+            to send yourself.
           </div>
         ) : null}
 
