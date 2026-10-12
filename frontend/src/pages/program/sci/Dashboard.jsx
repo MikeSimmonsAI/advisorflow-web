@@ -3,6 +3,8 @@
    from GET /program/dashboard (and the chart from GET /program/responses). */
 import { useEffect, useMemo, useState } from 'react'
 import { api, getCurrentUser } from '../../../api/client'
+import { useNavigate } from 'react-router-dom'
+import Surveys from './Surveys'
 import { LANDSCAPE, CLASS_LABEL, CLASS_TONE, Chip, Empty, Metric, Panel, assetSrc, num, when } from './ui'
 
 const VERDICT_TONE = { READY: 'ok', CONDITIONAL: 'warn', BLOCKED: 'bad' }
@@ -21,7 +23,9 @@ export default function Dashboard({ data, goTab, setParam }) {
   const first = user.first_name || (user.full_name || '').split(' ')[0] || ''
 
   // Priority order: people waiting first, then data that blocks outreach.
+  const navigate = useNavigate()
   const actions = [
+    { n: att.survey_alerts || 0, label: 'Low survey ratings (1-3 stars)', note: 'Call the family back, then mark handled', tone: 'bad', go: () => document.getElementById('sci-surveys')?.scrollIntoView({ behavior: 'smooth' }) },
     { n: (att.hot_responses || 0), label: 'HOT replies needing a person', note: 'Read and respond', tone: 'bad', go: () => goTab('responses') },
     { n: att.unhandled_hot || 0, label: 'HOT replies past the response SLA', note: 'Waiting longer than the target', tone: 'bad', go: () => goTab('responses') },
     { n: att.new_sms_replies || 0, label: 'New text replies', note: 'Unread conversations', tone: 'warn', go: () => goTab('responses') },
@@ -91,6 +95,10 @@ export default function Dashboard({ data, goTab, setParam }) {
           </div>
         </Panel>
         <ResponseActivity locationId={sel?.location_id} />
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <Surveys locationId={sel?.location_id} navigate={navigate} />
       </div>
 
       <div className="sci-grid-even" style={{ marginBottom: 16 }}>

@@ -2185,6 +2185,13 @@ class SurveyResponse(Base):
     # Lead's social handles (optional, soft ask)
     facebook_handle = Column(String, nullable=True)
     instagram_handle = Column(String, nullable=True)
+    # Outreach program (SCI): the location the family dealt with.
+    location_id     = Column(String, nullable=True, index=True)
+    # The family ticked "OK to share my review" (first name + last initial only).
+    share_ok        = Column(Boolean, nullable=True)
+    # A 1-3 star answer is an ALERT on the dashboard until someone marks it handled.
+    handled_at      = Column(DateTime, nullable=True)
+    handled_by      = Column(String, nullable=True)
 
     submitted_at    = Column(DateTime, default=datetime.utcnow)
     created_at      = Column(DateTime, default=datetime.utcnow)

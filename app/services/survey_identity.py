@@ -29,9 +29,9 @@ def location_identity(db: Session, lead) -> Optional[dict]:
         return None
     prof = location_profile_for_lead(db, lead)
     if prof is None:
-        return {"name": None, "phone": None, "resolved": False}
+        return {"name": None, "phone": None, "resolved": False, "location_id": None}
     return {"name": prof.official_name, "phone": (prof.facility_phone or "").strip() or None,
-            "resolved": True}
+            "resolved": True, "location_id": prof.location_id}
 
 
 HELD_NO_LOCATION = "held: program contact has no resolved location - no survey under an unknown name"

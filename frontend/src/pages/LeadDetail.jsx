@@ -1,3 +1,4 @@
+import SurveyCard from '../components/SurveyCard'
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { api, getCurrentUser } from '../api/client'
@@ -1895,6 +1896,8 @@ export default function LeadDetail() {
               <p className="lcc-small lcc-muted">{aiStartBlockedReason}</p>
             )}
           </section>
+
+          <SurveyCard leadId={leadId} />
 
           <div className="lcc-rail-pair">
             <section className="lcc-card lcc-rail-card" aria-labelledby="lcc-book-h">

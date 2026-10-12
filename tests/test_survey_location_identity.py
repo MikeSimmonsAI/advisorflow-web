@@ -29,8 +29,9 @@ def test_survey_page_names_the_location_and_its_phone_only(client, program):
     prof.facility_phone = "+12565550199"
     db.commit()
     lead = _lead_for(db, org, admin, "L007", phone="2145550107", first="rosa", email="rd@example.com")
-    assert location_identity(db, lead) == {"name": "Alabama Heritage Funeral Home",
-                                           "phone": "+12565550199", "resolved": True}
+    got = location_identity(db, lead)
+    assert got["name"] == "Alabama Heritage Funeral Home" and got["phone"] == "+12565550199"
+    assert got["resolved"] is True and got["location_id"] == prof.location_id
     r = client.get("/survey/%s/context" % _survey(db, lead, admin))
     assert r.status_code == 200, r.text
     body = r.json()
@@ -52,6 +53,7 @@ def test_location_without_a_phone_shows_no_phone(client, program):
 def test_unresolved_location_gets_no_name(client, program):
     db, org, admin = program["db"], program["org"], program["admin"]
     lead = _lead_for(db, org, admin, "L006", phone="2145550106", first="Lee", email="lm@example.com")
-    assert location_identity(db, lead) == {"name": None, "phone": None, "resolved": False}
+    assert location_identity(db, lead) == {"name": None, "phone": None, "resolved": False,
+                                           "location_id": None}
     body = client.get("/survey/%s/context" % _survey(db, lead, admin)).json()
     assert body["business_name"] == "" and not body["business_phone"]
