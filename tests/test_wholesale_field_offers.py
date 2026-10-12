@@ -73,3 +73,36 @@ def test_the_limit_is_yours_to_set(client, admin_auth_headers, auth_headers, sam
     assert q["max_offer"] == 84500                       # 90% of 94k = 84.6k, rounded down to $500
     assert client.put("/wholesale/team/rules", headers=admin_auth_headers,
                       json={"offer_limit_pct": 300}).status_code == 422
+
+
+def test_a_rep_can_raise_their_opening_offer_by_ten_percent_at_most(
+        client, admin_auth_headers, auth_headers, sample_advisor, second_advisor, db_session):
+    a = _setup(client, admin_auth_headers, sample_advisor, second_advisor)
+    rules = ok(client.get("/wholesale/team/rules", headers=admin_auth_headers))
+    assert rules["raise_limit_pct"] == 10 and "10%" in rules["explained"]
+    quote = lambda: ok(client.post("/wholesale/appointments/%s/offer-quote" % a["id"], headers=auth_headers,
+                                   json={"arv": 300000, "repairs": 0}))
+    # 300k x 70% - 9k costs (3%) - 10k fee = 191k; no opening offer yet
+    q = quote()
+    assert q["max_offer"] == 191000 and q["opening_offer"] is None and not q["capped_by_raise"]
+    base = "/wholesale/appointments/%s/offers" % a["id"]
+    send = lambda n: ok(client.post(base, headers=auth_headers, json={"arv": 300000, "repairs": 0, "offer": n}))
+    assert send(150000)["status"] == "within"                   # the opening offer
+    q = quote()
+    assert q["opening_offer"] == 150000 and q["max_offer"] == 165000 and q["capped_by_raise"]
+    assert "mao" not in q
+    assert send(165000)["status"] == "within"                   # +10%: still theirs to make
+    assert send(166000)["status"] == "pending"                  # more than that: Mike decides
+    admin = db_session.query(User).filter(User.role == "org_admin").first()
+    bell = [n.message for n in db_session.query(Notification).filter(
+        Notification.user_id == admin.id, Notification.type == NotificationType.WHOLESALE_OFFER).all()]
+    assert any("10% above their $150,000 opening offer" in m for m in bell)
+    # Mike can loosen or drop the raise rule
+    ok(client.put("/wholesale/team/rules", headers=admin_auth_headers,
+                  json={"offer_limit_pct": 100, "raise_limit_pct": 100}))
+    assert quote()["max_offer"] == 191000
+    ok(client.put("/wholesale/team/rules", headers=admin_auth_headers,
+                  json={"offer_limit_pct": 100, "raise_limit_pct": 0}))
+    assert quote()["max_offer"] == 150000                       # no raises without asking
+    assert client.put("/wholesale/team/rules", headers=admin_auth_headers,
+                      json={"offer_limit_pct": 100, "raise_limit_pct": 150}).status_code == 422
