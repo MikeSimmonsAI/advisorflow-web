@@ -14,6 +14,17 @@ import InstallTip from './InstallTip'
 import PhoneAlerts from './PhoneAlerts'
 import { centralToIso, dayLabel, isoToCentral, todayCentral } from './apptTime'
 import './appts.css'
+import OutboxBar from './OutboxBar'
+import { all, getKept, newRef, saveOrKeep, subscribe } from './outbox'
+
+// What is still waiting on this phone shows as done, marked "on this phone".
+async function withWaiting(prefix, rows) {
+  let ops = []
+  try { ops = await all() } catch { /* no store */ }
+  const mine = Object.fromEntries(ops.filter((o) => o.key.startsWith(prefix) && !o.error).map((o) => [o.key.slice(prefix.length), o.body]))
+  return rows.map((x) => (mine[x.id] ? { ...x, ...mine[x.id], waiting: true } : x))
+}
+const WAIT = <span className="vd-wait">Saved on this phone - sends when signal is back</span>
 
 const OUTCOME = { signed: ['Signed', 'live'], follow_up: ['Follow up', 'info'], dead: ['Dead', 'danger'] }
 const STATUS = { scheduled: ['Scheduled', 'info'], completed: ['Done', 'live'], no_show: ['No-show', 'danger'], cancelled: ['Cancelled', null] }
@@ -35,7 +46,12 @@ export function ApptCard({ a, isField, reps, onChanged }) {
 
   async function patch(body) {
     setBusy(true); setErr(null)
-    try { onChanged(await api.patch(`/wholesale/appointments/${a.id}`, body)); setMore(false); setLogging(false); setNote('') }
+    try {
+      const r = await saveOrKeep({ key: `appt:${a.id}`, method: 'PATCH', merge: true, path: `/wholesale/appointments/${a.id}`,
+                                   body: { ...body, client_ref: newRef() }, label: `the visit at ${a.address || a.local_time}` })
+      onChanged(r.queued ? { ...a, ...body, ...(body.outcome && a.status === 'scheduled' ? { status: 'completed' } : {}), waiting: true } : r.result)
+      setMore(false); setLogging(false); setNote('')
+    }
     catch (e) { setErr(e.message || 'That did not save.') } finally { setBusy(false) }
   }
   const withNote = (body) => (note.trim() ? { ...body, notes: [a.notes, note.trim()].filter(Boolean).join('\n') } : body)
@@ -49,6 +65,7 @@ export function ApptCard({ a, isField, reps, onChanged }) {
         {a.outcome ? <Tag kind={(OUTCOME[a.outcome] || [])[1] || undefined}>{(OUTCOME[a.outcome] || [a.outcome])[0]}</Tag> : null}
         {a.is_test ? <Tag kind="sandbox">Test</Tag> : null}
       </div>
+      {a.waiting ? WAIT : null}
       {a.address ? <div className="ap-addr">{a.address}</div> : null}
       <div className="ap-meta">
         {a.seller_name ? <span>Seller: <strong>{a.seller_name}</strong></span> : null}
@@ -126,10 +143,18 @@ export default function WholesaleAppointments() {
     const q = new URLSearchParams({ when })
     if (when === 'today') q.set('day', day)
     if (rep) q.set('rep', rep)
-    try { setData(await api.get(`/wholesale/appointments?${q}`)); setErr(null) }
+    try {
+      const d = await getKept(`/wholesale/appointments?${q}`)
+      setData({ ...d, items: await withWaiting('appt:', d.items || []) }); setErr(null)
+    }
     catch (e) { setErr(e.message || 'Appointments could not be loaded.') }
   }, [when, day, rep])
   useEffect(() => { load() }, [load])
+  // When changes kept on the phone go through, show the saved ones.
+  useEffect(() => {
+    let n = -1
+    return subscribe((xs) => { const m = xs.filter((x) => x.key.startsWith('appt:')).length; if (n > m) load(); n = m })
+  }, [load])
   useEffect(() => {
     api.get('/wholesale/appointments/reps').then((r) => setReps(r.items || [])).catch(() => setReps([]))
   }, [])
@@ -165,6 +190,8 @@ export default function WholesaleAppointments() {
           </select>
         ) : null}
       </div>
+      <OutboxBar />
+      <Alert kind="info">{data?._offline ? 'No signal - this is your list as it was last opened on this phone.' : null}</Alert>
       <Alert kind="ok">{notice}</Alert>
       <Alert>{err}</Alert>
       {data && !isField ? <PendingOffers /> : null}

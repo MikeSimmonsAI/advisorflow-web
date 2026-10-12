@@ -212,6 +212,9 @@ class WholesaleFieldAppointment(Base):
     status = Column(String, nullable=False, default="scheduled")
     outcome = Column(String, nullable=True)                   # set by #16 (signed | follow_up | dead)
     outcome_note = Column(Text, nullable=True)
+    # The phone's own id for its last change (build list #28). A change the
+    # phone kept through a dead zone may arrive twice; the second is ignored.
+    outcome_ref = Column(String, nullable=True)
     source = Column(String, nullable=False, default="manual")
     source_ref = Column(String, nullable=True)                # e.g. the callback it was booked from
     created_by_id = Column(String, ForeignKey("users.id"), nullable=True)

@@ -44,6 +44,14 @@ export { sessionExpiredUrl, safeNextPath }
 export function clearToken() {
   localStorage.removeItem(KEY_TOKEN)
   localStorage.removeItem('bookaboost_token') // clean up legacy key if present
+  // The field app keeps the last screens a rep opened, for reading with no
+  // signal (pages/wholesale/appts/outbox.js). Signing out forgets them.
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith('evosys-kept:')) localStorage.removeItem(k)
+    }
+  } catch { /* blocked */ }
 }
 
 /**

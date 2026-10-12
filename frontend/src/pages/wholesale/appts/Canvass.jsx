@@ -9,6 +9,17 @@ import { Alert, Empty, EvoApp, PageHead, Seg, Skeleton, Tag } from '../ds/ds'
 import '../ds/evo-pages.css'
 import { dayLabel, tomorrowCentral } from './apptTime'
 import './appts.css'
+import OutboxBar from './OutboxBar'
+import { all, getKept, saveOrKeep, subscribe } from './outbox'
+
+// What is still waiting on this phone shows as done, marked "on this phone".
+async function withWaiting(prefix, rows) {
+  let ops = []
+  try { ops = await all() } catch { /* no store */ }
+  const mine = Object.fromEntries(ops.filter((o) => o.key.startsWith(prefix) && !o.error).map((o) => [o.key.slice(prefix.length), o.body]))
+  return rows.map((x) => (mine[x.id] ? { ...x, ...mine[x.id], waiting: true } : x))
+}
+const WAIT = <span className="vd-wait">Saved on this phone - sends when signal is back</span>
 
 const RESULTS = [['not_home', 'Not home'], ['talked', 'Talked'], ['not_interested', 'Not interested'], ['hot', 'Hot lead'], ['bad_address', 'Bad address']]
 const LABEL = Object.fromEntries(RESULTS)
@@ -66,7 +77,12 @@ function DoorCard({ d, n, onSaved }) {
   const [err, setErr] = useState(null)
   async function save(body, keep = false) {
     setBusy(true); setErr(null)
-    try { onSaved(await api.patch(`/wholesale/canvass/doors/${d.id}`, body)); if (!keep) setOpen(false) }
+    try {
+      const r = await saveOrKeep({ key: `door:${d.id}`, method: 'PATCH', merge: true, path: `/wholesale/canvass/doors/${d.id}`,
+                                   body, label: `the door at ${d.address || 'a house'}` })
+      onSaved(r.queued ? { ...d, ...body, waiting: true } : r.result)
+      if (!keep) setOpen(false)
+    }
     catch (e) { setErr(e.message || 'That did not save.') } finally { setBusy(false) }
   }
   const on = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }))
@@ -78,6 +94,7 @@ function DoorCard({ d, n, onSaved }) {
         {d.result ? <Tag kind={TONE[d.result]}>{LABEL[d.result]}</Tag> : null}
         {d.handed_off ? <Tag kind="info">Sent to manager</Tag> : null}
       </div>
+      {d.waiting ? WAIT : null}
       <div className="ap-meta">
         {d.owner_of_record ? <span>Owner: <strong>{d.owner_of_record}</strong></span> : null}
         {d.why ? <span>{d.why}</span> : null}
@@ -116,8 +133,15 @@ function DoorCard({ d, n, onSaved }) {
 function RouteView({ id, onBack, canBuild }) {
   const [r, setR] = useState(null)
   const [err, setErr] = useState(null)
-  const load = useCallback(() => api.get(`/wholesale/canvass/routes/${id}`).then(setR).catch((e) => setErr(e.message)), [id])
+  const load = useCallback(() => getKept(`/wholesale/canvass/routes/${id}`)
+    .then(async (route) => setR({ ...route, doors: await withWaiting('door:', route.doors || []) }))
+    .catch((e) => setErr(e.message)), [id])
   useEffect(() => { load() }, [load])
+  // When door knocks kept on the phone go through, show the saved ones.
+  useEffect(() => {
+    let n = -1
+    return subscribe((xs) => { const m = xs.filter((x) => x.key.startsWith('door:')).length; if (n > m) load(); n = m })
+  }, [load])
   const replace = (d) => setR((x) => {
     const doors = x.doors.map((y) => (y.id === d.id ? d : y))
     return { ...x, doors, doors_done: doors.filter((y) => y.result).length, hot: doors.filter((y) => y.result === 'hot').length }
@@ -128,6 +152,7 @@ function RouteView({ id, onBack, canBuild }) {
     <>
       <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={onBack}>← All routes</button>
       <h2 className="cv-h">{r.name}</h2>
+      <Alert kind="info">{r._offline ? 'No signal - this is the route as it was last opened on this phone. Keep knocking; taps save on the phone.' : null}</Alert>
       <div className="ap-meta" style={{ marginBottom: 12 }}>
         <span>{r.route_date ? dayLabel(r.route_date) : 'Any day'}</span><span>{r.assigned_to_name || 'No canvasser yet'}</span>
         <span><strong>{r.doors_done}</strong> of {r.doors_total} doors</span><span><strong>{r.hot}</strong> hot</span>
@@ -145,13 +170,14 @@ export default function Canvass() {
   const [status, setStatus] = useState('open')
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
-  const load = useCallback(() => api.get(`/wholesale/canvass/routes?status=${status}`).then(setData).catch((e) => setErr(e.message)), [status])
+  const load = useCallback(() => getKept(`/wholesale/canvass/routes?status=${status}`).then(setData).catch((e) => setErr(e.message)), [status])
   useEffect(() => { if (!routeId) load() }, [load, routeId])
   const go = (id) => setSp(id ? { route: id } : {})
   return (
     <EvoApp world="operations">
       <PageHead world="operations" eyebrow="Wholesale" title="Canvassing"
                 sub="Doors to knock, in order. One tap for what happened; hot leads go straight to a manager." />
+      <OutboxBar />
       {routeId ? <RouteView id={routeId} onBack={() => go(null)} canBuild={data?.can_build} /> : (
         <>
           {data?.can_build ? <BuildRoute onBuilt={(r) => go(r.id)} /> : null}

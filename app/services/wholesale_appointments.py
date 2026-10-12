@@ -323,6 +323,8 @@ def listing(db: Session, org_id: str, user: User, *, when: str = "today", day: O
 
 
 def change(db: Session, org_id: str, user: User, appt_id: str, data: Dict[str, Any]) -> WholesaleFieldAppointment:
+    data = dict(data)
+    ref = (str(data.pop("client_ref", None) or "").strip()[:64]) or None
     a = get_visible(db, org_id, user, appt_id)
     field = T.is_field(db, user)
     if field:
@@ -333,6 +335,12 @@ def change(db: Session, org_id: str, user: User, appt_id: str, data: Dict[str, A
             raise HTTPException(403, "Ask your manager to move or reassign this appointment.")
         if data.get("status") not in (None, "completed", "no_show"):
             raise HTTPException(403, "You can mark a visit done or a no-show. Ask your manager to cancel it.")
+    if ref and a.outcome_ref == ref:
+        # The same change again: the phone kept it through a dead zone and
+        # sent it twice. Already done - never a second call-back.
+        return a
+    if ref:
+        a.outcome_ref = ref
     before_rep, before_time = a.assigned_to_id, a.starts_at
     if "assigned_to_id" in data and data["assigned_to_id"] is not None:
         a.assigned_to_id = _rep(db, org_id, user, data["assigned_to_id"]) if data["assigned_to_id"] else None
