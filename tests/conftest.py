@@ -123,6 +123,14 @@ from app.services.auth_service import hash_password
 
 
 @pytest.fixture(autouse=True)
+def _relay_switched_on(monkeypatch):
+    """The relay tests describe the Control Room with the relay ON. In
+    production it is off unless a read credential is configured
+    (relay_control.relay_is_on); tests/test_relay_off.py covers that."""
+    monkeypatch.setenv("RELAY_ENABLED", "1")
+
+
+@pytest.fixture(autouse=True)
 def _fresh_rate_limit_allowance():
     """Give every test its own login-throttle budget. BOTH throttles.
 

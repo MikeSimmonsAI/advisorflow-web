@@ -378,15 +378,23 @@ export default function ControlRoom() {
 
   // Older relay snapshot (Give Direction, NEEDS MIKE gate, package, history). A failure
   // is shown as a failure; it never produces a success message.
+  const timer = useRef(null)
   const load = useCallback(async (refresh = false) => {
     try {
-      setData(await api.get('/god/relay/state' + (refresh ? '?refresh=true' : '')))
+      const d = await api.get('/god/relay/state' + (refresh ? '?refresh=true' : ''))
+      setData(d)
       setLoadErr(null)
+      // Relay switched off on the server: nothing to watch, so stop asking.
+      if (d && d.relay_off && timer.current) { clearInterval(timer.current); timer.current = null }
     } catch (e) { setLoadErr(errorMessage(e)) }
   }, [])
   const refreshNow = useCallback(() => { load(true) }, [load])
 
-  useEffect(() => { load() ; const t = setInterval(() => load(), POLL_MS); return () => clearInterval(t) }, [load])
+  useEffect(() => {
+    load()
+    timer.current = setInterval(() => load(), POLL_MS)
+    return () => { if (timer.current) clearInterval(timer.current); timer.current = null }
+  }, [load])
 
   const choose = async (c) => {
     setBusy(true)
@@ -394,6 +402,20 @@ export default function ControlRoom() {
       await api.post('/god/relay/direction', { text: c.text, mode: 'next_priority' })
       setAnswered(c.label); load(true)
     } catch (e) { setLoadErr(errorMessage(e)) } finally { setBusy(false) }
+  }
+
+  if (data && data.relay_off) {
+    return (
+      <div className="cr" data-testid="relay-off">
+        <style>{CSS}</style>
+        <h1>Control Room</h1>
+        <div className="card">
+          <h2>Relay is off</h2>
+          <div className="val">Work runs directly with Claude. Nothing on this screen is checking GitHub.</div>
+          <div className="evd" style={{ marginTop: 8 }}>{data.message}</div>
+        </div>
+      </div>
+    )
   }
 
   const q = (data && data.queue) || {}

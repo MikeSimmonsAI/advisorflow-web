@@ -43,6 +43,8 @@ def _recipients() -> int:
 
 @router.get("/state")
 def relay_state(refresh: bool = False, user: User = Depends(require_god)):
+    if not rc.relay_is_on():
+        return {"relay_off": True, "available": False, "message": rc.RELAY_OFF_MESSAGE}
     can_write = bool(rc.write_token())
     base = {
         "give_direction": {
@@ -95,6 +97,9 @@ def relay_worker(response: Response, user: User = Depends(require_god)):
     200) and never a cached or guessed worker. GET only; mutates nothing."""
     for k, v in rcr.NO_CACHE_HEADERS.items():
         response.headers[k] = v
+    if not rc.relay_is_on():
+        return {"relay_off": True, "available": False, "message": rc.RELAY_OFF_MESSAGE,
+                "worker": {"state": "off", "display": "Relay is off"}}
     return rcr.get_state()
 
 
