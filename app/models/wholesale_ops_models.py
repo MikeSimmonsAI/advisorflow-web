@@ -298,6 +298,9 @@ class WholesaleFieldRules(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     organization_id = Column(String, ForeignKey("organizations.id"), nullable=False, unique=True)
     offer_limit_pct = Column(Integer, nullable=False, default=100)   # % of the formula's max offer
+    # How far a rep may raise their own opening offer on a visit without
+    # asking (10 = up to 10% above it). 100 = no raise rule.
+    raise_limit_pct = Column(Integer, nullable=True, default=10)
     updated_by_id = Column(String, ForeignKey("users.id"), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

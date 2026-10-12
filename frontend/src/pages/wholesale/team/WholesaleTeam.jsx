@@ -179,25 +179,37 @@ function MemberRow({ m, data, onSaved }) {
 
 function FieldRules() {
   const [pct, setPct] = useState(null)
+  const [raise, setRaise] = useState(10)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
   const [err, setErr] = useState(null)
-  useEffect(() => { api.get('/wholesale/team/rules').then((r) => setPct(r.offer_limit_pct)).catch(() => setPct(null)) }, [])
+  useEffect(() => {
+    api.get('/wholesale/team/rules').then((r) => { setPct(r.offer_limit_pct); setRaise(r.raise_limit_pct ?? 100) }).catch(() => setPct(null))
+  }, [])
   if (pct === null) return null
   async function save() {
     setBusy(true); setErr(null); setMsg(null)
-    try { const r = await api.put('/wholesale/team/rules', { offer_limit_pct: Number(pct) }); setPct(r.offer_limit_pct); setMsg(r.explained) }
+    try {
+      const r = await api.put('/wholesale/team/rules', { offer_limit_pct: Number(pct), raise_limit_pct: Number(raise) })
+      setPct(r.offer_limit_pct); setRaise(r.raise_limit_pct); setMsg(r.explained)
+    }
     catch (e) { setErr(e.message || 'That did not save.') } finally { setBusy(false) }
   }
   return (
     <section className="evo-panel">
       <h2 className="wt-h2">Offer limit for field reps</h2>
       <p className="evo-muted evo-small" style={{ marginTop: 0 }}>Reps never see your investor % or fee - only the most they may offer.
-        Anything above this comes to you to approve.</p>
+        Anything above this comes to you to approve. Their first offer on a visit is their opening offer.</p>
       <div className="wt-grid">
         <label className="wt-lab" htmlFor="wt-limit">Most a rep can offer without asking
           <select id="wt-limit" className="wt-select" value={pct} onChange={(e) => setPct(e.target.value)}>
             {[80, 85, 90, 95, 100, 105].map((p) => <option key={p} value={p}>{p}% of the max offer{p === 100 ? ' (the formula, exactly)' : ''}</option>)}
+          </select></label>
+        <label className="wt-lab" htmlFor="wt-raise">How far a rep can raise their opening offer
+          <select id="wt-raise" className="wt-select" value={raise} onChange={(e) => setRaise(e.target.value)}>
+            <option value={0}>Not at all - every raise comes to me</option>
+            {[5, 10, 15, 20].map((p) => <option key={p} value={p}>Up to {p}% above their opening offer</option>)}
+            <option value={100}>No raise rule (only the limit above)</option>
           </select></label>
         <div style={{ alignSelf: 'end' }}><button type="button" className="evo-btn evo-btn--primary" disabled={busy} onClick={save}>Save</button></div>
       </div>

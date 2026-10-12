@@ -61,6 +61,11 @@ export default function OfferTab({ apptId, repairsTotal }) {
         <span>Most you can offer</span>
         <strong>{quote ? (quote.max_offer != null ? money(quote.max_offer) : 'Ask the office') : '-'}</strong>
         {quote && quote.mao != null ? <span className="evo-muted evo-small">Formula max {money(quote.mao)} · limit {quote.offer_limit_pct}%</span> : null}
+        {quote && quote.opening_offer != null && quote.raise_limit_pct != null ? (
+          <span className="evo-muted evo-small">Opening offer {money(quote.opening_offer)}{quote.raise_limit_pct
+            ? ` - you can raise it up to ${quote.raise_limit_pct}% on your own`
+            : ' - any raise goes to your manager first'}</span>
+        ) : null}
       </div>
       <div className="ap-form">
         <label className="ap-lab">Your offer to the seller

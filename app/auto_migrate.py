@@ -159,6 +159,7 @@ def _is_lock_contention(exc) -> bool:
 COLUMNS_TO_ADD = [
     # Wholesale field app, works with bad signal (2026-10-11)
     ("wholesale_field_appointments", "outcome_ref", "VARCHAR"),
+    ("wholesale_field_rules", "raise_limit_pct", "INTEGER DEFAULT 10"),
     # ── Location outreach programs (SCI, 2026-10-06) ──
     # The program tables exist on the staging database already, so a column
     # added to them after first boot must be listed here (create_all only
