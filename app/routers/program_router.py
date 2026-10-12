@@ -129,6 +129,7 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "hero_title": prog.hero_title, "hero_subtitle": prog.hero_subtitle,
         "primary_contact_name": prog.primary_contact_name,
         "customer_identity_locked": identity.locked(prog),
+        "send_via_mailbox": getattr(prog, "send_via_mailbox", None),
         "primary_contact_title": prog.primary_contact_title,
         "primary_contact_user_id": prog.primary_contact_user_id,
         "alert_email": prog.alert_email, "alert_phone": prog.alert_phone,
@@ -176,6 +177,7 @@ class SettingsIn(BaseModel):
     mailbox_folder_path: Optional[str] = None
     customer_identity_locked: Optional[bool] = None
     placement_seed_addresses: Optional[dict] = None
+    send_via_mailbox: Optional[str] = None
 
 
 _EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -246,6 +248,14 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db),
             if e:
                 clean[k] = e
         prog.placement_seed_addresses = json.dumps(clean)
+    if "send_via_mailbox" in data:
+        addr = (data.pop("send_via_mailbox") or "").strip().lower()
+        if addr:
+            from app.services.inbound_mailbox_service import sending_mailbox
+            if sending_mailbox(db, addr) is None:
+                raise HTTPException(status_code=422, detail="%s is not a connected Microsoft 365 mailbox. "
+                                    "Connect it first in God Mode > Email Diagnostics." % addr)
+        prog.send_via_mailbox = addr or None
     # CUSTOMER-FACING IDENTITY is locked until the platform owner unlocks it:
     # a manager may write and send, but the family always sees Kerry Allan.
     from app.services.capabilities import is_god as _is_god_user

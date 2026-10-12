@@ -51,6 +51,11 @@ log = logging.getLogger(__name__)
 # reports "reconnect with Mail.ReadWrite".
 MAILBOX_SCOPES = "offline_access Mail.ReadWrite User.Read"
 MAILBOX_READ_SCOPES = "offline_access Mail.Read User.Read"
+# CONNECTING asks for Mail.Send too, so the same mailbox can be a program's
+# sending path (programs/mailbox_send.py). Reading keeps refreshing with
+# MAILBOX_SCOPES, so a mailbox connected before this keeps reading as before.
+CONNECT_SCOPES = "offline_access Mail.ReadWrite Mail.Send User.Read"
+SEND_SCOPES = "offline_access Mail.Send User.Read"
 FIRST_RUN_LOOKBACK = timedelta(days=3)
 CURSOR_OVERLAP = timedelta(minutes=10)
 MAX_MESSAGES_PER_RUN = 500
@@ -77,7 +82,7 @@ def authorization_url(state: str) -> str:
         raise RuntimeError("MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET not configured.")
     params = {"client_id": M.MICROSOFT_CLIENT_ID, "response_type": "code",
               "redirect_uri": M.MICROSOFT_REDIRECT_URI, "response_mode": "query",
-              "scope": MAILBOX_SCOPES, "state": state,
+              "scope": CONNECT_SCOPES, "state": state,
               # Always show the account picker: the person must choose the
               # SHARED mailbox, not whatever account the browser is signed into.
               "prompt": "select_account"}
@@ -91,7 +96,7 @@ def connect_from_code(db: Session, *, code: str, connected_by_user_id: str,
     r = httpx.post(f"{M.AUTHORITY}/oauth2/v2.0/token", data={
         "client_id": M.MICROSOFT_CLIENT_ID, "client_secret": M.MICROSOFT_CLIENT_SECRET,
         "code": code, "redirect_uri": M.MICROSOFT_REDIRECT_URI,
-        "grant_type": "authorization_code", "scope": MAILBOX_SCOPES}, timeout=15)
+        "grant_type": "authorization_code", "scope": CONNECT_SCOPES}, timeout=15)
     r.raise_for_status()
     tok = r.json()
     if not tok.get("refresh_token"):
@@ -151,6 +156,64 @@ def _access_token_rw(box: InboundMailbox):
 
 def _access_token(box: InboundMailbox) -> str:
     return _access_token_rw(box)[0]
+
+
+# ── Graph send: the mailbox as a program's sending path ─────────────────────
+
+def sending_mailbox(db: Session, address: Optional[str]) -> Optional[InboundMailbox]:
+    addr = (address or "").strip().lower()
+    if not addr:
+        return None
+    return (db.query(InboundMailbox)
+            .filter(InboundMailbox.address == addr, InboundMailbox.is_active.is_(True)).first())
+
+
+def _access_token_send(box: InboundMailbox) -> str:
+    if not box.refresh_token_encrypted:
+        raise MailboxAuthError("No Microsoft sign-in stored for this mailbox.")
+    r = _refresh(box, SEND_SCOPES)
+    if r.status_code in (400, 401):
+        raise MailboxAuthError(
+            "This mailbox was connected without permission to send. Reconnect it in God Mode > "
+            "Email Diagnostics and approve sending.")
+    r.raise_for_status()
+    data = r.json()
+    if data.get("refresh_token"):
+        from app.utils.crypto import encrypt_value
+        box.refresh_token_encrypted = encrypt_value(data["refresh_token"])
+    return data["access_token"]
+
+
+def send_mail(db: Session, box: InboundMailbox, *, to_email: str, subject: str, body_html: str,
+              reply_to: Optional[str] = None, attachments: Optional[List[dict]] = None) -> Dict:
+    """Send one email FROM this mailbox through Microsoft Graph /me/sendMail.
+    Same result shape as email_service.send_email_via_provider. Graph only
+    accepts x- custom headers, so List-Unsubscribe headers are not sent; the
+    unsubscribe link in the body is."""
+    base = {"provider": "microsoft365", "from_email": box.address, "provider_message_id": None,
+            "audit_bcc_applied": False}
+    try:
+        token = _access_token_send(box)
+    except MailboxAuthError as exc:
+        return dict(base, success=False, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 - a refusal is a failed send, never a crash
+        return dict(base, success=False, error="Microsoft sign-in failed: %s" % type(exc).__name__)
+    msg = {"subject": subject or "", "body": {"contentType": "HTML", "content": body_html or ""},
+           "toRecipients": [{"emailAddress": {"address": to_email}}]}
+    if reply_to:
+        msg["replyTo"] = [{"emailAddress": {"address": reply_to}}]
+    if attachments:
+        msg["attachments"] = [{"@odata.type": "#microsoft.graph.fileAttachment", "name": a["filename"],
+                               "contentType": a.get("content_type", "application/octet-stream"),
+                               "contentBytes": a["content"]} for a in attachments]
+    try:
+        r = httpx.post(f"{GRAPH}/me/sendMail", headers={"Authorization": f"Bearer {token}"},
+                       json={"message": msg, "saveToSentItems": True}, timeout=30)
+    except Exception as exc:  # noqa: BLE001
+        return dict(base, success=False, error="Microsoft 365 could not be reached: %s" % type(exc).__name__)
+    if r.status_code == 202:
+        return dict(base, success=True, error=None)
+    return dict(base, success=False, error="Microsoft 365 refused the send (%s): %s" % (r.status_code, r.text[:300]))
 
 
 # ── Graph read ───────────────────────────────────────────────────────────────

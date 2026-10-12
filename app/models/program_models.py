@@ -73,6 +73,10 @@ class OutreachProgram(Base):
     reply_instructions_email = Column(Text, nullable=True)
     # A send with no resolved location is refused and parked in Location Review.
     require_location_to_send = Column(Boolean, nullable=False, default=True)
+    # SEND FROM MICROSOFT 365: a connected mailbox address (inbound_mailboxes)
+    # this program's email goes out from, instead of the email service.
+    # NULL = the email service. See programs/mailbox_send.py.
+    send_via_mailbox = Column(String, nullable=True)
     # APPROVAL MODE: automated sends go only to contacts a manager approved on
     # Choose & Send. Switched on by the first approval; never switched off by code.
     require_send_approval = Column(Boolean, nullable=False, default=False)
