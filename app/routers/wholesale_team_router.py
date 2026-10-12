@@ -51,6 +51,26 @@ def my_role(db: Session = Depends(get_db), user: User = Depends(require_tenant_u
             "wholesale_only": T.is_wholesale_only(db, user), "field": T.is_field(db, user)}
 
 
+class RulesIn(BaseModel):
+    offer_limit_pct: int
+
+
+@router.get("/rules")
+def get_rules(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    _admin(db, user)
+    from app.services import wholesale_field_offers as O
+    out = O.rules_json(O.rules(db, svc.write_org_id(db, user)))
+    db.commit()
+    return out
+
+
+@router.put("/rules", dependencies=[Depends(require_not_observation)])
+def put_rules(body: RulesIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    _admin(db, user)
+    from app.services import wholesale_field_offers as O
+    return O.set_rules(db, svc.write_org_id(db, user), user, body.offer_limit_pct)
+
+
 @router.get("")
 def get_team(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     _admin(db, user)

@@ -143,6 +143,9 @@ class NotificationType(str, enum.Enum):
     # A website visitor asked for a demo without booking a time (Book a Demo
     # "send my information instead"). In-app, to the deal's owner.
     DEMO_REQUEST = "demo_request"
+    # A field rep's offer above their limit waits for an admin, and the
+    # admin's answer goes back to the rep (wholesale_field_offers).
+    WHOLESALE_OFFER = "wholesale_offer"
 
 
 # ---------------------------------------------------------------------------
