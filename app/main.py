@@ -2293,3 +2293,8 @@ def version():
 
 
 # touched Thu Jul  9 12:08:59 UTC 2026
+
+
+# LOCATION LINKS - registered LAST: one-part catch-all, answers only on a location host.
+from app.routers.location_link_router import router as location_link_router  # noqa: E402
+app.include_router(location_link_router)

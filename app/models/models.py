@@ -1299,6 +1299,8 @@ class BookingLink(Base):
     token = Column(String, unique=True, nullable=False, default=gen_uuid)
     lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # 5-character code for the location link: https://<location>.<domain>/<code>
+    short_code = Column(String, nullable=True, index=True)
 
     status = Column(String, default="pending")  # pending, booked, confirmed, expired, cancelled
     booked_time = Column(DateTime, nullable=True)

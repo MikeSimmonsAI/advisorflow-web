@@ -137,6 +137,8 @@ class LocationProfile(Base):
     # identity, aliases, reporting and campaigns. NULL = its own campus.
     campus_key = Column(String, nullable=True, index=True)
     campus_label = Column(String, nullable=True)
+    # Front of the short booking link (easterngate.evosyspro.live). NULL = from the name.
+    link_key = Column(String, nullable=True)
     website = Column(String, nullable=True)
     facility_phone = Column(String, nullable=True)
     manager_name = Column(String, nullable=True)
