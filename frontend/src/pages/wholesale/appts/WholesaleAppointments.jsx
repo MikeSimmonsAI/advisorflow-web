@@ -13,7 +13,7 @@ import './appts.css'
 
 const STATUS = { scheduled: ['Scheduled', 'info'], completed: ['Done', 'live'], no_show: ['No-show', 'danger'], cancelled: ['Cancelled', null] }
 
-function ApptCard({ a, isField, reps, onChanged }) {
+export function ApptCard({ a, isField, reps, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [more, setMore] = useState(false)

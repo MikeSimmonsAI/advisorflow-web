@@ -24,3 +24,13 @@
   .ap-actions .evo-btn { flex: 1 1 auto; }
   .ap-bar .ap-input { flex: 1 1 140px; min-width: 0; }
 }
+
+/* Field property card (fc-) */
+.fc-grid { display: grid; grid-template-columns: minmax(0, 340px) 1fr; gap: 16px; align-items: start; margin: 8px 0 16px; }
+.fc-photo { border-radius: 12px; overflow: hidden; min-height: 160px; background: #f1f5f9; }
+.fc-head { display: grid; gap: 6px; align-content: start; }
+.fc-addr { font-size: 24px; line-height: 1.2; margin: 0; }
+.fc-size { font-weight: 600; color: #334155; }
+.fc-owner { font-size: 16px; padding: 2px 0; }
+.fc-why { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 15px; }
+@media (max-width: 720px) { .fc-grid { grid-template-columns: 1fr; } .fc-addr { font-size: 20px; } }
