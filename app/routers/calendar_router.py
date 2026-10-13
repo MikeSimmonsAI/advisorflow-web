@@ -1311,7 +1311,13 @@ def get_available_slots(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
-    today = date_cls.today()
+    # TODAY IN CENTRAL, not on the server's UTC clock: after 7 PM Central the
+    # UTC date is already tomorrow, and the family's "Today" was refused as past.
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        today = datetime.now(timezone.utc).astimezone(_ZI("America/Chicago")).date()
+    except Exception:                                    # noqa: BLE001
+        today = date_cls.today()
     max_date = today + timedelta(days=14)
     if target_date < today:
         raise HTTPException(status_code=400, detail="Date is in the past")
