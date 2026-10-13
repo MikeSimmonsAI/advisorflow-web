@@ -19,6 +19,7 @@ const dayTime = iso => {
 }
 const isToday = iso => iso && new Date(iso).toDateString() === new Date().toDateString()
 const title = s => (s || '').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+const BAD = { failed: 'Failed', bounced: 'Bounced', undelivered: 'Not delivered' }
 const CLASS = { hot: ['Hot', 'hot'], active: ['Replied', 'blue'], low: ['Replied', 'gray'], opt_out: ['Opted out', 'gray'],
                 bad_data: ['Bad info', 'gray'], wrong_person: ['Wrong person', 'gray'] }
 
@@ -100,7 +101,7 @@ export default function Live() {
         <Tile value={`${delivered}/${texts.length}`} label="Texts delivered" />
         <Tile value={emails} label="Emails sent" />
         <Tile value={optOuts} label="Opted out" />
-        <Tile value={failed} label="Failed" tone={failed ? 'red' : ''} />
+        <Tile value={failed} label="Failed or bounced" tone={failed ? 'red' : ''} />
       </section>
 
       <Section title="Appointments" empty="No one has booked yet.">
@@ -136,8 +137,8 @@ export default function Live() {
         {sent.slice(0, 10).map((s, i) => (
           <Row key={i} onClick={() => open(s.lead_id)} name={title(s.name)} where={s.location}
                right={<>
-                 <span className={`live-chip ${s.status === 'failed' ? 'red' : s.status === 'delivered' ? 'green' : 'gray'}`}>
-                   {s.channel === 'text' ? 'Text' : 'Email'} · {s.status === 'delivered' ? 'Delivered' : s.status === 'failed' ? 'Failed' : 'Sent'}
+                 <span className={`live-chip ${BAD[s.status] ? 'red' : s.status === 'delivered' ? 'green' : 'gray'}`}>
+                   {s.channel === 'text' ? 'Text' : 'Email'} · {BAD[s.status] || (s.status === 'delivered' ? 'Delivered' : s.status === 'opened' ? 'Opened' : 'Sent')}
                  </span>
                  <span className="live-time">{time(s.at)}</span>
                </>} />
