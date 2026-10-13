@@ -338,6 +338,38 @@ class ProgramLeadFile(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class WorkspaceSwitch(Base):
+    """EACH WORKSPACE HAS ITS OWN OUTREACH SWITCH.
+
+    Automated texts used to be one server-wide setting, so turning texts on for
+    one customer turned them on for every customer. Now each workspace has its
+    own row; no row, or texts_on False, means that workspace sends no automated
+    texts. There is no server-wide "on"."""
+    __tablename__ = "workspace_switches"
+
+    organization_id = Column(String, ForeignKey("organizations.id", ondelete="CASCADE"),
+                             primary_key=True)
+    texts_on = Column(Boolean, nullable=False, default=False)
+    updated_by = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BookingPageEvent(Base):
+    """What a family did on their booking page: opened it, looked at a day,
+    picked a time, booked. Kept so the workspace can see WHEN people engage
+    (morning vs afternoon, which weekday) and how many open versus book."""
+    __tablename__ = "booking_page_events"
+    __table_args__ = (Index("ix_booking_page_events_org_at", "organization_id", "created_at"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=True)
+    booking_link_id = Column(String, nullable=True)
+    lead_id = Column(String, nullable=True)
+    event = Column(String, nullable=False)          # opened | day_viewed | booked
+    detail = Column(String, nullable=True)          # e.g. the day looked at
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ProgramAsset(Base):
     """Logos, facility images and approved flyers. Versioned; never edited in place."""
     __tablename__ = "program_assets"

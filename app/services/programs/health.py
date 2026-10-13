@@ -48,15 +48,22 @@ def _sms_block(db: Session, org_id: str, org) -> Dict:
     else:
         number = getattr(org, "org_twilio_phone_number", None)
         configured, approved, enabled, scope, kind = bool(number), None, bool(number), None, "organization number"
+    # Each workspace has its own automated-text switch; the line being on is
+    # not enough by itself.
+    from app.services import cadence_service as _cs
+    workspace_on = _cs.org_sending_enabled(db, org_id)
+    enabled = bool(enabled and workspace_on)
     # "ok" needs proof of approval; unknown approval is a warning, never a pass.
     status = "fail" if not (number and configured) else ("ok" if approved is True and enabled else "warn")
     parts = ["%s %s" % (number or "no number", kind if number else "configured"),
              "account configured" if configured else "account NOT configured on this server",
              {True: "approved" + (" (%s)" % scope if scope else ""), False: "NOT approved", None: "approval unknown"}[approved],
              "sending on" if enabled else "sending off",
+             "automated texts %s for this workspace" % ("ON" if workspace_on else "OFF"),
              ("last inbound text %s" % seen) if seen else "no inbound text seen yet"]
     return {"status": status, "detail": "; ".join(parts), "number": number, "configured": configured,
-            "approved": approved, "sending_enabled": enabled, "approved_scope": scope, "last_inbound_at": seen}
+            "approved": approved, "sending_enabled": enabled, "workspace_texts_on": workspace_on,
+            "approved_scope": scope, "last_inbound_at": seen}
 
 
 _DNS_CACHE: Dict[str, tuple] = {}

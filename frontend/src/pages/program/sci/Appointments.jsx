@@ -3,7 +3,7 @@
    the family's record. */
 import { useEffect, useState } from 'react'
 import { api } from '../../../api/client'
-import { Chip, Empty, ErrorLine, FilterChips, Loading, PageHead, Panel, errText, num } from './ui'
+import { Chip, Empty, ErrorLine, FilterChips, Kpi, Loading, PageHead, Panel, errText, num, when as ago } from './ui'
 
 const WHEN = [['upcoming', 'Upcoming'], ['past', 'Past'], ['all', 'All']]
 const STATUS = { booked: ['Booked', 'ok'], confirmed: ['Confirmed', 'ok'], cancelled: ['Cancelled', 'warn'], completed: ['Completed', ''] }
@@ -38,6 +38,7 @@ export default function Appointments({ locationId, openPerson }) {
     <>
       <PageHead title="Appointments" sub="Visits families booked. Times show in your own time zone." />
       <ErrorLine text={err} />
+      <BookingActivity openPerson={openPerson} />
       <Panel title="Booked visits" labelledBy="sci-appts"
         aside={<span className="sci-micro sci-muted">{data ? `${num(data.items.length)} shown` : 'Loading…'}</span>}>
         <div style={{ marginBottom: 12 }}><FilterChips items={WHEN} value={when} onChange={setWhen} label="Which appointments" /></div>
@@ -69,5 +70,73 @@ export default function Appointments({ locationId, openPerson }) {
         ))}
       </Panel>
     </>
+  )
+}
+
+
+/* BOOKING PAGE ACTIVITY: how many families opened their booking link, looked
+   at times and booked - and WHEN (hour of day, weekday, Central time), so the
+   morning-vs-afternoon question has an answer. GET /program/booking-activity. */
+const EVENT = { opened: 'Opened booking page', day_viewed: 'Looked at times', booked: 'Booked' }
+const hourLabel = h => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'a' : 'p'}`
+
+function Bars({ rows, labelKey, fmt }) {
+  const max = Math.max(1, ...rows.map(r => r.opened))
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 120, padding: '8px 0 0' }}>
+      {rows.map(r => (
+        <div key={r[labelKey]} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}
+          title={`${fmt(r[labelKey])}: ${r.opened} opened, ${r.booked} booked`}>
+          <div style={{ width: '100%', height: 90, display: 'flex', alignItems: 'flex-end', gap: 2 }}>
+            <div style={{ flex: 1, height: `${(r.opened / max) * 100}%`, minHeight: r.opened ? 3 : 0, background: '#2f6f73', borderRadius: '3px 3px 0 0' }} />
+            <div style={{ flex: 1, height: `${(r.booked / max) * 100}%`, minHeight: r.booked ? 3 : 0, background: '#c9a24a', borderRadius: '3px 3px 0 0' }} />
+          </div>
+          <span className="sci-micro sci-muted" style={{ fontSize: 10.5 }}>{fmt(r[labelKey])}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function BookingActivity({ openPerson }) {
+  const [d, setD] = useState(null)
+  const [days, setDays] = useState(30)
+  useEffect(() => { setD(null); api.get(`/program/booking-activity?days=${days}`).then(setD).catch(() => setD({ error: true })) }, [days])
+  if (!d) return <Panel title="Booking page activity"><Loading /></Panel>
+  if (d.error) return null
+  return (
+    <Panel title="Booking page activity" labelledBy="sci-book-act"
+      aside={<FilterChips items={[[7, '7 days'], [30, '30 days'], [90, '90 days']]} value={days} onChange={setDays} label="Period" />}>
+      <section className="sci-kpis four" aria-label="Booking summary" style={{ marginBottom: 12 }}>
+        <Kpi icon="users" tone="blue" value={d.opened_people} label="Families opened the page" note={`${num(d.open_events)} visits in all`} />
+        <Kpi icon="clock" tone="slate" value={d.looked_at_times_people} label="Looked at times" />
+        <Kpi icon="check" tone="green" value={d.booked_people} label="Booked" />
+        <Kpi icon="bolt" tone="gold" value={d.booking_rate == null ? '—' : `${d.booking_rate}%`} label="Opened → booked" />
+      </section>
+      <div className="sci-grid-even">
+        <div className="sci-card">
+          <h3 className="sci-h3" style={{ marginBottom: 0 }}>By time of day <span className="sci-micro sci-muted">(Central)</span></h3>
+          <Bars rows={d.by_hour} labelKey="hour" fmt={hourLabel} />
+        </div>
+        <div className="sci-card">
+          <h3 className="sci-h3" style={{ marginBottom: 0 }}>By day of week</h3>
+          <Bars rows={d.by_weekday} labelKey="day" fmt={x => x} />
+        </div>
+      </div>
+      <p className="sci-micro sci-muted" style={{ margin: '8px 0 12px' }}>
+        <span style={{ display: 'inline-block', width: 10, height: 10, background: '#2f6f73', borderRadius: 2, marginRight: 4 }} />Opened
+        <span style={{ display: 'inline-block', width: 10, height: 10, background: '#c9a24a', borderRadius: 2, margin: '0 4px 0 12px' }} />Booked
+      </p>
+      {d.recent.length === 0 ? <Empty icon="calendar" title="No activity yet">When a family opens their booking link it shows up here.</Empty> : (
+        <div className="sci-rows">
+          {d.recent.slice(0, 15).map((r, i) => (
+            <div className="sci-kv" key={i} style={{ cursor: r.lead_id ? 'pointer' : 'default' }} onClick={() => r.lead_id && openPerson && openPerson(r.lead_id)}>
+              <span><b>{r.name}</b> · {EVENT[r.event] || r.event}{r.event === 'day_viewed' && r.detail ? ` (${r.detail})` : ''}</span>
+              <span className="sci-muted">{ago(r.at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
   )
 }

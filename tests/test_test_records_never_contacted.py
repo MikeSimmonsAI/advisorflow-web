@@ -115,7 +115,8 @@ def test_start_cadence_returns_none_for_a_test_lead(
 
 def test_an_enrolled_test_lead_is_stopped_with_a_recorded_reason(
         db_session, sample_org, sample_advisor, monkeypatch):
-    monkeypatch.setenv("CADENCE_SMS_SENDING", "true")
+    monkeypatch.setattr(cs, "org_sending_enabled", lambda db, org_id: True)
+    monkeypatch.setattr(cs, "workspaces_sending", lambda db: ["*"])
     lead = _lead(db_session, sample_org, sample_advisor, is_test=True)
     now = datetime.utcnow()
     state = CadenceState(lead_id=lead.id, status="active", current_touch_number=0,

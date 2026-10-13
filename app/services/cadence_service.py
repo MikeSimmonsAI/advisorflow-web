@@ -26,6 +26,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 import os
+from typing import Optional
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -313,33 +314,46 @@ MAX_ATTEMPTS_PER_TOUCH = 3
 RETRY_BACKOFF = timedelta(hours=1)
 
 
-def _sending_enabled() -> bool:
-    """MAY THIS DEPLOYMENT PLACE A CADENCE SMS AT ALL?
+def org_sending_enabled(db: Session, organization_id: Optional[str]) -> bool:
+    """MAY THIS WORKSPACE SEND AUTOMATED TEXTS?
 
-    Default OFF, and that default is load-bearing rather than cautious.
-
-    Until this rewrite the runner called `get_twilio_client(advisor, db)` and
-    unpacked THREE values from it. That function returns a single Client, so
-    every touch raised TypeError - after the counter had already been advanced
-    and committed. The cadence has therefore never sent one message: it has
-    walked leads from touch 1 to touch 9, marked them `sent`, written no
-    `messages` row, and reported an error count nobody read.
-
-    Repairing that makes the highest-volume sender in the product start working
-    on the next deploy, against a population of leads whose due dates are
-    months in the past. Turning that on is a decision about contacting real
-    families, and it belongs to the owner, not to a bug fix. So the repair
-    ships switched off and the switch is explicit.
-
-    Per-customer control is the `cadences` feature entitlement that already
-    exists and already gates the cadence router - checked below per lead, so
-    enabling this deployment-wide still sends nothing for a customer who is not
-    entitled to cadences.
-    """
-    raw = os.environ.get("CADENCE_SMS_SENDING")
-    if raw is None:
+    Each workspace has its own switch (WorkspaceSwitch.texts_on). There is no
+    server-wide "on": the old CADENCE_SMS_SENDING variable turned texts on for
+    every customer at once, which is exactly what must never happen. No row
+    means off. The `cadences` entitlement is still checked per lead as well."""
+    if not organization_id:
         return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    from app.models.program_models import WorkspaceSwitch
+    row = (db.query(WorkspaceSwitch)
+           .filter(WorkspaceSwitch.organization_id == organization_id).first())
+    return bool(row and row.texts_on)
+
+
+def workspaces_sending(db: Session) -> list:
+    """Organization ids whose texts are switched on."""
+    from app.models.program_models import WorkspaceSwitch
+    return [r.organization_id for r in
+            db.query(WorkspaceSwitch).filter(WorkspaceSwitch.texts_on.is_(True)).all()]
+
+
+def set_org_sending(db: Session, organization_id: str, on: bool, by: Optional[str] = None) -> bool:
+    from app.models.program_models import WorkspaceSwitch
+    row = (db.query(WorkspaceSwitch)
+           .filter(WorkspaceSwitch.organization_id == organization_id).first())
+    if row is None:
+        row = WorkspaceSwitch(organization_id=organization_id)
+        db.add(row)
+    row.texts_on = bool(on)
+    row.updated_by = by
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    return row.texts_on
+
+
+def _sending_enabled() -> bool:
+    """Kept for old callers: there is no server-wide switch any more, so this
+    is always False. Use org_sending_enabled(db, org_id)."""
+    return False
 
 
 def _log_touch(db: Session, state, lead, *, touch_number, attempt_seq, outcome,
@@ -490,8 +504,8 @@ def run_due_cadences(db: Session, organization_id: str = None,
     A failed touch is retried on a backoff up to MAX_ATTEMPTS_PER_TOUCH and
     then abandoned so the cadence continues rather than wedging.
 
-    NOTHING SENDS unless this deployment has CADENCE_SMS_SENDING on AND the
-    customer holds the `cadences` feature. See `_sending_enabled`.
+    NOTHING SENDS unless this workspace's own text switch is on AND the
+    customer holds the `cadences` feature. See `org_sending_enabled`.
     """
     from app.services.lead_capacity import is_held
     from app.services.compliance_service import check_compliance_preflight
@@ -519,7 +533,8 @@ def run_due_cadences(db: Session, organization_id: str = None,
     now = now or datetime.now(timezone.utc).replace(tzinfo=None)
     if now.tzinfo is not None:
         now = now.astimezone(timezone.utc).replace(tzinfo=None)
-    sending_on = _sending_enabled()
+    sending_on = bool(workspaces_sending(db))
+    org_on_cache = {}
 
     query = (
         db.query(CadenceState)
@@ -682,9 +697,12 @@ def run_due_cadences(db: Session, organization_id: str = None,
                        .filter(Organization.id == lead.organization_id).first())
                 org_cache[lead.organization_id] = org
 
-            if not sending_on or not entitlements.org_has_feature(org, "cadences"):
-                reason = ("cadence SMS sending is disabled for this deployment"
-                          if not sending_on
+            if lead.organization_id not in org_on_cache:
+                org_on_cache[lead.organization_id] = org_sending_enabled(db, lead.organization_id)
+            org_on = org_on_cache[lead.organization_id]
+            if not org_on or not entitlements.org_has_feature(org, "cadences"):
+                reason = ("texts are switched off for this workspace"
+                          if not org_on
                           else "the organization is not entitled to cadences")
                 _log_touch(db, state, lead, touch_number=touch_number,
                            attempt_seq=_next_attempt_seq(db, state, touch_number),

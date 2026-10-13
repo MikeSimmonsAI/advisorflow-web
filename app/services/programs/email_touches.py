@@ -137,16 +137,12 @@ def used_today(db: Session, org_id: str, now: Optional[datetime] = None) -> int:
 
 
 def in_sending_hours(db: Session, org_id: str, now: Optional[datetime] = None) -> bool:
+    """Same window as texts: 8:30 AM - 7:45 PM Eastern."""
     from zoneinfo import ZoneInfo
-    org = db.query(Organization).filter(Organization.id == org_id).first()
-    tzname = (getattr(org, "timezone", None) or "America/Chicago") if org else "America/Chicago"
-    try:
-        tz = ZoneInfo(tzname)
-    except Exception:                                    # noqa: BLE001
-        tz = ZoneInfo("America/Chicago")
+    from app.services import contact_hours as ch
     utc = (now or datetime.utcnow()).replace(tzinfo=ZoneInfo("UTC"))
-    hour = utc.astimezone(tz).hour
-    return SEND_HOURS[0] <= hour < SEND_HOURS[1]
+    t = utc.astimezone(ZoneInfo(ch.WINDOW_ZONE)).time()
+    return ch.WINDOW_START <= t <= ch.WINDOW_END
 
 
 # ── rendering (shared with the campaign preview) ────────────────────────────
