@@ -1,0 +1,52 @@
+/* SCI Live - phone-first status screen. */
+.live {
+  --live-bg: #f4f6f9; --live-card: #fff; --live-ink: #14202e; --live-muted: #5d6b7a; --live-line: #e3e8ee;
+  --live-blue: #1f5fbf; --live-green: #1d7a46; --live-amber: #a35f00; --live-red: #b42318;
+  min-height: 100vh; background: var(--live-bg); color: var(--live-ink);
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding: 12px 14px 32px; max-width: 640px; margin: 0 auto; box-sizing: border-box;
+}
+@media (prefers-color-scheme: dark) {
+  .live { --live-bg: #0f151c; --live-card: #18212b; --live-ink: #e8edf2; --live-muted: #9aa8b6; --live-line: #26313d;
+          --live-blue: #7fb0ff; --live-green: #5fd08f; --live-amber: #f0b45a; --live-red: #ff8a80; }
+}
+.live *, .live *::before, .live *::after { box-sizing: border-box; }
+.live-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 12px;
+             position: sticky; top: 0; background: var(--live-bg); z-index: 2; }
+.live-head h1 { margin: 0; font-size: 22px; font-weight: 700; }
+.live-muted { color: var(--live-muted); margin: 0; font-size: 13px; }
+.live-muted.pad { padding: 12px 14px; }
+.live-err { color: var(--live-red); font-size: 13px; margin: 0 0 10px; }
+.live-btn { border: 1px solid var(--live-line); background: var(--live-card); color: var(--live-ink); border-radius: 10px;
+            padding: 9px 14px; font-size: 14px; font-weight: 600; }
+.live-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+.live-tile { background: var(--live-card); border: 1px solid var(--live-line); border-radius: 14px; padding: 12px; min-width: 0; }
+.live-tile.big .live-val { font-size: 34px; }
+.live-val { font-size: 24px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.live-lbl { font-size: 13px; color: var(--live-muted); margin-top: 2px; }
+.live-note { font-size: 12px; margin-top: 4px; color: var(--live-muted); }
+.live-tile.green .live-val { color: var(--live-green); }
+.live-tile.amber .live-val, .live-tile.amber .live-note { color: var(--live-amber); }
+.live-tile.red .live-val { color: var(--live-red); }
+.live-sec { margin-bottom: 18px; }
+.live-sec h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--live-muted); margin: 0 0 6px 2px; }
+.live-list { list-style: none; margin: 0; padding: 0; background: var(--live-card); border: 1px solid var(--live-line);
+             border-radius: 14px; overflow: hidden; }
+.live-list > li + li { border-top: 1px solid var(--live-line); }
+.live-sec > p.live-muted { background: var(--live-card); border: 1px solid var(--live-line); border-radius: 14px; }
+.live-row { width: 100%; display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; text-align: left;
+            background: none; border: 0; padding: 11px 14px; color: inherit; font: inherit; cursor: pointer; }
+.live-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.live-name { font-weight: 600; overflow-wrap: anywhere; }
+.live-where { font-size: 13px; color: var(--live-muted); overflow-wrap: anywhere; }
+.live-text { font-size: 14px; margin-top: 3px; overflow-wrap: anywhere; }
+.live-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.live-time { font-size: 12px; color: var(--live-muted); white-space: nowrap; }
+.live-chip { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+             background: color-mix(in srgb, var(--live-muted) 14%, transparent); color: var(--live-muted); }
+.live-chip.green { background: color-mix(in srgb, var(--live-green) 15%, transparent); color: var(--live-green); }
+.live-chip.amber { background: color-mix(in srgb, var(--live-amber) 16%, transparent); color: var(--live-amber); }
+.live-chip.blue { background: color-mix(in srgb, var(--live-blue) 14%, transparent); color: var(--live-blue); }
+.live-chip.red, .live-chip.hot { background: color-mix(in srgb, var(--live-red) 14%, transparent); color: var(--live-red); }
+.live-foot { font-size: 12px; color: var(--live-muted); text-align: center; margin-top: 8px; }
+.live-link { background: none; border: 0; color: var(--live-blue); font: inherit; font-weight: 600; margin-left: 6px; padding: 0; cursor: pointer; }
