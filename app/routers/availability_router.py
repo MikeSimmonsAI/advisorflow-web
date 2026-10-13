@@ -466,7 +466,8 @@ def get_upcoming_appointments(
                 BookingLink.user_id.in_(org_user_ids),
                 BookingLink.status == "booked",
             )
-        bookings, total, zmap = _upcoming(db, bq, UPCOMING_CAP)
+        from app.services.test_records import not_test_booking
+        bookings, total, zmap = _upcoming(db, not_test_booking(bq), UPCOMING_CAP)
 
         # Cache advisor names
         advisor_cache = {}
@@ -509,7 +510,8 @@ def get_upcoming_appointments(
         BookingLink.user_id == target.id,
         BookingLink.status == "booked",
     )
-    bookings, total, zmap = _upcoming(db, bq, UPCOMING_CAP)
+    from app.services.test_records import not_test_booking
+    bookings, total, zmap = _upcoming(db, not_test_booking(bq), UPCOMING_CAP)
 
     leads_by_id = _leads_by_id(db, bookings, org_id=target.organization_id)
     result = []

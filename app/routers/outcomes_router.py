@@ -229,6 +229,7 @@ def get_outcomes_summary(
     # Count booked leads as pipeline - these are real, in-progress
     booked_count = lead_scope.authorized_lead_query(db, current_user).filter(
         Lead.status == "booked",
+        Lead.is_test.isnot(True),
     ).count()
 
     # Most common sale items from free-text field - split by comma,

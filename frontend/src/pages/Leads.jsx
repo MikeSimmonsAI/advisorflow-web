@@ -543,7 +543,10 @@ function ClassicLeads() {
   const me = useWhoAmI()
   const myId = me?.user_id || getCurrentUser()?.id || null
   const filteredLeads = useMemo(() => {
-    let result = baseLeads
+    // Test records only ever appear under the "Test records" view. Every other
+    // view, count and card leaves them out, so a test booking never reads as a
+    // real appointment.
+    let result = savedView === 'test' ? baseLeads.filter(l => l.is_test) : baseLeads.filter(l => !l.is_test)
     const sv = SAVED_VIEWS.find(s => s.key === savedView)
     if (sv && sv.rule) result = result.filter(l => sv.rule(l, myId))
     if (tierFilter) result = result.filter((l) => l.tier === tierFilter)
@@ -809,24 +812,25 @@ function ClassicLeads() {
   const selectedCount = selected.size
 
   const stats = useMemo(() => ({
-    total: leadsTotal,          // real total from server, not capped at 500
+    total: serverCounts?.real ?? leadsTotal, // server total without test records, not capped at 500
     shown: filteredLeads.length,
     sendable: sendableLeads.length,
     selected: selectedCount,
     needsReview: needsReviewTotal, // real total from server
-    dnc: leads.filter((l) => l.status === 'dnc').length,
-    missingPhone: leads.filter((l) => !l.phone).length,
-    duplicates: leads.filter((l) => l.is_duplicate).length,
-  }), [leadsTotal, needsReviewTotal, leads, filteredLeads.length, sendableLeads.length, selectedCount])
+    dnc: leads.filter((l) => !l.is_test && l.status === 'dnc').length,
+    missingPhone: leads.filter((l) => !l.is_test && !l.phone).length,
+    duplicates: leads.filter((l) => !l.is_test && l.is_duplicate).length,
+  }), [leadsTotal, serverCounts, needsReviewTotal, leads, filteredLeads.length, sendableLeads.length, selectedCount])
 
   // Server totals for the directory cards (the list itself is capped at 500).
   useEffect(() => {
-    const total = (q) => api.get(`/leads/?page=1&page_size=1${q}`).then(d => (d && d.total) || 0).catch(() => null)
+    const total = (q) => api.get(`/leads/?page=1&page_size=1&exclude_test=true${q}`).then(d => (d && d.total) || 0).catch(() => null)
     Promise.all([
       total('&status=replied'), total('&status=hot'), total('&status=booked'),
       myId ? total(`&assigned_to_id=${encodeURIComponent(myId)}`) : Promise.resolve(null),
-    ]).then(([replied, hot, booked, mine]) => setServerCounts({
-      needsReply: replied == null || hot == null ? null : replied + hot, booked, mine,
+      total(''),
+    ]).then(([replied, hot, booked, mine, real]) => setServerCounts({
+      needsReply: replied == null || hot == null ? null : replied + hot, booked, mine, real,
     }))
   }, [leadsTotal, myId])
 
@@ -1262,7 +1266,7 @@ function ClassicLeads() {
         </div>
         <div className="leads-tabs">
           <button className={`tab ${view === 'all' ? 'tab--active' : ''}`} onClick={() => { setView('all'); setSelected(new Set()); }}>
-            All leads <span className="mono">{leadsTotal > leads.length ? leadsTotal : leads.filter(l => !l.is_duplicate).length}</span>
+            All leads <span className="mono">{leadsTotal > leads.length ? (serverCounts?.real ?? leadsTotal) : leads.filter(l => !l.is_duplicate && !l.is_test).length}</span>
           </button>
           <button className={`tab ${view === 'review' ? 'tab--active' : ''}`} onClick={() => setView('review')}>
             Needs tier review <span className="mono">{Math.max(needsReviewTotal || 0, needsReview.length)}</span>

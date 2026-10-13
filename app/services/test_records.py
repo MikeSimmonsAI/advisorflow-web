@@ -62,6 +62,26 @@ def exclude_test_records(query):
     return query.filter(Lead.is_test.isnot(True))
 
 
+def not_test_booking(query):
+    """Drop bookings that belong to a test record. A booking with no lead
+    (rare, manual) stays."""
+    from sqlalchemy import or_
+    from app.models.models import BookingLink
+    test_ids = query.session.query(Lead.id).filter(Lead.is_test.is_(True))
+    return query.filter(or_(BookingLink.lead_id.is_(None), ~BookingLink.lead_id.in_(test_ids)))
+
+
+def exclude_test_program_records(query):
+    """Drop outreach-program source rows that belong to a test record (the
+    booking-page test contact). They are kept in the database so the test link
+    keeps working, but no count, list or queue shows them."""
+    from sqlalchemy import or_
+    from app.models.program_models import ProgramSourceRecord as R
+    test_ids = query.session.query(Lead.id).filter(Lead.is_test.is_(True))
+    return query.filter(~R.source_lead_id.like("TEST-BOOKING-%"),
+                        or_(R.lead_id.is_(None), ~R.lead_id.in_(test_ids)))
+
+
 def is_outreach_eligible(lead: Lead) -> bool:
     """Single-send gate. False = never send automated outreach to this record.
 
