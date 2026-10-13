@@ -217,6 +217,26 @@ def get_booking_by_token(request: Request, token: str, db: Session = Depends(get
             # ON-SITE ONLY (Mike, 2026-10-12): the family books a visit at the location.
             appt_label = "Visit at %s" % _org_name
             appt_duration = 60
+        try:
+            from app.services.programs.identity import program_for_org
+            from app.models.location_models import Location as _Loc
+            _prog = program_for_org(db, lead.organization_id)
+            _lrow = db.query(_Loc).filter(_Loc.id == _loc.get("location_id")).first() if _loc.get("location_id") else None
+            _street = ", ".join(x for x in (getattr(_lrow, "address_line1", None), getattr(_lrow, "address_line2", None)) if x)
+            _city = ", ".join(x for x in (getattr(_lrow, "city", None), " ".join(y for y in (getattr(_lrow, "state", None), getattr(_lrow, "postal_code", None)) if y)) if x)
+            _program_location = {
+                "name": _org_name, "phone": _org_phone, "street": _street, "city": _city,
+                "contact_name": getattr(_prog, "primary_contact_name", None) if _prog else None,
+                "contact_title": getattr(_prog, "primary_contact_title", None) if _prog else None,
+            }
+        except Exception:                                    # noqa: BLE001
+            _program_location = {"name": _org_name, "phone": _org_phone}
+    else:
+        _program_location = None
+
+    if (booking.status or "") not in ("booked", "confirmed"):
+        from app.services.programs import booking_events as _be
+        _be.record(db, booking, _be.OPENED)
 
     return {
         "token": token,
@@ -237,6 +257,7 @@ def get_booking_by_token(request: Request, token: str, db: Session = Depends(get
         "timezone": (getattr(advisor, "booking_timezone", None) if advisor else None) or "America/Chicago",
         "appt_label": appt_label,
         "appt_duration": appt_duration,
+        "program_location": _program_location,
         "status": booking.status,
         "created_at": booking.created_at,
     }
@@ -316,6 +337,8 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
             }
 
         booking.status = "booked"
+        from app.services.programs import booking_events as _be
+        _be.add_pending(db, booking, lead, _be.BOOKED, slot_display)
         if appt_label and body.get("appt_label"):
             try:
                 booking.appt_label = str(appt_label)[:120]
@@ -1337,6 +1360,25 @@ def get_available_slots(
                 bt = bt.replace(tzinfo=None)
             booked_times.add((bt.hour, bt.minute))
 
+    # OUTREACH PROGRAM VISITS ARE 60 MINUTES: a booked visit holds its whole
+    # hour, and a family is offered on-the-hour starts whose full hour is free.
+    from app.models.models import Lead as _Lead
+    _blead = db.query(_Lead).filter(_Lead.id == booking.lead_id).first()
+    _program_visit = False
+    try:
+        from app.services.programs.identity import program_for_org as _pfo
+        _program_visit = bool(_blead is not None and _pfo(db, _blead.organization_id) is not None)
+    except Exception:                                    # noqa: BLE001
+        _program_visit = False
+    if _program_visit:
+        for (h, m) in list(booked_times):
+            booked_times.add((h, m + 30) if m < 30 else (h + 1, m - 30))
+        try:
+            from app.services.programs import booking_events as _be
+            _be.record(db, booking, _be.DAY_VIEWED, date)
+        except Exception:                                # noqa: BLE001
+            pass
+
     available = [s for s in candidate_slots if (s.hour, s.minute) not in booked_times]
 
     # ── External calendar (Microsoft or Google) via the tested provider ──────
@@ -1393,6 +1435,11 @@ def get_available_slots(
             s for s in available
             if dt_cls(_today_ct.year, _today_ct.month, _today_ct.day, s.hour, s.minute) >= cutoff_time
         ]
+
+    if _program_visit:
+        _free = {(s.hour, s.minute) for s in available}
+        available = [s for s in available
+                     if s.minute == 0 and s.hour <= 16 and (s.hour, 30) in _free]
 
     return {
         "date": date,

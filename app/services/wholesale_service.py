@@ -960,8 +960,8 @@ def apply_seller_reply(db: Session, org_id: str, deal: WholesaleDeal,
 # deal that is already closed or dead.
 #
 # TWO DEPLOYMENT SWITCHES ARE UPSTREAM OF THIS AND BOTH DEFAULT OFF:
-# `CADENCE_SMS_SENDING` decides whether this deployment may place a cadence SMS
-# at all, and the `cadences` feature entitlement decides it per customer. The
+# The workspace's own text switch (WorkspaceSwitch.texts_on) decides whether it
+# may place a cadence SMS at all, and the `cadences` feature entitlement decides it per customer. The
 # status this module returns reports both, so a cadence that is enrolled but
 # cannot send says so instead of looking like it is working.
 
@@ -987,7 +987,7 @@ def cadence_status(db: Session, org_id: str, deal: WholesaleDeal) -> Dict[str, A
              .filter(CadenceState.lead_id == deal.seller_lead_id).first())
 
     blockers = _cadence_blockers(db, org_id, deal, lead)
-    sending_on = cadence_service._sending_enabled()
+    sending_on = cadence_service.org_sending_enabled(db, org_id)
 
     out = {
         "state": (state.status if state else "not_started"),
@@ -1012,8 +1012,8 @@ def cadence_status(db: Session, org_id: str, deal: WholesaleDeal) -> Dict[str, A
                          "they will not go out until an administrator turns "
                          "sending on."),
         "sending_note_technical": (None if sending_on else
-                                   "CADENCE_SMS_SENDING is not set in the "
-                                   "server environment."),
+                                   "WorkspaceSwitch.texts_on is off for this "
+                                   "workspace (each workspace has its own switch)."),
     }
     if lead is not None:
         try:

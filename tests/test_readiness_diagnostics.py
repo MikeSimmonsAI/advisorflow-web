@@ -117,7 +117,7 @@ def test_the_switch_report_shows_the_deployment_half(client, god_headers):
     assert all(v is False for v in body["email"]["deployment"].values()), \
         "an outbound email source is enabled"
     assert body["cadence_sms"]["deployment_enabled"] is False
-    assert body["cadence_sms"]["variable"] == "CADENCE_SMS_SENDING"
+    assert body["cadence_sms"]["workspaces_sending"] == []
 
 
 def test_the_switch_report_takes_an_organization(client, god_headers, sample_org):

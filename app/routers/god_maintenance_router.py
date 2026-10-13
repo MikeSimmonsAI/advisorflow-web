@@ -175,10 +175,11 @@ def outbound_switches(
         "emergency_stop": outbound_brake.status(),
         "email": email,
         "cadence_sms": {
-            "deployment_enabled": cadence_service._sending_enabled(),
-            "variable": "CADENCE_SMS_SENDING",
-            "per_customer": "the `cadences` feature entitlement",
-            "note": "Both must say yes. A missing switch means no.",
+            "deployment_enabled": False,
+            "variable": None,
+            "workspaces_sending": cadence_service.workspaces_sending(db),
+            "per_customer": "each workspace's own text switch, plus the `cadences` feature entitlement",
+            "note": "There is no server-wide switch. Each workspace is on or off by itself.",
         },
     }
 

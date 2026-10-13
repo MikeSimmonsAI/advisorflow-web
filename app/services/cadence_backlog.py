@@ -224,7 +224,8 @@ def scan(db: Session, organization_id: Optional[str] = None,
     out = {
         "generated_at": now,
         "read_only": True,
-        "sending_enabled": cadence_service._sending_enabled(),
+        "sending_enabled": bool(cadence_service.workspaces_sending(db)),
+        "workspaces_sending": cadence_service.workspaces_sending(db),
         "active_enrollments": active,
         "due_now": due,
         "touches": {
@@ -285,7 +286,7 @@ def activation_plan(db: Session, organization_id: Optional[str] = None,
                      "happens by itself if the switch is simply flipped.")},
             {"step": 3,
              "action": "Enable for ONE organization first, via its `cadences` "
-                       "entitlement, with CADENCE_SMS_SENDING on.",
+                       "entitlement, with that workspace's own text switch on.",
              "why": ("Both gates must agree, so the deployment switch alone "
                      "reaches nobody. One customer is a real test with a "
                      "bounded number of families in it.")},

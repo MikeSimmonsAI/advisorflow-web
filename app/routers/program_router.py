@@ -1789,38 +1789,38 @@ async def import_source(file: UploadFile = File(...), dry_run: bool = Form(True)
 # ── owner: load a source file into production (the server-side version of
 #    scripts/program_setup.py --stage --hold-reviews --promote) ──────────────
 
-@god_router.post("/{organization_id}/load-source")
-async def god_load_source(organization_id: str, file: UploadFile = File(...),
-                          apply: bool = Form(False),
-                          db: Session = Depends(get_db), god: User = Depends(require_god)):
-    """Platform owner only. apply=False (the default) analyses the file and
-    writes only the import audit row. apply=True, in order: stages every row
-    (one ProgramSourceRecord per source Lead ID, originals never changed),
-    HOLDS every record still in a review state (location, duplicate, data,
-    conflict, and source statuses such as Not Interested / Disqualified),
-    then promotes the clean contacts to live leads. It never records consent,
-    never enrols anyone in a campaign and never sends anything.
-    Unknown location names go to Location Review - no location is created."""
-    from app.models.program_models import OutreachProgram
+def _excel_to_csv(content: bytes, filename: Optional[str]) -> bytes:
+    """Kerry's lists come as Excel as often as CSV. Read the first sheet and
+    hand the importer the same CSV it has always read."""
+    name = (filename or "").lower()
+    if not (name.endswith(".xlsx") or name.endswith(".xls")):
+        return content
+    import io as _io
+    import pandas as _pd
+    try:
+        frame = _pd.read_excel(_io.BytesIO(content), dtype=str).fillna("")
+    except Exception:                                    # noqa: BLE001
+        raise HTTPException(status_code=422, detail="That Excel file could not be read. Save it as .xlsx or .csv and try again.")
+    return frame.to_csv(index=False).encode("utf-8")
+
+
+def _load_source(db: Session, org, content: bytes, filename: Optional[str], apply: bool, actor: User) -> dict:
+    """Check (apply=False) or load (apply=True) a lead file: stage every row,
+    HOLD every record still in a review state, promote the clean contacts to
+    live leads, then check each new number mobile vs landline. Never records
+    consent, never enrols anyone in a campaign, never sends anything."""
     from app.services.programs import holds, promote
-    org = db.query(Organization).filter(Organization.id == organization_id).first()
-    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == organization_id).first() \
-        if org else None
-    if org is None or prog is None:
-        raise HTTPException(status_code=404, detail="No outreach program for that organization.")
-    content = await file.read(10 * 1024 * 1024 + 1)
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Files up to 10 MB.")
-    staged = importer.stage(db, org, content, filename=file.filename, dry_run=not apply, actor_id=god.id)
+    content = _excel_to_csv(content, filename)
+    staged = importer.stage(db, org, content, filename=filename, dry_run=not apply, actor_id=actor.id)
     out = {"apply": apply, "stage": staged["summary"], "run_id": staged["run_id"]}
     if not apply or staged["summary"].get("refused"):
         out["promotion_plan"] = {k: v for k, v in promote.plan(db, org).items() if k != "groups"}
         return out
-    held = holds.hold_open_reviews(db, org.id, god.id)
+    held = holds.hold_open_reviews(db, org.id, actor.id)
     db.commit()
     out["held"] = {k: v for k, v in held.items() if k != "source_lead_ids"}
     try:
-        out["promotion"] = promote.promote(db, org, god, apply=True)
+        out["promotion"] = promote.promote(db, org, actor, apply=True)
     except HTTPException:
         db.rollback()
         raise
@@ -1834,12 +1834,43 @@ async def god_load_source(organization_id: str, file: UploadFile = File(...),
         out["line_check"] = {"error": str(exc)[:200]}
     try:
         from app.routers.audit_log_router import log_action
-        log_action(db, org.id, god.id, "program.source_loaded", "organization", org.id,
-                   details={"file": file.filename, "staged": staged["summary"].get("staged"),
+        log_action(db, org.id, actor.id, "program.source_loaded", "organization", org.id,
+                   details={"file": filename, "staged": staged["summary"].get("staged"),
                             "held": held.get("held"), "created": out["promotion"].get("created")})
     except Exception:                                    # noqa: BLE001
         db.rollback()
     return out
+
+
+@router.post("/leads/import")
+async def import_leads(file: UploadFile = File(...), apply: bool = Form(False),
+                       db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """IMPORT LEADS INSIDE THE WORKSPACE (managers). apply=False checks the file
+    and changes nothing; apply=True loads it live. Loading never sends."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    content = await file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Files up to 10 MB.")
+    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    return _load_source(db, org, content, file.filename, apply, user)
+
+
+@god_router.post("/{organization_id}/load-source")
+async def god_load_source(organization_id: str, file: UploadFile = File(...),
+                          apply: bool = Form(False),
+                          db: Session = Depends(get_db), god: User = Depends(require_god)):
+    """Platform owner only - same as /program/leads/import for any workspace."""
+    from app.models.program_models import OutreachProgram
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == organization_id).first() \
+        if org else None
+    if org is None or prog is None:
+        raise HTTPException(status_code=404, detail="No outreach program for that organization.")
+    content = await file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Files up to 10 MB.")
+    return _load_source(db, org, content, file.filename, apply, god)
 
 
 # ── owner: configure a customer as a program ─────────────────────────────────
@@ -1875,3 +1906,85 @@ def god_setup(body: GodSetupIn, db: Session = Depends(get_db), god: User = Depen
     return {"program": _program_json(db, prog),
             "locations": sum(1 for p in profiles.values() if not p.is_review_bucket),
             "review_bucket": True, "campaign_families": len(fams)}
+
+
+# ── EACH WORKSPACE'S OWN TEXT SWITCH ────────────────────────────────────────
+class TextSwitchIn(BaseModel):
+    on: bool
+
+
+@router.get("/text-switch")
+def get_text_switch(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Is this workspace's automated texting on? Only the owner account can change it."""
+    from app.services import cadence_service as _cs
+    prog = _program(db, user)
+    return {"on": _cs.org_sending_enabled(db, prog.organization_id),
+            "can_change": getattr(user, "role", None) == "god_admin"}
+
+
+@router.post("/text-switch")
+def set_text_switch(body: TextSwitchIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    from app.services import cadence_service as _cs
+    prog = _program(db, user)
+    if getattr(user, "role", None) != "god_admin":
+        raise HTTPException(status_code=403, detail="Only the owner can switch automated texts on or off.")
+    on = _cs.set_org_sending(db, prog.organization_id, body.on, by=user.id)
+    return {"on": on, "can_change": True}
+
+
+@router.get("/booking-activity")
+def booking_activity(days: int = 30, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user)):
+    """Who opened their booking page, looked at times and booked - and when."""
+    from app.services.programs import booking_events
+    prog = _program(db, user)
+    return booking_events.summary(db, prog.organization_id, days=max(1, min(int(days), 365)))
+
+
+# ── A TEST BOOKING LINK, so the owner can see exactly what a family sees ────
+class TestLinkIn(BaseModel):
+    location_id: Optional[str] = None
+
+
+@router.post("/booking-test-link")
+def booking_test_link(body: TestLinkIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user)):
+    """A real booking link for a TEST contact (is_test, on hold): it opens the
+    same page a family gets, books onto the same calendar, and that contact is
+    never texted or emailed by anything. Owner only."""
+    import json as _json
+    from app.models.models import Lead
+    from app.models.program_models import ProgramSourceRecord
+    prog = _program(db, user)
+    if getattr(user, "role", None) != "god_admin":
+        raise HTTPException(status_code=403, detail="Owner only.")
+    org_id = prog.organization_id
+    homes = [p for p in _profiles(db, org_id) if not p.is_review_bucket]
+    prof = next((p for p in homes if p.location_id == body.location_id), None) or (homes[0] if homes else None)
+    if prof is None:
+        raise HTTPException(status_code=422, detail="This workspace has no locations.")
+    sid = "TEST-BOOKING-%s" % prof.location_id[:8]
+    rec = (db.query(ProgramSourceRecord)
+           .filter(ProgramSourceRecord.organization_id == org_id, ProgramSourceRecord.source_lead_id == sid).first())
+    lead = db.query(Lead).filter(Lead.id == rec.lead_id).first() if rec and rec.lead_id else None
+    if lead is None:
+        lead = Lead(organization_id=org_id, assigned_to_id=getattr(prog, "booking_user_id", None) or user.id,
+                    first_name=(user.full_name or "Test").split(" ")[0], last_name="(TEST)",
+                    email=None, phone=None, status="new", is_test=True)
+        db.add(lead)
+        db.flush()
+    if rec is None:
+        rec = ProgramSourceRecord(organization_id=org_id, source_lead_id=sid,
+                                  raw_json=_json.dumps({"note": "test booking contact"}))
+        db.add(rec)
+    rec.lead_id = lead.id
+    rec.location_id = prof.location_id
+    rec.location_status = "mapped"
+    rec.on_hold = True
+    rec.hold_reason = "TEST contact for previewing the booking page - never contacted"
+    db.commit()
+    url = identity.program_booking_url(db, lead)
+    if not url:
+        raise HTTPException(status_code=422, detail="No booking calendar is set for this workspace.")
+    return {"url": url, "location": prof.official_name}

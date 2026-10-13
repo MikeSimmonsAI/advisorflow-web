@@ -85,7 +85,9 @@ def _twilio():
 
 
 def _sending_on(monkeypatch):
-    monkeypatch.setenv("CADENCE_SMS_SENDING", "true")
+    # Each workspace has its own switch now; tests flip it for every workspace.
+    monkeypatch.setattr(cs, "org_sending_enabled", lambda db, org_id: True)
+    monkeypatch.setattr(cs, "workspaces_sending", lambda db: ["*"])
 
 
 def _logs(db_session, lead):
@@ -100,8 +102,22 @@ def _logs(db_session, lead):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_this_build_does_not_send_cadence_sms(monkeypatch):
-    monkeypatch.delenv("CADENCE_SMS_SENDING", raising=False)
+    monkeypatch.setenv("CADENCE_SMS_SENDING", "true")      # the old variable does nothing
     assert cs._sending_enabled() is False
+
+
+def test_each_workspace_has_its_own_text_switch(db_session, sample_org):
+    from app.models.models import Organization
+    other = Organization(name="Other Co", slug="other-co-switch")
+    db_session.add(other)
+    db_session.commit()
+    assert cs.org_sending_enabled(db_session, sample_org.id) is False
+    cs.set_org_sending(db_session, sample_org.id, True, by="test")
+    assert cs.org_sending_enabled(db_session, sample_org.id) is True
+    assert cs.org_sending_enabled(db_session, other.id) is False
+    assert cs.workspaces_sending(db_session) == [sample_org.id]
+    cs.set_org_sending(db_session, sample_org.id, False)
+    assert cs.org_sending_enabled(db_session, sample_org.id) is False
 
 
 def test_with_the_switch_off_nothing_reaches_the_provider(
@@ -120,7 +136,7 @@ def test_with_the_switch_off_nothing_reaches_the_provider(
     assert state.current_touch_number == 0, "a skipped touch must not advance"
     log = _logs(db_session, lead)[-1]
     assert log.outcome == cs.OUTCOME_SKIPPED
-    assert "disabled for this deployment" in log.reason
+    assert "switched off for this workspace" in log.reason
 
 
 def test_a_customer_without_the_cadences_feature_is_skipped(
@@ -507,8 +523,8 @@ def test_a_lead_in_a_split_state_is_permitted_only_when_both_halves_are(
     lead.state = "TX"
     db_session.commit()
 
-    # 14:00 UTC is 09:00 Central - fine there, 08:00 Mountain - too early.
-    assert contact_hours.is_permitted(lead, AT.replace(hour=14)) is False
+    # 13:00 UTC: Mountain is 06:00-07:00 - too early there, whatever Central says.
+    assert contact_hours.is_permitted(lead, AT.replace(hour=13)) is False
     assert contact_hours.is_permitted(lead, AT.replace(hour=15)) is True
 
 
@@ -641,7 +657,7 @@ def test_the_scan_predicts_the_same_outcome_the_engine_produces(
     night = _lead(db_session, sample_org, sample_advisor, phone="12145559999",
                   status="sent")
     _due(db_session, night)
-    night.state = "CA"           # 15:00 UTC is 08:00 there - too early
+    night.state = "HI"           # 15:00 UTC is 05:00 there - too early
     db_session.commit()
 
     report = cadence_backlog.scan(db_session, now=AT)

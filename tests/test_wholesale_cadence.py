@@ -69,7 +69,7 @@ def test_the_status_admits_when_the_deployment_cannot_send(client, auth_headers)
     # the screen unreadable, the second would make the problem unfixable.
     assert "turned off" in status["sending_note"]
     assert "CADENCE_SMS_SENDING" not in status["sending_note"]
-    assert "CADENCE_SMS_SENDING" in status["sending_note_technical"]
+    assert "texts_on" in status["sending_note_technical"]
 
 
 # ── The lifecycle ───────────────────────────────────────────────────────────

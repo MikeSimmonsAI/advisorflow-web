@@ -187,6 +187,7 @@ export default function Settings({ isManager, program, readiness, locations, onC
               <div className="sci-rows" style={{ marginBottom: 18 }}>
                 {(readiness?.items || []).map(i => <StatusRow key={i.key} item={i} label={LABELS[i.key] || i.key.replace(/_/g, ' ')} />)}
               </div>
+              <TextSwitch />
               {isManager && <ImportAndAlerts onChange={onChange} />}
             </>
           )}
@@ -337,6 +338,37 @@ function ImportAndAlerts({ onChange }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+
+/* This workspace's own automated-text switch. Every workspace has its own;
+   turning SCI on never turns anyone else on. Only the owner can change it. */
+function TextSwitch() {
+  const [d, setD] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => { api.get('/program/text-switch').then(setD).catch(e => setErr(errText(e))) }, [])
+  const flip = () => {
+    setBusy(true); setErr('')
+    api.post('/program/text-switch', { on: !d.on }).then(setD).catch(e => setErr(errText(e))).finally(() => setBusy(false))
+  }
+  return (
+    <div className="sci-rows" style={{ marginBottom: 18 }}>
+      <div className="sci-ctrl">
+        <span>Automated texts for this workspace</span>
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {d ? <Chip tone={d.on ? 'ok' : 'warn'} plain>{d.on ? 'On' : 'Off'}</Chip> : <span className="sci-muted">Checking…</span>}
+          {d?.can_change && (
+            <button type="button" className={`sci-btn sm ${d.on ? '' : 'primary'}`} disabled={busy} onClick={flip}>
+              {busy ? 'Saving…' : d.on ? 'Turn off' : 'Turn on'}
+            </button>
+          )}
+        </span>
+      </div>
+      <p className="sci-micro sci-muted" style={{ margin: '6px 0 0' }}>Texts go out 8:30 AM – 7:45 PM Eastern, never before 8 AM or after 9 PM in the family's own time. This switch only affects this workspace.</p>
+      {err && <ErrorLine text={err} />}
     </div>
   )
 }

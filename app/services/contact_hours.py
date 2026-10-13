@@ -68,9 +68,15 @@ import re
 from datetime import datetime, time, timezone as _timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-# The permitted window, local to the recipient. One place.
+# The sending window, on the EASTERN clock (Mike, 2026-10-12: "8:30 in the
+# morning Eastern all the way to 7:45 p.m. Eastern"). One place.
 WINDOW_START = time(8, 30)
 WINDOW_END = time(19, 45)
+WINDOW_ZONE = "America/New_York"
+# And never outside 8 AM - 9 PM in the family's OWN time, whatever the Eastern
+# clock says: 8:30 Eastern is 7:30 Central, too early for a Central family.
+LOCAL_FLOOR = time(8, 0)
+LOCAL_CEILING = time(21, 0)
 
 # Why a lead was refused - stable codes, so a diagnostic can group by them.
 PERMITTED = "permitted"
@@ -261,16 +267,28 @@ def check(lead, now_utc: Optional[datetime] = None) -> Dict[str, Any]:
                 "basis": resolved["basis"], "zones": zones, "local": {}}
 
     local = {name: dt.strftime("%H:%M") for name, dt in pairs}
+    aware = now_utc if now_utc.tzinfo else now_utc.replace(tzinfo=_timezone.utc)
+    et_zone = _zone(WINDOW_ZONE)
+    if et_zone is not None:
+        et = aware.astimezone(et_zone).time()
+        if not (WINDOW_START <= et <= WINDOW_END):
+            return {"permitted": False, "code": OUTSIDE_WINDOW,
+                    "reason": ("It is %s Eastern, outside the %s-%s Eastern "
+                               "sending window."
+                               % (et.strftime("%H:%M"),
+                                  WINDOW_START.strftime("%H:%M"),
+                                  WINDOW_END.strftime("%H:%M"))),
+                    "basis": resolved["basis"], "zones": zones, "local": local}
     outside = [name for name, dt in pairs
-               if not (WINDOW_START <= dt.time() <= WINDOW_END)]
+               if not (LOCAL_FLOOR <= dt.time() <= LOCAL_CEILING)]
     if outside:
         first = outside[0]
         return {"permitted": False, "code": OUTSIDE_WINDOW,
-                "reason": ("It is %s in %s, outside the permitted %s-%s "
-                           "contact window."
+                "reason": ("It is %s in %s, outside %s-%s in the family's "
+                           "own time."
                            % (local[first], first,
-                              WINDOW_START.strftime("%H:%M"),
-                              WINDOW_END.strftime("%H:%M"))),
+                              LOCAL_FLOOR.strftime("%H:%M"),
+                              LOCAL_CEILING.strftime("%H:%M"))),
                 "basis": resolved["basis"], "zones": zones, "local": local}
 
     return {"permitted": True, "code": PERMITTED,
