@@ -42,7 +42,19 @@ export default function Live() {
     ]).then(([ob, rs, ap, ba]) => {
       setD({ ob, rs: rs?.items || [], ap: ap?.items || [], ba })
       setErr(''); setAt(new Date())
-    }).catch(e => setErr((e && e.message) || 'Could not load.'))
+      try { sessionStorage.removeItem('sci_live_entry') } catch { /* private mode */ }
+    }).catch(e => {
+      const msg = (e && e.message) || 'Could not load.'
+      // Opened in a fresh tab (a Home Screen shortcut, a link): no workspace is
+      // chosen yet. Go through the SCI front door, which picks SCI and comes
+      // straight back here.
+      if (/no workspace|no outreach program/i.test(msg) && !sessionStorage.getItem('sci_live_entry')) {
+        try { sessionStorage.setItem('sci_live_entry', '1') } catch { /* private mode */ }
+        window.location.replace('/sci?to=live')
+        return
+      }
+      setErr(msg)
+    })
       .finally(() => { busy.current = false })
   }, [])
 

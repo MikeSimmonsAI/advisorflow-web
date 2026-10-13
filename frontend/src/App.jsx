@@ -717,6 +717,12 @@ function WorkspaceRoute() {
  * A platform owner without an SCI membership is sent to the Platform Console
  * (God Mode enters a customer explicitly). Everyone else is refused cleanly.
  */
+// /sci?to=live lands on the phone screen instead of the full Program Center.
+function sciLanding() {
+  try { return new URLSearchParams(window.location.search).get('to') === 'live' ? '/program/live' : '/program' }
+  catch { return '/program' }
+}
+
 function SciFrontDoor() {
   const { phase, ctx, retry } = useAuthorizedContexts()
   const navigate = useNavigate()
@@ -767,7 +773,7 @@ function SciFrontDoor() {
         // correctly refuse a god_admin who does not hold that membership.
         clearWorkspaceContext()
         await enterCustomer(exact[0].id, exact[0].name)
-        if (live) navigate('/program', { replace: true })
+        if (live) navigate(sciLanding(), { replace: true })
       } catch (err) {
         if (live) {
           setGodEntry({
@@ -808,7 +814,7 @@ function SciFrontDoor() {
     if (getWorkspaceContext() !== decision.organizationId) {
       setWorkspaceContext(decision.organizationId)
     }
-    return <Navigate to="/program" replace />
+    return <Navigate to={sciLanding()} replace />
   }
 
   if (decision.state === 'god') {
