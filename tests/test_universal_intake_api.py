@@ -199,3 +199,21 @@ def test_contacts_summary_keeps_leads_meaningful(client, db_session, orgs):
     assert s["previous_customers"] == 1
     assert s["needs_enrichment"] == 1
     assert s["sms_ready"] == 0
+
+
+def test_categories_can_be_combined(client, db_session, orgs):
+    """'a+b' narrows to rows in both - e.g. past customers waiting for review."""
+    a, _ = orgs
+    admin = _user(db_session, a, "org_admin", "admin-combo@atl.test")
+    h = _headers(db_session, admin)
+    bid = _upload(client, h).json()["id"]
+    client.post(f"/intake/batches/{bid}/analyze", headers=h)
+    one = client.get(f"/intake/batches/{bid}/rows?category=coverage:no_direct_contact", headers=h).json()
+    both = client.get(f"/intake/batches/{bid}/rows?category=coverage:no_direct_contact%2Bcoverage:no_direct_contact",
+                      headers=h).json()
+    assert both["total"] == one["total"]
+    none = client.get(f"/intake/batches/{bid}/rows?category=coverage:no_direct_contact%2Bcoverage:phone_only",
+                      headers=h).json()
+    assert none["total"] == 0
+    assert client.get(f"/intake/batches/{bid}/rows?category=nonsense%2Bcoverage:phone_only",
+                      headers=h).status_code == 400
