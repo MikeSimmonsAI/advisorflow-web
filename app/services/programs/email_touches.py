@@ -245,16 +245,31 @@ def classify_provider_error(text: Optional[str]) -> str:
 STALE_CLAIM_AFTER = timedelta(hours=1)      # a claim never resolved -> outcome unknown
 
 
+def _member_of(db: Session, user: User, org_id: str) -> bool:
+    """Home organization OR an active membership: Kerry is SCI's by membership
+    (her login is seconded), and the old home-org-only test refused her."""
+    if user.organization_id == org_id:
+        return True
+    from app.models.sales_models import Membership
+    return db.query(Membership.id).filter(Membership.user_id == user.id, Membership.scope_id == org_id,
+                                          Membership.is_active.is_(True)).first() is not None
+
+
 def _sender(db: Session, prog: OutreachProgram, lead: Lead) -> Optional[User]:
+    """Whose name a program email/text goes out under: the program's primary
+    contact, then the lead's own advisor, then a workspace admin - the one
+    whose name is the program's primary contact first."""
     for uid in (prog.primary_contact_user_id, lead.assigned_to_id):
         if uid:
-            u = db.query(User).filter(User.id == uid, User.is_active.is_(True),
-                                      User.organization_id == prog.organization_id).first()
-            if u is not None:
+            u = db.query(User).filter(User.id == uid, User.is_active.is_(True)).first()
+            if u is not None and _member_of(db, u, prog.organization_id):
                 return u
     from app.services.programs.responses import _org_admin_users
     admins = [u for u in _org_admin_users(db, prog.organization_id)
-              if u.organization_id == prog.organization_id]
+              if getattr(u, "role", None) != "god_admin"]
+    want = (prog.primary_contact_name or "").strip().lower()
+    admins.sort(key=lambda u: (0 if want and (u.full_name or "").strip().lower() == want else 1,
+                               u.full_name or ""))
     return admins[0] if admins else None
 
 
