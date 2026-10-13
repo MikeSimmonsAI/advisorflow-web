@@ -726,8 +726,12 @@ def _reporting(db: Session, recs, resps) -> dict:
                 out["sms"]["delivered"] += n
             if (st or "") in ("failed", "undelivered"):
                 out["sms"]["failed"] += n
+        # Owner test contacts (booking preview) never count as appointments.
+        from app.models.models import Lead as _L
+        test_ids = {i for (i,) in db.query(_L.id).filter(_L.id.in_(lead_ids), _L.is_test.is_(True)).all()}
+        real_ids = [i for i in lead_ids if i not in test_ids]
         out["appointments"] = (db.query(func.count(BookingLink.id))
-                               .filter(BookingLink.lead_id.in_(lead_ids),
+                               .filter(BookingLink.lead_id.in_(real_ids or ["-"]),
                                        BookingLink.status.in_(("booked", "confirmed"))).scalar() or 0)
     out["email"]["replied"] = sum(1 for r in resps if r.channel == "email")
     out["sms"]["replied"] = sum(1 for r in resps if r.channel == "sms")
@@ -1991,3 +1995,108 @@ def booking_test_link(body: TestLinkIn, db: Session = Depends(get_db),
     if not url:
         raise HTTPException(status_code=422, detail="No booking calendar is set for this workspace.")
     return {"url": url, "location": prof.official_name}
+
+
+# ── OUTBOX: what went out (text or email) and what is going out next ────────
+
+@router.get("/outbox")
+def outbox(day: Optional[str] = Query(None, description="YYYY-MM-DD, Central; default today"),
+           db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Every text and email sent to the program's families on one day, newest
+    first, with what it said and whether it was delivered; and every family
+    still scheduled later that day, by time and by channel. Reads only."""
+    from datetime import date as _date, datetime as _dt, time as _time, timedelta as _td
+    from zoneinfo import ZoneInfo
+    from app.models.models import CadenceState, EmailMessage, Lead, Message
+    from app.services.programs import send_approval as _sa
+    prog = _program(db, user)
+    org_id = prog.organization_id
+    tz = ZoneInfo("America/Chicago")
+    utc = ZoneInfo("UTC")
+    try:
+        d = _date.fromisoformat(day) if day else _dt.now(utc).astimezone(tz).date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Day must be YYYY-MM-DD.")
+    start = _dt.combine(d, _time(0, 0), tz).astimezone(utc).replace(tzinfo=None)
+    end = start + _td(days=1)
+    now = _dt.utcnow()
+
+    def iso(x):
+        return x.strftime("%Y-%m-%dT%H:%M:%SZ") if x else None
+
+    profiles = {p.location_id: p.official_name for p in _profiles(db, org_id)}
+    recs = {}
+    for r in (db.query(ProgramSourceRecord)
+              .filter(ProgramSourceRecord.organization_id == org_id, ProgramSourceRecord.lead_id.isnot(None))
+              .all()):
+        recs.setdefault(r.lead_id, []).append(r)
+
+    def where(lead_id):
+        rows = recs.get(lead_id) or []
+        m = _sa._master(rows) if rows else None
+        return (profiles.get(m.location_id) if m else None), (m.campaign_family if m else None), m
+
+    sent = []
+    texts = (db.query(Message, Lead).join(Lead, Lead.id == Message.lead_id)
+             .filter(Lead.organization_id == org_id, Message.sent_at >= start, Message.sent_at < end).all())
+    for m, lead in texts:
+        loc, fam, _ = where(lead.id)
+        st = (m.delivery_status or m.twilio_status or "sent").lower()
+        sent.append({"at": iso(m.sent_at), "lead_id": lead.id,
+                     "name": " ".join(x for x in (lead.first_name, lead.last_name) if x) or "Family",
+                     "location": loc, "channel": "text", "to": lead.phone, "subject": None,
+                     "preview": (m.body or "")[:400], "status": st})
+    emails = (db.query(EmailMessage, Lead).join(Lead, Lead.id == EmailMessage.lead_id)
+              .filter(Lead.organization_id == org_id, EmailMessage.sent_at >= start,
+                      EmailMessage.sent_at < end).all())
+    import re as _re
+    for e, lead in emails:
+        loc, fam, _ = where(lead.id)
+        text = _re.sub(r"<[^>]+>", " ", e.body_html or "")
+        text = _re.sub(r"\s+", " ", text).replace("&#x27;", "'").replace("&amp;", "&").strip()
+        st = (e.status or "sent").lower()
+        if getattr(e, "opened_at", None):
+            st = "opened"
+        sent.append({"at": iso(e.sent_at), "lead_id": lead.id,
+                     "name": " ".join(x for x in (lead.first_name, lead.last_name) if x) or "Family",
+                     "location": loc, "channel": "email", "to": lead.email, "subject": e.subject,
+                     "preview": text[:400], "status": st})
+    sent.sort(key=lambda x: x["at"] or "", reverse=True)
+
+    # Coming up: slow-drip starts later today, and follow-up texts due today.
+    coming = []
+    seen = set()
+    for lead_id, rows in recs.items():
+        m = _sa._master(rows)
+        sa = getattr(m, "scheduled_start_at", None)
+        if not (m.approved_to_send_at and sa and now < sa < end and sa >= start):
+            continue
+        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        if lead is None:
+            continue
+        mode = getattr(m, "send_mode", None) or "text_email"
+        reach = _sa.reaches(lead, mode)
+        coming.append({"at": iso(sa), "lead_id": lead_id,
+                       "name": " ".join(x for x in (lead.first_name, lead.last_name) if x) or "Family",
+                       "location": profiles.get(m.location_id), "what": "First message",
+                       "channels": reach, "campaign": m.campaign_family})
+        seen.add(lead_id)
+    for state, lead in (db.query(CadenceState, Lead).join(Lead, Lead.id == CadenceState.lead_id)
+                        .filter(Lead.organization_id == org_id, CadenceState.status == "active",
+                                CadenceState.next_touch_due_at >= max(now, start),
+                                CadenceState.next_touch_due_at < end).all()):
+        if lead.id in seen:
+            continue
+        loc, fam, _ = where(lead.id)
+        coming.append({"at": iso(state.next_touch_due_at), "lead_id": lead.id,
+                       "name": " ".join(x for x in (lead.first_name, lead.last_name) if x) or "Family",
+                       "location": loc, "what": "Text #%d" % ((state.current_touch_number or 0) + 1),
+                       "channels": "Text", "campaign": fam})
+    coming.sort(key=lambda x: x["at"] or "")
+
+    texts_n = sum(1 for s in sent if s["channel"] == "text")
+    emails_n = sum(1 for s in sent if s["channel"] == "email")
+    failed_n = sum(1 for s in sent if s["status"] in ("failed", "undelivered", "bounced"))
+    return {"day": d.isoformat(), "texts_sent": texts_n, "emails_sent": emails_n, "failed": failed_n,
+            "coming_up": len(coming), "sent": sent, "upcoming": coming,
+            "note": "Texts go out at the hourly pass after their time; emails within about 10 minutes."}

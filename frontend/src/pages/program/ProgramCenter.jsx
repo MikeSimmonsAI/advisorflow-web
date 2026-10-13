@@ -38,6 +38,7 @@ import Settings from './sci/Settings'
 import Send from './sci/Send'
 import Leads from './sci/Leads'
 import Appointments from './sci/Appointments'
+import Outbox from './sci/Outbox'
 import Person from './sci/Person'
 import './ProgramCenter.css'
 
@@ -45,6 +46,7 @@ const TABS = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { key: 'leads', label: 'Leads', icon: 'users' },
   { key: 'send', label: 'Choose & Send', icon: 'send' },
+  { key: 'outbox', label: 'Outbox', icon: 'mail' },
   { key: 'responses', label: 'Responses', icon: 'responses' },
   { key: 'appointments', label: 'Appointments', icon: 'calendar' },
   { key: 'review', label: 'Review', icon: 'review' },
@@ -261,6 +263,7 @@ export default function ProgramCenter() {
           {personId && <Person leadId={personId} isManager={isManager} onBack={() => (window.history.length > 1 ? navigate(-1) : setMany({ person: '' }))} />}
           {!personId && tab === 'leads' && <Leads locations={data.locations} locationId={locationId} openPerson={openPerson} initialQuery={params.get('q') || ''} />}
           {!personId && tab === 'appointments' && <Appointments locationId={locationId} openPerson={openPerson} />}
+          {!personId && tab === 'outbox' && <Outbox openPerson={openPerson} />}
           {!personId && tab === 'dashboard' && <Dashboard data={data} goTab={goTab} setParam={setParam} isManager={isManager} />}
           {!personId && tab === 'responses' && <Responses locationId={locationId} onChange={load} navigate={navigate} isManager={isManager} />}
           {!personId && tab === 'review' && <Review locationId={locationId} locations={data.locations} isManager={isManager}
