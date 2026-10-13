@@ -668,6 +668,17 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 continue
 
             advisor = lead.assigned_to
+            if not advisor and lead.organization_id:
+                # A location-outreach program contact nobody claimed yet goes
+                # out under the program's own sender (its primary contact).
+                try:
+                    from app.services.programs import identity as _pid
+                    from app.services.programs import email_touches as _pet
+                    _prog = _pid.program_for_org(db, lead.organization_id)
+                    if _prog is not None:
+                        advisor = _pet._sender(db, _prog, lead)
+                except Exception:                        # noqa: BLE001
+                    advisor = None
             if not advisor:
                 _log_touch(db, state, lead, touch_number=touch_number,
                            attempt_seq=_next_attempt_seq(db, state, touch_number),
