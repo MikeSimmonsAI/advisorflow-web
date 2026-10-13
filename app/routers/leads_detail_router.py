@@ -206,7 +206,8 @@ def get_lead_timeline(lead_id: str,
     for e in email_messages:
         import re as _re
         raw_html = e.body_html or ""
-        plain_body = _re.sub(r'<[^>]+>', ' ', raw_html)
+        import html as _html
+        plain_body = _html.unescape(_re.sub(r'<[^>]+>', ' ', raw_html))
         plain_body = _re.sub(r'\s+', ' ', plain_body).strip()
         if len(plain_body) > 600:
             plain_body = plain_body[:600] + "\u2026"
