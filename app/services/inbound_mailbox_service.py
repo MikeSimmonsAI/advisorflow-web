@@ -449,6 +449,70 @@ def _file_processed(db: Session, box: InboundMailbox, row, gid: str, prof, mover
         log.exception("outlook filing failed for message %s", gid)
 
 
+# ── BOUNCES ("couldn't be delivered" notices) ──────────────────────────────
+# Program email goes out through this mailbox, so when an address does not
+# exist the receiving server's refusal comes back HERE as a notice from
+# Microsoft Outlook / postmaster / mailer-daemon. Without this it was routed
+# like a reply, matched no lead and was dropped - the address kept being
+# mailed and the app said "sent".
+_NDR_SENDER = re.compile(r"(?i)^(postmaster|mailer-daemon|microsoftexchange[0-9a-f]*|mail-daemon|no-?reply-dsn)@")
+_NDR_SUBJECT = re.compile(r"(?i)^(undeliverable|undelivered mail|delivery status notification|mail delivery (failed|subsystem)"
+                          r"|returned mail|delivery (has )?failed|failure notice|message not delivered)")
+_NDR_BODY = re.compile(r"(?i)(couldn'?t be delivered|could not be delivered|wasn'?t found at|does not exist|"
+                       r"address not found|user unknown|no such user|recipient address rejected|5\.1\.1|"
+                       r"mailbox unavailable|delivery has failed)")
+_EMAIL = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_SOFT = re.compile(r"(?i)(mailbox (is )?full|over quota|temporar|try again later|4\.\d\.\d)")
+
+
+def bounce_addresses(m: dict, own: Optional[set] = None) -> Optional[List[str]]:
+    """None when the message is not a delivery-failure notice; otherwise the
+    addresses named in it (the failed recipient is among them)."""
+    sender = ((m.get("from") or {}).get("emailAddress") or {})
+    addr = (sender.get("address") or "").strip().lower()
+    name = (sender.get("name") or "").strip().lower()
+    subject = (m.get("subject") or "").strip()
+    body = (m.get("body") or {}).get("content") or m.get("bodyPreview") or ""
+    looks = bool(_NDR_SENDER.match(addr)) or name in ("microsoft outlook", "mail delivery subsystem",
+                                                       "mail delivery system")
+    if not (looks or _NDR_SUBJECT.match(subject)) or not _NDR_BODY.search(body + " " + subject):
+        return None
+    own = {a.lower() for a in (own or set())}
+    found = []
+    for e in _EMAIL.findall(body + " " + subject) + [x for x in recipients_of(m)]:
+        e = e.strip(".'").lower()
+        if e not in found and e not in own and not _NDR_SENDER.match(e) and "outlook.com" not in e.split("@")[1][-12:]:
+            found.append(e)
+    return found
+
+
+def record_bounce(db: Session, org_ids: List[str], addresses: List[str], received: datetime,
+                  soft: bool = False) -> Optional[str]:
+    """Mark the newest email we sent to one of these addresses bounced and,
+    for a permanent failure, flag the address bad so nothing mails it again.
+    Returns a short description, or None when no email of ours matches."""
+    from sqlalchemy import func
+    from app.models.models import EmailMessage, Lead
+    if not addresses:
+        return None
+    q = db.query(EmailMessage, Lead).join(Lead, Lead.id == EmailMessage.lead_id).filter(
+        func.lower(Lead.email).in_(addresses), EmailMessage.sent_at <= received + timedelta(minutes=5),
+        EmailMessage.sent_at >= received - timedelta(days=14))
+    if org_ids:
+        q = q.filter(Lead.organization_id.in_(org_ids))
+    hit = q.order_by(EmailMessage.sent_at.desc()).first()
+    if hit is None:
+        return None
+    msg, lead = hit
+    msg.status = "bounced"
+    if not soft and not lead.manual_flag:
+        lead.manual_flag = "bad_email"
+        lead.manual_flag_reason = "email bounced - address does not exist (%s)" % (lead.email or "")
+    db.commit()
+    return "Bounce for %s: email marked bounced%s." % (
+        lead.email, "" if soft else "; address flagged so it is not emailed again")
+
+
 def _store_reply(db: Session, lead, body: str, received_at: datetime, message_id: Optional[str] = None):
     from app.models.models import Notification, Reply
     # Same message (same body, received within minutes), not merely the same
@@ -573,7 +637,14 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
         row.internet_message_id = m.get("internetMessageId")
         row.from_address, row.subject, row.received_at = sender or None, (m.get("subject") or "")[:500], received
         try:
-            if not sender or sender == box.address:
+            bounced = bounce_addresses(m, own={box.address})
+            if bounced is not None:
+                body_txt = (m.get("body") or {}).get("content") or m.get("bodyPreview") or ""
+                done = record_bounce(db, org_ids, bounced, received, soft=bool(_SOFT.search(body_txt)))
+                row.outcome = "bounce"
+                row.detail = done or ("Delivery-failure notice; no email of ours to %s found."
+                                      % (", ".join(bounced[:3]) or "an unknown address"))
+            elif not sender or sender == box.address:
                 row.outcome, row.detail = "own_mail", "Sent by the mailbox itself."
             else:
                 alias_prof = _alias_location(db, m)
