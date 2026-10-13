@@ -200,6 +200,17 @@ class TestPlatformSlugsMatrix:
         db.query.side_effect = query_side_effect
         return user_authorized_platform_slugs(user, db)
 
+    # ── N: workspace member only (NULL org, customer_org membership) ──────
+    def test_N_customer_org_membership_only(self):
+        user = make_user(organization_id=None)
+        b_q = MagicMock(); b_q.join.return_value.join.return_value.filter.return_value.all.return_value = []
+        c_q = MagicMock(); c_q.join.return_value.filter.return_value.all.return_value = []
+        d_q = MagicMock(); d_q.join.return_value.filter.return_value.all.return_value = [("plat-evo",)]
+        p_q = MagicMock(); p_q.filter.return_value.all.return_value = [("evosyspro",)]
+        seq = iter([b_q, c_q, d_q, p_q])
+        db = MagicMock(); db.query.side_effect = lambda *a, **k: next(seq, MagicMock())
+        assert user_authorized_platform_slugs(user, db) == {"evosyspro"}
+
     # ── A: legacy customer with org → platform ────────────────────────────
     def test_A_legacy_customer_org_platform(self):
         user = make_user(organization_id="org1")

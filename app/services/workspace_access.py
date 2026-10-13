@@ -256,6 +256,27 @@ def user_authorized_platform_slugs(user: User, db: Session) -> set:
     )
     slugs.update(r[0] for r in platform_rows)
 
+    # Source D: active customer-workspace memberships. A login added to a
+    # customer's workspace on Manage Access (Membership scope customer_org)
+    # with no legacy users.organization_id - e.g. Kerry on SCI - must be able
+    # to sign in on that customer's brand domain. Same default as Source A: an
+    # organization with no platform_id is 'bookaboost'.
+    org_rows = (
+        db.query(Organization.platform_id)
+        .join(Membership, Membership.scope_id == Organization.id)
+        .filter(
+            Membership.user_id == user.id,
+            Membership.scope_type == SCOPE_CUSTOMER_ORG,
+            Membership.is_active.is_(True),
+        )
+        .all()
+    )
+    pids = {r[0] for r in org_rows if r[0]}
+    if any(not r[0] for r in org_rows):
+        slugs.add("bookaboost")
+    if pids:
+        slugs.update(r[0] for r in db.query(Platform.slug).filter(Platform.id.in_(pids)).all())
+
     return slugs
 
 
