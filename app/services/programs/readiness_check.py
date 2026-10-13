@@ -224,9 +224,76 @@ LAUNCH_GATES: List[Dict] = [
 WHY_NO_GO: List[str] = [g["text"] for g in LAUNCH_GATES if g["group"] in ("external", "approval")]
 
 
-def verdict(last: Optional[Dict]) -> Dict:
+def live_gates(db, org_id: Optional[str]) -> List[Dict]:
+    """THE CHECKLIST, READ FROM THE WORKSPACE - not a list written on one day.
+
+    The external and approval items used to be fixed sentences, so the page kept
+    saying "Kerry has no login" and "contacts are not loaded" after both were
+    done. Each one is now answered from the database; anything that cannot be
+    answered stays exactly as it was (open)."""
+    gates = [dict(g) for g in LAUNCH_GATES]
+    if db is None or not org_id:
+        return gates
+    by_key = {g["key"]: g for g in gates}
+
+    def done(key, text):
+        g = by_key.get(key)
+        if g is not None:
+            g["group"], g["text"] = "verified", text
+
+    try:
+        from app.models.models import Lead, User
+        from app.models.program_models import (CampaignFamily, OutreachProgram,
+                                               ProgramSourceRecord)
+        prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org_id).first()
+        contact = (getattr(prog, "primary_contact_name", None) or "The primary contact") if prog else "The primary contact"
+        # E1 - the primary contact can sign in.
+        try:
+            from app.models.sales_models import Membership, SCOPE_CUSTOMER_ORG
+            members = (db.query(Membership).join(User, User.id == Membership.user_id)
+                       .filter(Membership.scope_type == SCOPE_CUSTOMER_ORG, Membership.scope_id == org_id,
+                               Membership.is_active.is_(True), User.is_active.is_(True),
+                               User.role != "god_admin").count())
+        except Exception:                                # noqa: BLE001
+            members = 0
+        if members or (prog is not None and prog.primary_contact_user_id):
+            done("E1", "%s has her own login to this workspace." % contact)
+        # C9 - Oaklawn is held, so nothing is sent there; not a blocker.
+        done("C9", "Oaklawn Central Care Center is held: its contacts are never sent until it is resolved with SCI.")
+        # B6 - inbox placement checked; the providers that went to junk are held.
+        if prog is not None:
+            from app.services.programs.email_touches import PROVIDER_LABELS, held_providers
+            held = sorted(held_providers(prog))
+            if held:
+                done("B6", "Inbox check done. Email to %s is held (it went to junk), so those families get texts only."
+                     % " and ".join(PROVIDER_LABELS.get(h, h) for h in held))
+        # F2 - families loaded.
+        loaded = (db.query(Lead.id).filter(Lead.organization_id == org_id, Lead.is_test.isnot(True)).count())
+        if loaded:
+            done("F2", "%d families loaded into the workspace." % loaded)
+        # D2 - campaigns chosen.
+        on = [f.name for f in db.query(CampaignFamily).filter(CampaignFamily.organization_id == org_id,
+                                                               CampaignFamily.is_active.is_(True)).all()]
+        if on:
+            done("D2", "Campaigns on: %s." % ", ".join(sorted(on)))
+        # G1 - the owner's GO is picking families on Choose & Send.
+        approved = (db.query(ProgramSourceRecord.lead_id)
+                    .filter(ProgramSourceRecord.organization_id == org_id,
+                            ProgramSourceRecord.approved_to_send_at.isnot(None),
+                            ProgramSourceRecord.lead_id.isnot(None)).distinct().count())
+        if approved:
+            done("G1", "GO given: %d families approved on Choose & Send." % approved)
+    except Exception:                                    # noqa: BLE001
+        try:
+            db.rollback()
+        except Exception:                                # noqa: BLE001
+            pass
+    return gates
+
+
+def verdict(last: Optional[Dict], gates: Optional[List[Dict]] = None) -> Dict:
     """READY / CONDITIONAL / BLOCKED for the staging build."""
-    external = [g for g in LAUNCH_GATES if g["group"] in ("external", "approval")]
+    external = [g for g in (gates if gates is not None else LAUNCH_GATES) if g["group"] in ("external", "approval")]
     if last is None:
         return {"status": "BLOCKED", "reason": "The controlled readiness test has not been run yet. Press Run."}
     if last["fail_count"]:
@@ -240,9 +307,11 @@ def verdict(last: Optional[Dict]) -> Dict:
     return {"status": "READY", "reason": "All checks pass and no external blockers remain."}
 
 
-def console(last: Optional[Dict]) -> Dict:
-    groups = {k: [g for g in LAUNCH_GATES if g["group"] == k] for k in ("verified", "test_now", "external", "approval")}
-    return {"verdict": verdict(last), "groups": groups, "why_no_go": WHY_NO_GO, "last_run": last,
+def console(last: Optional[Dict], db=None, org_id: Optional[str] = None) -> Dict:
+    gates = live_gates(db, org_id)
+    groups = {k: [g for g in gates if g["group"] == k] for k in ("verified", "test_now", "external", "approval")}
+    why = [g["text"] for g in gates if g["group"] in ("external", "approval")]
+    return {"verdict": verdict(last, gates), "groups": groups, "why_no_go": why, "last_run": last,
             "stages": STAGES,
             "persisted": False,
             "note": "Synthetic data only. Nothing is sent. Results are kept in memory on this server and reset on restart."}

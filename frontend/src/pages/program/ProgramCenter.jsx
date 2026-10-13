@@ -77,7 +77,9 @@ export default function ProgramCenter() {
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [search, setSearch] = useState(params.get('q') || '')
   const [me, setMe] = useState(() => getCurrentUser() || {})
-  const isManager = readAuthority().isWorkspaceManager
+  // The server's answer wins: a workspace admin by membership (Kerry) is a manager
+  // even when the browser's stored role says otherwise.
+  const isManager = data?.viewer_is_manager ?? readAuthority().isWorkspaceManager
   const navigate = useNavigate()
   const personId = params.get('person') || ''
   // A login that only has program workspaces has no "main menu" to go back

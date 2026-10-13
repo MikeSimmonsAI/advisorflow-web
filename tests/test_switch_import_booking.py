@@ -121,3 +121,17 @@ def test_test_contacts_never_count_in_booking_activity(client, db_session, sampl
     h = _h(db_session, admin)
     assert client.get("/program/booking-activity", headers=h).json()["opened_people"] == 0
     assert client.get("/program/appointments", headers=h).json()["items"] == []
+
+
+def test_launch_checklist_reads_the_workspace(client, db_session, sample_org):
+    admin = _program(db_session, sample_org)
+    h = _h(db_session, admin)
+    before = client.get("/program/readiness-test", headers=h).json()
+    open_keys = {g["key"] for k in ("external", "approval") for g in before["groups"][k]}
+    assert "C9" not in open_keys                      # Oaklawn is held, never a blocker
+    client.post("/program/leads/import", headers=h,
+                files={"file": ("list.csv", CSV.encode(), "text/csv")}, data={"apply": "true"})
+    after = client.get("/program/readiness-test", headers=h).json()
+    verified = {g["key"] for g in after["groups"]["verified"]}
+    assert "F2" in verified                           # families loaded
+    assert client.get("/program/dashboard", headers=h).json()["viewer_is_manager"] is True

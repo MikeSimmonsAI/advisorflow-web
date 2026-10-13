@@ -682,7 +682,8 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
         },
         "reporting": _reporting(db, recs, resps),
         "readiness": readiness(db, prog),
-        "readiness_test": _readiness_summary(org_id),
+        "readiness_test": _readiness_summary(org_id, db),
+        "viewer_is_manager": lead_scope.is_manager_here(user, db),
     }
 
 
@@ -1215,9 +1216,9 @@ def clear_review(record_id: str, body: ClearReviewIn, db: Session = Depends(get_
 _LAST_READINESS_RUN: dict = {}      # org id -> latest run; in memory, reset on restart
 
 
-def _readiness_summary(org_id: str) -> dict:
+def _readiness_summary(org_id: str, db: Session = None) -> dict:
     last = _LAST_READINESS_RUN.get(org_id)
-    v = readiness_check.verdict(last)
+    v = readiness_check.verdict(last, readiness_check.live_gates(db, org_id))
     return {**v, "pass_count": last["pass_count"] if last else None,
             "fail_count": last["fail_count"] if last else None, "ran_at": last["ran_at"] if last else None}
 
@@ -1225,7 +1226,7 @@ def _readiness_summary(org_id: str) -> dict:
 @router.get("/readiness-test")
 def readiness_test_console(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     prog = _program(db, user)
-    return readiness_check.console(_LAST_READINESS_RUN.get(prog.organization_id))
+    return readiness_check.console(_LAST_READINESS_RUN.get(prog.organization_id), db, prog.organization_id)
 
 
 @router.post("/readiness-test/run")
@@ -1234,7 +1235,7 @@ def run_readiness_test(db: Session = Depends(get_db), user: User = Depends(requi
     provider request. Managers only."""
     prog = _program(db, user)
     _LAST_READINESS_RUN[prog.organization_id] = readiness_check.run_all()
-    return readiness_check.console(_LAST_READINESS_RUN[prog.organization_id])
+    return readiness_check.console(_LAST_READINESS_RUN[prog.organization_id], db, prog.organization_id)
 
 
 # ── operations health ────────────────────────────────────────────────────────
