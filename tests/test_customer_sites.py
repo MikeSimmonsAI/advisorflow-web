@@ -418,3 +418,25 @@ def test_a_bad_slug_is_a_400_with_a_reason(db_session, client):
                      headers=_headers(db_session, god), json={"html": PAGE})
     assert res.status_code == 400
     assert "reserved" in res.json()["detail"]
+
+
+def test_an_enquiry_tells_the_owning_workspace_in_app_and_sends_nothing(db_session, client):
+    """The handoff: the workspace's own admins see it in-app. No email or text
+    goes to anyone, and another workspace's admins hear nothing."""
+    mine = _org(db_session, "Handoff", "handoff")
+    theirs = _org(db_session, "Elsewhere", "elsewhere")
+    for org, mail in ((mine, "admin@handoff.example"), (theirs, "admin@elsewhere.example")):
+        db_session.add(User(organization_id=org.id, email=mail, password_hash=hash_password("x"),
+                            full_name="Admin", role="org_admin", is_active=True,
+                            must_change_password=False))
+    db_session.commit()
+    _publish(db_session, mine, slug="handoff-page")
+    client.post("/site/handoff-page/inquiry",
+                json={"name": "Dana Whitfield", "email": "dana@example.com",
+                      "request_type": "Compare electricity options"})
+    notes = db_session.query(Notification).all()
+    mine_admin = db_session.query(User).filter(User.email == "admin@handoff.example").one()
+    assert [n.user_id for n in notes] == [mine_admin.id]
+    assert "Compare electricity options" in notes[0].message
+    assert db_session.query(Message).count() == 0
+    assert db_session.query(EmailMessage).count() == 0

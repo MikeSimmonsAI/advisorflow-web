@@ -112,7 +112,9 @@ class SourceWiring(unittest.TestCase):
         self.assertIn("status_code=404", body)
 
     def test_frontend_styles_email_reply(self):
-        self.assertIn("email_reply:", _src("frontend/src/pages/LeadDetail.jsx"))
+        # The activity list no longer keeps a per-type style table; every event whose
+        # type starts with sms or email is a Message, so email_reply lands there.
+        self.assertIn("/^(sms|email)/", _src("frontend/src/pages/LeadDetail.jsx"))
 
 
 if __name__ == "__main__":

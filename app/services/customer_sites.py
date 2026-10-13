@@ -369,6 +369,51 @@ def record_inquiry(db: Session, *, site: CustomerSite, organization: Organizatio
         if lead is not None and not lead.assigned_to_id:
             lead.assigned_to_id = site.default_owner_user_id
 
+    _notify_workspace(db, site=site, organization=organization, result=result,
+                      payload=payload)
+
     if commit:
         db.commit()
     return result
+
+
+def _notify_workspace(db: Session, *, site: CustomerSite, organization: Organization,
+                      result: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    """THE HANDOFF: somebody in the workspace is told a request came in.
+
+    In-app only - nothing is emailed or texted to anyone. The lead's owner if it
+    has one; otherwise the page's default owner; otherwise the workspace's own
+    active admins (never another tenant's). Best effort: a request is never
+    lost because a notification could not be written."""
+    lead_id = result.get("lead_id")
+    if not lead_id:
+        return
+    try:
+        from app.models.models import Lead, Notification, NotificationType, User
+        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        if lead is None or lead.organization_id != organization.id:
+            return
+        if lead.assigned_to_id:
+            users = [lead.assigned_to_id]
+        elif site.default_owner_user_id:
+            users = [site.default_owner_user_id]
+        else:
+            users = [r[0] for r in db.query(User.id).filter(
+                User.organization_id == organization.id, User.role == "org_admin",
+                User.is_active.isnot(False)).all()]
+        if not users:
+            return
+        name = " ".join(x for x in (lead.first_name, lead.last_name) if x) or "Someone"
+        what = str(payload.get("request_type") or "").strip()
+        msg = "Website request from %s%s - contact them." % (name, (": " + what[:80]) if what else "")
+        nested = db.begin_nested()
+        for uid in users:
+            db.add(Notification(user_id=uid, lead_id=lead.id, type=NotificationType.DEMO_REQUEST,
+                                message=msg, link="/leads/%s" % lead.id))
+        db.flush()
+        nested.commit()
+    except Exception:                                    # noqa: BLE001
+        try:
+            nested.rollback()
+        except Exception:                                # noqa: BLE001
+            pass

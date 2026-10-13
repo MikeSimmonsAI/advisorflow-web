@@ -511,3 +511,23 @@ def test_the_adapter_states_that_there_is_no_async_status_mechanism():
     assert chariot.HAS_STATUS_CALLBACK is False
     assert chariot.HAS_STATUS_LOOKUP is False
     assert chariot.HAS_DOCUMENT_RETRIEVAL is False
+
+
+def test_a_submit_that_times_out_is_pending_and_never_called_failed(monkeypatch):
+    """Chariot has no status lookup after SubmitEnrollment. A timeout means we
+    do not know - pending with a do-not-resubmit reason, never failed."""
+    monkeypatch.setenv(chariot.ENV_ALLOW_TRANSACTIONS, "true")
+    seen = {}
+
+    def slow(method, url, *, params=None, files=None, timeout=None):
+        seen["timeout"] = timeout
+        raise TimeoutError("read timed out")
+    previous = chariot.set_transport(slow)
+    try:
+        result = chariot.submit_enrollment({"Zip": "78415"})
+    finally:
+        chariot.set_transport(previous)
+    assert seen["timeout"] >= 120
+    assert result.normalized_status == base.PENDING_PROVIDER
+    assert result.reason == chariot.REASON_OUTCOME_UNKNOWN
+    assert result.ok is False
