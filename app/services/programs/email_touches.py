@@ -417,7 +417,7 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
     else:
         flyer_line = r["fields"].get("flyer_link") or ""
         msg = dict(brain.compose(packet, touch, "email", flyer_line=flyer_line), source="playbook")
-    prior = [re.sub(r"<[^>]+>", " ", m.body_html or "") for m in
+    prior = [html.unescape(re.sub(r"<[^>]+>", " ", m.body_html or "")) for m in
              db.query(EmailMessage).filter(EmailMessage.lead_id == lead.id,
                                            EmailMessage.status != "failed").limit(10).all()]
     others = [p.official_name for p in db.query(LocationProfile).filter(

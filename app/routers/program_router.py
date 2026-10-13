@@ -2057,7 +2057,8 @@ def outbox(day: Optional[str] = Query(None, description="YYYY-MM-DD, Central; de
     for e, lead in emails:
         loc, fam, _ = where(lead.id)
         text = _re.sub(r"<[^>]+>", " ", e.body_html or "")
-        text = _re.sub(r"\s+", " ", text).replace("&#x27;", "'").replace("&amp;", "&").strip()
+        import html as _html
+        text = _re.sub(r"\s+", " ", _html.unescape(text)).strip()
         st = (e.status or "sent").lower()
         if getattr(e, "opened_at", None):
             st = "opened"

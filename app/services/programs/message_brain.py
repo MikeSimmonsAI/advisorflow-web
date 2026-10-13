@@ -524,7 +524,8 @@ def next_message(db: Session, lead, touch, channel: str = "email", *, flyer_line
     prior = [m.body_html or "" for m in db.query(EmailMessage).filter(EmailMessage.lead_id == lead.id,
                                                                       EmailMessage.status != "failed")
              .order_by(EmailMessage.sent_at.desc()).limit(10).all()]
-    prior = [re.sub(r"<[^>]+>", " ", p) for p in prior]
+    import html as _html
+    prior = [_html.unescape(re.sub(r"<[^>]+>", " ", p)) for p in prior]
     others = [p.official_name for p in db.query(LocationProfile)
               .filter(LocationProfile.organization_id == lead.organization_id,
                       LocationProfile.is_review_bucket.is_(False)).all()]

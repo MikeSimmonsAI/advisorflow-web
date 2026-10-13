@@ -265,7 +265,8 @@ def _get_conversation_history(db: Session, lead: Lead) -> str:
         EmailMessage.lead_id == lead.id
     ).order_by(EmailMessage.sent_at.asc()).all()
     for m in email_msgs:
-        body = re.sub(r'<[^>]+>', ' ', m.body_html or '').strip()[:250]
+        import html as _html
+        body = _html.unescape(re.sub(r'<[^>]+>', ' ', m.body_html or '')).strip()[:250]
         events.append({"dir": "out", "channel": "email", "subject": m.subject or "", "body": body, "ts": m.sent_at or datetime.min})
 
     # All replies (email + SMS)

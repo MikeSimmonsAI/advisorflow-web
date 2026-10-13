@@ -129,7 +129,8 @@ def _get_conversation(db: Session, lead_id: str) -> tuple[str, str]:
         emails = db.query(EmailMessage).filter(EmailMessage.lead_id == lead_id).order_by(EmailMessage.sent_at.asc()).all()
         import re as _re
         for em in emails:
-            body = _re.sub(r'<[^>]+>', ' ', em.body_html or '').strip()[:200]
+            import html as _html
+            body = _html.unescape(_re.sub(r'<[^>]+>', ' ', em.body_html or '')).strip()[:200]
             events.append({"dir": "out", "channel": "Email", "body": body, "ts": em.sent_at})
     except Exception:
         pass
