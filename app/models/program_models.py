@@ -321,6 +321,23 @@ class CampaignFamily(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class ProgramLeadFile(Base):
+    """A file kept on one family's record (a signed form, a photo, a document)."""
+    __tablename__ = "program_lead_files"
+    __table_args__ = (Index("ix_program_lead_files_lead", "organization_id", "lead_id"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    lead_id = Column(String, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
+    filename = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    size_bytes = Column(Integer, nullable=False, default=0)
+    data = Column(LargeBinary, nullable=False)
+    note = Column(Text, nullable=True)
+    uploaded_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ProgramAsset(Base):
     """Logos, facility images and approved flyers. Versioned; never edited in place."""
     __tablename__ = "program_assets"

@@ -30,7 +30,7 @@ export default function Surveys({ locationId, navigate, isManager = true, compac
   }
 
   const s = data?.summary
-  const open = rec => rec.lead_id && navigate && navigate(`/leads/${rec.lead_id}`)
+  const open = rec => rec.lead_id && navigate && navigate(`/program?tab=leads&person=${rec.lead_id}`)
 
   return (
     <div id="sci-surveys" style={{ minWidth: 0 }}>

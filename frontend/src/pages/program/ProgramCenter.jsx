@@ -23,7 +23,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, getCurrentUser, refreshCurrentUser } from '../../api/client'
+import { api, fetchMyContexts, getCurrentUser, logout, refreshCurrentUser } from '../../api/client'
 import { readAuthority } from '../../auth/workspaceAuthority'
 import { Icon, LocationMark, SearchBox, errText, initials, Loading } from './sci/ui'
 import Dashboard from './sci/Dashboard'
@@ -36,12 +36,17 @@ import Launch from './sci/Launch'
 import Health from './sci/Health'
 import Settings from './sci/Settings'
 import Send from './sci/Send'
+import Leads from './sci/Leads'
+import Appointments from './sci/Appointments'
+import Person from './sci/Person'
 import './ProgramCenter.css'
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+  { key: 'leads', label: 'Leads', icon: 'users' },
   { key: 'send', label: 'Choose & Send', icon: 'send' },
   { key: 'responses', label: 'Responses', icon: 'responses' },
+  { key: 'appointments', label: 'Appointments', icon: 'calendar' },
   { key: 'review', label: 'Review', icon: 'review' },
   { key: 'locations', label: 'Locations', icon: 'locations' },
   { key: 'campaigns', label: 'Campaigns', icon: 'campaigns' },
@@ -74,6 +79,15 @@ export default function ProgramCenter() {
   const [me, setMe] = useState(() => getCurrentUser() || {})
   const isManager = readAuthority().isWorkspaceManager
   const navigate = useNavigate()
+  const personId = params.get('person') || ''
+  // A login that only has program workspaces has no "main menu" to go back
+  // to - the Family Service Center IS its whole app.
+  const [programOnly, setProgramOnly] = useState(false)
+  useEffect(() => {
+    let alive = true
+    fetchMyContexts().then(c => { if (alive) setProgramOnly(!!c?.program_only) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
 
   // The stored user can be stale (another workspace, an older name). Ask the
   // server who is signed in; the stored copy is only the first paint.
@@ -95,9 +109,12 @@ export default function ProgramCenter() {
   const setParam = useCallback((key, value) => setMany({ [key]: value }), [setMany])
   const goTab = useCallback((key, extra = {}) => {
     // Tab changes are real history entries so Back/Forward move between screens.
-    setMany({ tab: key === 'dashboard' ? '' : key, queue: '', q: '', ...extra }, { push: true })
+    setMany({ tab: key === 'dashboard' ? '' : key, queue: '', q: '', person: '', ...extra }, { push: true })
     setMenuOpen(false)
     window.scrollTo?.({ top: 0 })
+  }, [setMany])
+  const openPerson = useCallback(id => {
+    if (id) { setMany({ person: id }, { push: true }); setMenuOpen(false) }
   }, [setMany])
 
   const load = useCallback(() => {
@@ -124,7 +141,7 @@ export default function ProgramCenter() {
 
   const submitSearch = e => {
     e.preventDefault()
-    goTab('review', { q: search.trim(), queue: 'all' })
+    goTab('leads', { q: search.trim() })
   }
 
   if (err && !data) {
@@ -133,7 +150,7 @@ export default function ProgramCenter() {
         <div className="sci-work">
           <div className="sci-alert" role="alert">{err}</div>
           <button type="button" className="sci-btn" onClick={load}><Icon name="refresh" />Try again</button>{' '}
-          <button type="button" className="sci-btn" onClick={() => navigate('/')}><Icon name="back" />Back to main menu</button>
+          {!programOnly && <button type="button" className="sci-btn" onClick={() => navigate('/')}><Icon name="back" />Back to main menu</button>}
         </div>
       </div>
     )
@@ -179,9 +196,15 @@ export default function ProgramCenter() {
             aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}>
             <Icon name={collapsed ? 'expand' : 'collapse'} /><span>Collapse menu</span>
           </button>
-          <button type="button" className="sci-side-link" onClick={() => navigate('/')} title="Back to main menu">
-            <Icon name="back" /><span>Back to main menu</span>
-          </button>
+          {programOnly ? (
+            <button type="button" className="sci-side-link" onClick={async () => { await logout(); window.location.href = '/login' }} title="Sign out">
+              <Icon name="lock" /><span>Sign out</span>
+            </button>
+          ) : (
+            <button type="button" className="sci-side-link" onClick={() => navigate('/')} title="Back to main menu">
+              <Icon name="back" /><span>Back to main menu</span>
+            </button>
+          )}
           <div className="sci-scicard" style={{ '--dot': sendingOn ? '#3fc28f' : '#e9a54a' }}
             title={sendingOn ? `${data.automation.active_campaign_families} campaign(s) switched on` : 'All campaigns off — nothing sends automatically'}>
             {selLoc ? <LocationMark name={selLoc.name} size={34} /> : <b aria-hidden="true"><Icon name="pin" size={20} /></b>}
@@ -233,20 +256,23 @@ export default function ProgramCenter() {
             <SearchBox id="sci-search-m" value={search} onChange={setSearch} label="Search contacts or Lead IDs" placeholder="Search contacts or Lead IDs…" />
           </form>
           {err && <div className="sci-alert" role="alert">{err}</div>}
-          {tab === 'dashboard' && <Dashboard data={data} goTab={goTab} setParam={setParam} isManager={isManager} />}
-          {tab === 'responses' && <Responses locationId={locationId} onChange={load} navigate={navigate} isManager={isManager} />}
-          {tab === 'review' && <Review locationId={locationId} locations={data.locations} isManager={isManager}
+          {personId && <Person leadId={personId} isManager={isManager} onBack={() => (window.history.length > 1 ? navigate(-1) : setMany({ person: '' }))} />}
+          {!personId && tab === 'leads' && <Leads locations={data.locations} locationId={locationId} openPerson={openPerson} initialQuery={params.get('q') || ''} />}
+          {!personId && tab === 'appointments' && <Appointments locationId={locationId} openPerson={openPerson} />}
+          {!personId && tab === 'dashboard' && <Dashboard data={data} goTab={goTab} setParam={setParam} isManager={isManager} />}
+          {!personId && tab === 'responses' && <Responses locationId={locationId} onChange={load} navigate={navigate} isManager={isManager} />}
+          {!personId && tab === 'review' && <Review locationId={locationId} locations={data.locations} isManager={isManager}
             attention={att} initialQueue={params.get('queue') || firstOpenQueue(att)} initialSearch={params.get('q') || ''}
             onChange={load} goTab={goTab} navigate={navigate} />}
-          {tab === 'locations' && <Locations isManager={isManager} selected={locationId} onChange={load} setParam={setParam}
+          {!personId && tab === 'locations' && <Locations isManager={isManager} selected={locationId} onChange={load} setParam={setParam}
             performance={data.location_performance} goTab={goTab} />}
-          {tab === 'campaigns' && <Campaigns isManager={isManager} locationId={locationId} locations={data.locations}
+          {!personId && tab === 'campaigns' && <Campaigns isManager={isManager} locationId={locationId} locations={data.locations}
             performance={data.campaign_performance} goTab={goTab} />}
-          {tab === 'assets' && <Assets isManager={isManager} locations={data.locations} />}
-          {tab === 'launch' && <Launch isManager={isManager} onChange={load} goTab={goTab} />}
-          {tab === 'send' && <Send locations={data.locations} isManager={isManager} locationId={locationId} goTab={goTab} automation={data.automation} />}
-          {tab === 'health' && <Health goTab={goTab} />}
-          {tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness}
+          {!personId && tab === 'assets' && <Assets isManager={isManager} locations={data.locations} />}
+          {!personId && tab === 'launch' && <Launch isManager={isManager} onChange={load} goTab={goTab} />}
+          {!personId && tab === 'send' && <Send locations={data.locations} isManager={isManager} locationId={locationId} goTab={goTab} automation={data.automation} openPerson={openPerson} />}
+          {!personId && tab === 'health' && <Health goTab={goTab} />}
+          {!personId && tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness}
             locations={realLocations} onChange={load} goTab={goTab} automation={data.automation} />}
         </main>
       </div>

@@ -374,9 +374,18 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
     rows = workspace_memberships(user, db)
     org_ids = [m.scope_id for m in rows]
     orgs = {}
+    program_orgs = set()
     if org_ids:
         for o in db.query(Organization).filter(Organization.id.in_(org_ids)).all():
             orgs[o.id] = o
+        # A program workspace (e.g. SCI) is its own suite: entering it opens the
+        # program center, never the general workspace tools.
+        try:
+            from app.models.program_models import OutreachProgram
+            program_orgs = {x for (x,) in db.query(OutreachProgram.organization_id)
+                            .filter(OutreachProgram.organization_id.in_(org_ids)).all()}
+        except Exception:                                # pragma: no cover
+            _log.warning("could not resolve program workspaces", exc_info=True)
     for m in rows:
         org = orgs.get(m.scope_id)
         if org is None:
@@ -398,6 +407,7 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             "organization_slug": org.slug,
             "role": m.role,
             "path": "/workspace/%s" % org.id,
+            "is_program": org.id in program_orgs,
         })
 
     platform = [c for c in contexts if c["type"] == "platform"]
@@ -494,6 +504,11 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         "platform_contexts": platform,
         "executive_contexts": executive,
         "workspace_contexts": workspaces,
+        # Only program workspaces and nothing else (no back office, no
+        # executive suite, not god): this login sees the program suite only.
+        "program_only": bool(workspaces) and all(w.get("is_program") for w in workspaces)
+                        and not platform and not executive
+                        and getattr(user, "role", None) != "god_admin",
         "has_back_office": bool(platform),
         "workspace_count": len(workspaces),
         "default_context": default,
