@@ -234,7 +234,7 @@ function Inspector({ r, homes, isManager, navigate, onDone, onError }) {
         </>
       ) : <p className="sci-micro sci-muted">Only a workspace manager can assign, clear or hold records.</p>}
 
-      {r.lead_id && <button type="button" className="sci-btn block" onClick={() => navigate(`/leads/${r.lead_id}`)}><Icon name="external" />Open full record</button>}
+      {r.lead_id && <button type="button" className="sci-btn block" onClick={() => navigate(`/program?tab=leads&person=${r.lead_id}`)}><Icon name="external" />Open full record</button>}
       <div className="sci-banner" style={{ margin: 0 }}>
         <span className="sci-banner-icon" aria-hidden="true"><Icon name="lock" /></span>
         <div className="sci-banner-body sci-micro">Resolving a data issue never bypasses consent, STOP, do-not-call or suppression.</div>

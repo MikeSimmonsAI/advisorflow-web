@@ -412,7 +412,27 @@ function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = fa
   // Service Center has its own navigation). Same checks above; only the
   // tenant Layout chrome is left out. The context banner stays.
   if (bare) return <><ContextBanner />{children}</>
-  return <Layout><ContextBanner />{children}</Layout>
+  return <ProgramOnlyGate><Layout><ContextBanner />{children}</Layout></ProgramOnlyGate>
+}
+
+/**
+ * A login that belongs only to program workspaces (e.g. SCI staff) never sees
+ * the general platform screens: any of them sends it back to its program.
+ * The server builds `program_only`; the browser only follows it.
+ */
+const PROGRAM_OK_PATHS = ['/change-password', '/login', '/logout']
+function ProgramOnlyGate({ children }) {
+  const { phase, ctx } = useAuthorizedContexts()
+  const here = typeof window !== 'undefined' ? window.location.pathname : ''
+  if (phase === 'loading' && !ctx) return null
+  if (ctx?.program_only && !PROGRAM_OK_PATHS.includes(here)) {
+    const ws = (ctx.workspace_contexts || [])[0]
+    if (ws?.organization_id) {
+      if (getWorkspaceContext() !== ws.organization_id) setWorkspaceContext(ws.organization_id)
+      return <Navigate to="/program" replace />
+    }
+  }
+  return children
 }
 
 /**
@@ -643,6 +663,11 @@ function WorkspaceRoute() {
     // a wrong-numbers bug, which is worse than an error because it looks fine.
     // Idempotent and guarded, so it is a write at most once per entry.
     if (getWorkspaceContext() !== organizationId) setWorkspaceContext(organizationId)
+    // A PROGRAM WORKSPACE (SCI) IS ITS OWN SUITE. Entering it opens the program
+    // center - never the general workspace tools - for every login, the
+    // executive switching in included.
+    const entry = (ctx?.workspace_contexts || []).find(w => w && w.organization_id === organizationId)
+    if (entry?.is_program) return <Navigate to="/program" replace />
     // ProtectedRoute already wraps its children in Layout + ContextBanner; the
     // second banner this used to add was the same banner drawn twice.
     return <ProtectedRoute><AgencyHomeGate><Overview /></AgencyHomeGate></ProtectedRoute>

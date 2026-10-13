@@ -204,7 +204,7 @@ def list_contacts(db: Session, prog: OutreachProgram, *, search: str = "", locat
             "name": " ".join(x for x in (lead.first_name, lead.last_name) if x) or "(no name)",
             "location": pname.get(m.location_id), "location_id": m.location_id,
             "campaign": fname.get(m.campaign_family, m.campaign_family), "campaign_key": m.campaign_family,
-            "phone": lead.phone, "email": lead.email,
+            "phone": lead.phone, "email": lead.email, "status": lead.status,
             "line_type": getattr(lead, "phone_line_type", None),
             "mode": getattr(m, "send_mode", None) or "text_email",
             "reaches": reaches(lead, getattr(m, "send_mode", None)),

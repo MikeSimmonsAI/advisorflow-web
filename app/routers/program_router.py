@@ -408,6 +408,114 @@ def _survey_alerts(db, org_id, location_id):
         return 0
 
 
+LEAD_FILE_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/heic", "text/plain",
+                   "application/msword",
+                   "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+MAX_LEAD_FILE_BYTES = 15 * 1024 * 1024
+
+
+def _program_lead(db: Session, prog, lead_id: str) -> Lead:
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Not found.")
+    return lead
+
+
+def _file_json(f) -> dict:
+    return {"id": f.id, "filename": f.filename, "content_type": f.content_type, "size_bytes": f.size_bytes,
+            "note": f.note, "created_at": f.created_at.isoformat() + "Z" if f.created_at else None}
+
+
+@router.get("/leads/{lead_id}/files")
+def program_lead_files(lead_id: str, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_or_observer)):
+    from app.models.program_models import ProgramLeadFile
+    prog = _program(db, user)
+    _program_lead(db, prog, lead_id)
+    from sqlalchemy.orm import defer
+    rows = (db.query(ProgramLeadFile).options(defer(ProgramLeadFile.data))
+            .filter(ProgramLeadFile.organization_id == prog.organization_id, ProgramLeadFile.lead_id == lead_id)
+            .order_by(ProgramLeadFile.created_at.desc()).all())
+    return {"items": [_file_json(f) for f in rows]}
+
+
+@router.post("/leads/{lead_id}/files")
+async def program_lead_file_upload(lead_id: str, file: UploadFile = File(...), note: Optional[str] = Form(None),
+                                   db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.models.program_models import ProgramLeadFile
+    prog = _program(db, user)
+    _program_lead(db, prog, lead_id)
+    data = await file.read(MAX_LEAD_FILE_BYTES + 1)
+    if len(data) > MAX_LEAD_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="Files up to 15 MB.")
+    if not data:
+        raise HTTPException(status_code=422, detail="That file is empty.")
+    ctype = (file.content_type or "").split(";")[0].strip().lower()
+    if ctype not in LEAD_FILE_TYPES:
+        raise HTTPException(status_code=415, detail="PDF, Word, text or picture files only.")
+    f = ProgramLeadFile(organization_id=prog.organization_id, lead_id=lead_id,
+                        filename=(file.filename or "file")[:200], content_type=ctype, size_bytes=len(data),
+                        data=data, note=(note or "").strip()[:500] or None, uploaded_by=user.id)
+    db.add(f)
+    db.commit()
+    return _file_json(f)
+
+
+@router.get("/leads/{lead_id}/files/{file_id}")
+def program_lead_file_download(lead_id: str, file_id: str, db: Session = Depends(get_db),
+                               user: User = Depends(require_tenant_or_observer)):
+    from app.models.program_models import ProgramLeadFile
+    prog = _program(db, user)
+    f = (db.query(ProgramLeadFile).filter(ProgramLeadFile.id == file_id, ProgramLeadFile.lead_id == lead_id,
+                                          ProgramLeadFile.organization_id == prog.organization_id).first())
+    if f is None:
+        raise HTTPException(status_code=404, detail="Not found.")
+    return Response(content=f.data, media_type=f.content_type,
+                    headers={"Content-Disposition": content_disposition(f.filename, "attachment"),
+                             "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/appointments")
+def program_appointments(when: str = Query("upcoming"), location_id: Optional[str] = Query(None),
+                         lead_id: Optional[str] = Query(None),
+                         db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Booked visits for the program's families: upcoming (default), past or all."""
+    from app.models.models import BookingLink
+    prog = _program(db, user)
+    now = datetime.utcnow()
+    q = (db.query(BookingLink, Lead).join(Lead, Lead.id == BookingLink.lead_id)
+         .filter(Lead.organization_id == prog.organization_id, BookingLink.booked_time.isnot(None),
+                 BookingLink.status.in_(("booked", "confirmed", "cancelled", "completed"))))
+    if lead_id:
+        q = q.filter(Lead.id == lead_id)
+    if when == "upcoming":
+        q = q.filter(BookingLink.booked_time >= now - timedelta(hours=2)).order_by(BookingLink.booked_time.asc())
+    elif when == "past":
+        q = q.filter(BookingLink.booked_time < now - timedelta(hours=2)).order_by(BookingLink.booked_time.desc())
+    else:
+        q = q.order_by(BookingLink.booked_time.desc())
+    rows = q.limit(300).all()
+    lead_ids = list({l.id for _b, l in rows})
+    loc_of = {}
+    if lead_ids:
+        for r in (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == prog.organization_id,
+                                                        ProgramSourceRecord.lead_id.in_(lead_ids)).all()):
+            loc_of.setdefault(r.lead_id, r.location_id)
+    names = {p.location_id: p.official_name for p in db.query(LocationProfile)
+             .filter(LocationProfile.organization_id == prog.organization_id).all()}
+    items = []
+    for b, l in rows:
+        loc = loc_of.get(l.id)
+        if location_id and loc != location_id:
+            continue
+        items.append({"id": b.id, "lead_id": l.id,
+                      "name": " ".join(x for x in (l.first_name, l.last_name) if x) or "(no name)",
+                      "phone": l.phone, "email": l.email, "location_id": loc, "location": names.get(loc),
+                      "when": b.booked_time.isoformat() + "Z", "status": b.status,
+                      "label": getattr(b, "appt_label", None), "minutes": getattr(b, "appt_duration", None)})
+    return {"items": items, "when": when}
+
+
 @router.get("/reach/{lead_id}")
 def program_reach(lead_id: str, db: Session = Depends(get_db),
                   user: User = Depends(require_tenant_or_observer)):

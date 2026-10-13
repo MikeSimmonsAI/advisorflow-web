@@ -285,7 +285,7 @@ function ConversationPane({ r, mark, navigate, onSent }) {
             <button key={k} type="button" aria-pressed={r.status === k} onClick={() => mark(r, k)}>{label}</button>
           ))}
         </div>
-        {r.lead_id && <button type="button" className="sci-btn primary" style={{ marginTop: 12, width: '100%' }} onClick={() => navigate(`/leads/${r.lead_id}`)}>Open full record</button>}
+        {r.lead_id && <button type="button" className="sci-btn primary" style={{ marginTop: 12, width: '100%' }} onClick={() => navigate(`/program?tab=leads&person=${r.lead_id}`)}>Open full record</button>}
       </aside>
     </>
   )
@@ -312,7 +312,7 @@ function CallPane({ c, navigate }) {
           <dt>Matched contact</dt><dd>{c.lead_name || 'Not matched'}</dd>
           <dt>Status</dt><dd>{c.status || '—'}{c.reviewed_at ? ` · reviewed ${when(c.reviewed_at)}` : ''}</dd>
         </dl>
-        {c.lead_id && <button type="button" className="sci-btn primary" style={{ marginTop: 14, width: '100%' }} onClick={() => navigate(`/leads/${c.lead_id}`)}>Open full record</button>}
+        {c.lead_id && <button type="button" className="sci-btn primary" style={{ marginTop: 14, width: '100%' }} onClick={() => navigate(`/program?tab=leads&person=${c.lead_id}`)}>Open full record</button>}
       </aside>
     </>
   )
