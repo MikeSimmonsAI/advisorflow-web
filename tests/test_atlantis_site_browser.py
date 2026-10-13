@@ -20,7 +20,7 @@ import pytest
 
 from app.models.models import EmailMessage, Lead, Message, Notification, Organization, User
 from app.services import customer_sites as cs
-from app.services.auth_service import hash_password
+from app.services.auth_service import create_access_token, hash_password
 
 PAGE = Path(__file__).resolve().parent.parent / "public-sites" / "atlantis-light-and-power" / "index.html"
 SLUG = "atlantis-light-and-power"
@@ -130,6 +130,11 @@ def test_every_form_on_the_page_files_into_atlantis_and_alerts_staff(client, db_
         assert "2 sites, 3 meters" in json.dumps(cf) + (lead.notes or "")
     if kind == "move":
         assert cf.get("move_date") == "2026-11-15"
+    # It shows on the advisor's Rate Requests queue, under New.
+    h = {"Authorization": "Bearer %s" % create_access_token(admin, db_session)}
+    rr = client.get("/rate-requests/?status=new", headers=h)
+    assert rr.status_code == 200, rr.text
+    assert lead.id in [i["id"] for i in rr.json()["items"]]
     note = db_session.query(Notification).filter(Notification.lead_id == lead.id).one()
     assert note.user_id == admin.id and request_type in note.message
     assert db_session.query(Message).count() == 0

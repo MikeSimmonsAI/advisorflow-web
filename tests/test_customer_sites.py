@@ -440,3 +440,32 @@ def test_an_enquiry_tells_the_owning_workspace_in_app_and_sends_nothing(db_sessi
     assert "Compare electricity options" in notes[0].message
     assert db_session.query(Message).count() == 0
     assert db_session.query(EmailMessage).count() == 0
+
+
+def test_an_energy_request_lands_in_the_rate_requests_queue(db_session, client):
+    """Energy website leads start at new_inquiry (the Rate Requests queue's
+    first column), with residential/commercial recorded. Other industries are
+    untouched."""
+    energy = _org(db_session, "Volt Co", "volt")
+    _publish(db_session, energy, slug="volt-page")
+    client.post("/site/volt-page/inquiry", json={"name": "Res Person", "email": "res@example.com",
+                                                 "request_type": "Compare electricity options"})
+    client.post("/site/volt-page/inquiry", json={"name": "Biz Person", "email": "biz@example.com",
+                                                 "request_type": "Commercial energy procurement",
+                                                 "company": "Oak Lawn Dental"})
+    res = db_session.query(Lead).filter(Lead.email == "res@example.com").one()
+    biz = db_session.query(Lead).filter(Lead.email == "biz@example.com").one()
+    assert res.tier == "new_inquiry" and json.loads(res.custom_fields)["segment"] == "residential"
+    assert biz.tier == "new_inquiry" and json.loads(biz.custom_fields)["segment"] == "commercial"
+    other = Organization(name="Shop", slug="shop", plan="standard", industry="generic")
+    db_session.add(other)
+    db_session.commit()
+    _publish(db_session, other, slug="shop-page")
+    client.post("/site/shop-page/inquiry", json={"name": "Shop Person", "email": "shop@example.com"})
+    assert db_session.query(Lead).filter(Lead.email == "shop@example.com").one().tier == "web_lead"
+    # Advanced leads are never moved back.
+    res.tier = "proposal_sent"
+    db_session.commit()
+    client.post("/site/volt-page/inquiry", json={"name": "Res Person", "email": "res@example.com"})
+    db_session.refresh(res)
+    assert res.tier == "proposal_sent"
