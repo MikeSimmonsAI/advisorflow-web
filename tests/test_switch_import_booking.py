@@ -107,3 +107,17 @@ def test_owner_gets_a_test_booking_link(client, db_session, sample_org):
     assert len(test_leads) == 1 and test_leads[0].phone is None
     client.post("/program/booking-test-link", headers=gh, json={})
     assert db_session.query(Lead).filter_by(organization_id=sample_org.id, is_test=True).count() == 1
+
+
+def test_test_contacts_never_count_in_booking_activity(client, db_session, sample_org):
+    admin = _program(db_session, sample_org)
+    lead = Lead(organization_id=sample_org.id, first_name="Tess", last_name="(TEST)", is_test=True, status="new")
+    db_session.add(lead)
+    db_session.commit()
+    db_session.add(BookingPageEvent(organization_id=sample_org.id, lead_id=lead.id, event="opened"))
+    db_session.add(BookingLink(lead_id=lead.id, user_id=admin.id, status="booked",
+                               booked_time=datetime.utcnow() + timedelta(days=1)))
+    db_session.commit()
+    h = _h(db_session, admin)
+    assert client.get("/program/booking-activity", headers=h).json()["opened_people"] == 0
+    assert client.get("/program/appointments", headers=h).json()["items"] == []

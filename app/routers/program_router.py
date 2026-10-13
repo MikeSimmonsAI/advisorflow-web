@@ -485,6 +485,7 @@ def program_appointments(when: str = Query("upcoming"), location_id: Optional[st
     now = datetime.utcnow()
     q = (db.query(BookingLink, Lead).join(Lead, Lead.id == BookingLink.lead_id)
          .filter(Lead.organization_id == prog.organization_id, BookingLink.booked_time.isnot(None),
+                 Lead.is_test.isnot(True),
                  BookingLink.status.in_(("booked", "confirmed", "cancelled", "completed"))))
     if lead_id:
         q = q.filter(Lead.id == lead_id)

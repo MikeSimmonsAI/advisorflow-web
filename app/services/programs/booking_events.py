@@ -49,9 +49,13 @@ def summary(db: Session, org_id: str, days: int = 30, tz: str = "America/Chicago
     from app.models.models import Lead
     from app.models.program_models import BookingPageEvent
     since = datetime.utcnow() - timedelta(days=days)
-    rows = (db.query(BookingPageEvent)
-            .filter(BookingPageEvent.organization_id == org_id, BookingPageEvent.created_at >= since)
-            .order_by(BookingPageEvent.created_at.desc()).all())
+    # Test contacts (the owner previewing the page) never count.
+    test_ids = {i for (i,) in db.query(Lead.id).filter(Lead.organization_id == org_id,
+                                                       Lead.is_test.is_(True)).all()}
+    rows = [r for r in (db.query(BookingPageEvent)
+                        .filter(BookingPageEvent.organization_id == org_id, BookingPageEvent.created_at >= since)
+                        .order_by(BookingPageEvent.created_at.desc()).all())
+            if r.lead_id not in test_ids]
     zone = ZoneInfo(tz)
     utc = ZoneInfo("UTC")
 
