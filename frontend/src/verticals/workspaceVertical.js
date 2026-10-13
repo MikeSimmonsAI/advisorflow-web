@@ -80,6 +80,7 @@ const ENERGY = {
         { to: '/rate-requests', label: 'Rate Requests', icon: 'zap', featureKey: 'leads' },
         { to: '/pipeline', label: 'Sales Pipeline', icon: 'trending-up' },
         { to: '/energy/move-concierge', label: 'Move Concierge', icon: 'truck', featureKey: 'leads' },
+        { to: '/energy/suppliers', label: 'Suppliers & Enrollments', icon: 'zap', featureKey: 'leads' },
       ],
     },
     {

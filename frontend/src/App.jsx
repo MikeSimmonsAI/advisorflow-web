@@ -93,6 +93,7 @@ import Pipeline from './pages/Pipeline'
 import RateRequests from './pages/vertical/RateRequests'
 import FollowUpQueues, { RenewalsQueues } from './pages/energy/FollowUpQueues'
 import MoveConcierge from './pages/energy/MoveConcierge'
+import Suppliers from './pages/energy/Suppliers'
 import MobileApp from './mobile/routes'
 // WHOLESALE REAL ESTATE. Five screens behind one feature key. `feature` on the
 // routes below is what stops a workspace without the module walking into the
@@ -1257,6 +1258,7 @@ export default function App() {
         <Route path="/energy/follow-up" element={<ProtectedRoute feature="leads"><FollowUpQueues /></ProtectedRoute>} />
         <Route path="/energy/renewals" element={<ProtectedRoute feature="leads"><RenewalsQueues /></ProtectedRoute>} />
         <Route path="/energy/move-concierge" element={<ProtectedRoute feature="leads"><MoveConcierge /></ProtectedRoute>} />
+        <Route path="/energy/suppliers" element={<ProtectedRoute feature="leads"><Suppliers /></ProtectedRoute>} />
         <Route path="/view/rate-requests" element={<Navigate to="/rate-requests" replace />} />
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />

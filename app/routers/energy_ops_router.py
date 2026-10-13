@@ -829,13 +829,27 @@ def _lead_in_scope(db, user, request, lead_id) -> Lead:
     return lead
 
 
+# The Atlantis website's "How can we help?" answers, in the words classify reads.
+_SITE_REQUEST_HINTS = {
+    "compare electricity options": "rate review",
+    "analyze my current bill": "bill",
+    "i'm moving": "move",
+    "commercial energy procurement": "commercial",
+    "partner / referral program": "partner",
+}
+
+
 def _classification(lead: Lead) -> str:
     from app.services import energy_enrollment as ee
     cf = _cf(getattr(lead, "custom_fields", None))
+    req = str(cf.get("request_type") or "").strip()
+    hint = _SITE_REQUEST_HINTS.get(req.lower(), req)
+    source = getattr(lead, "source_detail", None)
+    if hint == "partner":
+        source = "partner referral"
     return ee.classify(premise_type=cf.get("premise_type") or cf.get("service_type"),
-                       source_detail=getattr(lead, "source_detail", None),
-                       tier=getattr(lead, "tier", None),
-                       intent_hint=cf.get("request_type"))
+                       source_detail=source, tier=getattr(lead, "tier", None),
+                       intent_hint=hint)
 
 
 @router.get("/enrollments")
@@ -904,3 +918,40 @@ def reconcile_enrollment(tx_id: str, body: ReconcileIn, request: Request,
     log_action(db, org_id, user.id, "energy.enrollment_reconciled", "provider_transaction", row.id,
                details={"outcome": body.outcome})
     return ce.row_out(row)
+
+
+# ── SUPPLIERS: what each can really do, and the advisor's manual handoff ─────
+
+class HandoffIn(BaseModel):
+    supplier: str
+    note: str = ""
+    follow_up_days: int = 2
+
+
+@router.get("/suppliers")
+def supplier_catalog(user: User = Depends(require_tenant_user)):
+    from app.services import energy_suppliers
+    return {"suppliers": energy_suppliers.catalog()}
+
+
+@router.post("/leads/{lead_id}/handoff", dependencies=[Depends(require_not_observation)])
+def supplier_handoff(lead_id: str, body: HandoffIn, request: Request, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user)):
+    """Record a hand-off to a supplier and open a follow-up task. Sends nothing."""
+    from app.services import energy_suppliers
+    lead = _lead_in_scope(db, user, request, lead_id)
+    if not lead_scope.is_manager_here(user, db, request) and lead.assigned_to_id not in (None, user.id):
+        raise HTTPException(403, "This customer belongs to another advisor.")
+    if body.supplier == "chariot":
+        cls = _classification(lead)
+        from app.services import energy_enrollment as ee
+        if not ee.may_submit_to_provider(cls):
+            raise HTTPException(409, "Chariot is residential only; this customer is %s." % cls.replace("_", " "))
+    try:
+        out = energy_suppliers.record_handoff(db, lead=lead, actor_user_id=user.id, supplier=body.supplier,
+                                              note=body.note, follow_up_days=body.follow_up_days)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    log_action(db, lead.organization_id, user.id, "energy.supplier_handoff", "lead", lead.id,
+               details={"supplier": body.supplier})
+    return out

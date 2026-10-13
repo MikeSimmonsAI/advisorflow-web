@@ -131,6 +131,7 @@ REQUIRED_ROUTES = {
     # screens (/energy/*); the follow-up page links on to /workqueue.
     "energy": ("/", "/leads", "/rate-requests", "/pipeline", "/replies",
                "/energy/follow-up", "/energy/renewals", "/energy/move-concierge",
+               "/energy/suppliers",
                "/reports", "/users", "/launch"),
     # The cleaning rail is six entries by design. Three of them are configured
     # screens, which are asserted separately; these are the routes.
@@ -410,7 +411,7 @@ def test_every_vertical_dashboard_is_reachable_from_the_overview_switch(key):
 APPROVED_RAIL = {
     "energy": {
         "Operate": ["Overview", "Leads & Customers", "Contacts", "Rate Requests",
-                    "Sales Pipeline", "Move Concierge"],
+                    "Sales Pipeline", "Move Concierge", "Suppliers & Enrollments"],
         "Work": ["Communications", "Tasks & Follow-Up", "Renewals", "Reports"],
         "System": ["Integrations", "Team & Access", "Launch Center"],
     },
