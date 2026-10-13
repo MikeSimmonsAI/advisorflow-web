@@ -26,7 +26,9 @@ export default function Assets({ isManager, locations }) {
   const [busy, setBusy] = useState(false)
   const [kind, setKind] = useState('')
   const [q, setQ] = useState('')
-  const [filter, setFilter] = useState({ category: '', location: '', activeOnly: false })
+  // Active only by default: replaced versions stay on file but are not shown
+  // unless asked for, so the library shows what campaigns actually use.
+  const [filter, setFilter] = useState({ category: '', location: '', activeOnly: true })
   const [form, setForm] = useState({ kind: 'flyer', title: '', category: '', location_id: '', activate: false })
   const [file, setFile] = useState(null)
   const [over, setOver] = useState(false)
