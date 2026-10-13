@@ -4,7 +4,11 @@
    placeholder flyers are ever shown as if they were uploaded files - an empty
    library says so. Uploading and activating are manager-only on the server. */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, fetchObjectUrl } from '../../../api/client'
+import { api } from '../../../api/client'
+
+// Read the file WITH the workspace headers (a manager viewing another workspace
+// needs X-Org-Override, or the server answers 404).
+const blobUrl = async path => URL.createObjectURL(await api.get(path, { asBlob: true }))
 import {
   Chip, Drawer, Empty, ErrorLine, Field, FilterChips, Icon, Kpi, Loading, Notice, PageHead, Panel, SearchBox,
   errText, num, when,
@@ -115,7 +119,7 @@ export default function Assets({ isManager, locations }) {
     try { await api.post(`/program/assets/${a.id}/active`, { active: !a.is_active }); setMsg(`${a.title} v${a.version} ${a.is_active ? 'deactivated' : 'activated'}.`); load() } catch (e) { setErr(errText(e)) }
   }
   const view = async a => {
-    try { const url = await fetchObjectUrl(`/program/assets/${a.id}/preview`); window.open(url, '_blank', 'noopener') } catch (e) { setErr(errText(e)) }
+    try { const url = await blobUrl(`/program/assets/${a.id}/preview`); window.open(url, '_blank', 'noopener') } catch (e) { setErr(errText(e)) }
   }
 
   return (
@@ -289,17 +293,18 @@ export default function Assets({ isManager, locations }) {
 /** The real file as a thumbnail; PDFs and failed loads show a document icon. */
 function Thumb({ a, big = false }) {
   const [url, setUrl] = useState(null)
+  const [failed, setFailed] = useState(false)
   const isImage = /^image\//.test(a.content_type || '') || /\.(png|jpe?g|webp|svg)$/i.test(a.filename || '')
   useEffect(() => {
     if (!isImage) return undefined
     let alive = true
     let made = null
-    fetchObjectUrl(`/program/assets/${a.id}/preview`).then(u => { made = u; if (alive) setUrl(u) }).catch(() => {})
+    blobUrl(`/program/assets/${a.id}/preview`).then(u => { made = u; if (alive) setUrl(u) }).catch(() => { if (alive) setFailed(true) })
     return () => { alive = false; if (made) URL.revokeObjectURL?.(made) }
   }, [a.id, isImage])
   return (
     <div className="sci-asset-cover" style={big ? { aspectRatio: '4 / 3' } : undefined}>
-      {url ? <img src={url} alt={a.title} loading="lazy" /> : <span style={{ display: 'grid', placeItems: 'center', gap: 6 }}><Icon name="doc" />{isImage ? 'Loading…' : (a.filename || 'Document')}</span>}
+      {url ? <img src={url} alt={a.title} loading="lazy" /> : <span style={{ display: 'grid', placeItems: 'center', gap: 6 }}><Icon name="doc" />{!isImage ? (a.filename || 'Document') : failed ? 'Preview unavailable' : 'Loading…'}</span>}
     </div>
   )
 }
