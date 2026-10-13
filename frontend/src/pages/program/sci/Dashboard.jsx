@@ -224,7 +224,7 @@ function RecentActivity({ recent, locationId, goTab }) {
     if (locationId) q.set('location_id', locationId)
     api.get(`/program/responses?${q}`).then(d => { if (alive) setItems(d.items || []) }).catch(() => { if (alive) setItems([]) })
     return () => { alive = false }
-  }, [locationId])
+  }, [locationId, recent])
   const days = useMemo(() => {
     const out = []
     const today = new Date(); today.setHours(0, 0, 0, 0)
