@@ -1985,6 +1985,7 @@ def booking_test_link(body: TestLinkIn, db: Session = Depends(get_db),
     rec.hold_reason = "TEST contact for previewing the booking page - never contacted"
     db.commit()
     url = identity.program_booking_url(db, lead)
+    db.commit()          # the short code is only flushed when it is minted
     if not url:
         raise HTTPException(status_code=422, detail="No booking calendar is set for this workspace.")
     return {"url": url, "location": prof.official_name}
