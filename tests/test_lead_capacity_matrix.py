@@ -69,6 +69,7 @@ FIXTURE_PATHS = {
     "services/workforce_intelligence/proof.py": "proof harness, synthetic org",
     "services/agency/demo_seed.py": "Max Life DEMO seeder; writes only into the is_demo org /god/demo/maxlife created",
     "routers/staging_harness_router.py": "god-only staging harness; TEST contacts for the designated live-test phones",
+    "routers/program_router.py": "owner-only booking_test_link: one is_test preview contact per location, never contacted",
 }
 
 

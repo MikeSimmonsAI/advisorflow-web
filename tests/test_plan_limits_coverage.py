@@ -37,6 +37,7 @@ EXEMPT = {
     "scripts/seed_demo_org.py": "standalone dev seed script, not an app path",
     "scripts/seed_god_mode_orgs.py": "standalone dev seed script, not an app path",
     "seed.py": "standalone dev seed script, not an app path",
+    "routers/program_router.py": "creates only the owner-only is_test booking preview contact (booking_test_link); program leads are created by programs/promote.py, which is gated",
 
     # Demo scenario builders - fixtures, same category as sample_data.
     "services/demo_scenarios/brand_sales.py": "demo fixture builder; creates platform-scope users with organization_id=None",
