@@ -107,6 +107,7 @@ def get_todays_work(
             Lead.assigned_to_id == user_id,
             Lead.status == "booked",
             Lead.is_duplicate == False,
+            Lead.is_test.isnot(True),
             ~Lead.id.in_(
                 db.query(LeadOutcome.lead_id)
                 .filter(LeadOutcome.lead_id.isnot(None))

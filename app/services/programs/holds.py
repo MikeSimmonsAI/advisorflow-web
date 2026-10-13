@@ -58,7 +58,9 @@ def _conflicted_masters(recs: List[ProgramSourceRecord]) -> set:
 def hold_open_reviews(db: Session, org_id: str, actor_id: Optional[str] = None,
                       *, apply: bool = True, now: Optional[datetime] = None) -> Dict:
     now = now or datetime.utcnow()
-    recs = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org_id).all()
+    from app.services.test_records import exclude_test_program_records
+    recs = exclude_test_program_records(
+        db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org_id)).all()
     conflict = _conflicted_masters(recs)
     held, already, by_reason = [], 0, defaultdict(int)
     for r in recs:

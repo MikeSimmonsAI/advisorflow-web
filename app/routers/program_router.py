@@ -30,6 +30,7 @@ from app.models.program_models import (
     ProgramAlert, ProgramAsset, ProgramResponse, ProgramSourceRecord,
 )
 from app.services import lead_scope
+from app.services import test_records as _test_records
 from app.services.programs import identity, importer, readiness_check, responses, setup
 
 router = APIRouter(prefix="/program", tags=["program"])
@@ -568,7 +569,8 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
     if location_id and location_id not in {p.location_id for p in profiles}:
         raise HTTPException(status_code=404, detail="Location not found.")
 
-    recs_q = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org_id)
+    recs_q = _test_records.exclude_test_program_records(
+        db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org_id))
     resp_q = db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id)
     if location_id:
         recs_q = recs_q.filter(ProgramSourceRecord.location_id == location_id)
@@ -1122,7 +1124,8 @@ def list_records(queue: Optional[str] = Query(None), location_id: Optional[str] 
                  offset: int = Query(0, ge=0),
                  db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     prog = _program(db, user)
-    q = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == prog.organization_id)
+    q = _test_records.exclude_test_program_records(
+        db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == prog.organization_id))
     if queue == "on_hold":
         q = q.filter(ProgramSourceRecord.on_hold.is_(True))
     elif queue == "data_review":
@@ -2026,8 +2029,9 @@ def outbox(day: Optional[str] = Query(None, description="YYYY-MM-DD, Central; de
 
     profiles = {p.location_id: p.official_name for p in _profiles(db, org_id)}
     recs = {}
-    for r in (db.query(ProgramSourceRecord)
-              .filter(ProgramSourceRecord.organization_id == org_id, ProgramSourceRecord.lead_id.isnot(None))
+    for r in (_test_records.exclude_test_program_records(
+              db.query(ProgramSourceRecord)
+              .filter(ProgramSourceRecord.organization_id == org_id, ProgramSourceRecord.lead_id.isnot(None)))
               .all()):
         recs.setdefault(r.lead_id, []).append(r)
 

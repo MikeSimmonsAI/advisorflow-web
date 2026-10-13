@@ -43,9 +43,11 @@ def is_approved(recs: Iterable[ProgramSourceRecord]) -> bool:
 def _people(db: Session, org_id: str) -> Dict[str, List[ProgramSourceRecord]]:
     """lead_id -> its source records (a person may have several rows)."""
     out: Dict[str, List[ProgramSourceRecord]] = {}
-    for r in (db.query(ProgramSourceRecord)
+    from app.services.test_records import exclude_test_program_records
+    for r in (exclude_test_program_records(
+              db.query(ProgramSourceRecord)
               .filter(ProgramSourceRecord.organization_id == org_id,
-                      ProgramSourceRecord.lead_id.isnot(None))
+                      ProgramSourceRecord.lead_id.isnot(None)))
               .order_by(ProgramSourceRecord.row_number, ProgramSourceRecord.id).all()):
         out.setdefault(r.lead_id, []).append(r)
     return out
