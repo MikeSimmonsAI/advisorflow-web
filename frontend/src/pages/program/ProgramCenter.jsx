@@ -131,6 +131,20 @@ export default function ProgramCenter() {
   }, [locationId])
   useEffect(() => load(), [load])
 
+  // Keep the Dashboard current on its own: quietly reload every 60 seconds
+  // while it is open and the browser tab is visible. A failed background
+  // reload keeps the last good numbers instead of blanking the screen.
+  useEffect(() => {
+    if (tab !== 'dashboard' || personId) return undefined
+    const t = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      api.get(`/program/dashboard${locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''}`)
+        .then(d => setData(d))
+        .catch(() => {})
+    }, 60000)
+    return () => clearInterval(t)
+  }, [tab, personId, locationId])
+
   useEffect(() => {
     const label = TABS.find(t => t.key === tab)?.label || 'Dashboard'
     document.title = `${label} · Family Service Center · EvoSys Pro`
