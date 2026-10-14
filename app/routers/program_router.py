@@ -2258,6 +2258,66 @@ def alert_test_system(db: Session = Depends(get_db), user: User = Depends(requir
             "sms": {"to": _mask(prog.alert_phone), "ok": res["sms"][0] if res["sms"] else None}}
 
 
+@router.get("/audit/spacing")
+def audit_spacing(days: int = Query(7, ge=1, le=60), gap_hours: int = Query(20, ge=1, le=96),
+                  db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """READ-ONLY spacing audit. Every real (non-test) contact who got two
+    outbound texts less than `gap_hours` apart in the last `days`, with every
+    outbound text (time, why it was sent, Twilio SID, delivery), every cadence
+    touch attempt, the cadence state, and any reply from the family. Sends
+    nothing, changes nothing."""
+    from datetime import timedelta as _td
+    from app.models.models import CadenceState, CadenceTouchLog, Message
+    from app.models.program_models import ProgramResponse
+    prog = _program(db, user)
+    _require_manager(db, user)
+    org = prog.organization_id
+    since = datetime.utcnow() - _td(days=days)
+    gap = _td(hours=gap_hours)
+    rows = (db.query(Message).join(Lead, Lead.id == Message.lead_id)
+            .filter(Lead.organization_id == org, Lead.is_test.isnot(True), Message.sent_at >= since - gap)
+            .order_by(Message.sent_at).all())
+    by: dict = {}
+    for m in rows:
+        by.setdefault(m.lead_id, []).append(m)
+    out = []
+    for lid, ms in by.items():
+        pairs = [(a, b) for a, b in zip(ms, ms[1:]) if b.sent_at >= since and b.sent_at - a.sent_at < gap]
+        if not pairs:
+            continue
+        lead = db.query(Lead).filter(Lead.id == lid).first()
+        st = db.query(CadenceState).filter(CadenceState.lead_id == lid).first()
+        logs = (db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id == lid)
+                .order_by(CadenceTouchLog.created_at).all())
+        replies = (db.query(ProgramResponse).filter(ProgramResponse.lead_id == lid)
+                   .order_by(ProgramResponse.received_at).all())
+        iso = lambda d: d.isoformat() if d else None
+        out.append({
+            "lead_id": lid,
+            "name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip() if lead else None,
+            "phone_last4": (lead.phone or "")[-4:] if lead else None,
+            "status": getattr(lead, "status", None),
+            "close_pairs": [{"first": iso(a.sent_at), "second": iso(b.sent_at),
+                             "hours_apart": round((b.sent_at - a.sent_at).total_seconds() / 3600, 2)}
+                            for a, b in pairs],
+            "texts": [{"id": m.id, "sent_at": iso(m.sent_at), "source": getattr(m, "send_source", None),
+                       "by_user": getattr(m, "sent_by_user_id", None), "sid": m.twilio_sid,
+                       "twilio_status": m.twilio_status, "delivery": m.delivery_status,
+                       "send_state": getattr(m, "send_state", None), "error": getattr(m, "error_code", None),
+                       "body": (m.body or "")[:70]} for m in ms],
+            "cadence": ({"status": st.status, "touch": st.current_touch_number, "started": iso(st.cadence_started_at),
+                         "next_due": iso(st.next_touch_due_at), "last_sent": iso(st.last_touch_sent_at)}
+                        if st else None),
+            "touch_log": [{"touch": l.touch_number, "attempt": l.attempt_seq, "channel": l.channel,
+                           "outcome": l.outcome, "reason": l.reason, "scheduled": iso(l.scheduled_for),
+                           "attempted": iso(l.attempted_at), "message_id": l.message_id,
+                           "sid": l.provider_message_id, "err": l.provider_error_code} for l in logs],
+            "replies": [{"at": iso(r.received_at), "channel": r.channel,
+                         "class": r.response_class} for r in replies],
+        })
+    return {"window_days": days, "gap_hours": gap_hours, "contacts": len(out), "items": out}
+
+
 class SimulateReplyIn(BaseModel):
     text: str
     channel: str = "sms"           # sms | email
