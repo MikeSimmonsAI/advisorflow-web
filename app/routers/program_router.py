@@ -1528,6 +1528,58 @@ def send_approve(body: PickIn, db: Session = Depends(get_db), user: User = Depen
                                  start_at=start, spacing_minutes=spacing)
 
 
+class DailyBatchIn(BaseModel):
+    count: int
+    spacing_minutes: Optional[int] = None
+    start: Optional[str] = None
+    days: Optional[str] = None
+    confirm: Optional[str] = None
+
+
+@router.get("/daily-batch")
+def get_daily_batch(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.services.programs import daily_batch
+    prog = _program(db, user)
+    out = daily_batch.status(prog)
+    if prog.daily_batch_by:
+        u = db.query(User).filter(User.id == prog.daily_batch_by).first()
+        out["set_by_name"] = u.full_name if u else None
+    return out
+
+
+@router.post("/daily-batch")
+def set_daily_batch(body: DailyBatchIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """EXPLICIT HUMAN ACTION: a standing approval. Every sending day the
+    program approves the next `count` people in this person's name. Turning it
+    on (or raising it) needs confirm "DAILY <count>"; count 0 switches it off."""
+    import re as _re
+    from app.services.programs import daily_batch
+    prog = _program(db, user)
+    _require_manager(db, user)
+    n = int(body.count or 0)
+    if n < 0 or n > daily_batch.MAX_PER_DAY:
+        raise HTTPException(status_code=422, detail="Between 0 and %d people a day." % daily_batch.MAX_PER_DAY)
+    if n > 0 and (body.confirm or "").strip().upper() != "DAILY %d" % n:
+        raise HTTPException(status_code=422, detail="Confirm with DAILY %d." % n)
+    if body.start is not None and not _re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", body.start.strip()):
+        raise HTTPException(status_code=422, detail="Start time must look like 09:00.")
+    if body.days is not None and not _re.fullmatch(r"[1-7]{1,7}", body.days.strip()):
+        raise HTTPException(status_code=422, detail="Days must be digits 1 (Mon) to 7 (Sun).")
+    prog.daily_batch_count = n
+    if body.spacing_minutes is not None:
+        prog.daily_batch_spacing = max(1, min(240, int(body.spacing_minutes)))
+    if body.start is not None:
+        prog.daily_batch_start = body.start.strip()
+    if body.days is not None:
+        prog.daily_batch_days = "".join(sorted(set(body.days.strip())))
+    prog.daily_batch_by = user.id if n > 0 else prog.daily_batch_by
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.daily_batch_set",
+               target_type="outreach_program", target_id=prog.id, details=daily_batch.status(prog))
+    db.commit()
+    return daily_batch.status(prog)
+
+
 @router.post("/send/unapprove")
 def send_unapprove(body: PickIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     """Take approval back: no more automated messages to these contacts."""

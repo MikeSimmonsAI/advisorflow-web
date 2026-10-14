@@ -1770,6 +1770,16 @@ async def _program_sla_loop():
                             except Exception as exc:                 # noqa: BLE001
                                 db.rollback()
                                 _logger.error("in-process mailbox poll error: %s", exc, exc_info=True)
+                        # Daily batch: programs whose manager switched it on
+                        # approve the day's new people once, on sending days.
+                        try:
+                            from app.services.programs import daily_batch as _db_batch
+                            done = _db_batch.run(db)
+                            if done:
+                                out["daily_batch"] = done
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("program daily batch error: %s", exc, exc_info=True)
                         try:
                             from app.services.programs import email_touches as _et
                             if _et.sending_enabled() and _et.pass_due():

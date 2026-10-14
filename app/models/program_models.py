@@ -87,6 +87,15 @@ class OutreachProgram(Base):
     # APPROVAL MODE: automated sends go only to contacts a manager approved on
     # Choose & Send. Switched on by the first approval; never switched off by code.
     require_send_approval = Column(Boolean, nullable=False, default=False)
+    # DAILY BATCH - a standing approval a manager switches on in the app: every
+    # sending day the program approves the next N people itself (see
+    # services/programs/daily_batch.py). 0 = off. Who switched it on is kept.
+    daily_batch_count = Column(Integer, nullable=True, default=0)
+    daily_batch_spacing = Column(Integer, nullable=True, default=8)
+    daily_batch_start = Column(String, nullable=True, default="09:00")      # Central
+    daily_batch_days = Column(String, nullable=True, default="12345")       # Mon=1 .. Sun=7
+    daily_batch_by = Column(String, nullable=True)
+    daily_batch_last_date = Column(String, nullable=True)                   # YYYY-MM-DD Central
     # Staff SMS alerts are a real send; off until someone turns them on.
     staff_sms_alerts_enabled = Column(Boolean, nullable=False, default=False)
     logo_asset_id = Column(String, nullable=True)
