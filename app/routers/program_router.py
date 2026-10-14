@@ -2240,6 +2240,24 @@ def alert_test_sms(body: AlertTestSmsIn, db: Session = Depends(get_db), user: Us
     return out[0] if body.target != "team" else {"items": out}
 
 
+@router.post("/alerts/test-system")
+def alert_test_system(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """ONE test of the OWNER-ONLY system alert path (the one self-checks and
+    mailbox problems use): owner's alert email + alert phone, nobody else."""
+    from app.services.programs import responses as R
+    prog = _program(db, user)
+    _require_manager(db, user)
+    title = R.alert_title(prog)
+    res = R.owner_system_alert(
+        db, prog, "system",
+        "TEST ONLY - owner system alert check. Internal system warnings now go to you only, "
+        "never to the team.",
+        sms_text="TEST - %s: Owner-only system alert check. Please check your email." % title)
+    db.commit()
+    return {"email": {"to": _mask(prog.alert_email, 10), "ok": res["email"][0] if res["email"] else None},
+            "sms": {"to": _mask(prog.alert_phone), "ok": res["sms"][0] if res["sms"] else None}}
+
+
 class SimulateReplyIn(BaseModel):
     text: str
     channel: str = "sms"           # sms | email

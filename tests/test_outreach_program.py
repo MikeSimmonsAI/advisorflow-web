@@ -1343,18 +1343,25 @@ def test_mailbox_token_falls_back_to_read_only_instead_of_breaking(monkeypatch, 
 def test_mailbox_disconnect_alerts_once_per_outage(program, monkeypatch):
     from app.models.program_models import ProgramAlert
     from app.services import inbound_mailbox_service as S
-    db = program["db"]
+    db, prog = program["db"], program["prog"]
     box = _central_box(db)
     box.refresh_token_encrypted = "x"
+    prog.alert_phone, prog.alert_email = "+18435550000", "owner@example.com"
+    prog.management_recipients = json.dumps([{"name": "K", "phone": "+14105550100", "email": "k@example.com",
+                                              "role": "team"}])
+    prog.staff_sms_alerts_enabled = True
     db.commit()
 
     def refused(b):
         raise S.MailboxAuthError("Microsoft refused the stored sign-in (400)")
     monkeypatch.setattr(S, "_access_token_rw", refused)
+    monkeypatch.setattr("app.services.programs.responses._deliver_staff_alert",
+                        lambda *a, **k: (True, None))
     S.poll_mailbox(db, box)
     S.poll_mailbox(db, box)
     alerts = db.query(ProgramAlert).filter_by(kind="mailbox_reconnect").all()
-    assert alerts and len({a.recipient for a in alerts}) == len(alerts)     # one per admin, not per poll
+    # once per outage, not per poll - and to the OWNER only, never the team
+    assert sorted(a.recipient for a in alerts) == ["+18435550000", "owner@example.com"]
     assert box.last_status == "auth_error"
 
 
