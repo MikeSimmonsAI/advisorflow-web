@@ -36,7 +36,8 @@ export default function Outbox({ openPerson }) {
             <Kpi icon="sms" tone="blue" value={d.texts_sent} label="Texts sent" />
             <Kpi icon="mail" tone="green" value={d.emails_sent} label="Emails sent" />
             <Kpi icon="alert" tone={d.failed ? 'red' : 'slate'} value={d.failed} label="Failed" />
-            <Kpi icon="clock" tone="gold" value={d.coming_up} label={isToday ? 'Still scheduled today' : 'Scheduled'} />
+            <Kpi icon="clock" tone="gold" value={d.coming_up} label={isToday ? 'Still scheduled today' : 'Scheduled'}
+                 note={isToday && d.next_day ? `${d.next_day} more go tomorrow morning` : undefined} />
           </section>
 
           {d.upcoming.length > 0 && (
