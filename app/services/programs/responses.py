@@ -247,10 +247,54 @@ def _app_link(response_id: Optional[str]) -> Optional[str]:
     return "%s/program?tab=responses%s" % (base, "&id=%s" % response_id if response_id else "") if base else None
 
 
+# SYSTEM ALERTS ARE THE OWNER'S ONLY (Oct 14, Mike): self-check failures,
+# spacing/timing problems, delivery errors, mailbox/integration problems and
+# any other internal warning go to the program owner's alert phone and alert
+# email - never to the team list (management_recipients) and never to other
+# users in-app. Family-response alerts are separate and still go to the team.
+SYSTEM_KINDS = ("self_check", "mailbox_reconnect", "system")
+
+
+def owner_system_alert(db: Session, prog: OutreachProgram, kind: str, message: str,
+                       sms_text: Optional[str] = None) -> Dict:
+    """Send one internal/operational alert to the OWNER ONLY (alert email +
+    alert phone). Returns {"email": (ok, why) | None, "sms": (ok, why) | None}."""
+    if kind not in SYSTEM_KINDS:
+        raise ValueError("not a system alert kind: %r" % kind)
+    out: Dict = {"email": None, "sms": None}
+    if not prog.staff_sms_alerts_enabled:
+        return out
+    if prog.alert_email:
+        out["email"] = _deliver_staff_alert(db, prog, "email", prog.alert_email, message, kind=kind)
+        db.add(ProgramAlert(organization_id=prog.organization_id, kind=kind, audience="owner", channel="email",
+                            recipient=prog.alert_email, delivered=bool(out["email"][0]), reason=out["email"][1],
+                            message=message[:2000]))
+    if prog.alert_phone:
+        rc: Dict = {}
+        text = sms_text or "%s: The system check found a problem. Please check your email." % alert_title(prog)
+        out["sms"] = _deliver_staff_alert(db, prog, "sms", prog.alert_phone, text, kind=kind, receipt=rc)
+        db.add(sms_alert_record(ProgramAlert(organization_id=prog.organization_id, kind=kind, audience="owner",
+                                             channel="sms", recipient=prog.alert_phone,
+                                             delivered=bool(out["sms"][0]), reason=out["sms"][1],
+                                             message=text), rc))
+    return out
+
+
+def _owner_target(prog: OutreachProgram, to: Optional[str]) -> bool:
+    def norm(v):
+        v = str(v or "").strip().lower()
+        return v if "@" in v else "".join(c for c in v if c.isdigit())[-10:]
+    return bool(to) and norm(to) in {norm(prog.alert_email), norm(prog.alert_phone)} - {""}
+
+
 def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: str,
                          message: str, *, kind: Optional[str] = None, response_id: Optional[str] = None,
                          receipt: Optional[Dict] = None):
     """A real staff alert. Reached only when switched on with a recipient set."""
+    if kind in SYSTEM_KINDS and not _owner_target(prog, to):
+        # Hard stop: an internal system alert can never reach anyone but the owner.
+        log.warning("blocked %s alert to a non-owner recipient", kind)
+        return False, "system alerts go to the program owner only"
     from app.models.models import Organization
     org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
     rich = None
@@ -550,27 +594,17 @@ def record_unmatched(db: Session, prof, *, alias: str, sender: Optional[str], su
 
 def mailbox_reconnect_alert(db: Session, address: str, error: str) -> int:
     """The central mailbox lost its Microsoft sign-in. Every active program
-    depends on it for replies, so each program's admins get one in-app alert
-    (and management one staff email when staff alerts are on)."""
+    depends on it for replies. This is an internal system problem, so it goes
+    to each program's OWNER only (alert email + alert phone) - never the team."""
     from app.models.program_models import OutreachProgram
     progs = db.query(OutreachProgram).filter(OutreachProgram.is_active.is_(True)).all()
-    msg = ("⚠️ The reply mailbox %s needs to be reconnected - EvoSys cannot read family replies "
-           "until it is. Owner console → Email → Inbound mailboxes → Reconnect." % address)
+    msg = ("The reply mailbox %s needs to be reconnected - EvoSys cannot read family replies "
+           "until it is. Owner console -> Email -> Inbound mailboxes -> Reconnect. (%s)" % (address, (error or "")[:200]))
     n = 0
     for prog in progs:
-        for u in _org_admin_users(db, prog.organization_id):
-            db.add(Notification(user_id=u.id, type=NotificationType.REPLY_RECEIVED, message=msg,
-                                link="/program?tab=health"))
-            db.add(ProgramAlert(organization_id=prog.organization_id, kind="mailbox_reconnect",
-                                audience="management", channel="in_app", recipient=u.id,
-                                delivered=True, message=msg, reason=(error or "")[:200]))
-            n += 1
-        if prog.staff_sms_alerts_enabled:
-            for m in _managers(prog):
-                if m.get("email"):
-                    ok, why = _deliver_staff_alert(db, prog, "email", m["email"], msg, kind="mailbox_reconnect")
-                    db.add(ProgramAlert(organization_id=prog.organization_id, kind="mailbox_reconnect",
-                                        audience="management", channel="email", recipient=m["email"],
-                                        delivered=ok, reason=why, message=msg))
+        res = owner_system_alert(db, prog, "mailbox_reconnect", msg,
+                                 sms_text="%s: The reply mailbox needs to be reconnected. Please check your email."
+                                 % alert_title(prog))
+        n += sum(1 for v in res.values() if v and v[0])
     db.commit()
     return n

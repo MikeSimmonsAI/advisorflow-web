@@ -235,7 +235,7 @@ _alerted: Dict[str, str] = {}
 
 def alert_all(db: Session, now: datetime = None) -> int:
     from app.models.program_models import OutreachProgram
-    from app.services.programs.responses import _deliver_staff_alert
+    from app.services.programs.responses import owner_system_alert
     now = now or datetime.utcnow()
     sent = 0
     for prog in db.query(OutreachProgram).filter(OutreachProgram.is_active.is_(True)).all():
@@ -250,14 +250,10 @@ def alert_all(db: Session, now: datetime = None) -> int:
         lines = ["%s - %s%s" % (c["title"], c["detail"], (" (" + ", ".join(c["people"][:6]) + ")") if c["people"] else "")
                  for c in new]
         msg = "System self-check found %d problem(s): %s" % (len(new), " | ".join(lines))
-        ok, _why = _deliver_staff_alert(db, prog, "email", prog.alert_email, msg, kind="self_check")
-        if prog.alert_phone:
-            # The owner's phone too: "SYSTEM CHECK: n problem(s)" + the first one.
-            from app.services.programs.responses import alert_title as _title
-            # Plain, like reply alerts (details in the email): carriers block detail.
-            short = "%s: The system check found a problem. Please check your email." % _title(prog)
-            sms_ok, _w = _deliver_staff_alert(db, prog, "sms", prog.alert_phone, short, kind="self_check")
-            ok = ok or sms_ok
+        # OWNER ONLY: internal problems never go to the team list.
+        res = owner_system_alert(db, prog, "self_check", msg)
+        db.commit()
+        ok = any(v and v[0] for v in res.values())
         if ok:
             for c in new:
                 _alerted["%s:%s" % (prog.id, c["key"])] = day
