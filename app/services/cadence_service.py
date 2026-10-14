@@ -402,6 +402,25 @@ def _log_touch(db: Session, state, lead, *, touch_number, attempt_seq, outcome,
         return None
 
 
+MIN_TOUCH_GAP = timedelta(hours=20)
+
+
+def _touch_gap(schedule, touch_number: int) -> timedelta:
+    """How far after the PREVIOUS touch this one may go: the schedule's own
+    day gap, never less than MIN_TOUCH_GAP."""
+    cur = next((t for t in schedule if t["touch_number"] == touch_number), None)
+    prev = next((t for t in schedule if t["touch_number"] == touch_number - 1), None)
+    days = (cur["day_offset"] - prev["day_offset"]) if (cur and prev) else 1
+    return max(MIN_TOUCH_GAP, timedelta(days=max(0, days)))
+
+
+def _last_sent_at(db: Session, state):
+    from sqlalchemy import func as _f
+    return (db.query(_f.max(CadenceTouchLog.attempted_at))
+            .filter(CadenceTouchLog.cadence_state_id == state.id,
+                    CadenceTouchLog.outcome == OUTCOME_SENT).scalar())
+
+
 def _already_sent(db: Session, state, touch_number: int) -> bool:
     """Has this touch ALREADY gone out?
 
@@ -701,6 +720,26 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 db.commit()
                 continue
 
+            # ── SPACING FROM THE LAST TEXT ACTUALLY SENT ──────────────────────
+            #
+            # Touches are scheduled from the day the cadence started. When one
+            # is held (quiet hours overnight, a paused runner) and goes late, the
+            # next one is already "due" and used to fire right behind it - on
+            # Oct 14 a family got touch 1 at 8:16 and touch 2 at 10:38. A touch
+            # now waits until the schedule's own gap has passed since the last
+            # text that really went out.
+            if touch_number > 1:
+                last = _last_sent_at(db, state)
+                if last is not None:
+                    if getattr(last, "tzinfo", None) is not None:
+                        last = last.replace(tzinfo=None)
+                    earliest = last + _touch_gap(schedule, touch_number)
+                    if now < earliest:
+                        state.next_touch_due_at = earliest
+                        skipped_count += 1
+                        db.commit()
+                        continue
+
             # ── ENTITLEMENT AND THE DEPLOYMENT SWITCH ──────────────────────────
             org = org_cache.get(lead.organization_id)
             if org is None and lead.organization_id:
@@ -880,7 +919,11 @@ def _advance_schedule(state, schedule, touch_number, total_touches, now):
     base = state.cadence_started_at or now
     if getattr(base, "tzinfo", None) is not None:
         base = base.replace(tzinfo=None)
-    state.next_touch_due_at = base + timedelta(days=next_def["day_offset"])
+    n = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) is not None else now
+    # The later of "on schedule" and "the schedule's gap after THIS send", so a
+    # touch that went late never pulls the next one in right behind it.
+    state.next_touch_due_at = max(base + timedelta(days=next_def["day_offset"]),
+                                  n + _touch_gap(schedule, touch_number + 1))
 
 
 def get_cadence_history(db: Session, lead_id: str) -> list:

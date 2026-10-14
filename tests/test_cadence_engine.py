@@ -409,7 +409,9 @@ def test_the_history_reconstructs_what_actually_happened(
         db_session.refresh(state)
         state.next_touch_due_at = datetime.utcnow() - timedelta(minutes=1)
         db_session.commit()
-        cs.run_due_cadences(db_session, now=AT)
+        # Touch 2 only goes once the schedule's gap after touch 1 has passed
+        # (see test_cadence_spacing) - a week later, same hour, is past it.
+        cs.run_due_cadences(db_session, now=AT + timedelta(days=7))
 
     history = cs.get_cadence_history(db_session, lead.id)
     assert [h["touch_number"] for h in history] == [1, 2]
