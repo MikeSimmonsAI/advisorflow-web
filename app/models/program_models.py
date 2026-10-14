@@ -310,6 +310,15 @@ class ProgramAlert(Base):
     delivered = Column(Boolean, nullable=False, default=False)
     reason = Column(String, nullable=True)
     message = Column(Text, nullable=True)
+    # SMS: the carrier's own answer, not our request. provider_id is the
+    # Twilio message SID; provider_status walks queued -> sent -> delivered |
+    # undelivered | failed via the status callback. delivered is True ONLY
+    # when Twilio reports "delivered" (Oct 14: accepted texts were counted
+    # as delivered and Mike's phone never got them).
+    provider_id = Column(String, nullable=True, index=True)
+    provider_status = Column(String, nullable=True)
+    provider_error = Column(String, nullable=True)
+    status_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

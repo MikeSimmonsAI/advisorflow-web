@@ -56,3 +56,29 @@ def test_sci_staff_text_uses_the_toll_free_line(program, monkeypatch):
     assert ok and why is None
     kw = client.messages.create.call_args.kwargs
     assert kw["from_"] == "+18449172171" and kw["to"] == "+18435550000"
+
+
+def test_accepted_text_is_not_delivered_until_twilio_says_so(program, sample_advisor, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from app.models.program_models import ProgramAlert
+    from app.services import sms_programs
+    db, org, prog = program["db"], program["org"], program["prog"]
+    org.org_twilio_phone_number = None
+    prog.alert_phone, prog.alert_email = "+18435550000", None
+    prog.staff_sms_alerts_enabled = True
+    db.commit()
+    client = MagicMock()
+    client.messages.create.return_value = SimpleNamespace(sid="SMtest123", status="queued", error_code=None)
+    monkeypatch.setattr(sms_programs, "is_sci_org", lambda db_, oid: True)
+    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (client, "+18449172171"))
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    responses.on_inbound(db, lead, "Yes please call me", "sms")
+    a = db.query(ProgramAlert).filter_by(channel="sms", recipient="+18435550000").one()
+    assert a.provider_id == "SMtest123" and a.delivered is False and "waiting" in a.reason
+    assert responses.apply_sms_receipt(db, "SMtest123", "undelivered", "30007", "Carrier filtered")
+    db.commit(); db.refresh(a)
+    assert a.delivered is False and "30007" in a.reason
+    responses.apply_sms_receipt(db, "SMtest123", "delivered", None, None)
+    db.commit(); db.refresh(a)
+    assert a.delivered is True
