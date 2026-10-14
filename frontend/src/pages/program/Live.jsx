@@ -83,6 +83,7 @@ export default function Live() {
   const texts = sent.filter(s => s.channel === 'text')
   const delivered = texts.filter(s => s.status === 'delivered').length
   const emails = sent.filter(s => s.channel === 'email').length
+  const opensToday = sent.filter(s => s.channel === 'email' && s.status === 'opened').length
   const failed = d.ob?.failed || 0
   const repliesToday = d.rs.filter(r => isToday(r.received_at))
   const needs = d.rs.filter(r => r.status === 'new' && r.class !== 'opt_out')
@@ -114,7 +115,8 @@ export default function Live() {
                  + (d.ob?.next_day ? ` · ${d.ob.next_day} go tomorrow morning` : '')} all={A && `${A.contacted} people`} />
         <Tile value={opened} label="Opened booking page" note="Last 24 hours" all={A && `${A.opened_booking} people`} />
         <Tile value={`${delivered}/${texts.length}`} label="Texts delivered" all={A && `${A.texts_delivered}/${A.texts_sent}`} />
-        <Tile value={emails} label="Emails sent" all={A && `${A.emails_sent}`} />
+        <Tile value={emails} label="Emails sent" note={opensToday ? `${opensToday} opened` : null}
+              all={A && `${A.emails_sent} sent${A.emails_opened != null ? ` · ${A.emails_opened} opened` : ''}`} />
         <Tile value={optOuts} label="Opted out" all={A && `${A.opted_out} people`} />
         <Tile value={failed} label="Failed or bounced" tone={failed ? 'red' : ''} all={A && `${A.failed}`} />
       </section>

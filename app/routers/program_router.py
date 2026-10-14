@@ -753,12 +753,12 @@ def _reporting(db: Session, recs, resps, prog=None) -> dict:
                                        BookingLink.status.in_(("booked", "confirmed"))).scalar() or 0)
     if prog is not None and getattr(prog, "send_via_mailbox", None):
         out["email"]["delivered"] = None
-        out["email"]["opened"] = None
         out["email"]["complained"] = None
         out["email"]["reached"] = max(0, out["email"]["sent"] - out["email"]["bounced"])
-        out["email"]["note"] = ("Email goes out from the %s mailbox. Microsoft does not report delivery or "
-                                "opens, so 'Not bounced' is every email sent minus the bounce notices that "
-                                "came back." % prog.send_via_mailbox)
+        out["email"]["note"] = ("Email goes out from the %s mailbox. Microsoft does not report delivery, so "
+                                "'Not bounced' is every email sent minus the bounce notices that came back. "
+                                "Opens are counted from Oct 14 on; Outlook hides images until the reader "
+                                "allows them, so real opens are higher." % prog.send_via_mailbox)
     out["email"]["replied"] = sum(1 for r in resps if r.channel == "email")
     out["sms"]["replied"] = sum(1 for r in resps if r.channel == "sms")
     out["email"]["unsubscribed"] = sum(1 for r in resps if r.channel == "email" and r.response_class == "opt_out")
