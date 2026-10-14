@@ -6,7 +6,7 @@
    phone comes back to this screen. Route: /program/live */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../../api/client'
+import { api, getCurrentUser, logout } from '../../api/client'
 import './Live.css'
 
 const REFRESH_MS = 60000
@@ -73,7 +73,7 @@ export default function Live() {
   const open = id => id && navigate(`/program?person=${encodeURIComponent(id)}`)
 
   if (!d) {
-    return <div className="live"><Header ago={ago} onRefresh={load} />{err ? <p className="live-err">{err}</p> : <p className="live-muted">Loading…</p>}</div>
+    return <div className="live"><Header ago={ago} onRefresh={load} />{err ? <WrongAccount err={err} /> : <p className="live-muted">Loading…</p>}</div>
   }
   const sent = d.ob?.sent || []
   const people = new Set(sent.map(s => s.lead_id || s.name)).size
@@ -148,6 +148,27 @@ export default function Live() {
 
       <p className="live-foot">Updates every 60 seconds and whenever you come back to this screen.
         <button type="button" className="live-link" onClick={() => navigate('/program')}>Open full app</button></p>
+    </div>
+  )
+}
+
+// The phone opened this page signed in as an account that cannot see SCI
+// (another workspace's login, a sales login) - say who, in plain words, and
+// offer one tap to sign in with the right account and land straight back here.
+function WrongAccount({ err }) {
+  const who = (getCurrentUser() || {}).email
+  const access = /customer workspace route|brand sales|not authorized|permission|forbidden|no outreach program|no workspace/i.test(err || '')
+  const signIn = async () => {
+    try { await logout() } catch { /* already signed out */ }
+    try { sessionStorage.removeItem('sci_live_entry') } catch { /* private mode */ }
+    window.location.assign('/login?next=' + encodeURIComponent('/sci?to=live'))
+  }
+  return (
+    <div className="live-sec">
+      <p className="live-err">{access
+        ? `This phone is signed in as ${who || 'an account'} that can't see SCI.`
+        : err}</p>
+      <button type="button" className="live-btn" onClick={signIn}>Sign in with your owner account</button>
     </div>
   )
 }
