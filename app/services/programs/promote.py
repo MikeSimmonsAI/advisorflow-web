@@ -50,8 +50,14 @@ def plan(db: Session, org: Organization) -> Dict:
 
 
 def promote(db: Session, org: Organization, actor: Optional[User] = None, *,
-            apply: bool = False, assign_to_id: Optional[str] = None) -> Dict:
+            apply: bool = False, assign_to_id: Optional[str] = None,
+            only_keys: Optional[set] = None) -> Dict:
+    """only_keys: promote just these contact masters (a record a person has
+    just released from hold) and leave every other staged row alone."""
     p = plan(db, org)
+    if only_keys is not None:
+        p["groups"] = {k: v for k, v in p["groups"].items() if k in only_keys}
+        p["to_create"] = len(p["groups"])
     summary = {k: v for k, v in p.items() if k != "groups"}
     if not apply:
         summary["applied"] = False
