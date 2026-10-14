@@ -119,7 +119,7 @@ ALL_JOB_NAMES = LOOP_JOB_NAMES + CRON_JOB_NAMES
 # interval (plus a margin for a deploy restart). "Last run: success" nine days
 # ago is not healthy, it is stopped - and without this the screen said success.
 EXPECTED_INTERVAL_MINUTES = {
-    JobName.CADENCE_LOOP: 60,
+    JobName.CADENCE_LOOP: 5,
     JobName.AI_CONVERSATION: 2,
     JobName.REVIEW_REQUEST: 30,
     JobName.SUPPORT_INTELLIGENCE: 6 * 60,
