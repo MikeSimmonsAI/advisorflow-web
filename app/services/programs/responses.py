@@ -235,7 +235,18 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
                                           org=sending_identity_for_org(db, prog.organization_id))
             return bool(res.get("success")), res.get("error")
         from app.services.sms_service import Client, _org_twilio_credentials
+        from app.services import sms_programs as _sci
         sid, token = _org_twilio_credentials(org)
+        if _sci.is_sci_org(db, prog.organization_id) and not (org and org.org_twilio_phone_number):
+            # SCI has no number of its own: it texts from the EvoSys Pro
+            # toll-free line (approved for account notifications - exactly
+            # what a staff alert is). Oct 14: every staff text alert failed
+            # with "no Twilio number" while family texts went out fine.
+            client, from_ = _sci.sci_sender()
+            link = _app_link(response_id)
+            text = rich["sms"] if rich is not None else (("%s %s" % (message[:250], link)) if link else message[:300])
+            client.messages.create(body=text, from_=from_, to=to)
+            return True, None
         if not (sid and token and org and org.org_twilio_phone_number):
             return False, "the organization has no Twilio number configured"
         link = _app_link(response_id)
