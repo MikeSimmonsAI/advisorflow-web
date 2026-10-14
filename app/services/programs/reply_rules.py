@@ -219,10 +219,12 @@ def alert_plan(cls: str) -> Optional[Dict]:
         return {"kind": HOT, "management": True, "external": True}
     if cls == ACTIVE:
         return {"kind": ACTIVE, "management": False, "external": True}
+    # Every human answer reaches the team's phones and inboxes (Oct 14: "I'll
+    # call you" was a LOW reply and nobody was told). Only opt-outs are quiet.
     if cls == LOW:
-        return {"kind": LOW, "management": False, "external": False}
+        return {"kind": LOW, "management": False, "external": True}
     if cls in (BAD_DATA, WRONG_PERSON):
-        return {"kind": cls, "management": False, "external": False}
+        return {"kind": cls, "management": False, "external": True}
     return None                                # OPT_OUT: closed, no alert
 
 
