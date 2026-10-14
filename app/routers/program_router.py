@@ -2192,6 +2192,45 @@ def alert_sms_check(hours: int = Query(6, ge=1, le=72), db: Session = Depends(ge
     return {"sender": _mask(from_), "recipients": [_mask(p) for p in sorted(staff)], "messages": rows}
 
 
+class AlertTestSmsIn(BaseModel):
+    message: str
+
+
+@router.post("/alerts/test-sms")
+def alert_test_sms(body: AlertTestSmsIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """ONE plain test text, exactly as given, to the program OWNER's alert
+    phone only (never the team, never a family), from the same SCI line staff
+    alerts use. Recorded as a program alert with Twilio's SID; its delivery
+    report updates the record. Read the result with GET /alerts/sms-check."""
+    from app.models.program_models import ProgramAlert
+    from app.services.programs import responses as R
+    prog = _program(db, user)
+    _require_manager(db, user)
+    text = (body.message or "").strip()
+    if not text or len(text) > 300:
+        raise HTTPException(status_code=422, detail="Message must be 1-300 characters.")
+    if not prog.alert_phone:
+        raise HTTPException(status_code=422, detail="No owner alert phone is set.")
+    # Sent EXACTLY as given (the normal alert path would append an app link).
+    from app.services import sms_programs as _sci
+    from app.services.twilio_callbacks import apply_status_callback
+    rc, ok, why = {}, False, None
+    try:
+        client, from_ = _sci.sci_sender()
+        sent = client.messages.create(**apply_status_callback(dict(body=text, from_=from_, to=prog.alert_phone)))
+        rc = {"sid": getattr(sent, "sid", None), "status": getattr(sent, "status", None)}
+        ok = True
+    except Exception as exc:                             # noqa: BLE001 - shown, not hidden
+        why = "%s: %s" % (type(exc).__name__, str(exc)[:200])
+    a = R.sms_alert_record(ProgramAlert(organization_id=prog.organization_id, response_id=None, kind="test",
+                                        audience="primary", channel="sms", recipient=prog.alert_phone,
+                                        delivered=False, reason=why, message=text), rc)
+    db.add(a)
+    db.commit()
+    return {"accepted": ok, "error": why, "alert_id": a.id, "sid": rc.get("sid"), "status": rc.get("status"),
+            "to": _mask(prog.alert_phone)}
+
+
 class AlertResendIn(BaseModel):
     response_ids: List[str]
 
