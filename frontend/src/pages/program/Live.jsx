@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser, logout } from '../../api/client'
 import EngagementGauge, { useEngagement } from './EngagementGauge'
+import SelfCheck from './SelfCheck'
 import './Live.css'
 
 const REFRESH_MS = 60000
@@ -95,6 +96,7 @@ export default function Live() {
       <Header ago={ago} onRefresh={load} />
       {err && <p className="live-err">Last refresh failed - showing the numbers from {time(at?.toISOString())}.</p>}
 
+      <SelfCheck compact />
       <section className="live-sec live-eng" aria-label="Engagement">
         <h2>Engagement</h2>
         <div className="live-card"><EngagementGauge data={engagement} compact /></div>

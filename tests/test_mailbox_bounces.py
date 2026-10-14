@@ -48,3 +48,19 @@ def test_mailbox_full_bounce_does_not_flag_the_address(db_session, world):
 def test_a_real_reply_is_not_mistaken_for_a_bounce(db_session, world):
     m = _msg("r1", "josh@example.com", "Thanks, that address does not exist anymore at my old job, use this one.")
     assert S.bounce_addresses(m, own={BOX}) is None
+
+
+def test_an_old_notice_logged_as_no_lead_is_caught_up(db_session, world):
+    from datetime import datetime
+    row = InboundMailboxMessage(mailbox_id=world.box.id, graph_message_id="old1", outcome="no_lead",
+                                subject="Undeliverable: Following up, Joshua", received_at=datetime.utcnow(),
+                                detail="No lead with microsoftexchange...")
+    db_session.add(row); db_session.commit()
+    n = S.catch_up_bounces(db_session, world.box, [world.atl.id, world.other.id], fetch_one=lambda gid: _ndr(gid))
+    assert n == 1
+    db_session.refresh(row)
+    assert row.outcome == "bounce"
+    em = db_session.query(EmailMessage).filter(EmailMessage.lead_id == world.lead.id).one()
+    assert em.status == "bounced"
+    # Done once: a second pass finds nothing to fix.
+    assert S.catch_up_bounces(db_session, world.box, [world.atl.id], fetch_one=lambda gid: _ndr(gid)) == 0

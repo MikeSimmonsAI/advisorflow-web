@@ -1778,6 +1778,18 @@ async def _program_sla_loop():
                             except Exception as exc:                 # noqa: BLE001
                                 db.rollback()
                                 _logger.error("in-process mailbox poll error: %s", exc, exc_info=True)
+                        # Self-check: every 15 minutes compare plan with what
+                        # happened; email the program's alert address once per
+                        # problem per day.
+                        try:
+                            from app.services.programs import email_touches as _et_sc
+                            from app.services.programs import self_check as _sc
+                            from datetime import timedelta as _td_sc
+                            if _et_sc.pass_due(key="self_check", every=_td_sc(minutes=15)):
+                                out["self_check_alerts"] = _sc.alert_all(db)
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("program self-check error: %s", exc, exc_info=True)
                         # Daily batch: programs whose manager switched it on
                         # approve the day's new people once, on sending days.
                         try:

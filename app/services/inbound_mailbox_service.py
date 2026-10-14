@@ -513,6 +513,55 @@ def record_bounce(db: Session, org_ids: List[str], addresses: List[str], receive
         lead.email, "" if soft else "; address flagged so it is not emailed again")
 
 
+_NDR_ROW_SUBJECT = re.compile(r"(?i)^(undeliverable|undelivered|delivery status notification|mail delivery|"
+                              r"returned mail|delivery (has )?failed|failure notice|message not delivered)")
+
+
+def catch_up_bounces(db: Session, box: InboundMailbox, org_ids: List[str], fetch_one=None,
+                     limit: int = 25) -> int:
+    """Bounce notices logged BEFORE bounce detection existed (outcome
+    no_lead / unmatched) are read again and recorded as bounces. Runs every
+    poll; a row it fixes becomes outcome 'bounce', so each is done once."""
+    rows = (db.query(InboundMailboxMessage)
+            .filter(InboundMailboxMessage.mailbox_id == box.id,
+                    InboundMailboxMessage.outcome.in_(("no_lead", "ambiguous", "unmatched")))
+            .order_by(InboundMailboxMessage.received_at.desc()).limit(500).all())
+    rows = [r for r in rows if _NDR_ROW_SUBJECT.match((r.subject or "").strip())][:limit]
+    if not rows:
+        return 0
+    if fetch_one is None:
+        token = _access_token(box)
+
+        def fetch_one(gid):
+            r = httpx.get(f"{GRAPH}/me/messages/{gid}",
+                          headers={"Authorization": f"Bearer {token}",
+                                   "Prefer": 'outlook.body-content-type="text", IdType="ImmutableId"'},
+                          params={"$select": "id,subject,from,toRecipients,ccRecipients,body,bodyPreview"},
+                          timeout=20)
+            return r.json() if r.status_code == 200 else None
+    fixed = 0
+    for row in rows:
+        try:
+            m = fetch_one(row.graph_message_id)
+            if not m:
+                continue
+            addrs = bounce_addresses(m, own={box.address})
+            if addrs is None:
+                continue
+            body_txt = (m.get("body") or {}).get("content") or m.get("bodyPreview") or ""
+            done = record_bounce(db, org_ids, addrs, row.received_at or datetime.utcnow(),
+                                 soft=bool(_SOFT.search(body_txt)))
+            row.outcome = "bounce"
+            row.detail = (done or "Delivery-failure notice; no email of ours to %s found."
+                          % ", ".join(addrs[:3])) + " (caught up)"
+            db.commit()
+            fixed += 1
+        except Exception:  # noqa: BLE001 - one notice must not stop the rest
+            db.rollback()
+            log.exception("bounce catch-up failed for %s", row.graph_message_id)
+    return fixed
+
+
 def _store_reply(db: Session, lead, body: str, received_at: datetime, message_id: Optional[str] = None):
     from app.models.models import Notification, Reply
     # Same message (same body, received within minutes), not merely the same
@@ -604,6 +653,12 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
         return {"mailbox": box.address, "checked": 0, "matched": 0, "errors": 1}
 
     org_ids = candidate_org_ids(db, box, addresses)
+    if fetch is None:
+        try:
+            catch_up_bounces(db, box, org_ids)
+        except Exception:  # noqa: BLE001 - the catch-up never blocks reading new mail
+            db.rollback()
+            log.exception("bounce catch-up failed for %s", box.address)
     seen = {r[0]: r[1] for r in db.query(InboundMailboxMessage.graph_message_id, InboundMailboxMessage.outcome)
             .filter(InboundMailboxMessage.mailbox_id == box.id,
                     InboundMailboxMessage.graph_message_id.in_([m.get("id") for m in messages if m.get("id")] or ["-"]))

@@ -1,0 +1,11 @@
+.sc { border-radius: 14px; padding: 12px 14px; border: 1px solid; margin-bottom: 14px; font-size: 14px; line-height: 1.4; }
+.sc.ok { border-color: color-mix(in srgb, #1e8a5a 40%, transparent); background: color-mix(in srgb, #1e8a5a 9%, transparent); }
+.sc.bad { border-color: color-mix(in srgb, #d23f48 55%, transparent); background: color-mix(in srgb, #d23f48 10%, transparent); }
+.sc-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sc-dot { width: 10px; height: 10px; border-radius: 50%; background: #1e8a5a; flex-shrink: 0; }
+.sc.bad .sc-dot { background: #d23f48; }
+.sc-at { font-size: 12px; opacity: .7; margin-left: auto; }
+.sc-list { margin: 8px 0 0; padding-left: 18px; }
+.sc-list li { margin: 4px 0; }
+.sc-list.ok { list-style: none; padding-left: 0; opacity: .8; font-size: 13px; }
+.sc-people { opacity: .8; }
