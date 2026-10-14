@@ -94,15 +94,20 @@ def _alert(db: Session, prog: OutreachProgram, resp: ProgramResponse, lead: Lead
 
     if external:
         targets = [("primary", "sms", prog.alert_phone), ("primary", "email", prog.alert_email)]
-        if management and not _managers(prog):
+        if management and not [m for m in _managers(prog) if m.get("phone") or m.get("email")]:
             out.append(ProgramAlert(organization_id=prog.organization_id, response_id=resp.id,
                                     kind=kind, audience="management", channel="sms",
                                     recipient=None, delivered=False,
                                     reason="no management recipients configured", message=message))
-        if management:
-            for m in _managers(prog):
-                targets.append(("management", "sms", m.get("phone")))
-                targets.append(("management", "email", m.get("email")))
+        for m in _managers(prog):
+            # role "team": this person gets EVERY reply alert, like the owner.
+            # Anyone else on the list is escalation only (hot / not handled).
+            if management or (m.get("role") or "").lower() == "team":
+                aud = "team" if (m.get("role") or "").lower() == "team" else "management"
+                if m.get("phone"):
+                    targets.append((aud, "sms", m.get("phone")))
+                if m.get("email"):
+                    targets.append((aud, "email", m.get("email")))
         for audience, channel, to in targets:
             delivered = False
             ok, reason = staff_alert_gate(to, channel, audience, bool(prog.staff_sms_alerts_enabled))

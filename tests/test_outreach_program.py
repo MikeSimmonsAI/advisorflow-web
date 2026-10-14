@@ -1489,3 +1489,25 @@ def test_staging_harness_seeds_and_refuses_a_second_send(client, db_session, mon
     again = client.post("/god/staging/sci/seed", headers=h, json={"test_email": "tester@example.com",
                                                                   "simulation_contacts": True}).json()
     assert len(again["simulation_contacts"]) == 6 and again["contacts_in_workspace"] == 7
+
+
+def test_team_recipients_get_every_reply_by_text_and_email(program, sample_advisor):
+    """Oct 14: Kerry and Michael got nothing; "I'll call you" (a low reply)
+    alerted nobody. A role "team" person gets every non-opt-out reply."""
+    db, org, prog = program["db"], program["org"], program["prog"]
+    prog.alert_phone, prog.alert_email = "+14695550000", "owner@example.com"
+    prog.management_recipients = json.dumps([
+        {"name": "Kerry", "phone": "+14105550100", "role": "team"},
+        {"name": "Michael", "phone": "+15405550100", "email": "m@example.com", "role": "team"}])
+    prog.staff_sms_alerts_enabled = True
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    calls = []
+
+    def fake_deliver(db_, prog_, channel, to, message, **kw):
+        calls.append((channel, to))
+        return True, None
+    with patch("app.services.programs.responses._deliver_staff_alert", side_effect=fake_deliver):
+        responses.on_inbound(db, lead, "I'll call you.", "sms")
+    assert {("sms", "+14695550000"), ("email", "owner@example.com"), ("sms", "+14105550100"),
+            ("sms", "+15405550100"), ("email", "m@example.com")} <= set(calls)

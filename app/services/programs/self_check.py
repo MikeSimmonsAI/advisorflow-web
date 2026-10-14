@@ -239,7 +239,7 @@ def alert_all(db: Session, now: datetime = None) -> int:
     now = now or datetime.utcnow()
     sent = 0
     for prog in db.query(OutreachProgram).filter(OutreachProgram.is_active.is_(True)).all():
-        if not (prog.alert_email and prog.staff_sms_alerts_enabled):
+        if not ((prog.alert_email or prog.alert_phone) and prog.staff_sms_alerts_enabled):
             continue
         res = run(db, prog.organization_id, now)
         day = now.strftime("%Y-%m-%d")
@@ -251,6 +251,11 @@ def alert_all(db: Session, now: datetime = None) -> int:
                  for c in new]
         msg = "System self-check found %d problem(s): %s" % (len(new), " | ".join(lines))
         ok, _why = _deliver_staff_alert(db, prog, "email", prog.alert_email, msg, kind="self_check")
+        if prog.alert_phone:
+            # The owner's phone too: "SYSTEM CHECK: n problem(s)" + the first one.
+            short = "SYSTEM CHECK - %d problem(s). %s" % (len(new), lines[0][:200])
+            sms_ok, _w = _deliver_staff_alert(db, prog, "sms", prog.alert_phone, short, kind="self_check")
+            ok = ok or sms_ok
         if ok:
             for c in new:
                 _alerted["%s:%s" % (prog.id, c["key"])] = day
