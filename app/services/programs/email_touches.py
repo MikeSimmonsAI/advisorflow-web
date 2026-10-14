@@ -23,7 +23,7 @@ WHO GETS A TOUCH - every one of these must hold, every pass:
   * no Location / Data / Duplicate Review is open (identity.send_refusal), and
   * it is inside sending hours (9:00-18:00 in the organization's timezone),
   * the program is under its daily cap (PROGRAM_EMAIL_TOUCH_DAILY_CAP,
-    default 50 per local day; at most PROGRAM_EMAIL_TOUCH_BATCH per pass), and
+    default 200 per local day; at most PROGRAM_EMAIL_TOUCH_BATCH per pass), and
   * if the campaign's email mode carries a flyer (hosted / attached), an
     approved flyer is active for that location - otherwise it is held.
 Then send_email_to_lead runs the same compliance gate every email passes
@@ -102,7 +102,7 @@ def batch_limit() -> int:
         return DEFAULT_BATCH
 
 
-DEFAULT_DAILY_CAP = 50
+DEFAULT_DAILY_CAP = 200   # was 50: below one day of new people plus follow-ups
 
 
 def daily_cap() -> int:

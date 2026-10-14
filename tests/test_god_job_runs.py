@@ -469,7 +469,7 @@ def test_a_job_whose_last_success_is_long_ago_is_reported_stale():
     assert is_stale(JobName.CADENCE_CRON, now - timedelta(days=9), now) is True
     # Retired: never expected to run, so never stale.
     assert is_stale(JobName.AI_CONVERSATION_CRON, now - timedelta(days=9), now) is False
-    assert is_stale(JobName.CADENCE_LOOP, now - timedelta(minutes=50), now) is False
+    assert is_stale(JobName.CADENCE_LOOP, now - timedelta(minutes=8), now) is False   # every 5 min since Oct 14
     assert is_stale(JobName.CADENCE_LOOP, now - timedelta(hours=3), now) is True
     assert is_stale(JobName.EMAIL_POLLER, now - timedelta(minutes=12), now) is False
     assert is_stale("unknown_job", now - timedelta(days=30), now) is False
@@ -494,7 +494,7 @@ def test_the_latest_endpoint_flags_stale_jobs(engine, db_session):
         assert data["jobs"][JobName.CADENCE_CRON]["stale"] is True
         assert data["jobs"][JobName.CADENCE_LOOP]["stale"] is False
         assert JobName.CADENCE_CRON in data["stale_jobs"]
-        assert data["jobs"][JobName.CADENCE_LOOP]["expected_every_minutes"] == 60
+        assert data["jobs"][JobName.CADENCE_LOOP]["expected_every_minutes"] == 5
     finally:
         app.dependency_overrides.clear()
 

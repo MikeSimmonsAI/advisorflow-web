@@ -2189,4 +2189,4 @@ def outbox(day: Optional[str] = Query(None, description="YYYY-MM-DD, Central; de
     failed_n = sum(1 for s in sent if s["status"] in ("failed", "undelivered", "bounced"))
     return {"day": d.isoformat(), "texts_sent": texts_n, "emails_sent": emails_n, "failed": failed_n,
             "coming_up": len(coming), "next_day": later, "sent": sent, "upcoming": coming,
-            "note": "Texts go out at the hourly pass after their time; emails within about 10 minutes."}
+            "note": "Texts go out within about 5 minutes of their time; emails within about 10 minutes."}

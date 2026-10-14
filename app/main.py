@@ -1441,8 +1441,16 @@ async def _ai_conversation_loop():
         await asyncio.sleep(120)  # 2 minutes
 
 
+# EVERY 5 MINUTES, NOT EVERY HOUR (Oct 14 2026). Texts were only sent once an
+# hour, so a slow drip spaced every 8 minutes went out in hourly clumps and,
+# when a pass slipped its lease, waited two hours. A touch is only ever sent
+# once it is due, inside the recipient's allowed hours and the sending window;
+# running more often only stops them waiting.
+CADENCE_PASS_SECONDS = 300
+
+
 async def _cadence_loop():
-    """Run due SMS cadence touches every hour — all orgs at once.
+    """Run due SMS cadence touches every 5 minutes — all orgs at once.
 
     run_due_cadences already applies with_for_update(skip_locked=True) so
     concurrent invocations (e.g. a manual admin trigger) cannot double-send.
@@ -1467,8 +1475,8 @@ async def _cadence_loop():
     while True:
         # ONE PASS PER INTERVAL ACROSS ALL INSTANCES (a lease in the shared
         # database); a second web instance skips instead of repeating it.
-        if not await _pass_claimed(JobName.CADENCE_LOOP, 3600):
-            await asyncio.sleep(3600)
+        if not await _pass_claimed(JobName.CADENCE_LOOP, CADENCE_PASS_SECONDS - 30):
+            await asyncio.sleep(CADENCE_PASS_SECONDS)
             continue
         try:
             async with record_job_run(JobName.CADENCE_LOOP, db_factory=SessionLocal) as _m:
@@ -1483,7 +1491,7 @@ async def _cadence_loop():
                     )
         except Exception as exc:
             _logger.error("cadence_loop: error: %s", exc)
-        await asyncio.sleep(3600)  # 1 hour
+        await asyncio.sleep(CADENCE_PASS_SECONDS)
 
 
 async def _session_cleanup_loop():
