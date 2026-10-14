@@ -1191,7 +1191,7 @@ def test_management_hot_email_has_a_clear_subject(program, monkeypatch):
     with patch("app.services.email_service.send_email_via_provider", side_effect=fake_send):
         ok, _ = R._deliver_staff_alert(db, prog, "email", "manager@example.com", "Ollie <b>replied</b>",
                                        kind="hot", response_id="r1")
-    assert ok and seen["subject"].startswith("HOT RESPONSE")
+    assert ok and "HOT RESPONSE" in seen["subject"]
     assert "&lt;b&gt;" in seen["body"] and "https://app.example.com/program?tab=responses&amp;id=r1" in seen["body"]
 
 

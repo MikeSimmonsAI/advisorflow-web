@@ -156,6 +156,7 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "primary_contact_title": prog.primary_contact_title,
         "primary_contact_user_id": prog.primary_contact_user_id,
         "alert_email": prog.alert_email, "alert_phone": prog.alert_phone,
+        "alert_title": getattr(prog, "alert_title", None),
         "management_recipients": json.loads(prog.management_recipients or "[]"),
         "hot_sla_minutes": prog.hot_sla_minutes,
         "customer_channels": identity.channels(prog),
@@ -191,6 +192,7 @@ class SettingsIn(BaseModel):
     primary_contact_title: Optional[str] = None
     alert_email: Optional[str] = None
     alert_phone: Optional[str] = None
+    alert_title: Optional[str] = None
     management_recipients: Optional[List[dict]] = None
     hot_sla_minutes: Optional[int] = None
     reply_instructions_sms: Optional[str] = None
@@ -2128,6 +2130,70 @@ def booking_test_link(body: TestLinkIn, db: Session = Depends(get_db),
 
 
 # ── SELF-CHECK: is the program doing what the plan says? ───────────────────
+
+class AlertPreviewIn(BaseModel):
+    response_id: str
+
+
+@router.post("/alerts/preview")
+def alert_preview(body: AlertPreviewIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Send ONE alert for this reply, in the current format, to the program
+    OWNER only (alert phone + alert email) so it can be approved. Nobody else."""
+    from app.models.program_models import ProgramResponse
+    from app.services.programs import responses as R
+    prog = _program(db, user)
+    _require_manager(db, user)
+    resp = db.query(ProgramResponse).filter(ProgramResponse.id == body.response_id,
+                                            ProgramResponse.organization_id == prog.organization_id).first()
+    if resp is None:
+        raise HTTPException(status_code=404, detail="Reply not found.")
+    kind = "hot" if resp.response_class == "hot" else resp.response_class
+    content = R.alert_content(db, prog, resp, kind)
+    sent = {}
+    for ch, to in (("sms", prog.alert_phone), ("email", prog.alert_email)):
+        if to:
+            ok, why = R._deliver_staff_alert(db, prog, ch, to, resp.summary or "", kind=kind, response_id=resp.id)
+            sent[ch] = {"to": to, "ok": ok, "error": why}
+    return {"sent": sent, "preview": content}
+
+
+class AlertResendIn(BaseModel):
+    response_ids: List[str]
+
+
+@router.post("/alerts/resend")
+def alert_resend(body: AlertResendIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Re-send the alert for replies that were missed, to EVERYONE who gets
+    reply alerts now (owner + team). Each send is recorded."""
+    from app.models.program_models import ProgramResponse, ProgramAlert
+    from app.services.programs import responses as R
+    prog = _program(db, user)
+    _require_manager(db, user)
+    out = []
+    for rid in body.response_ids[:20]:
+        resp = db.query(ProgramResponse).filter(ProgramResponse.id == rid,
+                                                ProgramResponse.organization_id == prog.organization_id).first()
+        if resp is None:
+            out.append({"id": rid, "error": "not found"})
+            continue
+        kind = "hot" if resp.response_class == "hot" else resp.response_class
+        targets = [("primary", "sms", prog.alert_phone), ("primary", "email", prog.alert_email)]
+        for m in R._managers(prog):
+            if (m.get("role") or "").lower() == "team":
+                targets += [("team", "sms", m.get("phone")), ("team", "email", m.get("email"))]
+        res = []
+        for aud, ch, to in targets:
+            if not to:
+                continue
+            ok, why = R._deliver_staff_alert(db, prog, ch, to, resp.summary or "", kind=kind, response_id=resp.id)
+            db.add(ProgramAlert(organization_id=prog.organization_id, response_id=resp.id, kind=kind,
+                                audience=aud, channel=ch, recipient=to, delivered=ok, reason=why,
+                                message="(resent) " + (resp.summary or "")))
+            res.append({"to": to, "channel": ch, "ok": ok, "error": why})
+        db.commit()
+        out.append({"id": rid, "sent": res})
+    return {"items": out}
+
 
 @router.get("/self-check")
 def self_check(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):

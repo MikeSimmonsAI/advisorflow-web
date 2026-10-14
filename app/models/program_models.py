@@ -64,6 +64,8 @@ class OutreachProgram(Base):
     # Where alerts go. BLANK UNTIL SUPPLIED - never guessed, never hard-coded.
     alert_email = Column(String, nullable=True)
     alert_phone = Column(String, nullable=True)
+    # The first line of every staff alert, e.g. "EvoSys Pro SCI POC".
+    alert_title = Column(String, nullable=True)
     # JSON list of {"name", "email", "phone", "role"} - management escalation.
     management_recipients = Column(Text, nullable=True)
     hot_sla_minutes = Column(Integer, nullable=False, default=15)

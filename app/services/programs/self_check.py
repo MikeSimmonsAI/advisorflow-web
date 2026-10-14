@@ -253,7 +253,8 @@ def alert_all(db: Session, now: datetime = None) -> int:
         ok, _why = _deliver_staff_alert(db, prog, "email", prog.alert_email, msg, kind="self_check")
         if prog.alert_phone:
             # The owner's phone too: "SYSTEM CHECK: n problem(s)" + the first one.
-            short = "SYSTEM CHECK - %d problem(s). %s" % (len(new), lines[0][:200])
+            from app.services.programs.responses import alert_title as _title
+            short = "%s - SYSTEM CHECK\n%d problem(s). %s" % (_title(prog), len(new), lines[0][:200])
             sms_ok, _w = _deliver_staff_alert(db, prog, "sms", prog.alert_phone, short, kind="self_check")
             ok = ok or sms_ok
         if ok:
