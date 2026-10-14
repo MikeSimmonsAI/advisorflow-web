@@ -185,6 +185,7 @@ COLUMNS_TO_ADD = [
     ("outreach_programs", "daily_batch_days", "VARCHAR DEFAULT '12345'"),
     ("outreach_programs", "daily_batch_by", "VARCHAR"),
     ("outreach_programs", "daily_batch_last_date", "VARCHAR"),
+    ("outreach_programs", "self_check_ack", "TEXT"),
     ("booking_links", "short_code", "VARCHAR"),
     ("location_profiles", "link_key", "VARCHAR"),
     ("survey_responses", "location_id", "VARCHAR"),

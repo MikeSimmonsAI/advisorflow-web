@@ -137,6 +137,32 @@ def daily_batch_ran(db: Session, org_id: str, now: datetime) -> Dict:
 CHECKS = [texts_too_close, texts_overdue, first_messages_late, bounces_unrecorded, jobs_running, daily_batch_ran]
 
 
+def signature(c: Dict) -> str:
+    import hashlib
+    raw = "%s|%s|%s" % (c["key"], c.get("detail", ""), ",".join(sorted(c.get("people") or [])))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _acks(db: Session, org_id: str) -> Dict[str, str]:
+    import json
+    from app.models.program_models import OutreachProgram
+    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org_id).first()
+    try:
+        return json.loads(getattr(prog, "self_check_ack", None) or "{}") if prog else {}
+    except ValueError:
+        return {}
+
+
+def acknowledge(db: Session, org_id: str, key: str, sig: str) -> None:
+    import json
+    from app.models.program_models import OutreachProgram
+    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org_id).first()
+    acks = _acks(db, org_id)
+    acks[key] = sig
+    prog.self_check_ack = json.dumps(acks)
+    db.commit()
+
+
 def run(db: Session, org_id: str, now: datetime = None) -> Dict:
     now = now or datetime.utcnow()
     out = []
@@ -148,8 +174,13 @@ def run(db: Session, org_id: str, now: datetime = None) -> Dict:
             log.exception("self-check %s failed", fn.__name__)
             out.append({"key": fn.__name__, "ok": False, "title": fn.__name__.replace("_", " ").title(),
                         "detail": "This check could not run: %s" % type(exc).__name__, "people": []})
-    return {"checked_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "ok": all(c["ok"] for c in out),
-            "problems": sum(1 for c in out if not c["ok"]), "checks": out}
+    acks = _acks(db, org_id)
+    for c in out:
+        c["signature"] = signature(c)
+        c["acknowledged"] = (not c["ok"]) and acks.get(c["key"]) == c["signature"]
+    open_ = [c for c in out if not c["ok"] and not c["acknowledged"]]
+    return {"checked_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "ok": not open_,
+            "problems": len(open_), "acknowledged": sum(1 for c in out if c["acknowledged"]), "checks": out}
 
 
 # ── alerting: email the owner once per problem per day ──────────────────────
@@ -166,7 +197,8 @@ def alert_all(db: Session, now: datetime = None) -> int:
             continue
         res = run(db, prog.organization_id, now)
         day = now.strftime("%Y-%m-%d")
-        new = [c for c in res["checks"] if not c["ok"] and _alerted.get("%s:%s" % (prog.id, c["key"])) != day]
+        new = [c for c in res["checks"] if not c["ok"] and not c.get("acknowledged")
+               and _alerted.get("%s:%s" % (prog.id, c["key"])) != day]
         if not new:
             continue
         lines = ["%s - %s%s" % (c["title"], c["detail"], (" (" + ", ".join(c["people"][:6]) + ")") if c["people"] else "")
