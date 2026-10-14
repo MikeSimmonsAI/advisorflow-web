@@ -321,6 +321,18 @@ def provider_hold_reason(prog, addr: Optional[str]) -> Optional[str]:
     return None
 
 
+def shared_email_peers(db: Session, lead: Lead) -> List[str]:
+    """Other real contacts in this workspace with the SAME email address (two
+    people, one inbox - a couple, or a son who reads mail for a parent)."""
+    from sqlalchemy import func
+    addr = (lead.email or "").strip().lower()
+    if not addr:
+        return []
+    return [i for (i,) in db.query(Lead.id).filter(
+        Lead.organization_id == lead.organization_id, Lead.id != lead.id,
+        Lead.is_test.isnot(True), func.lower(func.trim(Lead.email)) == addr).all()]
+
+
 def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[str]:
     if not (lead.email or "").strip():
         return "no email address"
@@ -340,6 +352,15 @@ def _skip_reason(db: Session, lead: Lead, replied: bool, prog=None) -> Optional[
     if db.query(BookingLink.id).filter(BookingLink.lead_id == lead.id,
                                        BookingLink.status.in_(("booked", "confirmed"))).first():
         return "an appointment is booked - the sequence stops"
+    # ONE INBOX, ONE EMAIL. When several contacts share an address, the first
+    # to reach its email sends one UNADDRESSED email ("Hi there"); the others
+    # never email that inbox. Their texts are unaffected.
+    peers = shared_email_peers(db, lead)
+    if peers:
+        from app.models.models import EmailMessage
+        if db.query(EmailMessage.id).filter(EmailMessage.lead_id.in_(peers),
+                                            EmailMessage.status != "failed").first():
+            return "shares an email address with another contact - that inbox already gets one unaddressed email"
     return identity.send_refusal(db, lead, "cadence")
 
 
@@ -401,7 +422,7 @@ def _family_copy_is_default(fam: CampaignFamily) -> bool:
 
 
 def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: LocationProfile,
-                  lead: Lead, touch: int, r: Dict) -> Dict:
+                  lead: Lead, touch: int, r: Dict, blind: bool = False) -> Dict:
     """The copy for this touch and its quality verdict.
 
     Touch 1 uses the family's own email copy when a person has edited it
@@ -411,6 +432,9 @@ def build_message(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof:
     from app.services.programs import message_brain as brain
     from app.models.models import EmailMessage
     packet = brain.context_packet(db, lead)
+    if blind and packet is not None:
+        # Shared inbox: no name - it may not be this person who reads it.
+        packet = dict(packet, first_name=None, last_name=None)
     if touch == 1 and not _family_copy_is_default(fam):
         msg = {"touch": 1, "channel": "email", "subject": r["subject"], "body": r["body"],
                "strategy": brain.TOUCH_STRATEGY[1], "family": fam.key, "source": "family copy"}
@@ -583,8 +607,9 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
             if prof is None:
                 report["skipped"] += 1
                 continue
-            r = render_touch(db, prog, fam, prof, lead.first_name, "first" if touch == 1 else "followup",
-                             flyer_cache=flyer_cache)
+            blind = bool(shared_email_peers(db, lead))
+            r = render_touch(db, prog, fam, prof, None if blind else lead.first_name,
+                             "first" if touch == 1 else "followup", flyer_cache=flyer_cache)
             if r["email_mode"] in ("hosted", "attached") and r["flyer"] is None:
                 # The campaign is set to carry a flyer and no approved flyer is
                 # active for this location: an email promising a guide with no
@@ -592,7 +617,7 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
                 report["skipped"] += 1
                 report["held_no_flyer"] += 1
                 continue
-            built = build_message(db, prog, fam, prof, lead, touch, r)
+            built = build_message(db, prog, fam, prof, lead, touch, r, blind=blind)
             q = built["quality"]
             if dry_run:
                 report["would_send"].append({
