@@ -96,7 +96,8 @@ export default function Live() {
         <Tile big value={d.ap.length} label="Appointments booked" tone={d.ap.length ? 'green' : ''} />
         <Tile big value={repliesToday.length} label="Replies today" tone={needs.length ? 'amber' : ''}
               note={needs.length ? `${needs.length} need a look` : 'All handled'} />
-        <Tile value={people} label="People contacted" note={`${d.ob?.coming_up ?? 0} still scheduled`} />
+        <Tile value={people} label="People contacted" note={(d.ob?.coming_up ? `${d.ob.coming_up} more today` : 'Done for today')
+                 + (d.ob?.next_day ? ` · ${d.ob.next_day} go tomorrow morning` : '')} />
         <Tile value={opened} label="Opened booking page" note="Last 24 hours" />
         <Tile value={`${delivered}/${texts.length}`} label="Texts delivered" />
         <Tile value={emails} label="Emails sent" />
@@ -125,7 +126,7 @@ export default function Live() {
         })}
       </Section>
 
-      <Section title="Next up" empty="Nothing else scheduled today.">
+      <Section title="Next up" empty={d.ob?.next_day ? `Done for today. ${d.ob.next_day} follow-up texts go out tomorrow morning when sending opens.` : 'Nothing else scheduled today.'}>
         {upcoming.map((u, i) => (
           <Row key={i} onClick={() => open(u.lead_id)} name={title(u.name)} where={u.location}
                text={[u.what, u.channels].filter(Boolean).join(' · ')}

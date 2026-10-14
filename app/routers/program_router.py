@@ -2023,6 +2023,7 @@ def outbox(day: Optional[str] = Query(None, description="YYYY-MM-DD, Central; de
     start = _dt.combine(d, _time(0, 0), tz).astimezone(utc).replace(tzinfo=None)
     end = start + _td(days=1)
     now = _dt.utcnow()
+    today_c = _dt.now(utc).astimezone(tz).date()
 
     def iso(x):
         return x.strftime("%Y-%m-%dT%H:%M:%SZ") if x else None
@@ -2086,14 +2087,29 @@ def outbox(day: Optional[str] = Query(None, description="YYYY-MM-DD, Central; de
                        "location": profiles.get(m.location_id), "what": "First message",
                        "channels": reach, "campaign": m.campaign_family})
         seen.add(lead_id)
+    # A follow-up text only goes out inside the sending window (8:30 AM -
+    # 7:45 PM Eastern, and daytime where the person lives). One that is due
+    # after the window closes waits for the next morning, so it is listed at
+    # the time it will ACTUALLY go - and not as "today" when that is tomorrow.
+    from app.services import contact_hours as _ch
+    later = 0
     for state, lead in (db.query(CadenceState, Lead).join(Lead, Lead.id == CadenceState.lead_id)
                         .filter(Lead.organization_id == org_id, CadenceState.status == "active",
-                                CadenceState.next_touch_due_at >= max(now, start),
+                                CadenceState.next_touch_due_at.isnot(None),
                                 CadenceState.next_touch_due_at < end).all()):
         if lead.id in seen:
             continue
+        due = state.next_touch_due_at
+        if due < start and due < now - timedelta(days=2):
+            continue
+        if d < today_c:
+            break
+        go = _ch.next_permitted_utc(lead, max(due, now)) if d == today_c else due
+        if go is None or go >= end or go < start:
+            later += 1
+            continue
         loc, fam, _ = where(lead.id)
-        coming.append({"at": iso(state.next_touch_due_at), "lead_id": lead.id,
+        coming.append({"at": iso(go), "lead_id": lead.id,
                        "name": " ".join(x for x in (lead.first_name, lead.last_name) if x) or "Family",
                        "location": loc, "what": "Text #%d" % ((state.current_touch_number or 0) + 1),
                        "channels": "Text", "campaign": fam})
@@ -2103,5 +2119,5 @@ def outbox(day: Optional[str] = Query(None, description="YYYY-MM-DD, Central; de
     emails_n = sum(1 for s in sent if s["channel"] == "email")
     failed_n = sum(1 for s in sent if s["status"] in ("failed", "undelivered", "bounced"))
     return {"day": d.isoformat(), "texts_sent": texts_n, "emails_sent": emails_n, "failed": failed_n,
-            "coming_up": len(coming), "sent": sent, "upcoming": coming,
+            "coming_up": len(coming), "next_day": later, "sent": sent, "upcoming": coming,
             "note": "Texts go out at the hourly pass after their time; emails within about 10 minutes."}
