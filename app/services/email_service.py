@@ -24,7 +24,7 @@ each from their own verified Resend domain, no cross-contamination.
 import os
 import re
 from sqlalchemy.orm import Session
-from app.models.models import Lead, User, EmailMessage, MessageTrack
+from app.models.models import Lead, User, EmailMessage, MessageTrack, gen_uuid
 
 import logging
 
@@ -525,22 +525,31 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     # (programs/mailbox_send.py) uses that path for its contacts; None = not set.
     result = None
     _prog_for_send = _program_identity.program_for_org(db, lead.organization_id)
+    # OPEN TRACKING for program email: the row's id is chosen BEFORE the send
+    # so the email can carry a 1x1 image that marks this row opened the first
+    # time it loads (/email-tracking/open/<id>). Links are NOT rewritten - the
+    # booking link is tracked by its own page. The saved body has no pixel.
+    _email_id = gen_uuid()
+    _send_html = rendered["body_html"]
+    if _prog_for_send is not None:
+        _send_html = _with_open_pixel(_send_html, _email_id)
     if _prog_for_send is not None:
         from app.services.programs import mailbox_send as _mbx
         result = _mbx.send(db, _prog_for_send, to_email=lead.email, subject=rendered["subject"],
-                           body_html=rendered["body_html"], reply_to=getattr(org, "reply_to_email", None),
+                           body_html=_send_html, reply_to=getattr(org, "reply_to_email", None),
                            attachments=attachments)
     if result is None:
         result = send_email_via_provider(
             to_email=lead.email,
             subject=rendered["subject"],
-            body_html=rendered["body_html"],
+            body_html=_send_html,
             org=org,
             **({"headers": _program_headers} if _program_headers else {}),
             **({"attachments": attachments} if attachments else {}),
         )
 
     email_msg = EmailMessage(
+        id=_email_id,
         lead_id=lead.id,
         sender_id=advisor.id,
         subject=rendered["subject"],
@@ -573,6 +582,26 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
         raise RuntimeError(result.get("error")
                            or "The email provider rejected the message.")
     return email_msg
+
+
+def _open_pixel_base() -> str:
+    """The backend's public origin, the same one the unsubscribe link uses."""
+    base = (os.environ.get("PROGRAM_ASSET_BASE_URL") or "").strip().rstrip("/")
+    if not base:
+        from app.services.twilio_callbacks import public_api_base
+        base = public_api_base()
+    return base
+
+
+def _with_open_pixel(body_html: str, email_id: str) -> str:
+    base = _open_pixel_base()
+    if not base or not body_html:
+        return body_html
+    pixel = '<img src="%s/email-tracking/open/%s" width="1" height="1" alt="" style="display:block;border:0" />' % (
+        base, email_id)
+    low = body_html.lower()
+    i = low.rfind("</body>")
+    return body_html[:i] + pixel + body_html[i:] if i >= 0 else body_html + pixel
 
 
 def send_email_batch(db: Session, advisor: User, leads: list[Lead]) -> dict:

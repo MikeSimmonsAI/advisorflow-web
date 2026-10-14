@@ -54,5 +54,13 @@ def test_m365_program_reports_not_tracked_not_zero():
     db = MagicMock()
     out = R._reporting(db, [], [], SimpleNamespace(send_via_mailbox="support@evosyspro.live"))
     e = out["email"]
-    assert e["delivered"] is None and e["opened"] is None and e["reached"] == 0
+    assert e["delivered"] is None and e["reached"] == 0
     assert "Microsoft" in e["note"]
+
+
+def test_open_pixel_goes_in_sent_mail_not_saved_body(monkeypatch):
+    from app.services import email_service as E
+    monkeypatch.setenv("PROGRAM_ASSET_BASE_URL", "https://api.example.test")
+    out = E._with_open_pixel("<html><body><p>Hi</p></body></html>", "abc")
+    assert 'src="https://api.example.test/email-tracking/open/abc"' in out
+    assert out.index("open/abc") < out.lower().index("</body>")
