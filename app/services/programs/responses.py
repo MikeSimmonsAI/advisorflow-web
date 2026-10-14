@@ -122,6 +122,78 @@ def _alert(db: Session, prog: OutreachProgram, resp: ProgramResponse, lead: Lead
     return out
 
 
+def _pretty_phone(raw: Optional[str]) -> Optional[str]:
+    d = "".join(c for c in str(raw or "") if c.isdigit())
+    if len(d) == 11 and d[0] == "1":
+        d = d[1:]
+    return "(%s) %s-%s" % (d[:3], d[3:6], d[6:]) if len(d) == 10 else (raw or None)
+
+
+def alert_title(prog: OutreachProgram) -> str:
+    return (getattr(prog, "alert_title", None) or "").strip() or "EvoSys Pro %s" % (prog.name or "").strip()
+
+
+def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kind: Optional[str]) -> Dict:
+    """What a staff alert says, built from the reply itself (Oct 14 format):
+    header, who and where, HOW they replied, what they said, and EVERY way to
+    reach them - phone and email - with the way they replied first."""
+    import html as _html
+    lead = db.query(Lead).filter(Lead.id == resp.lead_id).first()
+    name = ("%s %s" % (getattr(lead, "first_name", "") or "", getattr(lead, "last_name", "") or "")).strip().title() \
+        or "A contact"
+    where = None
+    if resp.location_id:
+        from app.models.program_models import LocationProfile
+        p = (db.query(LocationProfile).filter(LocationProfile.organization_id == resp.organization_id,
+                                              LocationProfile.location_id == resp.location_id).first())
+        where = p.official_name if p else None
+    how = "Email" if resp.channel == "email" else "Text"
+    when = resp.received_at
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import timezone as _tz
+        when_s = when.replace(tzinfo=_tz.utc).astimezone(ZoneInfo("America/Chicago")).strftime("%a %-I:%M %p CT")
+    except Exception:                                    # noqa: BLE001
+        when_s = when.strftime("%a %H:%M UTC") if when else ""
+    phone = _pretty_phone(getattr(lead, "phone", None))
+    email = (getattr(lead, "email", None) or "").strip() or None
+    contacts = [("Email", email), ("Phone", phone)] if how == "Email" else [("Phone", phone), ("Email", email)]
+    contact_line = " · ".join("%s %s" % (k, v) for k, v in contacts if v) or "No phone or email on file"
+    if kind == "sla_breach":
+        mins = int((datetime.utcnow() - when).total_seconds() // 60) if when else 0
+        status = "NOT HANDLED YET - %d min" % mins
+    elif kind == HOT:
+        status = "Wants a visit - call within %d min" % int(prog.hot_sla_minutes or 15)
+    else:
+        status = "New Reply"
+    head = "%s - %s" % (alert_title(prog), status)
+    said = re.sub(r"\s+", " ", (resp.body_excerpt or "").strip())
+    link = _app_link(resp.id)
+    who = "%s - %s" % (name, where) if where else name
+    sms = "\n".join(x for x in (
+        head, who, "Replied by: %s, %s" % (how, when_s),
+        'Said: "%s"' % (said[:180] + ("..." if len(said) > 180 else "")),
+        "Contact: %s" % contact_line, ("Open: %s" % link) if link else None) if x)
+    rows = [("Who", who), ("Replied by", "%s, %s" % (how, when_s)), ("Said", '"%s"' % said)]
+    rows += [(k, v) for k, v in contacts if v]
+    if resp.campaign_family:
+        rows.append(("Campaign", resp.campaign_family.replace("_", " ").title()))
+    body = ['<p style="font-size:16px;font-weight:700;margin:0 0 10px">%s</p>' % _html.escape(head),
+            '<table cellpadding="4" style="border-collapse:collapse;font-size:14px">']
+    for k, v in rows:
+        val = _html.escape(v)
+        if k == "Email":
+            val = '<a href="mailto:%s">%s</a>' % (_html.escape(v), val)
+        elif k == "Phone":
+            val = '<a href="tel:%s">%s</a>' % ("".join(c for c in v if c.isdigit()), val)
+        body.append('<tr><td style="color:#5d6b7a;padding-right:12px">%s</td><td>%s</td></tr>' % (k, val))
+    body.append("</table>")
+    if link:
+        body.append('<p style="margin-top:14px"><a href="%s">Open it in EvoSys</a></p>' % _html.escape(link))
+    subject = "%s - %s from %s (%s)" % (alert_title(prog), "New reply" if status == "New Reply" else status, name, how)
+    return {"sms": sms[:1500], "subject": subject, "html": "".join(body)}
+
+
 def _app_link(response_id: Optional[str]) -> Optional[str]:
     import os
     base = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
@@ -133,7 +205,21 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
     """A real staff alert. Reached only when switched on with a recipient set."""
     from app.models.models import Organization
     org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    rich = None
+    if response_id:
+        resp = db.query(ProgramResponse).filter(ProgramResponse.id == response_id).first()
+        if resp is not None:
+            try:
+                rich = alert_content(db, prog, resp, kind)
+            except Exception:                            # noqa: BLE001 - fall back to the plain line
+                log.exception("alert format failed for response %s", response_id)
     try:
+        if channel == "email" and rich is not None:
+            from app.services.email_service import send_email_via_provider
+            from app.services.public_identity import sending_identity_for_org
+            res = send_email_via_provider(to, rich["subject"], rich["html"],
+                                          org=sending_identity_for_org(db, prog.organization_id))
+            return bool(res.get("success")), res.get("error")
         if channel == "email":
             from app.services.email_service import send_email_via_provider
             from app.services.public_identity import sending_identity_for_org
@@ -145,7 +231,7 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
             body = "<p>%s</p>" % _html.escape(message)
             if link:
                 body += '<p><a href="%s">Open it in EvoSys</a></p>' % _html.escape(link)
-            res = send_email_via_provider(to, "%s - %s" % (label, prog.name), body,
+            res = send_email_via_provider(to, "%s - %s" % (alert_title(prog), label), body,
                                           org=sending_identity_for_org(db, prog.organization_id))
             return bool(res.get("success")), res.get("error")
         from app.services.sms_service import Client, _org_twilio_credentials
@@ -153,7 +239,7 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
         if not (sid and token and org and org.org_twilio_phone_number):
             return False, "the organization has no Twilio number configured"
         link = _app_link(response_id)
-        text = ("%s %s" % (message[:250], link)) if link else message[:300]
+        text = rich["sms"] if rich is not None else (("%s %s" % (message[:250], link)) if link else message[:300])
         Client(sid, token).messages.create(body=text,
                                            from_=org.org_twilio_phone_number, to=to)
         return True, None
