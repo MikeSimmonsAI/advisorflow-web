@@ -212,6 +212,8 @@ class ProgramSourceRecord(Base):
     # A PERSON'S DECISIONS SURVIVE A RE-IMPORT: a location assigned by hand, and
     # a review a person cleared, are not undone by staging the file again.
     location_assigned_manually = Column(Boolean, nullable=False, default=False)
+    # Contact them without naming the location (see identity.NoLocationProfile).
+    hide_location = Column(Boolean, nullable=True, default=False)
     data_review_cleared_at = Column(DateTime, nullable=True)
     duplicate_review_cleared_at = Column(DateTime, nullable=True)
     # HOLD: parked by a person's decision - excluded from ALL outreach and from

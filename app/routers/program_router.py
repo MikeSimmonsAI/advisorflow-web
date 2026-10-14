@@ -1151,6 +1151,7 @@ def list_records(queue: Optional[str] = Query(None), location_id: Optional[str] 
         "source_status": r.source_status, "source_campaign": r.source_campaign,
         "source_location_name": r.source_location_name, "location": pname.get(r.location_id),
         "location_status": r.location_status, "campaign_family": r.campaign_family,
+        "hide_location": bool(getattr(r, "hide_location", False)),
         "contact_master_key": r.contact_master_key, "link_status": r.link_status,
         "link_reason": r.link_reason, "duplicate_review_reason": r.duplicate_review_reason,
         "data_note_flags": json.loads(r.data_note_flags or "[]"), "lead_id": r.lead_id,
@@ -1160,6 +1161,7 @@ def list_records(queue: Optional[str] = Query(None), location_id: Optional[str] 
 
 class AssignLocationIn(BaseModel):
     location_id: str
+    hide_location: Optional[bool] = None    # True: contact them without naming the location
 
 
 @router.post("/records/{record_id}/location")
@@ -1176,8 +1178,32 @@ def assign_location(record_id: str, body: AssignLocationIn, db: Session = Depend
         raise HTTPException(status_code=404, detail="Record or location not found.")
     rec.location_id, rec.location_status = prof.location_id, "mapped"
     rec.location_assigned_manually = True
+    if body.hide_location is not None:
+        rec.hide_location = bool(body.hide_location)
     db.commit()
-    return {"id": rec.id, "location": prof.official_name, "location_status": rec.location_status}
+    return {"id": rec.id, "location": prof.official_name, "location_status": rec.location_status,
+            "hide_location": bool(rec.hide_location)}
+
+
+class HideLocationIn(BaseModel):
+    on: bool
+
+
+@router.post("/records/{record_id}/hide-location")
+def set_hide_location(record_id: str, body: HideLocationIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user)):
+    """Contact this person without naming any location: texts, emails, the
+    sender name, booking page and survey all say "Family Services" instead.
+    The real location stays on the record for routing and reports."""
+    prog = _program(db, user)
+    _require_manager(db, user)
+    rec = db.query(ProgramSourceRecord).filter(ProgramSourceRecord.id == record_id,
+                                               ProgramSourceRecord.organization_id == prog.organization_id).first()
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    rec.hide_location = bool(body.on)
+    db.commit()
+    return {"id": rec.id, "hide_location": bool(rec.hide_location)}
 
 
 class ClearReviewIn(BaseModel):

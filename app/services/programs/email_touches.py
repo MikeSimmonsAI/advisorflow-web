@@ -175,11 +175,13 @@ def render_touch(db: Session, prog: OutreachProgram, fam: CampaignFamily, prof: 
                  first_name: Optional[str], touch: str = "first", flyer_cache: Optional[Dict] = None) -> Dict:
     """Subject, plain body, HTML body and attachment for one family/location/touch."""
     mode = fam.first_touch_email_mode if touch == "first" else fam.followup_email_mode
-    key = (fam.key, prof.location_id)
+    # A hidden location gets only the general flyer, never its own branded one.
+    floc = None if identity.hides_location(prof) else prof.location_id
+    key = (fam.key, floc)
     if flyer_cache is not None and key in flyer_cache:
         found = flyer_cache[key]
     else:
-        found = flyer_for(db, prog.organization_id, fam, prof.location_id)
+        found = flyer_for(db, prog.organization_id, fam, floc)
         if flyer_cache is not None:
             flyer_cache[key] = found
     flyer = found if mode in ("hosted", "attached") else None
@@ -589,8 +591,8 @@ def run(db: Session, organization_id: Optional[str] = None, *, dry_run: bool = F
             # Cheapest hold first: a flyer campaign with no approved flyer for
             # this location (one lookup per family+location, cached).
             mode = fam.first_touch_email_mode if touch == 1 else fam.followup_email_mode
-            loc = item["record"].location_id
-            if mode in ("hosted", "attached") and loc:
+            loc = None if getattr(item["record"], "hide_location", False) else item["record"].location_id
+            if mode in ("hosted", "attached") and (loc or getattr(item["record"], "hide_location", False)):
                 key = (fam.key, loc)
                 if key not in flyer_cache:
                     flyer_cache[key] = flyer_for(db, prog.organization_id, fam, loc)
