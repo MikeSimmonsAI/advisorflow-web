@@ -1100,8 +1100,15 @@ def test_holding_open_reviews_excludes_them_and_does_not_block_the_rest(client, 
     item = [i for i in dash["readiness"]["items"] if i["key"] == "held_records"][0]
     assert item["ok"] is True and "4 on hold" in item["detail"]
     # a person can release one; nothing else changes
-    r = client.post("/program/records/%s/hold" % recs["L006"].id, headers=h, json={"on_hold": False}).json()
+    from unittest.mock import patch as _patch
+    with _patch("app.services.programs.line_check.run_for_org", return_value={}) as lc:
+        r = client.post("/program/records/%s/hold" % recs["L006"].id, headers=h, json={"on_hold": False}).json()
     assert r["on_hold"] is False
+    # Released = made a live contact (so it can be chosen in Choose & Send);
+    # only that one - the other held records stay staged.
+    db.refresh(recs["L006"])
+    assert r["lead_id"] and recs["L006"].lead_id == r["lead_id"] and lc.called
+    assert all(db.query(ProgramSourceRecord).get(recs[k].id).lead_id is None for k in ("L003", "L004", "L005"))
 
 
 def test_a_held_contact_is_refused_on_every_path(program, sample_advisor):

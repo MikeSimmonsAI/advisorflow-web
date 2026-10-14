@@ -1305,7 +1305,32 @@ def hold_record(record_id: str, body: HoldIn, db: Session = Depends(get_db),
                target_type="program_source_record", target_id=rec.id,
                details={"source_lead_id": rec.source_lead_id, "reason": (body.reason or "")[:300]})
     db.commit()
-    return {"id": rec.id, "on_hold": rec.on_hold, "hold_reason": rec.hold_reason}
+    lead_id = rec.lead_id
+    if not body.on_hold and not rec.lead_id:
+        lead_id = _promote_released(db, prog, user, rec)
+    return {"id": rec.id, "on_hold": rec.on_hold, "hold_reason": rec.hold_reason, "lead_id": lead_id}
+
+
+def _promote_released(db: Session, prog, user: User, rec) -> Optional[str]:
+    """A record released from hold that was never made a live contact (it was
+    held when its file was loaded) becomes one now, exactly as the load would
+    have done: a new lead, no consent, no campaign, nothing sent. Without this
+    a released person never shows up in Choose & Send. Its number gets the
+    usual mobile/landline check so a landline is never texted."""
+    from app.services.programs import line_check, promote
+    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+    try:
+        promote.promote(db, org, user, apply=True, only_keys={rec.contact_master_key or rec.source_lead_id})
+    except HTTPException:
+        db.rollback()
+        return None
+    db.refresh(rec)
+    if rec.lead_id:
+        try:
+            line_check.run_for_org(db, prog.organization_id, limit=5)
+        except Exception:                                # noqa: BLE001
+            db.rollback()
+    return rec.lead_id
 
 
 @router.post("/records/hold-open-reviews")
