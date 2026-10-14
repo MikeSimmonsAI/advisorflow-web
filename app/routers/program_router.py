@@ -2157,6 +2157,41 @@ def alert_preview(body: AlertPreviewIn, db: Session = Depends(get_db), user: Use
     return {"sent": sent, "preview": content}
 
 
+def _mask(v: Optional[str], keep: int = 4) -> str:
+    v = str(v or "")
+    return ("*" * max(0, len(v) - keep)) + v[-keep:] if v else ""
+
+
+@router.get("/alerts/sms-check")
+def alert_sms_check(hours: int = Query(6, ge=1, le=72), db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user)):
+    """PROOF, from Twilio itself: every text the SCI line sent to a staff
+    alert number in the last N hours, with Twilio's own status and error.
+    Also refreshes stored alert records from those statuses."""
+    from datetime import timedelta as _td
+    from app.models.program_models import ProgramAlert
+    from app.services import sms_programs as _sci
+    from app.services.programs import responses as R
+    prog = _program(db, user)
+    _require_manager(db, user)
+    staff = {prog.alert_phone} | {m.get("phone") for m in R._managers(prog)}
+    staff = {p for p in staff if p}
+    client, from_ = _sci.sci_sender()
+    since = datetime.utcnow() - _td(hours=hours)
+    rows = []
+    for to in sorted(staff):
+        for m in client.messages.list(to=to, date_sent_after=since, limit=50):
+            rows.append({"to": _mask(to), "from": _mask(getattr(m, "from_", None)), "sid": _mask(m.sid, 6),
+                         "status": m.status, "error_code": m.error_code, "error": m.error_message,
+                         "sent_at": m.date_sent.isoformat() if m.date_sent else None,
+                         "body_start": (m.body or "")[:40]})
+            if m.status:
+                R.apply_sms_receipt(db, m.sid, m.status, str(m.error_code) if m.error_code else None,
+                                    m.error_message)
+    db.commit()
+    return {"sender": _mask(from_), "recipients": [_mask(p) for p in sorted(staff)], "messages": rows}
+
+
 class AlertResendIn(BaseModel):
     response_ids: List[str]
 
@@ -2185,11 +2220,14 @@ def alert_resend(body: AlertResendIn, db: Session = Depends(get_db), user: User 
         for aud, ch, to in targets:
             if not to:
                 continue
-            ok, why = R._deliver_staff_alert(db, prog, ch, to, resp.summary or "", kind=kind, response_id=resp.id)
-            db.add(ProgramAlert(organization_id=prog.organization_id, response_id=resp.id, kind=kind,
-                                audience=aud, channel=ch, recipient=to, delivered=ok, reason=why,
-                                message="(resent) " + (resp.summary or "")))
-            res.append({"to": to, "channel": ch, "ok": ok, "error": why})
+            rc = {}
+            ok, why = R._deliver_staff_alert(db, prog, ch, to, resp.summary or "", kind=kind, response_id=resp.id,
+                                             receipt=rc)
+            db.add(R.sms_alert_record(ProgramAlert(
+                organization_id=prog.organization_id, response_id=resp.id, kind=kind, audience=aud,
+                channel=ch, recipient=to, delivered=ok, reason=why, message="(resent) " + (resp.summary or "")), rc))
+            res.append({"to": to, "channel": ch, "accepted": ok, "sid": rc.get("sid"), "status": rc.get("status"),
+                        "error": why})
         db.commit()
         out.append({"id": rid, "sent": res})
     return {"items": out}

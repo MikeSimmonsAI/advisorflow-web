@@ -239,6 +239,16 @@ async def sms_status_callback(
 
     msg = db.query(Message).filter(Message.twilio_sid == MessageSid).first()
     if not msg:
+        # A staff alert text (program_alerts.provider_id), not a family message.
+        try:
+            from app.services.programs.responses import apply_sms_receipt
+            if apply_sms_receipt(db, MessageSid, MessageStatus, ErrorCode, ErrorMessage):
+                db.commit()
+                logger.info("staff alert receipt: sid=%s status=%s error=%s", MessageSid, MessageStatus,
+                            ErrorCode or "-")
+        except Exception:                                   # noqa: BLE001
+            db.rollback()
+            logger.exception("staff alert receipt failed for %s", MessageSid)
         # Twilio may re-POST for messages sent before this feature existed — that's OK
         return _twiml_ack()
 

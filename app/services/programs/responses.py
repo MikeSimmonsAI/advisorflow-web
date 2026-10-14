@@ -111,15 +111,46 @@ def _alert(db: Session, prog: OutreachProgram, resp: ProgramResponse, lead: Lead
         for audience, channel, to in targets:
             delivered = False
             ok, reason = staff_alert_gate(to, channel, audience, bool(prog.staff_sms_alerts_enabled))
+            rc: Dict = {}
             if ok:
                 delivered, reason = _deliver_staff_alert(db, prog, channel, to, message,
-                                                         kind=kind, response_id=resp.id)
-            out.append(ProgramAlert(organization_id=prog.organization_id, response_id=resp.id,
-                                    kind=kind, audience=audience, channel=channel, recipient=to,
-                                    delivered=delivered, reason=reason, message=message))
+                                                         kind=kind, response_id=resp.id, receipt=rc)
+            out.append(sms_alert_record(ProgramAlert(
+                organization_id=prog.organization_id, response_id=resp.id, kind=kind, audience=audience,
+                channel=channel, recipient=to, delivered=delivered, reason=reason, message=message), rc))
     for a in out:
         db.add(a)
     return out
+
+
+def sms_alert_record(alert, rc: Dict):
+    """A text the provider ACCEPTED is not a text that ARRIVED: keep the SID,
+    mark it not-yet-delivered, and let the delivery report decide."""
+    if alert.channel == "sms" and rc.get("sid"):
+        alert.provider_id = rc.get("sid")
+        alert.provider_status = (rc.get("status") or "queued")
+        alert.status_at = datetime.utcnow()
+        alert.delivered = alert.provider_status == "delivered"
+        if not alert.delivered:
+            alert.reason = "accepted by Twilio - waiting for the carrier's delivery report"
+    return alert
+
+
+def apply_sms_receipt(db: Session, sid: str, status: str, error_code: Optional[str],
+                      error_message: Optional[str]) -> bool:
+    """Delivery report for a staff alert text. True when one was updated."""
+    rows = db.query(ProgramAlert).filter(ProgramAlert.provider_id == sid).all()
+    for a in rows:
+        a.provider_status = status
+        a.status_at = datetime.utcnow()
+        a.delivered = status == "delivered"
+        if error_code:
+            a.provider_error = ("%s %s" % (error_code, error_message or "")).strip()[:250]
+        if status in ("undelivered", "failed"):
+            a.reason = "NOT DELIVERED (%s)" % (a.provider_error or status)
+        elif status == "delivered":
+            a.reason = None
+    return bool(rows)
 
 
 def _pretty_phone(raw: Optional[str]) -> Optional[str]:
@@ -201,7 +232,8 @@ def _app_link(response_id: Optional[str]) -> Optional[str]:
 
 
 def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: str,
-                         message: str, *, kind: Optional[str] = None, response_id: Optional[str] = None):
+                         message: str, *, kind: Optional[str] = None, response_id: Optional[str] = None,
+                         receipt: Optional[Dict] = None):
     """A real staff alert. Reached only when switched on with a recipient set."""
     from app.models.models import Organization
     org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
@@ -245,14 +277,22 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
             client, from_ = _sci.sci_sender()
             link = _app_link(response_id)
             text = rich["sms"] if rich is not None else (("%s %s" % (message[:250], link)) if link else message[:300])
-            client.messages.create(body=text, from_=from_, to=to)
+            from app.services.twilio_callbacks import apply_status_callback
+            sent = client.messages.create(**apply_status_callback(dict(body=text, from_=from_, to=to)))
+            if receipt is not None:
+                receipt.update(sid=getattr(sent, "sid", None), status=getattr(sent, "status", None),
+                               error=getattr(sent, "error_code", None))
             return True, None
         if not (sid and token and org and org.org_twilio_phone_number):
             return False, "the organization has no Twilio number configured"
         link = _app_link(response_id)
         text = rich["sms"] if rich is not None else (("%s %s" % (message[:250], link)) if link else message[:300])
-        Client(sid, token).messages.create(body=text,
-                                           from_=org.org_twilio_phone_number, to=to)
+        from app.services.twilio_callbacks import apply_status_callback
+        sent = Client(sid, token).messages.create(**apply_status_callback(dict(
+            body=text, from_=org.org_twilio_phone_number, to=to)))
+        if receipt is not None:
+            receipt.update(sid=getattr(sent, "sid", None), status=getattr(sent, "status", None),
+                           error=getattr(sent, "error_code", None))
         return True, None
     except Exception as exc:  # pragma: no cover - provider failure path
         log.warning("program staff alert failed: %s", exc)
