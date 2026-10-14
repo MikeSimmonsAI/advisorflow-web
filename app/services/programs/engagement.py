@@ -49,8 +49,18 @@ def summary(db: Session, org_id: str, since: Optional[datetime] = None,
                                                            EmailMessage.status != "failed"),
                      EmailMessage.sent_at)
     contacted: Set[str] = {i for (i,) in texted.distinct().all()} | {i for (i,) in emailed.distinct().all()}
+    # Message totals for the same window (every message, not people).
+    tstat = [((d or t or "sent") or "sent").lower() for d, t in window(
+        db.query(Message.delivery_status, Message.twilio_status).filter(Message.lead_id.in_(real)),
+        Message.sent_at).all()]
+    estat = [(st or "sent").lower() for (st,) in window(
+        db.query(EmailMessage.status).filter(EmailMessage.lead_id.in_(real)), EmailMessage.sent_at).all()]
+    bad = ("failed", "undelivered", "bounced")
     out = {"contacted": len(contacted), "engaged": 0, "engaged_pct": None, "responded": 0,
-           "responded_pct": None, "replied": 0, "opened_booking": 0, "booked": 0, "opted_out": 0}
+           "responded_pct": None, "replied": 0, "opened_booking": 0, "booked": 0, "opted_out": 0,
+           "texts_sent": len(tstat), "texts_delivered": sum(1 for x in tstat if x == "delivered"),
+           "emails_sent": sum(1 for x in estat if x not in bad),
+           "failed": sum(1 for x in tstat + estat if x in bad)}
     if not contacted:
         return out
     ids = list(contacted)

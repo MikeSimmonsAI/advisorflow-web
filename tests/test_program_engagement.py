@@ -50,3 +50,18 @@ def test_engagement_rate(client, db_session, sample_org):
     assert a["opted_out"] == 1 and a["responded"] == 4 and a["responded_pct"] == 40.0
     assert a["replied"] == 1 and a["opened_booking"] == 2 and a["booked"] == 1
     assert r.json()["today"]["contacted"] == 0       # everyone was contacted yesterday
+
+
+def test_message_totals(client, db_session, sample_org):
+    admin = _program(db_session, sample_org)
+    l = _lead(db_session, sample_org, admin, "Q")
+    now = datetime.utcnow()
+    db_session.add(Message(lead_id=l.id, sender_id=admin.id, body="a", twilio_sid="S1", twilio_status="delivered",
+                           delivery_status="delivered", sent_at=now))
+    db_session.add(Message(lead_id=l.id, sender_id=admin.id, body="b", twilio_sid="S2", twilio_status="undelivered",
+                           delivery_status="undelivered", sent_at=now))
+    db_session.add(EmailMessage(lead_id=l.id, sender_id=admin.id, subject="s", body_html="b", status="bounced", sent_at=now))
+    db_session.add(EmailMessage(lead_id=l.id, sender_id=admin.id, subject="s", body_html="b", status="sent", sent_at=now))
+    db_session.commit()
+    a = client.get("/program/engagement", headers=_h(db_session, admin)).json()["all"]
+    assert (a["texts_sent"], a["texts_delivered"], a["emails_sent"], a["failed"]) == (2, 1, 1, 2)
