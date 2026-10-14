@@ -367,10 +367,71 @@ export default function Send({ locations, isManager, locationId, goTab, automati
             </div>
           )}
           <p className="sci-footnote">Good to go starts their texts right away (first text at the next allowed hour in their time zone). A reply or STOP ends them.</p>
+          {isManager && <DailyBatch />}
         </Panel>
       </div>
 
     </>
+  )
+}
+
+// EVERY DAY, AUTOMATICALLY: a standing approval. Once a manager switches it
+// on, each sending day the program approves the next N people itself (same
+// people "Pick 25 for me" would tick), spread out from the start time.
+function DailyBatch() {
+  const [d, setD] = useState(null)
+  const [count, setCount] = useState(66)
+  const [spacing, setSpacing] = useState(8)
+  const [start, setStart] = useState('09:00')
+  const [sat, setSat] = useState(false)
+  const [sure, setSure] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    api.get('/program/daily-batch').then(x => {
+      setD(x)
+      if (x.count) setCount(x.count)
+      if (x.spacing_minutes) setSpacing(x.spacing_minutes)
+      if (x.start) setStart(x.start)
+      setSat((x.days || '').includes('6'))
+    }).catch(() => {})
+  }, [])
+  const save = async on => {
+    setBusy(true); setNote('')
+    try {
+      const n = on ? Math.max(1, Math.min(200, Number(count) || 0)) : 0
+      const x = await api.post('/program/daily-batch', { count: n, spacing_minutes: Number(spacing) || 8, start,
+        days: sat ? '123456' : '12345', confirm: on ? `DAILY ${n}` : undefined })
+      setD(x); setSure(false)
+      setNote(on ? `On: ${n} new people every ${sat ? 'Mon–Sat' : 'weekday'} from ${start}, one every ${x.spacing_minutes} min. If today's batch hasn't gone yet, it starts within a few minutes.`
+        : 'Off. No new daily batches; people already approved keep their schedule.')
+    } catch (e) { setNote(errText(e)) } finally { setBusy(false) }
+  }
+  return (
+    <div className="sci-daily" style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+      <div className="sci-row-gap" style={{ justifyContent: 'space-between' }}>
+        <b>Every day, automatically</b>
+        <Chip tone={d?.on ? 'ok' : ''}>{d?.on ? `On · ${d.count}/day` : 'Off'}</Chip>
+      </div>
+      <p className="sci-micro sci-muted" style={{ margin: '6px 0 10px' }}>
+        Sends the next new people (cell phones, active campaigns, never contacted) every sending day, spread across locations. No taps needed after this.
+      </p>
+      <div className="sci-row-gap" style={{ flexWrap: 'wrap' }}>
+        <label className="sci-micro">People a day <input type="number" min="1" max="200" value={count} onChange={e => setCount(e.target.value)} className="sci-input sm" style={{ width: 70 }} /></label>
+        <label className="sci-micro">Start <input type="time" value={start} onChange={e => setStart(e.target.value)} className="sci-input sm" /></label>
+        <label className="sci-micro">Every <input type="number" min="1" max="240" value={spacing} onChange={e => setSpacing(e.target.value)} className="sci-input sm" style={{ width: 56 }} /> min</label>
+        <label className="sci-micro"><input type="checkbox" checked={sat} onChange={e => setSat(e.target.checked)} /> Saturdays too</label>
+      </div>
+      <label className="sci-micro" style={{ display: 'block', marginTop: 10 }}>
+        <input type="checkbox" checked={sure} onChange={e => setSure(e.target.checked)} /> I approve texting and emailing {Number(count) || 0} new people every {sat ? 'Mon–Sat' : 'weekday'}.
+      </label>
+      <div className="sci-row-gap" style={{ marginTop: 10 }}>
+        <button type="button" className="sci-btn gold sm" disabled={!sure || busy} onClick={() => save(true)}>{d?.on ? 'Save' : 'Turn on'}</button>
+        {d?.on && <button type="button" className="sci-btn sm danger" disabled={busy} onClick={() => save(false)}>Turn off</button>}
+      </div>
+      {note && <p className="sci-micro" style={{ marginTop: 8 }}>{note}</p>}
+      {d?.on && d.set_by_name && <p className="sci-micro sci-muted" style={{ marginTop: 4 }}>Switched on by {d.set_by_name}{d.last_date ? ` · last batch ${d.last_date}` : ''}.</p>}
+    </div>
   )
 }
 
