@@ -132,3 +132,27 @@ def test_simulated_reply_runs_the_real_alert_path_once_per_person(program, clien
         r = client.post("/program/alerts/simulate-reply", headers=_h(db, program["admin"]),
                         json={"text": "STOP", "channel": "sms"}).json()
         assert r["class"] == "opt_out" and calls == []                       # opt-outs alert nobody
+
+
+def test_synthetic_contact_alerts_are_marked_test(program, sample_advisor):
+    db, org, prog = program["db"], program["org"], program["prog"]
+    prog.alert_title = "EvoSys Pro SCI POC"
+    db.commit()
+    from app.models.models import Lead
+    lead = Lead(organization_id=org.id, first_name="SCI Alert", last_name="Test (synthetic)", status="new",
+                is_test=True, assigned_to_id=sample_advisor.id)
+    db.add(lead)
+    db.commit()
+    resp = ProgramResponse(organization_id=org.id, lead_id=lead.id, channel="sms", response_class="active",
+                           body_excerpt="What does the guide include?")
+    db.add(resp)
+    db.commit()
+    c = responses.alert_content(db, prog, resp, "active")
+    assert c["sms"] == ("TEST - EvoSys Pro SCI POC: A new family response needs attention. "
+                        "Please check your SCI Responses inbox.")
+    assert c["subject"].startswith("TEST - EvoSys Pro SCI POC")
+    assert "TEST ONLY - not a real family" in c["html"]
+    lead.is_test = False
+    db.commit()
+    c = responses.alert_content(db, prog, resp, "active")
+    assert not c["sms"].startswith("TEST") and not c["subject"].startswith("TEST")

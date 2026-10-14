@@ -160,8 +160,14 @@ def _pretty_phone(raw: Optional[str]) -> Optional[str]:
     return "(%s) %s-%s" % (d[:3], d[3:6], d[6:]) if len(d) == 10 else (raw or None)
 
 
-def plain_alert_sms(prog: OutreachProgram) -> str:
-    return "%s: A new family response needs attention. Please check your SCI Responses inbox." % alert_title(prog)
+TEST_MARK = "TEST ONLY - not a real family"
+
+
+def plain_alert_sms(prog: OutreachProgram, test: bool = False) -> str:
+    text = "%s: A new family response needs attention. Please check your SCI Responses inbox." % alert_title(prog)
+    # A synthetic test contact's alert says TEST up front so nobody mistakes
+    # it for a real family (Oct 14 end-to-end verification).
+    return ("TEST - " + text) if test else text
 
 
 def alert_title(prog: OutreachProgram) -> str:
@@ -209,7 +215,10 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
     # quote, phone, email, link) was blocked by the carriers as error 30007 on
     # every phone; this exact wording was delivered. All detail stays in the
     # email and the app. Do not add names, numbers, links or quotes here.
-    sms = plain_alert_sms(prog)
+    test = bool(getattr(lead, "is_test", False))
+    sms = plain_alert_sms(prog, test=test)
+    if test:
+        head = "%s - %s" % (TEST_MARK, head)
     rows = [("Who", who), ("Replied by", "%s, %s" % (how, when_s)), ("Said", '"%s"' % said)]
     rows += [(k, v) for k, v in contacts if v]
     if resp.campaign_family:
@@ -227,6 +236,8 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
     if link:
         body.append('<p style="margin-top:14px"><a href="%s">Open it in EvoSys</a></p>' % _html.escape(link))
     subject = "%s - %s from %s (%s)" % (alert_title(prog), "New reply" if status == "New Reply" else status, name, how)
+    if test:
+        subject = "TEST - " + subject
     return {"sms": sms[:1500], "subject": subject, "html": "".join(body)}
 
 
