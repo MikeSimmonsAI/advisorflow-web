@@ -134,7 +134,8 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
             from app.services.public_identity import sending_identity_for_org
             import html as _html
             label = {"hot": "HOT RESPONSE", "sla_breach": "HOT RESPONSE - NOT YET HANDLED",
-                     "mailbox_reconnect": "ACTION NEEDED - reply mailbox disconnected"}.get(kind, "Response")
+                     "mailbox_reconnect": "ACTION NEEDED - reply mailbox disconnected",
+                     "self_check": "SYSTEM CHECK - something is not running as planned"}.get(kind, "Response")
             link = _app_link(response_id)
             body = "<p>%s</p>" % _html.escape(message)
             if link:

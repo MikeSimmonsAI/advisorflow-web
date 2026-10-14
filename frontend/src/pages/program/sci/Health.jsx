@@ -8,6 +8,7 @@
    browser: the server reports status and detail only. */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
+import SelfCheck from '../SelfCheck'
 import { Chip, Drawer, Empty, ErrorLine, Icon, Kpi, Loading, PageHead, Panel, STATUS_TONE, errText, ago, when } from './ui'
 
 const TILES = [
@@ -51,6 +52,7 @@ export default function Health({ goTab }) {
         <Chip tone={STATUS_TONE[d.overall]}>{d.overall === 'ok' ? 'All working' : d.overall === 'fail' ? 'Some services need attention' : 'Check warnings'}</Chip>
         <button type="button" className="sci-btn" disabled={busy} onClick={load}><Icon name="refresh" />{busy ? 'Checking…' : 'Refresh checks'}</button>
       </PageHead>
+      <SelfCheck />
 
       <section className="sci-kpis four" aria-label="Health summary">
         <Kpi icon="check" tone="green" value={working} label="Modules working" note={`of ${TILES.length}`} />

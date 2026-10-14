@@ -2052,6 +2052,15 @@ def booking_test_link(body: TestLinkIn, db: Session = Depends(get_db),
     return {"url": url, "location": prof.official_name}
 
 
+# ── SELF-CHECK: is the program doing what the plan says? ───────────────────
+
+@router.get("/self-check")
+def self_check(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.services.programs import self_check as _sc
+    prog = _program(db, user)
+    return _sc.run(db, prog.organization_id)
+
+
 # ── ENGAGEMENT: of the people reached, how many did something back ────────
 
 @router.get("/engagement")
