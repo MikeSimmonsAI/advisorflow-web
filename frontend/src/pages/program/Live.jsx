@@ -88,6 +88,7 @@ export default function Live() {
   const optOuts = repliesToday.filter(r => r.class === 'opt_out').length
   const opened = d.ba?.opened_people ?? 0
   const upcoming = (d.ob?.upcoming || []).slice(0, 5)
+  const A = engagement?.all
 
   return (
     <div className="live">
@@ -99,17 +100,21 @@ export default function Live() {
         <div className="live-card"><EngagementGauge data={engagement} compact /></div>
       </section>
 
+      <section className="live-sec" aria-label="Today and all time">
+        <h2>Today <span className="live-h2-sub">· all time underneath</span></h2>
+      </section>
       <section className="live-tiles" aria-label="Today">
-        <Tile big value={d.ap.length} label="Appointments booked" tone={d.ap.length ? 'green' : ''} />
+        <Tile big value={d.ap.length} label="Upcoming appointments" tone={d.ap.length ? 'green' : ''}
+              all={A && `${A.booked} booked`} />
         <Tile big value={repliesToday.length} label="Replies today" tone={needs.length ? 'amber' : ''}
-              note={needs.length ? `${needs.length} need a look` : 'All handled'} />
+              note={needs.length ? `${needs.length} need a look` : 'All handled'} all={A && `${A.responded} people replied`} />
         <Tile value={people} label="People contacted" note={(d.ob?.coming_up ? `${d.ob.coming_up} more today` : 'Done for today')
-                 + (d.ob?.next_day ? ` · ${d.ob.next_day} go tomorrow morning` : '')} />
-        <Tile value={opened} label="Opened booking page" note="Last 24 hours" />
-        <Tile value={`${delivered}/${texts.length}`} label="Texts delivered" />
-        <Tile value={emails} label="Emails sent" />
-        <Tile value={optOuts} label="Opted out" />
-        <Tile value={failed} label="Failed or bounced" tone={failed ? 'red' : ''} />
+                 + (d.ob?.next_day ? ` · ${d.ob.next_day} go tomorrow morning` : '')} all={A && `${A.contacted} people`} />
+        <Tile value={opened} label="Opened booking page" note="Last 24 hours" all={A && `${A.opened_booking} people`} />
+        <Tile value={`${delivered}/${texts.length}`} label="Texts delivered" all={A && `${A.texts_delivered}/${A.texts_sent}`} />
+        <Tile value={emails} label="Emails sent" all={A && `${A.emails_sent}`} />
+        <Tile value={optOuts} label="Opted out" all={A && `${A.opted_out} people`} />
+        <Tile value={failed} label="Failed or bounced" tone={failed ? 'red' : ''} all={A && `${A.failed}`} />
       </section>
 
       <Section title="Appointments" empty="No one has booked yet.">
@@ -192,12 +197,13 @@ function Header({ ago, onRefresh }) {
   )
 }
 
-function Tile({ value, label, note, tone = '', big = false }) {
+function Tile({ value, label, note, tone = '', big = false, all }) {
   return (
     <div className={`live-tile ${tone} ${big ? 'big' : ''}`}>
       <div className="live-val">{value}</div>
       <div className="live-lbl">{label}</div>
       {note && <div className="live-note">{note}</div>}
+      {all && <div className="live-all">All time: <b>{all}</b></div>}
     </div>
   )
 }

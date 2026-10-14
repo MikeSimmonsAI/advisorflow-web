@@ -65,7 +65,7 @@ export default function EngagementGauge({ data, compact = false }) {
         </div>
       </div>
       <p className="eg-note">
-        <b>{a.engaged}</b> of <b>{a.contacted}</b> people contacted replied, opened their booking page or booked.
+        All time: <b>{a.engaged}</b> of <b>{a.contacted}</b> people contacted so far replied, opened their booking page or booked.
         {' '}Any response, including opt-outs: <b>{fmt(a.responded_pct)}</b>.
         {t && t.contacted > 0 && <> Today: <b>{fmt(t.engaged_pct)}</b> of {t.contacted} contacted.</>}
       </p>

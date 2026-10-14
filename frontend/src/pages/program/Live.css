@@ -53,3 +53,7 @@
 
 .live-card { background: var(--live-card); border: 1px solid var(--live-line); border-radius: 14px; padding: 14px; }
 .live-eng .eg { --eg-accent: var(--live-green); }
+
+.live-all { font-size: 12px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--live-line); color: var(--live-muted); }
+.live-all b { color: var(--live-ink); font-variant-numeric: tabular-nums; }
+.live-h2-sub { text-transform: none; letter-spacing: 0; font-weight: 400; }

@@ -986,7 +986,11 @@ function ClassicLeads() {
           { key: 'needs_reply', label: 'Needs reply', value: serverCounts?.needsReply, accent: 'amber', sub: 'Replied or hot' },
           { key: 'appointments', label: 'Appointments', value: serverCounts?.booked, accent: 'green', sub: 'Booked' },
           { key: 'mine', label: 'Assigned to me', value: serverCounts?.mine, accent: 'blue', sub: 'Your leads' },
-          { key: 'blocked', label: 'Blocked / needs setup', value: stats.dnc + stats.duplicates + stats.missingPhone, accent: 'red', sub: 'DNC, duplicate or no phone (loaded rows)' },
+          // Counted with the SAME rule the "Blocked / needs setup" list uses, so the
+          // card and the list it opens always agree. (It used to add up DNC,
+          // duplicates and email-only rows - email-only people are reachable and
+          // duplicates live on their own tab, so the card said 3 and the list 0.)
+          { key: 'blocked', label: 'Blocked / needs setup', value: leads.filter(l => !l.is_test && !l.is_duplicate && !outreachState(l).ok).length, accent: 'red', sub: 'Do not contact, removed or no phone and no email' },
         ].map(({ key, label, value, accent, sub }) => (
           <button type="button" key={key} className={`leads-kpi-card leads-kpi-card--${accent} ${savedView === key ? 'is-active' : ''}`}
             aria-pressed={savedView === key} onClick={() => { setView('all'); setSavedView(key); setSelected(new Set()); setLeadsPage(1) }}>
