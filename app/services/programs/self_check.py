@@ -102,6 +102,28 @@ def bounces_unrecorded(db: Session, org_id: str, now: datetime) -> Dict:
                   "%d bounce notices in the support mailbox are not recorded yet.")
 
 
+def replies_unrecorded(db: Session, org_id: str, now: datetime) -> Dict:
+    """A reply to one of OUR emails (same subject) that the mailbox reader
+    could not put on a contact. Nothing a family writes back may sit unseen."""
+    from app.models.inbound_mailbox_models import InboundMailboxMessage
+    from app.models.models import EmailMessage, Lead
+    from app.services.inbound_mailbox_service import _norm_subject
+    rows = (db.query(InboundMailboxMessage)
+            .filter(InboundMailboxMessage.received_at >= now - timedelta(days=7),
+                    InboundMailboxMessage.outcome.in_(("no_lead", "ambiguous", "unmatched"))).all())
+    rows = [r for r in rows if re.match(r"(?i)^\s*(re|aw|fw|fwd)\s*:", r.subject or "")]
+    if not rows:
+        return _check("replies_unrecorded", "Every email reply recorded", [],
+                      "Every reply to our emails is on a contact.", "")
+    ours = {_norm_subject(s) for (s,) in db.query(EmailMessage.subject).join(Lead, Lead.id == EmailMessage.lead_id)
+            .filter(Lead.organization_id == org_id, EmailMessage.sent_at >= now - timedelta(days=45)).distinct().all()}
+    bad = ["%s (%s)" % (r.from_address or "unknown sender", (r.subject or "")[:50])
+           for r in rows if _norm_subject(r.subject) in ours]
+    return _check("replies_unrecorded", "Every email reply recorded", bad,
+                  "Every reply to our emails is on a contact.",
+                  "%d replies to our emails are in the support mailbox but not on any contact.")
+
+
 def jobs_running(db: Session, org_id: str, now: datetime) -> Dict:
     from app.models.inbound_mailbox_models import InboundMailbox
     from app.models.job_models import JobName, JobRun
@@ -134,7 +156,8 @@ def daily_batch_ran(db: Session, org_id: str, now: datetime) -> Dict:
                   "The daily batch ran (or is off / not due yet).", "%d daily batch problem.")
 
 
-CHECKS = [texts_too_close, texts_overdue, first_messages_late, bounces_unrecorded, jobs_running, daily_batch_ran]
+CHECKS = [texts_too_close, texts_overdue, first_messages_late, bounces_unrecorded, replies_unrecorded,
+          jobs_running, daily_batch_ran]
 
 
 def signature(c: Dict) -> str:

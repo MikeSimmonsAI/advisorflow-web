@@ -350,6 +350,47 @@ def _norm_subject(subject: Optional[str]) -> str:
     return " ".join(_SUBJ_PREFIX.sub("", subject or "").lower().split())
 
 
+def _is_gmail(addr: Optional[str]) -> bool:
+    return (addr or "").strip().lower().rsplit("@", 1)[-1] in ("gmail.com", "googlemail.com")
+
+
+def address_key(addr: Optional[str]) -> str:
+    """One key per real inbox: lower-case; for Gmail, dots and +tags in the
+    name are ignored and googlemail.com is gmail.com."""
+    a = (addr or "").strip().lower()
+    if "@" not in a:
+        return a
+    local, domain = a.rsplit("@", 1)
+    if domain in ("gmail.com", "googlemail.com"):
+        local = local.split("+", 1)[0].replace(".", "")
+        domain = "gmail.com"
+    return "%s@%s" % (local, domain)
+
+
+def requeue_missed_replies(db: Session, box: InboundMailbox, org_ids: List[str],
+                           days: int = 14) -> Optional[datetime]:
+    """Replies logged as 'no lead' / 'ambiguous' that DO match a contact now
+    (the matching got better - e.g. Gmail dots) are marked for a re-read.
+    Returns the oldest such received time, so the poll reads back that far."""
+    since = datetime.utcnow() - timedelta(days=days)
+    rows = (db.query(InboundMailboxMessage)
+            .filter(InboundMailboxMessage.mailbox_id == box.id,
+                    InboundMailboxMessage.outcome.in_(("no_lead", "ambiguous")),
+                    InboundMailboxMessage.received_at >= since,
+                    InboundMailboxMessage.from_address.isnot(None)).limit(500).all())
+    oldest = None
+    for r in rows:
+        if _NDR_ROW_SUBJECT.match((r.subject or "").strip()):
+            continue
+        lead, outcome, _d = route(db, org_ids, r.from_address, r.subject)
+        if lead is not None and outcome == "matched":
+            r.outcome, r.detail = "error", "Re-reading: it matches a contact now."
+            oldest = r.received_at if oldest is None or r.received_at < oldest else oldest
+    if oldest is not None:
+        db.commit()
+    return oldest
+
+
 def route(db: Session, org_ids: List[str], sender: str, subject: Optional[str] = None):
     """(lead, outcome, detail).
 
@@ -366,6 +407,14 @@ def route(db: Session, org_ids: List[str], sender: str, subject: Optional[str] =
         return None, "no_lead", "No workspace sends from this mailbox."
     leads = (db.query(Lead).filter(Lead.organization_id.in_(org_ids),
                                    func.lower(Lead.email) == sender).all())
+    if not leads and _is_gmail(sender):
+        # Gmail ignores dots and +tags: we emailed l.laffiette@gmail.com and
+        # the reply came from llaffiette@gmail.com - the same inbox.
+        key = address_key(sender)
+        leads = [l for l in db.query(Lead).filter(Lead.organization_id.in_(org_ids),
+                                                  func.lower(Lead.email).like("%@gmail.com")
+                                                  | func.lower(Lead.email).like("%@googlemail.com")).all()
+                 if address_key(l.email) == key]
     if not leads:
         return None, "no_lead", f"No lead with {sender} in the workspaces that send from this mailbox."
     shared = len(set(org_ids)) > 1
@@ -638,6 +687,14 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                 from app.services.programs.mailfiling import GraphMover
                 mover = GraphMover(token, can_write)
         since = (box.cursor_received_at - CURSOR_OVERLAP) if box.cursor_received_at else now - FIRST_RUN_LOOKBACK
+        try:
+            missed = requeue_missed_replies(db, box, candidate_org_ids(db, box, addresses))
+        except Exception:  # noqa: BLE001 - never blocks reading new mail
+            db.rollback()
+            log.exception("missed-reply re-read failed for %s", box.address)
+            missed = None
+        if missed is not None and missed - timedelta(minutes=1) < since:
+            since = missed - timedelta(minutes=1)
         messages = (fetch or (lambda s: _fetch(token, s)))(since)
     except MailboxAuthError as e:
         box.last_status, box.last_error = "auth_error", str(e)[:1000]
