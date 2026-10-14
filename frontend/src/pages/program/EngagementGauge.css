@@ -1,0 +1,20 @@
+/* Engagement gauge - inherits text color from where it sits; the accent can be
+   set by the host with --eg-accent. Works on the light Dashboard and the dark
+   phone screen. */
+.eg { --eg-accent: #1e8a5a; --eg-muted: currentColor; color: inherit; }
+.eg-main { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.eg-ring { flex-shrink: 0; }
+.eg-track { stroke: color-mix(in srgb, currentColor 12%, transparent); }
+.eg-fill { stroke: var(--eg-accent); transition: stroke-dasharray .6s ease; }
+.eg-pct { font-size: 26px; font-weight: 800; fill: currentColor; font-variant-numeric: tabular-nums; }
+.eg.compact .eg-pct { font-size: 23px; }
+.eg-cap { font-size: 12px; fill: currentColor; opacity: .65; }
+.eg-bars { flex: 1; min-width: 180px; display: grid; gap: 9px; }
+.eg-bar-top { display: flex; justify-content: space-between; font-size: 13px; }
+.eg-bar-top span { opacity: .8; }
+.eg-bar-top b { font-variant-numeric: tabular-nums; }
+.eg-bar-track { height: 7px; border-radius: 999px; background: color-mix(in srgb, currentColor 10%, transparent); overflow: hidden; margin-top: 3px; }
+.eg-bar-track span { display: block; height: 100%; border-radius: 999px; background: var(--eg-accent); }
+.eg-bar.muted .eg-bar-track span { background: color-mix(in srgb, currentColor 35%, transparent); }
+.eg-bar.muted .eg-bar-top { opacity: .75; }
+.eg-note { font-size: 13px; margin: 12px 0 0; opacity: .8; line-height: 1.45; }

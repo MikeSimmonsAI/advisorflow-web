@@ -50,3 +50,6 @@
 .live-chip.red, .live-chip.hot { background: color-mix(in srgb, var(--live-red) 14%, transparent); color: var(--live-red); }
 .live-foot { font-size: 12px; color: var(--live-muted); text-align: center; margin-top: 8px; }
 .live-link { background: none; border: 0; color: var(--live-blue); font: inherit; font-weight: 600; margin-left: 6px; padding: 0; cursor: pointer; }
+
+.live-card { background: var(--live-card); border: 1px solid var(--live-line); border-radius: 14px; padding: 14px; }
+.live-eng .eg { --eg-accent: var(--live-green); }
