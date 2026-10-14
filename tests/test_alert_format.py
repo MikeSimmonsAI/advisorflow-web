@@ -41,3 +41,18 @@ def test_email_reply_alert_has_header_both_contacts_email_first(program, sample_
     assert em.startswith("EvoSys Pro SCI POC - New reply from") and "(Email)" in em.split("\n")[0]
     resp = db.query(ProgramResponse).filter_by(lead_id=lead.id).one()
     print("\n" + responses.alert_content(db, prog, resp, resp.response_class)["sms"])
+
+
+def test_sci_staff_text_uses_the_toll_free_line(program, monkeypatch):
+    from unittest.mock import MagicMock
+    from app.services import sms_programs
+    db, prog = program["db"], program["prog"]
+    program["org"].org_twilio_phone_number = None
+    db.commit()
+    client = MagicMock()
+    monkeypatch.setattr(sms_programs, "is_sci_org", lambda db_, oid: True)
+    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (client, "+18449172171"))
+    ok, why = responses._deliver_staff_alert(db, prog, "sms", "+18435550000", "hello", kind="active")
+    assert ok and why is None
+    kw = client.messages.create.call_args.kwargs
+    assert kw["from_"] == "+18449172171" and kw["to"] == "+18435550000"
