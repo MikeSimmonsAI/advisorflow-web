@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation } from '../api/client'
+import { getCurrentUser, refreshCurrentUser, logout, getBranding, clearBranding, applyBrandingCSS, applyBrandingDOM, fetchAndStoreBranding, getOrgContext, setOrgContext, clearOrgContext, clearBrandContext, api, stopKeepAlive, stopRefreshLoop, getWorkspaceLocation, setWorkspaceLocation, fetchMyContexts } from '../api/client'
+import { findSciWorkspace } from '../auth/sciDoor'
 import { isManagerRole, isWorkspaceManagerRole, roleOf, workspaceFeatures, canEnterProduct, WHOLESALE_FEATURE, workspaceLocationChoices, activeLocationId } from '../auth/workspaceAuthority'
 import { enterCustomer as enterCustomerContext } from '../pages/god/enterCustomer'
 import { detectTheme, shellTheme, shellThemeSource, productName, BRAND_CONFIG, THEMES } from '../theme.js'
@@ -372,6 +373,17 @@ export default function Layout({ children }) {
     api.get('/program/status', { skipRedirect: true })
       .then(d => { if (alive) setProgramActive(!!d?.active) })
       .catch(() => { if (alive) setProgramActive(false) })
+    return () => { alive = false }
+  }, [])
+  // THE LINK FOLLOWS THE PERSON, NOT ONLY THE WORKSPACE THEY ARE STANDING IN.
+  // An owner/admin login whose home workspace has no program (EvoSys
+  // Wholesale) still holds SCI; the link shows for them too and opens SCI
+  // through its front door (/program redirects there when this workspace has
+  // no program of its own).
+  const [sciAvailable, setSciAvailable] = useState(false)
+  useEffect(() => {
+    let alive = true
+    fetchMyContexts().then(c => { if (alive) setSciAvailable(!!findSciWorkspace(c)) }).catch(() => {})
     return () => { alive = false }
   }, [])
   const [launchNavState, setLaunchNavState] = useState(null)
@@ -938,7 +950,7 @@ export default function Layout({ children }) {
               // means the answer has not arrived yet, and the item stays
               // hidden until it does — a nav entry that appears a second late
               // is far better than one that flashes and vanishes.
-              if (item.programOnly && !programActive) return false
+              if (item.programOnly && !programActive && !sciAvailable) return false
               if (item.launchOnly &&
                   (!launchNavState?.exists || launchNavState.completed)) return false
               // A capability item is NEVER shown on the strength of a role.

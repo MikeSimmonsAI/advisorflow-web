@@ -125,8 +125,18 @@ export default function ProgramCenter() {
     let alive = true
     setErr('')
     api.get(`/program/dashboard${locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''}`)
-      .then(d => { if (alive) setData(d) })
-      .catch(e => { if (alive) { setErr(errText(e)); setData(null) } })
+      .then(d => { if (alive) { setData(d); try { sessionStorage.removeItem('sci_pc_entry') } catch { /* private mode */ } } })
+      .catch(e => {
+        if (!alive) return
+        // Standing in a workspace with no program (e.g. EvoSys Wholesale) while
+        // holding SCI: go in through the SCI front door instead of an error.
+        if (/no outreach program/i.test(errText(e)) && !sessionStorage.getItem('sci_pc_entry')) {
+          try { sessionStorage.setItem('sci_pc_entry', '1') } catch { /* private mode */ }
+          window.location.replace('/sci')
+          return
+        }
+        setErr(errText(e)); setData(null)
+      })
     return () => { alive = false }
   }, [locationId])
   useEffect(() => load(), [load])
