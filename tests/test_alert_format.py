@@ -32,15 +32,12 @@ def test_email_reply_alert_has_header_both_contacts_email_first(program, sample_
         C.return_value.messages.create.side_effect = fake_create
         responses.on_inbound(db, lead, "Yes I will get back with you", "email")
     sms = [b for c, to, b in sent if c == "sms"]
-    assert sms and all(b.startswith("EvoSys Pro SCI POC - New Reply") for b in sms)
-    body = sms[0]
-    assert "Replied by: Email" in body and "larry@example.com" in body
-    assert body.index("Email larry@example.com") < body.index("Phone")
+    plain = "EvoSys Pro SCI POC: A new family response needs attention. Please check your SCI Responses inbox."
+    assert sms and all(b == plain for b in sms)          # nothing the carriers block
     assert {to for c, to, b in sent} >= {"+18435550000", "owner@example.com", "+14105550100"}
     em = [b for c, to, b in sent if c == "email"][0]
     assert em.startswith("EvoSys Pro SCI POC - New reply from") and "(Email)" in em.split("\n")[0]
-    resp = db.query(ProgramResponse).filter_by(lead_id=lead.id).one()
-    print("\n" + responses.alert_content(db, prog, resp, resp.response_class)["sms"])
+    assert "larry@example.com" in em and "Yes I will get back" in em     # details stay in the email
 
 
 def test_sci_staff_text_uses_the_toll_free_line(program, monkeypatch):
@@ -104,3 +101,34 @@ def test_owner_test_sms_sends_exact_text_to_owner_only(program, client, monkeypa
     assert kw["body"] == msg and kw["to"] == "+18435550000" and tw.messages.create.call_count == 1
     a = db.query(ProgramAlert).filter_by(provider_id="SMx1").one()
     assert a.kind == "test" and a.delivered is False
+
+
+
+def test_simulated_reply_runs_the_real_alert_path_once_per_person(program, client, monkeypatch):
+    import json as _j
+    from unittest.mock import patch as _p
+    from tests.test_outreach_program import _h
+    db, prog = program["db"], program["prog"]
+    prog.alert_title = "EvoSys Pro SCI POC"
+    prog.alert_phone, prog.alert_email = "+18435550000", "owner@example.com"
+    prog.management_recipients = _j.dumps([{"name": "K", "phone": "+14105550100", "role": "team"},
+                                           {"name": "M", "phone": "+15405550100", "email": "m@example.com",
+                                            "role": "team"}])
+    prog.staff_sms_alerts_enabled = True
+    db.commit()
+    calls = []
+
+    def fake(db_, prog_, ch, to, msg, **kw):
+        calls.append((ch, to))
+        return True, None
+    with _p("app.services.programs.responses._deliver_staff_alert", side_effect=fake):
+        r = client.post("/program/alerts/simulate-reply", headers=_h(db, program["admin"]),
+                        json={"text": "What does the guide include?", "channel": "sms"}).json()
+        assert r["class"] in ("active", "low")
+        assert sorted(calls) == sorted([("sms", "+18435550000"), ("email", "owner@example.com"),
+                                        ("sms", "+14105550100"), ("sms", "+15405550100"),
+                                        ("email", "m@example.com")])        # exactly one each
+        calls.clear()
+        r = client.post("/program/alerts/simulate-reply", headers=_h(db, program["admin"]),
+                        json={"text": "STOP", "channel": "sms"}).json()
+        assert r["class"] == "opt_out" and calls == []                       # opt-outs alert nobody

@@ -160,6 +160,10 @@ def _pretty_phone(raw: Optional[str]) -> Optional[str]:
     return "(%s) %s-%s" % (d[:3], d[3:6], d[6:]) if len(d) == 10 else (raw or None)
 
 
+def plain_alert_sms(prog: OutreachProgram) -> str:
+    return "%s: A new family response needs attention. Please check your SCI Responses inbox." % alert_title(prog)
+
+
 def alert_title(prog: OutreachProgram) -> str:
     return (getattr(prog, "alert_title", None) or "").strip() or "EvoSys Pro %s" % (prog.name or "").strip()
 
@@ -201,10 +205,11 @@ def alert_content(db: Session, prog: OutreachProgram, resp: ProgramResponse, kin
     said = re.sub(r"\s+", " ", (resp.body_excerpt or "").strip())
     link = _app_link(resp.id)
     who = "%s - %s" % (name, where) if where else name
-    sms = "\n".join(x for x in (
-        head, who, "Replied by: %s, %s" % (how, when_s),
-        'Said: "%s"' % (said[:180] + ("..." if len(said) > 180 else "")),
-        "Contact: %s" % contact_line, ("Open: %s" % link) if link else None) if x)
+    # THE TEXT IS PLAIN, ON PURPOSE (Oct 14): the detailed alert (name,
+    # quote, phone, email, link) was blocked by the carriers as error 30007 on
+    # every phone; this exact wording was delivered. All detail stays in the
+    # email and the app. Do not add names, numbers, links or quotes here.
+    sms = plain_alert_sms(prog)
     rows = [("Who", who), ("Replied by", "%s, %s" % (how, when_s)), ("Said", '"%s"' % said)]
     rows += [(k, v) for k, v in contacts if v]
     if resp.campaign_family:
@@ -276,7 +281,7 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
             # with "no Twilio number" while family texts went out fine.
             client, from_ = _sci.sci_sender()
             link = _app_link(response_id)
-            text = rich["sms"] if rich is not None else (("%s %s" % (message[:250], link)) if link else message[:300])
+            text = rich["sms"] if rich is not None else message[:300]
             from app.services.twilio_callbacks import apply_status_callback
             sent = client.messages.create(**apply_status_callback(dict(body=text, from_=from_, to=to)))
             if receipt is not None:

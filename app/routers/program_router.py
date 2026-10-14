@@ -2194,6 +2194,7 @@ def alert_sms_check(hours: int = Query(6, ge=1, le=72), db: Session = Depends(ge
 
 class AlertTestSmsIn(BaseModel):
     message: str
+    target: str = "owner"          # owner | team (each team member's phone, once)
 
 
 @router.post("/alerts/test-sms")
@@ -2209,26 +2210,70 @@ def alert_test_sms(body: AlertTestSmsIn, db: Session = Depends(get_db), user: Us
     text = (body.message or "").strip()
     if not text or len(text) > 300:
         raise HTTPException(status_code=422, detail="Message must be 1-300 characters.")
-    if not prog.alert_phone:
-        raise HTTPException(status_code=422, detail="No owner alert phone is set.")
-    # Sent EXACTLY as given (the normal alert path would append an app link).
+    if body.target == "team":
+        targets = [("team", m.get("name"), m.get("phone")) for m in R._managers(prog)
+                   if (m.get("role") or "").lower() == "team" and m.get("phone")]
+    else:
+        targets = [("primary", "owner", prog.alert_phone)] if prog.alert_phone else []
+    if not targets:
+        raise HTTPException(status_code=422, detail="No phone is set for that target.")
+    # Sent EXACTLY as given, ONCE per phone, never retried automatically.
     from app.services import sms_programs as _sci
     from app.services.twilio_callbacks import apply_status_callback
-    rc, ok, why = {}, False, None
-    try:
-        client, from_ = _sci.sci_sender()
-        sent = client.messages.create(**apply_status_callback(dict(body=text, from_=from_, to=prog.alert_phone)))
-        rc = {"sid": getattr(sent, "sid", None), "status": getattr(sent, "status", None)}
-        ok = True
-    except Exception as exc:                             # noqa: BLE001 - shown, not hidden
-        why = "%s: %s" % (type(exc).__name__, str(exc)[:200])
-    a = R.sms_alert_record(ProgramAlert(organization_id=prog.organization_id, response_id=None, kind="test",
-                                        audience="primary", channel="sms", recipient=prog.alert_phone,
-                                        delivered=False, reason=why, message=text), rc)
-    db.add(a)
-    db.commit()
-    return {"accepted": ok, "error": why, "alert_id": a.id, "sid": rc.get("sid"), "status": rc.get("status"),
-            "to": _mask(prog.alert_phone)}
+    out = []
+    for aud, who, to in targets:
+        rc, ok, why = {}, False, None
+        try:
+            client, from_ = _sci.sci_sender()
+            sent = client.messages.create(**apply_status_callback(dict(body=text, from_=from_, to=to)))
+            rc = {"sid": getattr(sent, "sid", None), "status": getattr(sent, "status", None)}
+            ok = True
+        except Exception as exc:                         # noqa: BLE001 - shown, not hidden
+            why = "%s: %s" % (type(exc).__name__, str(exc)[:200])
+        a = R.sms_alert_record(ProgramAlert(organization_id=prog.organization_id, response_id=None, kind="test",
+                                            audience=aud, channel="sms", recipient=to,
+                                            delivered=False, reason=why, message=text), rc)
+        db.add(a)
+        db.commit()
+        out.append({"who": who, "accepted": ok, "error": why, "alert_id": a.id, "sid": rc.get("sid"),
+                    "status": rc.get("status"), "to": _mask(to)})
+    return out[0] if body.target != "team" else {"items": out}
+
+
+class SimulateReplyIn(BaseModel):
+    text: str
+    channel: str = "sms"           # sms | email
+
+
+@router.post("/alerts/simulate-reply")
+def alert_simulate_reply(body: SimulateReplyIn, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    """END-TO-END ALERT TEST without a real family: a reply from the program's
+    own SYNTHETIC test contact (is_test, no phone, no email - it can never be
+    messaged) goes through the real reply handling: classification, response
+    record, cadence pause, and the SAME alert dispatch a real reply gets.
+    Returns the response and every alert record it produced."""
+    from app.models.program_models import ProgramAlert, ProgramResponse
+    from app.services.programs import responses as R
+    prog = _program(db, user)
+    _require_manager(db, user)
+    if body.channel not in ("sms", "email"):
+        raise HTTPException(status_code=422, detail="channel must be sms or email")
+    lead = (db.query(Lead).filter(Lead.organization_id == prog.organization_id, Lead.is_test.is_(True),
+                                  Lead.first_name == "SCI Alert", Lead.last_name == "Test (synthetic)").first())
+    if lead is None:
+        lead = Lead(organization_id=prog.organization_id, first_name="SCI Alert", last_name="Test (synthetic)",
+                    phone=None, email=None, status="new", is_test=True,
+                    assigned_to_id=getattr(prog, "booking_user_id", None) or user.id)
+        db.add(lead)
+        db.commit()
+    resp = R.on_inbound(db, lead, (body.text or "")[:500], body.channel)
+    alerts = (db.query(ProgramAlert).filter(ProgramAlert.response_id == resp.id).all()) if resp else []
+    return {"response_id": resp.id if resp else None, "class": resp.response_class if resp else None,
+            "alerts": [{"channel": a.channel, "audience": a.audience, "to": _mask(a.recipient),
+                        "accepted": bool(a.provider_id) or (a.channel != "sms" and a.delivered),
+                        "sid": a.provider_id, "status": a.provider_status, "delivered": a.delivered,
+                        "reason": a.reason} for a in alerts]}
 
 
 class AlertResendIn(BaseModel):
