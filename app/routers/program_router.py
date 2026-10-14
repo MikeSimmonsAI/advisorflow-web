@@ -2061,6 +2061,20 @@ def self_check(db: Session = Depends(get_db), user: User = Depends(require_tenan
     return _sc.run(db, prog.organization_id)
 
 
+class AckIn(BaseModel):
+    key: str
+    signature: str
+
+
+@router.post("/self-check/ack")
+def self_check_ack(body: AckIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """'Got it' on a self-check problem: hidden until it changes."""
+    from app.services.programs import self_check as _sc
+    prog = _program(db, user)
+    _sc.acknowledge(db, prog.organization_id, body.key[:64], body.signature[:32])
+    return _sc.run(db, prog.organization_id)
+
+
 # ── ENGAGEMENT: of the people reached, how many did something back ────────
 
 @router.get("/engagement")

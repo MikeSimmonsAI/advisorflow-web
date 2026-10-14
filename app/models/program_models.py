@@ -96,6 +96,9 @@ class OutreachProgram(Base):
     daily_batch_days = Column(String, nullable=True, default="12345")       # Mon=1 .. Sun=7
     daily_batch_by = Column(String, nullable=True)
     daily_batch_last_date = Column(String, nullable=True)                   # YYYY-MM-DD Central
+    # Self-check problems a person has acknowledged ("Got it"): {check key: signature}.
+    # A problem that changes (new people, new detail) has a new signature and shows again.
+    self_check_ack = Column(Text, nullable=True)
     # Staff SMS alerts are a real send; off until someone turns them on.
     staff_sms_alerts_enabled = Column(Boolean, nullable=False, default=False)
     logo_asset_id = Column(String, nullable=True)

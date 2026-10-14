@@ -9,3 +9,7 @@
 .sc-list li { margin: 4px 0; }
 .sc-list.ok { list-style: none; padding-left: 0; opacity: .8; font-size: 13px; }
 .sc-people { opacity: .8; }
+.sc-ack { margin-left: 8px; border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 999px;
+          padding: 1px 10px; font-size: 12px; font-weight: 600; cursor: pointer; opacity: .85; }
+.sc-acked { margin: 8px 0 0; font-size: 12px; opacity: .75; }
+.sc-link { background: none; border: 0; color: inherit; text-decoration: underline; font: inherit; cursor: pointer; padding: 0; }
