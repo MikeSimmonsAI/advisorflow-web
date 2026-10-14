@@ -149,6 +149,7 @@ export default function Review({ locationId, locations, isManager, attention, in
 function Inspector({ r, homes, isManager, navigate, onDone, onError }) {
   const is = issueOf(r)
   const [loc, setLoc] = useState('')
+  const [hideLoc, setHideLoc] = useState(!!r.hide_location)
   const [note, setNote] = useState('')
   const [reason, setReason] = useState('')
   const [ver, setVer] = useState(undefined)
@@ -162,7 +163,10 @@ function Inspector({ r, homes, isManager, navigate, onDone, onError }) {
     setBusy(true)
     try { await fn(); onDone(okText) } catch (e) { onError(errText(e)) } finally { setBusy(false) }
   }
-  const assign = () => run(() => api.post(`/program/records/${r.id}/location`, { location_id: loc }), 'Location assigned. The source name is kept as supplied.')
+  const assign = () => run(() => api.post(`/program/records/${r.id}/location`, { location_id: loc, hide_location: hideLoc }),
+    hideLoc ? 'Location assigned. Messages to this person will not name any location.' : 'Location assigned. The source name is kept as supplied.')
+  const toggleHide = on => run(() => api.post(`/program/records/${r.id}/hide-location`, { on }),
+    on ? 'Messages to this person will not name any location.' : 'Messages will name the location again.')
   const clear = review => run(() => api.post(`/program/records/${r.id}/review`, { review, note: note.trim() || null }),
     'Marked reviewed. The original flags stay on the record.')
   const hold = on => run(() => api.post(`/program/records/${r.id}/hold`, { on_hold: on, reason: reason.trim() || null }),
@@ -210,7 +214,17 @@ function Inspector({ r, homes, isManager, navigate, onDone, onError }) {
                 </select>
                 <button type="button" className="sci-btn primary" disabled={!loc || busy} onClick={assign}>Assign</button>
               </div>
+              <label className="sci-micro" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+                <input type="checkbox" checked={hideLoc} onChange={e => setHideLoc(e.target.checked)} />
+                Don't mention the location in messages (they'll come from "Family Services")
+              </label>
             </div>
+          )}
+          {r.location_status === 'mapped' && (
+            <label className="sci-micro" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="checkbox" checked={!!r.hide_location} disabled={busy} onChange={e => toggleHide(e.target.checked)} />
+              Don't mention the location in messages (they'll come from "Family Services")
+            </label>
           )}
           {(r.data_note_flags?.length > 0 || r.duplicate_review_reason) && (
             <div className="sci-field">

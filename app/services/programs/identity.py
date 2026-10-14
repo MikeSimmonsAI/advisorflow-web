@@ -65,7 +65,45 @@ def location_profile_for_lead(db: Session, lead: Lead) -> Optional[LocationProfi
                     LocationProfile.location_id == locs.pop()).first())
     if prof is None or prof.is_review_bucket:
         return None
+    if any(getattr(r, "hide_location", False) for r in recs):
+        return NoLocationProfile(prof)
     return prof
+
+
+# ── "don't mention the location" ────────────────────────────────────────────
+# A record whose source location is wrong or doubtful (a web lead marked at a
+# crematory, a seminar contact from another company's list) can still be
+# contacted: the owner switches on hide_location. The record keeps a real
+# location for routing, calendars and reporting, but EVERYTHING the family
+# sees - text, email, sender name, booking page, survey - reads as the neutral
+# name below, with no location phone, alias, website, link or flyer.
+NEUTRAL_LOCATION_NAME = "Family Services"
+
+
+class NoLocationProfile:
+    """A LocationProfile as the family sees it when the location is hidden.
+    Reads fall through to the real profile except the family-facing fields;
+    writes (alias bookkeeping) go to the real profile."""
+    _HIDDEN = {"official_name": NEUTRAL_LOCATION_NAME, "email_display_name": None,
+               "sms_identity_name": None, "email_alias": None, "website": None,
+               "facility_phone": None, "appointment_link": None, "link_key": None,
+               "source_names": None, "alias_verified_at": None}
+    hide_location = True
+
+    def __init__(self, real):
+        object.__setattr__(self, "_real", real)
+
+    def __getattr__(self, name):
+        if name in NoLocationProfile._HIDDEN:
+            return NoLocationProfile._HIDDEN[name]
+        return getattr(object.__getattribute__(self, "_real"), name)
+
+    def __setattr__(self, name, value):
+        setattr(object.__getattribute__(self, "_real"), name, value)
+
+
+def hides_location(prof) -> bool:
+    return bool(getattr(prof, "hide_location", False))
 
 
 def locked(prog: OutreachProgram) -> bool:
@@ -395,7 +433,8 @@ def program_booking_url(db: Session, lead: Lead) -> str:
     link = get_or_create_booking_link(db, lead, user)
     # Location first when switched on: https://easterngate.evosyspro.live/k7q2x
     from app.services.programs.location_links import short_url
-    short = short_url(db, location_profile_for_lead(db, lead), link)
+    prof = location_profile_for_lead(db, lead)
+    short = "" if hides_location(prof) else short_url(db, prof, link)
     return short or booking_url(db, lead.organization_id, link.token) or ""
 
 
