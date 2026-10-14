@@ -674,6 +674,9 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
         "campaign_performance": campaign_perf,
         "automation": {
             "active_cadences": cad.get("active", 0), "paused_cadences": cad.get("paused", 0),
+            # Everyone whose texts stopped because they answered (paused, or
+            # finished after a reply) - not only the ones still "paused".
+            "stopped_by_reply": _stopped_by_reply(db, resps),
             "awaiting_reply": max(0, len({r.lead_id for r in recs if r.lead_id})
                                   - len({r.lead_id for r in resps})),
             "staged_not_live": sum(1 for r in recs if not r.lead_id),
@@ -682,15 +685,28 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
             "review_needed": sum(1 for r in recs if r.needs_data_review or r.duplicate_review_reason
                                  or r.location_status == "location_review"),
         },
-        "reporting": _reporting(db, recs, resps),
+        "reporting": _reporting(db, recs, resps, prog),
         "readiness": readiness(db, prog),
         "readiness_test": _readiness_summary(org_id, db),
         "viewer_is_manager": lead_scope.is_manager_here(user, db),
     }
 
 
-def _reporting(db: Session, recs, resps) -> dict:
-    """Delivery and handling numbers. SENT is never reported as DELIVERED."""
+def _stopped_by_reply(db: Session, resps) -> int:
+    ids = list({r.lead_id for r in resps if r.lead_id and r.response_class != "opt_out"})
+    if not ids:
+        return 0
+    return sum(1 for (st,) in db.query(CadenceState.status).filter(CadenceState.lead_id.in_(ids)).all()
+               if str(getattr(st, "value", st)) != "active")
+
+
+def _reporting(db: Session, recs, resps, prog=None) -> dict:
+    """Delivery and handling numbers. SENT is never reported as DELIVERED.
+
+    Email sent from a Microsoft 365 mailbox (send_via_mailbox) has NO delivery
+    or open events at all, so those two read "Not tracked" (None) - a 0 there
+    read as "nothing was delivered" (Oct 14). What IS known is shown instead:
+    sent, bounced (from the bounce notices), and reached = sent - bounced."""
     from app.models.models import BookingLink, EmailMessage, Message
     lead_ids = list({r.lead_id for r in recs if r.lead_id})
     import os as _os
@@ -735,6 +751,14 @@ def _reporting(db: Session, recs, resps) -> dict:
         out["appointments"] = (db.query(func.count(BookingLink.id))
                                .filter(BookingLink.lead_id.in_(real_ids or ["-"]),
                                        BookingLink.status.in_(("booked", "confirmed"))).scalar() or 0)
+    if prog is not None and getattr(prog, "send_via_mailbox", None):
+        out["email"]["delivered"] = None
+        out["email"]["opened"] = None
+        out["email"]["complained"] = None
+        out["email"]["reached"] = max(0, out["email"]["sent"] - out["email"]["bounced"])
+        out["email"]["note"] = ("Email goes out from the %s mailbox. Microsoft does not report delivery or "
+                                "opens, so 'Not bounced' is every email sent minus the bounce notices that "
+                                "came back." % prog.send_via_mailbox)
     out["email"]["replied"] = sum(1 for r in resps if r.channel == "email")
     out["sms"]["replied"] = sum(1 for r in resps if r.channel == "sms")
     out["email"]["unsubscribed"] = sum(1 for r in resps if r.channel == "email" and r.response_class == "opt_out")

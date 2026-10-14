@@ -292,9 +292,11 @@ function DeliverySummary({ r, a, goTab }) {
   const s = r.sms
   const med = r.response_time_minutes?.median
   const groups = [
-    { title: 'Email', icon: 'mail', tone: 'gold', cells: [['Sent', e.sent], ['Delivered', e.delivered], ['Opens', e.opened], ['Replies', e.replied], ['Bounced', e.bounced]] },
+    { title: 'Email', icon: 'mail', tone: 'gold', cells: e.reached != null
+        ? [['Sent', e.sent], ['Not bounced', e.reached], ['Opens', e.opened], ['Replies', e.replied], ['Bounced', e.bounced]]
+        : [['Sent', e.sent], ['Delivered', e.delivered], ['Opens', e.opened], ['Replies', e.replied], ['Bounced', e.bounced]] },
     { title: 'Text / SMS', icon: 'sms', tone: 'teal', cells: [['Sent', s.sent], ['Delivered', s.delivered], ['Replies', s.replied], ['Failed', s.failed]] },
-    { title: 'Automation', icon: 'bolt', tone: 'blue', cells: [['Active cadences', a.active_cadences], ['Paused by reply', a.paused_cadences], ['Review needed', a.review_needed], ['Opted out', a.suppressed]] },
+    { title: 'Automation', icon: 'bolt', tone: 'blue', cells: [['Active cadences', a.active_cadences], ['Stopped by reply', a.stopped_by_reply ?? a.paused_cadences], ['Review needed', a.review_needed], ['Opted out', a.suppressed]] },
   ]
   return (
     <Panel title="Delivery & response summary" labelledBy="sci-rep" aside={<MoreLink onClick={() => goTab('health')}>Diagnostics</MoreLink>}>
@@ -305,7 +307,7 @@ function DeliverySummary({ r, a, goTab }) {
             <div className="sci-statstrip">
               {g.cells.map(([k, v]) => (
                 <div className="sci-stat" key={k}>
-                  {v == null ? <b className="nt" title="This channel's delivery is not reported back to us">Not tracked</b> : <b>{num(v)}</b>}
+                  {v == null ? <b className="nt" title="Microsoft does not report this back to us">Not tracked</b> : <b>{num(v)}</b>}
                   <span>{k}</span>
                 </div>
               ))}
