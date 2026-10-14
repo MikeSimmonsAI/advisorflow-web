@@ -82,3 +82,25 @@ def test_accepted_text_is_not_delivered_until_twilio_says_so(program, sample_adv
     responses.apply_sms_receipt(db, "SMtest123", "delivered", None, None)
     db.commit(); db.refresh(a)
     assert a.delivered is True
+
+
+def test_owner_test_sms_sends_exact_text_to_owner_only(program, client, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from app.models.program_models import ProgramAlert
+    from app.services import sms_programs
+    from tests.test_outreach_program import _h
+    db, prog = program["db"], program["prog"]
+    prog.alert_phone = "+18435550000"
+    prog.management_recipients = '[{"name":"K","phone":"+14105550100","role":"team"}]'
+    db.commit()
+    tw = MagicMock()
+    tw.messages.create.return_value = SimpleNamespace(sid="SMx1", status="queued")
+    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (tw, "+18449172171"))
+    msg = "EvoSys Pro SCI POC: A new family response needs attention. Please check your SCI Responses inbox."
+    r = client.post("/program/alerts/test-sms", headers=_h(db, program["admin"]), json={"message": msg}).json()
+    assert r["accepted"] and r["sid"] == "SMx1"
+    kw = tw.messages.create.call_args.kwargs
+    assert kw["body"] == msg and kw["to"] == "+18435550000" and tw.messages.create.call_count == 1
+    a = db.query(ProgramAlert).filter_by(provider_id="SMx1").one()
+    assert a.kind == "test" and a.delivered is False
