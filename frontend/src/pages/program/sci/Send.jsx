@@ -31,12 +31,59 @@ export default function Send({ locations, isManager, locationId, goTab, automati
   const [focus, setFocus] = useState(null)          // { row, item } single-contact preview
   const [confirming, setConfirming] = useState(false)
   const [mode, setMode] = useState('text_email')
-  const [drip, setDrip] = useState('now')
+  const [drip, setDrip] = useState('today')
   // Slow drip: tomorrow 9:00 AM (this computer's clock), one contact every 20 minutes.
-  const dripBody = () => {
-    if (drip !== 'tomorrow') return {}
-    const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0)
-    return { start_at: d.toISOString(), spacing_minutes: 20 }
+  // "Today": starts in 5 minutes - or right after the last first message
+  // already scheduled today, so batches line up instead of piling on - then
+  // one every 8 minutes.
+  const dripBody = async () => {
+    if (drip === 'tomorrow') {
+      const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0)
+      return { start_at: d.toISOString(), spacing_minutes: 20 }
+    }
+    if (drip === 'today') {
+      let start = Date.now() + 5 * 60000
+      try {
+        const ob = await api.get('/program/outbox')
+        for (const u of ob.upcoming || []) {
+          if (u.what === 'First message' && u.at) start = Math.max(start, new Date(u.at).getTime() + 8 * 60000)
+        }
+      } catch { /* no schedule read - start in 5 minutes */ }
+      return { start_at: new Date(start).toISOString(), spacing_minutes: 8 }
+    }
+    return {}
+  }
+  // "Pick 25 for me": the next people never contacted, on a confirmed cell
+  // phone, in a campaign that is switched on - one per location in turn so a
+  // batch is spread across locations. Only ticks them; nothing is sent until
+  // Good to go is pressed.
+  const autoPick = async () => {
+    setBusy(true); setErr(''); setMsg(''); setPreview(null)
+    try {
+      const active = new Set((fams || []).filter(f => f.is_active).map(f => f.key))
+      let rows = []
+      for (let off = 0; off < 3000; off += 300) {
+        const d = await api.get(`/program/send/contacts?show=not_approved&limit=300&offset=${off}`)
+        rows = rows.concat(d.items || [])
+        if ((d.items || []).length < 300) break
+      }
+      const pool = rows.filter(r => !r.approved && !r.blocked && r.line_type === 'mobile' && active.has(r.campaign_key)
+        && !r.last_text_at && !r.last_email_at && r.status === 'new' && !picked[r.lead_id])
+      const byLoc = {}
+      pool.forEach(r => { (byLoc[r.location_id] = byLoc[r.location_id] || []).push(r) })
+      const want = Math.max(0, (max || 25) - ids.length)
+      const out = []
+      for (let i = 0; out.length < want; i++) {
+        let any = false
+        for (const k of Object.keys(byLoc)) {
+          if (byLoc[k][i]) { out.push(byLoc[k][i]); any = true; if (out.length >= want) break }
+        }
+        if (!any) break
+      }
+      setPicked(p => { const n = { ...p }; out.forEach(r => { n[r.lead_id] = r.name }); return n })
+      setMsg(out.length ? `Ticked ${out.length} people across ${new Set(out.map(r => r.location_id)).size} locations. Nothing is sent until you press Good to go.`
+        : 'Nobody left who has not been contacted on a cell phone in an active campaign.')
+    } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -102,7 +149,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
   const approve = async typed => {
     setBusy(true); setErr('')
     try {
-      const r = await api.post('/program/send/approve', { lead_ids: ids, confirm: typed, mode, ...dripBody() })
+      const r = await api.post('/program/send/approve', { lead_ids: ids, confirm: typed, mode, ...(await dripBody()) })
       const parts = [`${num(r.approved)} approved.`]
       if (r.start_at) parts.push(`Slow drip: the first one starts ${when(r.start_at)}, then one every ${r.spacing_minutes} minutes. Nothing goes out before then.`)
       else if (r.texting) parts.push(`${num(r.texting)} will get their first text at the next allowed hour in their own time zone (never at night).`)
@@ -115,7 +162,7 @@ export default function Send({ locations, isManager, locationId, goTab, automati
   const approveOne = async row => {
     setBusy(true); setErr('')
     try {
-      const r = await api.post('/program/send/approve', { lead_ids: [row.lead_id], confirm: 'SEND 1', mode, ...dripBody() })
+      const r = await api.post('/program/send/approve', { lead_ids: [row.lead_id], confirm: 'SEND 1', mode, ...(await dripBody()) })
       setMsg(r.approved ? `${row.name} is good to go — first text at the next allowed hour in their time zone.`
         : `${row.name} was not sent: ${(r.skipped || []).map(s => s.reason).join(', ') || 'blocked by a send check'}.`)
       load(); loadTotals()
@@ -299,12 +346,16 @@ export default function Send({ locations, isManager, locationId, goTab, automati
             <label className="sci-micro" style={{ display: 'block', marginTop: 8 }}>When{' '}
               <select value={drip} onChange={e => setDrip(e.target.value)} style={{ marginLeft: 6 }}>
                 <option value="now">Right away</option>
+                <option value="today">Today, spread out — one every 8 min</option>
                 <option value="tomorrow">Slow drip — tomorrow 9 AM, one every 20 min</option>
               </select>
             </label>
           )}
           {isManager && (
             <div className="sci-row-gap" style={{ marginTop: 14 }}>
+              <button type="button" className="sci-btn sm" disabled={busy || (max != null && ids.length >= max)} onClick={autoPick}>
+                Pick {max || 25} for me
+              </button>
               <button type="button" className="sci-btn gold" disabled={!ids.length || overMax || busy}
                 onClick={() => approve(`SEND ${ids.length}`)}>
                 <Icon name="check" />{busy ? 'Sending…' : `Good to go — ${mode === 'email_only' ? 'email' : mode === 'call' ? 'call list' : 'send'} (${num(ids.length)})`}
