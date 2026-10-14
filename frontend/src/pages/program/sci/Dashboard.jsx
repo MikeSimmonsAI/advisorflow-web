@@ -10,6 +10,7 @@
    with no location yet) when it has contacts - it is shown as its own labeled
    row, never as a 40th facility. */
 import { useEffect, useMemo, useState } from 'react'
+import EngagementGauge, { useEngagement } from '../EngagementGauge'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser } from '../../../api/client'
 import Surveys from './Surveys'
@@ -35,6 +36,7 @@ export default function Dashboard({ data, goTab, setParam }) {
   const user = getCurrentUser() || {}
   const first = user.first_name || (user.full_name || '').split(' ')[0] || ''
   const [allActions, setAllActions] = useState(false)
+  const engagement = useEngagement()
   const sendingOn = auto.active_campaign_families > 0
   const reviewTotal = (att.data_review || 0) + (att.location_review || 0) + (att.duplicate_review || 0)
 
@@ -79,6 +81,11 @@ export default function Dashboard({ data, goTab, setParam }) {
         <Kpi icon="pin" tone="green" value={m.locations} label={sel ? 'Location selected' : 'Locations'} note={sel ? sel.official_name : 'Mapped facilities'}
           onClick={() => goTab('locations')} />
       </section>
+
+      <Panel title="Engagement" labelledBy="sci-engagement"
+             aside={<span className="sci-footnote" style={{ margin: 0 }}>People who did something back · since outreach began</span>}>
+        <EngagementGauge data={engagement} />
+      </Panel>
 
       <div className="sci-grid-dash-a">
         <Panel title="Lead pipeline" labelledBy="sci-pipe" aside={<MoreLink onClick={() => goTab('review', { queue: 'all' })}>View records</MoreLink>}>

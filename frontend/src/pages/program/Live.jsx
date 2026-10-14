@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getCurrentUser, logout } from '../../api/client'
+import EngagementGauge, { useEngagement } from './EngagementGauge'
 import './Live.css'
 
 const REFRESH_MS = 60000
@@ -30,6 +31,7 @@ export default function Live() {
   const [at, setAt] = useState(null)
   const [, tick] = useState(0)
   const busy = useRef(false)
+  const engagement = useEngagement()
 
   const load = useCallback(() => {
     if (busy.current) return
@@ -91,6 +93,11 @@ export default function Live() {
     <div className="live">
       <Header ago={ago} onRefresh={load} />
       {err && <p className="live-err">Last refresh failed - showing the numbers from {time(at?.toISOString())}.</p>}
+
+      <section className="live-sec live-eng" aria-label="Engagement">
+        <h2>Engagement</h2>
+        <div className="live-card"><EngagementGauge data={engagement} compact /></div>
+      </section>
 
       <section className="live-tiles" aria-label="Today">
         <Tile big value={d.ap.length} label="Appointments booked" tone={d.ap.length ? 'green' : ''} />

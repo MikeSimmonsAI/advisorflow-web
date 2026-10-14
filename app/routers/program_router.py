@@ -2000,6 +2000,23 @@ def booking_test_link(body: TestLinkIn, db: Session = Depends(get_db),
     return {"url": url, "location": prof.official_name}
 
 
+# ── ENGAGEMENT: of the people reached, how many did something back ────────
+
+@router.get("/engagement")
+def engagement(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Engagement rate since the program started and for people contacted
+    today (Central). See services/programs/engagement.py for what counts."""
+    from datetime import datetime as _dt, time as _time
+    from zoneinfo import ZoneInfo
+    from app.services.programs import engagement as _eng
+    prog = _program(db, user)
+    tz, utc = ZoneInfo("America/Chicago"), ZoneInfo("UTC")
+    today = _dt.now(utc).astimezone(tz).date()
+    start = _dt.combine(today, _time(0, 0), tz).astimezone(utc).replace(tzinfo=None)
+    return {"all": _eng.summary(db, prog.organization_id),
+            "today": _eng.summary(db, prog.organization_id, since=start)}
+
+
 # ── OUTBOX: what went out (text or email) and what is going out next ────────
 
 @router.get("/outbox")
