@@ -61,10 +61,33 @@ def texts_overdue(db: Session, org_id: str, now: datetime) -> Dict:
     rows = (db.query(CadenceState, Lead).join(Lead, Lead.id == CadenceState.lead_id)
             .filter(Lead.organization_id == org_id, Lead.is_test.isnot(True), CadenceState.status == "active",
                     CadenceState.next_touch_due_at < now - OVERDUE).all())
-    bad = [_name(l) for s, l in rows if contact_hours.is_permitted(l, now)]
+    bad = []
+    for s, l in rows:
+        c = contact_hours.check(l, now)
+        if c["permitted"]:
+            bad.append(_name(l))
+        elif c["code"] in (contact_hours.ZONE_UNKNOWN, contact_hours.ZONE_UNRESOLVABLE):
+            # Not "waiting for the window" - it can NEVER go until fixed.
+            bad.append("%s (no time zone for this number)" % _name(l))
     return _check("texts_overdue", "Texts going out on time", bad,
                   "Every text that is due and allowed right now has gone out.",
-                  "%d texts are more than 15 minutes overdue while sending is allowed.")
+                  "%d texts are overdue: due, and either allowed right now or blocked for good.")
+
+
+def texts_never_started(db: Session, org_id: str, now: datetime) -> Dict:
+    """An approved person on an active text sequence for a day with NOT ONE
+    text attempted. Whatever the reason, the plan is not running for them.
+    (Oct 14: 15 families at "0 of 6 texts" for two days, nothing flagged.)"""
+    from app.models.models import CadenceState, Lead, Message
+    rows = (db.query(CadenceState, Lead).join(Lead, Lead.id == CadenceState.lead_id)
+            .filter(Lead.organization_id == org_id, Lead.is_test.isnot(True), CadenceState.status == "active",
+                    CadenceState.cadence_started_at < now - timedelta(hours=24)).all())
+    ids = [l.id for _s, l in rows]
+    tried = {i for (i,) in db.query(Message.lead_id).filter(Message.lead_id.in_(ids or ["-"])).distinct().all()}
+    bad = [_name(l) for _s, l in rows if l.id not in tried and l.status not in ("dnc", "booked")]
+    return _check("texts_never_started", "Every approved person's texts started", bad,
+                  "Everyone approved more than a day ago has had their first text attempted.",
+                  "%d people were approved over a day ago and not one text has been attempted.")
 
 
 def first_messages_late(db: Session, org_id: str, now: datetime) -> Dict:
@@ -156,7 +179,7 @@ def daily_batch_ran(db: Session, org_id: str, now: datetime) -> Dict:
                   "The daily batch ran (or is off / not due yet).", "%d daily batch problem.")
 
 
-CHECKS = [texts_too_close, texts_overdue, first_messages_late, bounces_unrecorded, replies_unrecorded,
+CHECKS = [texts_too_close, texts_overdue, texts_never_started, first_messages_late, bounces_unrecorded, replies_unrecorded,
           jobs_running, daily_batch_ran]
 
 
