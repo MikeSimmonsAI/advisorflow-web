@@ -2352,6 +2352,36 @@ def audit_spacing(days: int = Query(7, ge=1, le=60), gap_hours: int = Query(20, 
             "upcoming": upcoming}
 
 
+@router.get("/audit/lead/{lead_id}")
+def audit_lead(lead_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """READ-ONLY send history for one family: cadence state, every touch
+    attempt with its outcome and reason, and every outbound text. Used to
+    explain a self-check flag such as "texts never started". Sends nothing."""
+    from app.models.models import CadenceState, CadenceTouchLog, Message
+    prog = _program(db, user)
+    _require_manager(db, user)
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == prog.organization_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Not found")
+    iso = lambda d: d.isoformat() if d else None
+    st = db.query(CadenceState).filter(CadenceState.lead_id == lead_id).first()
+    logs = (db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id == lead_id)
+            .order_by(CadenceTouchLog.created_at).all())
+    msgs = db.query(Message).filter(Message.lead_id == lead_id).order_by(Message.sent_at).all()
+    return {
+        "lead_id": lead_id, "status": getattr(lead, "status", None), "is_test": bool(lead.is_test),
+        "cadence": ({"status": st.status, "touch": st.current_touch_number, "started": iso(st.cadence_started_at),
+                     "next_due": iso(st.next_touch_due_at), "last_sent": iso(st.last_touch_sent_at)}
+                    if st else None),
+        "touch_log": [{"touch": l.touch_number, "attempt": l.attempt_seq, "channel": l.channel,
+                       "outcome": l.outcome, "reason": l.reason, "scheduled": iso(l.scheduled_for),
+                       "attempted": iso(l.attempted_at), "message_id": l.message_id,
+                       "err": l.provider_error_code} for l in logs],
+        "texts": [{"sent_at": iso(m.sent_at), "source": getattr(m, "send_source", None),
+                   "delivery": m.delivery_status, "error": getattr(m, "error_code", None)} for m in msgs],
+    }
+
+
 # ── appointment setter: conversations and the synthetic simulator ──────────
 
 def _conv_json(db, conv, lead=None, turns: bool = False) -> dict:
