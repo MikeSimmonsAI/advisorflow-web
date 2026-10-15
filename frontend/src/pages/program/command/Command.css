@@ -54,11 +54,11 @@ body:has(.cmd)::before { display: none; }
 .badge.new { background: #fde8d4; color: #9a4a00; } .badge.review { background: #e3eefc; color: #1e55a8; }
 .badge.active { background: #ddf3e6; color: #17683b; } .badge.low { background: var(--c-chip); color: var(--c-muted); }
 .cmd-btns { display: flex; gap: 8px; margin-top: 10px; }
-.cmd-btns button, .cmd-quick > *, .cmd-send button, .cmd-slots button {
+.cmd-btns button, .cmd-btns a, .cmd-quick > *, .cmd-send button, .cmd-slots button {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 1;
   border: 1px solid var(--c-line); background: var(--c-card); border-radius: 10px; padding: 9px 8px;
   font-weight: 600; font-size: 14.5px; cursor: pointer; min-width: 0; text-decoration: none; color: var(--c-ink); }
-.cmd-btns button.primary, .cmd-quick .primary, .cmd-send .primary { background: var(--c-navy); color: var(--c-navy-ink); border-color: var(--c-navy); }
+.cmd-btns button.primary, .cmd-btns a.primary, .cmd-quick .primary, .cmd-send .primary { background: var(--c-navy); color: var(--c-navy-ink); border-color: var(--c-navy); }
 .cmd button:disabled { opacity: .5; cursor: default; }
 .cmd-actions button { display: flex; align-items: center; gap: 12px; width: 100%; background: none; border: 0; padding: 12px 14px;
                       text-align: left; cursor: pointer; color: var(--c-ink); }

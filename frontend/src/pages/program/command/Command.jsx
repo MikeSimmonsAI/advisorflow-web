@@ -15,6 +15,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../api/client'
 import EngagementGauge, { useEngagement } from '../EngagementGauge'
 import SelfCheck from '../SelfCheck'
+import VoicemailPlayer from '../../../components/telephony/VoicemailPlayer'
 import './Command.css'
 
 const REFRESH_MS = 45000
@@ -176,6 +177,7 @@ export default function Command() {
               <span className="cmd-link">View ›</span>
             </a>
           )}
+          <Unknown items={d.unknown} toast={setToast} reload={load} />
           <SectionHead title="Priority inbox" onAll={() => setTab('inbox')} />
           <Inbox items={inbox.slice(0, 5)} act={act} open={setFamily} />
           <SectionHead title="Today's upcoming actions" onAll={() => setTab('inbox')} />
@@ -273,8 +275,43 @@ function InboxTab({ loc, act, open }) {
         <button key={k} role="tab" aria-selected={flt === k} className={flt === k ? 'on' : ''} onClick={() => setFlt(k)}>
           {l}{k !== 'handled' && c[k] !== undefined ? <i>{c[k]}</i> : null}</button>))}
     </div>
+    {r && flt !== 'handled' && <Unknown items={(r.unknown || []).filter(u => flt === 'all' || flt === 'needs_reply' || (flt === 'email' ? u.channel_label === 'EMAIL' : u.channel_label !== 'EMAIL'))} reload={load} />}
     {r === null ? <p className="cmd-muted">Loading…</p>
       : <Inbox items={r.inbox} act={act} open={open} empty={flt === 'handled' ? 'Nothing handled in the last two weeks.' : 'Nobody is waiting. Nice work.'} />}
+  </>
+}
+
+// Replies from a number or address that matches no family - texts,
+// voicemails (with the recording) and emails. Never hidden.
+function Unknown({ items, toast, reload }) {
+  const [gone, setGone] = useState({})
+  const list = (items || []).filter(u => !gone[u.id])
+  if (!list.length) return null
+  const handled = async u => {
+    try { await api.post(`/program/unmatched-replies/${u.id}/handled`, {}); setGone(g => ({ ...g, [u.id]: true })); toast?.('Marked handled.'); reload?.() }
+    catch (e) { toast?.(e.message || 'Could not update.') }
+  }
+  return <>
+    <SectionHead title={`Unknown callers & senders (${list.length})`} />
+    {list.map(u => (
+      <article key={u.id} className="cmd-card cmd-item">
+        <div className="cmd-item-main">
+          <span className="dot active" />
+          <span className="cmd-item-text">
+            <b>{u.channel_label === 'EMAIL' ? u.from : (fmtPhone(u.from) || u.from || 'Unknown')}
+              <em className={`chan ${u.channel_label === 'EMAIL' ? 'email' : 'text'}`}>{u.channel_label}</em></b>
+            <small>Not matched to a family{u.location ? ` · ${u.location}` : ''}</small>
+            {u.subject && <small className="cmd-subjline">{u.subject}</small>}
+            <span>{u.summary}</span>
+            {u.audio_path && <VoicemailPlayer path={u.audio_path} label={`Play voicemail${u.duration ? ` (${u.duration}s)` : ''}`} />}
+          </span>
+          <span className="cmd-item-meta"><small>{time(u.received_at)}</small></span>
+        </div>
+        <div className="cmd-btns">
+          {u.channel_label !== 'EMAIL' && u.from && <a className="primary" href={`tel:${u.from}`}><Icon n="call" />Call back</a>}
+          <button onClick={() => handled(u)}><Icon n="check" />Handled</button>
+        </div>
+      </article>))}
   </>
 }
 
@@ -498,7 +535,8 @@ function Family({ id, startReply, onBack, toast, toastText }) {
             {t.channel === 'email' && t.who === 'family' && <small className="cmd-bhead">From {t.sender_name ? `${t.sender_name} <${t.sender_email}>` : t.sender_email}{t.subject ? ` · ${t.subject}` : ''}</small>}
             {t.channel === 'email' && t.who === 'us' && (t.to || t.subject) && <small className="cmd-bhead">{t.to ? `To ${t.to}` : ''}{t.to && t.subject ? ' · ' : ''}{t.subject || ''}</small>}
             <p>{t.text}</p>
-            <small>{time(t.at)}{t.channel === 'email' ? ' · EMAIL' : ' · TEXT'}{t.source === 'sci_appointment_setter' ? ' · AI' : ''}{t.delivery === 'simulated' && t.who === 'us' ? ' · simulated' : ''}{t.who === 'us' && ['failed', 'undelivered', 'bounced'].includes(t.delivery) ? ` · NOT SENT${t.error ? `: ${t.error}` : ''}` : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
+            {t.audio_path && <VoicemailPlayer path={t.audio_path} label={`Play voicemail${t.duration ? ` (${t.duration}s)` : ''}`} />}
+            <small>{time(t.at)}{t.channel === 'email' ? ' · EMAIL' : t.channel === 'voicemail' ? ' · VOICEMAIL' : ' · TEXT'}{t.source === 'sci_appointment_setter' ? ' · AI' : ''}{t.delivery === 'simulated' && t.who === 'us' ? ' · simulated' : ''}{t.who === 'us' && ['failed', 'undelivered', 'bounced'].includes(t.delivery) ? ` · NOT SENT${t.error ? `: ${t.error}` : ''}` : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
           </div></Fragment>)) : <p className="cmd-muted">No messages yet.</p>}
       </section>
 

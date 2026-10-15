@@ -101,3 +101,50 @@ def test_search_finds_every_family_not_only_repliers(program, sample_advisor, cl
     assert client.get("/program/command/search?q=alvin%20maj", headers=h).json()["items"][0]["replied"] is False
     assert client.get("/program/command/search?q=5550101", headers=h).json()["items"][0]["name"] == "Alvin Major"
     assert client.get("/program/command/search?q=a", headers=h).json()["items"] == []
+
+
+def test_a_voicemail_in_the_family_thread_has_a_play_button(program, sample_advisor, client):
+    from app.models.telephony_models import Voicemail
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        R.on_inbound(db, lead, "Hi, please call me back about planning.", "voicemail")
+    db.add(Voicemail(organization_id=org.id, lead_id=lead.id, recording_sid="RE" + "a" * 32,
+                     recording_url="https://api.twilio.com/x", duration_seconds=21,
+                     transcript="Hi, please call me back about planning.", received_at=datetime.utcnow()))
+    db.commit()
+    fam = client.get("/program/command/family/%s" % lead.id, headers=_h(db, program["admin"])).json()
+    vm = [t for t in fam["thread"] if t["channel"] == "voicemail"]
+    assert len(vm) == 1 and vm[0]["audio_path"].startswith("/voicemails/") and vm[0]["duration"] == 21
+    assert "api.twilio.com" not in str(fam)                      # the provider URL never reaches the browser
+
+
+def test_unknown_senders_and_their_voicemail_show_in_sci_live(program, sample_advisor, client):
+    from app.models.program_models import ProgramUnmatchedReply
+    from app.models.telephony_models import Voicemail
+    db, org = program["db"], program["org"]
+    db.add(Voicemail(organization_id=org.id, recording_sid="RE" + "b" * 32, recording_url="https://api.twilio.com/y",
+                     duration_seconds=30, transcript="Please call me", received_at=datetime.utcnow()))
+    db.add(ProgramUnmatchedReply(organization_id=org.id, from_address="+12515550123", subject="Voicemail",
+                                 body_excerpt="Please call me", received_at=datetime.utcnow(),
+                                 mailbox_message_id="vm:RE" + "b" * 32, reason="no contact", status="open"))
+    db.commit()
+    r = client.get("/program/command", headers=_h(db, program["admin"])).json()
+    u = r["unknown"][0]
+    assert u["channel_label"] == "VOICEMAIL" and u["audio_path"].startswith("/voicemails/") and u["duration"] == 30
+    assert "api.twilio.com" not in str(r)
+
+
+def test_an_inbound_text_matches_a_number_stored_with_a_plus(program, sample_advisor):
+    from app.routers.sms_router import process_inbound_sms
+    from app.models.models import Lead
+    db, org = program["db"], program["org"]
+    lead = Lead(organization_id=org.id, first_name="Owner", last_name="Plus", phone="+18435550177", status="sent")
+    db.add(lead)
+    db.commit()
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        process_inbound_sms(db, org_id=org.id, advisor=None, From="+18435550177", Body="Tuesday at 1 works",
+                            MessageSid="SMx1")
+    from app.models.program_models import ProgramResponse, ProgramUnmatchedReply
+    assert db.query(ProgramResponse).filter_by(lead_id=lead.id).count() == 1
+    assert db.query(ProgramUnmatchedReply).count() == 0
