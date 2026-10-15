@@ -21,7 +21,8 @@ def test_only_the_setter_only_the_owners_number(setter):
     me = _owner(db, org, "+18435550000")
     assert TR.owner_live_test_send_allowed(db, me, ss.SCI_SETTER)
     assert not TR.owner_live_test_send_allowed(db, me, ss.CADENCE)
-    assert not TR.owner_live_test_send_allowed(db, me, ss.MANUAL)
+    assert TR.owner_live_test_send_allowed(db, me, ss.MANUAL)              # the owner, by hand, to himself
+    assert not TR.owner_live_test_send_allowed(db, me, ss.BULK)
     other = _owner(db, org, "+12145550199")
     assert not TR.owner_live_test_send_allowed(db, other, ss.SCI_SETTER)
     plain_test = Lead(organization_id=org.id, first_name="X", last_name="SIM", phone="+18435550000", is_test=True)
