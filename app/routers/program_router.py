@@ -2570,10 +2570,21 @@ def setter_live_test(body: LiveTestIn, db: Session = Depends(get_db), user: User
         db.commit()
     # The owner approves his own test contact for sending by running this
     # (Choose & Send approval) - every other gate, consent included, still applies.
+    # It rides on a campaign that is already switched on for real families,
+    # so it meets exactly the gates a replying family meets.
+    from app.models.program_models import CampaignFamily
+    live_family = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == prog.organization_id,
+                                                   CampaignFamily.is_active.is_(True))
+                   .order_by(CampaignFamily.key).first())
     for rec in db.query(ProgramSourceRecord).filter(ProgramSourceRecord.lead_id == lead.id).all():
         if rec.approved_to_send_at is None:
             rec.approved_to_send_at = datetime.utcnow()
             rec.approved_to_send_by = user.id
+        if live_family is not None:
+            fam = (db.query(CampaignFamily).filter(CampaignFamily.organization_id == prog.organization_id,
+                                                   CampaignFamily.key == (rec.campaign_family or "")).first())
+            if fam is None or not fam.is_active:
+                rec.campaign_family = live_family.key
     db.commit()
     if body.reset:
         for c in db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id).all():
