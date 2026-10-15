@@ -458,9 +458,11 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
 
     msg = "%s %s" % ("🔥" if cls == HOT else "💬", resp.summary)
     plan = alert_plan(cls)
-    if plan:
+    if plan and staff_alerts:
+        # staff_alerts=False (the simulator): no texts, emails OR in-app
+        # notices - a synthetic family never reaches anyone's bell.
         _alert(db, prog, resp, lead, plan["kind"], msg, management=plan["management"],
-               external=plan["external"] and staff_alerts)
+               external=plan["external"])
     db.commit()
     # THE APPOINTMENT SETTER: answers the family in conversation when the
     # program has it switched on (off / draft / auto). It never raises into the

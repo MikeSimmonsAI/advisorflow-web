@@ -233,6 +233,18 @@ def run(db: Session, org_id: str, now: datetime = None) -> Dict:
 _alerted: Dict[str, str] = {}
 
 
+def _alerted_today(db: Session, prog, key: str, now: datetime) -> bool:
+    """Once per problem per day, remembered in the DATABASE. The in-memory
+    note alone was forgotten on every restart, so a day of deploys texted the
+    owner the same problem again and again (Oct 14: six times in 30 minutes)."""
+    from app.models.program_models import ProgramAlert
+    since = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return (db.query(ProgramAlert.id)
+            .filter(ProgramAlert.organization_id == prog.organization_id, ProgramAlert.kind == "self_check",
+                    ProgramAlert.created_at >= since, ProgramAlert.message.like("%%[%s]%%" % key))
+            .first()) is not None
+
+
 def alert_all(db: Session, now: datetime = None) -> int:
     from app.models.program_models import OutreachProgram
     from app.services.programs.responses import owner_system_alert
@@ -244,12 +256,14 @@ def alert_all(db: Session, now: datetime = None) -> int:
         res = run(db, prog.organization_id, now)
         day = now.strftime("%Y-%m-%d")
         new = [c for c in res["checks"] if not c["ok"] and not c.get("acknowledged")
-               and _alerted.get("%s:%s" % (prog.id, c["key"])) != day]
+               and _alerted.get("%s:%s" % (prog.id, c["key"])) != day
+               and not _alerted_today(db, prog, c["key"], now)]
         if not new:
             continue
         lines = ["%s - %s%s" % (c["title"], c["detail"], (" (" + ", ".join(c["people"][:6]) + ")") if c["people"] else "")
                  for c in new]
-        msg = "System self-check found %d problem(s): %s" % (len(new), " | ".join(lines))
+        msg = "System self-check found %d problem(s): %s %s" % (
+            len(new), " | ".join(lines), " ".join("[%s]" % c["key"] for c in new))
         # OWNER ONLY: internal problems never go to the team list.
         res = owner_system_alert(db, prog, "self_check", msg)
         db.commit()
