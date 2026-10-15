@@ -1225,6 +1225,8 @@ app.include_router(esign_public_router)   # /esign/sign/{token} - EvoSys e-signa
 from app.routers.program_router import (router as program_router,
                                         public_router as program_public_router,
                                         god_router as program_god_router)
+from app.routers.sci_command_router import router as sci_command_router
+app.include_router(sci_command_router)   # /program/command - SCI Command phone screens
 app.include_router(program_router)
 app.include_router(program_public_router)  # public - the token IS the authorization
 app.include_router(program_god_router)
