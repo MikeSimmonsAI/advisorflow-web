@@ -436,6 +436,38 @@ def _spacing_hold_until(db: Session, state, lead, schedule, touch_number: int, n
     return earliest if n < earliest else None
 
 
+UNREACHABLE_ONCE = {"30005", "30006", "21614"}   # unknown number, landline, not a mobile
+UNREACHABLE_TWICE = {"30003"}                     # handset unreachable (could be temporary)
+
+
+def _unreachable_reason(db: Session, lead) -> Optional[str]:
+    from app.models.models import Message
+    rows = (db.query(Message.delivery_status, Message.error_code).filter(Message.lead_id == lead.id)
+            .order_by(Message.sent_at.desc()).limit(2).all())
+    codes = [str(e) for (st, e) in rows if (st or "").lower() in ("undelivered", "failed") and e]
+    hit = [c for c in codes if c in UNREACHABLE_ONCE]
+    if hit:
+        return "phone cannot receive texts (carrier error %s) - check the number" % hit[0]
+    if len(rows) == 2 and len(codes) == 2 and all(c in UNREACHABLE_TWICE for c in codes):
+        return "phone unreachable twice in a row (carrier error 30003) - check the number"
+    return None
+
+
+def _flag_bad_number(db: Session, lead, reason: str) -> None:
+    try:
+        import json as _json
+        from app.models.program_models import ProgramSourceRecord
+        rec = (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.lead_id == lead.id).first())
+        if rec is not None:
+            rec.needs_data_review = True
+            flags = _json.loads(rec.data_note_flags or "[]")
+            if "PHONE UNREACHABLE" not in flags:
+                flags.append("PHONE UNREACHABLE")
+            rec.data_note_flags = _json.dumps(flags)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("could not flag unreachable number for lead %s", lead.id)
+
+
 def _already_sent(db: Session, state, touch_number: int) -> bool:
     """Has this touch ALREADY gone out?
 
@@ -733,6 +765,22 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 state.completed_at = now
                 completed_count += 1
                 db.commit()
+                continue
+
+            # ── A NUMBER THAT CANNOT BE REACHED IS NOT TEXTED AGAIN ────────────
+            #
+            # Oct 14: two texts to one family both came back 30003 (handset
+            # unreachable) and the schedule would have kept sending. A number
+            # the carrier calls unknown / a landline once, or unreachable twice
+            # in a row, stops the text schedule and goes to Data Review - a
+            # person checks the number; nothing is retried blind.
+            bad = _unreachable_reason(db, lead)
+            if bad:
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
+                           outcome=OUTCOME_STOPPED, reason=bad, scheduled_for=scheduled_for)
+                _flag_bad_number(db, lead, bad)
+                stop_cadence_for_lead(db, lead.id, "stopped_bad_number")
                 continue
 
             # ── SPACING FROM THE LAST TEXT ACTUALLY SENT ──────────────────────
