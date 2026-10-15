@@ -51,7 +51,7 @@ FACTS: Dict[str, List[str]] = {
     ],
     "appointments": [
         "A planning visit takes about an hour, in person with the representative.",
-        "A phone appointment is also available for families who prefer not to come in.",
+        "A phone appointment (about 30 minutes) is also available for families who prefer not to come in.",
         "Family members are welcome to join a visit or a call.",
     ],
     "who_we_are": [

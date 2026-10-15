@@ -279,7 +279,7 @@ ANSWERING QUESTIONS. When APPROVED INFORMATION answers the question, ANSWER IT i
 MOVING TOWARD AN APPOINTMENT - without pressure:
 - A call or visit is offered when it genuinely helps (they're interested, have questions only {contact} can answer, or asked). Never offer times twice in a row if they didn't engage with the first offer; respond to what they said instead. Never invent urgency.
 - To offer times, write the placeholder {{TIMES}} where two times belong ("Would {{TIMES}} work for a short visit?"). That sentence IS your one question - do not ask anything else in the same message. The system fills in two REAL open times. NEVER write a day or clock time yourself (repeating times already offered is fine). If they mentioned when they're free ("afternoons", "next Tuesday"), put it in best_times so times can match.
-- Visit = about an hour in person; a phone appointment is also available. Family members are welcome - if a spouse or adult child should be included, say so warmly.
+- Visit = about an hour (60 minutes) in person; a phone appointment is about 30 minutes. Family members are welcome - if a spouse or adult child should be included, say so warmly.
 - BOOK only when their words clearly pick ONE of the times we offered ("the first one", "Thursday at 10 works") -> slot_choice 1 or 2. If they name a different specific day AND time, use requested_time YYYY-MM-DDTHH:MM (Central); the system checks it. "Friday works" when Friday has more than one possibility, "sure", "ok", "sounds good" -> do NOT book; ask which time.
 - Never say an appointment is booked, set or confirmed - the system confirms bookings itself.
 
@@ -877,9 +877,9 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         if preferred_day is None:
             preferred_day = day_named(body, A._today_central().date())
         if preferred_day is not None:
-            slots, why = A.slots_on_day(db, prog, preferred_day)
+            slots, why = A.slots_on_day(db, prog, preferred_day, kind=conv.appointment_kind or A.VISIT)
         if not slots:
-            slots, why = A.available_slots(db, prog)
+            slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
         if not slots:
             _handoff(db, prog, lead, conv, "no times to offer: %s" % why, notify=True)
             text = ("Thank you. %s will reach out to find a time that works for you."
@@ -944,7 +944,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
     if "{TIMES}" in text and action != "offer_times":
         # Times written into another kind of reply (e.g. guide + a visit
         # offer): fill them from the calendar too, or drop the offer.
-        slots, _why = A.available_slots(db, prog)
+        slots, _why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
         if slots:
             text = _fill_times(text, slots)
             conv.offered_slots = json.dumps([s.isoformat() for s in slots])
@@ -1027,7 +1027,10 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
         mode = mode_of(prog) if prog else OFF
         if mode == OFF:
             continue                                     # stays due; nothing happens while off
-        stop = (lead is None or getattr(lead, "status", None) == "dnc"
+        from app.services.test_records import is_owner_test_lead as _owner_test
+        # The owner's live test contact never gets a follow-up: a test proves
+        # one exchange and is then cleaned up; it must not keep texting the owner.
+        stop = (lead is None or getattr(lead, "status", None) == "dnc" or _owner_test(lead)
                 or (conv.followups_sent or 0) >= MAX_FOLLOWUPS
                 or (conv.last_family_at and conv.last_ai_at and conv.last_family_at > conv.last_ai_at))
         if stop:

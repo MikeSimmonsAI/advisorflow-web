@@ -59,7 +59,7 @@ def setter(program, sample_advisor, monkeypatch):
     db.commit()
     monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "true")
     monkeypatch.setattr(A, "available_slots", lambda db, prog, **kw: (list(SLOTS), None))
-    monkeypatch.setattr(A, "still_free", lambda db, prog, slot: slot in SLOTS)
+    monkeypatch.setattr(A, "still_free", lambda db, prog, slot, *a, **k: slot in SLOTS)
     from app.services import ai_gateway
     ai_gateway._reset_for_tests()
     return program
@@ -256,7 +256,7 @@ def test_taken_time_is_never_booked_and_new_times_are_offered(setter, sample_adv
     db.commit()
     fake = _Fake([_d("offer_times", "Would {TIMES} work?"), _d("book", "", slot_choice=1)])
     _run(db, lead, "Can I come in this week?", fake)
-    monkeypatch.setattr(A, "still_free", lambda db, prog, slot: False)
+    monkeypatch.setattr(A, "still_free", lambda db, prog, slot, *a, **k: False)
     _, conv = _run(db, lead, "The first one", fake)
     assert conv.state == "offered" and conv.booked_time is None
     assert "just filled" in _ai_turns(db, conv)[-1].text
@@ -347,7 +347,7 @@ def test_asking_for_a_day_offers_times_that_day(setter, sample_advisor, monkeypa
     lead.is_test = True
     db.commit()
     day = [datetime(2030, 1, 11, 10, 0), datetime(2030, 1, 11, 15, 0)]
-    monkeypatch.setattr(A, "slots_on_day", lambda db, prog, d, want=2: (day, None))
+    monkeypatch.setattr(A, "slots_on_day", lambda db, prog, d, want=2, **k: (day, None))
     fake = _Fake([_d("offer_times", "Would {TIMES} work?"),
                   _d("book", "", requested_time="2030-01-11T09:00")])
     _run(db, lead, "Can I come in?", fake)
@@ -373,7 +373,7 @@ def test_a_named_day_shapes_the_offer_even_when_the_ai_just_offers(setter, sampl
     lead = _lead_for(db, org, sample_advisor, "L001")
     seen = {}
 
-    def on_day(db, prog, d, want=2):
+    def on_day(db, prog, d, want=2, **k):
         seen["day"] = d
         return [datetime(2030, 1, 11, 10, 0), datetime(2030, 1, 11, 15, 0)], None
     monkeypatch.setattr(A, "slots_on_day", on_day)
