@@ -2594,6 +2594,36 @@ def setter_live_test(body: LiveTestIn, db: Session = Depends(get_db), user: User
             "turn": turn, "message": msg}
 
 
+@router.post("/setter/live-test/cleanup")
+def setter_live_test_cleanup(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """OWNER ONLY. Remove the owner live test's booking from the calendar
+    (Google event deleted, booking marked cancelled) without texting anyone,
+    and close its conversation. Touches nothing but the owner test contact."""
+    from app.models.models import BookingLink
+    from app.models.program_models import ProgramConversation
+    from app.services import test_records as TR
+    from app.services.calendar_service import cancel_calendar_event
+    if getattr(user, "role", None) != "god_admin":
+        raise HTTPException(status_code=403, detail="Owner only.")
+    prog = _program(db, user)
+    lead = (db.query(Lead).filter(Lead.organization_id == prog.organization_id, Lead.is_test.is_(True),
+                                  Lead.last_name == TR.OWNER_TEST_LAST_NAME).first())
+    if lead is None:
+        return {"ok": True, "bookings": []}
+    out = []
+    for b in db.query(BookingLink).filter(BookingLink.lead_id == lead.id,
+                                          BookingLink.status.in_(("booked", "confirmed"))).all():
+        had_event = b.calendar_event_id
+        res = cancel_calendar_event(db, b)
+        out.append({"booking_id": b.id, "booked_time": b.booked_time.isoformat() if b.booked_time else None,
+                    "calendar_event_id": had_event, "result": res.get("note"), "status": b.status})
+    for c in db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id).all():
+        c.state = "stopped"
+        c.next_followup_at = None
+    db.commit()
+    return {"ok": True, "bookings": out}
+
+
 @router.get("/setter/live-test/message/{message_id}")
 def setter_live_test_message(message_id: str, db: Session = Depends(get_db),
                              user: User = Depends(require_tenant_user)):
