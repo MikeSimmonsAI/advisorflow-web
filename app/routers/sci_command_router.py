@@ -482,6 +482,55 @@ def command_reply(body: ReplyIn, db: Session = Depends(get_db), user: User = Dep
     return out
 
 
+class FollowUpIn(BaseModel):
+    lead_id: str
+    reason: str
+    not_before: Optional[str] = None          # ISO UTC; never earlier than the spacing rule allows
+
+
+@router.post("/follow-up")
+def command_follow_up(body: FollowUpIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Schedule ONE AI follow-up for a family, written at send time from the
+    whole conversation (including what a person already sent) for the reason
+    given - e.g. invite them in with two real times. It goes through every
+    production gate (AI Handling, AUTO, consent, contact hours, the 20-hour
+    spacing backstop) and is cancelled automatically if the family writes
+    first or a person takes the conversation. Never sends now."""
+    from app.services import contact_hours
+    from app.services.programs import ai_setter
+    from app.services.programs import spacing as _sp
+    _require_manager(db, user)
+    prog = _program(db, user, managers_only=False)
+    lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    if (lead.status or "") == "dnc":
+        raise HTTPException(status_code=409, detail="This family is Do Not Contact.")
+    conv = ai_setter.conversation_for(db, lead)
+    if conv.state in ("human", "stopped", "booked"):
+        raise HTTPException(status_code=409, detail="Switch the conversation to AI Handling first (now: %s)." % conv.state)
+    now = datetime.utcnow()
+    at = now + timedelta(hours=1)
+    last = _sp.last_text_at(db, lead.id)
+    if last is not None:
+        at = max(at, last + _sp.MIN_GAP)
+    if body.not_before:
+        try:
+            at = max(at, datetime.fromisoformat(body.not_before.replace("Z", "")[:19]))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="not_before must be an ISO time")
+    if not contact_hours.check(lead, at).get("permitted"):
+        at = contact_hours.next_permitted_utc(lead, at) or at
+    conv.state = "info_requested" if conv.state not in ai_setter.FOLLOW_UP_STATES else conv.state
+    conv.next_followup_at = at
+    conv.followup_reason = (body.reason or "")[:250]
+    conv.followups_sent = min(conv.followups_sent or 0, ai_setter.MAX_FOLLOWUPS - 1)
+    ai_setter._turn(db, conv, "system", None, action="follow_up_scheduled",
+                    reason="one follow-up at %s UTC: %s" % (at.strftime("%Y-%m-%d %H:%M"), conv.followup_reason))
+    db.commit()
+    return {"lead_id": lead.id, "follow_up_at": at.isoformat() + "Z", "reason": conv.followup_reason}
+
+
 class HandlingIn(BaseModel):
     lead_id: str
     owner: str

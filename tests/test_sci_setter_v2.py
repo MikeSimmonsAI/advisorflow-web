@@ -153,12 +153,13 @@ def test_repeating_an_offered_time_is_not_inventing_one(setter, sample_advisor):
     assert ai_setter.validate_decision(cb, "Call me tomorrow after 3", conv) == []
 
 
-def test_existing_plan_asks_which_review_before_times(setter, sample_advisor):
+def test_existing_plan_is_invited_straight_to_a_file_review(setter, sample_advisor):
     db, org = setter["db"], setter["org"]
     lead = _lead_for(db, org, sample_advisor, "L001")
     conv = ai_setter.conversation_for(db, lead)
-    d = {"action": "offer_times", "reply": "Would {TIMES} work for a review?"}
-    assert any("which review" in p for p in ai_setter.validate_decision(d, "I already have a plan with you", conv))
+    d = {"action": "offer_times", "reply": "We'd be glad to go over your file with you in person. Would {TIMES} work for a review?"}
+    assert ai_setter.validate_decision(d, "I already have a plan with you", conv) == []
+    assert "FILE REVIEW" in ai_setter.SYSTEM_PROMPT and "PRIMARY GOAL" in ai_setter.SYSTEM_PROMPT
 
 
 def test_unclear_short_reply_is_not_a_close(setter, sample_advisor):

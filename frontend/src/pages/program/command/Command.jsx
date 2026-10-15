@@ -101,8 +101,8 @@ export default function Command() {
     // The former SCI Live numbers (sends, deliveries, booking-page opens, next
     // up, just sent) load beside the command data, so nothing the old screen
     // showed is lost.
-    Promise.all([safe('/program/outbox'), safe('/program/booking-activity?days=1')])
-      .then(([ob, ba]) => setLive({ ob, ba }))
+    Promise.all([safe('/program/outbox'), safe('/program/booking-activity?days=1'), safe('/program/setter/stats?days=30')])
+      .then(([ob, ba, st]) => setLive({ ob, ba, st }))
     api.get('/program/command' + (p.toString() ? `?${p}` : '')).then(r => { setD(r); setErr(''); setAt(new Date())
       try { sessionStorage.removeItem('sci_live_entry') } catch { /* private mode */ } })
       .catch(e => {
@@ -601,6 +601,17 @@ function TodayActivity({ live, engagement, open }) {
       <MiniTile v={A?.opted_out ?? '-'} l="Opted out" a="all time" />
       <MiniTile v={live?.ob?.failed || 0} l="Failed or bounced" tone={live?.ob?.failed ? 'red' : ''} a={A && `${A.failed} all time`} />
     </div>
+    {live?.st?.outcomes && <>
+      <SectionHead title="Appointments (last 30 days)" />
+      <div className="cmd-mini">
+        <MiniTile v={live.st.outcomes.appointments_offered} l="Offered real times" />
+        <MiniTile v={live.st.outcomes.appointments_accepted} l="Accepted" />
+        <MiniTile v={live.st.outcomes.confirmed_on_google_calendar} l="On the calendar" tone={live.st.outcomes.confirmed_on_google_calendar ? 'green' : ''} />
+        <MiniTile v={live.st.outcomes.visits_completed} l="Visits completed" />
+        <MiniTile v={live.st.outcomes.information_only_fulfilled} l="Info only, sent" />
+        <MiniTile v={live.st.outcomes.declines + live.st.outcomes.opt_outs} l="Declined or opted out" />
+      </div>
+    </>}
     <div className="cmd-card cmd-eng"><EngagementGauge data={engagement} compact /></div>
     <SectionHead title="Next up" />
     {upcoming.length ? <div className="cmd-card cmd-list">{upcoming.map((u, i) => (

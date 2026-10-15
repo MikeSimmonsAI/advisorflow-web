@@ -302,3 +302,34 @@ def test_an_opted_out_family_shows_as_opted_out(setter, sample_advisor, client):
     db.commit()
     fam = client.get("/program/command/family/%s" % lead.id, headers=_h(db, setter["admin"])).json()
     assert fam["handling"]["opted_out"] and fam["handling"]["owner"] == "human"
+
+
+def test_one_scheduled_follow_up_respects_spacing_and_handling(setter, sample_advisor, client, monkeypatch):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    db.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body="Thank you", send_source="manual",
+                   twilio_sid="SMf", sent_at=datetime.utcnow()))
+    db.commit()
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    h = _h(db, setter["admin"])
+    r = client.post("/program/command/follow-up", headers=h,
+                    json={"lead_id": lead.id, "reason": "invite them in to go over the guide; offer two real times"})
+    assert r.status_code == 200, r.text
+    conv = db.query(ProgramConversation).filter_by(lead_id=lead.id).one()
+    assert conv.next_followup_at >= datetime.utcnow() + timedelta(hours=19)     # 20-hour spacing kept
+    client.post("/program/command/handling", headers=h, json={"lead_id": lead.id, "owner": "human"})
+    db.refresh(conv)
+    assert conv.next_followup_at is None                                         # a person took it: cancelled
+    assert client.post("/program/command/follow-up", headers=h,
+                       json={"lead_id": lead.id, "reason": "x"}).status_code == 409
+
+
+def test_outcomes_never_count_a_guide_or_text_as_an_appointment(setter, sample_advisor, client):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    conv = ai_setter.conversation_for(db, lead)
+    conv.memory = '{"mail_request": {"requested": true, "done": true}}'
+    db.commit()
+    o = client.get("/program/setter/stats", headers=_h(db, setter["admin"])).json()["outcomes"]
+    assert o["appointments_accepted"] == 0 and o["confirmed_on_google_calendar"] == 0
+    assert o["information_only_fulfilled"] == 1
