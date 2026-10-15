@@ -142,7 +142,7 @@ export default function Command() {
                 <small>Includes {d.upcoming.new} new and {d.upcoming.review} needing review
                   {d.upcoming.callbacks ? ` · ${d.upcoming.callbacks} callbacks` : ''}</small></span>›</button>
             <button onClick={() => setTab('appts')}><Icon n="cal" />
-              <span><b>{d.upcoming.visits_booked ? `${d.upcoming.visits_booked} appointments booked` : 'No appointments scheduled'}</b><br />
+              <span><b>{d.upcoming.visits_booked ? `${d.upcoming.visits_booked} appointment${d.upcoming.visits_booked === 1 ? '' : 's'} booked` : 'No appointments scheduled'}</b><br />
                 <small>{d.upcoming.visits_booked ? 'See who is coming in' : 'Get in touch to book a visit today'}</small></span>›</button>
           </div>
         </>}
