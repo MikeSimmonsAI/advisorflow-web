@@ -196,10 +196,7 @@ export default function Command() {
             {' '}<a href="/program">Open the full SCI Program Center</a></p>
         </>}
       </>}
-      {tab === 'inbox' && <>
-        <header className="cmd-top"><h1>Inbox</h1></header>
-        <Inbox items={inbox} act={act} open={setFamily} empty="Nobody is waiting. Nice work." />
-      </>}
+      {tab === 'inbox' && <InboxTab loc={loc} act={act} open={setFamily} />}
       {tab === 'search' && <>
         <header className="cmd-top"><h1>Search</h1></header>
         <SearchBox q={q} setQ={setQ} autoFocus />
@@ -248,6 +245,38 @@ function SearchResults({ q, loc, open }) {
   )
 }
 
+// ONE inbox for texts and emails, with its own filters. Reads the same
+// endpoint as Home; "Handled" brings back what was answered or closed.
+const FILTERS = [['all', 'All'], ['needs_reply', 'Needs reply'], ['text', 'Text'], ['email', 'Email'], ['handled', 'Handled']]
+
+function InboxTab({ loc, act, open }) {
+  const [flt, setFlt] = useState('all')
+  const [r, setR] = useState(null)
+  const seq = useRef(0)
+  const load = useCallback(() => {
+    const n = ++seq.current
+    const p = new URLSearchParams({ filter: flt, limit: '200' })
+    if (loc) p.set('location_id', loc)
+    api.get(`/program/command?${p}`).then(x => { if (n === seq.current) setR(x) }).catch(() => { if (n === seq.current) setR({ inbox: [] }) })
+  }, [flt, loc])
+  useEffect(() => {
+    load()
+    const t = setInterval(() => { if (document.visibilityState === 'visible') load() }, REFRESH_MS)
+    return () => clearInterval(t)
+  }, [load])
+  const c = r?.filter_counts || {}
+  return <>
+    <header className="cmd-top"><h1>Inbox</h1>{c.unread ? <p className="cmd-sub">{c.unread} new</p> : null}</header>
+    <div className="cmd-chips" role="tablist">
+      {FILTERS.map(([k, l]) => (
+        <button key={k} role="tab" aria-selected={flt === k} className={flt === k ? 'on' : ''} onClick={() => setFlt(k)}>
+          {l}{k !== 'handled' && c[k] !== undefined ? <i>{c[k]}</i> : null}</button>))}
+    </div>
+    {r === null ? <p className="cmd-muted">Loading…</p>
+      : <Inbox items={r.inbox} act={act} open={open} empty={flt === 'handled' ? 'Nothing handled in the last two weeks.' : 'Nobody is waiting. Nice work.'} />}
+  </>
+}
+
 function SearchBox({ q, setQ, autoFocus }) {
   return (
     <label className="cmd-search"><Icon n="search" />
@@ -280,7 +309,14 @@ function Inbox({ items, act, open, empty }) {
       <button className="cmd-item-main" onClick={() => open(i.lead_id)}>
         <span className={`dot ${i.class}`} />
         <span className="cmd-item-text">
-          <b>{i.name}</b><small>{i.location || 'Location not set'}</small>
+          <b>{i.channel === 'email' && (i.sender_name || i.sender_email) ? (i.sender_name || i.sender_email) : i.name}
+            <em className={`chan ${i.channel === 'email' ? 'email' : 'text'}`}>{i.channel_label || (i.channel === 'email' ? 'EMAIL' : 'TEXT')}</em>
+            {i.owner === 'human' && <em className="chan human">PERSON</em>}
+            {i.is_test && <em className="chan human">TEST</em>}</b>
+          {i.channel === 'email'
+            ? <small className="cmd-from">{i.sender_email}{i.sender_email && ' · '}Family: {i.name}{i.location ? ` · ${i.location}` : ''}</small>
+            : <small>{i.location || 'Location not set'}</small>}
+          {i.channel === 'email' && i.subject && <small className="cmd-subjline">{i.subject}</small>}
           <span>{i.summary}</span>
         </span>
         <span className="cmd-item-meta"><em className={`badge ${BADGE[i.badge] || 'low'}`}>{i.badge}</em>
@@ -317,6 +353,8 @@ function Family({ id, onBack, toast, toastText }) {
   const [err, setErr] = useState('')
   const [mode, setMode] = useState('note')
   const [text, setText] = useState('')
+  const sendKey = useRef(null)
+  const newKey = () => (window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`)
   const [subject, setSubject] = useState('')
   const [slots, setSlots] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -335,9 +373,12 @@ function Family({ id, onBack, toast, toastText }) {
   }, [id])
   useEffect(() => { if (f?.status === 'new' && f.response_id) api.post(`/program/responses/${f.response_id}/viewed`, {}).catch(() => {}) }, [f?.response_id, f?.status])
 
-  const focusComposer = m => { setMode(m); if (m === 'text' && f?.suggested_reply && !text) setText(f.suggested_reply); setTimeout(() => composer.current?.focus(), 50) }
-  const send = async () => {
-    if (!text.trim()) return
+  const replyMode = () => (f?.reply_to?.channel === 'email' ? 'email' : 'text')
+  const focusComposer = m => { setMode(m); if (m !== 'note' && f?.suggested_reply && !text) setText(f.suggested_reply); setTimeout(() => composer.current?.focus(), 50) }
+  // then: 'human' (Send) or 'ai' (Send & let AI continue). One send key per
+  // composed message, so a double tap, a retry or a refresh never sends twice.
+  const send = async then => {
+    if (!text.trim() || busy) return
     setBusy(true)
     try {
       if (mode === 'note') {
@@ -346,17 +387,27 @@ function Family({ id, onBack, toast, toastText }) {
       } else if (f.is_demo) {
         await api.post('/program/command/demo-send', { lead_id: id, channel: mode === 'email' ? 'email' : 'sms', text: text.trim(), subject: subject.trim() || null })
         toast('Demo family: saved in the conversation as simulated. Nothing was sent.')
-      } else if (mode === 'text') {
-        await api.post('/sms/send', { lead_id: id, template: text.trim(), include_booking_link: false })
-        if (f.response_id) await api.post(`/program/responses/${f.response_id}/mark`, { state: 'responded' }).catch(() => {})
-        toast('Text sent.')
       } else {
-        await api.post(`/email/send/${id}`, { subject: subject.trim() || 'Following up', body: text.trim(), include_booking_link: false })
-        if (f.response_id) await api.post(`/program/responses/${f.response_id}/mark`, { state: 'responded' }).catch(() => {})
-        toast('Email sent.')
+        if (!sendKey.current) sendKey.current = newKey()
+        const r = await api.post('/program/command/reply', {
+          lead_id: id, channel: mode === 'email' ? 'email' : 'sms', text: text.trim(),
+          idempotency_key: sendKey.current, then: then || 'human',
+          response_id: mode === 'email' ? f.reply_to?.response_id : (f.reply_to?.channel === 'sms' ? f.reply_to?.response_id : null),
+        })
+        const where = mode === 'email' ? `Email sent to ${r.email?.to || 'the sender'} in the same thread` : 'Text sent'
+        toast(r.duplicate ? 'Already sent - not sent again.' : `${where}.${then === 'ai' ? ' AI will answer their next reply.' : ''}`)
       }
+      sendKey.current = null
       setText(''); setSubject(''); load()
     } catch (e) { toast(e.message || 'Not sent.') } finally { setBusy(false) }
+  }
+  const setOwner = async owner => {
+    setBusy(true)
+    try {
+      await api.post('/program/command/handling', { lead_id: id, owner })
+      toast(owner === 'ai' ? 'AI Handling on - the AI answers their next reply.' : 'Human Handling on - the AI will not reply.')
+      load()
+    } catch (e) { toast(e.message || 'Could not change.') } finally { setBusy(false) }
   }
   const book = async s => {
     if (!window.confirm(`Book ${f.name} for ${s.label}? The family gets a confirmation text.`)) return
@@ -386,6 +437,8 @@ function Family({ id, onBack, toast, toastText }) {
     catch (e) { toast(e.message || 'Could not assign.') }
   }
 
+  const canSend = mode === 'text' ? !!f?.phone
+    : mode === 'email' ? !!(f?.reply_to?.channel === 'email' && f.reply_to.threadable) : true
   if (!f) return <div className="cmd"><button className="cmd-back" onClick={onBack}><Icon n="back" /> Back</button>{err ? <p className="cmd-err">{err}</p> : <p className="cmd-muted">Loading…</p>}</div>
   return (
     <div className="cmd cmd-family">
@@ -405,17 +458,35 @@ function Family({ id, onBack, toast, toastText }) {
       </header>
       <div className="cmd-quick">
         <a href={f.phone ? `tel:${f.phone}` : undefined} className={f.phone ? '' : 'off'}><Icon n="call" s={22} />Call</a>
-        <button className="primary" onClick={() => focusComposer('text')}><Icon n="reply" s={22} />Reply</button>
+        <button className="primary" onClick={() => focusComposer(replyMode())}><Icon n="reply" s={22} />Reply</button>
         <button onClick={() => schedRef.current?.scrollIntoView({ behavior: 'smooth' })}><Icon n="cal" s={22} />Schedule Visit</button>
         <button onClick={() => focusComposer('note')}><Icon n="note" s={22} />Add Note</button>
       </div>
+
+      {!f.is_demo && <section className="cmd-card cmd-handling" aria-label="Conversation handling">
+        <h3><Icon n="person" /> Conversation handling</h3>
+        <div className="cmd-seg two">
+          <button className={f.handling?.owner === 'ai' ? 'on' : ''} disabled={busy || f.handling?.opted_out} onClick={() => f.handling?.owner !== 'ai' && setOwner('ai')}>
+            AI Handling{f.handling?.owner === 'ai' ? ' — ON' : ''}</button>
+          <button className={f.handling?.owner === 'human' ? 'on' : ''} disabled={busy} onClick={() => f.handling?.owner !== 'human' && setOwner('human')}>
+            Human Handling{f.handling?.owner === 'human' ? ' — ON' : ''}</button>
+        </div>
+        <p className="cmd-muted small">
+          {f.handling?.opted_out ? 'This family opted out. Nobody texts or emails them.'
+            : f.handling?.owner === 'ai' ? 'The AI answers this family\'s next text or email, knowing everything sent so far.'
+              : `A person has this conversation. The AI reads it but does not reply.${f.handling?.reason ? ` (${f.handling.reason})` : ''}`}
+          {f.handling?.changed_at ? ` Last change: ${dayLabel(f.handling.changed_at)} ${time(f.handling.changed_at)}${f.handling.changed_by ? ` by ${f.handling.changed_by}` : ''}.` : ''}
+        </p>
+      </section>}
 
       <section className="cmd-thread" aria-label="Conversation">
         {f.thread.length ? f.thread.map((t, k) => (<Fragment key={k}>
           {(k === 0 || dayLabel(f.thread[k - 1].at || '') !== dayLabel(t.at || '')) && t.at && <div className="cmd-day">{dayLabel(t.at)}</div>}
           <div className={`bubble ${t.who}`}>
+            {t.channel === 'email' && t.who === 'family' && <small className="cmd-bhead">From {t.sender_name ? `${t.sender_name} <${t.sender_email}>` : t.sender_email}{t.subject ? ` · ${t.subject}` : ''}</small>}
+            {t.channel === 'email' && t.who === 'us' && (t.to || t.subject) && <small className="cmd-bhead">{t.to ? `To ${t.to}` : ''}{t.to && t.subject ? ' · ' : ''}{t.subject || ''}</small>}
             <p>{t.text}</p>
-            <small>{time(t.at)}{t.channel === 'email' ? ' · Email' : ''}{t.delivery === 'simulated' && t.who === 'us' ? ' · simulated' : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
+            <small>{time(t.at)}{t.channel === 'email' ? ' · EMAIL' : ' · TEXT'}{t.source === 'sci_appointment_setter' ? ' · AI' : ''}{t.delivery === 'simulated' && t.who === 'us' ? ' · simulated' : ''}{t.who === 'us' && ['failed', 'undelivered', 'bounced'].includes(t.delivery) ? ` · NOT SENT${t.error ? `: ${t.error}` : ''}` : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
           </div></Fragment>)) : <p className="cmd-muted">No messages yet.</p>}
       </section>
 
@@ -471,12 +542,17 @@ function Family({ id, onBack, toast, toastText }) {
           {[['note', 'note', 'Note'], ['text', 'reply', 'Text'], ['email', 'mail', 'Email']].map(([k, ic, l]) => (
             <button key={k} className={mode === k ? 'on' : ''} onClick={() => focusComposer(k)}><Icon n={ic} />{l}</button>))}
         </div>
-        {mode === 'email' && <input className="cmd-subj" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Subject" />}
+        {mode === 'email' && !f.is_demo && (f.reply_to?.channel === 'email'
+          ? <p className={`cmd-replyto ${f.reply_to.threadable ? '' : 'bad'}`}>Replying to <b>{f.reply_to.to_name || f.reply_to.to}</b>{f.reply_to.to_name ? ` <${f.reply_to.to}>` : ''}{f.reply_to.subject ? ` · ${/^re:/i.test(f.reply_to.subject) ? f.reply_to.subject : `Re: ${f.reply_to.subject}`}` : ''}
+            {!f.reply_to.threadable && <><br />{f.reply_to.why_not}</>}</p>
+          : <p className="cmd-replyto bad">There is no email from this family to answer. Reply by text, or add a note.</p>)}
+        {mode === 'email' && f.is_demo && <input className="cmd-subj" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Subject" />}
         <textarea ref={composer} value={text} onChange={e => setText(e.target.value)} rows={4}
                   placeholder={mode === 'note' ? 'Write a note about this family...' : mode === 'text' ? 'Write a text...' : 'Write an email...'} />
         <div className="cmd-send">
           {mode === 'text' && f.suggested_reply && text !== f.suggested_reply && <button className="link" onClick={() => setText(f.suggested_reply)}>Use suggested reply</button>}
-          <button className="primary" disabled={busy || !text.trim() || (!f.is_demo && ((mode === 'text' && !f.phone) || (mode === 'email' && !f.email)))} onClick={send}>
+          {mode !== 'note' && !f.is_demo && <button disabled={busy || !text.trim() || !canSend} onClick={() => send('ai')}>Send &amp; let AI continue</button>}
+          <button className="primary" disabled={busy || !text.trim() || (mode !== 'note' && !f.is_demo && !canSend)} onClick={() => send('human')}>
             {mode === 'note' ? 'Save note' : mode === 'text' ? 'Send text' : 'Send email'}</button>
         </div>
       </section>

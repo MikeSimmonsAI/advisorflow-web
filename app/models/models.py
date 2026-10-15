@@ -1656,6 +1656,15 @@ class EmailMessage(Base):
 
     provider_message_id = Column(String, nullable=True)  # e.g. SendGrid/SES message ID
     status = Column(String, default="queued")  # queued, sent, delivered, bounced, failed
+    # Threaded replies (SCI Live): the real recipient and sending mailbox,
+    # the original's Message-ID, the family reply answered, a send key that
+    # makes a repeated tap a no-op, and the provider's refusal if any.
+    to_email = Column(String, nullable=True)
+    from_email = Column(String, nullable=True)
+    in_reply_to = Column(String, nullable=True)
+    idempotency_key = Column(String, nullable=True)
+    response_id = Column(String, nullable=True)
+    error = Column(Text, nullable=True)
 
     sent_at = Column(DateTime, server_default=func.now())
 

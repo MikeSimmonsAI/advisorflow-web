@@ -78,3 +78,22 @@ def test_book_records_the_length_and_sends_it_to_the_calendar(program, sample_ad
     monkeypatch.setattr(CR, "booking_confirmed_webhook", fake_webhook)
     res = A.book(db, prog, lead, slot, A.PHONE)
     assert res["ok"] and seen["dur"] == 30 and seen["duration_minutes"] == 30
+
+
+def test_booking_from_an_email_never_texts_the_record_phone(program, sample_advisor, monkeypatch):
+    db, org, prog = program["db"], program["org"], program["prog"]
+    prog.booking_user_id = sample_advisor.id
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    monkeypatch.setattr(A, "still_free", lambda *a, **k: True)
+    seen = {}
+
+    async def fake_webhook(req, db_):
+        p = await req.json()
+        seen.update(p)
+        link = db_.query(BookingLink).filter_by(token=p["booking_token"]).one()
+        link.status = "booked"
+        db_.commit()
+    monkeypatch.setattr(CR, "booking_confirmed_webhook", fake_webhook)
+    A.book(db, prog, lead, datetime(DAY.year, DAY.month, DAY.day, 10, 0), A.VISIT, family_text=False)
+    assert seen["skip_family_text"] is True

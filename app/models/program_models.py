@@ -621,6 +621,11 @@ class ProgramConversation(Base):
     memory = Column(Text, nullable=True)
     followups_sent = Column(Integer, nullable=True, default=0)
     followup_reason = Column(String, nullable=True)
+    # WHO OWNS THE CONVERSATION: the AI (state not "human") or a person
+    # (state "human"). The last explicit change, by whom, and a note.
+    owner_changed_at = Column(DateTime, nullable=True)
+    owner_changed_by = Column(String, nullable=True)
+    owner_note = Column(String, nullable=True)
     is_test = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

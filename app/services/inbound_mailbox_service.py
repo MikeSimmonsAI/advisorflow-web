@@ -748,6 +748,8 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                or InboundMailboxMessage(mailbox_id=box.id, graph_message_id=gid))
         row.internet_message_id = m.get("internetMessageId")
         row.from_address, row.subject, row.received_at = sender or None, (m.get("subject") or "")[:500], received
+        row.from_name = ((((m.get("from") or {}).get("emailAddress") or {}).get("name") or "").strip()[:200]
+                         or None)
         try:
             bounced = bounce_addresses(m, own={box.address})
             if bounced is not None:
