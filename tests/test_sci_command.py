@@ -148,3 +148,22 @@ def test_an_inbound_text_matches_a_number_stored_with_a_plus(program, sample_adv
     from app.models.program_models import ProgramResponse, ProgramUnmatchedReply
     assert db.query(ProgramResponse).filter_by(lead_id=lead.id).count() == 1
     assert db.query(ProgramUnmatchedReply).count() == 0
+
+
+def test_a_voicemail_on_the_sci_line_plays_with_the_platform_account(program, sample_advisor, client, monkeypatch):
+    from app.models.telephony_models import Voicemail
+    db, org = program["db"], program["org"]
+    vm = Voicemail(organization_id=org.id, recording_sid="RE" + "c" * 32, to_e164="+18449172171",
+                   from_e164="+12515550123", received_at=datetime.utcnow())
+    db.add(vm)
+    db.commit()
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC" + "1" * 32)
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "tok")
+    seen = {}
+
+    def fake_fetch(creds, sid):
+        seen["creds"] = creds
+        return b"ID3audio", "audio/mpeg"
+    monkeypatch.setattr("app.services.telephony_twilio.fetch_recording", fake_fetch)
+    r = client.get("/voicemails/%s/audio" % vm.id, headers=_h(db, program["admin"]))
+    assert r.status_code == 200 and r.content == b"ID3audio" and seen["creds"], seen

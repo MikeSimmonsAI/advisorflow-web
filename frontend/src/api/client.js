@@ -417,9 +417,14 @@ export const api = {
 // Callers own the returned URL and must URL.revokeObjectURL() it when done.
 export async function fetchObjectUrl(path) {
   const token = getToken()
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+  // The SAME workspace the page is reading: without it the platform owner
+  // standing in a customer workspace (SCI Live) got 403 and no voicemail played.
+  const orgOverride = orgOverrideFor(
+    typeof window !== 'undefined' ? window.location.pathname : '/',
+    { orgId: getOrgContext()?.orgId || null, noOrgContext: false, asCustomer: null })
+  if (orgOverride) headers['X-Org-Override'] = orgOverride
+  const res = await fetch(`${API_BASE}${path}`, { headers })
   if (!res.ok) {
     const err = new Error(res.status === 404 ? 'File not found' : 'Could not load file')
     err.status = res.status
