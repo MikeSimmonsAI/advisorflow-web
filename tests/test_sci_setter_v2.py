@@ -174,3 +174,13 @@ def test_who_is_this_is_answered_not_treated_as_bad_data():
     from app.services.programs.reply_rules import classify, BAD_DATA
     assert classify("who is this")["class"] != BAD_DATA
     assert classify("wrong number")["class"] == BAD_DATA
+
+
+def test_sending_the_guide_does_not_also_ask_if_they_want_it(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    conv = ai_setter.conversation_for(db, lead)
+    bad = {"action": "send_guide", "reply": "Would you like our planning guide?"}
+    assert any("AND asks" in p for p in ai_setter.validate_decision(bad, "k", conv))
+    ok = {"action": "send_guide", "reply": "Here it comes - I'm sending the planning guide now."}
+    assert ai_setter.validate_decision(ok, "k", conv) == []

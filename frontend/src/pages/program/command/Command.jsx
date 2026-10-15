@@ -169,6 +169,10 @@ export default function Command() {
             <button onClick={() => setTab('appts')}><Icon n="cal" />
               <span><b>{d.upcoming.visits_booked ? `${d.upcoming.visits_booked} appointment${d.upcoming.visits_booked === 1 ? '' : 's'} booked` : 'No appointments scheduled'}</b><br />
                 <small>{d.upcoming.visits_booked ? 'See who is coming in' : 'Get in touch to book a visit today'}</small></span>›</button>
+            {(d.tasks || []).map(t => (
+              <button key={`${t.kind}-${t.lead_id}`} onClick={() => setFamily(t.lead_id)}><Icon n="mail" />
+                <span><b>Mail a printed guide · {t.name}</b><br />
+                  <small>{t.note || 'Confirm the address, mail it, then mark it done'}</small></span>›</button>))}
           </div>
         </>}
       </>}
@@ -316,6 +320,13 @@ function Family({ id, onBack, toast, toastText }) {
       api.get(`/program/command/slots?lead_id=${id}`).then(setSlots).catch(() => {})
     } catch (e) { toast(e.message || 'Could not book.') } finally { setBusy(false) }
   }
+  const mailTask = async done => {
+    try {
+      await api.post('/program/command/mail-task', { lead_id: id, done })
+      toast(done ? 'Marked as mailed.' : 'Task added: mail a printed guide.')
+      load()
+    } catch (e) { toast(e.message || 'Could not update the task.') }
+  }
   const markHandled = async () => {
     try { await api.post(`/program/responses/${f.response_id}/mark`, { state: 'closed' }); toast('Marked handled.'); load() }
     catch (e) { toast(e.message || 'Could not update.') }
@@ -338,6 +349,7 @@ function Family({ id, onBack, toast, toastText }) {
           {menu && <div className="cmd-menu" onClick={() => setMenu(false)}>
             <a href={`/leads/${id}`}>Open full family record</a>
             {f.response_id && <button onClick={markHandled}>Mark handled</button>}
+            {!f.mail_task && <button onClick={() => mailTask(false)}>Add task: mail a printed guide</button>}
             {f.phone && <button onClick={() => { navigator.clipboard?.writeText(f.phone).then(() => toast('Phone copied.')).catch(() => {}) }}>Copy phone number</button>}
           </div>}
         </span>
@@ -379,6 +391,13 @@ function Family({ id, onBack, toast, toastText }) {
         {f.booking && <p className="cmd-booked"><Icon n="check" /> Booked {new Date(f.booking.when).toLocaleString([], { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · {f.booking.label || 'Visit'}</p>}
       </section>
 
+      {f.mail_task && <section className="cmd-card cmd-next">
+        <h3><Icon n="mail" /> Printed guide by mail</h3>
+        {f.mail_task.done
+          ? <p>Mailed{f.mail_task.done_by ? ` by ${f.mail_task.done_by}` : ''}{f.mail_task.done_at ? ` · ${new Date(f.mail_task.done_at).toLocaleDateString()}` : ''}.</p>
+          : <><p>The family asked for a printed guide. Confirm the address, mail it, then mark it done.{f.mail_task.note ? ` (${f.mail_task.note})` : ''}</p>
+            <div className="cmd-send"><button className="primary" onClick={() => mailTask(true)}>Mark as mailed</button></div></>}
+      </section>}
       <section className="cmd-card cmd-next">
         <h3><Icon n="bulb" /> Suggested next step</h3>
         <p>{f.suggestion.title}.</p>

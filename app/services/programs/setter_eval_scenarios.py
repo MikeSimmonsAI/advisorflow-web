@@ -258,7 +258,7 @@ sc("s082", "legal", "Mabel",
 sc("s083", "short", "Tyrone",
    ("?", "answer"),)
 sc("s084", "short", "Keisha",
-   ("k", "answer,wait", NO_BOOK),)
+   ("k", "answer,wait,send_guide", NO_BOOK),)
 sc("s085", "slang", "Dwayne",
    ("ya I'm down. wat days u got", "offer_times"),
    ("2nd 1", "book", {"booked": True}))
@@ -275,7 +275,7 @@ sc("s090", "indirect", "Chester",
 sc("s091", "typos", "Bessie",
    ("i wud like the guid and to tlk", "send_guide,offer_times"),)
 sc("s092", "emoji", "Monica",
-   ("👍", "answer,wait", NO_BOOK),)
+   ("👍", "answer,wait,send_guide", NO_BOOK),)
 
 # ── multi-turn journeys ──────────────────────────────────────────────────────
 sc("s093", "journey", "Agnes",
