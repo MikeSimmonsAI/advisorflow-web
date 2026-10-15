@@ -229,20 +229,58 @@ def run(db: Session, org_id: str, now: datetime = None) -> Dict:
             "problems": len(open_), "acknowledged": sum(1 for c in out if c["acknowledged"]), "checks": out}
 
 
-# ── alerting: email the owner once per problem per day ──────────────────────
+# ── alerting: ONE notice per unchanged incident ──────────────────────────────
+# An incident is a check key plus its signature (what is wrong and who it is
+# about). The owner hears about it once. The same unchanged finding is not
+# repeated - not after a deploy or restart (remembered in the database), not
+# the next morning - until REPEAT_AFTER has passed. A materially different
+# finding (new signature: new people, a different count) is a new incident
+# and is sent at once. Acknowledged findings stay quiet until they change.
+REPEAT_AFTER = timedelta(days=7)
 _alerted: Dict[str, str] = {}
 
 
+def _marker(c: Dict) -> str:
+    return "[%s:%s]" % (c["key"], c["signature"])
+
+
+def _already_alerted(db: Session, prog, c: Dict, now: datetime) -> bool:
+    from app.models.program_models import ProgramAlert
+    base = (db.query(ProgramAlert.id)
+            .filter(ProgramAlert.organization_id == prog.organization_id, ProgramAlert.kind == "self_check"))
+    if base.filter(ProgramAlert.created_at >= now - REPEAT_AFTER,
+                   ProgramAlert.message.like("%%%s%%" % _marker(c))).first() is not None:
+        return True
+    # Notices written before incident markers carried only "[key]": honour them
+    # for the rest of that day so this deploy does not repeat tonight's notice.
+    since = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return base.filter(ProgramAlert.created_at >= since,
+                       ProgramAlert.message.like("%%[%s]%%" % c["key"])).first() is not None
+
+
+# Kept for callers/tests that ask the old question.
 def _alerted_today(db: Session, prog, key: str, now: datetime) -> bool:
-    """Once per problem per day, remembered in the DATABASE. The in-memory
-    note alone was forgotten on every restart, so a day of deploys texted the
-    owner the same problem again and again (Oct 14: six times in 30 minutes)."""
     from app.models.program_models import ProgramAlert
     since = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return (db.query(ProgramAlert.id)
             .filter(ProgramAlert.organization_id == prog.organization_id, ProgramAlert.kind == "self_check",
-                    ProgramAlert.created_at >= since, ProgramAlert.message.like("%%[%s]%%" % key))
+                    ProgramAlert.created_at >= since, ProgramAlert.message.like("%%[%s%%" % key))
             .first()) is not None
+
+
+def _lock(db: Session, prog) -> bool:
+    """Two processes checking at the same moment must not both send: a
+    transaction-scoped Postgres advisory lock per program (no-op elsewhere)."""
+    try:
+        if db.bind is None or db.bind.dialect.name != "postgresql":
+            return True
+        from sqlalchemy import text
+        import zlib
+        key = zlib.crc32(("self_check:" + prog.id).encode()) & 0x7FFFFFFF
+        return bool(db.execute(text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": key}).scalar())
+    except Exception:                                    # noqa: BLE001
+        db.rollback()
+        return True
 
 
 def alert_all(db: Session, now: datetime = None) -> int:
@@ -254,22 +292,26 @@ def alert_all(db: Session, now: datetime = None) -> int:
         if not ((prog.alert_email or prog.alert_phone) and prog.staff_sms_alerts_enabled):
             continue
         res = run(db, prog.organization_id, now)
-        day = now.strftime("%Y-%m-%d")
+        if not _lock(db, prog):
+            continue
+        for c in res["checks"]:
+            c.setdefault("signature", signature(c))
         new = [c for c in res["checks"] if not c["ok"] and not c.get("acknowledged")
-               and _alerted.get("%s:%s" % (prog.id, c["key"])) != day
-               and not _alerted_today(db, prog, c["key"], now)]
+               and _alerted.get("%s:%s" % (prog.id, c["key"])) != c["signature"]
+               and not _already_alerted(db, prog, c, now)]
         if not new:
+            db.commit()
             continue
         lines = ["%s - %s%s" % (c["title"], c["detail"], (" (" + ", ".join(c["people"][:6]) + ")") if c["people"] else "")
                  for c in new]
         msg = "System self-check found %d problem(s): %s %s" % (
-            len(new), " | ".join(lines), " ".join("[%s]" % c["key"] for c in new))
+            len(new), " | ".join(lines), " ".join(_marker(c) for c in new))
         # OWNER ONLY: internal problems never go to the team list.
         res = owner_system_alert(db, prog, "self_check", msg)
         db.commit()
         ok = any(v and v[0] for v in res.values())
         if ok:
             for c in new:
-                _alerted["%s:%s" % (prog.id, c["key"])] = day
+                _alerted["%s:%s" % (prog.id, c["key"])] = c["signature"]
             sent += 1
     return sent

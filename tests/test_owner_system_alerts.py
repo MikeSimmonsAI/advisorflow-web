@@ -97,3 +97,29 @@ def test_the_simulator_reaches_nobodys_bell(program, sample_advisor):
     before = db.query(Notification).count()
     responses.on_inbound(db, lead, "Can I schedule a visit?", "sms", staff_alerts=False, run_setter=False)
     assert db.query(Notification).count() == before
+
+
+def test_one_notice_per_unchanged_incident_across_days_and_restarts(program):
+    from datetime import datetime, timedelta
+    db, prog = program["db"], program["prog"]
+    _setup(db, prog)
+    self_check._alerted.clear()
+    found = {"key": "texts_too_close", "ok": False, "title": "Texts spaced as planned",
+             "detail": "8 people", "people": []}
+    calls, fake = _capture()
+    t0 = datetime.utcnow()                       # alert rows are stamped with the real clock
+    with patch("app.services.programs.responses._deliver_staff_alert", side_effect=fake):
+        with patch.object(self_check, "run", return_value={"checks": [dict(found)]}):
+            assert self_check.alert_all(db, t0) == 1
+            self_check._alerted.clear()                          # restart
+            assert self_check.alert_all(db, t0 + timedelta(minutes=5)) == 0
+            self_check._alerted.clear()
+            assert self_check.alert_all(db, t0 + timedelta(days=1)) == 0   # next day, unchanged
+        changed = dict(found, detail="9 people")                  # a materially new incident
+        with patch.object(self_check, "run", return_value={"checks": [changed]}):
+            self_check._alerted.clear()
+            assert self_check.alert_all(db, t0 + timedelta(days=1, hours=1)) == 1
+        with patch.object(self_check, "run", return_value={"checks": [dict(found)]}):
+            self_check._alerted.clear()
+            assert self_check.alert_all(db, t0 + timedelta(days=8)) == 1   # long-standing: a weekly reminder
+    assert len(calls) == 6                                       # three notices, email + text each
