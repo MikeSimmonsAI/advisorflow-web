@@ -119,7 +119,7 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
         rq = rq.filter(ProgramResponse.location_id == location_id)
     open_rows = rq.filter(ProgramResponse.handling_status != "closed").all()
     owner_test_ids = set()
-    if getattr(user, "role", None) == "god_admin":
+    if False:  # test conversations are never shown in SCI Live (owner, Oct 15)
         # The owner sees his OWN live test conversation (marked TEST) so he can
         # run it from his phone. Nobody else does, and it is never counted.
         from app.services.test_records import OWNER_TEST_LAST_NAME
@@ -236,8 +236,17 @@ def _unknown_senders(db, org, location_id=None) -> list:
     if location_id:
         q = q.filter(ProgramUnmatchedReply.location_id == location_id)
     locs = _locations(db, org)
+    # The owner's own test phone / email are tests, never "unknown senders".
+    from app.models.program_models import OutreachProgram
+    from app.services.test_records import _digits
+    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org).first()
+    own_phone = _digits(getattr(prog, "alert_phone", None)) if prog else ""
+    own_email = (getattr(prog, "alert_email", None) or "").strip().lower() if prog else ""
     out = []
     for u in q.order_by(ProgramUnmatchedReply.received_at.desc()).limit(50).all():
+        frm = (u.from_address or "").strip().lower()
+        if (own_phone and _digits(frm) == own_phone) or (own_email and frm == own_email):
+            continue
         mid = u.mailbox_message_id or ""
         is_vm = mid.startswith("vm:") or (u.subject or "").lower() == "voicemail"
         is_email = "@" in (u.from_address or "")
