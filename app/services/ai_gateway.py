@@ -113,6 +113,7 @@ CAPABILITY_MODELS: Dict[str, str] = {
     "concierge_chat":         "gpt-4o",       # concierge conversation
     "support_chat":           "gpt-4o",       # support assistant
     "pipeline_reply":         "gpt-4o",       # pipeline conversation reply
+    "sci_appointment_setter": "gpt-4o",       # SCI setter: answer a family, offer real times
     "draft_reply":            "gpt-4o-mini",  # reply draft for a person
     "draft_reply_rich":       "gpt-4o",       # the richer draft path
     "campaign_copy":          "gpt-4o-mini",  # campaign message generation

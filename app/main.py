@@ -1790,6 +1790,16 @@ async def _program_sla_loop():
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("program self-check error: %s", exc, exc_info=True)
+                        # Appointment setter: replies held for the family's
+                        # contact hours go out once those hours open.
+                        try:
+                            from app.services.programs import ai_setter as _setter
+                            _sw = _setter.sweep(db)
+                            if _sw.get("sent"):
+                                out["setter_sent"] = _sw["sent"]
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("appointment setter sweep error: %s", exc, exc_info=True)
                         # Daily batch: programs whose manager switched it on
                         # approve the day's new people once, on sending days.
                         try:

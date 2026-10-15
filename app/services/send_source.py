@@ -47,6 +47,7 @@ CAMPAIGN = "campaign"
 
 # ── Engine-initiated ────────────────────────────────────────────────────────
 CADENCE = "cadence"
+SCI_SETTER = "sci_appointment_setter"   # the SCI appointment setter answering a family
 AI_CONVERSATION = "ai_conversation"
 PIPELINE_AUTO_REPLY = "pipeline_auto_reply"
 APPOINTMENT_FOLLOWUP = "appointment_followup"
@@ -70,6 +71,7 @@ ALL_SOURCES = (
     VOICE_BOOKING_LINK,
     AI_EMPLOYEE,
     WHOLESALE_PROGRAM,
+    SCI_SETTER,
     DEMO,
 )
 
@@ -90,6 +92,7 @@ _LABELS = {
     APPOINTMENT_FOLLOWUP: ("Appointment", "Confirmation, reminder, thank-you or review request tied to an appointment."),
     VOICE_BOOKING_LINK: ("Voice booking", "Sent during or after an AI voice call."),
     AI_EMPLOYEE: ("AI employee", "Sent by an AI workforce employee."),
+    SCI_SETTER: ("Appointment setter", "The SCI appointment setter answered a family's reply within the program's rules."),
     WHOLESALE_PROGRAM: ("Wholesale program", "A Wholesale seller SMS program message (e.g. opt-in confirmation), sent through the program gate."),
     DEMO: ("Demo", "Simulated. No provider was ever called."),
 }

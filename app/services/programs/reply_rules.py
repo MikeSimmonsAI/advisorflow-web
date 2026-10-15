@@ -11,8 +11,27 @@ from typing import Dict, List, Optional, Tuple
 
 HOT, ACTIVE, LOW, OPT_OUT, BAD_DATA = "hot", "active", "low", "opt_out", "bad_data"
 WRONG_PERSON = "wrong_person"
+AUTO_REPLY = "auto_reply"
 LABELS = {HOT: "HOT", ACTIVE: "ACTIVE", LOW: "LOW", OPT_OUT: "OPT-OUT", BAD_DATA: "BAD DATA",
-          WRONG_PERSON: "WRONG PERSON"}
+          WRONG_PERSON: "WRONG PERSON", AUTO_REPLY: "AUTO-REPLY"}
+
+# AN AUTOMATIC REPLY IS NOT A PERSON. "I'm driving with Do Not Disturb on" /
+# out-of-office / "this is an automated message" are the phone or mailbox
+# answering for them. Never treated as interest (Oct 14: "call me later" in a
+# driving auto-reply scored HOT), never answered (that is how message loops
+# start), and the regular, spaced follow-up continues.
+_AUTO_REPLY_PATTERNS = (
+    r"(i'?m|i am|currently) driving|driving (right now|with do not disturb)|do not disturb while driving|"
+    r"(do not disturb|dnd) (is )?(on|enabled)|i('| wi)ll see your message when i|"
+    r"\b(auto(matic|mated)?[- ]?(reply|response|message))\b|this is an automated|"
+    r"out of (the )?office|away from (the|my) (office|phone|desk)|on vacation (until|through)|"
+    r"(reply|replying|respond(ing)?) (when|once) i('| a)m (able|free|available|back)|"
+    r"sent from my car|i('| a)m in a meeting and will"
+)
+
+
+def is_auto_reply(body: str) -> bool:
+    return bool(re.search(_AUTO_REPLY_PATTERNS, (body or "").strip().lower()))
 # WHAT the person is asking for / telling us (several can apply). Kept apart
 # from the class above, which is the URGENCY / handling lane: HOT, ACTIVE, LOW,
 # or a terminal lane (OPT-OUT, BAD DATA, WRONG PERSON).
@@ -85,6 +104,8 @@ def classify(body: str, reply_classification: Optional[str] = None) -> Dict:
     bereaved = bool(re.search(_BEREAVEMENT, text))
     if re.search(_STOP_WORDS, text):
         return {"class": OPT_OUT, "reasons": ["asked to stop"]}
+    if is_auto_reply(text) and not re.search(_OPT_OUT_PHRASES, text):
+        return {"class": AUTO_REPLY, "reasons": ["automatic reply (driving / away), not a person"]}
     if re.search(_WRONG_PERSON_PATTERNS, text) and not hot:
         return {"class": WRONG_PERSON, "reasons": ["says we have the wrong person"]}
     if re.search(_BAD_DATA_PATTERNS, text) and not hot:
@@ -146,7 +167,7 @@ def suggested_reply(cls: str, found: List[str], *, first_name: Optional[str], co
                     location: Optional[str], channel: str, bereaved: bool = False) -> Optional[str]:
     """A DRAFT for the person to edit and send. Never sent by EvoSys. Asks the
     family to reply - never to call."""
-    if cls in (OPT_OUT, LOW):
+    if cls in (OPT_OUT, LOW, AUTO_REPLY):
         return None
     name = (first_name or "").strip().title()
     hi = "Hi %s," % name if name else "Hello,"
@@ -194,6 +215,7 @@ RECOMMENDED = {
     OPT_OUT: "Do not contact again. Automation has been stopped for this person.",
     BAD_DATA: "Fix the contact record in Data Review before any further outreach.",
     WRONG_PERSON: "Wrong person: the contact is held in Data Review; confirm the right person before anything else.",
+    AUTO_REPLY: "Automatic reply from their phone - not answered; the regular, spaced follow-up continues.",
 }
 
 
@@ -225,6 +247,9 @@ def alert_plan(cls: str) -> Optional[Dict]:
         return {"kind": LOW, "management": False, "external": True}
     if cls in (BAD_DATA, WRONG_PERSON):
         return {"kind": cls, "management": False, "external": True}
+    if cls == AUTO_REPLY:
+        # Logged in the app; nobody's phone buzzes for a car's auto-text.
+        return {"kind": LOW, "management": False, "external": False}
     return None                                # OPT_OUT: closed, no alert
 
 

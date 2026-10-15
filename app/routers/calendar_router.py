@@ -1272,63 +1272,24 @@ def _tz_utc():
     return _timezone.utc
 
 
-@router.get("/slots")
-def get_available_slots(
-    advisor_id: str = Query(...),
-    date: str = Query(..., description="YYYY-MM-DD"),
-    token: str = Query(..., description="Booking token for authorization"),
-    db: Session = Depends(get_db),
-):
-    """
-    Public endpoint — no auth required (token proves the link is valid).
-    Returns available 30-minute appointment slots for a given advisor on a given date.
-
-    Checks:
-      1. Token is valid and belongs to this advisor
-      2. Date is Mon-Fri, within 14 days from today
-      3. The advisor's connected external calendar (Microsoft or Google), read
-         once for the whole day through the tested provider registry
-      4. Existing booked/confirmed BookingLink records for that day
-
-    FAILS CLOSED. If the advisor has a calendar connected and it cannot be read,
-    this returns NO slots and a reason - never the whole day as free. See
-    `_booking_window_busy` for the two fail-open bugs this replaced.
-
-    Returns available slot start times as naive local ISO 8601 strings.
-    """
-    from datetime import date as date_cls, timedelta, timezone
-
-    # ── Validate token ────────────────────────────────────────────────────────
-    booking = db.query(BookingLink).filter(BookingLink.token == token).first()
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking link not found")
-    if booking.user_id != advisor_id:
-        raise HTTPException(status_code=403, detail="Token does not match advisor")
-
-    # ── Parse & validate date ─────────────────────────────────────────────────
-    try:
-        target_date = date_cls.fromisoformat(date)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-
-    # TODAY IN CENTRAL, not on the server's UTC clock: after 7 PM Central the
-    # UTC date is already tomorrow, and the family's "Today" was refused as past.
-    try:
-        from zoneinfo import ZoneInfo as _ZI
-        today = datetime.now(timezone.utc).astimezone(_ZI("America/Chicago")).date()
-    except Exception:                                    # noqa: BLE001
-        today = date_cls.today()
-    max_date = today + timedelta(days=14)
-    if target_date < today:
-        raise HTTPException(status_code=400, detail="Date is in the past")
-    if target_date > max_date:
-        raise HTTPException(status_code=400, detail="Date is more than 14 days out")
-    if target_date.weekday() >= 5:  # Saturday=5, Sunday=6
-        return {"date": date, "slots": [], "reason": "Weekend — no appointments"}
-
-    advisor = db.query(User).filter(User.id == advisor_id).first()
-    if not advisor:
-        raise HTTPException(status_code=404, detail="Advisor not found")
+def compute_day_slots(db: Session, advisor, target_date, *, program_visit: bool, today=None) -> dict:
+    """THE ONE SLOT ENGINE for a booking day: office hours, the advisor's
+    booked/confirmed BookingLinks, their connected calendar (fails closed), the
+    same-day 2-hour buffer, and 60-minute on-the-hour visits for an outreach
+    program. The public booking page and the SCI appointment setter both use
+    it, so a time the AI offers is a time the page would offer.
+    Returns {"date", "advisor_id", "slots": [local ISO], "reason"?, "calendar_error"?}."""
+    from datetime import timedelta, timezone
+    from datetime import date as date_cls
+    advisor_id = advisor.id
+    date = target_date.isoformat()
+    _program_visit = bool(program_visit)
+    if today is None:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            today = datetime.now(timezone.utc).astimezone(_ZI("America/Chicago")).date()
+        except Exception:                                # noqa: BLE001
+            today = date_cls.today()
 
     # ── Build all candidate 30-min slots 9am-5pm Central ─────────────────────
     # We work in UTC internally; Chicago is UTC-5 (CST) / UTC-6 (CDT).
@@ -1368,22 +1329,9 @@ def get_available_slots(
 
     # OUTREACH PROGRAM VISITS ARE 60 MINUTES: a booked visit holds its whole
     # hour, and a family is offered on-the-hour starts whose full hour is free.
-    from app.models.models import Lead as _Lead
-    _blead = db.query(_Lead).filter(_Lead.id == booking.lead_id).first()
-    _program_visit = False
-    try:
-        from app.services.programs.identity import program_for_org as _pfo
-        _program_visit = bool(_blead is not None and _pfo(db, _blead.organization_id) is not None)
-    except Exception:                                    # noqa: BLE001
-        _program_visit = False
     if _program_visit:
         for (h, m) in list(booked_times):
             booked_times.add((h, m + 30) if m < 30 else (h + 1, m - 30))
-        try:
-            from app.services.programs import booking_events as _be
-            _be.record(db, booking, _be.DAY_VIEWED, date)
-        except Exception:                                # noqa: BLE001
-            pass
 
     available = [s for s in candidate_slots if (s.hour, s.minute) not in booked_times]
 
@@ -1452,6 +1400,82 @@ def get_available_slots(
         "advisor_id": advisor_id,
         "slots": [s.strftime("%Y-%m-%dT%H:%M:00") for s in available],
     }
+
+
+@router.get("/slots")
+def get_available_slots(
+    advisor_id: str = Query(...),
+    date: str = Query(..., description="YYYY-MM-DD"),
+    token: str = Query(..., description="Booking token for authorization"),
+    db: Session = Depends(get_db),
+):
+    """
+    Public endpoint — no auth required (token proves the link is valid).
+    Returns available 30-minute appointment slots for a given advisor on a given date.
+
+    Checks:
+      1. Token is valid and belongs to this advisor
+      2. Date is Mon-Fri, within 14 days from today
+      3. The advisor's connected external calendar (Microsoft or Google), read
+         once for the whole day through the tested provider registry
+      4. Existing booked/confirmed BookingLink records for that day
+
+    FAILS CLOSED. If the advisor has a calendar connected and it cannot be read,
+    this returns NO slots and a reason - never the whole day as free. See
+    `_booking_window_busy` for the two fail-open bugs this replaced.
+
+    Returns available slot start times as naive local ISO 8601 strings.
+    """
+    from datetime import date as date_cls, timedelta, timezone
+
+    # ── Validate token ────────────────────────────────────────────────────────
+    booking = db.query(BookingLink).filter(BookingLink.token == token).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking link not found")
+    if booking.user_id != advisor_id:
+        raise HTTPException(status_code=403, detail="Token does not match advisor")
+
+    # ── Parse & validate date ─────────────────────────────────────────────────
+    try:
+        target_date = date_cls.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+
+    # TODAY IN CENTRAL, not on the server's UTC clock: after 7 PM Central the
+    # UTC date is already tomorrow, and the family's "Today" was refused as past.
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        today = datetime.now(timezone.utc).astimezone(_ZI("America/Chicago")).date()
+    except Exception:                                    # noqa: BLE001
+        today = date_cls.today()
+    max_date = today + timedelta(days=14)
+    if target_date < today:
+        raise HTTPException(status_code=400, detail="Date is in the past")
+    if target_date > max_date:
+        raise HTTPException(status_code=400, detail="Date is more than 14 days out")
+    if target_date.weekday() >= 5:  # Saturday=5, Sunday=6
+        return {"date": date, "slots": [], "reason": "Weekend — no appointments"}
+
+    advisor = db.query(User).filter(User.id == advisor_id).first()
+    if not advisor:
+        raise HTTPException(status_code=404, detail="Advisor not found")
+
+    # OUTREACH PROGRAM VISITS ARE 60 MINUTES (see compute_day_slots).
+    from app.models.models import Lead as _Lead
+    _blead = db.query(_Lead).filter(_Lead.id == booking.lead_id).first()
+    _program_visit = False
+    try:
+        from app.services.programs.identity import program_for_org as _pfo
+        _program_visit = bool(_blead is not None and _pfo(db, _blead.organization_id) is not None)
+    except Exception:                                    # noqa: BLE001
+        _program_visit = False
+    if _program_visit:
+        try:
+            from app.services.programs import booking_events as _be
+            _be.record(db, booking, _be.DAY_VIEWED, date)
+        except Exception:                                # noqa: BLE001
+            pass
+    return compute_day_slots(db, advisor, target_date, program_visit=_program_visit, today=today)
 
 
 @router.post("/send-reminders")
