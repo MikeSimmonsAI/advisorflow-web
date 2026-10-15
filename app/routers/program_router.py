@@ -2884,7 +2884,8 @@ def outbox(day: Optional[str] = Query(None, description="YYYY-MM-DD, Central; de
 
     sent = []
     texts = (db.query(Message, Lead).join(Lead, Lead.id == Message.lead_id)
-             .filter(Lead.organization_id == org_id, Message.sent_at >= start, Message.sent_at < end).all())
+             .filter(Lead.organization_id == org_id, Lead.is_test.isnot(True),   # test contacts never in the counts
+                     Message.sent_at >= start, Message.sent_at < end).all())
     for m, lead in texts:
         loc, fam, _ = where(lead.id)
         st = (m.delivery_status or m.twilio_status or "sent").lower()
@@ -2893,7 +2894,7 @@ def outbox(day: Optional[str] = Query(None, description="YYYY-MM-DD, Central; de
                      "location": loc, "channel": "text", "to": lead.phone, "subject": None,
                      "preview": (m.body or "")[:400], "status": st})
     emails = (db.query(EmailMessage, Lead).join(Lead, Lead.id == EmailMessage.lead_id)
-              .filter(Lead.organization_id == org_id, EmailMessage.sent_at >= start,
+              .filter(Lead.organization_id == org_id, Lead.is_test.isnot(True), EmailMessage.sent_at >= start,
                       EmailMessage.sent_at < end).all())
     import re as _re
     for e, lead in emails:
