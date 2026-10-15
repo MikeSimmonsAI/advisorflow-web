@@ -293,6 +293,11 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
     if booking:
         advisor = db.query(User).filter(User.id == booking.user_id).first()
         lead = db.query(Lead).filter(Lead.id == booking.lead_id).first()
+        from app.services.sci_staging_demo import is_demo_lead as _is_demo_lead
+        if _is_demo_lead(lead):
+            # A made-up staging demo family never gets a calendar event, a case
+            # file or a confirmation text.
+            raise HTTPException(status_code=409, detail="Demo family - nothing is booked for real.")
 
         # ── IDEMPOTENCY ─────────────────────────────────────────────────────
         #

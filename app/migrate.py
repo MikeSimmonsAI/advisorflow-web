@@ -151,6 +151,18 @@ def main(argv=None) -> int:
         log.error("SCI staging bootstrap errored (deploy continues): %s",
                   type(e).__name__)
 
+    # ── 3c. SCI STAGING DEMO FAMILIES (fails closed outside SCI staging) ──
+    try:
+        from app.deps import SessionLocal
+        from app.services import sci_staging_demo
+        _db = SessionLocal()
+        try:
+            log.info("sci staging demo: %s", sci_staging_demo.ensure(_db))
+        finally:
+            _db.close()
+    except Exception as e:                                   # noqa: BLE001
+        log.error("SCI staging demo errored (deploy continues): %s", type(e).__name__)
+
     # ── 4. SAY WHAT HAPPENED ──────────────────────────────────────────────
     log.info("migration outcome=%s elapsed=%ss columns_checked=%s",
              LAST_RUN["outcome"], LAST_RUN["elapsed_seconds"],

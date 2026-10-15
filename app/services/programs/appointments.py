@@ -150,8 +150,10 @@ def book(db: Session, prog, lead, slot: datetime, kind: str) -> Dict:
     advisor = program_advisor(db, prog)
     if advisor is None:
         return {"ok": False, "status": "no_calendar", "reason": "no booking calendar is set"}
-    if getattr(lead, "is_test", False) and not _staging():
-        # A SYNTHETIC contact in production never writes to a real calendar:
+    from app.services.sci_staging_demo import is_demo_lead
+    if (getattr(lead, "is_test", False) and not _staging()) or is_demo_lead(lead):
+        # A SYNTHETIC contact in production - and a made-up staging demo family
+    # anywhere - never writes to a real calendar:
         # the time is re-checked against the live calendar and reported as a
         # simulated booking - never as a confirmed one.
         free = still_free(db, prog, slot)
@@ -221,7 +223,8 @@ def notify_team_booked(db: Session, prog, lead, slot: datetime, kind: str) -> No
                 targets.append(("team", "sms", m["phone"]))
             if m.get("email"):
                 targets.append(("team", "email", m["email"]))
-    test = bool(getattr(lead, "is_test", False))
+    from app.services.sci_staging_demo import is_demo_lead
+    test = bool(getattr(lead, "is_test", False)) or is_demo_lead(lead)
     if test:
         targets = []                    # a synthetic contact never pages the team
     for aud, ch, to in targets:

@@ -100,6 +100,7 @@ import MobileApp from './mobile/routes'
 // endpoints, exactly as entitlements.py insists it must be.
 const ProgramCenter = lazyPage(() => import('./pages/program/ProgramCenter'))
 const ProgramLive = lazyPage(() => import('./pages/program/Live'))
+const ProgramCommand = lazyPage(() => import('./pages/program/command/Command'))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
@@ -720,7 +721,10 @@ function WorkspaceRoute() {
  */
 // /sci?to=live lands on the phone screen instead of the full Program Center.
 function sciLanding() {
-  try { return new URLSearchParams(window.location.search).get('to') === 'live' ? '/program/live' : '/program' }
+  try {
+    const to = new URLSearchParams(window.location.search).get('to')
+    return to === 'live' ? '/program/live' : to === 'command' ? '/program/command' : '/program'
+  }
   catch { return '/program' }
 }
 
@@ -1270,6 +1274,7 @@ export default function App() {
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
         <Route path="/program/live" element={<ProtectedRoute bare><ProgramLive /></ProtectedRoute>} />
+        <Route path="/program/command" element={<ProtectedRoute bare><ProgramCommand /></ProtectedRoute>} />
         <Route path="/program" element={<ProtectedRoute bare><ProgramCenter /></ProtectedRoute>} />
         <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute feature="reports" requireAdmin><Reports /></ProtectedRoute>} />

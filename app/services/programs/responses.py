@@ -383,6 +383,9 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
     used when the contact has none resolved, and a mismatch is called out in
     the summary rather than silently re-homing the family."""
     prog = identity.program_for_org(db, lead.organization_id)
+    from app.services.sci_staging_demo import is_demo_lead as _is_demo_lead
+    if _is_demo_lead(lead):
+        staff_alerts = False                  # a made-up staging family never pages anyone
     if prog is None:
         return None
     now = now or datetime.utcnow()
