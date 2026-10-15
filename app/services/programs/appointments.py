@@ -91,6 +91,30 @@ def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
     return out[:want], (None if out else "no open times in the next two weeks")
 
 
+def slots_on_day(db: Session, prog, day, want: int = 2) -> Tuple[List[datetime], Optional[str]]:
+    """Open times on one day the family asked for (morning and afternoon if
+    both exist). ([], reason) when that day has none."""
+    from app.routers.calendar_router import compute_day_slots
+    advisor = program_advisor(db, prog)
+    if advisor is None or day.weekday() >= 5:
+        return [], "no times that day"
+    res = compute_day_slots(db, advisor, day, program_visit=True, today=_today_central().date())
+    if res.get("calendar_error"):
+        return [], "the calendar cannot be read right now"
+    slots = [datetime.fromisoformat(x) for x in res.get("slots") or []]
+    if not slots:
+        return [], "no open times that day"
+    am = [s for s in slots if s.hour < 12]
+    pm = [s for s in slots if s.hour >= 12]
+    pick = ([am[0]] if am else []) + ([pm[0]] if pm else [])
+    for s in slots:
+        if len(pick) >= want:
+            break
+        if s not in pick:
+            pick.append(s)
+    return sorted(pick[:want]), None
+
+
 def describe(slot: datetime) -> str:
     return slot.strftime("%A, %B %-d at %-I:%M %p").replace(":00 ", " ")
 
