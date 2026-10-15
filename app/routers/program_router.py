@@ -2492,6 +2492,8 @@ def setter_stats(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_
     test contacts: AI replies sent / drafted, conversations people are
     handling, appointment offers, callback requests, bookings, confirmed."""
     from app.models.models import BookingLink, Message
+    from app.services import ai_gateway as _gw
+    from app.services.programs import ai_setter as _setter
     from app.models.program_models import ProgramConversation, ProgramConversationTurn
     from app.services import send_source as _ss
     prog = _program(db, user, managers_only=False)
@@ -2529,7 +2531,25 @@ def setter_stats(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_
         "booked_by_ai": sum(1 for c in convs if c.state == "booked"),
         "confirmed_visits": sum(1 for b in bookings if (b.status or "") in ("confirmed", "completed")),
         "setter_mode": getattr(prog, "ai_setter_mode", None) or "off",
+        "effective_mode": _setter.mode_of(prog),
+        "emergency_off": _setter.killed(),
+        "platform_background_ai": _gw.background_enabled(),
+        "runs_without_platform_switch": True,
     }
+
+
+@router.post("/setter/off")
+def setter_emergency_off(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """EMERGENCY OFF. Any manager may stop the appointment setter at once
+    (turning it ON stays the owner's decision). Held replies are dropped by
+    the next sweep; nothing further is answered or sent."""
+    prog = _program(db, user, managers_only=True)
+    before = getattr(prog, "ai_setter_mode", None) or "off"
+    prog.ai_setter_mode = "off"
+    db.commit()
+    import logging
+    logging.getLogger(__name__).warning("SCI setter EMERGENCY OFF by %s (was %s)", user.id, before)
+    return {"ok": True, "was": before, "mode": "off"}
 
 
 class SimulateReplyIn(BaseModel):

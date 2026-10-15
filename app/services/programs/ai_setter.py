@@ -52,7 +52,17 @@ _BANNED = [
 ]
 
 
+def killed() -> bool:
+    """EMERGENCY OFF for the SCI setter alone: AI_SCI_SETTER_ENABLED=false
+    stops every answer, send and held reply at once, whatever the program's
+    mode says. Unset = not killed (the program's own mode decides, default off)."""
+    import os
+    return (os.environ.get("AI_SCI_SETTER_ENABLED") or "").strip().lower() in ("0", "false", "no", "off")
+
+
 def mode_of(prog) -> str:
+    if killed():
+        return OFF
     m = (getattr(prog, "ai_setter_mode", None) or OFF).strip().lower()
     return m if m in (OFF, DRAFT, AUTO) else OFF
 
@@ -236,13 +246,21 @@ def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Opt
     ctx = _context(db, prog, lead, conv, resp)
     if note:
         ctx["correction"] = note
-    r = ai_gateway.chat_completion(
-        feature="sci_appointment_setter", capability="sci_appointment_setter",
-        mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND, actor=actor,
-        org_id=prog.organization_id, client=_get_client(),
-        messages=[{"role": "system", "content": system},
-                  {"role": "user", "content": json.dumps(ctx, default=str)}],
-        temperature=0.4, response_format={"type": "json_object"})
+    from contextlib import nullcontext
+    # A family's reply runs as BACKGROUND AI. It no longer needs the platform-
+    # wide background switch: the gateway grants THIS feature for THIS
+    # organization only, and only while the program's own mode is draft/auto
+    # and the SCI emergency switch is not thrown. Every cap still applies.
+    grant = (ai_gateway.scoped_grant("sci_appointment_setter", prog.organization_id)
+             if (not actor and mode_of(prog) in (DRAFT, AUTO)) else nullcontext())
+    with grant:
+        r = ai_gateway.chat_completion(
+            feature="sci_appointment_setter", capability="sci_appointment_setter",
+            mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND, actor=actor,
+            org_id=prog.organization_id, client=_get_client(),
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": json.dumps(ctx, default=str)}],
+            temperature=0.4, response_format={"type": "json_object"})
     raw = r.choices[0].message.content
     d = json.loads(raw)
     if d.get("action") not in ACTIONS:
