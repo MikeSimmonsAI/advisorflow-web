@@ -169,12 +169,14 @@ def test_marion_existing_plan_offer_review_and_unsafe_text_is_held(setter, sampl
     fake = _Fake([
         _d("answer", "Thank you, Marion. Would you like to review your prearrangement file or your flower care service?"),
         _d("offer_times", "Prices go up next month, so act now - {TIMES}?"),
+        _d("offer_times", "Prices go up next month, so act now - {TIMES}?"),   # told once, does it again
     ])
     _run(db, lead, "I already have a plan with you", fake)
     resp, conv = _run(db, lead, "The prearrangement file", fake)
     held = _ai_turns(db, conv)[-1]
     assert held.delivery == "blocked" and "pressure" in held.reason       # fabricated urgency never goes out
     assert conv.state == "human"
+    assert "broke these rules" in fake.calls[-1]["messages"][1]["content"]  # it was given one chance to fix it
 
 
 # ── guards ───────────────────────────────────────────────────────────────────

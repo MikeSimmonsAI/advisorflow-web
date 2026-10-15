@@ -2485,6 +2485,49 @@ def setter_simulate(body: SetterSimIn, db: Session = Depends(get_db), user: User
             "conversation": _conv_json(db, conv, lead, turns=True) if conv else None}
 
 
+class SetterEvalIn(BaseModel):
+    scenario_id: str
+    run_tag: str = "r1"
+    model: str = "gpt-4o"            # gpt-4o | gpt-4o-mini (benchmark)
+    location_id: Optional[str] = None
+
+
+@router.get("/setter/eval/scenarios")
+def setter_eval_scenarios(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services.programs.setter_eval_scenarios import SCENARIOS
+    _program(db, user)
+    return {"count": len(SCENARIOS), "items": [{"id": s["id"], "category": s["category"],
+                                                  "turns": len(s["turns"])} for s in SCENARIOS]}
+
+
+@router.post("/setter/eval")
+def setter_eval(body: SetterEvalIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """OWNER ONLY. Run one evaluation conversation through the real setter as
+    the owner's own manual AI action, with a fresh SYNTHETIC contact that can
+    never be messaged (bookings are simulated against the live calendar).
+    Returns every turn and what failed."""
+    from app.services.programs import setter_eval as E
+    if getattr(user, "role", None) != "god_admin":
+        raise HTTPException(status_code=403, detail="Only the owner runs setter evaluations.")
+    prog = _program(db, user)
+    sc = E.scenario(body.scenario_id)
+    if sc is None:
+        raise HTTPException(status_code=404, detail="No such scenario.")
+    cap = {"gpt-4o": "sci_appointment_setter", "gpt-4o-mini": "sci_appointment_setter_mini"}.get(body.model)
+    if cap is None:
+        raise HTTPException(status_code=422, detail="model must be gpt-4o or gpt-4o-mini")
+    loc = body.location_id
+    if not loc:
+        p = (db.query(LocationProfile).filter(LocationProfile.organization_id == prog.organization_id,
+                                              LocationProfile.is_review_bucket.isnot(True),
+                                              LocationProfile.location_id.isnot(None))
+             .order_by(LocationProfile.official_name).first())
+        loc = p.location_id if p else None
+    tag = "".join(ch for ch in body.run_tag if ch.isalnum())[:16] or "r1"
+    return E.run_scenario(db, prog, user, sc, run_tag="%s%s" % (tag, "m" if cap.endswith("mini") else ""),
+                          location_id=loc, capability=cap)
+
+
 @router.get("/setter/stats")
 def setter_stats(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db),
                  user: User = Depends(require_tenant_or_observer)):

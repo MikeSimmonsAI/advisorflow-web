@@ -1809,6 +1809,11 @@ async def _program_sla_loop():
                             _sw = _setter.sweep(db)
                             if _sw.get("sent"):
                                 out["setter_sent"] = _sw["sent"]
+                            # Contextual follow-ups that are due (times offered
+                            # and unanswered, guide sent, "check back later").
+                            _fu = _setter.followup_sweep(db)
+                            if _fu.get("sent") or _fu.get("drafted"):
+                                out["setter_followups"] = _fu
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("appointment setter sweep error: %s", exc, exc_info=True)

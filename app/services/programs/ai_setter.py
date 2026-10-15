@@ -38,9 +38,19 @@ from app.services.programs import appointments as A
 log = logging.getLogger(__name__)
 
 OFF, DRAFT, AUTO = "off", "draft", "auto"
-MAX_AI_TURNS = 8
+# Operational limits instead of a blunt eight-turn cut-off: a long, healthy
+# conversation keeps going; a runaway one (or a family texting all day) is
+# handed to a person. Confidence and risk decide hand-offs, not turn counts.
+MAX_AI_PER_DAY = 6            # AI messages to one family in one Central day
+MAX_AI_TOTAL = 30             # AI messages to one family, ever
+MAX_FOLLOWUPS = 2             # unanswered follow-ups the setter may send
+LOW_CONFIDENCE = 0.4          # below this the setter does not send; a person reviews
+OFFERED_FOLLOWUP = timedelta(days=2)     # times offered, no answer: one gentle check-in
+INFO_FOLLOWUP = timedelta(days=3)        # guide sent, no answer: one check-in
 FOLLOWUP_GAP = timedelta(hours=20)
-ACTIONS = ("answer", "offer_times", "book", "callback", "send_guide", "handoff", "wait")
+ACTIONS = ("answer", "offer_times", "book", "callback", "send_guide", "mail_guide", "follow_up_later",
+           "handoff", "close", "wait")
+MAX_AI_TURNS = MAX_AI_TOTAL   # kept for older imports
 
 _BANNED = [
     (r"\$\s?\d|\b\d+\s?(dollars|per month|a month)\b", "mentions a price"),
@@ -48,6 +58,8 @@ _BANNED = [
     (r"\b(act now|limited time|only today|expires?|last chance|hurry|before it'?s too late|"
      r"prices? (are )?(going|go) up|running out)\b", "creates pressure"),
     (r"\b(service corporation|sci\b|dignity memorial)", "names the parent company"),
+    (r"\b(it'?s|is|are|completely|totally|100%) free\b|\bcomplimentary\b|\bno[- ]cost\b|\bfree of charge\b|\bat no charge\b",
+     "calls something free"),
     (r"\bas an ai\b|\blanguage model\b", "talks about being an AI"),
 ]
 
@@ -90,27 +102,136 @@ def _turn(db, conv, role, text, *, action=None, delivery=None, reason=None, mess
     return t
 
 
-def history(db: Session, lead, limit: int = 14) -> List[Dict]:
-    """What the family saw and said, oldest first: our texts (any path) and
-    their replies, plus any setter draft/simulated lines that never became a
-    Message row."""
+def history(db: Session, lead, limit: int = 40) -> List[Dict]:
+    """What the family ACTUALLY saw and said, oldest first: texts that went to
+    them by any path and their replies. A draft or a held reply was never
+    received and is NOT in here (see unsent_drafts). For a synthetic contact
+    nothing is ever really sent, so its simulated lines stand in for sent ones
+    and are marked as such."""
     from app.models.models import Message
     rows = []
     for m in db.query(Message).filter(Message.lead_id == lead.id).order_by(Message.sent_at.desc()).limit(limit):
-        rows.append((m.sent_at, "us", m.body or ""))
+        if (m.delivery_status or "") in ("failed", "undelivered", "simulated") and not _synthetic(lead):
+            continue
+        rows.append((m.sent_at, "us", m.body or "", None))
     for r in (db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id)
               .order_by(ProgramResponse.received_at.desc()).limit(limit)):
-        rows.append((r.received_at, "family", r.body_excerpt or ""))
+        rows.append((r.received_at, "family", r.body_excerpt or "", r.response_class))
     conv = conversation_for(db, lead, create=False)
-    if conv is not None:
+    if conv is not None and _synthetic(lead):
         for t in (db.query(ProgramConversationTurn)
                   .filter(ProgramConversationTurn.conversation_id == conv.id, ProgramConversationTurn.role == "ai",
-                          ProgramConversationTurn.delivery.in_(("simulated", "draft", "held")))
+                          ProgramConversationTurn.delivery == "simulated")
                   .order_by(ProgramConversationTurn.created_at.desc()).limit(limit)):
-            rows.append((t.created_at, "us", t.text or ""))
+            rows.append((t.created_at, "us", t.text or "", "simulated"))
     rows = [r for r in rows if r[0] is not None]
     rows.sort(key=lambda r: r[0])
-    return [{"at": r[0].isoformat(), "who": r[1], "text": r[2]} for r in rows[-limit:]]
+    out = []
+    for at, who, text, tag in rows[-limit:]:
+        item = {"at": at.strftime("%Y-%m-%d %H:%M UTC"), "who": who, "text": text}
+        if tag == "auto_reply":
+            item["note"] = "automatic reply from their phone"
+        out.append(item)
+    return out
+
+
+def unsent_drafts(db: Session, conv) -> List[str]:
+    """Replies the setter WROTE that the family never received (draft, held,
+    blocked). Shown to the model as unsent, so it never refers to them."""
+    if conv is None:
+        return []
+    rows = (db.query(ProgramConversationTurn)
+            .filter(ProgramConversationTurn.conversation_id == conv.id, ProgramConversationTurn.role == "ai",
+                    ProgramConversationTurn.delivery.in_(("draft", "held", "blocked")))
+            .order_by(ProgramConversationTurn.created_at.desc()).limit(3).all())
+    return [t.text for t in reversed(rows) if t.text]
+
+
+# ── family memory ────────────────────────────────────────────────────────────
+
+MEMORY_LISTS = ("wants", "reasons", "questions_open", "questions_answered", "concerns", "service_interests",
+                "participants", "info_provided", "commitments", "notes")
+MEMORY_TEXT = ("existing_arrangements", "preferred_contact", "best_times", "readiness", "next_step")
+READINESS = ("unknown", "not_ready", "considering", "ready", "booked", "closed")
+
+
+def memory_of(conv) -> Dict:
+    try:
+        m = json.loads(getattr(conv, "memory", None) or "{}")
+        return m if isinstance(m, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def merge_memory(conv, update: Optional[Dict]) -> Dict:
+    """Fold the model's notes into the family's memory. Lists are merged
+    without duplicates and capped; text fields are replaced; an answered
+    question leaves the open list. Unknown keys are ignored."""
+    mem = memory_of(conv)
+    if not isinstance(update, dict):
+        return mem
+    for k in MEMORY_LISTS:
+        v = update.get(k)
+        if isinstance(v, str):
+            v = [v]
+        if not isinstance(v, list):
+            continue
+        cur = [x for x in mem.get(k, []) if isinstance(x, str)]
+        for item in v:
+            item = str(item).strip()[:160]
+            if item and item.lower() not in {c.lower() for c in cur}:
+                cur.append(item)
+        mem[k] = cur[-12:]
+    answered = {a.lower() for a in mem.get("questions_answered", [])}
+    if answered:
+        mem["questions_open"] = [q for q in mem.get("questions_open", []) if q.lower() not in answered]
+    for k in MEMORY_TEXT:
+        v = update.get(k)
+        if isinstance(v, str) and v.strip():
+            mem[k] = v.strip()[:200]
+    if mem.get("readiness") not in READINESS:
+        mem.pop("readiness", None)
+    if isinstance(update.get("mail_request"), dict) or update.get("mail_request") is True:
+        mr = update.get("mail_request") if isinstance(update.get("mail_request"), dict) else {}
+        mem["mail_request"] = {"requested": True, "what": str(mr.get("what") or "printed planning guide")[:80]}
+    conv.memory = json.dumps(mem)
+    return mem
+
+
+def _facts(db, prog, lead, conv) -> Dict:
+    """What the CODE knows for certain - never taken from the model."""
+    from app.models.models import BookingLink
+    sent_ai = (db.query(ProgramConversationTurn.id)
+               .filter(ProgramConversationTurn.conversation_id == conv.id, ProgramConversationTurn.role == "ai",
+                       ProgramConversationTurn.delivery.in_(("sent", "simulated"))).count())
+    booking = (db.query(BookingLink).filter(BookingLink.lead_id == lead.id,
+                                            BookingLink.status.in_(("booked", "confirmed")))
+               .order_by(BookingLink.booked_time.desc()).first())
+    return {
+        "ai_messages_delivered": sent_ai,
+        "times_offered_now": [A.describe(s) for s in A.offered(conv)],
+        "times_offered_count": _offers_made(db, conv),
+        "confirmed_booking": A.describe(booking.booked_time.replace(tzinfo=None))
+        if booking is not None and booking.booked_time else None,
+        "callback_requested": conv.callback_window if conv.state == "callback_requested" else None,
+        "guide_sent_by_text": _guide_sent(db, conv),
+        "mail_task_open": bool(memory_of(conv).get("mail_request")),
+        "followups_sent": conv.followups_sent or 0,
+    }
+
+
+def _offers_made(db, conv) -> int:
+    return (db.query(ProgramConversationTurn.id)
+            .filter(ProgramConversationTurn.conversation_id == conv.id, ProgramConversationTurn.role == "ai",
+                    ProgramConversationTurn.action == "offer_times",
+                    ProgramConversationTurn.delivery.in_(("sent", "simulated"))).count())
+
+
+def _guide_sent(db, conv) -> bool:
+    return (db.query(ProgramConversationTurn.id)
+            .filter(ProgramConversationTurn.conversation_id == conv.id, ProgramConversationTurn.role == "ai",
+                    ProgramConversationTurn.action == "send_guide",
+                    ProgramConversationTurn.delivery.in_(("sent", "simulated"))).first()) is not None
 
 
 def _human_took_over(db: Session, lead, conv) -> bool:
@@ -144,45 +265,190 @@ def check_text(text: str, *, allowed_links: List[str]) -> List[str]:
 
 # ── the AI's decision ────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are writing text messages for {contact}, the family-services representative for {location}, a funeral home / cemetery. A family replied to our planning outreach. Your job: a warm, natural conversation that helps them - and the best help is usually a short phone call or a personal visit with {contact}, who can answer their real questions. Work toward that, gently, one step at a time.
+SYSTEM_PROMPT = """You write text messages for {contact}, the family-services representative at {location} (a funeral home / cemetery). A family replied to our planning outreach. You are a thoughtful, experienced family-services coordinator, not a script: read what THIS family said, in the context of everything they've said before, and choose the single most helpful next step.
 
-How to write:
-- Plain, kind, local. 1-3 short sentences. At most ONE question per message. No emojis, no sales talk.
-- Sign nothing; the family knows who is writing. Refer to {contact} by name, never "they".
-- Never mention prices, costs, discounts, guarantees, deadlines or urgency that is not real. Never invent facts about the family, their plan, benefits or eligibility. Do not answer detailed questions about benefits, veterans' eligibility, options or costs yourself.
-- If asked directly whether you're a person, say you're helping {contact} with scheduling and {contact} is glad to talk.
-- Respect their choice and timing. If they're busy, acknowledge it and ask when is a better time to reconnect. If they prefer to call themselves, welcome that warmly (they can reply here or call the office) and offer, once, to have {contact} call them at a time that suits instead. Never push.
-- If they ask for the planning guide: action "send_guide". Say you're sending it, and ask ONE question offering a short call or visit with {contact} to walk through it and answer questions.
-- QUESTIONS ABOUT OPTIONS, BENEFITS, VETERANS, BURIAL, CREMATION OR COSTS are exactly what a call or visit is for: acknowledge the question kindly and offer times (action "offer_times") for a call or visit with {contact} to go over it. Do not hand these off.
-- If they already have a plan with us: thank them for being part of the family here and offer a plan review appointment. Do NOT assume what kind of review: unless they've said, ask whether they'd like to go over their prearrangement file or their flower / memorial care service. A timely review is reasonable (keeping records, wishes and contacts current) - never invent urgency.
-- When a call or visit fits, offer EXACTLY two times using the placeholder {{TIMES}} in your reply, e.g. "Would {{TIMES}} work for a short visit?" The system fills in two real open times. Never write a specific time yourself. Set appointment_kind to "phone" or "visit" when they've indicated which.
-- If they pick one of the offered times ("the first one", "Tuesday works"), action "book" with slot_choice 1 or 2. If they name a different specific day/time, action "book" with requested_time YYYY-MM-DDTHH:MM (24h, Central); the system checks it.
-- Action "handoff" ONLY when they ask for a person by name or say they want to speak to someone now, are upset, complaining or grieving a recent loss, raise anything legal, or want to reschedule/cancel a booked appointment. Reply briefly that {contact} will reach out.
-- If they ask to be called back at a time ("call me tomorrow afternoon"): action "callback" with callback_window in their words.
-- Action "wait" ONLY for a bare "ok"/"thanks" after an appointment is already confirmed. Never "wait" when the family says they'll call us, will get back to us, or are busy - always acknowledge them warmly (and, once, offer a convenient time for {contact} to reach them).
-- One step at a time: for someone with an existing plan, FIRST ask which review they'd like (no times yet); offer times only after they answer.
+WORK IN THIS ORDER (fill every part of the JSON):
+1. UNDERSTAND. What do they actually mean, including indirect or casual wording ("maybe after the holidays" = not now, later; "my daughter handles that" = involve the daughter; "ok" after times were offered is NOT a choice)? Their mood? Any questions, worries or objections? Did they change their mind or return to an earlier question? Read FAMILY MEMORY first - never ask for something they already told us.
+2. OBJECTIVE. Pick the one goal for this message: answer their question / build confidence / move toward a call or visit / confirm a time they chose / honour their timing / fulfil a request (guide, mail) / close politely / bring in a person.
+3. ACTION. Exactly one: answer, offer_times, book, callback, send_guide, mail_guide, follow_up_later, handoff, close, wait.
+4. COMPOSE the reply: plain, warm, local, 1-3 short sentences, usually ONE purposeful question (never two). No emojis, no sales talk, no signature. Vary your wording - never repeat a sentence we already sent. Use their first name at most occasionally.
+5. CHECK it yourself against the rules below before returning.
+
+ANSWERING QUESTIONS. When APPROVED INFORMATION answers the question, ANSWER IT in plain words first - do not dodge to an appointment. Then, only if it fits naturally, one gentle next step. Questions about price, eligibility for benefits (veterans, insurance), or the details of their own plan/property are for {contact}: acknowledge kindly and offer a short call or visit to go over it ("offer_times"). Never invent facts, numbers, benefits, timelines or anything about their family or plan.
+
+MOVING TOWARD AN APPOINTMENT - without pressure:
+- A call or visit is offered when it genuinely helps (they're interested, have questions only {contact} can answer, or asked). Never offer times twice in a row if they didn't engage with the first offer; respond to what they said instead. Never invent urgency.
+- To offer times, write the placeholder {{TIMES}} where two times belong ("Would {{TIMES}} work for a short visit?"). The system fills in two REAL open times. NEVER write a day or clock time yourself. If they mentioned when they're free ("afternoons", "next Tuesday"), put it in best_times so times can match.
+- Visit = about an hour in person; a phone appointment is also available. Family members are welcome - if a spouse or adult child should be included, say so warmly.
+- BOOK only when their words clearly pick ONE of the times we offered ("the first one", "Thursday at 10 works") -> slot_choice 1 or 2. If they name a different specific day AND time, use requested_time YYYY-MM-DDTHH:MM (Central); the system checks it. "Friday works" when Friday has more than one possibility, "sure", "ok", "sounds good" -> do NOT book; ask which time.
+- Never say an appointment is booked, set or confirmed - the system confirms bookings itself.
+
+HONOUR THEIR TIMING:
+- Busy right now / will get back to us / call me later: acknowledge warmly. If they gave a time to be called -> "callback" with callback_window in their words. If they said "later" with a horizon ("after the holidays", "next month", "in a couple weeks") -> "follow_up_later" with follow_up_date (YYYY-MM-DD, Central) and follow_up_about (what to pick up next time). Otherwise one gentle question about a better time.
+- Not interested (but not STOP): thank them, leave the door open in one sentence -> "close".
+- A person must step in ("handoff") when: they ask for a real person or {contact} directly, are upset or complaining, recently lost someone and are grieving, mention legal issues or disputes, want to change or cancel an existing appointment, or you are genuinely unsure what they need. Reply briefly that {contact} will reach out personally. Do NOT hand off ordinary questions.
+- Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether you are a person, say you're helping {contact} with scheduling and {contact} is glad to talk. Offer to stop if they prefer.
+- Planning guide request -> "send_guide" (the system adds the approved link). If they want it MAILED / a printed copy -> "mail_guide": say you'll have a printed guide arranged and, if needed, confirm the mailing address with them - never claim it has been mailed.
+- Existing plan with us: thank them, offer a review; ask which kind (their prearrangement file or a flower/memorial care service) before offering times.
+- "wait" only for a closing "ok"/"thanks" after an appointment is confirmed, or a message that needs no reply.
+
+NEVER: prices, costs, discounts, "free"/"complimentary"/"no cost", guarantees, deadlines, pressure, the parent company's name, links (the system adds approved ones), questions about Social Security numbers or private documents by text, promises a person hasn't made.
+
+{knowledge}
 
 Return ONLY JSON:
-{{"intent": "<short>", "action": "answer|offer_times|book|callback|send_guide|handoff|wait", "reply": "<the text to send, or empty for wait>", "slot_choice": 0, "requested_time": "", "appointment_kind": "phone|visit|", "service_type": "", "callback_window": "", "reason": "<why, one line>"}}"""
+{{"understanding": {{"meaning": "<one line>", "mood": "positive|neutral|hesitant|negative|grieving|upset|confused", "questions": ["..."], "objections": ["..."], "changed_mind": false}},
+ "objective": "<one line>",
+ "action": "answer|offer_times|book|callback|send_guide|mail_guide|follow_up_later|handoff|close|wait",
+ "reply": "<the text to send, or empty for wait>",
+ "slot_choice": 0, "requested_time": "", "appointment_kind": "phone|visit|", "service_type": "",
+ "callback_window": "", "follow_up_date": "", "follow_up_about": "",
+ "memory_update": {{"wants": [], "reasons": [], "questions_open": [], "questions_answered": [], "concerns": [], "service_interests": [], "participants": [], "info_provided": [], "commitments": [], "existing_arrangements": "", "preferred_contact": "", "best_times": "", "readiness": "unknown|not_ready|considering|ready", "next_step": "", "mail_request": false}},
+ "confidence": 0.0,
+ "reason": "<why this action, one line>"}}"""
 
 
-def _context(db, prog, lead, conv, resp) -> Dict:
+def _context(db, prog, lead, conv, resp, *, follow_up: Optional[str] = None) -> Dict:
     from app.services.programs import identity
     prof = identity.location_profile_for_lead(db, lead)
-    slots = A.offered(conv)
     now_c = A._today_central()
-    return {
+    ctx = {
         "family_first_name": (lead.first_name or "").strip().title() or None,
         "location": prof.official_name if prof else "our family services team",
         "today": now_c.strftime("%A, %B %-d, %Y %-I:%M %p Central"),
         "conversation_state": conv.state,
-        "times_already_offered": [{"choice": i + 1, "time": A.describe(s)} for i, s in enumerate(slots)],
-        "booked": A.describe(conv.booked_time) if conv.booked_time else None,
-        "reply_class": resp.response_class if resp is not None else None,
-        "intents": json.loads(resp.intents) if (resp is not None and resp.intents) else [],
-        "guide_available": True,
-        "conversation": history(db, lead),
+        "family_memory": memory_of(conv),
+        "facts_known_for_certain": _facts(db, prog, lead, conv),
+        "latest_reply_class": resp.response_class if resp is not None else None,
+        "latest_reply_intents": json.loads(resp.intents) if (resp is not None and resp.intents) else [],
+        "conversation_family_actually_saw": history(db, lead),
+        "replies_written_but_NOT_received_by_the_family": unsent_drafts(db, conv),
     }
+    if follow_up:
+        ctx["task"] = ("FOLLOW-UP: the family has not written since our last message. %s Write ONE short, "
+                       "friendly follow-up that picks up exactly where things were left (use FAMILY MEMORY), "
+                       "not a new introduction. If a follow-up would not help, return action \"wait\"." % follow_up)
+    return ctx
+
+
+_CLOCK = re.compile(r"\b\d{1,2}(:\d{2})?\s*(a\.?m\.?|p\.?m\.?)(?![a-z])|\b\d{1,2}:\d{2}\b|\bnoon\b", re.I)
+_CLAIM_BOOKED = re.compile(r"\b(you'?re (all )?set for|you are (all )?set for|i'?ve booked|i booked|is booked|"
+                           r"has been booked|is confirmed|has been confirmed|i'?ve scheduled|scheduled you|"
+                           r"see you (on|at) )", re.I)
+_CLAIM_MAILED = re.compile(r"\b(i'?ve|we'?ve|i have|we have|has been|have been|already) (mailed|sent it in the mail|"
+                           r"put it in the mail)\b|\bwe mailed\b|\bit'?s in the mail\b", re.I)
+_CLAIM_GUIDE = re.compile(r"\b(here'?s|here is) (the|your) (planning )?guide\b", re.I)
+
+
+def validate_decision(d: Dict, body: str, conv) -> List[str]:
+    """Rules the model's answer must meet before anything is sent. Returned
+    to the model once as a correction; if they still fail, a person decides."""
+    problems: List[str] = []
+    action = d.get("action")
+    reply = (d.get("reply") or "").strip()
+    if action not in ACTIONS:
+        return ["action must be exactly one of: %s" % ", ".join(ACTIONS)]
+    if action not in ("wait", "book") and not reply:
+        problems.append("the reply is empty")
+    if _question_count(reply) > 1:
+        problems.append("it asks more than one question - ask exactly one")
+    if action != "book" and _CLOCK.search(reply.replace("{TIMES}", "")):
+        problems.append("it writes a clock time itself - use {TIMES} so the system offers real open times")
+    if action != "book" and _CLAIM_BOOKED.search(reply):
+        problems.append("it says an appointment is set or confirmed - only the system confirms bookings")
+    if _CLAIM_MAILED.search(reply):
+        problems.append("it says something was mailed - a person mails it; say it will be arranged")
+    if action != "send_guide" and _CLAIM_GUIDE.search(reply):
+        problems.append("it presents the guide without action send_guide")
+    if re.search(r"https?://", reply):
+        problems.append("it contains a link - the system adds approved links itself")
+    for pat, why in _BANNED:
+        if re.search(pat, reply.lower()):
+            problems.append(why)
+    last = _last_ai_text(conv)
+    if last and reply and _norm(reply) == _norm(last):
+        problems.append("it repeats our last message word for word - respond to what they just said")
+    return problems
+
+
+def _norm(t: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", (t or "").lower()).strip()
+
+
+def _last_ai_text(conv) -> Optional[str]:
+    from sqlalchemy.orm import object_session
+    db = object_session(conv)
+    if db is None or conv.id is None:
+        return None
+    t = (db.query(ProgramConversationTurn)
+         .filter(ProgramConversationTurn.conversation_id == conv.id, ProgramConversationTurn.role == "ai",
+                 ProgramConversationTurn.delivery.in_(("sent", "simulated")))
+         .order_by(ProgramConversationTurn.created_at.desc()).first())
+    return t.text if t else None
+
+
+def _over_limit(db, conv, now) -> Optional[str]:
+    """Operational limits that replace the old eight-turn cut-off."""
+    delivered = (db.query(ProgramConversationTurn)
+                 .filter(ProgramConversationTurn.conversation_id == conv.id, ProgramConversationTurn.role == "ai",
+                         ProgramConversationTurn.delivery.in_(("sent", "simulated", "held"))))
+    total = delivered.count()
+    if total >= MAX_AI_TOTAL:
+        return "very long conversation (%d AI messages) - a person should take it from here" % total
+    day_start = A._today_central().replace(hour=0, minute=0, second=0, microsecond=0)
+    from zoneinfo import ZoneInfo
+    day_start_utc = day_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    today = delivered.filter(ProgramConversationTurn.created_at >= day_start_utc).count()
+    if today >= MAX_AI_PER_DAY:
+        return "%d AI messages to this family today - a person should take it from here" % today
+    return None
+
+
+def _parse_follow_up(raw, now) -> datetime:
+    """The family's own horizon, clamped to 1-90 days; 14 days if unclear.
+    Returned as UTC at 15:00 (10 AM Central) on that date."""
+    try:
+        day = datetime.strptime(str(raw or "")[:10], "%Y-%m-%d")
+    except ValueError:
+        day = None
+    today = A._today_central().date()
+    if day is None or not (1 <= (day.date() - today).days <= 90):
+        day = datetime.combine(today + timedelta(days=14), datetime.min.time())
+    return day.replace(hour=15, minute=0)
+
+
+def _schedule_follow_up(conv, action, now) -> None:
+    if (conv.followups_sent or 0) >= MAX_FOLLOWUPS:
+        return
+    if conv.state == "offered":
+        conv.next_followup_at = now + OFFERED_FOLLOWUP
+        conv.followup_reason = "two times were offered and they have not answered"
+    elif action == "send_guide" and conv.state in ("ai_active", "info_requested"):
+        conv.state = "info_requested"
+        conv.next_followup_at = now + INFO_FOLLOWUP
+        conv.followup_reason = "the planning guide was sent; see if they have questions or would like to talk"
+
+
+def _mail_task(db, prog, lead, conv) -> None:
+    """A person must mail the printed guide: an in-app task for the team (not
+    a page) and a line the family record keeps until it is marked done."""
+    try:
+        from app.models.program_models import ProgramAlert
+        if _synthetic(lead):
+            return
+        who = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A family"
+        db.add(ProgramAlert(organization_id=prog.organization_id, kind="task", audience="team", channel="in_app",
+                            delivered=True, reason="mail_guide",
+                            message="%s asked for a printed planning guide by mail. Confirm the address and "
+                                    "mail it, then mark it done." % who))
+    except Exception:                                     # noqa: BLE001
+        log.exception("could not record the mail task for lead %s", lead.id)
+
+
+import contextvars as _cv
+# Which capability the setter calls. Normally "sci_appointment_setter"; the
+# owner's evaluation run can benchmark "sci_appointment_setter_mini".
+_CAPABILITY = _cv.ContextVar("sci_setter_capability", default="sci_appointment_setter")
 
 
 def _get_client():                                       # test seam (see ai_gateway.chat_completion)
@@ -234,16 +500,19 @@ def day_named(body: str, today) -> Optional[object]:
     return None
 
 
-def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Optional[str] = None) -> Dict:
+def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Optional[str] = None,
+           follow_up: Optional[str] = None) -> Dict:
     """The AI's one next step. Raises on any AI failure (caller hands off).
     A family's reply runs it as BACKGROUND AI (the platform switch must be
     on); a person running the simulator runs it as a MANUAL action of theirs."""
     from app.services import ai_gateway
     from app.services.programs import identity
     prof = identity.location_profile_for_lead(db, lead)
+    from app.services.programs import sci_knowledge
     system = SYSTEM_PROMPT.format(contact=(prog.primary_contact_name or "our representative"),
-                                  location=(prof.official_name if prof else "our family services team"))
-    ctx = _context(db, prog, lead, conv, resp)
+                                  location=(prof.official_name if prof else "our family services team"),
+                                  knowledge=sci_knowledge.as_prompt_block())
+    ctx = _context(db, prog, lead, conv, resp, follow_up=follow_up)
     if note:
         ctx["correction"] = note
     from contextlib import nullcontext
@@ -255,7 +524,7 @@ def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Opt
              if (not actor and mode_of(prog) in (DRAFT, AUTO)) else nullcontext())
     with grant:
         r = ai_gateway.chat_completion(
-            feature="sci_appointment_setter", capability="sci_appointment_setter",
+            feature="sci_appointment_setter", capability=_CAPABILITY.get(),
             mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND, actor=actor,
             org_id=prog.organization_id, client=_get_client(),
             messages=[{"role": "system", "content": system},
@@ -388,10 +657,15 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         _handoff(db, prog, lead, conv, "a person is texting this family", notify=False)
         db.commit()
         return dict(out, action="none", state=conv.state)
-    if conv.ai_turns >= MAX_AI_TURNS:
-        _handoff(db, prog, lead, conv, "long conversation - a person should take it from here", notify=True)
+    limit = _over_limit(db, conv, now)
+    if limit:
+        _handoff(db, prog, lead, conv, limit, notify=True)
         db.commit()
         return dict(out, action="handoff", state=conv.state)
+    if conv.state in ("waiting_future", "closed", "info_requested", "offered", "waiting"):
+        # The family wrote again: any scheduled follow-up is superseded.
+        conv.next_followup_at = None
+        conv.followup_reason = None
 
     try:
         try:
@@ -401,9 +675,13 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             d = decide(db, prog, lead, conv, resp, actor=actor,
                        note="Your last answer was not valid. Return the JSON with action set to exactly one of: "
                             + ", ".join(ACTIONS) + ".")
-        if _question_count(d.get("reply")) > 1:
+        problems = validate_decision(d, body, conv)
+        if problems:
+            # ONE chance to fix it, told exactly what was wrong.
             d = decide(db, prog, lead, conv, resp, actor=actor,
-                       note="Your last draft asked more than one question. Ask exactly one.")
+                       note="Your last answer broke these rules: %s. Fix them and return the full JSON again."
+                            % "; ".join(problems))
+            out["corrected"] = problems
     except Exception as exc:                             # noqa: BLE001
         log.warning("setter AI unavailable for lead %s: %s", lead.id, exc)
         _handoff(db, prog, lead, conv, "AI unavailable (%s) - a person answers" % type(exc).__name__, notify=False)
@@ -413,7 +691,25 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
 
     action = d["action"]
     text = (d.get("reply") or "").strip()
-    out.update(intent=d.get("intent"), action=action, reason=d.get("reason"))
+    und = d.get("understanding") if isinstance(d.get("understanding"), dict) else {}
+    out.update(intent=d.get("intent") or und.get("meaning"), action=action, reason=d.get("reason"),
+               objective=d.get("objective"), mood=und.get("mood"))
+    merge_memory(conv, d.get("memory_update"))
+    left = validate_decision(d, body, conv)
+    try:
+        confidence = float(d.get("confidence")) if d.get("confidence") not in (None, "") else 1.0
+    except (TypeError, ValueError):
+        confidence = 1.0
+    out["confidence"] = confidence
+    if left or (confidence < LOW_CONFIDENCE and action not in ("wait", "handoff")):
+        why = ("unsure (confidence %.2f)" % confidence) if not left else "; ".join(left)
+        if resp is not None and text:
+            resp.suggested_reply = text
+        _handoff(db, prog, lead, conv, "AI reply needs a person: %s" % why, notify=True)
+        _turn(db, conv, "ai", text or None, action=action, delivery="blocked", reason=why[:240],
+              response_id=resp.id if resp else None)
+        db.commit()
+        return dict(out, action="handoff", state=conv.state, held=left or [why])
     if d.get("appointment_kind") in (A.PHONE, A.VISIT):
         conv.appointment_kind = d["appointment_kind"]
     if d.get("service_type"):
@@ -541,6 +837,29 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             out["guide_by_email"] = True
         out["guide"] = guide
 
+    if action == "mail_guide":
+        # A PERSON mails it. The setter records the task and never claims it went.
+        mem = merge_memory(conv, {"mail_request": {"what": "printed planning guide"},
+                                  "commitments": ["printed planning guide to be mailed by the team"]})
+        conv.state = "info_requested"
+        conv.followup_reason = "mail the printed planning guide"
+        _mail_task(db, prog, lead, conv)
+        out["mail_task"] = True
+
+    if action == "follow_up_later":
+        when = _parse_follow_up(d.get("follow_up_date"), now)
+        conv.state = "waiting_future"
+        conv.next_followup_at = when
+        conv.followup_reason = (d.get("follow_up_about") or "pick up where we left off")[:250]
+        merge_memory(conv, {"commitments": ["we'll check back around %s" % when.strftime("%B %-d")],
+                            "readiness": "not_ready"})
+        out["follow_up_at"] = when.isoformat()
+
+    if action == "close":
+        conv.state = "closed"
+        conv.next_followup_at = None
+        merge_memory(conv, {"readiness": "closed"})
+
     if action == "callback":
         conv.state = "callback_requested"
         conv.callback_window = (d.get("callback_window") or "")[:120]
@@ -572,6 +891,8 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
     t = _deliver(db, prog, lead, conv, resp, text, action, mode, now=now)
     conv.ai_turns = (conv.ai_turns or 0) + 1
     conv.last_ai_at = now
+    if t.delivery in ("sent", "simulated", "held"):
+        _schedule_follow_up(conv, action, now)
     if conv.state == "ai_active" and action == "answer":
         pass
     db.commit()
@@ -608,3 +929,82 @@ def sweep(db: Session, now: Optional[datetime] = None) -> Dict:
             t.delivery, t.reason = "blocked", str(exc)[:240]
     db.commit()
     return {"sent": sent}
+
+
+FOLLOW_UP_STATES = ("offered", "info_requested", "waiting_future")
+
+
+def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20) -> Dict:
+    """Due follow-ups: a family that has not answered since our last message,
+    in a state where one gentle, CONTEXTUAL check-in helps (times offered,
+    guide sent, or they asked us to come back later). At most MAX_FOLLOWUPS
+    per conversation, inside contact hours, through the spacing backstop, and
+    never for a family that opted out, was handed to a person, or wrote back."""
+    from app.models.models import Lead
+    from app.services.programs import identity
+    now = now or datetime.utcnow()
+    done = {"sent": 0, "drafted": 0, "skipped": 0}
+    due = (db.query(ProgramConversation)
+           .filter(ProgramConversation.next_followup_at.isnot(None),
+                   ProgramConversation.next_followup_at <= now,
+                   ProgramConversation.state.in_(FOLLOW_UP_STATES))
+           .order_by(ProgramConversation.next_followup_at).limit(limit).all())
+    for conv in due:
+        lead = db.query(Lead).filter(Lead.id == conv.lead_id).first()
+        prog = identity.program_for_org(db, lead.organization_id) if lead else None
+        mode = mode_of(prog) if prog else OFF
+        if mode == OFF:
+            continue                                     # stays due; nothing happens while off
+        stop = (lead is None or getattr(lead, "status", None) == "dnc"
+                or (conv.followups_sent or 0) >= MAX_FOLLOWUPS
+                or (conv.last_family_at and conv.last_ai_at and conv.last_family_at > conv.last_ai_at))
+        if stop:
+            conv.next_followup_at = None
+            done["skipped"] += 1
+            continue
+        reason = conv.followup_reason or "pick up where we left off"
+        conv.next_followup_at = None                     # one attempt, whatever happens
+        conv.followups_sent = (conv.followups_sent or 0) + 1
+        try:
+            d = decide(db, prog, lead, conv, None, follow_up=reason)
+            if validate_decision(d, "", conv):
+                d = decide(db, prog, lead, conv, None, follow_up=reason,
+                           note="Fix: %s" % "; ".join(validate_decision(d, "", conv)))
+        except Exception as exc:                         # noqa: BLE001
+            log.warning("follow-up AI unavailable for lead %s: %s", conv.lead_id, exc)
+            db.commit()
+            continue
+        action = d.get("action")
+        text = (d.get("reply") or "").strip()
+        merge_memory(conv, d.get("memory_update"))
+        if action == "wait" or not text or validate_decision(d, "", conv) or action not in (
+                "answer", "offer_times", "send_guide", "close"):
+            _turn(db, conv, "system", None, action="wait", reason="follow-up not needed: %s" % (d.get("reason") or action))
+            db.commit()
+            done["skipped"] += 1
+            continue
+        allowed: List[str] = []
+        if "{TIMES}" in text or action == "offer_times":
+            slots, _why = A.available_slots(db, prog)
+            if not slots:
+                db.commit()
+                done["skipped"] += 1
+                continue
+            if "{TIMES}" not in text:
+                text = (text + " Would {TIMES} work?").strip()
+            text = _fill_times(text, slots)
+            conv.offered_slots = json.dumps([x.isoformat() for x in slots])
+            conv.offered_at = now
+            conv.state = "offered"
+        if action == "close":
+            conv.state = "closed"
+        if check_text(text, allowed_links=allowed):
+            db.commit()
+            done["skipped"] += 1
+            continue
+        t = _deliver(db, prog, lead, conv, None, text, "follow_up", mode, now=now)
+        conv.last_ai_at = now
+        conv.ai_turns = (conv.ai_turns or 0) + 1
+        done["sent" if t.delivery in ("sent", "simulated") else "drafted"] += 1
+        db.commit()
+    return done
