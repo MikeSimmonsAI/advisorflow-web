@@ -2315,7 +2315,24 @@ def audit_spacing(days: int = Query(7, ge=1, le=60), gap_hours: int = Query(20, 
             "replies": [{"at": iso(r.received_at), "channel": r.channel,
                          "class": r.response_class} for r in replies],
         })
-    return {"window_days": days, "gap_hours": gap_hours, "contacts": len(out), "items": out}
+    # FORWARD CHECK: every active cadence in this workspace, when its next
+    # touch is due, and whether that is inside the gap after the last text the
+    # family actually got (the runner holds those; this shows how many).
+    from app.services.programs import spacing as _sp
+    upcoming = {"active": 0, "due_inside_gap": 0, "examples": []}
+    for st in (db.query(CadenceState).join(Lead, Lead.id == CadenceState.lead_id)
+               .filter(Lead.organization_id == org, Lead.is_test.isnot(True), CadenceState.status == "active")
+               .all()):
+        upcoming["active"] += 1
+        last = _sp.last_text_at(db, st.lead_id)
+        if last is not None and st.next_touch_due_at is not None and st.next_touch_due_at < last + _sp.MIN_GAP:
+            upcoming["due_inside_gap"] += 1
+            if len(upcoming["examples"]) < 10:
+                upcoming["examples"].append({"lead_id": st.lead_id, "last_text": last.isoformat(),
+                                             "next_due": st.next_touch_due_at.isoformat(),
+                                             "touch": st.current_touch_number + 1})
+    return {"window_days": days, "gap_hours": gap_hours, "contacts": len(out), "items": out,
+            "upcoming": upcoming}
 
 
 class SimulateReplyIn(BaseModel):

@@ -421,6 +421,21 @@ def _last_sent_at(db: Session, state):
                     CadenceTouchLog.outcome == OUTCOME_SENT).scalar())
 
 
+def _spacing_hold_until(db: Session, state, lead, schedule, touch_number: int, now):
+    """When this touch must wait for spacing, the moment it may go; else None.
+    The gap counts from the LATER of this cadence's last sent touch and the
+    last text that went to the family by any path."""
+    from app.services.programs import spacing as _spacing
+    candidates = [t for t in (_last_sent_at(db, state), _spacing.last_text_at(db, lead.id)) if t is not None]
+    if not candidates:
+        return None
+    last = max(_spacing._naive(t) for t in candidates)
+    gap = _touch_gap(schedule, touch_number) if touch_number > 1 else MIN_TOUCH_GAP
+    earliest = last + gap
+    n = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) is not None else now
+    return earliest if n < earliest else None
+
+
 def _already_sent(db: Session, state, touch_number: int) -> bool:
     """Has this touch ALREADY gone out?
 
@@ -725,20 +740,22 @@ def run_due_cadences(db: Session, organization_id: str = None,
             # Touches are scheduled from the day the cadence started. When one
             # is held (quiet hours overnight, a paused runner) and goes late, the
             # next one is already "due" and used to fire right behind it - on
-            # Oct 14 a family got touch 1 at 8:16 and touch 2 at 10:38. A touch
-            # now waits until the schedule's own gap has passed since the last
-            # text that really went out.
-            if touch_number > 1:
-                last = _last_sent_at(db, state)
-                if last is not None:
-                    if getattr(last, "tzinfo", None) is not None:
-                        last = last.replace(tzinfo=None)
-                    earliest = last + _touch_gap(schedule, touch_number)
-                    if now < earliest:
-                        state.next_touch_due_at = earliest
-                        skipped_count += 1
-                        db.commit()
-                        continue
+            # Oct 13-14, 23 families got touch 1 and touch 2 under 20 hours
+            # apart. A touch now waits until the schedule's own gap has passed
+            # since the last text that really went to this family - from this
+            # cadence OR any other path - and the hold is written to the log.
+            hold_until = _spacing_hold_until(db, state, lead, schedule, touch_number, now)
+            if hold_until is not None and not _already_sent(db, state, touch_number):
+                _log_touch(db, state, lead, touch_number=touch_number,
+                           attempt_seq=_next_attempt_seq(db, state, touch_number),
+                           claim=True, outcome=OUTCOME_SKIPPED,
+                           reason="spacing: held until %s UTC (last text too recent)"
+                                  % hold_until.strftime("%Y-%m-%d %H:%M"),
+                           scheduled_for=scheduled_for)
+                state.next_touch_due_at = hold_until
+                skipped_count += 1
+                db.commit()
+                continue
 
             # ── ENTITLEMENT AND THE DEPLOYMENT SWITCH ──────────────────────────
             org = org_cache.get(lead.organization_id)
@@ -855,11 +872,17 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 db.rollback()
                 claim = db.query(CadenceTouchLog).filter(
                     CadenceTouchLog.id == claim.id).first()
+                too_soon = "TOO_SOON" in str(exc)
                 if claim is not None:
                     is_guard = exc.__class__.__name__ == "DemoBoundaryViolation"
-                    claim.outcome = OUTCOME_SUPPRESSED if is_guard else OUTCOME_FAILED
+                    claim.outcome = (OUTCOME_SKIPPED if too_soon
+                                     else OUTCOME_SUPPRESSED if is_guard else OUTCOME_FAILED)
                     claim.reason = str(exc)[:500]
                 state.next_touch_due_at = now + RETRY_BACKOFF
+                if too_soon:
+                    # Not a failure: never spends the retry budget, waits the gap.
+                    from app.services.programs import spacing as _spacing
+                    state.next_touch_due_at = _spacing.earliest_next(db, lead.id) or (now + RETRY_BACKOFF)
                 error_count += 1
                 errors.append(f"Lead {lead.id}: {exc}")
                 db.commit()

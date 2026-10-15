@@ -673,6 +673,16 @@ def send_sms(
             db, lead, from_number=_sci_programs.sci_sender_number())
         if _sci_refusal:
             raise SciSmsBlocked(_sci_refusal)
+        # SPACING BACKSTOP: no automated path may text an SCI family again
+        # inside the gap, whatever its own schedule says. People texting by
+        # hand and replies after the family wrote back are not limited.
+        from app.services.programs import spacing as _spacing
+        _too_soon = _spacing.refusal(db, lead, send_source)
+        if _too_soon:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("sci_sms SPACING lead=%s source=%s %s",
+                                                 lead.id, send_source, _too_soon)
+            raise SciSmsBlocked([_spacing.TOO_SOON])
         client, from_phone = _sci_programs.sci_sender()
     else:
         client, from_phone, _ = _resolve_twilio_creds(advisor, db)
