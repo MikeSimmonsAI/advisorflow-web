@@ -11,7 +11,7 @@
    existing endpoints: /sms/send, /email/send/{id}, /work/leads/{id}/notes,
    /program/responses/{id}/mark, /program/command/schedule, /assign.
    Route: /program/command */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../api/client'
 import './Command.css'
 
@@ -22,6 +22,18 @@ const when = iso => {
   const d = new Date(iso)
   return new Date().toDateString() === d.toDateString() ? time(iso)
     : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time(iso)
+}
+const ago = iso => {
+  if (!iso) return ''
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+  return m < 2 ? 'just now' : m < 60 ? `${m} min ago` : `at ${time(iso)}`
+}
+const dayLabel = iso => {
+  const d = new Date(iso), t = new Date()
+  const tm = new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1)
+  if (d.toDateString() === t.toDateString()) return 'Today'
+  if (d.toDateString() === tm.toDateString()) return 'Tomorrow'
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
 }
 const fmtPhone = p => {
   const d = (p || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '')
@@ -46,8 +58,19 @@ const I = {
   person: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
   pin: <><path d="M12 21s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z" /><circle cx="12" cy="9" r="2.5" /></>,
   flag: <path d="M5 21V4h11l-2 4 2 4H5" />,
+  down: <path d="M6 9l6 6 6-6" />,
+  more: <><circle cx="5" cy="12" r="1.3" fill="currentColor" /><circle cx="12" cy="12" r="1.3" fill="currentColor" /><circle cx="19" cy="12" r="1.3" fill="currentColor" /></>,
   bulb: <><path d="M9 18h6M10 21h4" /><path d="M12 3a6 6 0 0 0-3 11v2h6v-2a6 6 0 0 0-3-11z" /></>,
 }
+// Solid icons for the four tiles and the active tab, as in the mockup.
+const F = {
+  alert: <><circle cx="12" cy="12" r="10" /><path d="M12 7v6M12 16.5v.5" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" /></>,
+  chat: <><path d="M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H9l-5 4V5a1 1 0 0 1 1-1z" /><path d="M8 10.5h.5M12 10.5h.5M16 10.5h.5" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" /></>,
+  cal: <><rect x="3" y="5" width="18" height="16" rx="2.5" /><path d="M8 3v4M16 3v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /><rect x="5.5" y="10" width="13" height="8.5" rx="1" fill="#fff" /><path d="M8 13h2M11 13h2M14 13h2M8 16h2M11 16h2" stroke="currentColor" strokeWidth="1.6" /></>,
+  people: <><circle cx="9" cy="8" r="3.6" /><path d="M2 20c0-4 3.2-6.5 7-6.5s7 2.5 7 6.5z" /><circle cx="17" cy="9" r="2.8" /><path d="M14.5 14.2c.8-.4 1.7-.6 2.5-.6 3 0 5 2 5 5.4h-5" /></>,
+  home: <path d="M3 11.2 12 3.5l9 7.7V21h-6.5v-6.5h-5V21H3z" />,
+}
+const Solid = ({ n, s = 22 }) => <svg className="ti" viewBox="0 0 24 24" width={s} height={s} fill="currentColor" aria-hidden="true">{F[n]}</svg>
 const Icon = ({ n, s = 18 }) => (
   <svg viewBox="0 0 24 24" width={s} height={s} fill="none" stroke="currentColor" strokeWidth="1.8"
        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{I[n]}</svg>
@@ -110,21 +133,23 @@ export default function Command() {
         <header className="cmd-top">
           <div>
             <h1>SCI Command</h1>
-            <p className="cmd-sub">{d ? `${d.locations.length} locations · updated ${when(d.updated_at)}` : 'Loading…'}</p>
+            <p className="cmd-sub">{d ? `${d.locations.length} locations · updated ${ago(d.updated_at)}` : 'Loading…'}</p>
           </div>
-          <select className="cmd-loc" value={loc} onChange={e => setLoc(e.target.value)} aria-label="Location">
-            <option value="">All locations</option>
-            {(d?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
+          <span className="cmd-loc-wrap">
+            <select className="cmd-loc" value={loc} onChange={e => setLoc(e.target.value)} aria-label="Location">
+              <option value="">All locations</option>
+              {(d?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select><Icon n="down" s={16} />
+          </span>
         </header>
         <SearchBox q={q} setQ={setQ} />
         {err && <p className="cmd-err">{err}</p>}
         {d && <>
           <div className="cmd-tiles">
-            <Tile icon="warn" tone="red" label="Needs attention" v={d.counts.needs_attention} onClick={() => setTab('inbox')} />
-            <Tile icon="reply" tone="green" label="Replies today" v={d.counts.replies_today} onClick={() => setTab('inbox')} />
+            <Tile icon="alert" tone="red" label="Needs attention" v={d.counts.needs_attention} onClick={() => setTab('inbox')} />
+            <Tile icon="chat" tone="green" label="Replies today" v={d.counts.replies_today} onClick={() => setTab('inbox')} />
             <Tile icon="cal" tone="blue" label="Visits booked" v={d.counts.visits_booked} onClick={() => setTab('appts')} />
-            <Tile icon="person" tone="teal" label="Contacted today" v={d.counts.contacted_today} />
+            <Tile icon="people" tone="teal" label="Contacted today" v={d.counts.contacted_today} onClick={() => setTab('inbox')} />
           </div>
           {d.owner_alert && (
             <a className="cmd-owner" href="/program?tab=health">
@@ -162,7 +187,7 @@ export default function Command() {
       <nav className="cmd-tabs" aria-label="Sections">
         {[['home', 'home', 'Home'], ['inbox', 'inbox', 'Inbox'], ['search', 'search', 'Search'], ['appts', 'cal', 'Appointments']].map(([k, ic, lbl]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
-            <span className="cmd-tabicon"><Icon n={ic} s={22} />
+            <span className="cmd-tabicon">{k === 'home' && tab === 'home' ? <Solid n="home" s={22} /> : <Icon n={ic} s={22} />}
               {k === 'inbox' && d?.counts.needs_attention ? <i>{d.counts.needs_attention}</i> : null}</span>{lbl}
           </button>))}
       </nav>
@@ -181,7 +206,7 @@ function SearchBox({ q, setQ, autoFocus }) {
 function Tile({ icon, tone, label, v, onClick }) {
   return (
     <button className={`cmd-tile ${tone}`} onClick={onClick} disabled={!onClick}>
-      <Icon n={icon} /><span>{label}</span><b>{v}</b>
+      <Solid n={icon} /><span>{label}</span><b>{v}</b>
     </button>
   )
 }
@@ -243,6 +268,8 @@ function Family({ id, onBack, toast, toastText }) {
   const [slots, setSlots] = useState(null)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState({})
+  const [menu, setMenu] = useState(false)
+  const [picking, setPicking] = useState(false)
   const composer = useRef(null)
   const schedRef = useRef(null)
 
@@ -286,8 +313,13 @@ function Family({ id, onBack, toast, toastText }) {
       api.get(`/program/command/slots?lead_id=${id}`).then(setSlots).catch(() => {})
     } catch (e) { toast(e.message || 'Could not book.') } finally { setBusy(false) }
   }
+  const markHandled = async () => {
+    try { await api.post(`/program/responses/${f.response_id}/mark`, { state: 'closed' }); toast('Marked handled.'); load() }
+    catch (e) { toast(e.message || 'Could not update.') }
+  }
   const assign = async uid => {
-    try { await api.post('/program/command/assign', { lead_id: id, user_id: uid || null }); toast('Assigned.'); load() }
+    setPicking(false)
+    try { await api.post('/program/command/assign', { lead_id: id, user_id: uid || null }); toast(uid ? 'Assigned.' : 'Unassigned.'); load() }
     catch (e) { toast(e.message || 'Could not assign.') }
   }
 
@@ -298,6 +330,14 @@ function Family({ id, onBack, toast, toastText }) {
         <button className="cmd-back" onClick={onBack} aria-label="Back"><Icon n="back" s={24} /></button>
         <div><h1>{f.name}{f.is_test && <em className="badge low"> Test</em>}</h1><p className="cmd-sub">{f.location || 'Location not set'}</p></div>
         {f.badge && <em className={`badge ${BADGE[f.badge] || 'low'}`}>{f.badge}</em>}
+        <span className="cmd-more">
+          <button onClick={() => setMenu(!menu)} aria-label="More" aria-expanded={menu}><Icon n="more" s={24} /></button>
+          {menu && <div className="cmd-menu" onClick={() => setMenu(false)}>
+            <a href={`/leads/${id}`}>Open full family record</a>
+            {f.response_id && <button onClick={markHandled}>Mark handled</button>}
+            {f.phone && <button onClick={() => { navigator.clipboard?.writeText(f.phone).then(() => toast('Phone copied.')).catch(() => {}) }}>Copy phone number</button>}
+          </div>}
+        </span>
       </header>
       <div className="cmd-quick">
         <a href={f.phone ? `tel:${f.phone}` : undefined} className={f.phone ? '' : 'off'}><Icon n="call" s={22} />Call</a>
@@ -307,26 +347,28 @@ function Family({ id, onBack, toast, toastText }) {
       </div>
 
       <section className="cmd-thread" aria-label="Conversation">
-        {f.thread.length ? f.thread.map((t, k) => (
-          <div key={k} className={`bubble ${t.who}`}>
+        {f.thread.length ? f.thread.map((t, k) => (<Fragment key={k}>
+          {(k === 0 || dayLabel(f.thread[k - 1].at || '') !== dayLabel(t.at || '')) && t.at && <div className="cmd-day">{dayLabel(t.at)}</div>}
+          <div className={`bubble ${t.who}`}>
             <p>{t.text}</p>
-            <small>{when(t.at)}{t.channel === 'email' ? ' · Email' : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
-          </div>)) : <p className="cmd-muted">No messages yet.</p>}
+            <small>{time(t.at)}{t.channel === 'email' ? ' · Email' : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
+          </div></Fragment>)) : <p className="cmd-muted">No messages yet.</p>}
       </section>
 
       <section className="cmd-card cmd-ctx">
-        <h3><Icon n="person" /> Family context</h3>
+        <h3><Icon n="person" /> Family context <a className="cmd-edit" href={`/leads/${id}`}>Edit</a></h3>
         <dl>
           <dt><Icon n="call" />Phone</dt><dd>{fmtPhone(f.phone) || '—'}{f.phone && <a href={`tel:${f.phone}`}>Call</a>}</dd>
-          <dt><Icon n="mail" />Email</dt><dd>{f.email || '—'}</dd>
+          {f.email && <><dt><Icon n="mail" />Email</dt><dd>{f.email}</dd></>}
           <dt><Icon n="pin" />Location</dt><dd>{f.location || '—'}</dd>
           <dt><Icon n="flag" />Campaign</dt><dd>{f.campaign || '—'}</dd>
           <dt><Icon n="person" />Assigned to</dt>
-          <dd><select value={f.assigned_to?.id || ''} onChange={e => assign(e.target.value)} aria-label="Assign">
-            <option value="">Unassigned</option>
-            {f.team.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select></dd>
-          <dt><Icon n="clock" />Last touch</dt><dd>{f.last_touch ? `${when(f.last_touch.at)} (${f.last_touch.channel === 'email' ? 'Email' : 'Text'})` : '—'}</dd>
+          <dd>{f.assigned_to?.name || 'Unassigned'}<button className="link" onClick={() => setPicking(!picking)}>{f.assigned_to ? 'Change' : 'Assign'}</button></dd>
+          {picking && <div className="cmd-assign">
+            {f.team.map(u => <button key={u.id} className={f.assigned_to?.id === u.id ? 'on' : ''} onClick={() => assign(u.id)}>{u.name}</button>)}
+            {f.assigned_to && <button onClick={() => assign('')}>Unassign</button>}
+          </div>}
+          <dt><Icon n="clock" />Last touch</dt><dd>{f.last_touch ? `${dayLabel(f.last_touch.at)} at ${time(f.last_touch.at)} (${f.last_touch.channel === 'email' ? 'Email' : 'Text'})` : '—'}</dd>
         </dl>
         {f.setter && <p className="cmd-setter">Appointment setter: <b>{f.setter.state.replace('_', ' ')}</b>
           {f.setter.offered.length ? ` · offered ${f.setter.offered.join(' or ')}` : ''}
@@ -345,11 +387,11 @@ function Family({ id, onBack, toast, toastText }) {
         <h3><Icon n="cal" /> Quick schedule a visit</h3>
         {slots === null ? <p className="cmd-muted">Checking the calendar…</p>
           : slots.slots.length ? <div className="cmd-slots">{slots.slots.slice(0, 2).map(s => (
-            <button key={s.value} disabled={busy} onClick={() => book(s)}><small>{s.day}</small>{s.time}</button>))}</div>
+            <button key={s.value} disabled={busy} onClick={() => book(s)}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div>
             : <p className="cmd-muted">{slots.reason || 'No open times right now.'}</p>}
-        {slots?.slots?.length > 2 && <details><summary>Choose another time ›</summary>
+        {slots?.slots?.length > 2 && <details><summary>Choose custom time ›</summary>
           <div className="cmd-slots">{slots.slots.slice(2).map(s => (
-            <button key={s.value} disabled={busy} onClick={() => book(s)}><small>{s.day}</small>{s.time}</button>))}</div></details>}
+            <button key={s.value} disabled={busy} onClick={() => book(s)}><small>{dayLabel(s.value)}</small>{s.time}</button>))}</div></details>}
       </section>
 
       <section className="cmd-card cmd-compose">

@@ -1,16 +1,16 @@
-/* SCI Command - phone-first, to the Oct 14 mockup. */
+/* SCI Command - phone-first, to the Oct 14 mockup. Light only, like the
+   mockup and the rest of the platform: a phone in dark mode still gets the
+   mockup's look. The page paints its own full-screen background so the
+   app's global backdrop never shows around it. */
+body:has(.cmd) { background: #f3f6f9 !important; }
+body:has(.cmd)::before { display: none; }
 .cmd {
   --c-bg: #f3f6f9; --c-card: #fff; --c-ink: #0f1b2a; --c-muted: #5b6878; --c-line: #e2e8ef;
   --c-navy: #0b3a5b; --c-navy-ink: #fff; --c-blue: #1f63c6; --c-green: #1d7a46; --c-red: #c62a2a;
   --c-amber: #b4620a; --c-teal: #12746b; --c-chip: #eef2f6;
   min-height: 100vh; background: var(--c-bg); color: var(--c-ink);
-  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.4 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color-scheme: light;
   max-width: 560px; margin: 0 auto; padding: 14px 16px 96px; box-sizing: border-box;
-}
-@media (prefers-color-scheme: dark) {
-  .cmd { --c-bg: #0d141b; --c-card: #172029; --c-ink: #e8edf2; --c-muted: #9aa8b6; --c-line: #263240;
-         --c-navy: #3f8fd8; --c-navy-ink: #06121d; --c-blue: #7fb0ff; --c-green: #5fd08f; --c-red: #ff8a80;
-         --c-amber: #f0b45a; --c-teal: #5fd0c3; --c-chip: #222e3a; }
 }
 .cmd *, .cmd *::before, .cmd *::after { box-sizing: border-box; }
 .cmd button, .cmd select, .cmd input, .cmd textarea { font: inherit; color: inherit; }
@@ -37,7 +37,6 @@
 .cmd-owner svg { color: var(--c-amber); flex: none; }
 .cmd-owner span:nth-child(2) { flex: 1; min-width: 0; }
 .cmd-link, .cmd-sec button { color: var(--c-blue); font-weight: 600; background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap; }
-@media (prefers-color-scheme: dark) { .cmd-owner { background: #2b2214; border-color: #5a4320; color: #f3d9b0; } }
 .cmd-sec { display: flex; justify-content: space-between; align-items: baseline; margin: 6px 2px 8px; }
 .cmd-sec h2 { margin: 0; font-size: 19px; font-weight: 800; }
 .cmd-card { background: var(--c-card); border: 1px solid var(--c-line); border-radius: 16px; margin-bottom: 10px; }
@@ -101,7 +100,6 @@
 .cmd-setter, .cmd-booked { margin: 12px 0 0; font-size: 13.5px; color: var(--c-muted); }
 .cmd-booked { color: var(--c-green); display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .cmd-next { background: #eef8f1; border-color: #cfe9d8; }
-@media (prefers-color-scheme: dark) { .cmd-next { background: #13241a; border-color: #24402e; } }
 .cmd-next h3 { color: var(--c-green); } .cmd-next p { margin: 0 0 8px; }
 .cmd-next label { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
 .cmd-next input { width: 20px; height: 20px; accent-color: var(--c-navy); }
@@ -120,3 +118,41 @@
 .cmd-send .primary { flex: 0 0 auto; padding: 9px 18px; }
 .cmd-send .link { flex: 0 0 auto; background: none; border: 0; color: var(--c-blue); padding: 0; }
 @media (max-width: 380px) { .cmd-tiles { grid-template-columns: repeat(2, 1fr); } }
+/* ── mockup fidelity pass (Oct 14 night) ── */
+.cmd-card, .cmd-tile, .cmd-search, .cmd-loc-wrap { box-shadow: 0 1px 2px rgba(15, 27, 42, .05); }
+.cmd-sub { white-space: nowrap; }
+.cmd-loc-wrap { position: relative; flex: none; border: 1px solid var(--c-line); background: var(--c-card); border-radius: 12px; }
+.cmd-loc-wrap select.cmd-loc { appearance: none; -webkit-appearance: none; border: 0; background: transparent; max-width: 170px;
+                               padding: 9px 30px 9px 14px; font-weight: 600; font-size: 14.5px; cursor: pointer; text-overflow: ellipsis; }
+.cmd-loc-wrap svg { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.cmd-tile { padding: 12px 10px; }
+.cmd-tile:disabled { opacity: 1; }
+.cmd-tile .ti { width: 22px; height: 22px; }
+.cmd-tile span { color: var(--c-ink); opacity: .78; }
+.cmd-owner b { color: var(--c-ink); font-size: 14.5px; }
+.cmd-owner { color: #3d3a33; }
+.cmd-tabs { left: 50%; right: auto; width: 100%; max-width: 560px; transform: translateX(-50%); }
+.cmd-tabs button.on { color: var(--c-navy); }
+/* family */
+.cmd-family .cmd-fhead { margin-bottom: 14px; }
+.cmd-more { position: relative; }
+.cmd-more > button { background: none; border: 0; padding: 6px; cursor: pointer; color: var(--c-ink); display: inline-flex; }
+.cmd-menu { position: absolute; right: 0; top: 36px; z-index: 6; background: var(--c-card); border: 1px solid var(--c-line);
+            border-radius: 12px; box-shadow: 0 8px 24px rgba(15, 27, 42, .14); min-width: 200px; overflow: hidden; }
+.cmd-menu button, .cmd-menu a { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 12px 14px;
+                                cursor: pointer; color: var(--c-ink); font-size: 14.5px; }
+.cmd-menu > * + * { border-top: 1px solid var(--c-line); }
+.cmd-day { display: flex; align-items: center; gap: 12px; color: var(--c-muted); font-size: 13.5px; margin: 2px 0 4px; }
+.cmd-day::before, .cmd-day::after { content: ''; flex: 1; height: 1px; background: var(--c-line); }
+.cmd-card h3 .cmd-edit { margin-left: auto; color: var(--c-blue); font-weight: 600; font-size: 14.5px; background: none; border: 0; padding: 0; cursor: pointer; }
+.cmd-ctx dl { row-gap: 0; }
+.cmd-ctx dt, .cmd-ctx dd { padding: 9px 0; border-top: 1px solid var(--c-line); }
+.cmd-ctx dd button.link { background: none; border: 0; padding: 0; color: var(--c-blue); font-weight: 600; cursor: pointer; }
+.cmd-assign { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px; grid-column: 1 / -1; }
+.cmd-assign button { text-align: left; border: 1px solid var(--c-line); background: var(--c-card); border-radius: 10px; padding: 9px 12px; cursor: pointer; }
+.cmd-assign button.on { border-color: var(--c-navy); font-weight: 700; }
+.cmd-slots button { color: var(--c-ink); font-weight: 500; }
+.cmd-slots small { color: var(--c-ink); font-size: 14.5px; }
+.cmd-sched summary { list-style: none; }
+.cmd-sched summary::-webkit-details-marker { display: none; }
+.cmd-quick > * { font-weight: 500; }
