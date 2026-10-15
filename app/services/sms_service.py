@@ -592,6 +592,10 @@ def send_sms(
     # behaviour for a bug on a send path is to refuse loudly rather than to
     # place the call and find out afterwards.
     _demo_send_guard(db, lead, "SMS")
+    # The made-up SCI staging demo families are never texted, by anyone.
+    from app.services.sci_staging_demo import is_demo_lead as _is_demo_lead
+    if _is_demo_lead(lead):
+        raise SciSmsBlocked(["DEMO_NUMBER"])
 
     # INTERNAL TEST RECORDS never reach a real provider. Raised as a
     # ValueError exactly like the DNC refusal below so every caller that

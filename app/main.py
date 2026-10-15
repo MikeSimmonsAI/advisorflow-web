@@ -1761,6 +1761,16 @@ async def _program_sla_loop():
                     db = SessionLocal()
                     try:
                         out = {"realerted": len(program_responses.sla_sweep(db))}
+                        # SCI STAGING ONLY: refresh the made-up demo families once per
+                        # Central day so "today" always has replies. A no-op
+                        # (fails closed) anywhere but the SCI staging database.
+                        try:
+                            from app.services import sci_staging_demo as _demo
+                            _d = _demo.ensure(db)
+                            if _d.get("families"):
+                                out["staging_demo"] = _d["families"]
+                        except Exception:                # noqa: BLE001
+                            db.rollback()
                         # Campaign email touches. Returns at once unless
                         # PROGRAM_EMAIL_TOUCHES_SENDING is on AND a campaign
                         # family is switched on; never raises out of the pass.

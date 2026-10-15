@@ -425,6 +425,9 @@ def send_email_to_lead(db: Session, advisor: User, lead: Lead,
     # on a send path must refuse rather than deliver.
     from app.services.sms_service import _demo_send_guard
     _demo_send_guard(db, lead, "email")
+    from app.services.sci_staging_demo import is_demo_lead as _is_demo_lead
+    if _is_demo_lead(lead):
+        raise ValueError("DEMO_FAMILY: a made-up staging family is never emailed.")
 
     # A program lead with no resolved location is never emailed.
     from app.services.programs import identity as _program_identity
