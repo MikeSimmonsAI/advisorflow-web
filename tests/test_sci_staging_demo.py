@@ -93,7 +93,7 @@ def test_demo_identity_guards_every_outward_path(staging, client):
     h = _h(db, staging["admin"])
     r = client.post("/program/command/demo-send", headers=h, json={"lead_id": lead.id, "text": "Hello"})
     assert r.status_code == 200 and r.json()["simulated"]
-    m = db.query(Message).filter(Message.lead_id == lead.id, Message.send_source == "demo_simulated").one()
+    m = db.query(Message).filter(Message.lead_id == lead.id, Message.send_source == "demo").one()
     assert m.delivery_status == "simulated" and m.twilio_sid is None
     f = client.get("/program/command/family/%s" % lead.id, headers=h).json()
     assert f["is_demo"] is True
@@ -105,7 +105,7 @@ def test_daily_refresh_moves_forward_and_keeps_tester_changes(staging, monkeypat
     db = staging["db"]
     demo.ensure(db)
     lead = db.query(Lead).filter(Lead.source == demo.DEMO_SOURCE).first()
-    db.add(Message(lead_id=lead.id, sender_id=staging["admin"].id, body="tester note", send_source="demo_simulated",
+    db.add(Message(lead_id=lead.id, sender_id=staging["admin"].id, body="tester note", send_source="demo",
                    delivery_status="simulated"))
     db.commit()
     before = max(r.received_at for r in db.query(ProgramResponse).all())

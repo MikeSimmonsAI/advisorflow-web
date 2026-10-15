@@ -306,6 +306,7 @@ def command_demo_send(body: DemoSendIn, db: Session = Depends(get_db),
     """A made-up staging demo family: record the reply in the thread as
     SIMULATED. Nothing is sent - the demo flag is refused by every sender."""
     from app.models.models import EmailMessage
+    from app.services import send_source as _ss
     prog = _program(db, user, managers_only=False)
     lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
     if lead is None:
@@ -318,10 +319,10 @@ def command_demo_send(body: DemoSendIn, db: Session = Depends(get_db),
     if body.channel == "email":
         db.add(EmailMessage(lead_id=lead.id, sender_id=user.id, sent_by_user_id=user.id,
                             subject=(body.subject or "Following up").strip()[:200], body_html=text,
-                            send_source="demo_simulated", status="simulated"))
+                            send_source=_ss.DEMO, status="simulated"))
     else:
         db.add(Message(lead_id=lead.id, sender_id=user.id, sent_by_user_id=user.id, body=text,
-                       send_source="demo_simulated", delivery_status="simulated", send_state="simulated"))
+                       send_source=_ss.DEMO, delivery_status="simulated", send_state="simulated"))
     resp = (db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id)
             .order_by(ProgramResponse.received_at.desc()).first())
     if resp is not None and resp.handling_status in ("new", "opened"):
