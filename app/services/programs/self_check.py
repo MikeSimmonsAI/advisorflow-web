@@ -248,6 +248,17 @@ def _already_alerted(db: Session, prog, c: Dict, now: datetime) -> bool:
     from app.models.program_models import ProgramAlert
     base = (db.query(ProgramAlert.id)
             .filter(ProgramAlert.organization_id == prog.organization_id, ProgramAlert.kind == "self_check"))
+    people = [p for p in (c.get("people") or []) if p]
+    if people:
+        # The same incident seen through a rolling window: as days pass the
+        # list SHRINKS (Oct 15 8:33 AM: yesterday's 8 people became 2, a new
+        # signature, and the owner was texted again). Only someone the owner
+        # has NOT been told about in the reminder window is news.
+        told = " ".join(m or "" for (m,) in db.query(ProgramAlert.message).filter(
+            ProgramAlert.organization_id == prog.organization_id, ProgramAlert.kind == "self_check",
+            ProgramAlert.created_at >= now - REPEAT_AFTER, ProgramAlert.message.like("%%[%s%%" % c["key"])).all())
+        if told and all(p in told for p in people):
+            return True
     if base.filter(ProgramAlert.created_at >= now - REPEAT_AFTER,
                    ProgramAlert.message.like("%%%s%%" % _marker(c))).first() is not None:
         return True
