@@ -131,3 +131,31 @@ def test_daily_limit_replaces_the_turn_cap(setter, sample_advisor):
     assert conv.state != "human"                                          # 6 replies is fine
     _, conv = _run(db, lead, "one more", _Fake([]))
     assert conv.state == "human" and "today" in conv.handoff_reason
+
+
+def test_offer_always_ends_in_one_question_with_real_times():
+    assert ai_setter._ensure_times_question("Happy to help. Would you like to come in?") == \
+        "Happy to help. Would {TIMES} work for you?"
+    assert ai_setter._one_question("Is this ok? Would {TIMES} work?") == "Would {TIMES} work?"
+    assert ai_setter._one_question("Thanks. One question?") == "Thanks. One question?"
+
+
+def test_repeating_an_offered_time_is_not_inventing_one(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    conv = ai_setter.conversation_for(db, lead)
+    conv.offered_slots = json.dumps([s.isoformat() for s in SLOTS])
+    ok = {"action": "answer", "reply": "Which works better: %s or %s?" % (A.describe(SLOTS[0]), A.describe(SLOTS[1]))}
+    assert ai_setter.validate_decision(ok, "ok", conv) == []
+    bad = {"action": "answer", "reply": "How about Monday at 4 PM?"}
+    assert any("clock time" in p for p in ai_setter.validate_decision(bad, "ok", conv))
+    cb = {"action": "callback", "reply": "Of course, Kerry will call you tomorrow after 3 PM."}
+    assert ai_setter.validate_decision(cb, "Call me tomorrow after 3", conv) == []
+
+
+def test_existing_plan_asks_which_review_before_times(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    conv = ai_setter.conversation_for(db, lead)
+    d = {"action": "offer_times", "reply": "Would {TIMES} work for a review?"}
+    assert any("which review" in p for p in ai_setter.validate_decision(d, "I already have a plan with you", conv))
