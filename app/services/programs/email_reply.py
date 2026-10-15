@@ -84,6 +84,48 @@ def signature(db: Session, lead) -> str:
     return ""
 
 
+def strip_signature(db: Session, lead, text: str) -> str:
+    """Drop a sign-off the writer (or a suggested draft) already put at the end
+    - "Kerry Allan", "Kerry Allan, <Location>", "- Kerry Allan", the location
+    on its own line, "Thanks, Kerry" - so the one approved sign-off the system
+    adds appears exactly once."""
+    sig = signature(db, lead)
+    if not sig or not text:
+        return (text or "").strip()
+    parts = [p.strip().lower() for p in re.split(r",|\|", sig) if p.strip()]
+    person = parts[0] if parts else ""
+    first = person.split()[0] if person else ""
+    def is_sig(line: str) -> bool:
+        l = re.sub(r"^[-–—\s]+", "", line.strip().lower()).rstrip(".,!")
+        if not l:
+            return True
+        l = re.sub(r"^(thanks|thank you|best|regards|sincerely|warmly|kind regards)[,!]?\s*", "", l)
+        if not l:
+            return True
+        return l in parts or l == sig.lower() or l == first or (person and l.startswith(person)) \
+            or all(bit.strip() in parts for bit in re.split(r",|\|", l) if bit.strip())
+    lines = (text or "").rstrip().split("\n")
+    cut = len(lines)
+    while cut > 0 and is_sig(lines[cut - 1]):
+        cut -= 1
+    body = "\n".join(lines[:cut]).rstrip()
+    return body if body else (text or "").strip()
+
+
+def guide_token(db: Session, lead, text: str) -> str:
+    """{GUIDE} in a person's reply becomes the family's own approved planning
+    guide link - the same one the AI sends."""
+    if "{GUIDE}" not in (text or ""):
+        return text
+    from app.services.programs import identity
+    from app.models.program_models import ProgramSourceRecord
+    prof = identity.location_profile_for_lead(db, lead)
+    rec = (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.lead_id == lead.id).first())
+    link = (identity.planning_guide_link(prof, db=db, family=getattr(rec, "campaign_family", None))
+            if prof is not None else identity.default_planning_guide())
+    return text.replace("{GUIDE}", link)
+
+
 def _blocked(db: Session, lead, to_addr: Optional[str]) -> Optional[str]:
     from app.models.models import Lead
     if lead is None:
@@ -147,7 +189,7 @@ def send_reply(db: Session, prog, lead, resp, text: str, *, send_source: str, id
     why = _blocked(db, lead, to_addr)
     if why is None and not meta.get("threadable"):
         why = "the original email is not in a connected mailbox, so it cannot be answered in its thread"
-    body_text = (text or "").strip()
+    body_text = strip_signature(db, lead, text)
     if why is None and not body_text:
         why = "the reply is empty"
     sig = signature(db, lead)
