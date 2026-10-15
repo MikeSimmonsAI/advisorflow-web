@@ -196,6 +196,7 @@ const GodBillingOps = lazyPage(() => import('./pages/god/GodBillingOps'))
 const Customer360 = lazyPage(() => import('./pages/god/Customer360'))
 import SalesImplementations from './pages/SalesImplementations'
 import Activate from './pages/Activate'
+import ForgotPassword from './pages/ForgotPassword'
 import LeadScraper from './pages/LeadScraper'
 import ImportBatches from './pages/ImportBatches'
 import ImportBatchReview from './pages/ImportBatchReview'
@@ -1063,6 +1064,7 @@ export default function App() {
         <Route path="/onboarding" element={<Onboarding />} />
         {/* Public by necessity: the invited customer has no account yet. */}
         <Route path="/activate" element={<Activate />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/setup-integrations" element={<SetupIntegrations />} />
         {/* ── PUBLIC customer surfaces ── no ProtectedRoute, by design ──
             A customer has no account. The token in the URL is the whole

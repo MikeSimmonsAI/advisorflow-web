@@ -672,3 +672,62 @@ def activation_accept(request: Request, req: ActivationAcceptRequest,
     user = _act.accept(db, req.token, req.new_password)
     return {"ok": True, "email": user.email,
             "message": "Password set. You can now sign in."}
+
+
+# -- self-service password reset ---------------------------------------------
+#
+# "I can't remember my password" had no answer except an administrator. This
+# is the standard one: the person asks with their email, and IF an active
+# account has that email, a one-time link (1 hour, single use, any earlier
+# pending link revoked) goes to THAT inbox. The response is identical either
+# way, so the form cannot be used to discover who has an account. The link
+# never appears in a response, a log line or an audit record; the token is
+# stored only as a hash (services/staff_activation). Nothing else about the
+# account changes - not its role, organization or memberships.
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+    next: Optional[str] = None
+
+
+_FORGOT_OK = {"ok": True, "message": "If an account uses that email, a reset link is on its way. It works once, for one hour."}
+
+
+def _safe_next(path: Optional[str]) -> Optional[str]:
+    p = (path or "").strip()
+    return p if p.startswith("/") and not p.startswith("//") and len(p) < 200 else None
+
+
+@router.post("/forgot-password")
+@limiter.limit("5/hour")
+def forgot_password(request: Request, req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    import os
+    from urllib.parse import quote
+    from app.services import staff_activation as _staff
+    from app.models.staff_models import PURPOSE_RESET
+    email = (req.email or "").strip().lower()
+    if not email or "@" not in email:
+        return _FORGOT_OK
+    from sqlalchemy import func as _f
+    user = (db.query(User).filter(_f.lower(User.email) == email, User.is_active.is_(True)).first())
+    if user is None:
+        _log.info("forgot-password: no active account for the address given")
+        return _FORGOT_OK
+    try:
+        _row, raw = _staff.issue(db, user, user, purpose=PURPOSE_RESET, ttl_hours=1)
+        base = (os.environ.get("FRONTEND_URL") or "").rstrip("/")
+        nxt = _safe_next(req.next)
+        link = "%s/activate?token=%s%s" % (base, raw, ("&next=" + quote(nxt)) if nxt else "")
+        env = (os.environ.get("APP_ENV") or "production").lower()
+        where = "EvoSys Pro (staging)" if env == "staging" else "EvoSys Pro"
+        html = ("<p>Someone asked to reset the password for your %s account.</p>"
+                "<p><a href=\"%s\">Choose a new password</a> - this link works once, for one hour.</p>"
+                "<p>If you didn't ask for this, ignore this email; your password stays the same.</p>"
+                % (where, link))
+        from app.services.email_service import send_email_via_provider
+        send_email_via_provider(user.email, "Reset your %s password" % where, html)
+        _log.info("forgot-password: reset link emailed to user %s", user.id)
+    except Exception:                                    # noqa: BLE001 - same answer either way
+        db.rollback()
+        _log.exception("forgot-password: could not issue a reset link")
+    return _FORGOT_OK

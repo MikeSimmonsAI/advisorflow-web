@@ -41,6 +41,7 @@ export default function Activate() {
   const [params] = useSearchParams()
   const nav = useNavigate()
   const token = params.get('token') || ''
+  const nextAfter = (() => { const n = params.get('next') || ''; return n.startsWith('/') && !n.startsWith('//') ? n : '' })()
   const [invite, setInvite] = useState(null)
   const [err, setErr] = useState('')
   const [pw, setPw] = useState('')
@@ -74,7 +75,7 @@ export default function Activate() {
         <div className="act-card">
           <h1>You're all set</h1>
           <div className="act-note ok">Your password is saved. You can sign in now.</div>
-          <button className="act-btn" onClick={() => nav('/login')}>Go to sign in</button>
+          <button className="act-btn" onClick={() => nav(nextAfter ? '/login?next=' + encodeURIComponent(nextAfter) : '/login')}>Go to sign in</button>
         </div>
       </div>
     )
