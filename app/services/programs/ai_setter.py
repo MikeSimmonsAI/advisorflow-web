@@ -351,7 +351,13 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         return dict(out, action="handoff", state=conv.state)
 
     try:
-        d = decide(db, prog, lead, conv, resp, actor=actor)
+        try:
+            d = decide(db, prog, lead, conv, resp, actor=actor)
+        except (ValueError, KeyError, TypeError):
+            # A malformed answer gets ONE correction; a second failure hands off.
+            d = decide(db, prog, lead, conv, resp, actor=actor,
+                       note="Your last answer was not valid. Return the JSON with action set to exactly one of: "
+                            + ", ".join(ACTIONS) + ".")
         if _question_count(d.get("reply")) > 1:
             d = decide(db, prog, lead, conv, resp, actor=actor,
                        note="Your last draft asked more than one question. Ask exactly one.")
