@@ -351,3 +351,19 @@ def test_a_follow_up_may_honour_a_mail_request_and_invite_in(setter, sample_advi
         send.return_value = MagicMock(id="m1")
         ai_setter.followup_sweep(db)
     assert send.call_count == 1 and "Would " in send.call_args.args[3] and "{TIMES}" not in send.call_args.args[3]
+
+
+def test_an_ai_text_reply_marks_the_message_answered(setter, sample_advisor, monkeypatch):
+    db, org, prog = setter["db"], setter["org"], setter["prog"]
+    prog.ai_setter_mode = "auto"
+    db.commit()
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    fake = _Fake([_d("answer", "Glad to help. Would a short visit be easier?")])
+    with patch.object(ai_setter, "_get_client", return_value=fake), \
+         patch("app.services.sms_service.send_sms") as send, \
+         patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        send.return_value = MagicMock(id="m1")
+        resp = R.on_inbound(db, lead, "What would we talk about?", "sms")
+    db.refresh(resp)
+    assert send.call_count == 1 and resp.handling_status == "responded"

@@ -700,6 +700,14 @@ def _synthetic(lead) -> bool:
     return bool(getattr(lead, "is_test", False)) or is_demo_lead(lead)
 
 
+def _answered(resp, now) -> None:
+    """The AI's reply went out: the family's message is answered (SCI Live
+    stops listing it under Needs reply). Email marks it in send_reply."""
+    if resp is not None and (resp.handling_status or "new") in ("new", "opened"):
+        resp.handling_status = "responded"
+        resp.responded_at = resp.responded_at or now
+
+
 def _deliver(db, prog, lead, conv, resp, text, action, mode, *, now) -> ProgramConversationTurn:
     from app.services import contact_hours, send_source as ss
     is_email = resp is not None and resp.channel == "email"
@@ -735,6 +743,7 @@ def _deliver(db, prog, lead, conv, resp, text, action, mode, *, now) -> ProgramC
         from app.services.sms_service import send_sms
         advisor = A.program_advisor(db, prog)
         msg = send_sms(db, advisor, lead, text, include_booking_link=False, send_source=ss.SCI_SETTER)
+        _answered(resp, now)
         return _turn(db, conv, "ai", text, action=action, delivery="sent", message_id=getattr(msg, "id", None),
                      response_id=resp.id if resp else None)
     except Exception as exc:                             # noqa: BLE001 - a refusal is recorded, never retried blind
