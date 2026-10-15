@@ -375,7 +375,7 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
                reply_id: Optional[str] = None, reply_classification: Optional[str] = None,
                now: Optional[datetime] = None, reply_to_alias: Optional[str] = None,
                alias_location_id: Optional[str] = None,
-               staff_alerts: bool = True) -> Optional[ProgramResponse]:
+               staff_alerts: bool = True, run_setter: bool = True) -> Optional[ProgramResponse]:
     """Record and route one inbound reply. None for non-program organizations.
 
     reply_to_alias / alias_location_id: the location address the family wrote
@@ -467,7 +467,8 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
     # inbound path - a failure is recorded and a person handles the reply.
     try:
         from app.services.programs import ai_setter
-        ai_setter.on_family_reply(db, prog, lead, resp, body, now=now)
+        if run_setter:
+            ai_setter.on_family_reply(db, prog, lead, resp, body, now=now)
     except Exception:                                    # noqa: BLE001
         log.exception("appointment setter failed for response %s", resp.id)
         try:
