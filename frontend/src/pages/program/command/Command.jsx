@@ -96,7 +96,6 @@ export default function Command() {
     busy.current = true
     const p = new URLSearchParams()
     if (loc) p.set('location_id', loc)
-    if (q.trim()) p.set('q', q.trim())
     const safe = path => api.get(path).catch(() => null)
     // The former SCI Live numbers (sends, deliveries, booking-page opens, next
     // up, just sent) load beside the command data, so nothing the old screen
@@ -118,7 +117,7 @@ export default function Command() {
         setErr(msg)
       })
       .finally(() => { busy.current = false })
-  }, [loc, q])
+  }, [loc])
 
   useEffect(() => {
     load()
@@ -160,7 +159,7 @@ export default function Command() {
             </select><Icon n="down" s={16} />
           </span>
         </header>
-        <SearchBox q={q} setQ={setQ} />
+        <SearchBox q={q} setQ={v => { setQ(v); if (v.trim()) setTab('search') }} />
         {err && <p className="cmd-err">{err}</p>}
         {d && <>
           <div className="cmd-tiles">
@@ -204,8 +203,7 @@ export default function Command() {
       {tab === 'search' && <>
         <header className="cmd-top"><h1>Search</h1></header>
         <SearchBox q={q} setQ={setQ} autoFocus />
-        {q.trim() ? <Inbox items={inbox} act={act} open={setFamily} empty="No family matches." />
-          : <p className="cmd-muted">Search by family name, phone, email or location.</p>}
+        <SearchResults q={q} loc={loc} open={setFamily} />
       </>}
       {tab === 'appts' && <Appointments open={setFamily} />}
       {toast && <div className="cmd-toast" role="status">{toast}</div>}
@@ -216,6 +214,36 @@ export default function Command() {
               {k === 'inbox' && d?.counts.needs_attention ? <i>{d.counts.needs_attention}</i> : null}</span>{lbl}
           </button>))}
       </nav>
+    </div>
+  )
+}
+
+// Every SCI family, not only those who replied. The newest query always wins:
+// a slower answer to an older query is ignored rather than shown.
+function SearchResults({ q, loc, open }) {
+  const [res, setRes] = useState(null)
+  const seq = useRef(0)
+  useEffect(() => {
+    const term = q.trim()
+    if (term.length < 2) { setRes(null); return }
+    const n = ++seq.current
+    const t = setTimeout(() => {
+      const p = new URLSearchParams({ q: term })
+      if (loc) p.set('location_id', loc)
+      api.get(`/program/command/search?${p}`)
+        .then(r => { if (n === seq.current) setRes(r.items || []) })
+        .catch(() => { if (n === seq.current) setRes([]) })
+    }, 250)
+    return () => clearTimeout(t)
+  }, [q, loc])
+  if (q.trim().length < 2) return <p className="cmd-muted">Search by family name, phone, email or location.</p>
+  if (res === null) return <p className="cmd-muted">Searching…</p>
+  if (!res.length) return <p className="cmd-muted">No family matches.</p>
+  return (
+    <div className="cmd-card cmd-actions">
+      {res.map(f => (
+        <button key={f.lead_id} onClick={() => open(f.lead_id)}><Icon n="people" />
+          <span><b>{f.name}</b><br /><small>{[f.location, f.phone, f.replied ? 'Has replied' : null].filter(Boolean).join(' · ')}</small></span>›</button>))}
     </div>
   )
 }
