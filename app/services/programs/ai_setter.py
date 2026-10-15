@@ -1189,7 +1189,7 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
         text = (d.get("reply") or "").strip()
         merge_memory(conv, d.get("memory_update"))
         if action == "wait" or not text or validate_decision(d, "", conv) or action not in (
-                "answer", "offer_times", "send_guide", "close"):
+                "answer", "offer_times", "send_guide", "mail_guide", "close"):
             _turn(db, conv, "system", None, action="wait", reason="follow-up not needed: %s" % (d.get("reason") or action))
             db.commit()
             done["skipped"] += 1
