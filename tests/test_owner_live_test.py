@@ -114,3 +114,28 @@ def test_after_cleanup_the_owner_test_never_rebooks_or_follows_up(setter, client
          patch("app.services.sms_service.send_sms") as send:
         R.on_inbound(db, me, "Friday at 9 works", "sms")
     assert send.call_count == 0 and not fake.calls                         # finished test: no AI, no booking
+
+
+def test_owner_booking_link_is_owner_only_and_goes_to_the_owner_number(setter, client, monkeypatch):
+    db, prog, admin = setter["db"], setter["prog"], setter["admin"]
+    h = _h(db, admin)
+    assert client.post("/program/setter/live-test/booking-link", headers=h).status_code == 403
+    admin.role = "god_admin"
+    db.commit()
+    h = dict(h, **{"X-Org-Override": setter["org"].id})
+    _owner(db, setter["org"], "+18435550000")
+    monkeypatch.setattr("app.services.public_identity.booking_url", lambda db_, org, tok: "https://book.example/book/%s" % tok)
+    from app.models.models import Message
+    sent = {}
+
+    def fake_send(db_, adv, lead_, text, *a, **k):
+        sent.update(text=text, phone=lead_.phone, src=k.get("send_source"))
+        m = Message(lead_id=lead_.id, sender_id=adv.id, body=text, twilio_sid="SMb", twilio_status="queued")
+        db_.add(m)
+        db_.commit()
+        return m
+    monkeypatch.setattr("app.services.sms_service.send_sms", fake_send)
+    r = client.post("/program/setter/live-test/booking-link", headers=h)
+    assert r.status_code == 200, r.text
+    assert sent["phone"] == "+18435550000" and "https://book.example/book/" in sent["text"]
+    assert r.json()["message"]["link_in_body"]
