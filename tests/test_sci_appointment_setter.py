@@ -124,7 +124,7 @@ def test_lester_guide_then_offer_then_booked(setter, sample_advisor):
     ])
     _run(db, lead, "Would really like this to receive guide, any questions I would contact you. Is this possible?", fake)
     _run(db, lead, "Yes, I'd like to talk about it in person.", fake)
-    _, conv = _run(db, lead, "The Thursday one works.", fake)
+    _, conv = _run(db, lead, "Wednesday works for me.", fake)
     texts = [t.text for t in _ai_turns(db, conv)]
     assert "planning-guide" in texts[0] or "http" in texts[0]
     assert A.describe(SLOTS[0]) in texts[1] and A.describe(SLOTS[1]) in texts[1]
@@ -304,3 +304,26 @@ def test_simulator_runs_the_setter_as_the_persons_manual_action(setter, client, 
     assert r["result"]["action"] == "offer_times" and len(r["conversation"]["offered"]) == 2
     assert r["conversation"]["turns"][-1]["delivery"] == "simulated"
     assert setter["prog"].ai_setter_mode == "off"                       # program setting untouched
+
+
+def test_never_books_a_time_the_family_did_not_choose(setter, sample_advisor):
+    """Live run, Oct 14: Marion answered "The prearrangement file" and the AI
+    tried to book the first time. The family's words must pick the time."""
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Marion")
+    lead.is_test = True
+    db.commit()
+    fake = _Fake([_d("offer_times", "Would {TIMES} work for a review?"), _d("book", "", slot_choice=1)])
+    _run(db, lead, "I already have a plan with you", fake)
+    _, conv = _run(db, lead, "The prearrangement file", fake)
+    assert conv.state == "offered" and conv.booked_time is None
+    assert "Which works better" in _ai_turns(db, conv)[-1].text
+
+
+def test_two_questions_are_rewritten_to_one(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    fake = _Fake([_d("answer", "Would you like a call? Or a visit?"),
+                  _d("answer", "Would a short call or a visit suit you better?")])
+    resp, conv = _run(db, lead, "Tell me more", fake)
+    assert resp.suggested_reply == "Would a short call or a visit suit you better?" and len(fake.calls) == 2

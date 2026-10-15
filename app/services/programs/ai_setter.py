@@ -149,7 +149,8 @@ How to write:
 - If they pick one of the offered times ("the first one", "Tuesday works"), action "book" with slot_choice 1 or 2. If they name a different specific day/time, action "book" with requested_time YYYY-MM-DDTHH:MM (24h, Central); the system checks it.
 - Action "handoff" ONLY when they ask for a person by name or say they want to speak to someone now, are upset, complaining or grieving a recent loss, raise anything legal, or want to reschedule/cancel a booked appointment. Reply briefly that {contact} will reach out.
 - If they ask to be called back at a time ("call me tomorrow afternoon"): action "callback" with callback_window in their words.
-- If the message needs no answer (a simple "ok"/"thanks" after we already confirmed), action "wait".
+- Action "wait" ONLY for a bare "ok"/"thanks" after an appointment is already confirmed. Never "wait" when the family says they'll call us, will get back to us, or are busy - always acknowledge them warmly (and, once, offer a convenient time for {contact} to reach them).
+- One step at a time: for someone with an existing plan, FIRST ask which review they'd like (no times yet); offer times only after they answer.
 
 Return ONLY JSON:
 {{"intent": "<short>", "action": "answer|offer_times|book|callback|send_guide|handoff|wait", "reply": "<the text to send, or empty for wait>", "slot_choice": 0, "requested_time": "", "appointment_kind": "phone|visit|", "service_type": "", "callback_window": "", "reason": "<why, one line>"}}"""
@@ -178,7 +179,33 @@ def _get_client():                                       # test seam (see ai_gat
     return None
 
 
-def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None) -> Dict:
+def _question_count(text: str) -> int:
+    return (text or "").count("?")
+
+
+_ORD = {0: r"\b(first|1st|earlier|former|either|whichever|option (1|one)|#1)\b",
+        1: r"\b(second|2nd|later|latter|option (2|two)|#2)\b"}
+
+
+def choice_evidence(body: str, slot: datetime, index: Optional[int]) -> bool:
+    """Did the family actually pick THIS time? Their words must name its day,
+    date, hour or position - an AI's guess never books an appointment."""
+    t = (body or "").lower()
+    if not t:
+        return False
+    if re.search(r"\b%s\b" % slot.strftime("%A").lower(), t) or re.search(r"\b%s\b" % slot.strftime("%a").lower(), t):
+        return True
+    if re.search(r"\b%s\b" % slot.strftime("%B").lower(), t) and str(slot.day) in t:
+        return True
+    hour = int(slot.strftime("%I"))
+    if re.search(r"\b%d(:00)?\s*(am|pm|a\.m\.|p\.m\.|o'?clock)?\b" % hour, t):
+        return True
+    if index is not None and index in _ORD and re.search(_ORD[index], t):
+        return True
+    return False
+
+
+def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Optional[str] = None) -> Dict:
     """The AI's one next step. Raises on any AI failure (caller hands off).
     A family's reply runs it as BACKGROUND AI (the platform switch must be
     on); a person running the simulator runs it as a MANUAL action of theirs."""
@@ -188,6 +215,8 @@ def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None) -> Dict:
     system = SYSTEM_PROMPT.format(contact=(prog.primary_contact_name or "our representative"),
                                   location=(prof.official_name if prof else "our family services team"))
     ctx = _context(db, prog, lead, conv, resp)
+    if note:
+        ctx["correction"] = note
     r = ai_gateway.chat_completion(
         feature="sci_appointment_setter", capability="sci_appointment_setter",
         mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND, actor=actor,
@@ -323,6 +352,9 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
 
     try:
         d = decide(db, prog, lead, conv, resp, actor=actor)
+        if _question_count(d.get("reply")) > 1:
+            d = decide(db, prog, lead, conv, resp, actor=actor,
+                       note="Your last draft asked more than one question. Ask exactly one.")
     except Exception as exc:                             # noqa: BLE001
         log.warning("setter AI unavailable for lead %s: %s", lead.id, exc)
         _handoff(db, prog, lead, conv, "AI unavailable (%s) - a person answers" % type(exc).__name__, notify=False)
@@ -350,12 +382,21 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         k = int(d.get("slot_choice") or 0)
         if 1 <= k <= len(choices):
             slot = choices[k - 1]
+            if not choice_evidence(body, slot, k - 1):
+                slot = None                             # the family did not pick a time
         elif d.get("requested_time"):
             try:
                 slot = datetime.fromisoformat(str(d["requested_time"])[:16])
             except ValueError:
                 slot = None
-        if slot is None:
+            if slot is not None and not choice_evidence(body, slot, None):
+                slot = None
+        if slot is None and choices:
+            # Never book on a guess: ask which of the offered times suits them.
+            action = "answer"
+            text = ("Thank you. Which works better for you: %s or %s?" % (A.describe(choices[0]), A.describe(choices[1]))
+                    if len(choices) >= 2 else "Thank you. Would %s work for you?" % A.describe(choices[0]))
+        elif slot is None:
             action = "offer_times"                      # unclear choice: offer again
         else:
             kind = conv.appointment_kind or A.VISIT
