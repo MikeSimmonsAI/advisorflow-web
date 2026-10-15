@@ -99,8 +99,9 @@ import MobileApp from './mobile/routes'
 // server's 402 — the entitlement itself is enforced on every one of those
 // endpoints, exactly as entitlements.py insists it must be.
 const ProgramCenter = lazyPage(() => import('./pages/program/ProgramCenter'))
-const ProgramLive = lazyPage(() => import('./pages/program/Live'))
-const ProgramCommand = lazyPage(() => import('./pages/program/command/Command'))
+// SCI Live IS the phone command center (Oct 15: updated in place). The old
+// /program/command address redirects here; there is one SCI Live screen.
+const ProgramLive = lazyPage(() => import('./pages/program/command/Command'))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
 const DealOperationsDispositions = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsDispositions })))
@@ -723,7 +724,7 @@ function WorkspaceRoute() {
 function sciLanding() {
   try {
     const to = new URLSearchParams(window.location.search).get('to')
-    return to === 'live' ? '/program/live' : to === 'command' ? '/program/command' : '/program'
+    return to === 'live' || to === 'command' ? '/program/live' : '/program'
   }
   catch { return '/program' }
 }
@@ -1274,7 +1275,7 @@ export default function App() {
         <Route path="/view/:viewKey" element={<ProtectedRoute><WorkspaceView /></ProtectedRoute>} />
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
         <Route path="/program/live" element={<ProtectedRoute bare><ProgramLive /></ProtectedRoute>} />
-        <Route path="/program/command" element={<ProtectedRoute bare><ProgramCommand /></ProtectedRoute>} />
+        <Route path="/program/command" element={<Navigate to="/program/live" replace />} />
         <Route path="/program" element={<ProtectedRoute bare><ProgramCenter /></ProtectedRoute>} />
         <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute feature="reports" requireAdmin><Reports /></ProtectedRoute>} />

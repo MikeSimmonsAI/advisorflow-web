@@ -156,3 +156,22 @@ body:has(.cmd)::before { display: none; }
 .cmd-sched summary { list-style: none; }
 .cmd-sched summary::-webkit-details-marker { display: none; }
 .cmd-quick > * { font-weight: 500; }
+
+/* former SCI Live numbers, same screen */
+.cmd-mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0 12px; }
+@media (max-width: 380px) { .cmd-mini { grid-template-columns: repeat(2, 1fr); } }
+.cmd-mtile { background: var(--c-card); border: 1px solid var(--c-line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cmd-mtile b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.cmd-mtile span { font-size: 12.5px; color: var(--c-muted); }
+.cmd-mtile small { font-size: 12px; color: var(--c-muted); }
+.cmd-mtile i { font-style: normal; font-size: 11.5px; color: var(--c-muted); border-top: 1px solid var(--c-line); margin-top: 4px; padding-top: 4px; }
+.cmd-mtile.red b { color: var(--c-red); }
+.cmd-eng { padding: 12px; margin-bottom: 12px; }
+.cmd-list button { display: flex; justify-content: space-between; gap: 10px; width: 100%; background: none; border: 0; padding: 11px 14px; text-align: left; cursor: pointer; color: var(--c-ink); }
+.cmd-list button + button { border-top: 1px solid var(--c-line); }
+.cmd-list span { display: flex; flex-direction: column; min-width: 0; }
+.cmd-list small { color: var(--c-muted); }
+.cmd-list em { font-style: normal; color: var(--c-muted); font-size: 13px; white-space: nowrap; }
+.cmd-list em.bad { color: var(--c-red); }
+.cmd-foot { color: var(--c-muted); font-size: 13px; text-align: center; margin: 14px 0 0; }
+.cmd-foot a { color: var(--c-blue); font-weight: 600; text-decoration: none; }

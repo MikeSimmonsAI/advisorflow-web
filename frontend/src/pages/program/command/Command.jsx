@@ -13,6 +13,8 @@
    Route: /program/command */
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../../api/client'
+import EngagementGauge, { useEngagement } from '../EngagementGauge'
+import SelfCheck from '../SelfCheck'
 import './Command.css'
 
 const REFRESH_MS = 45000
@@ -81,6 +83,9 @@ export default function Command() {
   const [loc, setLoc] = useState('')
   const [q, setQ] = useState('')
   const [d, setD] = useState(null)
+  const [live, setLive] = useState(null)          // former SCI Live numbers
+  const [at, setAt] = useState(null)
+  const engagement = useEngagement()
   const [err, setErr] = useState('')
   const [family, setFamily] = useState(null)       // lead id
   const [toast, setToast] = useState('')
@@ -92,12 +97,22 @@ export default function Command() {
     const p = new URLSearchParams()
     if (loc) p.set('location_id', loc)
     if (q.trim()) p.set('q', q.trim())
-    api.get('/program/command' + (p.toString() ? `?${p}` : '')).then(r => { setD(r); setErr('') })
+    const safe = path => api.get(path).catch(() => null)
+    // The former SCI Live numbers (sends, deliveries, booking-page opens, next
+    // up, just sent) load beside the command data, so nothing the old screen
+    // showed is lost.
+    Promise.all([safe('/program/outbox'), safe('/program/booking-activity?days=1')])
+      .then(([ob, ba]) => setLive({ ob, ba }))
+    api.get('/program/command' + (p.toString() ? `?${p}` : '')).then(r => { setD(r); setErr(''); setAt(new Date())
+      try { sessionStorage.removeItem('sci_live_entry') } catch { /* private mode */ } })
       .catch(e => {
         const msg = (e && e.message) || 'Could not load.'
-        if (/no workspace|no outreach program|customer workspace route/i.test(msg) && !sessionStorage.getItem('sci_cmd_entry')) {
-          try { sessionStorage.setItem('sci_cmd_entry', '1') } catch { /* private mode */ }
-          window.location.replace('/sci?to=command')
+        // Opened in a fresh tab (Home Screen shortcut, a link): no workspace is
+        // chosen yet. Go through the SCI front door, which picks SCI and comes
+        // straight back to SCI Live.
+        if (/no workspace|no outreach program|customer workspace route|brand sales/i.test(msg) && !sessionStorage.getItem('sci_live_entry')) {
+          try { sessionStorage.setItem('sci_live_entry', '1') } catch { /* private mode */ }
+          window.location.replace('/sci?to=live')
           return
         }
         setErr(msg)
@@ -108,7 +123,10 @@ export default function Command() {
   useEffect(() => {
     load()
     const t = setInterval(() => { if (document.visibilityState === 'visible') load() }, REFRESH_MS)
-    return () => clearInterval(t)
+    const onShow = () => { if (document.visibilityState === 'visible') load() }
+    document.addEventListener('visibilitychange', onShow)
+    window.addEventListener('focus', onShow)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onShow); window.removeEventListener('focus', onShow) }
   }, [load])
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 3500); return () => clearTimeout(t) }, [toast])
 
@@ -174,6 +192,9 @@ export default function Command() {
                 <span><b>Mail a printed guide · {t.name}</b><br />
                   <small>{t.note || 'Confirm the address, mail it, then mark it done'}</small></span>›</button>))}
           </div>
+          <TodayActivity live={live} engagement={engagement} open={setFamily} />
+          <p className="cmd-foot">Updates every {Math.round(REFRESH_MS / 1000)} seconds and whenever you come back to this screen{at ? ` · last ${time(at.toISOString())}` : ''}.
+            {' '}<a href="/program">Open the full SCI Program Center</a></p>
         </>}
       </>}
       {tab === 'inbox' && <>
@@ -434,4 +455,52 @@ function Family({ id, onBack, toast, toastText }) {
       {toastText && <div className="cmd-toast" role="status">{toastText}</div>}
     </div>
   )
+}
+
+
+/* Everything the former SCI Live screen showed, kept on the same screen:
+   system status, engagement, today's sending numbers (with all-time
+   underneath), who is next and what just went out. */
+const BAD = { failed: 'Failed', bounced: 'Bounced', undelivered: 'Not delivered' }
+const titled = s => (s || '').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+
+function TodayActivity({ live, engagement, open }) {
+  const sent = live?.ob?.sent || []
+  const texts = sent.filter(s => s.channel === 'text')
+  const delivered = texts.filter(s => s.status === 'delivered').length
+  const emails = sent.filter(s => s.channel === 'email').length
+  const opens = sent.filter(s => s.channel === 'email' && s.status === 'opened').length
+  const people = new Set(sent.map(s => s.lead_id || s.name)).size
+  const A = engagement?.all
+  const upcoming = (live?.ob?.upcoming || []).slice(0, 5)
+  return <>
+    <SectionHead title="Today's activity" />
+    <SelfCheck compact />
+    <div className="cmd-mini">
+      <MiniTile v={people} l="People contacted" n={live?.ob?.coming_up ? `${live.ob.coming_up} more today` : 'Done for today'} a={A && `${A.contacted} all time`} />
+      <MiniTile v={`${delivered}/${texts.length}`} l="Texts delivered" a={A && `${A.texts_delivered}/${A.texts_sent} all time`} />
+      <MiniTile v={live?.ba?.opened_people ?? 0} l="Opened booking page" n="Last 24 hours" a={A && `${A.opened_booking} all time`} />
+      <MiniTile v={emails} l="Emails sent" n={opens ? `${opens} opened` : null} a={A && `${A.emails_sent} all time`} />
+      <MiniTile v={A?.opted_out ?? '-'} l="Opted out" a="all time" />
+      <MiniTile v={live?.ob?.failed || 0} l="Failed or bounced" tone={live?.ob?.failed ? 'red' : ''} a={A && `${A.failed} all time`} />
+    </div>
+    <div className="cmd-card cmd-eng"><EngagementGauge data={engagement} compact /></div>
+    <SectionHead title="Next up" />
+    {upcoming.length ? <div className="cmd-card cmd-list">{upcoming.map((u, i) => (
+      <button key={i} onClick={() => u.lead_id && open(u.lead_id)}>
+        <span><b>{titled(u.name)}</b><small>{[u.location, u.what, u.channels].filter(Boolean).join(' · ')}</small></span>
+        <em>{time(u.at)}</em></button>))}</div>
+      : <p className="cmd-card cmd-muted pad">{live?.ob?.next_day ? `Done for today. ${live.ob.next_day} follow-up texts go out tomorrow morning when sending opens.` : 'Nothing else scheduled today.'}</p>}
+    <SectionHead title="Just sent" />
+    {sent.length ? <div className="cmd-card cmd-list">{sent.slice(0, 8).map((s, i) => (
+      <button key={i} onClick={() => s.lead_id && open(s.lead_id)}>
+        <span><b>{titled(s.name)}</b><small>{s.location || ''}</small></span>
+        <em className={BAD[s.status] ? 'bad' : ''}>{s.channel === 'text' ? 'Text' : 'Email'} · {BAD[s.status] || (s.status === 'delivered' ? 'Delivered' : s.status === 'opened' ? 'Opened' : 'Sent')} · {time(s.at)}</em>
+      </button>))}</div>
+      : <p className="cmd-card cmd-muted pad">Nothing sent yet today.</p>}
+  </>
+}
+
+function MiniTile({ v, l, n, a, tone }) {
+  return <div className={`cmd-mtile ${tone || ''}`}><b>{v}</b><span>{l}</span>{n && <small>{n}</small>}{a && <i>{a}</i>}</div>
 }
