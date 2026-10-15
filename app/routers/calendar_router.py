@@ -263,6 +263,20 @@ def get_booking_by_token(request: Request, token: str, db: Session = Depends(get
     }
 
 
+def _event_minutes(booking, body) -> int:
+    """How long the calendar event is: the booking's own length (SCI visits
+    60, phone appointments 30), else the payload's, else 30."""
+    for v in (getattr(booking, "appt_duration", None) if booking else None,
+              (body or {}).get("duration_minutes")):
+        try:
+            n = int(v)
+            if 15 <= n <= 240:
+                return n
+        except (TypeError, ValueError):
+            continue
+    return 30
+
+
 @router.post("/booking-confirmed")
 async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_db)):
     """
@@ -447,7 +461,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                 calendar_result = {"success": False, "error": f"Could not parse slot time: {slot_display!r}"}
             else:
                 from datetime import timedelta
-                event_end = event_start + timedelta(minutes=30)
+                event_end = event_start + timedelta(minutes=_event_minutes(booking, body))
                 event_body_payload = {
                     "subject": f"{appt_label} — {lead_name or lead_phone}",
                     "body": {
@@ -544,7 +558,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
 
             if event_start and booking:
                 from app.services.calendar_service import create_calendar_event_for_booking as _gcal_create
-                gcal_result = _gcal_create(db, booking, event_start, 30)
+                gcal_result = _gcal_create(db, booking, event_start, _event_minutes(booking, body))
                 google_calendar_result = gcal_result
                 logger.info("booking-confirmed: Google Calendar result=%s", gcal_result)
             else:
@@ -1277,7 +1291,8 @@ def _tz_utc():
     return _timezone.utc
 
 
-def compute_day_slots(db: Session, advisor, target_date, *, program_visit: bool, today=None) -> dict:
+def compute_day_slots(db: Session, advisor, target_date, *, program_visit: bool, today=None,
+                      minutes: int = 60) -> dict:
     """THE ONE SLOT ENGINE for a booking day: office hours, the advisor's
     booked/confirmed BookingLinks, their connected calendar (fails closed), the
     same-day 2-hour buffer, and 60-minute on-the-hour visits for an outreach
@@ -1331,12 +1346,18 @@ def compute_day_slots(db: Session, advisor, target_date, *, program_visit: bool,
             if hasattr(bt, 'tzinfo') and bt.tzinfo:
                 bt = bt.replace(tzinfo=None)
             booked_times.add((bt.hour, bt.minute))
-
-    # OUTREACH PROGRAM VISITS ARE 60 MINUTES: a booked visit holds its whole
-    # hour, and a family is offered on-the-hour starts whose full hour is free.
-    if _program_visit:
-        for (h, m) in list(booked_times):
-            booked_times.add((h, m + 30) if m < 30 else (h + 1, m - 30))
+            # OUTREACH PROGRAM: a booking holds its whole length (visits 60,
+            # phone appointments 30; an older booking with no length is a
+            # 60-minute visit), in 30-minute blocks.
+            if _program_visit:
+                try:
+                    _dur = int(getattr(b, "appt_duration", None) or 60)
+                except (TypeError, ValueError):
+                    _dur = 60
+                _t = bt
+                for _k in range(1, max(1, (_dur + 29) // 30)):
+                    _t = _t + timedelta(minutes=30)
+                    booked_times.add((_t.hour, _t.minute))
 
     available = [s for s in candidate_slots if (s.hour, s.minute) not in booked_times]
 
@@ -1395,7 +1416,8 @@ def compute_day_slots(db: Session, advisor, target_date, *, program_visit: bool,
             if dt_cls(_today_ct.year, _today_ct.month, _today_ct.day, s.hour, s.minute) >= cutoff_time
         ]
 
-    if _program_visit:
+    if _program_visit and int(minutes or 60) > 30:
+        # A 60-minute visit starts on the hour and needs its whole hour free.
         _free = {(s.hour, s.minute) for s in available}
         available = [s for s in available
                      if s.minute == 0 and s.hour <= 16 and (s.hour, 30) in _free]

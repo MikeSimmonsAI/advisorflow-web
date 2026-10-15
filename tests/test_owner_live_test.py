@@ -71,7 +71,7 @@ def test_owner_test_books_for_real_and_runs_auto_with_program_off(setter, monkey
     assert send.call_count == 1 and len(fake.calls) == 1
     # booking for the owner test is NOT simulated (it goes to the real calendar path)
     called = {}
-    monkeypatch.setattr(A, "still_free", lambda db, prog, slot: True)
+    monkeypatch.setattr(A, "still_free", lambda db, prog, slot, *a, **k: True)
     import app.routers.calendar_router as cr
 
     async def _hook(req, db):
@@ -85,3 +85,31 @@ def test_owner_test_books_for_real_and_runs_auto_with_program_off(setter, monkey
     slot = datetime(2030, 1, 8, 10, 0)
     out = A.book(db, prog, me, slot, "visit")
     assert out["status"] == "confirmed" and "TEST" in called["payload"]["appt_label"]
+
+
+def test_after_cleanup_the_owner_test_never_rebooks_or_follows_up(setter, client, monkeypatch):
+    from datetime import datetime, timedelta
+    from app.models.program_models import ProgramConversation
+    from app.services.programs import ai_setter
+    from app.services.programs import responses as R
+    db, org, prog, admin = setter["db"], setter["org"], setter["prog"], setter["admin"]
+    me = _owner(db, org, "+18435550000")
+    conv = ProgramConversation(organization_id=org.id, lead_id=me.id, state="offered", is_test=True,
+                               next_followup_at=datetime.utcnow() - timedelta(minutes=1))
+    db.add(conv)
+    db.commit()
+    fake = _Fake([_d("follow_up_later", "Just checking in.")])
+    with patch.object(ai_setter, "_get_client", return_value=fake), \
+         patch("app.services.sms_service.send_sms") as send:
+        ai_setter.followup_sweep(db)
+    assert send.call_count == 0 and not fake.calls                         # no follow-up to the owner
+    admin.role = "god_admin"
+    db.commit()
+    h = dict(_h(db, admin), **{"X-Org-Override": org.id})
+    assert client.post("/program/setter/live-test/cleanup", headers=h).json()["ok"]
+    fake = _Fake([_d("book", "", slot_choice=1)])
+    with patch.object(ai_setter, "_get_client", return_value=fake), \
+         patch("app.services.contact_hours.check", return_value={"permitted": True}), \
+         patch("app.services.sms_service.send_sms") as send:
+        R.on_inbound(db, me, "Friday at 9 works", "sms")
+    assert send.call_count == 0 and not fake.calls                         # finished test: no AI, no booking

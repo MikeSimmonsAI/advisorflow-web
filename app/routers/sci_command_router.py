@@ -291,13 +291,13 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
 
 
 @router.get("/slots")
-def command_slots(lead_id: str, db: Session = Depends(get_db),
+def command_slots(lead_id: str, kind: str = "visit", db: Session = Depends(get_db),
                   user: User = Depends(require_tenant_or_observer)):
     """Two real open times on the program's booking calendar - the same
     times the booking page and the appointment setter would offer."""
     from app.services.programs import appointments as A
     prog = _program(db, user, managers_only=False)
-    slots, why = A.available_slots(db, prog, want=4)
+    slots, why = A.available_slots(db, prog, want=4, kind=kind if kind in (A.PHONE, A.VISIT) else A.VISIT)
     return {"slots": [{"value": s.isoformat(), "label": A.describe(s),
                        "day": s.strftime("%a %b %-d"), "time": s.strftime("%-I:%M %p")} for s in slots],
             "reason": why}

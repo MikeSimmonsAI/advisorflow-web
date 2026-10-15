@@ -29,6 +29,13 @@ log = logging.getLogger(__name__)
 CENTRAL = "America/Chicago"
 PHONE, VISIT = "phone", "visit"
 LABELS = {PHONE: "Phone Appointment", VISIT: "Planning Visit"}
+# One length everywhere: what the AI says, the times offered, the booking
+# record and the calendar event.
+MINUTES = {PHONE: 30, VISIT: 60}
+
+
+def minutes_for(kind) -> int:
+    return MINUTES.get(kind or VISIT, MINUTES[VISIT])
 
 
 def _today_central():
@@ -51,7 +58,7 @@ def program_advisor(db: Session, prog):
 
 
 def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
-                    now_central: Optional[datetime] = None) -> Tuple[List[datetime], Optional[str]]:
+                    now_central: Optional[datetime] = None, kind: str = VISIT) -> Tuple[List[datetime], Optional[str]]:
     """Up to `want` genuine open times (naive Central), spread over different
     days when possible. ([], reason) when nothing can honestly be offered."""
     from app.routers.calendar_router import compute_day_slots
@@ -67,7 +74,7 @@ def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
         d = today + timedelta(days=i)
         if d.weekday() >= 5:
             continue
-        res = compute_day_slots(db, advisor, d, program_visit=True, today=today)
+        res = compute_day_slots(db, advisor, d, program_visit=True, today=today, minutes=minutes_for(kind))
         if res.get("calendar_error"):
             return [], "the calendar cannot be read right now"
         slots = [datetime.fromisoformat(x) for x in res.get("slots") or []]
@@ -91,14 +98,15 @@ def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
     return out[:want], (None if out else "no open times in the next two weeks")
 
 
-def slots_on_day(db: Session, prog, day, want: int = 2) -> Tuple[List[datetime], Optional[str]]:
+def slots_on_day(db: Session, prog, day, want: int = 2, kind: str = VISIT) -> Tuple[List[datetime], Optional[str]]:
     """Open times on one day the family asked for (morning and afternoon if
     both exist). ([], reason) when that day has none."""
     from app.routers.calendar_router import compute_day_slots
     advisor = program_advisor(db, prog)
     if advisor is None or day.weekday() >= 5:
         return [], "no times that day"
-    res = compute_day_slots(db, advisor, day, program_visit=True, today=_today_central().date())
+    res = compute_day_slots(db, advisor, day, program_visit=True, today=_today_central().date(),
+                            minutes=minutes_for(kind))
     if res.get("calendar_error"):
         return [], "the calendar cannot be read right now"
     slots = [datetime.fromisoformat(x) for x in res.get("slots") or []]
@@ -119,12 +127,13 @@ def describe(slot: datetime) -> str:
     return slot.strftime("%A, %B %-d at %-I:%M %p").replace(":00 ", " ")
 
 
-def still_free(db: Session, prog, slot: datetime) -> bool:
+def still_free(db: Session, prog, slot: datetime, kind: str = VISIT) -> bool:
     from app.routers.calendar_router import compute_day_slots
     advisor = program_advisor(db, prog)
     if advisor is None:
         return False
-    res = compute_day_slots(db, advisor, slot.date(), program_visit=True, today=_today_central().date())
+    res = compute_day_slots(db, advisor, slot.date(), program_visit=True, today=_today_central().date(),
+                            minutes=minutes_for(kind))
     if res.get("calendar_error"):
         return False
     return slot.strftime("%Y-%m-%dT%H:%M:00") in set(res.get("slots") or [])
@@ -158,7 +167,7 @@ def book(db: Session, prog, lead, slot: datetime, kind: str) -> Dict:
     # anywhere - never writes to a real calendar:
         # the time is re-checked against the live calendar and reported as a
         # simulated booking - never as a confirmed one.
-        free = still_free(db, prog, slot)
+        free = still_free(db, prog, slot, kind)
         return {"ok": free, "status": "simulated" if free else "taken", "simulated": True,
                 "booked_time": slot.isoformat(),
                 "reason": None if free else "that time is no longer open"}
@@ -175,17 +184,18 @@ def book(db: Session, prog, lead, slot: datetime, kind: str) -> Dict:
         same = existing.booked_time.replace(tzinfo=None) == slot
         return {"ok": same, "status": "confirmed" if same else "already_booked",
                 "booking_id": existing.id, "booked_time": existing.booked_time.isoformat()}
-    if not still_free(db, prog, slot):
+    if not still_free(db, prog, slot, kind):
         return {"ok": False, "status": "taken", "reason": "that time is no longer open"}
     link = get_or_create_booking_link(db, lead, advisor)
     link.booked_time = slot
+    link.appt_duration = minutes_for(kind)
     db.flush()
     from app.routers.calendar_router import booking_confirmed_webhook
     payload = {"booking_token": link.token, "slot_display": slot.strftime("%Y-%m-%dT%H:%M:00"),
                "appt_label": ("TEST - owner live test, safe to delete" if owner_test
                               else LABELS.get(kind, LABELS[VISIT])),
                "lead_name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip(),
-               "lead_phone": lead.phone or ""}
+               "lead_phone": lead.phone or "", "duration_minutes": minutes_for(kind)}
     try:
         try:
             asyncio.get_running_loop()
