@@ -238,15 +238,16 @@ def snapshot(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
                          ProgramUnmatchedReply.status == "open").scalar() or 0)
     out["unmatched_replies"] = {"status": "ok" if not unmatched else "warn", "count": unmatched}
 
-    hot = (db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id,
-                                            ProgramResponse.response_class == "hot",
-                                            ProgramResponse.handling_status != "closed").all())
+    from app.services import test_records as _tr
+    hot = _tr.exclude_test_responses(db.query(ProgramResponse).filter(
+        ProgramResponse.organization_id == org_id, ProgramResponse.response_class == "hot",
+        ProgramResponse.handling_status != "closed")).all()
     unhandled = [r for r in hot if r.handling_status == "new" and r.sla_due_at and r.sla_due_at < now]
     out["hot_responses"] = {"status": "ok" if not hot else "warn", "open": len(hot)}
     out["unhandled_hot"] = {"status": "ok" if not unhandled else "fail", "count": len(unhandled),
                             "sla_minutes": prog.hot_sla_minutes}
-    recent = (db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id,
-                                               ProgramResponse.received_at >= month).all())
+    recent = _tr.exclude_test_responses(db.query(ProgramResponse).filter(
+        ProgramResponse.organization_id == org_id, ProgramResponse.received_at >= month)).all()
     mins = []
     for r in recent:
         first = min([t for t in (r.opened_at, r.responded_at) if t] or [None]) if (r.opened_at or r.responded_at) else None

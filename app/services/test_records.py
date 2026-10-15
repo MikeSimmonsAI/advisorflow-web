@@ -111,3 +111,22 @@ def blocked_reason(lead: Lead) -> Optional[str]:
     if getattr(lead, "manual_flag", None) == "remove_all":
         return "lead manually flagged remove_all"
     return None
+
+
+def exclude_test_responses(query):
+    """Drop replies from test / synthetic contacts. Kept in the database for
+    audit; never in a production count, list or alert sweep."""
+    from app.models.program_models import ProgramResponse as PR
+    test_ids = query.session.query(Lead.id).filter(Lead.is_test.is_(True))
+    return query.filter(~PR.lead_id.in_(test_ids))
+
+
+def exclude_test_alerts(query):
+    """Drop staff alerts produced by test contacts or test sends."""
+    from sqlalchemy import or_
+    from app.models.program_models import ProgramAlert as PA, ProgramResponse as PR
+    test_ids = query.session.query(Lead.id).filter(Lead.is_test.is_(True))
+    test_resps = query.session.query(PR.id).filter(PR.lead_id.in_(test_ids))
+    return query.filter(or_(PA.kind.is_(None), PA.kind != "test"),
+                        or_(PA.response_id.is_(None), ~PA.response_id.in_(test_resps)),
+                        or_(PA.message.is_(None), ~PA.message.like("TEST%")))

@@ -187,6 +187,7 @@ COLUMNS_TO_ADD = [
     ("outreach_programs", "daily_batch_last_date", "VARCHAR"),
     ("outreach_programs", "self_check_ack", "TEXT"),
     ("outreach_programs", "alert_title", "VARCHAR"),
+    ("outreach_programs", "ai_setter_mode", "VARCHAR DEFAULT 'off'"),
     ("program_alerts", "provider_id", "VARCHAR"),
     ("program_alerts", "provider_status", "VARCHAR"),
     ("program_alerts", "provider_error", "VARCHAR"),

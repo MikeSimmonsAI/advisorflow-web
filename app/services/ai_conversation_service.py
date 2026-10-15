@@ -1434,6 +1434,9 @@ def handle_inbound_reply(db: Session, lead: Lead, advisor: User, reply_body: str
     # stored by the poller that called this; the advisor sees it as usual.
     if not ai_gateway.check_background("ai_inbound_reply"):
         return {"action": "ai_disabled"}
+    from app.services import sms_programs as _sci
+    if _sci.is_sci_org(db, lead.organization_id):
+        return {"action": "sci_program"}       # the SCI setter answers SCI families
 
     conv = db.query(PipelineConversation).filter(
         PipelineConversation.lead_id == lead.id,

@@ -34,7 +34,7 @@ from app.services.programs import identity
 log = logging.getLogger(__name__)
 
 from app.services.programs.reply_rules import (  # noqa: F401  (re-exported: other modules use responses.X)
-    ACKNOWLEDGMENT, ACTIVE, APPOINTMENT, BAD_DATA, BENEFITS, CEMETERY, CREMATION, GENERAL_PLANNING, HOT,
+    ACKNOWLEDGMENT, ACTIVE, APPOINTMENT, AUTO_REPLY, BAD_DATA, BENEFITS, CEMETERY, CREMATION, GENERAL_PLANNING, HOT,
     INFORMATION, INTENT_LABELS, I_BAD_DATA, I_OPT_OUT, I_WRONG_PERSON, LABELS, LOW, NOT_INTERESTED, OBJECTION,
     OPT_OUT, PRICING, RECOMMENDED, SLA_BREACH_LABEL, VETERAN, WRONG_PERSON,
     alert_plan, cadence_action, classify, intents, staff_alert_gate, suggested_reply, urgency,
@@ -318,7 +318,8 @@ def _deliver_staff_alert(db: Session, prog: OutreachProgram, channel: str, to: s
             import html as _html
             label = {"hot": "HOT RESPONSE", "sla_breach": "HOT RESPONSE - NOT YET HANDLED",
                      "mailbox_reconnect": "ACTION NEEDED - reply mailbox disconnected",
-                     "self_check": "SYSTEM CHECK - something is not running as planned"}.get(kind, "Response")
+                     "self_check": "SYSTEM CHECK - something is not running as planned",
+                     "booked": "APPOINTMENT BOOKED", "handoff": "A FAMILY ASKED FOR A PERSON"}.get(kind, "Response")
             link = _app_link(response_id)
             body = "<p>%s</p>" % _html.escape(message)
             if link:
@@ -373,7 +374,8 @@ def _pause_cadence(db: Session, lead: Lead) -> bool:
 def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
                reply_id: Optional[str] = None, reply_classification: Optional[str] = None,
                now: Optional[datetime] = None, reply_to_alias: Optional[str] = None,
-               alias_location_id: Optional[str] = None) -> Optional[ProgramResponse]:
+               alias_location_id: Optional[str] = None,
+               staff_alerts: bool = True) -> Optional[ProgramResponse]:
     """Record and route one inbound reply. None for non-program organizations.
 
     reply_to_alias / alias_location_id: the location address the family wrote
@@ -406,7 +408,7 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
         response_class=cls, body_excerpt=(body or "")[:1000],
         summary=summarize(lead, body, result, channel, prof.official_name if prof else None),
         recommended_action=RECOMMENDED[cls], received_at=now,
-        handling_status="closed" if cls in (OPT_OUT,) else "new",
+        handling_status="closed" if cls in (OPT_OUT, AUTO_REPLY) else "new",
     )
     from app.services.programs import campuses as _campuses
     if alias_prof is not None and prof is not None and alias_prof.location_id != prof.location_id \
@@ -416,8 +418,9 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
     if cls == HOT:
         resp.sla_due_at = now + timedelta(minutes=max(1, int(prog.hot_sla_minutes or 15)))
     # Any meaningful reply pauses the cadence; an acknowledgement does too -
-    # a person, not the sequence, decides what happens next.
-    resp.cadence_paused = _pause_cadence(db, lead)
+    # a person, not the sequence, decides what happens next. An AUTOMATIC
+    # reply (driving / away) is not a person: the spaced follow-up continues.
+    resp.cadence_paused = False if cls == AUTO_REPLY else _pause_cadence(db, lead)
     if cls == OPT_OUT:
         from app.services.cadence_service import stop_cadence_for_lead
         from app.models.models import CadenceStatus
@@ -456,8 +459,21 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
     msg = "%s %s" % ("🔥" if cls == HOT else "💬", resp.summary)
     plan = alert_plan(cls)
     if plan:
-        _alert(db, prog, resp, lead, plan["kind"], msg, management=plan["management"], external=plan["external"])
+        _alert(db, prog, resp, lead, plan["kind"], msg, management=plan["management"],
+               external=plan["external"] and staff_alerts)
     db.commit()
+    # THE APPOINTMENT SETTER: answers the family in conversation when the
+    # program has it switched on (off / draft / auto). It never raises into the
+    # inbound path - a failure is recorded and a person handles the reply.
+    try:
+        from app.services.programs import ai_setter
+        ai_setter.on_family_reply(db, prog, lead, resp, body, now=now)
+    except Exception:                                    # noqa: BLE001
+        log.exception("appointment setter failed for response %s", resp.id)
+        try:
+            db.rollback()
+        except Exception:                                # noqa: BLE001
+            pass
     return resp
 
 
@@ -522,6 +538,8 @@ def sla_sweep(db: Session, now: Optional[datetime] = None,
         ProgramResponse.sla_due_at <= now)
     if organization_id:
         q = q.filter(ProgramResponse.organization_id == organization_id)
+    from app.services import test_records as _tr
+    q = _tr.exclude_test_responses(q)          # a synthetic HOT reply never re-pages the team
     breached = []
     cap = sla_realert_cap()
     for resp in q.all():

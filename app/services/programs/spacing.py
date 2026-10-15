@@ -45,9 +45,12 @@ def last_text_at(db: Session, lead_id: str) -> Optional[datetime]:
 
 
 def family_replied_since(db: Session, lead_id: str, since: datetime) -> bool:
+    """A PERSON wrote back after `since`. An automatic reply (driving / away)
+    or an opt-out does not open a conversation."""
     from app.models.program_models import ProgramResponse
-    return db.query(ProgramResponse.id).filter(ProgramResponse.lead_id == lead_id,
-                                               ProgramResponse.received_at > since).first() is not None
+    return db.query(ProgramResponse.id).filter(
+        ProgramResponse.lead_id == lead_id, ProgramResponse.received_at > since,
+        ProgramResponse.response_class.notin_(("auto_reply", "opt_out"))).first() is not None
 
 
 def earliest_next(db: Session, lead_id: str, gap: timedelta = MIN_GAP) -> Optional[datetime]:

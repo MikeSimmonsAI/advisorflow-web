@@ -157,6 +157,7 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
         "primary_contact_user_id": prog.primary_contact_user_id,
         "alert_email": prog.alert_email, "alert_phone": prog.alert_phone,
         "alert_title": getattr(prog, "alert_title", None),
+        "ai_setter_mode": getattr(prog, "ai_setter_mode", None) or "off",
         "management_recipients": json.loads(prog.management_recipients or "[]"),
         "hot_sla_minutes": prog.hot_sla_minutes,
         "customer_channels": identity.channels(prog),
@@ -205,6 +206,7 @@ class SettingsIn(BaseModel):
     send_via_mailbox: Optional[str] = None
     email_hold_providers: Optional[List[str]] = None
     booking_user_id: Optional[str] = None
+    ai_setter_mode: Optional[str] = None
 
 
 _EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -264,6 +266,14 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db),
             raise HTTPException(status_code=422, detail="alias_mode must be from, reply_to or off.")
     if "staff_alerts_enabled" in data:
         prog.staff_sms_alerts_enabled = bool(data.pop("staff_alerts_enabled"))
+    if "ai_setter_mode" in data:
+        m = (data.get("ai_setter_mode") or "off").strip().lower()
+        if m not in ("off", "draft", "auto"):
+            raise HTTPException(status_code=422, detail="ai_setter_mode must be off, draft or auto.")
+        if m != "off" and getattr(user, "role", None) != "god_admin":
+            # Letting AI answer families is the owner's decision alone.
+            raise HTTPException(status_code=403, detail="Only the owner can switch the appointment setter on.")
+        data["ai_setter_mode"] = m
     if "placement_seed_addresses" in data:
         from app.services.programs import placement as _pl
         raw = data.pop("placement_seed_addresses") or {}
@@ -573,7 +583,8 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
 
     recs_q = _test_records.exclude_test_program_records(
         db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org_id))
-    resp_q = db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id)
+    resp_q = _test_records.exclude_test_responses(
+        db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id))
     if location_id:
         recs_q = recs_q.filter(ProgramSourceRecord.location_id == location_id)
         resp_q = resp_q.filter(ProgramResponse.location_id == location_id)
@@ -761,8 +772,9 @@ def _reporting(db: Session, recs, resps, prog=None) -> dict:
                                 "'Not bounced' is every email sent minus the bounce notices that came back. "
                                 "Opens are counted from Oct 14 on; Outlook hides images until the reader "
                                 "allows them, so real opens are higher." % prog.send_via_mailbox)
-    out["email"]["replied"] = sum(1 for r in resps if r.channel == "email")
-    out["sms"]["replied"] = sum(1 for r in resps if r.channel == "sms")
+    # A car's "I'm driving" auto-text is not a reply from a person.
+    out["email"]["replied"] = sum(1 for r in resps if r.channel == "email" and r.response_class != "auto_reply")
+    out["sms"]["replied"] = sum(1 for r in resps if r.channel == "sms" and r.response_class != "auto_reply")
     out["email"]["unsubscribed"] = sum(1 for r in resps if r.channel == "email" and r.response_class == "opt_out")
     waits = sorted((r.responded_at - r.received_at).total_seconds() / 60.0
                    for r in resps if r.responded_at and r.received_at)
@@ -1033,9 +1045,12 @@ def record_placement_result(check_id: str, body: PlacementResultIn, db: Session 
 @router.get("/responses")
 def list_responses(status: Optional[str] = Query(None), response_class: Optional[str] = Query(None),
                    location_id: Optional[str] = Query(None), limit: int = Query(100, ge=1, le=500),
+                   include_test: bool = Query(False),
                    db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     prog = _program(db, user)
     q = db.query(ProgramResponse).filter(ProgramResponse.organization_id == prog.organization_id)
+    if not include_test:
+        q = _test_records.exclude_test_responses(q)
     if status == "open":
         q = q.filter(ProgramResponse.handling_status != "closed")
     elif status:
@@ -1131,12 +1146,14 @@ def voice_report(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_
 
 
 @router.get("/alerts")
-def list_alerts(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db),
-                user: User = Depends(require_tenant_or_observer)):
+def list_alerts(limit: int = Query(50, ge=1, le=200), include_test: bool = Query(False),
+                db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     prog = _program(db, user)
     _require_manager(db, user)
-    rows = (db.query(ProgramAlert).filter(ProgramAlert.organization_id == prog.organization_id)
-            .order_by(ProgramAlert.created_at.desc()).limit(limit).all())
+    q = db.query(ProgramAlert).filter(ProgramAlert.organization_id == prog.organization_id)
+    if not include_test:
+        q = _test_records.exclude_test_alerts(q)
+    rows = (q.order_by(ProgramAlert.created_at.desc()).limit(limit).all())
     return [{"id": a.id, "kind": a.kind, "audience": a.audience, "channel": a.channel,
              "delivered": a.delivered, "reason": a.reason, "message": a.message,
              "created_at": a.created_at.isoformat() + "Z" if a.created_at else None} for a in rows]
@@ -2333,6 +2350,185 @@ def audit_spacing(days: int = Query(7, ge=1, le=60), gap_hours: int = Query(20, 
                                              "touch": st.current_touch_number + 1})
     return {"window_days": days, "gap_hours": gap_hours, "contacts": len(out), "items": out,
             "upcoming": upcoming}
+
+
+# ── appointment setter: conversations and the synthetic simulator ──────────
+
+def _conv_json(db, conv, lead=None, turns: bool = False) -> dict:
+    from app.models.program_models import ProgramConversationTurn
+    from app.services.programs import appointments as _A
+    out = {"id": conv.id, "lead_id": conv.lead_id, "state": conv.state, "is_test": bool(conv.is_test),
+           "appointment_kind": conv.appointment_kind, "service_type": conv.service_type,
+           "offered": [s.isoformat() for s in _A.offered(conv)],
+           "offered_text": [_A.describe(s) for s in _A.offered(conv)],
+           "callback_window": conv.callback_window,
+           "booked_time": conv.booked_time.isoformat() if conv.booked_time else None,
+           "handoff_reason": conv.handoff_reason, "ai_turns": conv.ai_turns,
+           "last_family_at": conv.last_family_at.isoformat() if conv.last_family_at else None,
+           "last_ai_at": conv.last_ai_at.isoformat() if conv.last_ai_at else None,
+           "next_followup_at": conv.next_followup_at.isoformat() if conv.next_followup_at else None}
+    if lead is not None:
+        out["name"] = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title()
+    if turns:
+        out["turns"] = [{"role": t.role, "text": t.text, "action": t.action, "delivery": t.delivery,
+                         "reason": t.reason, "at": t.created_at.isoformat() if t.created_at else None}
+                        for t in db.query(ProgramConversationTurn)
+                        .filter(ProgramConversationTurn.conversation_id == conv.id)
+                        .order_by(ProgramConversationTurn.created_at).all()]
+    return out
+
+
+@router.get("/conversations")
+def list_conversations(state: Optional[str] = None, include_test: bool = False,
+                       db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    from app.models.program_models import ProgramConversation
+    prog = _program(db, user, managers_only=False)
+    q = db.query(ProgramConversation).filter(ProgramConversation.organization_id == prog.organization_id)
+    if not include_test:
+        q = q.filter(ProgramConversation.is_test.isnot(True))
+    if state:
+        q = q.filter(ProgramConversation.state.in_(state.split(",")))
+    rows = q.order_by(ProgramConversation.updated_at.desc()).limit(200).all()
+    leads = {l.id: l for l in db.query(Lead).filter(Lead.id.in_([c.lead_id for c in rows])).all()} if rows else {}
+    return {"items": [_conv_json(db, c, leads.get(c.lead_id)) for c in rows]}
+
+
+@router.get("/conversations/{lead_id}")
+def get_conversation(lead_id: str, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_or_observer)):
+    from app.models.program_models import ProgramConversation
+    prog = _program(db, user, managers_only=False)
+    conv = (db.query(ProgramConversation).filter(ProgramConversation.organization_id == prog.organization_id,
+                                                 ProgramConversation.lead_id == lead_id)
+            .order_by(ProgramConversation.created_at.desc()).first())
+    if conv is None:
+        return {"conversation": None}
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    return {"conversation": _conv_json(db, conv, lead, turns=True)}
+
+
+class ConversationHandIn(BaseModel):
+    state: str                          # human | ai_active
+
+
+@router.post("/conversations/{lead_id}/hand")
+def hand_conversation(lead_id: str, body: ConversationHandIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user)):
+    """A person takes the conversation (state human) or gives it back (ai_active)."""
+    from app.models.program_models import ProgramConversation
+    prog = _program(db, user)
+    if body.state not in ("human", "ai_active"):
+        raise HTTPException(status_code=422, detail="state must be human or ai_active")
+    conv = (db.query(ProgramConversation).filter(ProgramConversation.organization_id == prog.organization_id,
+                                                 ProgramConversation.lead_id == lead_id)
+            .order_by(ProgramConversation.created_at.desc()).first())
+    if conv is None:
+        raise HTTPException(status_code=404, detail="No conversation for this contact.")
+    conv.state = body.state
+    conv.handoff_reason = ("taken by %s" % (user.email or user.id)) if body.state == "human" else None
+    db.commit()
+    return _conv_json(db, conv)
+
+
+class SetterSimIn(BaseModel):
+    persona: str                        # short key, e.g. "oscar"; one synthetic contact each
+    first_name: str
+    text: str
+    location_id: Optional[str] = None
+    channel: str = "sms"
+    reset: bool = False
+
+
+@router.post("/setter/simulate")
+def setter_simulate(body: SetterSimIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """ONE family message from a SYNTHETIC contact (is_test, no phone, no
+    email - it can never be messaged) through the real reply path and the
+    appointment setter (as "draft" in production unless it is switched on).
+    Booking for a synthetic contact is simulated in production (the time is
+    checked on the live calendar, nothing is written) and real in staging.
+    Returns the setter's decision and the full conversation."""
+    from app.models.program_models import ProgramConversation, ProgramSourceRecord
+    from app.services.programs import ai_setter
+    from app.services.programs import responses as R
+    prog = _program(db, user)
+    _require_manager(db, user)
+    key = "SIM-SETTER-%s" % "".join(ch for ch in body.persona.lower() if ch.isalnum())[:24]
+    lead = db.query(Lead).filter(Lead.organization_id == prog.organization_id, Lead.is_test.is_(True),
+                                 Lead.last_name == key).first()
+    if lead is None:
+        lead = Lead(organization_id=prog.organization_id, first_name=body.first_name[:40], last_name=key,
+                    phone=None, email=None, status="sent", is_test=True,
+                    assigned_to_id=getattr(prog, "booking_user_id", None) or user.id)
+        db.add(lead)
+        db.flush()
+        if body.location_id:
+            db.add(ProgramSourceRecord(organization_id=prog.organization_id, lead_id=lead.id,
+                                       source_lead_id=key, location_id=body.location_id,
+                                       raw_json="{}", campaign_family=None))
+        db.commit()
+    if body.reset:
+        for c in db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id).all():
+            c.state = "stopped"
+        db.commit()
+        db.add(ProgramConversation(organization_id=lead.organization_id, lead_id=lead.id,
+                                   state="ai_active", is_test=True))
+        db.commit()
+    resp = R.on_inbound(db, lead, body.text[:1000], body.channel, staff_alerts=False)
+    conv = ai_setter.conversation_for(db, lead, create=False)
+    result = None
+    if ai_setter.mode_of(prog) == "off" and resp is not None:
+        # The setter is off for real families; the simulator still exercises it.
+        result = ai_setter.on_family_reply(db, prog, lead, resp, body.text, force_mode="draft")
+        conv = ai_setter.conversation_for(db, lead, create=False)
+    return {"lead_id": lead.id, "class": resp.response_class if resp else None, "result": result,
+            "conversation": _conv_json(db, conv, lead, turns=True) if conv else None}
+
+
+@router.get("/setter/stats")
+def setter_stats(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db),
+                 user: User = Depends(require_tenant_or_observer)):
+    """The conversation numbers, each counted separately and never mixed with
+    test contacts: AI replies sent / drafted, conversations people are
+    handling, appointment offers, callback requests, bookings, confirmed."""
+    from app.models.models import BookingLink, Message
+    from app.models.program_models import ProgramConversation, ProgramConversationTurn
+    from app.services import send_source as _ss
+    prog = _program(db, user, managers_only=False)
+    org = prog.organization_id
+    since = datetime.utcnow() - timedelta(days=days)
+    test_ids = db.query(Lead.id).filter(Lead.is_test.is_(True))
+    turns = (db.query(ProgramConversationTurn.delivery)
+             .filter(ProgramConversationTurn.organization_id == org, ProgramConversationTurn.role == "ai",
+                     ProgramConversationTurn.created_at >= since, ~ProgramConversationTurn.lead_id.in_(test_ids))
+             .all())
+    convs = (db.query(ProgramConversation).filter(ProgramConversation.organization_id == org,
+                                                  ProgramConversation.is_test.isnot(True),
+                                                  ProgramConversation.updated_at >= since).all())
+    replied = _test_records.exclude_test_responses(
+        db.query(ProgramResponse.lead_id).filter(ProgramResponse.organization_id == org,
+                                                 ProgramResponse.received_at >= since,
+                                                 ProgramResponse.response_class.notin_(("auto_reply", "opt_out"))))
+    human = (db.query(Message.lead_id).filter(Message.send_source == _ss.MANUAL, Message.sent_at >= since,
+                                              Message.lead_id.in_(replied)).distinct().count())
+    org_leads = db.query(Lead.id).filter(Lead.organization_id == org, Lead.is_test.isnot(True))
+    bookings = (db.query(BookingLink).filter(BookingLink.lead_id.in_(org_leads),
+                                             BookingLink.status.in_(("booked", "confirmed", "completed")),
+                                             BookingLink.created_at >= since).all())
+    return {
+        "days": days,
+        "ai_replies_sent": sum(1 for (d,) in turns if d == "sent"),
+        "ai_replies_drafted": sum(1 for (d,) in turns if d == "draft"),
+        "ai_replies_held_or_blocked": sum(1 for (d,) in turns if d in ("held", "blocked")),
+        "families_replied": replied.distinct().count(),
+        "human_conversations": human,
+        "appointment_offers": sum(1 for c in convs if c.offered_at),
+        "callbacks_requested": sum(1 for c in convs if c.state == "callback_requested"),
+        "handed_to_person": sum(1 for c in convs if c.state == "human"),
+        "bookings": len(bookings),
+        "booked_by_ai": sum(1 for c in convs if c.state == "booked"),
+        "confirmed_visits": sum(1 for b in bookings if (b.status or "") in ("confirmed", "completed")),
+        "setter_mode": getattr(prog, "ai_setter_mode", None) or "off",
+    }
 
 
 class SimulateReplyIn(BaseModel):

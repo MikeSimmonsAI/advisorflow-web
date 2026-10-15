@@ -86,6 +86,11 @@ class OutreachProgram(Base):
     # booking link is minted for this user). NULL = program texts carry no
     # booking link.
     booking_user_id = Column(String, nullable=True)
+    # THE APPOINTMENT SETTER (services/programs/ai_setter.py). "off": a person
+    # answers every reply (the default, and production's until the owner turns
+    # it on). "draft": the AI writes the reply and offers real times, a person
+    # sends it. "auto": the AI answers and books within the rules.
+    ai_setter_mode = Column(String, nullable=True, default="off")
     # APPROVAL MODE: automated sends go only to contacts a manager approved on
     # Choose & Send. Switched on by the first approval; never switched off by code.
     require_send_approval = Column(Boolean, nullable=False, default=False)
@@ -577,4 +582,59 @@ class EmailProviderEvent(Base):
     lead_id = Column(String, nullable=True)
     organization_id = Column(String, nullable=True)
     action = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ProgramConversation(Base):
+    """ONE family's conversation with the appointment setter: where it stands
+    and what was offered. The words themselves are ProgramConversationTurn rows.
+
+    state: ai_active | offered (proposed times) | callback_requested |
+    pending (a booking link is out) | booked (calendar-confirmed) | human
+    (a person has it) | waiting (auto-reply; spaced follow-up later) | stopped
+    """
+    __tablename__ = "program_conversations"
+    __table_args__ = (Index("ix_program_conversations_lead", "lead_id"),
+                      Index("ix_program_conversations_org_state", "organization_id", "state"))
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False)
+    lead_id = Column(String, nullable=False)
+    state = Column(String, nullable=False, default="ai_active")
+    appointment_kind = Column(String, nullable=True)          # phone | visit
+    service_type = Column(String, nullable=True)               # e.g. prearrangement_review
+    offered_slots = Column(Text, nullable=True)                # JSON list of local ISO times
+    offered_at = Column(DateTime, nullable=True)
+    callback_window = Column(String, nullable=True)            # the family's own words
+    booking_link_id = Column(String, nullable=True)
+    booked_time = Column(DateTime, nullable=True)              # naive Central, as BookingLink
+    handoff_reason = Column(String, nullable=True)
+    ai_turns = Column(Integer, nullable=False, default=0)
+    last_family_at = Column(DateTime, nullable=True)
+    last_ai_at = Column(DateTime, nullable=True)
+    next_followup_at = Column(DateTime, nullable=True)
+    is_test = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProgramConversationTurn(Base):
+    """Every line of the conversation the setter saw or wrote, and what became
+    of it: sent (Twilio SID on the Message), draft (a person sends it),
+    simulated (synthetic contact - nothing left the building), held (waiting
+    for permitted hours), blocked (a rule refused it)."""
+    __tablename__ = "program_conversation_turns"
+    __table_args__ = (Index("ix_program_conv_turns_conv", "conversation_id", "created_at"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    conversation_id = Column(String, nullable=False)
+    organization_id = Column(String, nullable=False)
+    lead_id = Column(String, nullable=False)
+    role = Column(String, nullable=False)                      # family | ai | staff | system
+    text = Column(Text, nullable=True)
+    action = Column(String, nullable=True)                     # answer | offer_times | book | ...
+    delivery = Column(String, nullable=True)
+    message_id = Column(String, nullable=True)
+    reason = Column(String, nullable=True)
+    response_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -627,7 +627,12 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
         _reply_advisor = advisor or (
             db.query(User).filter(User.id == lead.assigned_to_id).first() if lead.assigned_to_id else None
         )
-        if _reply_advisor and not _evosense_owned and not _wholesale_seller:
+        # SCI families are answered ONLY by the SCI program's own handling
+        # (responses.on_inbound and its appointment setter), never by the
+        # generic pipeline / concierge auto-reply below.
+        from app.services import sms_programs as _sci_route
+        _sci_family = _sci_route.is_sci_org(db, lead.organization_id)
+        if _reply_advisor and not _evosense_owned and not _wholesale_seller and not _sci_family:
             if lead.status == "booked":
                 from app.services.ai_conversation_service import handle_inbound_reply
                 handle_inbound_reply(db, lead, _reply_advisor, Body)
