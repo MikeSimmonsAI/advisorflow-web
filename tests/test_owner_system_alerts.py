@@ -123,3 +123,25 @@ def test_one_notice_per_unchanged_incident_across_days_and_restarts(program):
             self_check._alerted.clear()
             assert self_check.alert_all(db, t0 + timedelta(days=8)) == 1   # long-standing: a weekly reminder
     assert len(calls) == 6                                       # three notices, email + text each
+
+
+def test_a_shrinking_list_of_already_reported_people_is_not_news(program):
+    from datetime import datetime, timedelta
+    db, prog = program["db"], program["prog"]
+    _setup(db, prog)
+    self_check._alerted.clear()
+    calls, fake = _capture()
+    t0 = datetime.utcnow()
+    eight = {"key": "texts_too_close", "ok": False, "title": "Texts spaced as planned",
+             "detail": "8 people", "people": ["Ann A", "Bo B", "Cy C"]}
+    two = dict(eight, detail="2 people", people=["Bo B", "Cy C"])
+    newcomer = dict(eight, detail="3 people", people=["Bo B", "Cy C", "Di D"])
+    with patch("app.services.programs.responses._deliver_staff_alert", side_effect=fake):
+        with patch.object(self_check, "run", return_value={"checks": [dict(eight)]}):
+            assert self_check.alert_all(db, t0) == 1
+        with patch.object(self_check, "run", return_value={"checks": [dict(two)]}):
+            self_check._alerted.clear()
+            assert self_check.alert_all(db, t0 + timedelta(hours=16)) == 0     # same people, smaller window
+        with patch.object(self_check, "run", return_value={"checks": [dict(newcomer)]}):
+            self_check._alerted.clear()
+            assert self_check.alert_all(db, t0 + timedelta(hours=17)) == 1     # Di D is new
