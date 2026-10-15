@@ -112,7 +112,8 @@ def test_preston_driving_autoreply_gets_no_answer_no_page_and_cadence_continues(
 
 # ── Lester: wants the guide, has questions -> guide, then times, then booked ─
 
-def test_lester_guide_then_offer_then_booked(setter, sample_advisor):
+def test_lester_guide_then_offer_then_booked(setter, sample_advisor, monkeypatch):
+    monkeypatch.setenv("SCI_SMS_LINKS", "on")                       # links in texts switched back on
     db, org = setter["db"], setter["org"]
     lead = _lead_for(db, org, sample_advisor, "L001", first="Lester")
     lead.is_test = True
@@ -379,3 +380,12 @@ def test_a_named_day_shapes_the_offer_even_when_the_ai_just_offers(setter, sampl
     monkeypatch.setattr(A, "slots_on_day", on_day)
     resp, conv = _run(db, lead, "A visit would help. Can you do Friday?", _Fake([_d("offer_times", "Would {TIMES} work?")]))
     assert seen["day"].weekday() == 4 and "January 11" in resp.suggested_reply
+
+
+def test_with_sms_links_off_the_guide_is_offered_by_mail_never_a_false_email_promise(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    fake = _Fake([_d("send_guide", "Happy to. Here is the planning guide.")])
+    out, conv = _run(db, lead, "Can you send me the guide?", fake)
+    texts = [t.text for t in _ai_turns(db, conv)]
+    assert "http" not in texts[0] and "mailed" in texts[0] and "email" not in texts[0].lower()
