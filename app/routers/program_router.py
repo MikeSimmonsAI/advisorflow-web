@@ -2568,6 +2568,13 @@ def setter_live_test(body: LiveTestIn, db: Session = Depends(get_db), user: User
                                        source_lead_id=TR.OWNER_TEST_LAST_NAME, location_id=p.location_id,
                                        location_status="mapped", raw_json="{}"))
         db.commit()
+    # The owner approves his own test contact for sending by running this
+    # (Choose & Send approval) - every other gate, consent included, still applies.
+    for rec in db.query(ProgramSourceRecord).filter(ProgramSourceRecord.lead_id == lead.id).all():
+        if rec.approved_to_send_at is None:
+            rec.approved_to_send_at = datetime.utcnow()
+            rec.approved_to_send_by = user.id
+    db.commit()
     if body.reset:
         for c in db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id).all():
             c.state = "stopped"
