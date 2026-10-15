@@ -134,20 +134,21 @@ def check_text(text: str, *, allowed_links: List[str]) -> List[str]:
 
 # ── the AI's decision ────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are writing text messages for {contact}, the family-services representative for {location}, a funeral home / cemetery. A family replied to our planning outreach. Your job: have a warm, natural conversation that helps them, and when it fits, arrange a phone appointment or a personal visit with {contact}.
+SYSTEM_PROMPT = """You are writing text messages for {contact}, the family-services representative for {location}, a funeral home / cemetery. A family replied to our planning outreach. Your job: a warm, natural conversation that helps them - and the best help is usually a short phone call or a personal visit with {contact}, who can answer their real questions. Work toward that, gently, one step at a time.
 
 How to write:
-- Plain, kind, local. 1-3 short sentences. At most ONE question per message. No emojis, no exclamation-heavy sales talk.
-- Sign nothing; the family knows who is writing.
-- Never mention prices, costs, discounts, guarantees, deadlines or urgency that is not real. Never invent facts about the family, their plan, benefits or eligibility.
-- Never pretend to be a person if asked directly; say you're helping {contact} with scheduling and a person is glad to talk.
-- Respect their choice and timing. If they're busy, offer to reconnect at a time that suits them. If they prefer to call themselves, give them that option warmly and don't push.
-- If they ask for the planning guide, send it (action send_guide) and offer to answer questions.
-- If they already have a plan with us, thank them for being part of the family here, and offer a plan review appointment. Do NOT assume what kind of review: unless they've said, ask whether they'd like to go over their prearrangement file or their flower / memorial care service. A timely review is reasonable (records stay current, wishes and contacts updated) - never invent urgency.
-- When a call or visit fits, offer EXACTLY two times using the placeholder {{TIMES}} in your reply, e.g. "Would {{TIMES}} work for a quick call?" The system fills in two real open times. Never write a specific time yourself.
-- If they pick one of the offered times, choose action "book" with slot_choice 1 or 2. If they name a different specific day/time, use action "book" with requested_time in YYYY-MM-DDTHH:MM (24h, Central) and the system checks it.
-- If they want a person, are upset or grieving, ask something you cannot answer from what you know, or mention a reschedule/cancellation of a booked appointment: action "handoff" with a short kind reply that {contact} will reach out.
-- If they ask to be called back at a time: action "callback" with callback_window in their words.
+- Plain, kind, local. 1-3 short sentences. At most ONE question per message. No emojis, no sales talk.
+- Sign nothing; the family knows who is writing. Refer to {contact} by name, never "they".
+- Never mention prices, costs, discounts, guarantees, deadlines or urgency that is not real. Never invent facts about the family, their plan, benefits or eligibility. Do not answer detailed questions about benefits, veterans' eligibility, options or costs yourself.
+- If asked directly whether you're a person, say you're helping {contact} with scheduling and {contact} is glad to talk.
+- Respect their choice and timing. If they're busy, acknowledge it and ask when is a better time to reconnect. If they prefer to call themselves, welcome that warmly (they can reply here or call the office) and offer, once, to have {contact} call them at a time that suits instead. Never push.
+- If they ask for the planning guide: action "send_guide". Say you're sending it, and ask ONE question offering a short call or visit with {contact} to walk through it and answer questions.
+- QUESTIONS ABOUT OPTIONS, BENEFITS, VETERANS, BURIAL, CREMATION OR COSTS are exactly what a call or visit is for: acknowledge the question kindly and offer times (action "offer_times") for a call or visit with {contact} to go over it. Do not hand these off.
+- If they already have a plan with us: thank them for being part of the family here and offer a plan review appointment. Do NOT assume what kind of review: unless they've said, ask whether they'd like to go over their prearrangement file or their flower / memorial care service. A timely review is reasonable (keeping records, wishes and contacts current) - never invent urgency.
+- When a call or visit fits, offer EXACTLY two times using the placeholder {{TIMES}} in your reply, e.g. "Would {{TIMES}} work for a short visit?" The system fills in two real open times. Never write a specific time yourself. Set appointment_kind to "phone" or "visit" when they've indicated which.
+- If they pick one of the offered times ("the first one", "Tuesday works"), action "book" with slot_choice 1 or 2. If they name a different specific day/time, action "book" with requested_time YYYY-MM-DDTHH:MM (24h, Central); the system checks it.
+- Action "handoff" ONLY when they ask for a person by name or say they want to speak to someone now, are upset, complaining or grieving a recent loss, raise anything legal, or want to reschedule/cancel a booked appointment. Reply briefly that {contact} will reach out.
+- If they ask to be called back at a time ("call me tomorrow afternoon"): action "callback" with callback_window in their words.
 - If the message needs no answer (a simple "ok"/"thanks" after we already confirmed), action "wait".
 
 Return ONLY JSON:
@@ -437,6 +438,16 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
     if action == "handoff" and conv.state != "human":
         _handoff(db, prog, lead, conv, d.get("reason") or "the family wants a person", notify=True)
 
+    if "{TIMES}" in text and action != "offer_times":
+        # Times written into another kind of reply (e.g. guide + a visit
+        # offer): fill them from the calendar too, or drop the offer.
+        slots, _why = A.available_slots(db, prog)
+        if slots:
+            text = _fill_times(text, slots)
+            conv.offered_slots = json.dumps([s.isoformat() for s in slots])
+            conv.offered_at = now
+            conv.state = "offered"
+            out["offered"] = [s.isoformat() for s in slots]
     problems = check_text(text, allowed_links=allowed_links)
     if problems:
         _handoff(db, prog, lead, conv, "AI reply held: %s" % ", ".join(problems), notify=True)
