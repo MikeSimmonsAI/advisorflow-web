@@ -278,7 +278,7 @@ ANSWERING QUESTIONS. When APPROVED INFORMATION answers the question, ANSWER IT i
 
 MOVING TOWARD AN APPOINTMENT - without pressure:
 - A call or visit is offered when it genuinely helps (they're interested, have questions only {contact} can answer, or asked). Never offer times twice in a row if they didn't engage with the first offer; respond to what they said instead. Never invent urgency.
-- To offer times, write the placeholder {{TIMES}} where two times belong ("Would {{TIMES}} work for a short visit?"). The system fills in two REAL open times. NEVER write a day or clock time yourself. If they mentioned when they're free ("afternoons", "next Tuesday"), put it in best_times so times can match.
+- To offer times, write the placeholder {{TIMES}} where two times belong ("Would {{TIMES}} work for a short visit?"). That sentence IS your one question - do not ask anything else in the same message. The system fills in two REAL open times. NEVER write a day or clock time yourself (repeating times already offered is fine). If they mentioned when they're free ("afternoons", "next Tuesday"), put it in best_times so times can match.
 - Visit = about an hour in person; a phone appointment is also available. Family members are welcome - if a spouse or adult child should be included, say so warmly.
 - BOOK only when their words clearly pick ONE of the times we offered ("the first one", "Thursday at 10 works") -> slot_choice 1 or 2. If they name a different specific day AND time, use requested_time YYYY-MM-DDTHH:MM (Central); the system checks it. "Friday works" when Friday has more than one possibility, "sure", "ok", "sounds good" -> do NOT book; ask which time.
 - Never say an appointment is booked, set or confirmed - the system confirms bookings itself.
@@ -289,7 +289,11 @@ HONOUR THEIR TIMING:
 - A person must step in ("handoff") when: they ask for a real person or {contact} directly, are upset or complaining, recently lost someone and are grieving, mention legal issues or disputes, want to change or cancel an existing appointment, or you are genuinely unsure what they need. Reply briefly that {contact} will reach out personally. Do NOT hand off ordinary questions.
 - Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether you are a person, say you're helping {contact} with scheduling and {contact} is glad to talk. Offer to stop if they prefer.
 - Planning guide request -> "send_guide" (the system adds the approved link). If they want it MAILED / a printed copy -> "mail_guide": say you'll have a printed guide arranged and, if needed, confirm the mailing address with them - never claim it has been mailed.
-- Existing plan with us: thank them, offer a review; ask which kind (their prearrangement file or a flower/memorial care service) before offering times.
+- Existing plan with us: thank them, offer a review; FIRST ask which kind (their prearrangement file or a flower/memorial care service) with action "answer" and no times. Offer times only after they say which.
+- Wants to CHANGE an existing plan (contact person, burial to cremation, wishes): that is exactly what a review with {contact} is for - offer times ("offer_times"); not a hand-off.
+- "I need to talk to my husband / wife / kids first": NOT a no. Acknowledge warmly, say they're welcome to join, and ask one gentle question (or "follow_up_later" if they give a horizon). Never "close".
+- "Who is this?" / "What is this about?": answer plainly - the family services team at {location}, following up on planning information on behalf of {contact}.
+- If asked whether the guide or a visit costs anything, do not use the words free, complimentary or no cost; say you're glad to send the guide, and {contact} can answer any cost questions.
 - "wait" only for a closing "ok"/"thanks" after an appointment is confirmed, or a message that needs no reply.
 
 NEVER: prices, costs, discounts, "free"/"complimentary"/"no cost", guarantees, deadlines, pressure, the parent company's name, links (the system adds approved ones), questions about Social Security numbers or private documents by text, promises a person hasn't made.
@@ -352,8 +356,14 @@ def validate_decision(d: Dict, body: str, conv) -> List[str]:
         problems.append("the reply is empty")
     if _question_count(reply) > 1:
         problems.append("it asks more than one question - ask exactly one")
-    if action != "book" and _CLOCK.search(reply.replace("{TIMES}", "")):
+    if action not in ("book", "callback", "follow_up_later") and _CLOCK.search(_strip_offered(reply, conv)):
         problems.append("it writes a clock time itself - use {TIMES} so the system offers real open times")
+    if action == "offer_times" and "{TIMES}" not in reply:
+        problems.append("action offer_times needs the {TIMES} placeholder in the reply (and no other question)")
+    if (action == "offer_times" and _EXISTING_PLAN.search(body or "") and conv is not None
+            and not (conv.ai_turns or 0) and not conv.service_type):
+        problems.append("for an existing plan, first ask which review they want (prearrangement file or "
+                        "flower/memorial care) - no times yet")
     if action != "book" and _CLAIM_BOOKED.search(reply):
         problems.append("it says an appointment is set or confirmed - only the system confirms bookings")
     if _CLAIM_MAILED.search(reply):
@@ -369,6 +379,40 @@ def validate_decision(d: Dict, body: str, conv) -> List[str]:
     if last and reply and _norm(reply) == _norm(last):
         problems.append("it repeats our last message word for word - respond to what they just said")
     return problems
+
+
+_EXISTING_PLAN = re.compile(r"\b(already (have|got|bought|took care)|have a plan|prearrang|bought (plots?|"
+                            r"spaces?|property))", re.I)
+_SENTENCE = re.compile(r"[^.!?]+[.!?]*")
+
+
+def _strip_offered(reply: str, conv) -> str:
+    """Times we actually offered may be repeated back ("Thursday at 9 AM or
+    Friday at 1 PM?"); only times the model invented count."""
+    out = reply.replace("{TIMES}", "")
+    for s in (A.offered(conv) if conv is not None else []):
+        for form in (A.describe(s), s.strftime("%-I:%M %p"), s.strftime("%-I %p"), s.strftime("%-I%p").lower(),
+                     s.strftime("%-I %p").lower()):
+            out = out.replace(form, "")
+    return out
+
+
+def _one_question(text: str) -> str:
+    """Keep every statement and only the LAST question."""
+    parts = [p.strip() for p in _SENTENCE.findall(text or "") if p.strip()]
+    qs = [i for i, p in enumerate(parts) if p.endswith("?")]
+    if len(qs) <= 1:
+        return text
+    keep = [p for i, p in enumerate(parts) if not p.endswith("?") or i == qs[-1]]
+    return " ".join(keep)
+
+
+def _ensure_times_question(text: str) -> str:
+    """An offer always ends in ONE question that carries {TIMES}."""
+    if "{TIMES}" in text or "{{TIMES}}" in text:
+        return _one_question(text.replace("{{TIMES}}", "{TIMES}"))
+    parts = [p.strip() for p in _SENTENCE.findall(text or "") if p.strip() and not p.strip().endswith("?")]
+    return (" ".join(parts) + " Would {TIMES} work for you?").strip()
 
 
 def _norm(t: str) -> str:
@@ -696,6 +740,10 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                objective=d.get("objective"), mood=und.get("mood"))
     merge_memory(conv, d.get("memory_update"))
     left = validate_decision(d, body, conv)
+    if left and all("more than one question" in p for p in left) and text:
+        text = _one_question(text)                       # deterministic, safe trim
+        d["reply"] = text
+        left = validate_decision(d, body, conv)
     try:
         confidence = float(d.get("confidence")) if d.get("confidence") not in (None, "") else 1.0
     except (TypeError, ValueError):
@@ -814,8 +862,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                     % (prog.primary_contact_name or "Our team"))
             action = "handoff"
         else:
-            if "{TIMES}" not in text and "{{TIMES}}" not in text:
-                text = (text + " Would {TIMES} work?").strip()
+            text = _ensure_times_question(text)
             text = _fill_times(text, slots)
             conv.offered_slots = json.dumps([s.isoformat() for s in slots])
             conv.offered_at = now
@@ -990,8 +1037,7 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
                 db.commit()
                 done["skipped"] += 1
                 continue
-            if "{TIMES}" not in text:
-                text = (text + " Would {TIMES} work?").strip()
+            text = _ensure_times_question(text)
             text = _fill_times(text, slots)
             conv.offered_slots = json.dumps([x.isoformat() for x in slots])
             conv.offered_at = now

@@ -315,9 +315,11 @@ def test_never_books_a_time_the_family_did_not_choose(setter, sample_advisor):
     lead = _lead_for(db, org, sample_advisor, "L001", first="Marion")
     lead.is_test = True
     db.commit()
-    fake = _Fake([_d("offer_times", "Would {TIMES} work for a review?"), _d("book", "", slot_choice=1)])
+    fake = _Fake([_d("answer", "Thank you, Marion. Would you like to review your prearrangement file or your flower care service?"),
+                  _d("offer_times", "Would {TIMES} work for a review?"), _d("book", "", slot_choice=1)])
     _run(db, lead, "I already have a plan with you", fake)
-    _, conv = _run(db, lead, "The prearrangement file", fake)
+    _run(db, lead, "The prearrangement file", fake)
+    _, conv = _run(db, lead, "Sounds good to me", fake)
     assert conv.state == "offered" and conv.booked_time is None
     assert "Which works better" in _ai_turns(db, conv)[-1].text
 

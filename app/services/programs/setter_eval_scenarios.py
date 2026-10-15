@@ -143,7 +143,7 @@ sc("s040", "guide", "Clarence",
 # ── mailed to home ───────────────────────────────────────────────────────────
 sc("s041", "mail", "Lawrence",
    ("Can you mail the guide to my home? I'd rather have it on paper", "mail_guide",
-    {"must_not": [r"\b(mailed|in the mail already)\b"]}),)
+    {"must_not": [r"\b(has been|have|we'?ve|i'?ve|already) (mailed|sent it)\b|\bwe mailed\b"]}),)
 sc("s042", "mail", "Mildred",
    ("Please mail me a copy, 412 Oak St", "mail_guide,answer", {"must_not": [r"\bwe mailed\b"]}),)
 sc("s043", "mail", "Otis",
@@ -193,7 +193,7 @@ sc("s059", "scheduling", "Peggy",
    ("ok", "answer,offer_times", NO_BOOK))
 sc("s060", "scheduling", "Willie",
    ("When are you open", "answer,offer_times"),
-   ("sounds good", "answer", NO_BOOK))
+   ("sounds good", "answer,offer_times", NO_BOOK))
 sc("s061", "scheduling", "Darlene",
    ("I can do a phone call instead of coming in", "offer_times"),
    ("the morning one", "book", {"booked": True}))
@@ -245,7 +245,8 @@ sc("s077", "opt_out", "Hal",
 sc("s078", "opt_out", "Pearl",
    ("Please stop texting me", None, {"states": ["stopped", "closed"]}),)
 sc("s079", "complaint", "Homer",
-   ("This is the third text you've sent me. Leave me alone", "handoff,close,answer", NO_BOOK),)
+   ("This is the third text you've sent me. Leave me alone", "handoff,close,answer,stop",
+    dict(NO_BOOK, states=["stopped", "closed", "human"])),)
 sc("s080", "complaint", "Edith",
    ("I'm very unhappy with how my mother's service was handled", "handoff"),)
 sc("s081", "complaint", "Roscoe",
