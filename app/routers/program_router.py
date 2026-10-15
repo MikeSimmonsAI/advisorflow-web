@@ -2473,13 +2473,14 @@ def setter_simulate(body: SetterSimIn, db: Session = Depends(get_db), user: User
         db.add(ProgramConversation(organization_id=lead.organization_id, lead_id=lead.id,
                                    state="ai_active", is_test=True))
         db.commit()
-    resp = R.on_inbound(db, lead, body.text[:1000], body.channel, staff_alerts=False)
-    conv = ai_setter.conversation_for(db, lead, create=False)
+    # The simulator is a person's action: the reply is recorded without the
+    # setter, then the setter runs as THIS person's manual AI action - in any
+    # program mode, for a synthetic contact that can never be messaged.
+    resp = R.on_inbound(db, lead, body.text[:1000], body.channel, staff_alerts=False, run_setter=False)
     result = None
-    if ai_setter.mode_of(prog) == "off" and resp is not None:
-        # The setter is off for real families; the simulator still exercises it.
-        result = ai_setter.on_family_reply(db, prog, lead, resp, body.text, force_mode="draft")
-        conv = ai_setter.conversation_for(db, lead, create=False)
+    if resp is not None:
+        result = ai_setter.on_family_reply(db, prog, lead, resp, body.text, force_mode="draft", actor=user.id)
+    conv = ai_setter.conversation_for(db, lead, create=False)
     return {"lead_id": lead.id, "class": resp.response_class if resp else None, "result": result,
             "conversation": _conv_json(db, conv, lead, turns=True) if conv else None}
 

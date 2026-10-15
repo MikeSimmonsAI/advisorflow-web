@@ -289,3 +289,18 @@ def test_generic_auto_reply_never_answers_an_sci_family(setter, sample_advisor, 
     lead = _lead_for(db, org, sample_advisor, "L001")
     monkeypatch.setattr("app.services.sms_programs.is_sci_org", lambda db, org_id: True)
     assert pipeline_service.process_inbound_reply(db, lead, sample_advisor, MagicMock())["action"] == "sci_program"
+
+
+def test_simulator_runs_the_setter_as_the_persons_manual_action(setter, client, monkeypatch):
+    from tests.test_outreach_program import _h
+    db = setter["db"]
+    monkeypatch.setenv("AI_BACKGROUND_AUTOMATION_ENABLED", "false")      # production: background AI off
+    setter["prog"].ai_setter_mode = "off"
+    db.commit()
+    fake = _Fake([_d("offer_times", "Would {TIMES} work for a call?", appointment_kind="phone")])
+    with patch.object(ai_setter, "_get_client", return_value=fake):
+        r = client.post("/program/setter/simulate", headers=_h(db, setter["admin"]),
+                        json={"persona": "lester", "first_name": "Lester", "text": "Can we talk this week?"}).json()
+    assert r["result"]["action"] == "offer_times" and len(r["conversation"]["offered"]) == 2
+    assert r["conversation"]["turns"][-1]["delivery"] == "simulated"
+    assert setter["prog"].ai_setter_mode == "off"                       # program setting untouched

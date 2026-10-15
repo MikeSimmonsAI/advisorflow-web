@@ -177,8 +177,10 @@ def _get_client():                                       # test seam (see ai_gat
     return None
 
 
-def decide(db, prog, lead, conv, resp) -> Dict:
-    """The AI's one next step. Raises on any AI failure (caller hands off)."""
+def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None) -> Dict:
+    """The AI's one next step. Raises on any AI failure (caller hands off).
+    A family's reply runs it as BACKGROUND AI (the platform switch must be
+    on); a person running the simulator runs it as a MANUAL action of theirs."""
     from app.services import ai_gateway
     from app.services.programs import identity
     prof = identity.location_profile_for_lead(db, lead)
@@ -186,7 +188,8 @@ def decide(db, prog, lead, conv, resp) -> Dict:
                                   location=(prof.official_name if prof else "our family services team"))
     ctx = _context(db, prog, lead, conv, resp)
     r = ai_gateway.chat_completion(
-        feature="sci_appointment_setter", capability="sci_appointment_setter", mode=ai_gateway.BACKGROUND,
+        feature="sci_appointment_setter", capability="sci_appointment_setter",
+        mode=ai_gateway.MANUAL if actor else ai_gateway.BACKGROUND, actor=actor,
         org_id=prog.organization_id, client=_get_client(),
         messages=[{"role": "system", "content": system},
                   {"role": "user", "content": json.dumps(ctx, default=str)}],
@@ -274,7 +277,7 @@ def _fill_times(text: str, slots: List[datetime]) -> str:
 # ── the entry point ──────────────────────────────────────────────────────────
 
 def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[datetime] = None,
-                    force_mode: Optional[str] = None) -> Optional[Dict]:
+                    force_mode: Optional[str] = None, actor: Optional[str] = None) -> Optional[Dict]:
     """Answer one family reply. Returns what happened, or None when the setter
     is off for this program."""
     from app.services.programs.reply_rules import AUTO_REPLY, BAD_DATA, OPT_OUT, WRONG_PERSON
@@ -318,7 +321,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         return dict(out, action="handoff", state=conv.state)
 
     try:
-        d = decide(db, prog, lead, conv, resp)
+        d = decide(db, prog, lead, conv, resp, actor=actor)
     except Exception as exc:                             # noqa: BLE001
         log.warning("setter AI unavailable for lead %s: %s", lead.id, exc)
         _handoff(db, prog, lead, conv, "AI unavailable (%s) - a person answers" % type(exc).__name__, notify=False)
