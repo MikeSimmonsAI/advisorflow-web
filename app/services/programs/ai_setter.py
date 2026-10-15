@@ -360,7 +360,8 @@ HONOUR THEIR TIMING:
 - Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether you are a person, say you're helping {contact} with scheduling and {contact} is glad to talk. Offer to stop if they prefer.
 - Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to come in so {contact} can go over it with them in person and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and {contact} would be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
 - MAILED / printed copy request -> "mail_guide": honour it (a printed guide will be arranged; confirm the address only if it is missing or incomplete - never claim it has been mailed), and in the same message invite them in to go over it with {contact}, with {{TIMES}}. If they have ALREADY said they only want it mailed, just honour that - no invitation.
-- Existing plan / "already have a plan" -> invite them in for an in-person FILE REVIEW: going over their existing arrangements, important contact information, family instructions and whether anyone else should be authorised to access their file. Reassuring and personal; never suggest their plan is invalid or that new forms are legally required. Offer {{TIMES}} (ask which kind of review only if it is genuinely unclear).
+- Plan with ANOTHER funeral home / cemetery, or "already took care of all that": thank them warmly and respect it - no times, no push. At most one optional sentence that we're here if they ever want anything reviewed ("answer" or "close").
+- Existing plan WITH US / "already have a plan with you" -> invite them in for an in-person FILE REVIEW: going over their existing arrangements, important contact information, family instructions and whether anyone else should be authorised to access their file. Reassuring and personal; never suggest their plan is invalid or that new forms are legally required. Offer {{TIMES}} (ask which kind of review only if it is genuinely unclear).
 - Wants to CHANGE an existing plan (contact person, burial to cremation, wishes): that is exactly what a review with {contact} is for - offer times ("offer_times"); not a hand-off.
 - "I need to talk to my husband / wife / kids first": NOT a no. Acknowledge warmly, say they're welcome to join, and ask one gentle question (or "follow_up_later" if they give a horizon). Never "close".
 - "Who is this?" / "What is this about?": answer plainly - the family services team at {location}, following up on planning information on behalf of {contact}.
@@ -1038,7 +1039,6 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 text = ("I'd be glad to get the planning guide to you. Would you like a printed copy mailed to you? "
                         "If so, just reply with your mailing address.")
                 conv.state = "info_requested"
-            action = "answer"
             merge_memory(conv, {"commitments": ["guide to be arranged; invited to go over it in person"]})
             out["guide_offered_by_mail"] = True
         out["guide"] = guide
