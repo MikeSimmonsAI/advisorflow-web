@@ -1396,8 +1396,9 @@ def reset_user_password(
 
     issued_url = None
     if req.new_password:
-        if len(req.new_password) < 8:
-            raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+        from app.services import password_policy as _pp
+        if len(req.new_password) < _pp.min_length():
+            raise HTTPException(status_code=400, detail=_pp.too_short_message())
         if req.confirm_password is not None and req.confirm_password != req.new_password:
             raise HTTPException(
                 status_code=400,

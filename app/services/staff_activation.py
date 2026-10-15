@@ -253,10 +253,9 @@ def accept(db: Session, raw_token: str, new_password: str) -> User:
     See the module docstring for the exhaustive list of what this writes. It
     does not touch organization_id, role, or memberships.
     """
-    if not new_password or len(new_password) < MIN_PASSWORD_LEN:
-        raise HTTPException(
-            status_code=400,
-            detail="Choose a password of at least %d characters." % MIN_PASSWORD_LEN)
+    from app.services import password_policy as _pp
+    if not new_password or len(new_password) < _pp.min_length():
+        raise HTTPException(status_code=400, detail=_pp.too_short_message())
 
     row = resolve(db, raw_token)
     user = db.query(User).filter(User.id == row.user_id).first()

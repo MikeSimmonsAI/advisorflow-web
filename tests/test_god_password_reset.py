@@ -265,7 +265,7 @@ def test_mismatched_confirmation_is_refused(client, db_session, god_headers, sam
 def test_a_short_password_is_refused(client, db_session, god_headers, sample_advisor):
     before = sample_advisor.password_hash
     r = client.post(f"/admin/users/{sample_advisor.id}/reset-password",
-                    json={"new_password": "short", "confirm_password": "short"},
+                    json={"new_password": "abc", "confirm_password": "abc"},
                     headers=god_headers)
     assert r.status_code in (400, 422)
     db_session.refresh(sample_advisor)

@@ -41,7 +41,7 @@ class OnboardingRegisterRequest(BaseModel):
     business_name: str = Field(..., min_length=1, max_length=200)
     admin_full_name: str = Field(..., min_length=1, max_length=200)
     admin_email: EmailStr
-    admin_password: str = Field(..., min_length=8)
+    admin_password: str = Field(..., min_length=1)
     industry: str = "funeral"  # funeral, roofing, insurance, real_estate, dental, legal
 
 
@@ -110,8 +110,9 @@ def _register_org_retired_implementation(
     db: Session,
 ):
     """The former body of register_org. Unreachable; kept for reference only."""
-    if len(req.admin_password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    from app.services import password_policy as _pp
+    if len(req.admin_password) < _pp.min_length():
+        raise HTTPException(status_code=400, detail=_pp.too_short_message())
     if len(req.business_name.strip()) < 2:
         raise HTTPException(status_code=400, detail="Business name is too short.")
     if len(req.admin_full_name.strip()) < 2:

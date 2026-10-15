@@ -136,15 +136,15 @@ export default function Activate() {
           <div className="act-field">
             <label>New password</label>
             <input type="password" value={pw} onChange={e => setPw(e.target.value)}
-                   autoComplete="new-password" minLength={10} required autoFocus />
-            <div className="hint">At least 10 characters.</div>
+                   autoComplete="new-password" minLength={4} required autoFocus />
+            <div className="hint">At least 4 characters.</div>
           </div>
           <div className="act-field">
             <label>Confirm password</label>
             <input type="password" value={pw2} onChange={e => setPw2(e.target.value)}
-                   autoComplete="new-password" minLength={10} required />
+                   autoComplete="new-password" minLength={4} required />
           </div>
-          <button className="act-btn" type="submit" disabled={busy || pw.length < 10}>
+          <button className="act-btn" type="submit" disabled={busy || pw.length < 4}>
             {busy ? 'Saving…' : 'Set password'}
           </button>
         </form>

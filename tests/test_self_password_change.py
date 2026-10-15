@@ -123,7 +123,7 @@ def test_unauthenticated_cannot_change_a_password(client):
 def test_a_short_new_password_is_refused(client, db_session, god_admin):
     before = god_admin.password_hash
     r = client.post("/auth/change-password",
-                    json={"current_password": OLD_PASSWORD, "new_password": "short"},
+                    json={"current_password": OLD_PASSWORD, "new_password": "abc"},
                     headers=_headers(db_session, god_admin))
     # 422 from the schema's min_length, 400 from the handler's own check -
     # both are refusals, and which one fires is not the point of this test.
