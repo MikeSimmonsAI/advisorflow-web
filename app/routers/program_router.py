@@ -2352,6 +2352,35 @@ def audit_spacing(days: int = Query(7, ge=1, le=60), gap_hours: int = Query(20, 
             "upcoming": upcoming}
 
 
+@router.get("/audit/failed-texts")
+def audit_failed_texts(days: int = Query(30, ge=1, le=120), db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    """OWNER ONLY, READ-ONLY. Every SCI text that failed or came back
+    undelivered, with the full Twilio SID, error code, send time, source and
+    the exact body - the evidence for a carrier-filtering (30007) support
+    case. Test contacts are included and marked. Sends nothing."""
+    from app.models.models import Message
+    if getattr(user, "role", None) != "god_admin":
+        raise HTTPException(status_code=403, detail="Owner only.")
+    prog = _program(db, user)
+    since = datetime.utcnow() - timedelta(days=days)
+    rows = (db.query(Message, Lead).join(Lead, Lead.id == Message.lead_id)
+            .filter(Lead.organization_id == prog.organization_id, Message.sent_at >= since,
+                    (Message.delivery_status.in_(("failed", "undelivered")))
+                    | (Message.twilio_status.in_(("failed", "undelivered")))
+                    | Message.error_code.isnot(None))
+            .order_by(Message.sent_at).all())
+    items = [{"sid": m.twilio_sid, "sent_at_utc": m.sent_at.isoformat() if m.sent_at else None,
+              "to_last4": (l.phone or "")[-4:], "is_test": bool(l.is_test),
+              "status": m.delivery_status or m.twilio_status, "error_code": m.error_code,
+              "error_message": getattr(m, "error_message", None), "source": m.send_source,
+              "has_link": "http" in (m.body or "").lower(), "body": m.body} for m, l in rows]
+    from collections import Counter
+    return {"days": days, "count": len(items),
+            "by_error": dict(Counter(i["error_code"] or "none" for i in items)),
+            "with_link": sum(1 for i in items if i["has_link"]), "items": items}
+
+
 @router.get("/audit/lead/{lead_id}")
 def audit_lead(lead_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     """READ-ONLY send history for one family: cadence state, every touch

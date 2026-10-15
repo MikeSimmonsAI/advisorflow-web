@@ -29,3 +29,17 @@ def test_lead_audit_shows_texts_and_is_org_scoped(program, sample_advisor, clien
     r = client.get("/program/audit/lead/%s" % lead.id, headers=_h(db, program["admin"]))
     assert r.status_code == 200 and len(r.json()["texts"]) == 1
     assert client.get("/program/audit/lead/nope", headers=_h(db, program["admin"])).status_code == 404
+
+
+def test_failed_texts_audit_is_owner_only_and_read_only(program, sample_advisor, client):
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L003", email="h@example.com")
+    db.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body="see https://x.test", twilio_sid="SMbad",
+                   delivery_status="undelivered", error_code="30007", sent_at=datetime.utcnow()))
+    db.commit()
+    admin = program["admin"]
+    assert client.get("/program/audit/failed-texts", headers=_h(db, admin)).status_code == 403
+    admin.role = "god_admin"
+    db.commit()
+    r = client.get("/program/audit/failed-texts", headers=dict(_h(db, admin), **{"X-Org-Override": org.id})).json()
+    assert r["count"] == 1 and r["items"][0]["sid"] == "SMbad" and r["by_error"] == {"30007": 1} and r["with_link"] == 1
