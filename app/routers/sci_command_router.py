@@ -217,11 +217,45 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
         "owner_alert": owner_alert,
         "inbox": items[:limit],
         "tasks": _open_tasks(db, org),
+        "unknown": _unknown_senders(db, org, location_id),
         "upcoming": {"follow_up": len(items), "new": sum(1 for i in items if i["badge"] == "New"),
                      "review": sum(1 for i in items if i["badge"] == "Review"),
                      "callbacks": callbacks, "visits_booked": booked},
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
+
+
+def _unknown_senders(db, org, location_id=None) -> list:
+    """Open replies from numbers / addresses that match no family (texts,
+    voicemails, emails). Never hidden: SCI Live lists them so a person can
+    call back, play the voicemail and mark them handled."""
+    from app.models.program_models import ProgramUnmatchedReply
+    from app.models.telephony_models import Voicemail
+    q = db.query(ProgramUnmatchedReply).filter(ProgramUnmatchedReply.organization_id == org,
+                                               ProgramUnmatchedReply.status == "open")
+    if location_id:
+        q = q.filter(ProgramUnmatchedReply.location_id == location_id)
+    locs = _locations(db, org)
+    out = []
+    for u in q.order_by(ProgramUnmatchedReply.received_at.desc()).limit(50).all():
+        mid = u.mailbox_message_id or ""
+        is_vm = mid.startswith("vm:") or (u.subject or "").lower() == "voicemail"
+        is_email = "@" in (u.from_address or "")
+        audio = None
+        if is_vm:
+            key = mid[3:]
+            vm = (db.query(Voicemail).filter(Voicemail.organization_id == org,
+                                             (Voicemail.recording_sid == key) | (Voicemail.id == key)).first()
+                  if key else None)
+            if vm is not None and (vm.recording_sid or vm.recording_url):
+                audio = {"path": "/voicemails/%s/audio" % vm.id, "duration": vm.duration_seconds}
+        out.append({"id": u.id, "from": u.from_address, "location": locs.get(u.location_id),
+                    "channel_label": "VOICEMAIL" if is_vm else ("EMAIL" if is_email else "TEXT"),
+                    "subject": u.subject if is_email else None, "summary": (u.body_excerpt or "")[:300],
+                    "received_at": u.received_at.isoformat() + "Z" if u.received_at else None,
+                    "audio_path": audio["path"] if audio else None,
+                    "duration": audio["duration"] if audio else None})
+    return out
 
 
 def _suggest(conv, latest, lead) -> dict:
@@ -304,12 +338,32 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
             .order_by(ProgramConversation.created_at.desc()).first())
     from app.services.programs import email_reply as _er
     thread = []
+    # Voicemails: the recording plays through the authenticated proxy
+    # (/voicemails/{id}/audio) - the provider URL never reaches the browser.
+    from app.models.telephony_models import Voicemail
+    vms = [v for v in db.query(Voicemail).filter(Voicemail.lead_id == lead.id,
+                                                  Voicemail.organization_id == prog.organization_id).all()
+           if v.recording_sid or v.recording_url]
+    used = set()
     for r in resps:
         item = {"who": "family", "text": r.body_excerpt, "channel": r.channel, "response_id": r.id,
                 "status": r.handling_status, "at": r.received_at.isoformat() + "Z" if r.received_at else None}
         if r.channel == "email":
             item.update(_sender(db, r, lead))
+        if r.channel == "voicemail" and vms:
+            near = min((v for v in vms if v.id not in used),
+                       key=lambda v: abs(((v.received_at or r.received_at) - r.received_at).total_seconds())
+                       if r.received_at else 0, default=None)
+            if near is not None:
+                used.add(near.id)
+                item.update(audio_path="/voicemails/%s/audio" % near.id, duration=near.duration_seconds)
         thread.append(item)
+    for v in vms:
+        if v.id not in used:                 # a recording with no transcript reply yet
+            thread.append({"who": "family", "text": v.transcript or "(Voicemail - transcript not ready yet)",
+                           "channel": "voicemail", "audio_path": "/voicemails/%s/audio" % v.id,
+                           "duration": v.duration_seconds,
+                           "at": v.received_at.isoformat() + "Z" if v.received_at else None})
     for m in db.query(Message).filter(Message.lead_id == lead.id).all():
         thread.append({"who": "us", "text": m.body, "channel": "sms", "source": m.send_source,
                        "delivery": m.delivery_status, "at": m.sent_at.isoformat() + "Z" if m.sent_at else None})

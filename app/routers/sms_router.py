@@ -485,8 +485,14 @@ def process_inbound_sms(db: Session, *, org_id: str, advisor, From: str, Body: s
     # belongs to whoever owns the LEAD, and the handler below already
     # resolves that from `lead.assigned_to_id`; inventing an advisor here
     # would attach a family's reply to whichever colleague owns the number.
+    # The SAME number in any spelling a record may hold it in ("18435550000",
+    # "+18435550000", "8435550000"). The owner's live-test contact was stored
+    # with a "+", so every real reply from the owner's phone (Oct 15) fell
+    # into the unmatched queue and the AI never saw it.
+    _phone_forms = [f for f in {lead_phone, ("+" + lead_phone) if lead_phone else None,
+                                lead_phone[1:] if len(lead_phone or "") == 11 else None} if f]
     lead = db.query(Lead).filter(
-        Lead.phone == lead_phone,
+        Lead.phone.in_(_phone_forms or [lead_phone]),
         Lead.organization_id == org_id,
     ).order_by(Lead.updated_at.desc()).first()
 
