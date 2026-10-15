@@ -334,6 +334,10 @@ export default function Login() {
             >
               {loading ? 'Signing in…' : 'Sign in →'}
             </button>
+            <a className="login-forgot" href={'/forgot-password' + (nextPath ? '?next=' + encodeURIComponent(nextPath) : '')}
+               style={{ display: 'block', textAlign: 'center', marginTop: 12, fontSize: 14, color: content.accentColor }}>
+              Forgot password?
+            </a>
           </form>
 
           {isAdvisorFlow && (
