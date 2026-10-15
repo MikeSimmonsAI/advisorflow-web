@@ -476,7 +476,13 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
     try:
         from app.services.programs import ai_setter
         if run_setter:
-            ai_setter.on_family_reply(db, prog, lead, resp, body, now=now)
+            from app.services.test_records import is_owner_test_lead as _owner_test
+            # The owner's live test contact runs the real AUTO path whatever
+            # the program's mode, so the live test works before families are
+            # switched on. Its texts can only ever reach the owner's own phone.
+            ai_setter.on_family_reply(db, prog, lead, resp, body, now=now,
+                                      force_mode=(ai_setter.AUTO if _owner_test(lead) and not ai_setter.killed()
+                                                  else None))
     except Exception:                                    # noqa: BLE001
         log.exception("appointment setter failed for response %s", resp.id)
         try:

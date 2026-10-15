@@ -579,8 +579,10 @@ def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Opt
     # wide background switch: the gateway grants THIS feature for THIS
     # organization only, and only while the program's own mode is draft/auto
     # and the SCI emergency switch is not thrown. Every cap still applies.
+    from app.services.test_records import is_owner_test_lead
+    live = mode_of(prog) in (DRAFT, AUTO) or (is_owner_test_lead(lead) and not killed())
     grant = (ai_gateway.scoped_grant("sci_appointment_setter", prog.organization_id)
-             if (not actor and mode_of(prog) in (DRAFT, AUTO)) else nullcontext())
+             if (not actor and live) else nullcontext())
     with grant:
         r = ai_gateway.chat_completion(
             feature="sci_appointment_setter", capability=_CAPABILITY.get(),
