@@ -86,6 +86,33 @@ def background_enabled() -> bool:
     return _flag("AI_BACKGROUND_AUTOMATION_ENABLED", False)
 
 
+# ── SCOPED background grants ────────────────────────────────────────────────
+# ONE named feature may run unattended for ONE organization without turning
+# background AI on for the whole platform. Only features listed here can be
+# granted, and only by code that has checked its own switch first (the SCI
+# setter checks the program's OFF/DRAFT/AUTO mode and its emergency switch).
+# The grant lives in a ContextVar for the duration of one call, names the
+# organization, and every budget cap and the provider breaker still apply.
+SCOPED_FEATURES = frozenset({"sci_appointment_setter"})
+_GRANT: contextvars.ContextVar = contextvars.ContextVar("ai_scoped_grant", default=None)
+
+
+@contextmanager
+def scoped_grant(feature: str, org_id: str):
+    if feature not in SCOPED_FEATURES or not org_id:
+        raise AIRefused("feature %s cannot be granted scoped background AI" % feature)
+    token = _GRANT.set((feature, org_id))
+    try:
+        yield
+    finally:
+        _GRANT.reset(token)
+
+
+def _scoped_ok(feature: str, org_id: Optional[str]) -> bool:
+    g = _GRANT.get()
+    return bool(g and org_id and g == (feature, org_id) and feature in SCOPED_FEATURES)
+
+
 def manual_enabled() -> bool:
     """AI a signed-in person asked for, one action at a time."""
     return _flag("AI_MANUAL_ACTIONS_ENABLED", True)
@@ -351,7 +378,7 @@ def _client(mode: str):
 
 
 def _admit(*, feature: str, capability: str, mode: str,
-           actor: Optional[str]) -> str:
+           actor: Optional[str], org_id: Optional[str] = None) -> str:
     """Every check that runs before a provider request. Returns the model."""
     if mode not in MODES:
         raise AIRefused("mode must be %s or %s" % MODES)
@@ -364,7 +391,7 @@ def _admit(*, feature: str, capability: str, mode: str,
             raise AIDisabled("manual AI actions are disabled "
                              "(AI_MANUAL_ACTIONS_ENABLED=false)")
     else:
-        if not background_enabled():
+        if not background_enabled() and not _scoped_ok(feature, org_id):
             note_background_disabled(feature)
             raise AIDisabled("background AI automation is disabled")
     model = resolve_model(capability)
@@ -391,7 +418,7 @@ def chat_completion(*, feature: str, capability: str, mode: str,
     """
     if "model" in params:
         raise TypeError("chat_completion takes a capability, never a model")
-    model = _admit(feature=feature, capability=capability, mode=mode, actor=actor)
+    model = _admit(feature=feature, capability=capability, mode=mode, actor=actor, org_id=org_id)
     corr = uuid.uuid4().hex[:12]
     t0 = time.monotonic()
     try:
