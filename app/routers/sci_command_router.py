@@ -32,6 +32,22 @@ router = APIRouter(prefix="/program/command", tags=["sci-command"])
 _RANK = {"hot": 0, "active": 1, "low": 2, "bad_data": 3, "wrong_person": 3, "auto_reply": 4}
 
 
+def _team(db, org_id):
+    """Everyone who works in this customer workspace: users whose home is the
+    organization AND users given a seat in it (memberships) - SCI's staff
+    hold seats, so the old home-organization query listed nobody and Assign
+    had no one to choose."""
+    from app.models.sales_models import Membership, SCOPE_CUSTOMER_ORG
+    seat_ids = [i for (i,) in db.query(Membership.user_id).filter(Membership.scope_type == SCOPE_CUSTOMER_ORG,
+                                                                  Membership.scope_id == org_id,
+                                                                  Membership.is_active.is_(True)).all()]
+    q = db.query(User).filter(User.is_active.is_(True))
+    from sqlalchemy import or_
+    users = q.filter(or_(User.organization_id == org_id, User.id.in_(seat_ids) if seat_ids else False)).all()
+    return sorted({u.id: u for u in users if getattr(u, "role", None) != "god_admin"}.values(),
+                  key=lambda u: (u.full_name or u.email or "").lower())
+
+
 def _is_demo(lead) -> bool:
     from app.services.sci_staging_demo import is_demo_lead
     return is_demo_lead(lead)
@@ -142,6 +158,7 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                    "contacted_today": contacted},
         "owner_alert": owner_alert,
         "inbox": items[:limit],
+        "tasks": _open_tasks(db, org),
         "upcoming": {"follow_up": len(items), "new": sum(1 for i in items if i["badge"] == "New"),
                      "review": sum(1 for i in items if i["badge"] == "Review"),
                      "callbacks": callbacks, "visits_booked": booked},
@@ -203,8 +220,7 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
     booking = (db.query(BookingLink).filter(BookingLink.lead_id == lead.id,
                                             BookingLink.status.in_(("booked", "confirmed")))
                .order_by(BookingLink.booked_time.desc()).first())
-    team = [{"id": u.id, "name": u.full_name or u.email} for u in
-            db.query(User).filter(User.organization_id == prog.organization_id, User.is_active.is_(True)).all()]
+    team = [{"id": u.id, "name": u.full_name or u.email} for u in _team(db, prog.organization_id)]
     return {
         "lead_id": lead.id, "is_test": bool(lead.is_test), "is_demo": _is_demo(lead),
         "name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title(),
@@ -225,6 +241,7 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
         "booking": {"when": booking.booked_time.isoformat(), "label": booking.appt_label,
                     "status": booking.status} if booking and booking.booked_time else None,
         "suggestion": _suggest(conv, latest, lead),
+        "mail_task": _mail_task_of(conv),
     }
 
 
@@ -285,7 +302,7 @@ def command_assign(body: AssignIn, db: Session = Depends(get_db), user: User = D
     if lead is None:
         raise HTTPException(status_code=404, detail="Family not found.")
     if body.user_id:
-        who = db.query(User).filter(User.id == body.user_id, User.organization_id == prog.organization_id).first()
+        who = next((u for u in _team(db, prog.organization_id) if u.id == body.user_id), None)
         if who is None:
             raise HTTPException(status_code=422, detail="That person is not on this team.")
     lead.assigned_to_id = body.user_id or None
@@ -330,3 +347,75 @@ def command_demo_send(body: DemoSendIn, db: Session = Depends(get_db),
         resp.responded_at = datetime.utcnow()
     db.commit()
     return {"ok": True, "simulated": True}
+
+
+# ── people's tasks: a printed guide to mail ────────────────────────────────
+# The setter (or a person) records the request; a PERSON mails it and marks
+# it done here. Nothing claims a guide was mailed until someone says so.
+
+def _mail_task_of(conv):
+    from app.services.programs.ai_setter import memory_of
+    if conv is None:
+        return None
+    mr = memory_of(conv).get("mail_request")
+    if not isinstance(mr, dict) or not mr.get("requested"):
+        return None
+    return {"what": mr.get("what") or "printed planning guide", "note": mr.get("note"),
+            "done": bool(mr.get("done")), "done_at": mr.get("done_at"), "done_by": mr.get("done_by")}
+
+
+def _open_tasks(db, org_id):
+    out = []
+    test_ids = {i for (i,) in db.query(Lead.id).filter(Lead.organization_id == org_id, Lead.is_test.is_(True))}
+    rows = (db.query(ProgramConversation).filter(ProgramConversation.organization_id == org_id,
+                                                 ProgramConversation.memory.isnot(None),
+                                                 ProgramConversation.memory.like('%mail_request%')).all())
+    for c in rows:
+        t = _mail_task_of(c)
+        if not t or t["done"] or c.lead_id in test_ids:
+            continue
+        lead = db.query(Lead).filter(Lead.id == c.lead_id).first()
+        if lead is None:
+            continue
+        out.append({"kind": "mail_guide", "lead_id": lead.id, "what": t["what"], "note": t.get("note"),
+                    "name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title()})
+    return out
+
+
+class MailTaskIn(BaseModel):
+    lead_id: str
+    note: Optional[str] = None
+    done: bool = False
+
+
+@router.post("/mail-task")
+def command_mail_task(body: MailTaskIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Record that a family asked for a printed guide by mail (done=False), or
+    mark it mailed (done=True) - by the person who did it."""
+    import json as _json
+    from app.models.program_models import ProgramAlert
+    from app.services.programs import ai_setter
+    prog = _program(db, user, managers_only=False)
+    lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    conv = ai_setter.conversation_for(db, lead)
+    mem = ai_setter.memory_of(conv)
+    mr = mem.get("mail_request") if isinstance(mem.get("mail_request"), dict) else {}
+    mr.update({"requested": True, "what": mr.get("what") or "printed planning guide"})
+    if body.note:
+        mr["note"] = body.note.strip()[:300]
+    who = getattr(user, "full_name", None) or getattr(user, "email", None) or "staff"
+    name = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A family"
+    if body.done:
+        mr.update({"done": True, "done_at": datetime.utcnow().isoformat() + "Z", "done_by": who})
+        msg = "%s marked the printed guide for %s as mailed." % (who, name)
+    else:
+        mr.update({"done": False})
+        msg = "%s asked for a printed planning guide by mail. Confirm the address and mail it, then mark it done." % name
+    mem["mail_request"] = mr
+    conv.memory = _json.dumps(mem)
+    db.add(ProgramAlert(organization_id=prog.organization_id, kind="task", audience="team", channel="in_app",
+                        delivered=True, reason="mail_guide_done" if body.done else "mail_guide", message=msg))
+    db.commit()
+    return {"ok": True, "mail_task": _mail_task_of(conv)}

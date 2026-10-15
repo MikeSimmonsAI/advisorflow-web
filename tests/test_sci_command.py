@@ -51,3 +51,39 @@ def test_family_view_slots_schedule_and_assign(program, sample_advisor, client, 
     assert r["status"] == "confirmed" and bk.call_args.args[3] == SLOTS[0] and note.call_count == 1
     a = client.post("/program/command/assign", headers=h, json={"lead_id": lead.id, "user_id": sample_advisor.id})
     assert a.status_code == 200 and a.json()["assigned_to_id"] == sample_advisor.id
+
+
+def test_assign_lists_people_with_a_seat_in_the_workspace(program, sample_advisor, client):
+    from app.models.models import User
+    from app.services import workspace_access
+    db, org = program["db"], program["org"]
+    staff = User(email="kerry.seat@example.com", full_name="Kerry Seat", role="advisor", organization_id=None,
+                 is_active=True, password_hash="x")
+    db.add(staff)
+    db.commit()
+    workspace_access.grant_workspace_membership(db, staff.id, org.id, role="manager", granted_by=program["admin"].id)
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Lester")
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        R.on_inbound(db, lead, "Can I schedule a visit?", "sms")
+    h = _h(db, program["admin"])
+    f = client.get("/program/command/family/%s" % lead.id, headers=h).json()
+    assert "Kerry Seat" in [t["name"] for t in f["team"]]
+    a = client.post("/program/command/assign", headers=h, json={"lead_id": lead.id, "user_id": staff.id})
+    assert a.status_code == 200 and a.json()["assigned_to_id"] == staff.id
+
+
+def test_mail_task_is_a_persons_job_never_a_claim(program, sample_advisor, client):
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Lawrence")
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        R.on_inbound(db, lead, "Is it possible to mail it to my home?", "sms")
+    h = _h(db, program["admin"])
+    r = client.post("/program/command/mail-task", headers=h, json={"lead_id": lead.id, "note": "address in his text"})
+    assert r.status_code == 200 and r.json()["mail_task"]["done"] is False
+    home = client.get("/program/command", headers=h).json()
+    assert [t["name"] for t in home["tasks"]] == ["Lawrence Testcase"]
+    f = client.get("/program/command/family/%s" % lead.id, headers=h).json()
+    assert f["mail_task"]["note"] == "address in his text" and not f["mail_task"]["done"]
+    client.post("/program/command/mail-task", headers=h, json={"lead_id": lead.id, "done": True})
+    assert client.get("/program/command", headers=h).json()["tasks"] == []

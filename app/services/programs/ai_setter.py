@@ -297,6 +297,8 @@ HONOUR THEIR TIMING:
 - "wait" only for a closing "ok"/"thanks" after an appointment is confirmed, or a message that needs no reply.
 - "close" ONLY when they clearly decline (not interested, no thanks, all set, already taken care of). A bare "k", "maybe", "idk", "lol" or an emoji is NOT a decline: reply warmly and ask one easy question (e.g. whether they'd like the planning guide).
 - They say they'll come in / want to meet / ask for times: offer times now ("offer_times"), unless times are already on the table - then ask which one.
+- They insist on a price before meeting: don't hand off. Acknowledge it plainly, say {contact} can go over costs by phone, and offer a short phone call ("offer_times" with appointment_kind "phone", or "callback" if they name a time).
+- Our first text offered the planning guide, so a bare "k" / "ok" / "yes" / thumbs-up to it means yes: "send_guide" and say it's on its way - don't also ask whether they want it.
 
 NEVER: prices, costs, discounts, "free"/"complimentary"/"no cost", guarantees, deadlines, pressure, the parent company's name, links (the system adds approved ones), questions about Social Security numbers or private documents by text, promises a person hasn't made.
 
@@ -373,6 +375,9 @@ def validate_decision(d: Dict, body: str, conv) -> List[str]:
     if action == "close" and not _DECLINE.search(body or ""):
         problems.append("they did not decline - a short or unclear reply ('k', 'maybe', an emoji) is not a no; "
                         "answer it or ask one gentle question instead of closing")
+    if action == "send_guide" and _ASKS_IF_WANTS_GUIDE.search(reply):
+        problems.append("it sends the guide AND asks whether they want it - either send it (say it's attached) "
+                        "or ask first with action answer")
     if action != "send_guide" and _CLAIM_GUIDE.search(reply):
         problems.append("it presents the guide without action send_guide")
     if re.search(r"https?://", reply):
@@ -389,6 +394,8 @@ def validate_decision(d: Dict, body: str, conv) -> List[str]:
 _EXISTING_PLAN = re.compile(r"\b(already (have|got|bought|took care)|have a plan|prearrang|bought (plots?|"
                             r"spaces?|property))", re.I)
 _SENTENCE = re.compile(r"[^.!?]+[.!?]*")
+_ASKS_IF_WANTS_GUIDE = re.compile(r"would you like (me to send |to receive |to get |to have )?(you )?(the |our |a )?"
+                                  r"(copy of (the |our )?)?(planning )?guide", re.I)
 _DECLINE = re.compile(r"\b(not interested|no thanks|no thank you|all set|we'?re (all )?set|already (have|took care|"
                       r"handled|done)|don'?t (want|need)|not (right )?now|not at this time|no longer|pass\b|"
                       r"changed my mind|leave me alone|not for me|nope|no$)", re.I)
@@ -950,6 +957,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         db.commit()
         return dict(out, action="handoff", state=conv.state, held=problems)
 
+    out["action"] = action                               # what was actually done, not only what was proposed
     t = _deliver(db, prog, lead, conv, resp, text, action, mode, now=now)
     conv.ai_turns = (conv.ai_turns or 0) + 1
     conv.last_ai_at = now
