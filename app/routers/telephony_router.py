@@ -546,6 +546,10 @@ def voicemail_audio(vm_id: str, db: Session = Depends(get_db),
     level = "organization" if rec is None or rec.organization_id else (
         "brand" if rec.platform_id else "platform")
     creds = NR.twilio_credentials(db, org, NR.ResolvedNumber(ok=True, level=level))
+    if not creds and _on_sci_line(vm):
+        # The SCI toll-free line lives on the EvoSys Pro PLATFORM account
+        # (sms_programs.sci_sender), not on an account of the SCI workspace.
+        creds = NR.twilio_credentials(db, org, NR.ResolvedNumber(ok=True, level="platform"))
     if not creds:
         raise HTTPException(status_code=503, detail="The provider account for this recording is not configured.")
     try:
@@ -557,6 +561,16 @@ def voicemail_audio(vm_id: str, db: Session = Depends(get_db),
         raise HTTPException(status_code=502, detail="The recording could not be retrieved from the provider.")
     return Response(content=content, media_type=ctype or "audio/mpeg",
                     headers={"Cache-Control": "private, no-store"})
+
+
+def _on_sci_line(vm) -> bool:
+    try:
+        from app.services import sms_programs
+        from app.services.dedup_service import normalize_phone
+        line = normalize_phone(sms_programs.sci_sender_number() or "")
+        return bool(line) and normalize_phone(vm.to_e164 or "") == line
+    except Exception:                                        # noqa: BLE001
+        return False
 
 
 @router.get("/calls/{call_id}/audio")
