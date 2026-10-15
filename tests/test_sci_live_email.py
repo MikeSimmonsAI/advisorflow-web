@@ -333,3 +333,21 @@ def test_outcomes_never_count_a_guide_or_text_as_an_appointment(setter, sample_a
     o = client.get("/program/setter/stats", headers=_h(db, setter["admin"])).json()["outcomes"]
     assert o["appointments_accepted"] == 0 and o["confirmed_on_google_calendar"] == 0
     assert o["information_only_fulfilled"] == 1
+
+
+def test_a_follow_up_may_honour_a_mail_request_and_invite_in(setter, sample_advisor, monkeypatch):
+    db, org, prog = setter["db"], setter["org"], setter["prog"]
+    prog.ai_setter_mode = "auto"
+    db.commit()
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    conv = ai_setter.conversation_for(db, lead)
+    conv.state, conv.next_followup_at = "info_requested", datetime.utcnow() - timedelta(minutes=1)
+    conv.followup_reason = "invite him in"
+    db.commit()
+    fake = _Fake([_d("mail_guide", "We're arranging your printed guide. Would {TIMES} work to go over it in person?")])
+    with patch.object(ai_setter, "_get_client", return_value=fake), \
+         patch("app.services.sms_service.send_sms") as send:
+        send.return_value = MagicMock(id="m1")
+        ai_setter.followup_sweep(db)
+    assert send.call_count == 1 and "Would " in send.call_args.args[3] and "{TIMES}" not in send.call_args.args[3]
