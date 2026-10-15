@@ -2692,6 +2692,48 @@ def setter_live_test_email_start(db: Session = Depends(get_db), user: User = Dep
             "subject": subject, "error": res.get("error"), "lead_id": lead.id, "email_id": em.id}
 
 
+@router.post("/setter/live-test/booking-link")
+def setter_live_test_booking_link(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """OWNER ONLY. Text the owner's live test contact (the program's own owner
+    alert number) a real booking link: a booking token for the PROGRAM'S
+    booking calendar (the central EvoSys Appointment Booking calendar), on the
+    branded /book page. Sent through send_sms with every gate - SCI sender,
+    consent, contact hours, and the toll-free registration's content check
+    (links are registered on TF-8449172171 for informational messages). No
+    family is involved; nothing is bypassed."""
+    from app.models.models import Message
+    from app.services import send_source as ss, test_records as TR
+    from app.services.programs import appointments as A
+    from app.services.public_identity import booking_url
+    from app.services.sms_service import get_or_create_booking_link, send_sms
+    if getattr(user, "role", None) != "god_admin":
+        raise HTTPException(status_code=403, detail="Only the owner runs the live test.")
+    prog = _program(db, user)
+    lead = (db.query(Lead).filter(Lead.organization_id == prog.organization_id, Lead.is_test.is_(True),
+                                  Lead.last_name == TR.OWNER_TEST_LAST_NAME).first())
+    if lead is None or not TR.owner_live_test_send_allowed(db, lead, ss.SCI_SETTER):
+        raise HTTPException(status_code=409, detail="The owner live test contact is not set up for this program.")
+    advisor = A.program_advisor(db, prog)
+    if advisor is None:
+        raise HTTPException(status_code=409, detail="The program has no booking calendar.")
+    link = get_or_create_booking_link(db, lead, advisor)
+    if (link.status or "") in ("booked", "confirmed"):
+        raise HTTPException(status_code=409, detail="The test contact already has a booking - clean it up first.")
+    url = booking_url(db, lead.organization_id, link.token)
+    if not url:
+        raise HTTPException(status_code=409, detail="No branded booking host is configured.")
+    db.commit()
+    body = "Here is your link to choose a time for your planning visit: %s" % url
+    try:
+        msg = send_sms(db, advisor, lead, body, include_booking_link=False, send_source=ss.SCI_SETTER)
+    except Exception as exc:                             # noqa: BLE001 - report the exact refusal
+        raise HTTPException(status_code=409, detail="Not sent: %s" % str(exc)[:400])
+    m = db.query(Message).filter(Message.id == msg.id).first()
+    return {"ok": True, "booking_url": url, "token": link.token, "calendar_user_id": advisor.id,
+            "message": {"id": m.id, "sid": m.twilio_sid, "status": m.twilio_status, "body": m.body,
+                        "link_in_body": url in (m.body or "")}}
+
+
 @router.post("/setter/live-test/cleanup")
 def setter_live_test_cleanup(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     """OWNER ONLY. Remove the owner live test's booking from the calendar
