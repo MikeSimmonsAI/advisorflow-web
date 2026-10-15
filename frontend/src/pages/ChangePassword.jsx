@@ -16,8 +16,8 @@ export default function ChangePassword({ forced = false }) {
     e.preventDefault()
     setError('')
 
-    if (newPassword.length < 8) {
-      setError('New password must be at least 8 characters.')
+    if (newPassword.length < 4) {
+      setError('New password must be at least 4 characters.')
       return
     }
     if (newPassword !== confirmPassword) {
@@ -66,7 +66,7 @@ export default function ChangePassword({ forced = false }) {
           {forced ? 'Set a new password to continue' : 'Change your password'}
         </h1>
         <p className="login-card-sub" style={{ color: 'rgba(255, 255, 255, 0.72)' }}>
-          At least 8 characters. Every session for this account is signed out when it changes.
+          At least 4 characters. Every session for this account is signed out when it changes.
         </p>
 
         {success ? (
@@ -94,9 +94,9 @@ export default function ChangePassword({ forced = false }) {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
-                minLength={8}
+                minLength={4}
                 className="login-input"
-                placeholder="At least 8 characters"
+                placeholder="At least 4 characters"
               />
             </label>
             <label className="login-label">

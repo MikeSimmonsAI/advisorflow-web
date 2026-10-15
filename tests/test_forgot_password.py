@@ -27,3 +27,11 @@ def test_reset_link_goes_only_to_the_accounts_inbox_and_works_once(client, db_se
     assert verify_password("BrandNewPass123!", u.password_hash)
     assert (u.role, u.organization_id) == (role, org)                 # nothing else changed
     assert "next=/program/command" in sent[0][1] or "next=%2Fprogram%2Fcommand" in sent[0][1]
+
+
+def test_four_characters_is_the_minimum(monkeypatch):
+    from app.services import password_policy as pp
+    monkeypatch.delenv("PASSWORD_MIN_LENGTH", raising=False)
+    assert pp.min_length() == 4
+    monkeypatch.setenv("PASSWORD_MIN_LENGTH", "12")
+    assert pp.min_length() == 12

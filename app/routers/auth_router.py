@@ -112,7 +112,7 @@ class TokenResponse(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1)
-    new_password: str = Field(..., min_length=8)
+    new_password: str = Field(..., min_length=1)
 
     # THE CONFIRMATION IS CHECKED ON THE SERVER, NOT ONLY IN THE BROWSER.
     # The form has always compared these two fields, but a check only the form
@@ -532,8 +532,9 @@ def change_password(
     if req.confirm_password is not None and req.confirm_password != req.new_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="New password and confirmation do not match")
-    if len(req.new_password) < 8:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be at least 8 characters")
+    from app.services import password_policy as _pp
+    if len(req.new_password) < _pp.min_length():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_pp.too_short_message())
 
     # hash_password is the application's single bcrypt entry point. No literal,
     # no hash computed anywhere else, no direct UPDATE.

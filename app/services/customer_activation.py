@@ -338,9 +338,10 @@ def resolve(db: Session, raw_token: Optional[str]) -> CustomerActivation:
 
 def accept(db: Session, raw_token: str, new_password: str) -> User:
     """Exchange the token for a password the customer chose. One-shot."""
-    if not new_password or len(new_password) < 10:
+    from app.services import password_policy as _pp
+    if not new_password or len(new_password) < _pp.min_length():
         raise HTTPException(status_code=400,
-                            detail="Choose a password of at least 10 characters.")
+                            detail=_pp.too_short_message())
     row = resolve(db, raw_token)
     user = db.query(User).filter(User.id == row.user_id).first()
     if user is None or not user.is_active:
