@@ -245,25 +245,23 @@ def test_only_the_owners_own_test_address_is_ever_emailed(setter, sample_advisor
     assert email_reply._blocked(db, plain, "owner@example.com")
 
 
-def test_owner_sees_his_test_conversation_marked_and_uncounted(setter, sample_advisor, client):
+def test_test_conversations_never_show_in_sci_live_even_to_the_owner(setter, sample_advisor, client):
     from app.models.models import Lead
+    from app.models.program_models import ProgramUnmatchedReply
     from app.services import test_records as TR
     db, org = setter["db"], setter["org"]
     me = Lead(organization_id=org.id, first_name="Owner", last_name=TR.OWNER_TEST_LAST_NAME, is_test=True,
               email="owner@example.com", status="sent", phone="+18435550000")
     db.add(me)
+    db.add(ProgramUnmatchedReply(organization_id=org.id, from_address="+18435550000", body_excerpt="Nice",
+                                 received_at=datetime.utcnow(), reason="x", status="open"))
     db.commit()
     _email_in(db, me, body="Testing the email path", gid="AAMk-owner")
     admin = setter["admin"]
-    h = _h(db, admin)
-    assert [i for i in client.get("/program/command", headers=h).json()["inbox"] if i["lead_id"] == me.id] == []
     admin.role = "god_admin"
     db.commit()
-    h = dict(_h(db, admin), **{"X-Org-Override": org.id})
-    r = client.get("/program/command", headers=h).json()
-    mine = [i for i in r["inbox"] if i["lead_id"] == me.id]
-    assert mine and mine[0]["is_test"] and r["counts"]["needs_attention"] == 0
-
+    r = client.get("/program/command", headers=dict(_h(db, admin), **{"X-Org-Override": org.id})).json()
+    assert [i for i in r["inbox"] if i["lead_id"] == me.id] == [] and r["unknown"] == []
 
 def test_one_signature_and_the_guide_link(setter, sample_advisor, client, monkeypatch):
     from app.services.programs import email_reply
