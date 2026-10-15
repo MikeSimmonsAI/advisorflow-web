@@ -150,7 +150,8 @@ def owner_live_test_send_allowed(db, lead, send_source) -> bool:
     from app.services import send_source as _ss
     if not (is_test_record(lead) and getattr(lead, "last_name", None) == OWNER_TEST_LAST_NAME):
         return False
-    if send_source not in (_ss.SCI_SETTER, _ss.APPOINTMENT_FOLLOWUP):
+    # MANUAL: the owner answering his own test conversation by hand in SCI Live.
+    if send_source not in (_ss.SCI_SETTER, _ss.APPOINTMENT_FOLLOWUP, _ss.MANUAL):
         return False
     from app.services.programs import identity
     prog = identity.program_for_org(db, lead.organization_id)
