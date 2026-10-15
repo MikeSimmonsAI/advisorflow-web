@@ -109,28 +109,44 @@ def history(db: Session, lead, limit: int = 40) -> List[Dict]:
     nothing is ever really sent, so its simulated lines stand in for sent ones
     and are marked as such."""
     from app.models.models import Message
+    from app.models.models import EmailMessage
+    from app.services import send_source as _ss
+    from app.services.programs import email_reply as _er
     rows = []
     for m in db.query(Message).filter(Message.lead_id == lead.id).order_by(Message.sent_at.desc()).limit(limit):
         if (m.delivery_status or "") in ("failed", "undelivered", "simulated") and not _synthetic(lead):
             continue
-        rows.append((m.sent_at, "us", m.body or "", None))
+        rows.append((m.sent_at, "us", m.body or "", "manual" if m.send_source == _ss.MANUAL else None, "text", None))
+    for e in (db.query(EmailMessage).filter(EmailMessage.lead_id == lead.id, EmailMessage.status == "sent")
+              .order_by(EmailMessage.sent_at.desc()).limit(limit)):
+        rows.append((e.sent_at, "us", _er.plain_text(e.body_html or "")[:1200],
+                     "manual" if e.send_source == _ss.MANUAL else None, "email",
+                     {"to": getattr(e, "to_email", None), "subject": e.subject}))
     for r in (db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id)
               .order_by(ProgramResponse.received_at.desc()).limit(limit)):
-        rows.append((r.received_at, "family", r.body_excerpt or "", r.response_class))
+        meta = _er.inbound_meta(db, r) if r.channel == "email" else {}
+        rows.append((r.received_at, "family", r.body_excerpt or "", r.response_class,
+                     "email" if r.channel == "email" else "text",
+                     {"from": meta.get("sender_email"), "from_name": meta.get("sender_name"),
+                      "subject": meta.get("subject")} if meta else None))
     conv = conversation_for(db, lead, create=False)
     if conv is not None and _synthetic(lead):
         for t in (db.query(ProgramConversationTurn)
                   .filter(ProgramConversationTurn.conversation_id == conv.id, ProgramConversationTurn.role == "ai",
                           ProgramConversationTurn.delivery == "simulated")
                   .order_by(ProgramConversationTurn.created_at.desc()).limit(limit)):
-            rows.append((t.created_at, "us", t.text or "", "simulated"))
+            rows.append((t.created_at, "us", t.text or "", "simulated", "text", None))
     rows = [r for r in rows if r[0] is not None]
     rows.sort(key=lambda r: r[0])
     out = []
-    for at, who, text, tag in rows[-limit:]:
-        item = {"at": at.strftime("%Y-%m-%d %H:%M UTC"), "who": who, "text": text}
+    for at, who, text, tag, channel, extra in rows[-limit:]:
+        item = {"at": at.strftime("%Y-%m-%d %H:%M UTC"), "who": who, "channel": channel, "text": text}
         if tag == "auto_reply":
             item["note"] = "automatic reply from their phone"
+        if tag == "manual":
+            item["note"] = "written and sent by a person on our team"
+        if extra:
+            item.update({k: v for k, v in extra.items() if v})
         out.append(item)
     return out
 
@@ -235,22 +251,74 @@ def _guide_sent(db, conv) -> bool:
 
 
 def _human_took_over(db: Session, lead, conv) -> bool:
-    from app.models.models import Message
+    """A person texted or emailed this family by hand AFTER the AI last
+    spoke AND after the conversation was last handed to the AI. A manual
+    message sent before someone switched AI Handling on (or used "Send & let
+    AI continue") never blocks the AI - ownership is the explicit setting,
+    not an old timestamp."""
+    from app.models.models import EmailMessage, Message
     from app.services import send_source as ss
-    since = conv.last_ai_at or conv.created_at
-    return db.query(Message.id).filter(Message.lead_id == lead.id, Message.send_source == ss.MANUAL,
-                                       Message.sent_at > since).first() is not None
+    marks = [t for t in (conv.last_ai_at, conv.created_at, getattr(conv, "owner_changed_at", None)) if t]
+    since = max(marks) if marks else datetime.min
+    if db.query(Message.id).filter(Message.lead_id == lead.id, Message.send_source == ss.MANUAL,
+                                   Message.sent_at > since).first() is not None:
+        return True
+    return db.query(EmailMessage.id).filter(EmailMessage.lead_id == lead.id, EmailMessage.send_source == ss.MANUAL,
+                                            EmailMessage.status == "sent",
+                                            EmailMessage.sent_at > since).first() is not None
+
+
+AI_OWNER, HUMAN_OWNER = "ai", "human"
+
+
+def owner_of(conv) -> str:
+    return HUMAN_OWNER if conv is not None and conv.state in ("human", "stopped") else AI_OWNER
+
+
+def set_owner(db: Session, lead, owner: str, *, actor: Optional[str], note: Optional[str] = None,
+              at: Optional[datetime] = None) -> ProgramConversation:
+    """Hand the conversation to the AI or to a person. Nothing is sent and no
+    old reply is processed again: the AI takes the NEXT reply that arrives.
+    Human: AI stops at once - scheduled follow-ups are cancelled and replies
+    held for contact hours are dropped. AI: never for a family that opted
+    out or is Do Not Contact."""
+    if owner not in (AI_OWNER, HUMAN_OWNER):
+        raise ValueError("owner must be ai or human")
+    conv = conversation_for(db, lead)
+    now = at or datetime.utcnow()
+    if owner == HUMAN_OWNER:
+        if conv.state != "stopped":
+            conv.state = "human"
+        conv.handoff_reason = (note or "a person is handling this conversation")[:250]
+        conv.next_followup_at = None
+        for t in (db.query(ProgramConversationTurn)
+                  .filter(ProgramConversationTurn.conversation_id == conv.id,
+                          ProgramConversationTurn.delivery == "held")):
+            t.delivery = "dropped"
+    else:
+        if conv.state == "stopped" or (getattr(lead, "status", None) or "") == "dnc":
+            raise ValueError("This family opted out - the AI cannot take this conversation.")
+        if conv.state in ("human", "callback_requested", "closed"):
+            conv.state = "ai_active"
+        conv.handoff_reason = None
+    conv.owner_changed_at = now
+    conv.owner_changed_by = actor
+    conv.owner_note = (note or ("AI handling on" if owner == AI_OWNER else "Human handling on"))[:250]
+    _turn(db, conv, "system", None, action="owner_" + owner,
+          reason=conv.owner_note)
+    db.commit()
+    return conv
 
 
 # ── safety check on every outgoing line ─────────────────────────────────────
 
-def check_text(text: str, *, allowed_links: List[str]) -> List[str]:
+def check_text(text: str, *, allowed_links: List[str], channel: str = "sms") -> List[str]:
     problems = []
     t = (text or "").strip()
     if not t:
         return ["empty"]
-    if len(t) > 480:
-        problems.append("too long for a text")
+    if len(t) > (1500 if channel == "email" else 480):
+        problems.append("too long for an email" if channel == "email" else "too long for a text")
     low = t.lower()
     for pat, why in _BANNED:
         if re.search(pat, low):
@@ -332,6 +400,27 @@ def _context(db, prog, lead, conv, resp, *, follow_up: Optional[str] = None) -> 
         "conversation_family_actually_saw": history(db, lead),
         "replies_written_but_NOT_received_by_the_family": unsent_drafts(db, conv),
     }
+    channel = (resp.channel if resp is not None else None) or "sms"
+    ctx["reply_channel"] = "email" if channel == "email" else "text message"
+    if channel == "email":
+        from app.services.programs import email_reply as _er
+        meta = _er.inbound_meta(db, resp)
+        record = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title()
+        writer = meta.get("sender_email")
+        ctx["email"] = {
+            "written_by": meta.get("sender_name") or writer,
+            "writer_address": writer,
+            "subject": meta.get("subject"),
+            "person_on_our_record": record or None,
+            "writer_is_the_record_person": bool(writer and (lead.email or "").strip().lower() == writer
+                                                and not meta.get("sender_name")) or None,
+            "rules": ("This reply came by EMAIL and your answer goes back by email, in the same thread, to the "
+                      "writer. The writer may be a relative or someone acting for the person on our record "
+                      "(read their words: 'my dad', 'my mother', 'on behalf of'). Address the WRITER, not the record "
+                      "name, unless they are clearly the same person. Never assume they hold authority, paperwork "
+                      "or arrangements they did not mention. You may use 2-5 short sentences and a greeting line. "
+                      "No signature (the system adds it)."),
+        }
     if follow_up:
         ctx["task"] = ("FOLLOW-UP: the family has not written since our last message. %s Write ONE short, "
                        "friendly follow-up that picks up exactly where things were left (use FAMILY MEMORY), "
@@ -397,7 +486,7 @@ _SENTENCE = re.compile(r"[^.!?]+[.!?]*")
 _ASKS_IF_WANTS_GUIDE = re.compile(r"would you like (me to send |to receive |to get |to have )?(you )?(the |our |a )?"
                                   r"(copy of (the |our )?)?(planning )?guide", re.I)
 _DECLINE = re.compile(r"\b(not interested|no thanks|no thank you|all set|we'?re (all )?set|already (have|took care|"
-                      r"handled|done)|don'?t (want|need)|not (right )?now|not at this time|no longer|pass\b|"
+                      r"handled|done)|(is|are|been|already) (all )?taken care of|already (made|has|have) (arrangements|plans)|don'?t (want|need)|not (right )?now|not at this time|no longer|pass\b|"
                       r"changed my mind|leave me alone|not for me|nope|no$)", re.I)
 
 
@@ -613,15 +702,30 @@ def _synthetic(lead) -> bool:
 
 def _deliver(db, prog, lead, conv, resp, text, action, mode, *, now) -> ProgramConversationTurn:
     from app.services import contact_hours, send_source as ss
-    if _synthetic(lead) or not lead.phone:
+    is_email = resp is not None and resp.channel == "email"
+    if _synthetic(lead) or (not lead.phone and not is_email):
         return _turn(db, conv, "ai", text, action=action, delivery="simulated",
                      response_id=resp.id if resp else None, reason="synthetic contact - nothing sent")
-    if mode == DRAFT or (resp is not None and resp.channel == "email"):
+    if mode == DRAFT:
         if resp is not None:
             resp.suggested_reply = text
         return _turn(db, conv, "ai", text, action=action, delivery="draft",
-                     response_id=resp.id if resp else None,
-                     reason="draft mode - a person sends it" if mode == DRAFT else "email reply - a person sends it")
+                     response_id=resp.id if resp else None, reason="draft mode - a person sends it")
+    if is_email:
+        # AUTO, and this conversation is the AI's: answer the email in its own
+        # thread, to the person who wrote it, from the mailbox it came to.
+        from app.services.programs import email_reply
+        res = email_reply.send_reply(db, prog, lead, resp, text, send_source=ss.SCI_SETTER,
+                                     idempotency_key="ai:%s:%s" % (resp.id, action))
+        if res.get("ok"):
+            return _turn(db, conv, "ai", text, action=action, delivery="sent",
+                         response_id=resp.id, reason="email reply in thread to %s"
+                         % ((res.get("email") or {}).get("to") or "the sender"))
+        resp.suggested_reply = text
+        _handoff(db, prog, lead, conv, "the email reply could not be sent: %s" % (res.get("error") or "")[:160],
+                 notify=True)
+        return _turn(db, conv, "ai", text, action=action, delivery="blocked",
+                     reason=(res.get("error") or "email not sent")[:240], response_id=resp.id)
     hours = contact_hours.check(lead, now)
     if not hours.get("permitted"):
         conv.next_followup_at = contact_hours.next_permitted_utc(lead, now)
@@ -832,7 +936,8 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             action = "offer_times"                      # unclear choice: offer again
         else:
             kind = conv.appointment_kind or A.VISIT
-            res = A.book(db, prog, lead, slot, kind)
+            by_email = resp is not None and resp.channel == "email"
+            res = A.book(db, prog, lead, slot, kind, family_text=not by_email)
             out["booking"] = res
             if res.get("ok"):
                 conv.state = "booked"
@@ -852,6 +957,14 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 # The booking path already sent the family its confirmation
                 # text; a synthetic contact gets the same line, simulated.
                 confirm = "You're all set for %s. If anything changes, just reply here." % A.describe(slot)
+                if by_email and not _synthetic(lead):
+                    # The confirmation goes back to the person who wrote, in the email
+                    # thread - never as a text to the record's phone.
+                    t = _deliver(db, prog, lead, conv, resp, "Thank you. " + confirm, "book", mode, now=now)
+                    conv.ai_turns += 1
+                    conv.last_ai_at = now
+                    db.commit()
+                    return dict(out, state=conv.state, booked_time=slot.isoformat(), delivery=t.delivery)
                 if _synthetic(lead) or not lead.phone:
                     _turn(db, conv, "ai", confirm, action="book", delivery="simulated",
                           reason="booking confirmed by the calendar")
@@ -951,7 +1064,8 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             conv.offered_at = now
             conv.state = "offered"
             out["offered"] = [s.isoformat() for s in slots]
-    problems = check_text(text, allowed_links=allowed_links)
+    problems = check_text(text, allowed_links=allowed_links,
+                          channel=(resp.channel if resp is not None else "sms") or "sms")
     if problems:
         _handoff(db, prog, lead, conv, "AI reply held: %s" % ", ".join(problems), notify=True)
         _turn(db, conv, "ai", text, action=action, delivery="blocked", reason="; ".join(problems),

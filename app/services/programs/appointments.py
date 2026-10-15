@@ -149,7 +149,7 @@ class _InternalRequest:
         return self._payload
 
 
-def book(db: Session, prog, lead, slot: datetime, kind: str) -> Dict:
+def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: bool = True) -> Dict:
     """Book `slot` for this family, through the booking page's own path.
     {"ok": True, "status": "confirmed", "booking_id", "booked_time"} only when
     the BookingLink reads back booked at that exact time."""
@@ -195,7 +195,10 @@ def book(db: Session, prog, lead, slot: datetime, kind: str) -> Dict:
                "appt_label": ("TEST - owner live test, safe to delete" if owner_test
                               else LABELS.get(kind, LABELS[VISIT])),
                "lead_name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip(),
-               "lead_phone": lead.phone or "", "duration_minutes": minutes_for(kind)}
+               "lead_phone": lead.phone or "", "duration_minutes": minutes_for(kind),
+               # Booked from an email conversation: the confirmation goes back by
+               # email to the writer, not as a text to the record's phone.
+               "skip_family_text": not family_text}
     try:
         try:
             asyncio.get_running_loop()

@@ -87,8 +87,25 @@ def _actions(r, conv) -> list:
     return ["reply", "call", "schedule"]
 
 
+_NEEDS_REPLY = ("new", "opened")
+FILTERS = ("all", "needs_reply", "text", "email", "handled")
+
+
+def _sender(db, r, lead) -> dict:
+    """WHO ACTUALLY WROTE: an email's verified sender (address and display
+    name, as the mail server gave them) is shown as itself - never relabelled
+    as the person on the family record it was matched to."""
+    if (r.channel or "") != "email":
+        return {"sender_email": None, "sender_name": None, "subject": None}
+    from app.services.programs import email_reply
+    m = email_reply.inbound_meta(db, r)
+    return {"sender_email": m.get("sender_email") or (getattr(lead, "email", None) if lead else None),
+            "sender_name": m.get("sender_name"), "subject": m.get("subject")}
+
+
 @router.get("")
 def command_home(location_id: Optional[str] = None, q: Optional[str] = None, limit: int = Query(40, le=200),
+                 view: str = Query("all", alias="filter"),
                  db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     from app.models.models import BookingLink
     from app.services.programs import engagement as _eng
@@ -101,6 +118,27 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
     if location_id:
         rq = rq.filter(ProgramResponse.location_id == location_id)
     open_rows = rq.filter(ProgramResponse.handling_status != "closed").all()
+    owner_test_ids = set()
+    if getattr(user, "role", None) == "god_admin":
+        # The owner sees his OWN live test conversation (marked TEST) so he can
+        # run it from his phone. Nobody else does, and it is never counted.
+        from app.services.test_records import OWNER_TEST_LAST_NAME
+        own = [i for (i,) in db.query(Lead.id).filter(Lead.organization_id == org, Lead.is_test.is_(True),
+                                                       Lead.last_name == OWNER_TEST_LAST_NAME)]
+        if own:
+            mine = (db.query(ProgramResponse).filter(ProgramResponse.lead_id.in_(own),
+                                                     ProgramResponse.handling_status != "closed",
+                                                     ProgramResponse.received_at >= datetime.utcnow() - timedelta(days=2)))
+            if location_id:
+                mine = mine.filter(ProgramResponse.location_id == location_id)
+            mine = mine.all()
+            owner_test_ids = {r.lead_id for r in mine}
+            open_rows = open_rows + mine
+    flt = view if view in FILTERS else "all"
+    if flt == "handled":
+        # Handled = answered or closed in the last 14 days.
+        open_rows = (rq.filter(ProgramResponse.handling_status.in_(("responded", "active", "closed")),
+                               ProgramResponse.received_at >= datetime.utcnow() - timedelta(days=14)).all())
     today_rows = rq.filter(ProgramResponse.received_at >= start,
                            ProgramResponse.response_class.notin_(("auto_reply",))).count()
     # one inbox line per family: their newest open reply
@@ -117,12 +155,19 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
         lead = leads.get(lid)
         name = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() if lead else "Family"
         loc = locs.get(r.location_id)
+        who = _sender(db, r, lead)
         if needle and not any(needle in (s or "").lower() for s in
-                              (name, loc, getattr(lead, "phone", ""), getattr(lead, "email", ""))):
+                              (name, loc, getattr(lead, "phone", ""), getattr(lead, "email", ""),
+                               who["sender_email"], who["sender_name"], who["subject"])):
             continue
         conv = convs.get(lid)
         items.append({"lead_id": lid, "response_id": r.id, "name": name, "location": loc,
                       "phone": getattr(lead, "phone", None),
+                      "channel_label": "EMAIL" if r.channel == "email" else ("VOICEMAIL" if r.channel == "voicemail" else "TEXT"),
+                      "is_test": lid in owner_test_ids,
+                      "handling_status": r.handling_status,
+                      "owner": "human" if (conv is not None and conv.state in ("human", "stopped")) else "ai",
+                      **who,
                       "location_id": r.location_id, "summary": (r.body_excerpt or r.summary or "")[:160],
                       "class": r.response_class, "badge": _badge(r, conv), "channel": r.channel,
                       "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
@@ -131,7 +176,19 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                       "setter_state": conv.state if conv else None, "actions": _actions(r, conv)})
     items.sort(key=lambda i: (not i["sla_breached"], _RANK.get(i["class"], 5),
                               -(datetime.fromisoformat(i["received_at"][:-1]).timestamp() if i["received_at"] else 0)))
-    needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person"))
+    needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person") and not i["is_test"])
+    filter_counts = {"all": len(items),
+                     "needs_reply": sum(1 for i in items if i["handling_status"] in _NEEDS_REPLY
+                                        and i["class"] != "auto_reply"),
+                     "text": sum(1 for i in items if i["channel"] != "email"),
+                     "email": sum(1 for i in items if i["channel"] == "email"),
+                     "unread": sum(1 for i in items if i["handling_status"] == "new")}
+    if flt == "needs_reply":
+        items = [i for i in items if i["handling_status"] in _NEEDS_REPLY and i["class"] != "auto_reply"]
+    elif flt == "text":
+        items = [i for i in items if i["channel"] != "email"]
+    elif flt == "email":
+        items = [i for i in items if i["channel"] == "email"]
 
     org_leads = db.query(Lead.id).filter(Lead.organization_id == org, Lead.is_test.isnot(True))
     booked = (db.query(BookingLink).filter(BookingLink.lead_id.in_(org_leads),
@@ -156,6 +213,7 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
         "locations": [{"id": k, "name": v} for k, v in sorted(locs.items(), key=lambda kv: kv[1])],
         "counts": {"needs_attention": needs, "replies_today": today_rows, "visits_booked": booked,
                    "contacted_today": contacted},
+        "filter": flt, "filter_counts": filter_counts,
         "owner_alert": owner_alert,
         "inbox": items[:limit],
         "tasks": _open_tasks(db, org),
@@ -244,14 +302,23 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
     latest = resps[-1] if resps else None
     conv = (db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id)
             .order_by(ProgramConversation.created_at.desc()).first())
-    thread = [{"who": "family", "text": r.body_excerpt, "channel": r.channel,
-               "at": r.received_at.isoformat() + "Z" if r.received_at else None} for r in resps]
+    from app.services.programs import email_reply as _er
+    thread = []
+    for r in resps:
+        item = {"who": "family", "text": r.body_excerpt, "channel": r.channel, "response_id": r.id,
+                "status": r.handling_status, "at": r.received_at.isoformat() + "Z" if r.received_at else None}
+        if r.channel == "email":
+            item.update(_sender(db, r, lead))
+        thread.append(item)
     for m in db.query(Message).filter(Message.lead_id == lead.id).all():
         thread.append({"who": "us", "text": m.body, "channel": "sms", "source": m.send_source,
                        "delivery": m.delivery_status, "at": m.sent_at.isoformat() + "Z" if m.sent_at else None})
     for e in db.query(EmailMessage).filter(EmailMessage.lead_id == lead.id).all():
-        thread.append({"who": "us", "text": getattr(e, "subject", None), "channel": "email",
-                       "at": e.created_at.isoformat() + "Z" if getattr(e, "created_at", None) else None})
+        # The email ACTUALLY sent - its body, not only its subject line.
+        thread.append({"who": "us", "text": _er.plain_text(e.body_html or "")[:4000], "subject": e.subject,
+                       "channel": "email", "source": e.send_source, "to": getattr(e, "to_email", None),
+                       "delivery": e.status, "error": getattr(e, "error", None),
+                       "at": e.sent_at.isoformat() + "Z" if e.sent_at else None})
     if conv is not None:
         from app.models.program_models import ProgramConversationTurn
         for t in (db.query(ProgramConversationTurn).filter(ProgramConversationTurn.conversation_id == conv.id,
@@ -287,7 +354,147 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
                     "status": booking.status} if booking and booking.booked_time else None,
         "suggestion": _suggest(conv, latest, lead),
         "mail_task": _mail_task_of(conv),
+        "handling": _handling(db, conv),
+        "reply_to": _reply_target(db, latest, lead),
     }
+
+
+def _handling(db, conv) -> dict:
+    from app.services.programs import ai_setter
+    by = None
+    if conv is not None and getattr(conv, "owner_changed_by", None):
+        u = db.query(User).filter(User.id == conv.owner_changed_by).first()
+        by = (u.full_name or u.email) if u else None
+    return {"owner": ai_setter.owner_of(conv),
+            "opted_out": bool(conv is not None and conv.state == "stopped"),
+            "reason": conv.handoff_reason if conv is not None else None,
+            "changed_at": conv.owner_changed_at.isoformat() + "Z"
+            if conv is not None and getattr(conv, "owner_changed_at", None) else None,
+            "changed_by": by,
+            "note": getattr(conv, "owner_note", None) if conv is not None else None}
+
+
+def _reply_target(db, latest, lead) -> dict:
+    """What pressing Reply answers: the newest family message, on its own
+    channel. An email is answered by email, in its thread, to its sender."""
+    if latest is None:
+        return {"channel": "sms" if lead.phone else ("email" if lead.email else None), "response_id": None}
+    if latest.channel == "email":
+        from app.services.programs import email_reply
+        m = email_reply.inbound_meta(db, latest)
+        return {"channel": "email", "response_id": latest.id, "to": m.get("sender_email"),
+                "to_name": m.get("sender_name"), "subject": m.get("subject"),
+                "threadable": bool(m.get("threadable")),
+                "why_not": None if m.get("threadable") else
+                "This email is not in a connected mailbox, so it can't be answered in its thread."}
+    return {"channel": "sms", "response_id": latest.id, "to": lead.phone}
+
+
+class ReplyIn(BaseModel):
+    lead_id: str
+    channel: str
+    text: str
+    idempotency_key: str
+    response_id: Optional[str] = None
+    then: str = "human"               # who owns the conversation after this send: human | ai
+
+
+@router.post("/reply")
+def command_reply(body: ReplyIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """A person answers a family from SCI Live. An EMAIL reply goes back in
+    the original thread to the verified sender, from the mailbox it came to; a
+    TEXT goes out on the program line. Idempotent on idempotency_key. The
+    family's message is marked responded only after the provider accepted it.
+    `then` decides who has the conversation afterwards: "human" (a person
+    keeps it) or "ai" ("Send & let AI continue": the AI answers the next
+    reply, knowing what was just sent)."""
+    from app.services import send_source as ss
+    from app.services.programs import ai_setter, email_reply
+    prog = _program(db, user, managers_only=False)
+    lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    if _is_demo(lead):
+        raise HTTPException(status_code=409, detail="A staging demo family is never contacted.")
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Write a reply first.")
+    if body.then not in ("human", "ai"):
+        raise HTTPException(status_code=422, detail="then must be human or ai")
+    resp = None
+    if body.response_id:
+        resp = (db.query(ProgramResponse).filter(ProgramResponse.id == body.response_id,
+                                                 ProgramResponse.organization_id == prog.organization_id,
+                                                 ProgramResponse.lead_id == lead.id).first())
+        if resp is None:
+            raise HTTPException(status_code=404, detail="That message is not in this family's conversation.")
+    out: dict = {"channel": body.channel}
+    if body.channel == "email":
+        if resp is None or resp.channel != "email":
+            raise HTTPException(status_code=422, detail="Choose the email you are answering.")
+        res = email_reply.send_reply(db, prog, lead, resp, text, send_source=ss.MANUAL,
+                                     idempotency_key="u:%s:%s" % (user.id, body.idempotency_key), actor_id=user.id)
+        out.update(res)
+        if not res.get("ok"):
+            raise HTTPException(status_code=502, detail="Not sent: %s" % (res.get("error") or "the email was refused"))
+        sent_at = datetime.utcnow()
+    elif body.channel == "sms":
+        from app.routers.compose_router import acting_advisor
+        from app.services import send_guard
+        from app.services.sms_service import send_sms
+        token = send_guard.claim(db, lead.id, text)
+        if token is None:
+            raise HTTPException(status_code=409, detail=send_guard.DUPLICATE_DETAIL)
+        try:
+            msg = send_sms(db, acting_advisor(db, lead, user), lead, text, False,
+                           send_source=ss.MANUAL, sent_by_user_id=user.id)
+        except Exception as exc:                         # noqa: BLE001
+            send_guard.release_after_failure(db, lead.id, text, token)
+            raise HTTPException(status_code=400, detail="Not sent: %s" % str(exc)[:300])
+        out.update(ok=True, message={"id": msg.id, "sid": msg.twilio_sid, "status": msg.twilio_status})
+        sent_at = max(datetime.utcnow(), msg.sent_at or datetime.utcnow())
+        if resp is not None:
+            from app.services.programs import responses as R
+            R.mark(db, resp, "responded", user)
+    else:
+        raise HTTPException(status_code=422, detail="channel must be sms or email")
+    # Ownership AFTER the send, stamped after it, so the AI never reads this
+    # manual message as "a person took over" when it was told to continue.
+    try:
+        conv = ai_setter.set_owner(db, lead, body.then, actor=user.id,
+                                   note=("Owner replied and let AI continue" if body.then == "ai"
+                                         else "Owner replied by hand"),
+                                   at=sent_at + timedelta(seconds=1))
+        out["handling"] = _handling(db, conv)
+    except ValueError as exc:
+        out["handling_error"] = str(exc)
+    return out
+
+
+class HandlingIn(BaseModel):
+    lead_id: str
+    owner: str
+
+
+@router.post("/handling")
+def command_handling(body: HandlingIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """AI Handling / Human Handling for one family. Sends nothing and never
+    re-processes an old reply: the owner takes the NEXT message."""
+    from app.services.programs import ai_setter
+    prog = _program(db, user, managers_only=False)
+    lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    try:
+        conv = ai_setter.set_owner(db, lead, body.owner, actor=user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="sci.conversation_owner", target_type="lead",
+               target_id=lead.id, details={"owner": body.owner})
+    db.commit()
+    return {"lead_id": lead.id, "handling": _handling(db, conv),
+            "program_mode": ai_setter.mode_of(prog)}
 
 
 @router.get("/slots")

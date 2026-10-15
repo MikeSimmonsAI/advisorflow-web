@@ -673,7 +673,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
         _prog_loc = _li(db, lead) if lead else None
     except Exception:
         _prog_loc = None
-    if _prog_loc is not None and lead and lead.phone and advisor:
+    if _prog_loc is not None and lead and lead.phone and advisor and not body.get("skip_family_text"):
         # OUTREACH PROGRAM (SCI): sent through send_sms, so it goes out on the
         # program's own approved line with every program gate, signed by the
         # location - never from an advisor's or another organization's number.

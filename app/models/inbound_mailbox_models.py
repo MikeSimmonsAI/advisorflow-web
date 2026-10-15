@@ -62,6 +62,7 @@ class InboundMailboxMessage(Base):
     graph_message_id = Column(String, nullable=False)
     internet_message_id = Column(String, nullable=True)
     from_address = Column(String, nullable=True)
+    from_name = Column(String, nullable=True)            # display name on the From line
     subject = Column(String, nullable=True)
     received_at = Column(DateTime, nullable=True)
     # matched | no_lead | ambiguous | own_mail | error

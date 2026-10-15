@@ -2642,6 +2642,56 @@ def setter_live_test(body: LiveTestIn, db: Session = Depends(get_db), user: User
             "turn": turn, "message": msg}
 
 
+@router.post("/setter/live-test/email-start")
+def setter_live_test_email_start(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """OWNER ONLY. Start the live EMAIL test: the owner's test contact gets the
+    program's owner alert address, and ONE short email goes to it from the
+    program's own sending mailbox. The owner replies from his own inbox; that
+    reply arrives through the real inbound mailbox path into SCI Live. The
+    conversation starts with a PERSON handling it, so the owner's first answer
+    is his own; he then hands it to the AI. Nobody else is emailed."""
+    from app.models.models import EmailMessage
+    from app.models.program_models import ProgramConversation
+    from app.services import send_source as ss, test_records as TR
+    from app.services.programs import ai_setter, mailbox_send
+    from app.services.programs import appointments as A
+    if getattr(user, "role", None) != "god_admin":
+        raise HTTPException(status_code=403, detail="Only the owner runs the live test.")
+    prog = _program(db, user)
+    owner_email = (prog.alert_email or "").strip().lower()
+    if "@" not in owner_email:
+        raise HTTPException(status_code=409, detail="The program has no owner alert email.")
+    lead = (db.query(Lead).filter(Lead.organization_id == prog.organization_id, Lead.is_test.is_(True),
+                                  Lead.last_name == TR.OWNER_TEST_LAST_NAME).first())
+    if lead is None:
+        raise HTTPException(status_code=409, detail="Run the text live test once first (it creates the test contact).")
+    lead.email = owner_email
+    for c in db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id).all():
+        c.state = "stopped"
+        c.next_followup_at = None
+    db.add(ProgramConversation(organization_id=lead.organization_id, lead_id=lead.id, state="human", is_test=True,
+                               handoff_reason="owner live email test - the owner answers first",
+                               owner_changed_at=datetime.utcnow(), owner_changed_by=user.id,
+                               owner_note="Human Handling on (live email test)"))
+    db.commit()
+    subject = "SCI Live email test %s" % datetime.utcnow().strftime("%b %d %H:%M")
+    html = ("<p>This is the EvoSys Pro SCI Live email test.</p>"
+            "<p>Please reply to this email with any short question about planning ahead. "
+            "Your reply should appear in SCI Live, where it can be answered in this same thread.</p>")
+    res = mailbox_send.send(db, prog, to_email=owner_email, subject=subject, body_html=html)
+    if res is None:
+        raise HTTPException(status_code=409, detail="The program has no sending mailbox.")
+    advisor = A.program_advisor(db, prog)
+    em = EmailMessage(lead_id=lead.id, sender_id=(advisor.id if advisor else user.id), subject=subject,
+                      body_html=html, status="sent" if res.get("success") else "failed",
+                      send_source=ss.MANUAL, sent_by_user_id=user.id)
+    em.to_email, em.from_email, em.error = owner_email, res.get("from_email"), res.get("error")
+    db.add(em)
+    db.commit()
+    return {"ok": bool(res.get("success")), "to": owner_email, "from": res.get("from_email"),
+            "subject": subject, "error": res.get("error"), "lead_id": lead.id, "email_id": em.id}
+
+
 @router.post("/setter/live-test/cleanup")
 def setter_live_test_cleanup(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     """OWNER ONLY. Remove the owner live test's booking from the calendar

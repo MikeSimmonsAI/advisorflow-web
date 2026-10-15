@@ -49,6 +49,7 @@ _TRUE = {"1", "true", "yes", "on"}
 _TWILIO_SEND = re.compile(r"/(Messages|Calls)(\.json)?/?$", re.IGNORECASE)
 _HTTPX_SENDS = (
     ("graph.microsoft.com", re.compile(r"/sendMail$", re.IGNORECASE)),
+    ("graph.microsoft.com", re.compile(r"/messages/[^/]+/(reply|replyAll|send)$", re.IGNORECASE)),
     ("api.retellai.com", re.compile(r"/create-phone-call$", re.IGNORECASE)),
 )
 

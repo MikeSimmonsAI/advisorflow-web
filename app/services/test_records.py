@@ -158,5 +158,16 @@ def owner_live_test_send_allowed(db, lead, send_source) -> bool:
     return bool(owner) and len(owner) == 10 and _digits(getattr(lead, "phone", None)) == owner
 
 
+def owner_live_test_email_allowed(db, lead, to_addr) -> bool:
+    """The owner's live test contact may be EMAILED only at the program's own
+    owner alert address - the email twin of owner_live_test_send_allowed."""
+    if not (is_test_record(lead) and getattr(lead, "last_name", None) == OWNER_TEST_LAST_NAME):
+        return False
+    from app.services.programs import identity
+    prog = identity.program_for_org(db, lead.organization_id)
+    owner = (getattr(prog, "alert_email", None) or "").strip().lower() if prog else ""
+    return bool(owner) and "@" in owner and (to_addr or "").strip().lower() == owner
+
+
 def is_owner_test_lead(lead) -> bool:
     return bool(is_test_record(lead) and getattr(lead, "last_name", None) == OWNER_TEST_LAST_NAME)
