@@ -344,7 +344,8 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
         "status": latest.handling_status if latest else None,
         "badge": _badge(latest, conv) if latest else None,
         "response_id": latest.id if latest else None,
-        "suggested_reply": latest.suggested_reply if latest else None,
+        "suggested_reply": (_er.strip_signature(db, lead, latest.suggested_reply)
+                            if latest and latest.suggested_reply else None),
         "last_touch": {"at": last["at"], "channel": last["channel"]} if last else None,
         "thread": thread[-40:],
         "setter": {"state": conv.state, "offered": [A.describe(s) for s in A.offered(conv)],
@@ -354,19 +355,21 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
                     "status": booking.status} if booking and booking.booked_time else None,
         "suggestion": _suggest(conv, latest, lead),
         "mail_task": _mail_task_of(conv),
-        "handling": _handling(db, conv),
+        "handling": _handling(db, conv, lead, latest),
         "reply_to": _reply_target(db, latest, lead),
     }
 
 
-def _handling(db, conv) -> dict:
+def _handling(db, conv, lead=None, latest=None) -> dict:
+    opted_out = bool(lead is not None and ((getattr(lead, "status", None) or "") == "dnc"
+                                           or (latest is not None and latest.response_class == "opt_out")))
     from app.services.programs import ai_setter
     by = None
     if conv is not None and getattr(conv, "owner_changed_by", None):
         u = db.query(User).filter(User.id == conv.owner_changed_by).first()
         by = (u.full_name or u.email) if u else None
-    return {"owner": ai_setter.owner_of(conv),
-            "opted_out": bool(conv is not None and conv.state == "stopped"),
+    return {"owner": ai_setter.owner_of(conv) if not opted_out else "human",
+            "opted_out": bool(opted_out or (conv is not None and conv.state == "stopped")),
             "reason": conv.handoff_reason if conv is not None else None,
             "changed_at": conv.owner_changed_at.isoformat() + "Z"
             if conv is not None and getattr(conv, "owner_changed_at", None) else None,
@@ -419,6 +422,8 @@ def command_reply(body: ReplyIn, db: Session = Depends(get_db), user: User = Dep
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(status_code=422, detail="Write a reply first.")
+    # One approved sign-off, added by the system; {GUIDE} = the family's guide link.
+    text = email_reply.guide_token(db, lead, email_reply.strip_signature(db, lead, text))
     if body.then not in ("human", "ai"):
         raise HTTPException(status_code=422, detail="then must be human or ai")
     resp = None

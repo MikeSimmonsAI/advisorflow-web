@@ -263,3 +263,42 @@ def test_owner_sees_his_test_conversation_marked_and_uncounted(setter, sample_ad
     r = client.get("/program/command", headers=h).json()
     mine = [i for i in r["inbox"] if i["lead_id"] == me.id]
     assert mine and mine[0]["is_test"] and r["counts"]["needs_attention"] == 0
+
+
+def test_one_signature_and_the_guide_link(setter, sample_advisor, client, monkeypatch):
+    from app.services.programs import email_reply
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    monkeypatch.setattr(email_reply, "signature", lambda db_, l: "Kerry Allan, Alabama Heritage Cemetery")
+    for draft in ("Thanks for writing.\n\nKerry Allan\nAlabama Heritage Cemetery",
+                  "Thanks for writing.\n- Kerry Allan, Alabama Heritage Cemetery",
+                  "Thanks for writing.\n\nThanks,\nKerry", "Thanks for writing."):
+        assert email_reply.strip_signature(db, lead, draft) == "Thanks for writing."
+    monkeypatch.setattr("app.services.programs.identity.planning_guide_link",
+                        lambda prof, db=None, family=None: "https://guide.example/x")
+    monkeypatch.setattr("app.services.programs.identity.default_planning_guide", lambda: "https://guide.example/x")
+    assert "https://guide.example/x" in email_reply.guide_token(db, lead, "Here it is: {GUIDE}")
+    sent = {}
+
+    def fake_send(db_, adv, lead_, text, *a, **k):
+        sent["text"] = text
+        m = Message(lead_id=lead_.id, sender_id=adv.id, body=text, send_source=k.get("send_source"),
+                    twilio_sid="SMg", sent_at=datetime.utcnow())
+        db_.add(m)
+        db_.commit()
+        return m
+    monkeypatch.setattr("app.services.sms_service.send_sms", fake_send)
+    r = client.post("/program/command/reply", headers=_h(db, setter["admin"]),
+                    json={"lead_id": lead.id, "channel": "sms", "idempotency_key": "g1",
+                          "text": "Here is your guide: {GUIDE}\n\nKerry Allan\nAlabama Heritage Cemetery"})
+    assert r.status_code == 200, r.text
+    assert sent["text"] == "Here is your guide: https://guide.example/x"
+
+
+def test_an_opted_out_family_shows_as_opted_out(setter, sample_advisor, client):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    lead.status = "dnc"
+    db.commit()
+    fam = client.get("/program/command/family/%s" % lead.id, headers=_h(db, setter["admin"])).json()
+    assert fam["handling"]["opted_out"] and fam["handling"]["owner"] == "human"

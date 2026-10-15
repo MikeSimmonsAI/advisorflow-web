@@ -88,6 +88,7 @@ export default function Command() {
   const engagement = useEngagement()
   const [err, setErr] = useState('')
   const [family, setFamily] = useState(null)       // lead id
+  const [startReply, setStartReply] = useState(false) // opened with Reply: composer open and focused
   const [toast, setToast] = useState('')
   const busy = useRef(false)
 
@@ -131,7 +132,7 @@ export default function Command() {
 
   const act = async (item, a) => {
     if (a === 'call') { window.location.href = `tel:${item.phone || ''}`; if (!item.phone) setFamily(item.lead_id); return }
-    if (['reply', 'schedule', 'review', 'note'].includes(a)) { setFamily(item.lead_id); return }
+    if (['reply', 'schedule', 'review', 'note'].includes(a)) { setStartReply(a === 'reply'); setFamily(item.lead_id); return }
     const state = a === 'close' || a === 'dismiss' ? 'closed' : 'opened'
     try {
       await api.post(`/program/responses/${item.response_id}/mark`, { state })
@@ -141,7 +142,7 @@ export default function Command() {
   }
 
   if (family) {
-    return <Family id={family} onBack={() => { setFamily(null); load() }} toast={setToast} toastText={toast} />
+    return <Family id={family} startReply={startReply} onBack={() => { setFamily(null); setStartReply(false); load() }} toast={setToast} toastText={toast} />
   }
   const inbox = d?.inbox || []
   return (
@@ -348,7 +349,7 @@ function Appointments({ open }) {
   </>
 }
 
-function Family({ id, onBack, toast, toastText }) {
+function Family({ id, startReply, onBack, toast, toastText }) {
   const [f, setF] = useState(null)
   const [err, setErr] = useState('')
   const [mode, setMode] = useState('note')
@@ -368,6 +369,17 @@ function Family({ id, onBack, toast, toastText }) {
     api.get(`/program/command/family/${id}`).then(r => { setF(r); setErr('') }).catch(e => setErr(e.message || 'Could not load.'))
   }, [id])
   useEffect(() => { load() }, [load])
+  // Reply on an inbox card: straight to the right composer - Email (in the
+  // thread) for an email, Text for a text - focused, no extra tap.
+  const replied = useRef(false)
+  useEffect(() => {
+    if (!startReply || !f || replied.current) return
+    replied.current = true
+    const m = f.reply_to?.channel === 'email' ? 'email' : 'text'
+    setMode(m)
+    if (f.suggested_reply) setText(t => t || f.suggested_reply)
+    setTimeout(() => { composer.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); composer.current?.focus() }, 80)
+  }, [startReply, f])
   useEffect(() => {
     api.get(`/program/command/slots?lead_id=${id}`).then(setSlots).catch(() => setSlots({ slots: [], reason: 'Calendar unavailable' }))
   }, [id])
@@ -550,7 +562,8 @@ function Family({ id, onBack, toast, toastText }) {
         <textarea ref={composer} value={text} onChange={e => setText(e.target.value)} rows={4}
                   placeholder={mode === 'note' ? 'Write a note about this family...' : mode === 'text' ? 'Write a text...' : 'Write an email...'} />
         <div className="cmd-send">
-          {mode === 'text' && f.suggested_reply && text !== f.suggested_reply && <button className="link" onClick={() => setText(f.suggested_reply)}>Use suggested reply</button>}
+          {mode !== 'note' && f.suggested_reply && text !== f.suggested_reply && <button className="link" onClick={() => setText(f.suggested_reply)}>Use suggested reply</button>}
+          {mode !== 'note' && !f.is_demo && !text.includes('{GUIDE}') && <button className="link" onClick={() => setText(t => `${t.trim()}${t.trim() ? ' ' : ''}{GUIDE}`)}>Add guide link</button>}
           {mode !== 'note' && !f.is_demo && <button disabled={busy || !text.trim() || !canSend} onClick={() => send('ai')}>Send &amp; let AI continue</button>}
           <button className="primary" disabled={busy || !text.trim() || (mode !== 'note' && !f.is_demo && !canSend)} onClick={() => send('human')}>
             {mode === 'note' ? 'Save note' : mode === 'text' ? 'Send text' : 'Send email'}</button>
