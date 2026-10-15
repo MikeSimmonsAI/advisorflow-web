@@ -18,3 +18,14 @@ def test_spacing_audit_lists_close_texts_and_sends_nothing(program, sample_advis
     item = r["items"][0]
     assert item["close_pairs"][0]["hours_apart"] == 4.0 and len(item["texts"]) == 2
     assert db.query(Message).filter(Message.lead_id == lead.id).count() == 2
+
+
+def test_lead_audit_shows_texts_and_is_org_scoped(program, sample_advisor, client):
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L002", email="g@example.com")
+    db.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body="hi", twilio_sid="SMx",
+                   sent_at=datetime.utcnow()))
+    db.commit()
+    r = client.get("/program/audit/lead/%s" % lead.id, headers=_h(db, program["admin"]))
+    assert r.status_code == 200 and len(r.json()["texts"]) == 1
+    assert client.get("/program/audit/lead/nope", headers=_h(db, program["admin"])).status_code == 404
