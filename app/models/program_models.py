@@ -613,6 +613,14 @@ class ProgramConversation(Base):
     last_family_at = Column(DateTime, nullable=True)
     last_ai_at = Column(DateTime, nullable=True)
     next_followup_at = Column(DateTime, nullable=True)
+    # What the setter knows about this family, kept across days (JSON): what
+    # they want and why, questions open/answered, concerns, existing plans,
+    # interests, contact preferences, what was provided and promised, and
+    # readiness. Facts the CODE knows (what was actually delivered, times
+    # offered, bookings) are never taken from the model.
+    memory = Column(Text, nullable=True)
+    followups_sent = Column(Integer, nullable=True, default=0)
+    followup_reason = Column(String, nullable=True)
     is_test = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
