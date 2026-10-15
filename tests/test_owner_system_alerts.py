@@ -71,3 +71,29 @@ def test_family_reply_still_alerts_the_whole_team(program, sample_advisor):
     got = sorted((c, t) for c, t, k in calls)
     assert got == sorted([("sms", OWNER_PHONE), ("email", OWNER_EMAIL), ("sms", "+14105550100"),
                           ("sms", "+15405550100"), ("email", "ms@example.com")])
+
+
+def test_a_restart_does_not_repeat_todays_self_check_alert(program):
+    db, prog = program["db"], program["prog"]
+    _setup(db, prog)
+    self_check._alerted.clear()
+    fake_run = {"checks": [{"key": "texts_too_close", "ok": False, "title": "Texts spaced as planned",
+                            "detail": "8 people", "people": []}]}
+    calls, fake = _capture()
+    with patch.object(self_check, "run", return_value=fake_run), \
+         patch("app.services.programs.responses._deliver_staff_alert", side_effect=fake):
+        assert self_check.alert_all(db) == 1
+        self_check._alerted.clear()                      # a deploy restarts the process
+        assert self_check.alert_all(db) == 0
+    assert len(calls) == 2                               # one email + one text, once
+
+
+def test_the_simulator_reaches_nobodys_bell(program, sample_advisor):
+    from app.models.models import Notification
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    lead.is_test = True
+    db.commit()
+    before = db.query(Notification).count()
+    responses.on_inbound(db, lead, "Can I schedule a visit?", "sms", staff_alerts=False, run_setter=False)
+    assert db.query(Notification).count() == before
