@@ -2725,7 +2725,10 @@ def setter_live_test_booking_link(db: Session = Depends(get_db), user: User = De
     db.commit()
     body = "Here is your link to choose a time for your planning visit: %s" % url
     try:
-        msg = send_sms(db, advisor, lead, body, include_booking_link=False, send_source=ss.SCI_SETTER)
+        # The owner pressing this is a person sending by hand (MANUAL): the
+        # 20-hour spacing backstop is for automated texts to families.
+        msg = send_sms(db, advisor, lead, body, include_booking_link=False, send_source=ss.MANUAL,
+                       sent_by_user_id=user.id)
     except Exception as exc:                             # noqa: BLE001 - report the exact refusal
         raise HTTPException(status_code=409, detail="Not sent: %s" % str(exc)[:400])
     m = db.query(Message).filter(Message.id == msg.id).first()
