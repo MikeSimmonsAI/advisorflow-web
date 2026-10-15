@@ -80,8 +80,8 @@ sc("s018", "pricing", "Ronald",
 
 # ── existing plan or property ───────────────────────────────────────────────
 sc("s019", "existing_plan", "Marion",
-   ("I already have a plan with you", "answer", {"must_not": [r"\b(am|pm)\b"]}),
-   ("The prearrangement file", "offer_times", {"must": [r"\b(am|pm)\b"]}))
+   ("I already have a plan with you", "offer_times,answer", {"must": [r"review"]}),
+   ("The first of those times works for me", "book,offer_times"))
 sc("s020", "existing_plan", "Gerald",
    ("We bought plots there in 1995", "answer,offer_times"),)
 sc("s021", "existing_plan", "Dorothy",
@@ -131,7 +131,7 @@ sc("s036", "burial_cremation", "Ralph",
 # ── guide / brochure requests ───────────────────────────────────────────────
 sc("s037", "guide", "Lester",
    ("Would really like this to receive guide, any questions I would contact you. Is this possible?",
-    "send_guide"),
+    "send_guide", {"must": [r"in person|visit|come in|stop by|sit down"]}),
    ("Yes I'd like to talk about it in person", "offer_times"))
 sc("s038", "guide", "Evelyn",
    ("send the guide please", "send_guide"),)
@@ -143,7 +143,8 @@ sc("s040", "guide", "Clarence",
 # ── mailed to home ───────────────────────────────────────────────────────────
 sc("s041", "mail", "Lawrence",
    ("Can you mail the guide to my home? I'd rather have it on paper", "mail_guide",
-    {"must_not": [r"\b(has been|have|we'?ve|i'?ve|already) (mailed|sent it)\b|\bwe mailed\b"]}),)
+    {"must_not": [r"\b(has been|have|we'?ve|i'?ve|already) (mailed|sent it)\b|\bwe mailed\b"],
+     "must": [r"in person|visit|come in|stop by|sit down"]}),)
 sc("s042", "mail", "Mildred",
    ("Please mail me a copy, 412 Oak St", "mail_guide,answer", {"must_not": [r"\bwe mailed\b"]}),)
 sc("s043", "mail", "Otis",

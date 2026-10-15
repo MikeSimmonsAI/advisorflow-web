@@ -2784,11 +2784,45 @@ def setter_stats(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_
         "bookings": len(bookings),
         "booked_by_ai": sum(1 for c in convs if c.state == "booked"),
         "confirmed_visits": sum(1 for b in bookings if (b.status or "") in ("confirmed", "completed")),
+        "outcomes": _appointment_outcomes(db, org, since, convs, bookings),
         "setter_mode": getattr(prog, "ai_setter_mode", None) or "off",
         "effective_mode": _setter.mode_of(prog),
         "emergency_off": _setter.killed(),
         "platform_background_ai": _gw.background_enabled(),
         "runs_without_platform_switch": True,
+    }
+
+
+def _appointment_outcomes(db, org, since, convs, bookings) -> dict:
+    """THE APPOINTMENT FUNNEL, real families only, each step counted on its
+    own: a guide request, a delivered text or a mailing task is never an
+    appointment. Offered = real open times were put to the family; accepted
+    = they chose one and it was booked; confirmed on Google = the booking
+    holds a calendar event on the central EvoSys Appointment Booking
+    calendar; completed = marked as having taken place."""
+    import json as _json
+    real = [b for b in bookings if (b.status or "") != "cancelled"]
+    fulfilled = 0
+    for c in convs:
+        try:
+            mr = (_json.loads(c.memory or "{}") or {}).get("mail_request")
+        except (TypeError, ValueError):
+            mr = None
+        if isinstance(mr, dict) and mr.get("done"):
+            fulfilled += 1
+    opt_outs = (_test_records.exclude_test_responses(
+        db.query(ProgramResponse.lead_id).filter(ProgramResponse.organization_id == org,
+                                                 ProgramResponse.received_at >= since,
+                                                 ProgramResponse.response_class == "opt_out"))
+        .distinct().count())
+    return {
+        "appointments_offered": sum(1 for c in convs if c.offered_at),
+        "appointments_accepted": len({b.lead_id for b in real}),
+        "confirmed_on_google_calendar": len({b.lead_id for b in real if getattr(b, "calendar_event_id", None)}),
+        "visits_completed": len({b.lead_id for b in real if (b.status or "") == "completed"}),
+        "information_only_fulfilled": fulfilled,
+        "declines": sum(1 for c in convs if c.state == "closed"),
+        "opt_outs": opt_outs,
     }
 
 

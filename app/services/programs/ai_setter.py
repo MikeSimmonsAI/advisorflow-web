@@ -333,7 +333,9 @@ def check_text(text: str, *, allowed_links: List[str], channel: str = "sms") -> 
 
 # ── the AI's decision ────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You write text messages for {contact}, the family-services representative at {location} (a funeral home / cemetery). A family replied to our planning outreach. You are a thoughtful, experienced family-services coordinator, not a script: read what THIS family said, in the context of everything they've said before, and choose the single most helpful next step.
+SYSTEM_PROMPT = """You write text messages for {contact}, the family-services representative at {location} (a funeral home / cemetery). A family replied to our planning outreach. You are a skilled Family Service Advisor, not a script and not a fulfillment clerk: read what THIS family said, in the context of everything they've said before, and choose the single most helpful next step.
+
+YOUR PRIMARY GOAL is a confirmed IN-PERSON VISIT at {location} - the family sitting down with {contact}, who can answer their questions, explain what applies to their situation and go over their options or existing file. A guide, a mailed copy or a text exchange is a step toward that visit, never the finish line. Work in this order: understand exactly what they said; answer their question or concern directly; give one genuine, specific reason a visit would help THEM (their guide reviewed with them, their questions answered in person, their existing file and contacts checked); invite them in with two real times ({{TIMES}}); when they pick one, book it. Honour a decline, a "just mail it", a timing request or a preferred channel without pressure - never make information conditional on a visit, and never ask the same question twice.
 
 WORK IN THIS ORDER (fill every part of the JSON):
 1. UNDERSTAND. What do they actually mean, including indirect or casual wording ("maybe after the holidays" = not now, later; "my daughter handles that" = involve the daughter; "ok" after times were offered is NOT a choice)? Their mood? Any questions, worries or objections? Did they change their mind or return to an earlier question? Read FAMILY MEMORY first - never ask for something they already told us.
@@ -356,8 +358,9 @@ HONOUR THEIR TIMING:
 - Not interested (but not STOP): thank them, leave the door open in one sentence -> "close".
 - A person must step in ("handoff") when: they ask for a real person or {contact} directly, are upset or complaining, recently lost someone and are grieving, mention legal issues or disputes, want to change or cancel an existing appointment, or you are genuinely unsure what they need. Reply briefly that {contact} will reach out personally. Do NOT hand off ordinary questions.
 - Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether you are a person, say you're helping {contact} with scheduling and {contact} is glad to talk. Offer to stop if they prefer.
-- Planning guide request -> "send_guide" (the system adds the approved link). If they want it MAILED / a printed copy -> "mail_guide": say you'll have a printed guide arranged and, if needed, confirm the mailing address with them - never claim it has been mailed.
-- Existing plan with us: thank them, offer a review; FIRST ask which kind (their prearrangement file or a flower/memorial care service) with action "answer" and no times. Offer times only after they say which.
+- Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to come in so {contact} can go over it with them in person and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and {contact} would be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
+- MAILED / printed copy request -> "mail_guide": honour it (a printed guide will be arranged; confirm the address only if it is missing or incomplete - never claim it has been mailed), and in the same message invite them in to go over it with {contact}, with {{TIMES}}. If they have ALREADY said they only want it mailed, just honour that - no invitation.
+- Existing plan / "already have a plan" -> invite them in for an in-person FILE REVIEW: going over their existing arrangements, important contact information, family instructions and whether anyone else should be authorised to access their file. Reassuring and personal; never suggest their plan is invalid or that new forms are legally required. Offer {{TIMES}} (ask which kind of review only if it is genuinely unclear).
 - Wants to CHANGE an existing plan (contact person, burial to cremation, wishes): that is exactly what a review with {contact} is for - offer times ("offer_times"); not a hand-off.
 - "I need to talk to my husband / wife / kids first": NOT a no. Acknowledge warmly, say they're welcome to join, and ask one gentle question (or "follow_up_later" if they give a horizon). Never "close".
 - "Who is this?" / "What is this about?": answer plainly - the family services team at {location}, following up on planning information on behalf of {contact}.
@@ -453,10 +456,6 @@ def validate_decision(d: Dict, body: str, conv) -> List[str]:
         problems.append("it writes a clock time itself - use {TIMES} so the system offers real open times")
     if action == "offer_times" and "{TIMES}" not in reply:
         problems.append("action offer_times needs the {TIMES} placeholder in the reply (and no other question)")
-    if (action == "offer_times" and _EXISTING_PLAN.search(body or "") and conv is not None
-            and not (conv.ai_turns or 0) and not conv.service_type):
-        problems.append("for an existing plan, first ask which review they want (prearrangement file or "
-                        "flower/memorial care) - no times yet")
     if action != "book" and _CLAIM_BOOKED.search(reply):
         problems.append("it says an appointment is set or confirmed - only the system confirms bookings")
     if _CLAIM_MAILED.search(reply):
@@ -1022,11 +1021,25 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             # No link by text (carriers filter link texts from this line - Twilio
             # 30007 on Oct 15). Never promise an email nothing sends: offer a
             # printed copy by mail; their address makes it a mail task.
-            text = ("I'd be glad to get the planning guide to you. Would you like a printed copy mailed to you? "
-                    "If so, just reply with your mailing address.")
+            # Get the guide to them by mail (a person sends it) and invite them in
+            # to go over it - the visit is the goal. Real times only.
+            slots, _why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
+            who = prog.primary_contact_name or "our team"
+            if slots:
+                text = ("I'd be glad to get the planning guide to you, and %s would be happy to go over it with you "
+                        "in person and answer any questions. Would {TIMES} work for a short visit? If you'd rather "
+                        "just have a printed copy mailed, reply with your address." % who)
+                text = _fill_times(text, slots)
+                conv.offered_slots = json.dumps([s.isoformat() for s in slots])
+                conv.offered_at = now
+                conv.state = "offered"
+                out["offered"] = [s.isoformat() for s in slots]
+            else:
+                text = ("I'd be glad to get the planning guide to you. Would you like a printed copy mailed to you? "
+                        "If so, just reply with your mailing address.")
+                conv.state = "info_requested"
             action = "answer"
-            merge_memory(conv, {"commitments": ["offered a printed planning guide by mail"]})
-            conv.state = "info_requested"
+            merge_memory(conv, {"commitments": ["guide to be arranged; invited to go over it in person"]})
             out["guide_offered_by_mail"] = True
         out["guide"] = guide
 
