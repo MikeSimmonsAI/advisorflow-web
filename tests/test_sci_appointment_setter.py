@@ -335,3 +335,19 @@ def test_a_malformed_ai_answer_gets_one_correction(setter, sample_advisor):
     fake = _Fake([_d(""), _d("answer", "Of course, Oscar - call whenever suits you. Would you like Kerry to call you instead?")])
     resp, conv = _run(db, lead, "I'll call you", fake)
     assert len(fake.calls) == 2 and conv.state == "ai_active" and resp.suggested_reply.startswith("Of course")
+
+
+def test_asking_for_a_day_offers_times_that_day(setter, sample_advisor, monkeypatch):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    lead.is_test = True
+    db.commit()
+    day = [datetime(2030, 1, 11, 10, 0), datetime(2030, 1, 11, 15, 0)]
+    monkeypatch.setattr(A, "slots_on_day", lambda db, prog, d, want=2: (day, None))
+    fake = _Fake([_d("offer_times", "Would {TIMES} work?"),
+                  _d("book", "", requested_time="2030-01-11T09:00")])
+    _run(db, lead, "Can I come in?", fake)
+    _, conv = _run(db, lead, "Can you do Friday?", fake)
+    t = _ai_turns(db, conv)[-1].text
+    assert conv.state == "offered" and conv.booked_time is None
+    assert A.describe(day[0]) in t and A.describe(day[1]) in t and "filled" not in t

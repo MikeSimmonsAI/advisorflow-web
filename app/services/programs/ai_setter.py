@@ -382,6 +382,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         db.commit()
         return dict(out, state=conv.state)
 
+    preferred_day = None
     if action == "book":
         slot = None
         choices = A.offered(conv)
@@ -395,9 +396,18 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 slot = datetime.fromisoformat(str(d["requested_time"])[:16])
             except ValueError:
                 slot = None
-            if slot is not None and not choice_evidence(body, slot, None):
-                slot = None
-        if slot is None and choices:
+            if slot is not None:
+                preferred_day = slot.date()
+                # A day without a clock time ("Can you do Friday?") is a
+                # request for times THAT day, not a booking.
+                if not re.search(r"\d|noon|morning|afternoon|evening", (body or "").lower()) \
+                        or not choice_evidence(body, slot, None):
+                    slot = None
+                    action = "offer_times"
+                    text = "Yes - would {TIMES} work for you?"
+        if slot is None and action == "offer_times":
+            pass
+        elif slot is None and choices:
             # Never book on a guess: ask which of the offered times suits them.
             action = "answer"
             text = ("Thank you. Which works better for you: %s or %s?" % (A.describe(choices[0]), A.describe(choices[1]))
@@ -438,14 +448,20 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 return dict(out, state=conv.state, booked_time=slot.isoformat())
             if res.get("status") in ("taken", "unconfirmed", "already_booked"):
                 action = "offer_times"
-                text = "That time just filled up. Would {TIMES} work instead?"
+                was_offered = slot in choices
+                text = ("That time just filled up. Would {TIMES} work instead?" if was_offered
+                        else "I don't have that exact time open. Would {TIMES} work?")
             else:
                 _handoff(db, prog, lead, conv, "booking failed: %s" % res.get("reason"), notify=True)
                 text = "Thank you. %s will reach out shortly to set that up." % (prog.primary_contact_name or "Our team")
                 action = "handoff"
 
     if action == "offer_times":
-        slots, why = A.available_slots(db, prog)
+        slots, why = ([], None)
+        if preferred_day is not None:
+            slots, why = A.slots_on_day(db, prog, preferred_day)
+        if not slots:
+            slots, why = A.available_slots(db, prog)
         if not slots:
             _handoff(db, prog, lead, conv, "no times to offer: %s" % why, notify=True)
             text = ("Thank you. %s will reach out to find a time that works for you."
