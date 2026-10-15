@@ -202,7 +202,26 @@ def choice_evidence(body: str, slot: datetime, index: Optional[int]) -> bool:
         return True
     if index is not None and index in _ORD and re.search(_ORD[index], t):
         return True
+    if re.search(r"\bmorning\b", t) and slot.hour < 12:
+        return True
+    if re.search(r"\b(afternoon|evening)\b", t) and slot.hour >= 12:
+        return True
     return False
+
+
+_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def day_named(body: str, today) -> Optional[object]:
+    """The next date for a weekday the family named ("Can you do Friday?")."""
+    t = (body or "").lower()
+    for i, name in enumerate(_DAYS):
+        if re.search(r"\b(%s|%s)\b" % (name, name[:3]), t):
+            ahead = (i - today.weekday()) % 7 or 7
+            return today + timedelta(days=ahead)
+    if re.search(r"\btomorrow\b", t):
+        return today + timedelta(days=1)
+    return None
 
 
 def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Optional[str] = None) -> Dict:
@@ -405,6 +424,11 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                     slot = None
                     action = "offer_times"
                     text = "Yes - would {TIMES} work for you?"
+        if slot is None and choices and action == "book":
+            # Their words may still pick exactly one offered time ("the afternoon one").
+            picked = [c for i, c in enumerate(choices) if choice_evidence(body, c, i)]
+            if len(picked) == 1:
+                slot = picked[0]
         if slot is None and action == "offer_times":
             pass
         elif slot is None and choices:
@@ -458,6 +482,8 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
 
     if action == "offer_times":
         slots, why = ([], None)
+        if preferred_day is None:
+            preferred_day = day_named(body, A._today_central().date())
         if preferred_day is not None:
             slots, why = A.slots_on_day(db, prog, preferred_day)
         if not slots:

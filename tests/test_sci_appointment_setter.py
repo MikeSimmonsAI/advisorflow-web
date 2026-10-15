@@ -351,3 +351,27 @@ def test_asking_for_a_day_offers_times_that_day(setter, sample_advisor, monkeypa
     t = _ai_turns(db, conv)[-1].text
     assert conv.state == "offered" and conv.booked_time is None
     assert A.describe(day[0]) in t and A.describe(day[1]) in t and "filled" not in t
+
+
+def test_the_afternoon_one_books_the_afternoon_time(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    lead.is_test = True
+    db.commit()
+    fake = _Fake([_d("offer_times", "Would {TIMES} work?"), _d("book", "", slot_choice=0)])
+    _run(db, lead, "Can I come in?", fake)
+    _, conv = _run(db, lead, "The afternoon one", fake)
+    assert conv.state == "booked" and conv.booked_time == SLOTS[1]          # SLOTS[1] is 2 PM
+
+
+def test_a_named_day_shapes_the_offer_even_when_the_ai_just_offers(setter, sample_advisor, monkeypatch):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    seen = {}
+
+    def on_day(db, prog, d, want=2):
+        seen["day"] = d
+        return [datetime(2030, 1, 11, 10, 0), datetime(2030, 1, 11, 15, 0)], None
+    monkeypatch.setattr(A, "slots_on_day", on_day)
+    resp, conv = _run(db, lead, "A visit would help. Can you do Friday?", _Fake([_d("offer_times", "Would {TIMES} work?")]))
+    assert seen["day"].weekday() == 4 and "January 11" in resp.suggested_reply
