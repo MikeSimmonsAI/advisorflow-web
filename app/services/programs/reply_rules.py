@@ -84,7 +84,7 @@ _OPT_OUT_PHRASES = (r"\b(remove me|take me off|unsubscribe me|opt me out|do not 
 # BAD DATA is about the RECORD (wrong person / number), never about a death in
 # the family - for a funeral home a bereaved reply is the most important one.
 _BAD_DATA_PATTERNS = (r"\b(wrong (number|person|email|address)|this is not (him|her|me)|not (him|her)|"
-                      r"no one (here )?by that name|don'?t know (who|what) (this|you|that)|who is this)\b")
+                      r"no one (here )?by that name|don'?t know (who|what) (this|you|that))\b")
 # Of those, the ones about the PERSON (not the number/address on file).
 _WRONG_PERSON_PATTERNS = (r"\b(wrong person|this is not (him|her|me)|not (him|her)|no one (here )?by that name|"
                           r"(he|she) (doesn'?t|does not) live here|you have the wrong(?! (?:number|email|address))|not the right person)\b")

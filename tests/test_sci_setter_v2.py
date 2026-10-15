@@ -159,3 +159,18 @@ def test_existing_plan_asks_which_review_before_times(setter, sample_advisor):
     conv = ai_setter.conversation_for(db, lead)
     d = {"action": "offer_times", "reply": "Would {TIMES} work for a review?"}
     assert any("which review" in p for p in ai_setter.validate_decision(d, "I already have a plan with you", conv))
+
+
+def test_unclear_short_reply_is_not_a_close(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    conv = ai_setter.conversation_for(db, lead)
+    d = {"action": "close", "reply": "No worries, we're here whenever you're ready."}
+    assert any("did not decline" in p for p in ai_setter.validate_decision(d, "lol idk maybe", conv))
+    assert ai_setter.validate_decision(d, "Not interested, thanks", conv) == []
+
+
+def test_who_is_this_is_answered_not_treated_as_bad_data():
+    from app.services.programs.reply_rules import classify, BAD_DATA
+    assert classify("who is this")["class"] != BAD_DATA
+    assert classify("wrong number")["class"] == BAD_DATA

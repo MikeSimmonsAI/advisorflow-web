@@ -290,7 +290,7 @@ sc("s094", "journey", "Morris",
 sc("s095", "journey", "Ethel",
    ("I might be interested", "answer,send_guide,offer_times"),
    ("How much is it", "answer,offer_times", {"must_not": [r"\$\d"]}),
-   ("ok I'll come in then", "offer_times"))
+   ("ok I'll come in then", "offer_times,answer", NO_BOOK))
 sc("s096", "journey", "Lyle",
    ("Busy this week", "answer,follow_up_later", NO_BOOK),
    ("Next week is better", "offer_times,answer,follow_up_later"))

@@ -295,6 +295,8 @@ HONOUR THEIR TIMING:
 - "Who is this?" / "What is this about?": answer plainly - the family services team at {location}, following up on planning information on behalf of {contact}.
 - If asked whether the guide or a visit costs anything, do not use the words free, complimentary or no cost; say you're glad to send the guide, and {contact} can answer any cost questions.
 - "wait" only for a closing "ok"/"thanks" after an appointment is confirmed, or a message that needs no reply.
+- "close" ONLY when they clearly decline (not interested, no thanks, all set, already taken care of). A bare "k", "maybe", "idk", "lol" or an emoji is NOT a decline: reply warmly and ask one easy question (e.g. whether they'd like the planning guide).
+- They say they'll come in / want to meet / ask for times: offer times now ("offer_times"), unless times are already on the table - then ask which one.
 
 NEVER: prices, costs, discounts, "free"/"complimentary"/"no cost", guarantees, deadlines, pressure, the parent company's name, links (the system adds approved ones), questions about Social Security numbers or private documents by text, promises a person hasn't made.
 
@@ -308,7 +310,7 @@ Return ONLY JSON:
  "slot_choice": 0, "requested_time": "", "appointment_kind": "phone|visit|", "service_type": "",
  "callback_window": "", "follow_up_date": "", "follow_up_about": "",
  "memory_update": {{"wants": [], "reasons": [], "questions_open": [], "questions_answered": [], "concerns": [], "service_interests": [], "participants": [], "info_provided": [], "commitments": [], "existing_arrangements": "", "preferred_contact": "", "best_times": "", "readiness": "unknown|not_ready|considering|ready", "next_step": "", "mail_request": false}},
- "confidence": 0.0,
+ "confidence": <number from 0 to 1: how sure you are this is the right next step>,
  "reason": "<why this action, one line>"}}"""
 
 
@@ -368,6 +370,9 @@ def validate_decision(d: Dict, body: str, conv) -> List[str]:
         problems.append("it says an appointment is set or confirmed - only the system confirms bookings")
     if _CLAIM_MAILED.search(reply):
         problems.append("it says something was mailed - a person mails it; say it will be arranged")
+    if action == "close" and not _DECLINE.search(body or ""):
+        problems.append("they did not decline - a short or unclear reply ('k', 'maybe', an emoji) is not a no; "
+                        "answer it or ask one gentle question instead of closing")
     if action != "send_guide" and _CLAIM_GUIDE.search(reply):
         problems.append("it presents the guide without action send_guide")
     if re.search(r"https?://", reply):
@@ -384,6 +389,9 @@ def validate_decision(d: Dict, body: str, conv) -> List[str]:
 _EXISTING_PLAN = re.compile(r"\b(already (have|got|bought|took care)|have a plan|prearrang|bought (plots?|"
                             r"spaces?|property))", re.I)
 _SENTENCE = re.compile(r"[^.!?]+[.!?]*")
+_DECLINE = re.compile(r"\b(not interested|no thanks|no thank you|all set|we'?re (all )?set|already (have|took care|"
+                      r"handled|done)|don'?t (want|need)|not (right )?now|not at this time|no longer|pass\b|"
+                      r"changed my mind|leave me alone|not for me|nope|no$)", re.I)
 
 
 def _strip_offered(reply: str, conv) -> str:
@@ -584,8 +592,13 @@ def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Opt
 # ── delivery ─────────────────────────────────────────────────────────────────
 
 def _synthetic(lead) -> bool:
-    """A test contact or a made-up staging demo family: nothing is ever sent."""
+    """A test contact or a made-up staging demo family: nothing is ever sent.
+    The owner's live test contact is the one exception - it goes through the
+    real send path, which itself checks it is the owner's own number."""
     from app.services.sci_staging_demo import is_demo_lead
+    from app.services.test_records import OWNER_TEST_LAST_NAME
+    if getattr(lead, "is_test", False) and getattr(lead, "last_name", None) == OWNER_TEST_LAST_NAME:
+        return False
     return bool(getattr(lead, "is_test", False)) or is_demo_lead(lead)
 
 
@@ -748,6 +761,8 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         confidence = float(d.get("confidence")) if d.get("confidence") not in (None, "") else 1.0
     except (TypeError, ValueError):
         confidence = 1.0
+    if not 0.0 <= confidence <= 1.0:
+        confidence = max(0.0, min(1.0, confidence / 100.0 if confidence > 1 else confidence))
     out["confidence"] = confidence
     if left or (confidence < LOW_CONFIDENCE and action not in ("wait", "handoff")):
         why = ("unsure (confidence %.2f)" % confidence) if not left else "; ".join(left)

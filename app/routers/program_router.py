@@ -2528,6 +2528,89 @@ def setter_eval(body: SetterEvalIn, db: Session = Depends(get_db), user: User = 
                           location_id=loc, capability=cap)
 
 
+class LiveTestIn(BaseModel):
+    text: str
+    reset: bool = False
+
+
+@router.post("/setter/live-test")
+def setter_live_test(body: LiveTestIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """OWNER ONLY. The real path, end to end, to the owner's OWN phone: a
+    reply from the owner's live test contact (is_test, phone = the program's
+    verified alert number) is recorded, the setter answers in AUTO, and the
+    answer goes out on the SCI line through every production gate (consent,
+    sender, location identity, contact hours, spacing). No family, no team
+    alert. Returns the setter turn and the message record."""
+    from app.models.models import Message
+    from app.models.program_models import ProgramConversation, ProgramSourceRecord
+    from app.services import test_records as TR
+    from app.services.programs import ai_setter
+    from app.services.programs import responses as R
+    if getattr(user, "role", None) != "god_admin":
+        raise HTTPException(status_code=403, detail="Only the owner runs the live test.")
+    prog = _program(db, user)
+    if len(TR._digits(prog.alert_phone)) != 10:
+        raise HTTPException(status_code=409, detail="The program has no verified owner alert phone.")
+    lead = (db.query(Lead).filter(Lead.organization_id == prog.organization_id, Lead.is_test.is_(True),
+                                  Lead.last_name == TR.OWNER_TEST_LAST_NAME).first())
+    if lead is None:
+        lead = Lead(organization_id=prog.organization_id, first_name="Owner", last_name=TR.OWNER_TEST_LAST_NAME,
+                    phone="+1" + TR._digits(prog.alert_phone), email=None, status="sent", is_test=True,
+                    assigned_to_id=getattr(prog, "booking_user_id", None) or user.id)
+        db.add(lead)
+        db.flush()
+        p = (db.query(LocationProfile).filter(LocationProfile.organization_id == prog.organization_id,
+                                              LocationProfile.is_review_bucket.isnot(True),
+                                              LocationProfile.location_id.isnot(None))
+             .order_by(LocationProfile.official_name).first())
+        if p is not None:
+            db.add(ProgramSourceRecord(organization_id=prog.organization_id, lead_id=lead.id,
+                                       source_lead_id=TR.OWNER_TEST_LAST_NAME, location_id=p.location_id,
+                                       location_status="mapped", raw_json="{}"))
+        db.commit()
+    if body.reset:
+        for c in db.query(ProgramConversation).filter(ProgramConversation.lead_id == lead.id).all():
+            c.state = "stopped"
+        db.add(ProgramConversation(organization_id=lead.organization_id, lead_id=lead.id, state="ai_active",
+                                   is_test=True))
+        db.commit()
+    resp = R.on_inbound(db, lead, body.text[:500], "sms", staff_alerts=False, run_setter=False)
+    res = (ai_setter.on_family_reply(db, prog, lead, resp, body.text, force_mode="auto", actor=user.id)
+           if resp is not None else None)
+    msg = None
+    if res and res.get("delivery") == "sent":
+        m = db.query(Message).filter(Message.lead_id == lead.id).order_by(Message.sent_at.desc()).first()
+        if m is not None:
+            msg = {"id": m.id, "sid": m.twilio_sid, "status": m.twilio_status, "delivery": m.delivery_status,
+                   "error": m.error_code, "sent_at": m.sent_at.isoformat() if m.sent_at else None}
+    conv = ai_setter.conversation_for(db, lead, create=False)
+    turn = None
+    if conv is not None:
+        from app.models.program_models import ProgramConversationTurn as T
+        t = db.query(T).filter(T.conversation_id == conv.id, T.role == "ai").order_by(T.created_at.desc()).first()
+        if t is not None:
+            turn = {"delivery": t.delivery, "reason": t.reason, "text": t.text}
+    return {"lead_id": lead.id, "class": resp.response_class if resp else None, "result": res,
+            "turn": turn, "message": msg}
+
+
+@router.get("/setter/live-test/message/{message_id}")
+def setter_live_test_message(message_id: str, db: Session = Depends(get_db),
+                             user: User = Depends(require_tenant_user)):
+    from app.models.models import Message
+    from app.services import test_records as TR
+    if getattr(user, "role", None) != "god_admin":
+        raise HTTPException(status_code=403, detail="Owner only.")
+    prog = _program(db, user)
+    m = (db.query(Message).join(Lead, Lead.id == Message.lead_id)
+         .filter(Message.id == message_id, Lead.organization_id == prog.organization_id,
+                 Lead.last_name == TR.OWNER_TEST_LAST_NAME).first())
+    if m is None:
+        raise HTTPException(status_code=404, detail="Not found.")
+    return {"id": m.id, "sid": m.twilio_sid, "status": m.twilio_status, "delivery": m.delivery_status,
+            "error": m.error_code, "error_message": m.error_message}
+
+
 @router.get("/setter/stats")
 def setter_stats(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db),
                  user: User = Depends(require_tenant_or_observer)):
