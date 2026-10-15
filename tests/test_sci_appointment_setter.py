@@ -327,3 +327,11 @@ def test_two_questions_are_rewritten_to_one(setter, sample_advisor):
                   _d("answer", "Would a short call or a visit suit you better?")])
     resp, conv = _run(db, lead, "Tell me more", fake)
     assert resp.suggested_reply == "Would a short call or a visit suit you better?" and len(fake.calls) == 2
+
+
+def test_a_malformed_ai_answer_gets_one_correction(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Oscar")
+    fake = _Fake([_d(""), _d("answer", "Of course, Oscar - call whenever suits you. Would you like Kerry to call you instead?")])
+    resp, conv = _run(db, lead, "I'll call you", fake)
+    assert len(fake.calls) == 2 and conv.state == "ai_active" and resp.suggested_reply.startswith("Of course")
