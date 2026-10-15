@@ -130,3 +130,29 @@ def exclude_test_alerts(query):
     return query.filter(or_(PA.kind.is_(None), PA.kind != "test"),
                         or_(PA.response_id.is_(None), ~PA.response_id.in_(test_resps)),
                         or_(PA.message.is_(None), ~PA.message.like("TEST%")))
+
+
+# ── THE OWNER'S LIVE TEST CONTACT ───────────────────────────────────────────
+# One synthetic contact per outreach program whose phone is the program
+# owner's own verified alert number. It proves the REAL path end to end (AI
+# reply -> SCI line -> carrier -> the owner's phone, and the owner's reply
+# back in) without touching a family. It stays is_test (out of every count,
+# list and alert) and only the appointment setter may text it.
+OWNER_TEST_LAST_NAME = "OWNER-LIVE-TEST"
+
+
+def _digits(p) -> str:
+    d = "".join(ch for ch in (p or "") if ch.isdigit())
+    return d[-10:]
+
+
+def owner_live_test_send_allowed(db, lead, send_source) -> bool:
+    from app.services import send_source as _ss
+    if not (is_test_record(lead) and getattr(lead, "last_name", None) == OWNER_TEST_LAST_NAME):
+        return False
+    if send_source != _ss.SCI_SETTER:
+        return False
+    from app.services.programs import identity
+    prog = identity.program_for_org(db, lead.organization_id)
+    owner = _digits(getattr(prog, "alert_phone", None)) if prog else ""
+    return bool(owner) and len(owner) == 10 and _digits(getattr(lead, "phone", None)) == owner

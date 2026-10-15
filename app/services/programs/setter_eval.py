@@ -32,7 +32,8 @@ def universal_checks(turn: Dict) -> List[str]:
         bad.append("claims something was mailed")
     if re.search(r"https?://", text) and turn.get("action") != "send_guide":
         bad.append("link outside send_guide")
-    if _FILLED_TIME.search(text) and turn.get("action") not in ("offer_times", "book", "answer") and not turn.get("offered"):
+    if _FILLED_TIME.search(text) and turn.get("action") not in ("offer_times", "book", "answer", "callback",
+                                                                 "follow_up_later") and not turn.get("offered"):
         bad.append("mentions a time without offering real ones")
     return bad
 

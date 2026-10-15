@@ -204,6 +204,9 @@ def build(db: Session, org, prog) -> Dict[str, Any]:
         return {"ok": False, "reason": "no_user_to_send_as"}
     rnd = random.Random(str(_central_today()))
     now = _now()
+    from zoneinfo import ZoneInfo
+    day_start = (datetime.combine(_central_today(), datetime.min.time(), ZoneInfo("America/Chicago"))
+                 .astimezone(ZoneInfo("UTC")).replace(tzinfo=None))
     made, n = 0, 0
 
     def lead_for(first, last, loc, email_ok):
@@ -228,9 +231,12 @@ def build(db: Session, org, prog) -> Dict[str, Any]:
     for i, (first, last, cls, handling, ago, channel, body, intents, setter) in enumerate(FAMILIES):
         loc = locs[(i * 7) % len(locs)]
         lead = lead_for(first, last, loc, channel == "email" or i % 3 == 0)
-        got = now - timedelta(minutes=ago)
+        # Replies are always TODAY (Central), even just after midnight: older
+        # ones are compressed into the part of today that has passed.
+        got = max(now - timedelta(minutes=ago), day_start + timedelta(seconds=20 * (i + 1)))
+        got = min(got, now - timedelta(seconds=5))
         text(lead, OUR_FIRST_TEXT.format(first=first, loc=loc.official_name),
-             got - timedelta(minutes=rnd.randint(30, 300)))
+             max(got - timedelta(minutes=rnd.randint(30, 300)), day_start + timedelta(seconds=10 * (i + 1))))
         resp = ProgramResponse(organization_id=org.id, lead_id=lead.id, channel=channel,
                                location_id=loc.location_id, campaign_family=CAMPAIGN,
                                source_lead_id="DEMO-%03d" % n, response_class=cls, body_excerpt=body,
@@ -286,7 +292,8 @@ def build(db: Session, org, prog) -> Dict[str, Any]:
         lead = lead_for(first, last, loc, False)
         lead.status = "sent"
         text(lead, OUR_FIRST_TEXT.format(first=first, loc=loc.official_name),
-             now - timedelta(minutes=rnd.randint(20, 400)))
+             min(max(now - timedelta(minutes=rnd.randint(20, 400)), day_start + timedelta(seconds=15 * (j + 1))),
+                 now - timedelta(seconds=3)))
         made += 1
     db.commit()
     return {"ok": True, "families": made, "replaced": removed}
