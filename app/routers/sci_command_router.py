@@ -182,6 +182,51 @@ def _suggest(conv, latest, lead) -> dict:
     return {"title": title[:1].upper() + title[1:], "steps": steps}
 
 
+@router.get("/search")
+def command_search(q: str = Query("", max_length=80), location_id: Optional[str] = None,
+                   limit: int = Query(25, le=50), db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_or_observer)):
+    """Every SCI family - not just the ones who replied - by name, phone,
+    email or location. Read-only."""
+    from sqlalchemy import func, or_
+    prog = _program(db, user, managers_only=False)
+    org = prog.organization_id
+    needle = (q or "").strip()
+    if len(needle) < 2:
+        return {"items": []}
+    locs = _locations(db, org)
+    low = needle.lower()
+    digits = "".join(ch for ch in needle if ch.isdigit())
+    like = "%" + low + "%"
+    conds = [func.lower(Lead.first_name).like(like), func.lower(Lead.last_name).like(like),
+             func.lower(Lead.email).like(like),
+             func.lower(func.coalesce(Lead.first_name, "") + " " + func.coalesce(Lead.last_name, "")).like(like)]
+    if len(digits) >= 4:
+        conds.append(Lead.phone.like("%" + digits + "%"))
+    loc_ids = [k for k, v in locs.items() if low in (v or "").lower()]
+    if loc_ids:
+        conds.append(Lead.id.in_(db.query(ProgramSourceRecord.lead_id)
+                                 .filter(ProgramSourceRecord.organization_id == org,
+                                         ProgramSourceRecord.location_id.in_(loc_ids))))
+    qry = db.query(Lead).filter(Lead.organization_id == org, Lead.is_test.isnot(True), or_(*conds))
+    if location_id:
+        qry = qry.filter(Lead.id.in_(db.query(ProgramSourceRecord.lead_id)
+                                     .filter(ProgramSourceRecord.organization_id == org,
+                                             ProgramSourceRecord.location_id == location_id)))
+    leads = qry.order_by(Lead.last_name, Lead.first_name).limit(limit).all()
+    ids = [l.id for l in leads]
+    recs = {r.lead_id: r for r in db.query(ProgramSourceRecord)
+            .filter(ProgramSourceRecord.organization_id == org, ProgramSourceRecord.lead_id.in_(ids or ["-"]))}
+    replied = {i for (i,) in db.query(ProgramResponse.lead_id).filter(ProgramResponse.lead_id.in_(ids or ["-"]))}
+    return {"items": [{
+        "lead_id": l.id,
+        "name": ("%s %s" % (l.first_name or "", l.last_name or "")).strip().title() or "Family",
+        "phone": l.phone,
+        "location": locs.get(recs[l.id].location_id) if l.id in recs else None,
+        "replied": l.id in replied,
+    } for l in leads]}
+
+
 @router.get("/family/{lead_id}")
 def command_family(lead_id: str, db: Session = Depends(get_db),
                    user: User = Depends(require_tenant_or_observer)):

@@ -87,3 +87,17 @@ def test_mail_task_is_a_persons_job_never_a_claim(program, sample_advisor, clien
     assert f["mail_task"]["note"] == "address in his text" and not f["mail_task"]["done"]
     client.post("/program/command/mail-task", headers=h, json={"lead_id": lead.id, "done": True})
     assert client.get("/program/command", headers=h).json()["tasks"] == []
+
+
+def test_search_finds_every_family_not_only_repliers(program, sample_advisor, client):
+    db, org = program["db"], program["org"]
+    _lead_for(db, org, sample_advisor, "L001", first="Alvin", last="Major")
+    t = _lead_for(db, org, sample_advisor, "L002", phone="2145550102", first="Alvina", last="Test", email="t@example.com")
+    t.is_test = True
+    db.commit()
+    h = _h(db, program["admin"])
+    names = [i["name"] for i in client.get("/program/command/search?q=alvin", headers=h).json()["items"]]
+    assert names == ["Alvin Major"]                      # never replied, still found; test contact hidden
+    assert client.get("/program/command/search?q=alvin%20maj", headers=h).json()["items"][0]["replied"] is False
+    assert client.get("/program/command/search?q=5550101", headers=h).json()["items"][0]["name"] == "Alvin Major"
+    assert client.get("/program/command/search?q=a", headers=h).json()["items"] == []
