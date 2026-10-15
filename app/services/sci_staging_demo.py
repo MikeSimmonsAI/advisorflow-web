@@ -22,9 +22,20 @@ NOTHING HERE CAN REACH A PERSON:
     the reminder jobs skip them;
   * nothing is emailed, texted or alerted while seeding.
 
-The set is rebuilt relative to "now" once per Central day (at deploy and from
-the background loop), so "replies today" always has today's replies. Only rows
-this module created (Lead.source == DEMO_SOURCE) are ever removed.
+Built once. After that, once per Central day (at deploy and from the
+background loop) every demo timestamp is MOVED FORWARD by the days that have
+passed - nothing is deleted - so "replies today" always has today's replies
+and anything a tester did (notes, assignments, simulated texts, closes) is
+kept. A full rebuild happens only on request (force=True). Only rows this
+module created (Lead.source == DEMO_SOURCE) are ever removed.
+
+Demo identity is ONE flag, Lead.source == DEMO_SOURCE, checked at every path
+that could reach the outside: sms_service, email_service, the booking webhook
+(no calendar event), appointments.book (always simulated), the appointment
+setter (simulated turns), staff alerts (never) and the outreach gate (source
+rows are on hold). Lead.is_test stays false on purpose: the SCI staging
+database holds nothing else, and is_test would hide them from every SCI
+screen. They exist only in the SCI staging database.
 """
 from __future__ import annotations
 
@@ -206,6 +217,7 @@ def build(db: Session, org, prog) -> Dict[str, Any]:
         db.flush()
         db.add(ProgramSourceRecord(organization_id=org.id, source_lead_id="DEMO-%03d" % n,
                                    raw_json=json.dumps({"demo": True}), location_id=loc.location_id, location_status="mapped",
+                                   on_hold=True,
                                    lead_id=lead.id, campaign_family=CAMPAIGN))
         return lead
 
@@ -252,7 +264,7 @@ def build(db: Session, org, prog) -> Dict[str, Any]:
                     when += timedelta(days=1)
                 conv.booked_time = when
                 db.add(BookingLink(lead_id=lead.id, user_id=sender.id, status="booked", booked_time=when,
-                                   appt_label="Planning Visit", appt_duration=60, confirmation_sent=True,
+                                   appt_label="Planning Visit (demo)", appt_duration=60, confirmation_sent=True,
                                    reminder_24hr_sent=True, reminder_1hr_sent=True,
                                    review_request_sent_at=now, confirmed_at=got + timedelta(minutes=3)))
                 text(lead, "You're set for %s. We look forward to seeing you." % when.strftime("%A at %-I %p"),
@@ -280,13 +292,87 @@ def build(db: Session, org, prog) -> Dict[str, Any]:
     return {"ok": True, "families": made, "replaced": removed}
 
 
+def _seed_day(db, org_id):
+    """The Central date of the newest SEEDED reply (DEMO-* rows only)."""
+    from zoneinfo import ZoneInfo
+    from app.models.models import Lead
+    from app.models.program_models import ProgramResponse
+    row = (db.query(ProgramResponse.received_at)
+           .filter(ProgramResponse.lead_id.in_(_demo_leads(db, org_id).with_entities(Lead.id)),
+                   ProgramResponse.source_lead_id.like("DEMO-%"))
+           .order_by(ProgramResponse.received_at.desc()).first())
+    if not row:
+        return None
+    return row[0].replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Chicago")).date()
+
+
+SHIFT = {
+    "ProgramResponse": ("received_at", "opened_at", "responded_at", "active_at", "closed_at", "created_at"),
+    "ProgramConversation": ("offered_at", "booked_time", "last_family_at", "last_ai_at", "next_followup_at",
+                            "created_at", "updated_at"),
+    "ProgramConversationTurn": ("created_at",),
+    "Message": ("sent_at", "delivery_status_at"),
+    "EmailMessage": ("sent_at", "opened_at"),
+    "BookingLink": ("booked_time", "confirmed_at", "created_at"),
+}
+
+
+def roll_forward(db: Session, org_id: str, days: int) -> int:
+    """Move every demo timestamp forward by `days`. Keeps everything testers did."""
+    from app.models import models as M, program_models as P
+    from app.models.models import Lead
+    ids = [i for (i,) in _demo_leads(db, org_id).with_entities(Lead.id).all()]
+    if not ids or days <= 0:
+        return 0
+    delta = timedelta(days=days)
+    moved = 0
+    for name, cols in SHIFT.items():
+        model = getattr(M, name, None) or getattr(P, name)
+        for row in db.query(model).filter(model.lead_id.in_(ids)).all():
+            for col in cols:
+                v = getattr(row, col, None)
+                if isinstance(v, datetime):
+                    setattr(row, col, v + delta)
+            if name == "ProgramConversation" and row.offered_slots:
+                try:
+                    row.offered_slots = json.dumps([(datetime.fromisoformat(x) + delta).isoformat()
+                                                    for x in json.loads(row.offered_slots)])
+                except (ValueError, TypeError):
+                    pass
+            moved += 1
+    db.commit()
+    return moved
+
+
+def _hold_all(db, org_id) -> None:
+    """Demo source rows are always on hold (never promoted, batched or sent)."""
+    from app.models.models import Lead
+    from app.models.program_models import ProgramSourceRecord as R
+    n = (db.query(R).filter(R.lead_id.in_(_demo_leads(db, org_id).with_entities(Lead.id)),
+                            R.on_hold.isnot(True))
+         .update({R.on_hold: True}, synchronize_session=False))
+    if n:
+        db.commit()
+
+
 def ensure(db: Session, force: bool = False) -> Dict[str, Any]:
-    """Build today's demo set when it is missing or from an earlier day."""
+    """Build the demo set once; afterwards move it forward a day at a time."""
     gate = allowed(db)
     if not gate["ok"]:
         return {"ok": False, "reason": gate["reason"]}
-    if not force and _fresh(db, gate["org"].id):
-        return {"ok": True, "skipped": "already_today"}
+    org_id = gate["org"].id
+    _hold_all(db, org_id)
+    seeded = _seed_day(db, org_id)
+    if not force and seeded is not None:
+        gap = (_central_today() - seeded).days
+        if gap <= 0:
+            return {"ok": True, "skipped": "already_today"}
+        try:
+            return {"ok": True, "rolled_forward_days": gap, "rows": roll_forward(db, org_id, gap)}
+        except Exception as exc:                         # noqa: BLE001
+            db.rollback()
+            log.exception("sci staging demo roll-forward failed")
+            return {"ok": False, "reason": type(exc).__name__}
     try:
         out = build(db, gate["org"], gate["prog"])
     except Exception as exc:                             # noqa: BLE001

@@ -290,6 +290,9 @@ function Family({ id, onBack, toast, toastText }) {
       if (mode === 'note') {
         await api.post(`/work/leads/${id}/notes`, { body: text.trim() })
         toast('Note saved.')
+      } else if (f.is_demo) {
+        await api.post('/program/command/demo-send', { lead_id: id, channel: mode === 'email' ? 'email' : 'sms', text: text.trim(), subject: subject.trim() || null })
+        toast('Demo family: saved in the conversation as simulated. Nothing was sent.')
       } else if (mode === 'text') {
         await api.post('/sms/send', { lead_id: id, template: text.trim(), include_booking_link: false })
         if (f.response_id) await api.post(`/program/responses/${f.response_id}/mark`, { state: 'responded' }).catch(() => {})
@@ -307,7 +310,7 @@ function Family({ id, onBack, toast, toastText }) {
     setBusy(true)
     try {
       const r = await api.post('/program/command/schedule', { lead_id: id, slot: s.value, kind: 'visit' })
-      toast(r.ok ? (r.simulated ? `Test contact: ${r.label} is free (nothing booked).` : `Booked - ${r.label}. Confirmed on the calendar.`)
+      toast(r.ok ? (r.simulated ? `Simulated: ${r.label} is open, but nothing was booked for real (test/demo family).` : `Booked - ${r.label}. Confirmed on the calendar.`)
         : (r.reason || 'That time is no longer open.'))
       load()
       api.get(`/program/command/slots?lead_id=${id}`).then(setSlots).catch(() => {})
@@ -328,7 +331,7 @@ function Family({ id, onBack, toast, toastText }) {
     <div className="cmd cmd-family">
       <header className="cmd-fhead">
         <button className="cmd-back" onClick={onBack} aria-label="Back"><Icon n="back" s={24} /></button>
-        <div><h1>{f.name}{f.is_test && <em className="badge low"> Test</em>}</h1><p className="cmd-sub">{f.location || 'Location not set'}</p></div>
+        <div><h1>{f.name}{f.is_test && <em className="badge low"> Test</em>}{f.is_demo && <em className="badge low"> Demo</em>}</h1><p className="cmd-sub">{f.location || 'Location not set'}</p></div>
         {f.badge && <em className={`badge ${BADGE[f.badge] || 'low'}`}>{f.badge}</em>}
         <span className="cmd-more">
           <button onClick={() => setMenu(!menu)} aria-label="More" aria-expanded={menu}><Icon n="more" s={24} /></button>
@@ -351,7 +354,7 @@ function Family({ id, onBack, toast, toastText }) {
           {(k === 0 || dayLabel(f.thread[k - 1].at || '') !== dayLabel(t.at || '')) && t.at && <div className="cmd-day">{dayLabel(t.at)}</div>}
           <div className={`bubble ${t.who}`}>
             <p>{t.text}</p>
-            <small>{time(t.at)}{t.channel === 'email' ? ' · Email' : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
+            <small>{time(t.at)}{t.channel === 'email' ? ' · Email' : ''}{t.delivery === 'simulated' && t.who === 'us' ? ' · simulated' : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
           </div></Fragment>)) : <p className="cmd-muted">No messages yet.</p>}
       </section>
 
@@ -405,7 +408,7 @@ function Family({ id, onBack, toast, toastText }) {
                   placeholder={mode === 'note' ? 'Write a note about this family...' : mode === 'text' ? 'Write a text...' : 'Write an email...'} />
         <div className="cmd-send">
           {mode === 'text' && f.suggested_reply && text !== f.suggested_reply && <button className="link" onClick={() => setText(f.suggested_reply)}>Use suggested reply</button>}
-          <button className="primary" disabled={busy || !text.trim() || (mode === 'text' && !f.phone) || (mode === 'email' && !f.email)} onClick={send}>
+          <button className="primary" disabled={busy || !text.trim() || (!f.is_demo && ((mode === 'text' && !f.phone) || (mode === 'email' && !f.email)))} onClick={send}>
             {mode === 'note' ? 'Save note' : mode === 'text' ? 'Send text' : 'Send email'}</button>
         </div>
       </section>

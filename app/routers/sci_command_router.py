@@ -32,6 +32,11 @@ router = APIRouter(prefix="/program/command", tags=["sci-command"])
 _RANK = {"hot": 0, "active": 1, "low": 2, "bad_data": 3, "wrong_person": 3, "auto_reply": 4}
 
 
+def _is_demo(lead) -> bool:
+    from app.services.sci_staging_demo import is_demo_lead
+    return is_demo_lead(lead)
+
+
 def _central_day_start_utc():
     from zoneinfo import ZoneInfo
     tz, utc = ZoneInfo("America/Chicago"), ZoneInfo("UTC")
@@ -201,7 +206,7 @@ def command_family(lead_id: str, db: Session = Depends(get_db),
     team = [{"id": u.id, "name": u.full_name or u.email} for u in
             db.query(User).filter(User.organization_id == prog.organization_id, User.is_active.is_(True)).all()]
     return {
-        "lead_id": lead.id, "is_test": bool(lead.is_test),
+        "lead_id": lead.id, "is_test": bool(lead.is_test), "is_demo": _is_demo(lead),
         "name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title(),
         "phone": lead.phone, "email": lead.email,
         "location": locs.get(rec.location_id) if rec else None,
@@ -286,3 +291,41 @@ def command_assign(body: AssignIn, db: Session = Depends(get_db), user: User = D
     lead.assigned_to_id = body.user_id or None
     db.commit()
     return {"lead_id": lead.id, "assigned_to_id": lead.assigned_to_id}
+
+
+class DemoSendIn(BaseModel):
+    lead_id: str
+    channel: str = "sms"            # sms | email
+    text: str
+    subject: Optional[str] = None
+
+
+@router.post("/demo-send")
+def command_demo_send(body: DemoSendIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user)):
+    """A made-up staging demo family: record the reply in the thread as
+    SIMULATED. Nothing is sent - the demo flag is refused by every sender."""
+    from app.models.models import EmailMessage
+    prog = _program(db, user, managers_only=False)
+    lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    if not _is_demo(lead):
+        raise HTTPException(status_code=400, detail="Only demo families can be simulated.")
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Write something first.")
+    if body.channel == "email":
+        db.add(EmailMessage(lead_id=lead.id, sender_id=user.id, sent_by_user_id=user.id,
+                            subject=(body.subject or "Following up").strip()[:200], body_html=text,
+                            send_source="demo_simulated", status="simulated"))
+    else:
+        db.add(Message(lead_id=lead.id, sender_id=user.id, sent_by_user_id=user.id, body=text,
+                       send_source="demo_simulated", delivery_status="simulated", send_state="simulated"))
+    resp = (db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id)
+            .order_by(ProgramResponse.received_at.desc()).first())
+    if resp is not None and resp.handling_status in ("new", "opened"):
+        resp.handling_status = "responded"
+        resp.responded_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True, "simulated": True}

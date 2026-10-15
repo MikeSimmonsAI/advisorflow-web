@@ -270,9 +270,15 @@ def decide(db, prog, lead, conv, resp, *, actor: Optional[str] = None, note: Opt
 
 # ── delivery ─────────────────────────────────────────────────────────────────
 
+def _synthetic(lead) -> bool:
+    """A test contact or a made-up staging demo family: nothing is ever sent."""
+    from app.services.sci_staging_demo import is_demo_lead
+    return bool(getattr(lead, "is_test", False)) or is_demo_lead(lead)
+
+
 def _deliver(db, prog, lead, conv, resp, text, action, mode, *, now) -> ProgramConversationTurn:
     from app.services import contact_hours, send_source as ss
-    if getattr(lead, "is_test", False) or not lead.phone:
+    if _synthetic(lead) or not lead.phone:
         return _turn(db, conv, "ai", text, action=action, delivery="simulated",
                      response_id=resp.id if resp else None, reason="synthetic contact - nothing sent")
     if mode == DRAFT or (resp is not None and resp.channel == "email"):
@@ -478,7 +484,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 # The booking path already sent the family its confirmation
                 # text; a synthetic contact gets the same line, simulated.
                 confirm = "You're all set for %s. If anything changes, just reply here." % A.describe(slot)
-                if getattr(lead, "is_test", False) or not lead.phone:
+                if _synthetic(lead) or not lead.phone:
                     _turn(db, conv, "ai", confirm, action="book", delivery="simulated",
                           reason="booking confirmed by the calendar")
                 else:
