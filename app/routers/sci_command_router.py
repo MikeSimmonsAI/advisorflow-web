@@ -423,6 +423,12 @@ def command_reply(body: ReplyIn, db: Session = Depends(get_db), user: User = Dep
     if not text:
         raise HTTPException(status_code=422, detail="Write a reply first.")
     # One approved sign-off, added by the system; {GUIDE} = the family's guide link.
+    if body.channel == "sms" and ("{GUIDE}" in text or "http" in text.lower()):
+        from app.services import sms_programs
+        if sms_programs.is_sci_org(db, lead.organization_id) and not sms_programs.sms_links_enabled():
+            raise HTTPException(status_code=422, detail=(
+                "Links in texts are being blocked by carriers on this line (Twilio 30007). "
+                "Send the guide link by email, or offer a printed copy by mail."))
     text = email_reply.guide_token(db, lead, email_reply.strip_signature(db, lead, text))
     if body.then not in ("human", "ai"):
         raise HTTPException(status_code=422, detail="then must be human or ai")

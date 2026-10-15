@@ -379,6 +379,13 @@ def sci_check(db, org_id: str, phone: Optional[str], *,
             "category": category or sms_campaigns.CATEGORY_INFORMATIONAL}
 
 
+def sms_links_enabled() -> bool:
+    """Links in SCI texts. OFF unless SCI_SMS_LINKS is on: on Oct 15 a text
+    with the hosted guide link came back undelivered (Twilio 30007, carrier
+    filtering) while the same family's plain texts were delivered."""
+    return (os.environ.get("SCI_SMS_LINKS") or "").strip().lower() in ("1", "true", "on", "yes")
+
+
 def content_allowance(db, lead) -> Dict[str, bool]:
     """For an SCI contact: may its message carry a link / a phone number?
     Only when the SCI sender is approved, lists SCI, and covers the message's

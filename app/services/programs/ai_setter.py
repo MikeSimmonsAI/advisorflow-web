@@ -1011,14 +1011,23 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         from app.services.programs import identity
         prof = identity.location_profile_for_lead(db, lead)
         guide = identity.planning_guide_link(prof, db=db) if prof else identity.default_planning_guide()
-        allow = sms_programs.content_allowance(db, lead).get("allow_links", True)
+        by_email = resp is not None and resp.channel == "email"
+        allow = by_email or (sms_programs.content_allowance(db, lead).get("allow_links", True)
+                             and sms_programs.sms_links_enabled())
         if allow and guide:
             allowed_links.append(guide)
             if guide not in text:
                 text = "%s %s" % (text, guide)
-        elif lead.email:
-            text = text or "I'll email the planning guide to you now."
-            out["guide_by_email"] = True
+        else:
+            # No link by text (carriers filter link texts from this line - Twilio
+            # 30007 on Oct 15). Never promise an email nothing sends: offer a
+            # printed copy by mail; their address makes it a mail task.
+            text = ("I'd be glad to get the planning guide to you. Would you like a printed copy mailed to you? "
+                    "If so, just reply with your mailing address.")
+            action = "answer"
+            merge_memory(conv, {"commitments": ["offered a printed planning guide by mail"]})
+            conv.state = "info_requested"
+            out["guide_offered_by_mail"] = True
         out["guide"] = guide
 
     if action == "mail_guide":
