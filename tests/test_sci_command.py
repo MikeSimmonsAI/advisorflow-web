@@ -232,6 +232,7 @@ def test_restart_texts_reopens_only_a_no_consent_stop(program, sample_advisor, c
     j = client.get(f"/program/command/analytics/journey/{lead.id}", headers=h).json()
     assert j["texts_restartable"] is True and "stopped_no_sms_consent" not in j["stage"]
     assert j["stage"] == "Texts stopped - no SMS consent on record"
+    assert j["can_resend"] is True
     r = client.post("/program/command/restart-texts", json={"lead_id": lead.id}, headers=h)
     assert r.status_code == 200 and r.json()["next_touch"] == 1
     db.refresh(st)
