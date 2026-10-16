@@ -100,3 +100,26 @@ def test_repace_spreads_an_after_hours_batch_over_the_next_morning(program, samp
     assert st.next_touch_due_at in starts
     db.refresh(prog)
     assert prog.daily_batch_last_date == res["counts_as_batch_for"]
+
+
+def test_the_batch_only_picks_families_with_sms_consent(db_session, sample_org, monkeypatch):
+    """Oct 16: the quota is never filled with families the SCI gate would refuse."""
+    admin = _program(db_session, sample_org)
+    p = _prog(db_session, sample_org)
+    rows = [{"lead_id": x, "approved": False, "blocked": None, "line_type": "mobile", "campaign_key": "general_survey",
+             "last_text_at": None, "last_email_at": None, "status": "new", "location_id": "L1", "phone": ph}
+            for x, ph in (("a", "12145550001"), ("b", "12145550002"), ("c", "12145550003"))]
+    monkeypatch.setattr(send_approval, "list_contacts", lambda *a, **k: {"items": rows})
+    from app.models.program_models import CampaignFamily
+    fam = db_session.query(CampaignFamily).filter_by(organization_id=sample_org.id, key="general_survey").first()
+    if fam is None:
+        db_session.add(CampaignFamily(organization_id=sample_org.id, key="general_survey", name="General", is_active=True))
+    else:
+        fam.is_active = True
+    db_session.commit()
+    from app.services import sms_programs
+    monkeypatch.setattr(sms_programs, "is_sci_org", lambda db, org: True)
+    monkeypatch.setattr(sms_programs, "consented_numbers", lambda db, org: {"+12145550002"})
+    assert daily_batch.pick(db_session, p, 40) == ["b"]
+    monkeypatch.setattr(sms_programs, "consented_numbers", lambda db, org: set())
+    assert daily_batch.pick(db_session, p, 40) == []

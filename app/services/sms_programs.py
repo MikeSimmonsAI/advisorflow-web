@@ -530,6 +530,51 @@ def owner_holds_records() -> bool:
     return v not in ("off", "0", "false", "no")
 
 
+# OCT 16 (owner's order): "do not manufacture or assume consent". Filing an
+# owner attestation automatically at the moment of sending is no longer the
+# default - a contact is texted only when a consent record already exists
+# (filed from real evidence through reconcile_existing, or a web opt-in).
+# SCI_AUTO_ATTEST_AT_SEND=on brings the old behaviour back, deliberately.
+AUTO_ATTEST_ENV = "SCI_AUTO_ATTEST_AT_SEND"
+
+
+def auto_attest_at_send() -> bool:
+    return (os.environ.get(AUTO_ATTEST_ENV) or "off").strip().lower() in ("1", "true", "on", "yes")
+
+
+CONSENT_BLOCKS = (NO_SMS_CONSENT, OPTED_OUT, CONSENT_WORDING_UNREGISTERED, SUPPRESSED, INVALID_NUMBER)
+
+
+def has_sms_consent(db, org_id: str, phone) -> bool:
+    """A usable SCI consent of record for this number (not opted out)."""
+    from app.models.sms_consent_models import SmsConsentRecord
+    from app.services import wholesale_sms
+    e164 = wholesale_sms.normalize_e164(phone)
+    if not e164:
+        return False
+    p = PROGRAMS[SCI]
+    recs = (db.query(SmsConsentRecord).filter(SmsConsentRecord.organization_id == org_id,
+                                              SmsConsentRecord.program == p.consent_program,
+                                              SmsConsentRecord.phone_normalized == e164).all())
+    if any(r.status != "opted_in" or r.opted_out_at for r in recs):
+        return False
+    return any(consent_counts(p, r) for r in recs)
+
+
+def consented_numbers(db, org_id: str) -> set:
+    """Every number with a usable SCI consent of record (one query)."""
+    from app.models.sms_consent_models import SmsConsentRecord
+    p = PROGRAMS[SCI]
+    good, bad = set(), set()
+    for r in (db.query(SmsConsentRecord).filter(SmsConsentRecord.organization_id == org_id,
+                                                SmsConsentRecord.program == p.consent_program).all()):
+        if r.status != "opted_in" or r.opted_out_at:
+            bad.add(r.phone_normalized)
+        elif consent_counts(p, r):
+            good.add(r.phone_normalized)
+    return good - bad
+
+
 def _owner_attestation_text(attested_by: str, evidence_reference: str) -> str:
     return ("Owner-attested: this contact opted in through the location's original "
             "sign-up (seminar registration, guide request or web form). The original "
@@ -541,8 +586,8 @@ def auto_attest_lead(db, org_id: str, lead) -> bool:
     """File the owner's consent record for one SCI contact if it has none.
     True when a record was filed. Never touches an opted-out, suppressed or
     DNC number, and never duplicates an active consent."""
-    if not owner_holds_records() or not _truthy(SCI_SEND_ENV):
-        return False                                # nothing is filed while SCI texting is off
+    if not auto_attest_at_send() or not owner_holds_records() or not _truthy(SCI_SEND_ENV):
+        return False                                # off by default since Oct 16; never while texting is off
     from app.models.sms_consent_models import SmsConsentRecord
     from app.services import wholesale_sms
     from app.services.compliance_service import is_phone_suppressed

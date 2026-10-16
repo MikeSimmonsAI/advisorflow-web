@@ -248,6 +248,28 @@ class Ledger:
                 "location_id": f.get("location_id"), "email_message_id": t.email_message_id,
             })
         self.attempts.sort(key=lambda a: a["at"] or datetime.min)
+        # SMS refused by the consent gate: never handed to a provider, so never
+        # an attempt or a failure - counted on their own.
+        self.blocked = []
+        for l in (db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id.in_(ids),
+                                                   CadenceTouchLog.outcome == "blocked").all()):
+            why = l.reason or ""
+            if not any(c in why for c in ("NO_SMS_CONSENT", "OPTED_OUT", "CONSENT_WORDING_UNREGISTERED",
+                                          "SUPPRESSED", "INVALID_NUMBER")):
+                continue
+            f = self.families.get(l.lead_id) or {}
+            self.blocked.append({"kind": "attempt", "id": l.id, "lead_id": l.lead_id, "touch": l.touch_number or 0,
+                                 "channel": "sms", "at": l.attempted_at or l.created_at, "result": "blocked",
+                                 "error": "No SMS consent of record" if "NO_SMS_CONSENT" in why else why[:120],
+                                 "text": l.body_preview or "", "location_id": f.get("location_id")})
+        try:
+            from app.services import sms_programs, wholesale_sms
+            ok = sms_programs.consented_numbers(db, org_id)
+            for fam in self.families.values():
+                fam["sms_consent"] = wholesale_sms.normalize_e164(fam["phone"]) in ok
+        except Exception:                                 # noqa: BLE001
+            for fam in self.families.values():
+                fam["sms_consent"] = False
         self.attempts_by_lead: Dict[str, List[Dict]] = defaultdict(list)
         lap("attempts")
         for a in self.attempts:
@@ -395,6 +417,14 @@ METRICS = {
     "loaded": ("Families loaded", "family", "Every real SCI family imported (snapshot, not date-filtered)."),
     "not_contacted": ("Not yet contacted", "family", "Loaded families who have never received a text or email (snapshot)."),
     "in_outreach": ("In active outreach", "family", "Families whose follow-up schedule is running now (snapshot)."),
+    "consent_blocked": ("SMS blocked - no consent", "attempt",
+                        "Texts the SCI consent gate refused before any provider call (no SMS consent of record, "
+                        "opted out, suppressed). Never counted as attempts or failures."),
+    "scheduled_sms_ready": ("Queued - SMS consent on file", "family",
+                            "Queued new families whose number has a usable SCI SMS consent of record."),
+    "scheduled_no_consent": ("Queued - no SMS consent", "family",
+                             "Queued new families with NO SMS consent of record: the gate will block their texts "
+                             "(emails still go)."),
     "in_followup": ("Active follow-up cadence", "family",
                     "Families already contacted whose follow-up schedule is still running (snapshot)."),
     "approved": ("Approved for outreach", "family", "Families approved to receive outreach (by a person or the daily batch)."),
@@ -405,7 +435,7 @@ METRICS = {
     "excluded": ("Can't be texted automatically", "family",
                  "Not approved and not textable by the schedule: not a cell phone, on hold, campaign switched off, or opted out."),
 }
-SNAPSHOT = ("loaded", "not_contacted", "in_outreach", "in_followup", "approved", "scheduled_new", "awaiting_approval", "excluded")
+SNAPSHOT = ("loaded", "not_contacted", "in_outreach", "in_followup", "scheduled_sms_ready", "scheduled_no_consent", "approved", "scheduled_new", "awaiting_approval", "excluded")
 
 
 def _excluded_reason(L: "Ledger", fam: Dict) -> Optional[str]:
@@ -475,6 +505,8 @@ def rows(L: Ledger, metric: str, w: Dict, f: Optional[Dict] = None) -> List[Dict
         return _families_from(L, [a for a in att if a["touch"] == 1], "first touch")
     if metric == "followup_families":
         return _families_from(L, [a for a in att if a["touch"] >= 2], "follow-up touches")
+    if metric == "consent_blocked":
+        return [b for b in L.blocked if inw(b) and _filters_ok(b, f)]
     src = {"replies": L.replies, "ai_messages": L.ai_msgs, "staff_messages": L.staff_msgs,
            "offers": L.offers, "appointments": L.bookings, "opt_outs": L.opt_outs}
     if metric in src:
@@ -497,10 +529,16 @@ def rows(L: Ledger, metric: str, w: Dict, f: Optional[Dict] = None) -> List[Dict
             note = None
             if metric == "approved" and not fam["approved_at"]:
                 continue
-            if metric == "scheduled_new":
+            if metric in ("scheduled_new", "scheduled_sms_ready", "scheduled_no_consent"):
                 if not fam["approved_at"] or contacted:
                     continue
-                note = "First text scheduled %s" % (fam["starts_at"].isoformat() + "Z" if fam["starts_at"] else "when sending opens")
+                if metric == "scheduled_sms_ready" and not fam.get("sms_consent"):
+                    continue
+                if metric == "scheduled_no_consent" and fam.get("sms_consent"):
+                    continue
+                when = (fam["starts_at"].isoformat() + "Z") if fam["starts_at"] else "when sending opens"
+                note = ("First text scheduled %s" % when if fam.get("sms_consent")
+                        else "No SMS consent of record - the text will be blocked (email still goes). Start %s" % when)
             if metric in ("awaiting_approval", "excluded"):
                 if fam["approved_at"] or contacted:
                     continue
@@ -517,6 +555,7 @@ def rows(L: Ledger, metric: str, w: Dict, f: Optional[Dict] = None) -> List[Dict
                         "count": len(L.attempts_by_lead.get(lid, ())), "count_label": "attempts",
                         "location_id": fam["location_id"],
                         "next_touch_at": (fam["starts_at"] if metric == "scheduled_new"
+                                          else fam["starts_at"] if metric.startswith("scheduled_")
                                           else (st.next_touch_due_at if st is not None else None)),
                         **({"text": note} if note else {})})
         return out
@@ -894,7 +933,9 @@ def overview(L: Ledger, db: Session, location_id: Optional[str] = None) -> Dict:
             ("awaiting_approval", "Ready, not approved"), ("excluded", "Excluded"))],
         "approved_today": approved_today,
         "in_followup": c("in_followup"),
-        "scheduled_new": {"value": c("scheduled_new"), "first_start": _iso(min(sched)) if sched else None,
+        "scheduled_new": {"value": c("scheduled_new"), "sms_ready": c("scheduled_sms_ready"),
+                          "no_consent": c("scheduled_no_consent"),
+                          "first_start": _iso(min(sched)) if sched else None,
                           "last_start": _iso(max(sched)) if sched else None},
         "replies_24h": {"value": count(L, "replies", d24, f), "repliers": count(L, "repliers", d24, f)},
         "appointments_7d": count(L, "appointments", wk, f),
@@ -905,6 +946,8 @@ def overview(L: Ledger, db: Session, location_id: Optional[str] = None) -> Dict:
              "value": c("attempts", today, touch="2+")},
             {"key": "email", "label": "Emails sent", "metric": "attempts", "channel": "email",
              "value": c("attempts", today, channel="email")},
+            {"key": "blocked", "label": "SMS blocked - no consent", "metric": "consent_blocked",
+             "value": c("consent_blocked", today)},
             {"key": "replies", "label": "Replies received", "metric": "replies", "value": c("replies", today)},
             {"key": "offers", "label": "Appointments offered", "metric": "offers", "value": c("offers", today)},
             {"key": "appts", "label": "Appointments confirmed", "metric": "appointments",

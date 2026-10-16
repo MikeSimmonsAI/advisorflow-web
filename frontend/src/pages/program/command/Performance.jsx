@@ -20,7 +20,7 @@ const fmtWhen = iso => {
 }
 const n = v => (v === null || v === undefined ? '—' : Number(v).toLocaleString())
 const pct = v => (v === null || v === undefined ? '—' : `${v}%`)
-const RESULT = { delivered: 'Delivered', opened: 'Opened', failed: 'Failed', pending: 'Awaiting result' }
+const RESULT = { delivered: 'Delivered', opened: 'Opened', failed: 'Failed', pending: 'Awaiting result', blocked: 'Blocked (no consent)' }
 const CHANNEL = { sms: 'Text', email: 'Email', voicemail: 'Voicemail' }
 
 export function rangeQuery(range, loc) {
@@ -312,7 +312,7 @@ export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily
       </header>
       <div className="dr-segs" role="tablist" aria-label="View">
         {[['All outbound', 'attempts'], ['New families', 'new_families'], ['Follow-ups', 'attempts', '2+'], ['SMS', 'attempts', '', 'sms'],
-          ['Email', 'attempts', '', 'email'], ['Replies', 'replies'], ['Appointments', 'appointments']].map(([l, m, t, c]) => (
+          ['Email', 'attempts', '', 'email'], ['SMS blocked', 'consent_blocked'], ['Replies', 'replies'], ['Appointments', 'appointments']].map(([l, m, t, c]) => (
           <button key={l} className={segOn(m, t, c) ? 'on' : ''} onClick={() => seg(m, t, c)}>{l}</button>))}
       </div>
       {r && !r.snapshot && <RangeBar range={range} setRange={setRange} />}

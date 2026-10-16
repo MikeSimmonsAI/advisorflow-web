@@ -558,12 +558,14 @@ def test_rounds_move_the_test_contact_and_send_the_real_campaign_text(client, db
 
 
 def test_first_send_clears_contact_automatically(client, db_session, monkeypatch):
-    """Mike holds the sign-ups: a contact with no consent on file is cleared
-    the first time a text is about to go to it. STOP / suppressed / DNC never are."""
+    """Only when deliberately switched on (SCI_AUTO_ATTEST_AT_SEND=on, off by
+    default since Oct 16): a contact with no consent on file is cleared the
+    first time a text is about to go to it. STOP / suppressed / DNC never are."""
     from app.services.compliance_service import add_suppression_entry_from_reply
     h, org_id = _seed(client, db_session, monkeypatch, [TF_VERIFIED])
     db = db_session
     monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
+    monkeypatch.setenv(sms_programs.AUTO_ATTEST_ENV, "on")
     active = _lead(db, org_id, SIM_ACTIVE)
     assert sms_programs.auto_attest_lead(db, org_id, active) is True
     rec = (db.query(SmsConsentRecord).filter_by(organization_id=org_id, program="sci_poc_sms",
@@ -594,3 +596,19 @@ def test_first_send_clears_contact_automatically(client, db_session, monkeypatch
     db.add(fresh)
     db.commit()
     assert sms_programs.auto_attest_lead(db, org_id, fresh) is False
+
+
+
+def test_no_consent_is_never_assumed_by_default(client, db_session, monkeypatch):
+    """Oct 16: without a consent record the SCI gate refuses (NO_SMS_CONSENT) and
+    nothing is filed on the family's behalf at send time."""
+    h, org_id = _seed(client, db_session, monkeypatch, [TF_VERIFIED])
+    db = db_session
+    monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "on")
+    monkeypatch.delenv(sms_programs.AUTO_ATTEST_ENV, raising=False)
+    lead = _lead(db, org_id, SIM_ACTIVE)
+    assert sms_programs.auto_attest_lead(db, org_id, lead) is False
+    assert db.query(SmsConsentRecord).filter_by(organization_id=org_id, program="sci_poc_sms").count() == 0
+    reasons = sms_programs.sci_send_refusal(db, lead, from_number=TF)
+    assert reasons and "NO_SMS_CONSENT" in reasons
+    assert sms_programs.has_sms_consent(db, org_id, SIM_ACTIVE) is False
