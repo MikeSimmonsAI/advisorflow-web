@@ -195,3 +195,10 @@ def test_pipeline_counts_real_families_only(program, sample_advisor, client):
     p = r.json()
     assert p["loaded"] == 1 and p["not_yet_contacted"] == 1 and "daily_batch" in p
     assert set(p["first_touches_today"]) == {"sent", "delivered", "failed"}
+
+
+def test_inbound_window_audit_is_owner_only(program, sample_advisor, client):
+    db = program["db"]
+    r = client.get("/program/audit/inbound-window?start=2026-10-16T01:35:00&end=2026-10-16T01:55:00",
+                   headers=_h(db, program["admin"]))
+    assert r.status_code == 403
