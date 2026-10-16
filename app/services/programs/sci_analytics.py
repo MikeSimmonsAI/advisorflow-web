@@ -395,6 +395,8 @@ METRICS = {
     "loaded": ("Families loaded", "family", "Every real SCI family imported (snapshot, not date-filtered)."),
     "not_contacted": ("Not yet contacted", "family", "Loaded families who have never received a text or email (snapshot)."),
     "in_outreach": ("In active outreach", "family", "Families whose follow-up schedule is running now (snapshot)."),
+    "in_followup": ("Active follow-up cadence", "family",
+                    "Families already contacted whose follow-up schedule is still running (snapshot)."),
     "approved": ("Approved for outreach", "family", "Families approved to receive outreach (by a person or the daily batch)."),
     "scheduled_new": ("New families scheduled", "family",
                       "Approved and not contacted yet - their first text is scheduled (next time shown)."),
@@ -403,7 +405,7 @@ METRICS = {
     "excluded": ("Can't be texted automatically", "family",
                  "Not approved and not textable by the schedule: not a cell phone, on hold, campaign switched off, or opted out."),
 }
-SNAPSHOT = ("loaded", "not_contacted", "in_outreach", "approved", "scheduled_new", "awaiting_approval", "excluded")
+SNAPSHOT = ("loaded", "not_contacted", "in_outreach", "in_followup", "approved", "scheduled_new", "awaiting_approval", "excluded")
 
 
 def _excluded_reason(L: "Ledger", fam: Dict) -> Optional[str]:
@@ -490,6 +492,8 @@ def rows(L: Ledger, metric: str, w: Dict, f: Optional[Dict] = None) -> List[Dict
             if metric == "in_outreach" and not (st is not None and st.status == "active"):
                 continue
             contacted = lid in L.contacted_ever
+            if metric == "in_followup" and not (st is not None and st.status == "active" and contacted):
+                continue
             note = None
             if metric == "approved" and not fam["approved_at"]:
                 continue
@@ -889,6 +893,7 @@ def overview(L: Ledger, db: Session, location_id: Optional[str] = None) -> Dict:
             ("loaded", "Total imported"), ("approved", "Approved"), ("in_outreach", "In cadence"),
             ("awaiting_approval", "Ready, not approved"), ("excluded", "Excluded"))],
         "approved_today": approved_today,
+        "in_followup": c("in_followup"),
         "scheduled_new": {"value": c("scheduled_new"), "first_start": _iso(min(sched)) if sched else None,
                           "last_start": _iso(max(sched)) if sched else None},
         "replies_24h": {"value": count(L, "replies", d24, f), "repliers": count(L, "repliers", d24, f)},

@@ -194,3 +194,16 @@ def test_dashboard_overview_numbers_open_their_records(program, sample_advisor, 
         d = client.get("/program/command/analytics/records?" + q, headers=h).json()
         assert d["count"] == row["value"], row
     assert {r["key"]: r["value"] for r in o["today"]}["followup"] == 1
+
+
+def test_follow_up_cadence_counts_only_contacted_families(program, sample_advisor, client):
+    db, a, b, t = _seed(program, sample_advisor)
+    c = _lead_for(db, program["org"], sample_advisor, "L004", phone="2145550104", first="Queued", email="q@example.com")
+    SA._CACHE.clear()
+    h = _h(db, program["admin"])
+    o = client.get("/program/command/analytics?range=today", headers=h).json()["overview"]
+    pipe = {p["key"]: p["value"] for p in o["pipeline"]}
+    # Lester replied (his schedule pauses); Marion is in follow-ups; the queued family is not a follow-up yet.
+    assert pipe["in_outreach"] == 2 and o["in_followup"] == 1
+    d = client.get("/program/command/analytics/records?metric=in_followup&range=all", headers=h).json()
+    assert d["count"] == 1 and [i["name"] for i in d["items"]] == ["Marion Testcase"]
