@@ -81,3 +81,35 @@ def test_validator_requires_an_honest_answer_to_are_you_a_robot(monkeypatch):
     honest = {"action": "answer", "reply": "Fair question - an automated assistant helps me keep up with messages, and I see every reply."}
     assert any("automated" in p for p in ai_setter.validate_decision(dodge, "Is this a real person or a robot?", C()))
     assert ai_setter.validate_decision(honest, "Is this a real person or a robot?", C()) == []
+
+
+def test_mail_request_keeps_a_personal_next_step_unless_mail_only(monkeypatch):
+    from app.services.programs import ai_setter
+
+    class C:
+        id = "c"; offered_slots = None; state = "open"
+    monkeypatch.setattr(ai_setter, "_last_ai_text", lambda conv: None)
+    monkeypatch.setattr(ai_setter, "_strip_offered", lambda reply, conv: reply)
+    bare = {"action": "mail_guide", "reply": "Of course, Lester. I'll make sure the printed guide is mailed to you."}
+    warm = {"action": "mail_guide", "reply": "Of course, Lester. I'll arrange the printed guide, and once you've had a "
+                                             "look I'd be glad to sit down and go over it with you."}
+    assert any("personal meeting" in p for p in ai_setter.validate_decision(bare, "Can you mail me a printed copy", C()))
+    assert ai_setter.validate_decision(warm, "Can you mail me a printed copy", C()) == []
+    assert ai_setter.validate_decision(bare, "Just mail it please, I don't want to meet", C()) == []
+
+
+def test_eval_found_validator_gaps_are_closed(monkeypatch):
+    """Oct 16 full run: s023 (plan elsewhere treated as not a decline) and
+    s059/s060 ('ok' after times offered -> 'which one?' rejected for lacking
+    {TIMES}) were handed to a person with an empty reply."""
+    from app.services.programs import ai_setter
+
+    class C:
+        id = "c"; offered_slots = None; state = "offered"
+    monkeypatch.setattr(ai_setter, "_last_ai_text", lambda conv: None)
+    monkeypatch.setattr(ai_setter, "_strip_offered", lambda reply, conv: reply)
+    close = {"action": "close", "reply": "Thank you for letting me know - I'm glad you're taken care of."}
+    assert ai_setter.validate_decision(close, "We have a plan with another funeral home", C()) == []
+    monkeypatch.setattr(ai_setter.A, "offered", lambda conv: ["x", "y"])
+    which = {"action": "offer_times", "reply": "Which of those two times works best for you?"}
+    assert ai_setter.validate_decision(which, "ok", C()) == []
