@@ -113,3 +113,37 @@ def test_eval_found_validator_gaps_are_closed(monkeypatch):
     monkeypatch.setattr(ai_setter.A, "offered", lambda conv: ["x", "y"])
     which = {"action": "offer_times", "reply": "Which of those two times works best for you?"}
     assert ai_setter.validate_decision(which, "ok", C()) == []
+
+
+def test_final_gate_checks_voice_on_the_assembled_text():
+    """Oct 16: the guide fallback was app-built and said 'Kerry Allan would be
+    happy to go over it' after the model's reply had passed validation."""
+    from app.services.programs import ai_setter
+    bad = "I'd be glad to get the planning guide to you, and Kerry Allan would be happy to go over it with you."
+    assert "talks about Kerry Allan in the third person" in ai_setter.check_text(bad, allowed_links=[], contact="Kerry Allan")
+    good = "I'd be glad to get the planning guide to you, and I'd be happy to go over it with you in person."
+    assert ai_setter.check_text(good, allowed_links=[], contact="Kerry Allan") == []
+    assert ai_setter.check_text(good, allowed_links=[], channel="email", contact="Kerry Allan") == []
+
+
+def test_no_app_built_reply_names_the_advisor():
+    import inspect
+    src = inspect.getsource(ai_setter.on_family_reply)
+    assert "would be happy to go over it" not in src.replace("I'd be happy to go over it", "")
+    assert "%s will reach out" not in src
+
+
+def test_guide_request_is_not_a_mail_request_and_plots_are_not_a_close(monkeypatch):
+    from app.services.programs import ai_setter
+
+    class C:
+        id = "c"; offered_slots = None; state = "open"; memory = None
+    monkeypatch.setattr(ai_setter, "_last_ai_text", lambda conv: None)
+    monkeypatch.setattr(ai_setter, "_strip_offered", lambda reply, conv: reply)
+    monkeypatch.setattr(ai_setter, "memory_of", lambda conv: {})
+    mail = {"action": "mail_guide", "reply": "I'll arrange a printed guide, and I'd be glad to sit down and go over it with you."}
+    assert any("not a printed" in p for p in ai_setter.validate_decision(mail, "Would really like to receive the guide", C()))
+    assert not any("not a printed" in p for p in ai_setter.validate_decision(mail, "Can you mail me a printed copy", C()))
+    close = {"action": "close", "reply": "Thank you for letting me know - we're here if you ever need anything."}
+    assert any("not WHERE" in p for p in ai_setter.validate_decision(close, "We already have plots", C()))
+    assert not any("not WHERE" in p for p in ai_setter.validate_decision(close, "We have a plan with another funeral home", C()))
