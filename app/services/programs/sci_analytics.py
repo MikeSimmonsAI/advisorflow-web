@@ -234,7 +234,8 @@ class Ledger:
             self.attempts.append({
                 "kind": "attempt", "id": t.id, "lead_id": t.lead_id, "touch": t.touch_number or 0,
                 "channel": "email", "at": t.attempted_at or t.created_at, "result": result, "error": err,
-                "text": ((e.subject + " — ") if (e is not None and e.subject) else "Email touch %s" % t.touch_number)[:400],
+                "text": ((e.subject or "") if e is not None else "Email touch %s" % t.touch_number)[:400]
+                        or "Email touch %s" % t.touch_number,
                 "location_id": f.get("location_id"), "email_message_id": t.email_message_id,
             })
         self.attempts.sort(key=lambda a: a["at"] or datetime.min)

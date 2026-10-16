@@ -353,7 +353,7 @@ function Record({ i, open }) {
         {i.text && <span className="pf-rec-text">{i.text}</span>}
         {i.error && <span className="pf-rec-err">Reason: {i.error}</span>}
         {i.appt_at && <span className="pf-rec-ok">Appointment {fmtWhen(i.appt_at)}</span>}
-        {i.next_touch_at && <small className="pf-rec-loc">Next touch {fmtWhen(i.next_touch_at)}</small>}
+        {i.next_touch_at && <small className="pf-rec-loc">Next touch due {fmtWhen(i.next_touch_at)} (sent during sending hours)</small>}
       </button>
       <div className="pf-rec-links">
         <button onClick={() => open(i.lead_id, 'journey')}>Journey ›</button>
@@ -381,7 +381,7 @@ export function Journey({ id }) {
         <div><span>Stage</span><b>{j.stage}</b></div>
         <div><span>Touches sent</span><b>{j.touches_sent}</b></div>
         <div><span>Replies</span><b>{j.replies}</b></div>
-        <div><span>Next touch</span><b>{j.next_touch_at ? fmtWhen(j.next_touch_at) : '—'}</b></div>
+        <div><span>Next touch due</span><b>{j.next_touch_at ? fmtWhen(j.next_touch_at) : '—'}</b></div>
         <div><span>Handling</span><b>{j.handling === 'human' ? 'Human' : 'AI'}</b></div>
       </div>
       <ol className="pf-timeline">
