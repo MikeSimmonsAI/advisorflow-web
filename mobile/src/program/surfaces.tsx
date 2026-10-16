@@ -24,7 +24,7 @@ export function Page({ children, refresh, refreshing }: {
 }
 export function Heading({ title, subtitle }: { title: string; subtitle?: string }) {
   return <View style={{ gap: 4, marginBottom: 6 }}>
-    <Text style={styles.eyebrow}>SCI PROGRAM • MOBILE PREVIEW</Text>
+    <Text style={styles.eyebrow}>OUTREACH PROGRAM • MOBILE PREVIEW</Text>
     <Text style={styles.heading}>{title}</Text>
     {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
   </View>;
