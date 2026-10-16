@@ -44,7 +44,7 @@ FAILED = ("failed", "undelivered", "bounced", "provider_failed")
 NOT_GENUINE_REPLY = ("auto_reply", "opt_out")
 BOOKED = ("booked", "confirmed", "completed")
 
-ERR = {"30007": "Carrier filtered (link)", "30003": "Phone unreachable", "30005": "Unknown / inactive number",
+ERR = {"30007": "Carrier filtered (link)", "30003": "Not reached - phone off or no signal, will try again", "30005": "Not reached - number not active right now, will try again",
        "30006": "Landline or unreachable carrier", "30008": "Unknown carrier error", "21610": "Opted out (STOP)",
        "30004": "Blocked by recipient", "21614": "Not a mobile number", "21211": "Invalid number"}
 
@@ -727,6 +727,7 @@ def present(L: Ledger, rows_: List[Dict], limit: int = 1000) -> Tuple[List[Dict]
 # Plain words for a stopped text schedule - never the raw status code.
 CADENCE_STATUS_WORDS = {
     "stopped_no_sms_consent": "Texts stopped - no SMS consent on record",
+    "stopped_bad_number": "Texts stopped - number cannot take texts",
     "completed": "Outreach complete - all touches sent",
     "cancelled": "Outreach cancelled",
     "paused": "Outreach paused",
@@ -927,7 +928,7 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
         "handling": ("human" if (conv is not None and conv.state in ("human", "stopped")) else "ai"),
         # The owner holds a consent form for every SCI family, so a schedule
         # stopped for "no consent" can be restarted from the family page.
-        "texts_restartable": bool(st is not None and st.status == "stopped_no_sms_consent"),
+        "texts_restartable": bool(st is not None and st.status in ("stopped_no_sms_consent", "stopped_bad_number")),
         "sms_links_on": _links_on(),
         "events": ev,
     }

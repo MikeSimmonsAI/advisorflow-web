@@ -439,8 +439,14 @@ def _spacing_hold_until(db: Session, state, lead, schedule, touch_number: int, n
     return earliest if n < earliest else None
 
 
-UNREACHABLE_ONCE = {"30005", "30006", "21614"}   # unknown number, landline, not a mobile
-UNREACHABLE_TWICE = {"30003"}                     # handset unreachable (could be temporary)
+# Oct 16 (owner's decision): only a number that CANNOT take a text at all - a
+# landline / not a mobile - stops the text schedule. "Phone unreachable"
+# (30003: off, no signal, out of service area) and "unknown / inactive"
+# (30005: often a phone that is off or between plans, or a VoIP line) keep
+# their schedule: the next text is tried on its normal day. Emails always
+# continue - nothing here puts the family in Data Review.
+UNREACHABLE_ONCE = {"30006", "21614"}            # landline, not a mobile
+UNREACHABLE_TWICE: set = set()                   # nothing temporary stops the schedule
 
 
 def _unreachable_reason(db: Session, lead) -> Optional[str]:
@@ -451,7 +457,7 @@ def _unreachable_reason(db: Session, lead) -> Optional[str]:
     hit = [c for c in codes if c in UNREACHABLE_ONCE]
     if hit:
         return "phone cannot receive texts (carrier error %s) - check the number" % hit[0]
-    if len(rows) == 2 and len(codes) == 2 and all(c in UNREACHABLE_TWICE for c in codes):
+    if UNREACHABLE_TWICE and len(rows) == 2 and len(codes) == 2 and all(c in UNREACHABLE_TWICE for c in codes):
         return "phone unreachable twice in a row (carrier error 30003) - check the number"
     return None
 
@@ -484,11 +490,24 @@ def _already_sent(db: Session, state, touch_number: int) -> bool:
     still produce one insert and one send - the read is the fast path, the
     index is the guarantee.
     """
-    return db.query(CadenceTouchLog.id).filter(
+    q = db.query(CadenceTouchLog.id).filter(
         CadenceTouchLog.cadence_state_id == state.id,
         CadenceTouchLog.touch_number == touch_number,
         CadenceTouchLog.outcome == OUTCOME_SENT,
-    ).first() is not None
+    )
+    return _since_start(q, state).first() is not None
+
+
+def _since_start(q, state):
+    """Only this run of the schedule counts. A schedule restarted from the
+    beginning (Oct 16: texts the family never received - a hold, a carrier
+    block) gets a new start; what happened before it is history, not a
+    reason to skip or abandon a touch now."""
+    start = getattr(state, "cadence_started_at", None)
+    if start is None:
+        return q
+    start = start.replace(tzinfo=None) if getattr(start, "tzinfo", None) is not None else start
+    return q.filter(CadenceTouchLog.attempted_at >= start)
 
 
 def _failed_attempts(db: Session, state, touch_number: int) -> int:
@@ -498,11 +517,11 @@ def _failed_attempts(db: Session, state, touch_number: int) -> int:
     so MAX_ATTEMPTS_PER_TOUCH is a budget for provider failures only. Skips,
     blocks and stops never spend it.
     """
-    return (db.query(func.count(CadenceTouchLog.id))
-            .filter(CadenceTouchLog.cadence_state_id == state.id,
-                    CadenceTouchLog.touch_number == touch_number,
-                    CadenceTouchLog.outcome == OUTCOME_FAILED)
-            .scalar()) or 0
+    q = (db.query(func.count(CadenceTouchLog.id))
+         .filter(CadenceTouchLog.cadence_state_id == state.id,
+                 CadenceTouchLog.touch_number == touch_number,
+                 CadenceTouchLog.outcome == OUTCOME_FAILED))
+    return _since_start(q, state).scalar() or 0
 
 
 def _next_attempt_seq(db: Session, state, touch_number: int) -> int:
@@ -782,7 +801,7 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 _log_touch(db, state, lead, touch_number=touch_number,
                            attempt_seq=_next_attempt_seq(db, state, touch_number), claim=True,
                            outcome=OUTCOME_STOPPED, reason=bad, scheduled_for=scheduled_for)
-                _flag_bad_number(db, lead, bad)
+                # Texts stop; emails keep going (no Data Review hold).
                 stop_cadence_for_lead(db, lead.id, "stopped_bad_number")
                 continue
 

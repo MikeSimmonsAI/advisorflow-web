@@ -1,4 +1,5 @@
-"""A number the carrier cannot reach is not texted again (Oct 14: two 30003s)."""
+"""Oct 16 owner's decision: only a landline / not-a-mobile stops texts.
+An unreachable or inactive number keeps its schedule (the phone may be off)."""
 from datetime import timedelta
 
 from app.models.models import Message
@@ -13,7 +14,7 @@ def _sent(db, lead, adv, hours_ago, status, code):
     db.commit()
 
 
-def test_two_unreachable_texts_stop_the_schedule(db_session, sample_org, sample_advisor, monkeypatch):
+def test_two_unreachable_texts_keep_the_schedule(db_session, sample_org, sample_advisor, monkeypatch):
     _sending_on(monkeypatch)
     lead = _lead(db_session, sample_org, sample_advisor, phone="12145552501")
     state = _due(db_session, lead, touch=2)
@@ -22,10 +23,9 @@ def test_two_unreachable_texts_stop_the_schedule(db_session, sample_org, sample_
     tw = _twilio()
     with patch("app.services.sms_service._resolve_twilio_creds", return_value=(tw, "+19998887777", None)):
         r = cs.run_due_cadences(db_session, now=AT)
-    assert r["sent"] == 0 and tw.messages.create.call_count == 0
     db_session.refresh(state)
-    assert state.status == "stopped_bad_number"
-    assert "unreachable" in _logs(db_session, lead)[-1].reason
+    assert state.status == "active"
+    assert cs._unreachable_reason(db_session, lead) is None
 
 
 def test_one_unreachable_text_is_not_enough(db_session, sample_org, sample_advisor):
@@ -39,3 +39,9 @@ def test_a_landline_stops_at_once(db_session, sample_org, sample_advisor):
     lead = _lead(db_session, sample_org, sample_advisor, phone="12145552503")
     _sent(db_session, lead, sample_advisor, 30, "undelivered", "30006")
     assert "30006" in cs._unreachable_reason(db_session, lead)
+
+
+def test_an_inactive_number_keeps_the_schedule(db_session, sample_org, sample_advisor):
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145552504")
+    _sent(db_session, lead, sample_advisor, 30, "undelivered", "30005")
+    assert cs._unreachable_reason(db_session, lead) is None
