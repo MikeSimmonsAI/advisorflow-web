@@ -265,8 +265,13 @@ class Ledger:
         try:
             from app.services import sms_programs, wholesale_sms
             ok = sms_programs.consented_numbers(db, org_id)
+            auto = sms_programs.auto_attest_at_send() and sms_programs.owner_holds_records()
+            gone = sms_programs.opted_out_numbers(db, org_id) if auto else set()
             for fam in self.families.values():
-                fam["sms_consent"] = wholesale_sms.normalize_e164(fam["phone"]) in ok
+                e = wholesale_sms.normalize_e164(fam["phone"])
+                # With the owner's consent filed at first send, every number
+                # that has not opted out is textable.
+                fam["sms_consent"] = (e in ok) or (auto and bool(e) and e not in gone and not fam["dnc"])
         except Exception:                                 # noqa: BLE001
             for fam in self.families.values():
                 fam["sms_consent"] = False

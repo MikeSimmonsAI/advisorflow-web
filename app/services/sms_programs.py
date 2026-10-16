@@ -561,6 +561,22 @@ def has_sms_consent(db, org_id: str, phone) -> bool:
     return any(consent_counts(p, r) for r in recs)
 
 
+def opted_out_numbers(db, org_id: str) -> set:
+    """Numbers whose SCI consent was withdrawn (STOP etc.) or that are suppressed."""
+    from app.models.sms_consent_models import SmsConsentRecord
+    p = PROGRAMS[SCI]
+    out = {r.phone_normalized for r in db.query(SmsConsentRecord).filter(
+        SmsConsentRecord.organization_id == org_id, SmsConsentRecord.program == p.consent_program).all()
+        if r.status != "opted_in" or r.opted_out_at}
+    try:
+        from app.models.models import SuppressionEntry
+        out |= {getattr(e, "phone_normalized", None) or getattr(e, "phone", None)
+                for e in db.query(SuppressionEntry).filter(SuppressionEntry.organization_id == org_id).all()}
+    except Exception:                                    # noqa: BLE001
+        pass
+    return {x for x in out if x}
+
+
 def consented_numbers(db, org_id: str) -> set:
     """Every number with a usable SCI consent of record (one query)."""
     from app.models.sms_consent_models import SmsConsentRecord
