@@ -18,7 +18,7 @@ export default function ProgramFamilyDetail() {
   return <><StatusBar style="dark" />
     <Page refresh={refresh} refreshing={query.isRefetching}>
       <Pressable accessibilityRole="button" onPress={() => router.back()} style={{ paddingVertical: 5 }}>
-        <Text style={{ color: blue, fontWeight: '700' }}>‹ Back to SCI Live</Text>
+        <Text style={{ color: blue, fontWeight: '700' }}>‹ Back to program</Text>
       </Pressable>
       <Heading title={family?.name || 'Family conversation'} subtitle={family?.location || 'Live conversation history'} />
       {query.isPending && !family ? <State title="Loading conversation" busy /> : null}
@@ -43,7 +43,7 @@ export default function ProgramFamilyDetail() {
             </Text>
           </View>
         ) : <Panel><State title="No messages recorded yet" /></Panel>}
-        <Notice text="Preview is read-only. Use SCI Live to reply, take ownership or book a visit." />
+        <Notice text="Preview is read-only. Use the authorized program workspace to reply, take ownership or book a visit." />
       </> : null}
     </Page>
   </>;
