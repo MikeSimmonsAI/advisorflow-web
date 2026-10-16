@@ -340,6 +340,7 @@ def test_toll_free_registration_is_staging_only_and_idempotent(client, db_sessio
 # ── 5. per-cemetery template fields, subject to capability ──────────────────
 
 def test_template_fields_and_capability_gating(client, db_session, monkeypatch):
+    monkeypatch.setenv("SCI_SMS_LINKS", "on")                # links switched on for this check
     from app.models.program_models import LocationProfile
     from app.services.programs import identity
     from app.services.sms_content_policy import enforce_sms_content_policy

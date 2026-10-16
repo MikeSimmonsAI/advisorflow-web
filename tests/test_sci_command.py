@@ -167,3 +167,18 @@ def test_a_voicemail_on_the_sci_line_plays_with_the_platform_account(program, sa
     monkeypatch.setattr("app.services.telephony_twilio.fetch_recording", fake_fetch)
     r = client.get("/voicemails/%s/audio" % vm.id, headers=_h(db, program["admin"]))
     assert r.status_code == 200 and r.content == b"ID3audio" and seen["creds"], seen
+
+
+def test_sci_texts_carry_no_links_unless_switched_on(program, sample_advisor, monkeypatch):
+    from app.services import sms_programs
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001")
+    monkeypatch.setattr(sms_programs, "is_sci_org", lambda db_, oid: True)
+    monkeypatch.setattr(sms_programs, "sci_sender_entry", lambda: {
+        "kind": "toll_free", "verification_status": "TWILIO_APPROVED", "programs": ["sci"],
+        "has_embedded_links": True, "has_embedded_phone": True, "approved_scope": ["informational"]})
+    monkeypatch.setattr(sms_programs, "message_category", lambda db_, l: "informational")
+    monkeypatch.delenv("SCI_SMS_LINKS", raising=False)
+    assert sms_programs.content_allowance(db, lead)["allow_links"] is False
+    monkeypatch.setenv("SCI_SMS_LINKS", "on")
+    assert sms_programs.content_allowance(db, lead)["allow_links"] is True

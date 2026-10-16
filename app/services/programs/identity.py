@@ -443,6 +443,11 @@ def _with_booking(db: Session, lead: Lead, template: str, fields: Dict[str, str]
     {booking_link} -> the bare link. A link is minted only when the text uses one."""
     if "{booking_line}" not in (template or "") and "{booking_link}" not in (template or ""):
         return dict(fields, booking_line="")
+    from app.services import sms_programs as _sp
+    if _sp.content_allowance(db, lead).get("allow_links", True) is False:
+        # Links are off for this sender (carrier filtering): no link is minted
+        # and the text reads cleanly without one.
+        return dict(fields, booking_line="", booking_link="")
     url = program_booking_url(db, lead)
     out = dict(fields, booking_line=("Pick a time that works for you: %s" % url) if url else "")
     if url:
