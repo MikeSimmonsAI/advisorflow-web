@@ -297,7 +297,7 @@ def _suggest(conv, latest, lead) -> dict:
     return {"title": title[:1].upper() + title[1:], "steps": steps}
 
 
-_ERR = {"30007": "Carrier filtered (link)", "30003": "Phone unreachable", "30005": "Unknown / inactive number",
+_ERR = {"30007": "Carrier filtered (link)", "30003": "Not reached - phone off or no signal, will try again", "30005": "Not reached - number not active right now, will try again",
         "30006": "Landline or unreachable carrier", "30008": "Unknown carrier error", "21610": "Opted out (STOP)",
         "30004": "Blocked by recipient"}
 
@@ -716,16 +716,23 @@ def command_handling(body: HandlingIn, db: Session = Depends(get_db), user: User
 
 class RestartTextsIn(BaseModel):
     lead_id: str
+    from_touch: Optional[int] = None     # 1 = start the texts over; default: the next touch
+
+
+# Never reopened here: the family said stop, replied, booked, or is do-not-contact.
+_NO_RESTART = ("opted_out", "stopped_opted_out", "dnc", "stopped_dnc", "replied", "stopped_replied",
+               "booked", "stopped_booked", "cancelled")
 
 
 @router.post("/restart-texts")
 def command_restart_texts(body: RestartTextsIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
-    """Restart a family's text schedule that was stopped as "no SMS consent".
-    The owner holds a consent form for every SCI family (Oct 16 standing
-    decision); on Oct 16 at 9:03 CT a job without the SCI send switches
-    stopped one family this way by mistake. Managers only. Only that one
-    stopped state is reopened - opt-outs, replies, bookings and holds are
-    never touched - and every send still goes through the SCI gate."""
+    """Restart a family's texts - from text 1 (from_touch=1) or from any touch.
+    For texts the family never received through no choice of theirs: stopped
+    as "no SMS consent" by a job that could not send (Oct 16), held for a
+    location review, or blocked by the carrier (30007, Oct 15). The schedule
+    gets a new start, so earlier attempts never cause a touch to be skipped
+    or abandoned. Managers only; opt-outs, replies, bookings and do-not-contact
+    are never reopened; every send still passes the SCI gate and spacing."""
     from app.models.models import CadenceState
     prog = _program(db, user, managers_only=True)
     lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
@@ -733,20 +740,29 @@ def command_restart_texts(body: RestartTextsIn, db: Session = Depends(get_db), u
         raise HTTPException(status_code=404, detail="Family not found.")
     if _tr.is_test_record(lead) or not _tr.is_outreach_eligible(lead):
         raise HTTPException(status_code=409, detail="This family is excluded from outreach.")
+    if (lead.status or "").lower() in ("dnc", "replied", "booked", "hot"):
+        raise HTTPException(status_code=409, detail="This family replied, booked or asked not to be contacted - a person has it.")
     st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
-    if st is None or st.status != "stopped_no_sms_consent":
-        raise HTTPException(status_code=409, detail="Only a text schedule stopped for no SMS consent can be restarted here.")
+    if st is None:
+        raise HTTPException(status_code=409, detail="This family has no text schedule.")
+    if (st.status or "") in _NO_RESTART:
+        raise HTTPException(status_code=409, detail="This text schedule ended for a reason a restart must not undo.")
+    before = {"status": st.status, "touch": st.current_touch_number or 0}
+    nxt = body.from_touch if body.from_touch else (st.current_touch_number or 0) + 1
+    if nxt < 1 or nxt > 12:
+        raise HTTPException(status_code=422, detail="from_touch must be a touch number.")
     now = datetime.utcnow()
     st.status = "active"
     st.completed_at = None
+    st.current_touch_number = nxt - 1
+    if body.from_touch:
+        st.cadence_started_at = now          # a new run: days count from today
     st.next_touch_due_at = now
     from app.routers.audit_log_router import log_action
     log_action(db, prog.organization_id, user.id, action="sci.restart_texts", target_type="lead",
-               target_id=lead.id, details={"from": "stopped_no_sms_consent",
-                                           "next_touch": (st.current_touch_number or 0) + 1})
+               target_id=lead.id, details={"before": before, "next_touch": nxt})
     db.commit()
-    return {"lead_id": lead.id, "status": st.status, "next_touch": (st.current_touch_number or 0) + 1,
-            "next_touch_at": now.isoformat() + "Z"}
+    return {"lead_id": lead.id, "status": st.status, "next_touch": nxt, "next_touch_at": now.isoformat() + "Z"}
 
 
 @router.get("/slots")

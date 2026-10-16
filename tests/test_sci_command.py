@@ -236,8 +236,7 @@ def test_restart_texts_reopens_only_a_no_consent_stop(program, sample_advisor, c
     assert r.status_code == 200 and r.json()["next_touch"] == 1
     db.refresh(st)
     assert st.status == "active" and st.completed_at is None and st.next_touch_due_at is not None
-    # a second try (now active) and any other stopped state are refused
-    assert client.post("/program/command/restart-texts", json={"lead_id": lead.id}, headers=h).status_code == 409
+    # an opted-out family is never reopened
     st.status = "opted_out"; db.commit()
     assert client.post("/program/command/restart-texts", json={"lead_id": lead.id}, headers=h).status_code == 409
 
@@ -269,3 +268,25 @@ def test_an_on_hold_family_waits_instead_of_failing(program, sample_advisor):
     holds.set_hold(db, rec, False, None)
     db.commit(); db.refresh(st)
     assert st.next_touch_due_at <= datetime.utcnow()
+
+
+
+def test_start_over_from_text_1_resends_even_a_touch_sent_before(program, sample_advisor, client):
+    """Oct 16: a family whose texts never reached them starts over at text 1.
+    Attempts from before the restart never make a touch look already sent."""
+    from app.models.models import CadenceState, CadenceTouchLog
+    from app.services import cadence_service as C
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Alvin")
+    st = db.query(CadenceState).filter_by(lead_id=lead.id).one()
+    st.current_touch_number, st.cadence_started_at = 3, datetime(2026, 10, 14, 14, 0)
+    db.add(CadenceTouchLog(cadence_state_id=st.id, lead_id=lead.id, touch_number=1, attempt_seq=1,
+                           outcome="sent", attempted_at=datetime(2026, 10, 14, 15, 0)))
+    db.commit()
+    assert C._already_sent(db, st, 1) is True
+    r = client.post("/program/command/restart-texts", json={"lead_id": lead.id, "from_touch": 1},
+                    headers=_h(db, program["admin"]))
+    assert r.status_code == 200 and r.json()["next_touch"] == 1
+    db.refresh(st)
+    assert st.current_touch_number == 0 and st.status == "active"
+    assert C._already_sent(db, st, 1) is False      # the old run is history
