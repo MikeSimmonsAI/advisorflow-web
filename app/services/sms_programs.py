@@ -397,7 +397,11 @@ def content_allowance(db, lead) -> Dict[str, bool]:
     ok = (sms_campaigns.is_approved(entry) and SCI in (entry.get("programs") or [])
           and sms_campaigns.scope_allows(entry, message_category(db, lead)))
     f = sms_campaigns.features(entry) if ok else {"links": False, "phone": False}
-    return {"allow_links": f["links"], "allow_phone": f["phone"]}
+    # Links additionally need SCI_SMS_LINKS on: carriers filtered SCI link
+    # texts as 30007 on Oct 15 (Twilio ticket #29953372), including 12
+    # cadence touch-3 texts at 23:11 UTC. Every SCI text - cadence, AI,
+    # manual - passes through here, so this is the one switch.
+    return {"allow_links": bool(f["links"]) and sms_links_enabled(), "allow_phone": f["phone"]}
 
 
 def sci_sender():

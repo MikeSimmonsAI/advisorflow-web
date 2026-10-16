@@ -37,6 +37,7 @@ def test_settings_set_booking_user(client, program):
 
 
 def test_one_link_per_family_and_page_shows_location(client, program, monkeypatch):
+    monkeypatch.setenv("SCI_SMS_LINKS", "on")                # links switched on for this check
     db, org, admin = program["db"], program["org"], program["admin"]
     u = _booking_user(db, org)
     prog = db.query(OutreachProgram).filter_by(organization_id=org.id).one()
