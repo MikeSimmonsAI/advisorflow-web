@@ -328,7 +328,12 @@ def set_owner(db: Session, lead, owner: str, *, actor: Optional[str], note: Opti
 
 # ── safety check on every outgoing line ─────────────────────────────────────
 
-def check_text(text: str, *, allowed_links: List[str], channel: str = "sms") -> List[str]:
+def check_text(text: str, *, allowed_links: List[str], channel: str = "sms",
+               contact: Optional[str] = None) -> List[str]:
+    """THE FINAL GATE on the assembled outgoing text - after the model's reply
+    has been changed by the app (times filled in, a guide link added, or a
+    fallback sentence swapped in). Voice is checked here too, so app-built
+    text can't reintroduce "Kerry Allan would be happy to..." (Oct 16)."""
     problems = []
     t = (text or "").strip()
     if not t:
@@ -344,6 +349,8 @@ def check_text(text: str, *, allowed_links: List[str], channel: str = "sms") -> 
             problems.append("contains a link that is not an approved one")
     if "{" in t or "}" in t:
         problems.append("unfilled placeholder")
+    if contact and third_person(t, contact):
+        problems.append("talks about %s in the third person" % contact)
     return problems
 
 
@@ -380,6 +387,7 @@ HONOUR THEIR TIMING:
 - Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to sit down with you so you can go over it together and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and I'd be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
 - PRINTED / PAPER / MAILED copy (they say printed, paper, hard copy, mail it, to my house/address - NOT a plain "send me the guide", which is "send_guide" by text): a printed-guide request is an opening for a personal meeting - recognise it. If PERSONAL DELIVERY is available (facts_known_for_certain.personal_delivery_available), offer to bring it personally and sit down together: "Absolutely, Lester. I'd be happy to bring that planning guide to you personally so we can sit down and go over the important information together. What's a good day and time for me to stop by?" (action "mail_guide"; no {{TIMES}}; put any day/time they give in best_times). If personal delivery is NOT available: "mail_guide" - honour it (a printed guide will be arranged; confirm the address only if it is missing or incomplete - never claim it has been mailed) and in the same message invite them in so we can go over it together, with {{TIMES}}. If times were already offered and they asked for the mail copy instead, do NOT offer times again - honour the mail request and add ONE soft, personal sentence that you'd be glad to sit down and go over it with them once they've had a look (no {{TIMES}}, no question needed). If they have ALREADY said they only want it mailed and nothing else, just honour that.
 - UNCLEAR "already got it / them / that": it may mean the guide, their benefits, or arrangements. If FAMILY MEMORY and the conversation don't settle which, ask ONE short, warm clarifying question first (e.g. "Glad to hear it, Ronald - do you mean you already have your veteran benefits paperwork, or the planning guide?") - no {{TIMES}} in that message.
+- "We already have plots / a plan / property" WITHOUT saying where: it may well be with us - don't close. Thank them and ask one warm question (is that here at {location}?) or offer a review of their file.
 - Plan with ANOTHER funeral home / cemetery, or "already took care of all that": thank them warmly and respect it - no times, no push. At most one optional sentence that we're here if they ever want anything reviewed ("answer" or "close").
 - Existing plan WITH US / "already have a plan with you" -> invite them in for an in-person FILE REVIEW: going over their existing arrangements, important contact information, family instructions and whether anyone else should be authorised to access their file. Reassuring and personal; never suggest their plan is invalid or that new forms are legally required. Offer {{TIMES}} (ask which kind of review only if it is genuinely unclear).
 - Wants to CHANGE an existing plan (contact person, burial to cremation, wishes): that is exactly what a review with me is for - offer times ("offer_times"); not a hand-off.
@@ -494,6 +502,13 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
         problems.append("it says an appointment is set or confirmed - only the system confirms bookings")
     if _CLAIM_MAILED.search(reply):
         problems.append("it says something was mailed - a person mails it; say it will be arranged")
+    if action == "close" and _EXISTING_PLAN.search(body or "") and not _ELSEWHERE.search(body or ""):
+        problems.append("they said they already have plots / a plan but not WHERE - it may be with us. Don't "
+                        "close: thank them and ask warmly whether it's with us, or offer a review of their file")
+    if (action == "mail_guide" and (body or "").strip() and not _PRINTED.search(body or "")   # not a follow-up
+            and not (memory_of(conv) or {}).get("mail_request")):
+        problems.append("they asked for the guide, not a printed or mailed copy - use send_guide (the system "
+                        "texts or emails it, or offers a printed copy if a link can't go by text)")
     if action == "close" and not _DECLINE.search(body or ""):
         problems.append("they did not decline - a short or unclear reply ('k', 'maybe', an emoji) is not a no; "
                         "answer it or ask one gentle question instead of closing")
@@ -525,6 +540,9 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
     return problems
 
 
+_PRINTED = re.compile(r"(print|paper|hard ?copy|\bmail|post office|address|to my (house|home)|"
+                      r"\b\d{2,6}\s+\w+.*\b(rd|road|st|street|ave|avenue|dr|drive|ln|lane|blvd|way|ct|hwy|highway)\b)", re.I)
+_ELSEWHERE = re.compile(r"\b(another|other|different|elsewhere|somewhere else)\b", re.I)
 _PERSONAL_STEP = re.compile(r"(sit down|go over (it|this|that|the guide)? ?(with you|together)|in person|stop by|"
                             r"bring (it|the guide|that)|come (in|by)|visit)", re.I)
 _MAIL_ONLY = re.compile(r"\b((just|only) (mail|send)|mail (it )?only|don'?t (want|need) (to )?(meet|visit|come|talk)|"
@@ -1046,7 +1064,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                         else "I don't have that exact time open. Would {TIMES} work?")
             else:
                 _handoff(db, prog, lead, conv, "booking failed: %s" % res.get("reason"), notify=True)
-                text = "Thank you. %s will reach out shortly to set that up." % (prog.primary_contact_name or "Our team")
+                text = "Thank you. I'll reach out to you shortly to set that up."
                 action = "handoff"
 
     if action == "offer_times":
@@ -1059,8 +1077,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
         if not slots:
             _handoff(db, prog, lead, conv, "no times to offer: %s" % why, notify=True)
-            text = ("Thank you. %s will reach out to find a time that works for you."
-                    % (prog.primary_contact_name or "Our team"))
+            text = "Thank you. I'll reach out to find a time that works for you."
             action = "handoff"
         else:
             text = _ensure_times_question(text)
@@ -1089,11 +1106,10 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             # Get the guide to them by mail (a person sends it) and invite them in
             # to go over it - the visit is the goal. Real times only.
             slots, _why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
-            who = prog.primary_contact_name or "our team"
             if slots:
-                text = ("I'd be glad to get the planning guide to you, and %s would be happy to go over it with you "
+                text = ("I'd be glad to get the planning guide to you, and I'd be happy to go over it with you "
                         "in person and answer any questions. Would {TIMES} work for a short visit? If you'd rather "
-                        "just have a printed copy mailed, reply with your address." % who)
+                        "just have a printed copy mailed, reply with your address.")
                 text = _fill_times(text, slots)
                 conv.offered_slots = json.dumps([s.isoformat() for s in slots])
                 conv.offered_at = now
@@ -1151,7 +1167,8 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             conv.state = "offered"
             out["offered"] = [s.isoformat() for s in slots]
     problems = check_text(text, allowed_links=allowed_links,
-                          channel=(resp.channel if resp is not None else "sms") or "sms")
+                          channel=(resp.channel if resp is not None else "sms") or "sms",
+                          contact=prog.primary_contact_name)
     if problems:
         _handoff(db, prog, lead, conv, "AI reply held: %s" % ", ".join(problems), notify=True)
         _turn(db, conv, "ai", text, action=action, delivery="blocked", reason="; ".join(problems),
@@ -1272,7 +1289,7 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
             conv.state = "offered"
         if action == "close":
             conv.state = "closed"
-        if check_text(text, allowed_links=allowed):
+        if check_text(text, allowed_links=allowed, contact=prog.primary_contact_name):
             db.commit()
             done["skipped"] += 1
             continue

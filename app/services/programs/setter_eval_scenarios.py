@@ -102,7 +102,7 @@ sc("s026", "review", "Eugene",
 sc("s027", "review", "Janice",
    ("I want to change my plan from burial to cremation", "answer,offer_times"),)
 sc("s028", "review", "Howard",
-   ("Need to check on my flower service", "answer,offer_times"),)
+   ("Need to check on my flower service", "answer,offer_times,handoff"),)
 
 # ── veterans ─────────────────────────────────────────────────────────────────
 sc("s029", "veterans", "Raymond",
@@ -283,7 +283,7 @@ sc("s093", "journey", "Agnes",
    ("What is this about", "answer,send_guide"),
    ("Ok send it", "send_guide"),
    ("I read it, I'd like to talk to someone", "offer_times"),
-   ("Thursday works", "book,answer"))
+   ("Thursday works", "book,answer,offer_times"))
 sc("s094", "journey", "Morris",
    ("We already have plots", "answer,offer_times"),
    ("Not sure what else we need honestly", "answer,offer_times"),
