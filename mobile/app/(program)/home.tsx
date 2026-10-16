@@ -9,7 +9,7 @@ import { Page, Heading, Section, Panel, Metric, Line, Notice, State, Action } fr
 export default function ProgramHome() {
   const exp = useActiveExperience();
   const refresh = useScopedRefresh();
-  const home = useScopedQuery(['program', 'overview'], program.overview, { refetchInterval: 60000 });
+  const home = useScopedQuery(['program', 'overview'], () => program.overview(), { refetchInterval: 60000 });
   const pipeline = useScopedQuery(['program', 'pipeline'], program.pipeline, { refetchInterval: 60000 });
   const overview = home.data;
   const stats = pipeline.data;
