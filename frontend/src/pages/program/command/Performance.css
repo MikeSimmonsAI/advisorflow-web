@@ -219,3 +219,16 @@
 .jr-resend { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
 .jr-resend select { font: inherit; font-size: 12.5px; padding: 6px 8px; border: 1px solid #d5deea; border-radius: 8px; background: #fff; max-width: 100%; }
 .jr-resend .jr-restart { margin-top: 0; }
+/* Resend texts bar (family page, both tabs) */
+.rs-bar { background: #f6f9fc; border: 1px solid #d5deea; border-radius: 12px; padding: 12px 14px; margin: 10px 0 12px; }
+.rs-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: 14px; }
+.rs-head b { font-size: 15px; color: #7a3d05; }
+.rs-head span { color: #5b4632; }
+.rs-picks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.rs-picks button, .rs-confirm button { font: inherit; font-size: 14px; font-weight: 700; padding: 9px 16px; border-radius: 9px; border: 1px solid #e3b98a; background: #fff; color: #5b3a12; cursor: pointer; }
+.rs-picks button.on { background: #152f4f; border-color: #152f4f; color: #fff; }
+.rs-confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; font-size: 14px; }
+.rs-confirm .rs-yes { background: #0d8b6f; border-color: #0d8b6f; color: #fff; }
+.rs-msg { margin: 10px 0 0; font-weight: 700; color: #0d8b6f; }
+.rs-bar.missed { background: #fff7ed; border: 2px solid #f2a04c; }
+.rs-head em { font-style: normal; font-weight: 700; color: #b4420a; }

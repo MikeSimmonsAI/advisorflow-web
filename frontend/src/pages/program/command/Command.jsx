@@ -17,7 +17,7 @@ import { api } from '../../../api/client'
 import EngagementGauge, { useEngagement } from '../EngagementGauge'
 import SelfCheck from '../SelfCheck'
 import VoicemailPlayer from '../../../components/telephony/VoicemailPlayer'
-import { Journey, MetricDrill, PerformanceHome } from './Performance'
+import { Journey, MetricDrill, PerformanceHome, ResendBar } from './Performance'
 import { Home, ScreenTabs, TopBar, useHomeData } from './Dashboard'
 import { LIVE_SCREENS, MobileNav, SideNav } from './SciNav'
 import './Dashboard.css'
@@ -599,6 +599,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         <button onClick={() => schedRef.current?.scrollIntoView({ behavior: 'smooth' })}><Icon n="cal" s={22} />Schedule Visit</button>
         <button onClick={() => focusComposer('note')}><Icon n="note" s={22} />Add Note</button>
       </div>
+      {!f.is_demo && <ResendBar key={`rs-${id}`} id={id} onDone={load} />}
 
       <div className="cmd-seg two cmd-fview" role="tablist" aria-label="View">
         <button role="tab" aria-selected={view === 'conversation'} className={view === 'conversation' ? 'on' : ''} onClick={() => setView('conversation')}>Conversation</button>
