@@ -4,6 +4,10 @@
 .sl-shell {
   --navy: #0c203a; --navy2: #152f4f; --ink: #12243b; --muted: #6e7f95; --canvas: #f4f7fb; --blue: #2563eb;
   --lightblue: #eaf3ff; --teal: #0caa97; --mint: #e5faf3; --orange: #f2a04c; --line: #e5eaf2; --purple: #7656ce; --red: #ce4e55;
+  /* Command.css tokens, so the bottom tabs and toasts (outside .cmd) keep their colors */
+  --c-bg: #f3f6f9; --c-card: #fff; --c-ink: #0f1b2a; --c-muted: #5b6878; --c-line: #e2e8ef;
+  --c-navy: #0b3a5b; --c-navy-ink: #fff; --c-blue: #1f63c6; --c-green: #1d7a46; --c-red: #c62a2a;
+  --c-amber: #b4620a; --c-teal: #12746b; --c-chip: #eef2f6;
   display: flex; min-height: 100vh; background: var(--canvas); color: var(--ink);
   font: 14px/1.45 'Segoe UI', Inter, -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif;
 }
@@ -210,3 +214,6 @@ button.sl-tag { cursor: pointer; }
   .sl-body .cmd-quick > * { flex-direction: row; padding: 9px 8px; font-size: 13.5px; gap: 8px; }
   .sl-body > .cmd.cmd-family:not(.embedded) { max-width: none; padding: 16px 24px 32px; margin: 0; }
 }
+
+.sl-main > .cmd-tabs { background: #fff; z-index: 20; }
+.sl-main > .cmd-toast { z-index: 30; }
