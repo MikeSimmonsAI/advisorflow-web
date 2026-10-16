@@ -25,6 +25,7 @@ Read-only: nothing here sends, enrolls, approves or changes a record.
 from __future__ import annotations
 
 import json
+import threading
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -339,6 +340,7 @@ class Ledger:
 
 
 _CACHE: Dict[str, "Ledger"] = {}
+_LOCK = threading.Lock()
 CACHE_SECONDS = 30
 
 
@@ -346,10 +348,20 @@ def ledger(db: Session, org_id: str, fresh: bool = False) -> "Ledger":
     """The ledger, rebuilt at most every 30 seconds per workspace so the home
     screen, its four ranges and every drill-down read the SAME snapshot (the
     counts then match by construction, even while new replies arrive)."""
+    def stale(x):
+        return x is None or (datetime.utcnow() - x.built_at).total_seconds() > CACHE_SECONDS
+
     L = _CACHE.get(org_id)
-    if fresh or L is None or (datetime.utcnow() - L.built_at).total_seconds() > CACHE_SECONDS:
-        L = Ledger(db, org_id)
-        _CACHE[org_id] = L
+    if not fresh and not stale(L):
+        return L
+    # ONE builder at a time: requests that arrive while the snapshot is being
+    # rebuilt wait for it instead of each rebuilding it (a burst of screens
+    # opening at once must never tie up every database connection).
+    with _LOCK:
+        L = _CACHE.get(org_id)
+        if fresh or stale(L):
+            L = Ledger(db, org_id)
+            _CACHE[org_id] = L
     return L
 
 

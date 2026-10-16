@@ -144,3 +144,22 @@ def test_outreach_emails_count_as_attempts(program, sample_advisor, client):
     assert d["count"] == 1 and d["items"][0]["name"] == "Marion Testcase" and d["items"][0]["result"] == "delivered"
     j = client.get("/program/command/analytics/journey/%s" % a.id, headers=h).json()
     assert any(ev["kind"] == "skipped" and ev["detail"] == "provider hold" for ev in j["events"])
+
+
+def test_a_burst_of_screens_builds_the_snapshot_once(monkeypatch):
+    import threading
+    import time
+    built = []
+
+    class Slow:
+        def __init__(self, db, org):
+            built.append(org)
+            time.sleep(0.2)
+            self.built_at = datetime.utcnow()
+    monkeypatch.setattr(SA, "Ledger", Slow)
+    ts = [threading.Thread(target=SA.ledger, args=(None, "org-1")) for _ in range(12)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert built == ["org-1"]
