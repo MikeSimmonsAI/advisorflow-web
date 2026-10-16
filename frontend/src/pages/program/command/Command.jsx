@@ -102,8 +102,9 @@ export default function Command() {
     // The former SCI Live numbers (sends, deliveries, booking-page opens, next
     // up, just sent) load beside the command data, so nothing the old screen
     // showed is lost.
-    Promise.all([safe('/program/outbox'), safe('/program/booking-activity?days=1'), safe('/program/setter/stats?days=30')])
-      .then(([ob, ba, st]) => setLive({ ob, ba, st }))
+    Promise.all([safe('/program/outbox'), safe('/program/booking-activity?days=1'), safe('/program/setter/stats?days=30'),
+      safe('/program/command/pipeline')])
+      .then(([ob, ba, st, pl]) => setLive({ ob, ba, st, pl }))
     api.get('/program/command' + (p.toString() ? `?${p}` : '')).then(r => { setD(r); setErr(''); setAt(new Date())
       try { sessionStorage.removeItem('sci_live_entry') } catch { /* private mode */ } })
       .catch(e => {
@@ -312,6 +313,38 @@ function Unknown({ items, toast, reload }) {
           <button onClick={() => handled(u)}><Icon n="check" />Handled</button>
         </div>
       </article>))}
+  </>
+}
+
+// THE OUTREACH OPERATION: are new families entering, and are existing ones
+// progressing? Real families only.
+function Pipeline({ p }) {
+  const b = p.daily_batch || {}
+  const reasons = Object.entries(p.failed_today?.reasons || {})
+  return <>
+    <SectionHead title="Outreach pipeline" />
+    <div className="cmd-card cmd-pipe">
+      <p className={b.on ? 'ok' : 'warn'}>{b.on
+        ? `Automatic enrollment ON - ${b.count} new families each sending day, starting ${b.start}, one every ${b.spacing_minutes} min.${b.last_date ? ` Last batch: ${b.last_date}.` : ''}`
+        : <>Automatic enrollment is OFF - no new families are being added. <a href="/program?tab=send">Turn it on (Choose &amp; Send › Every day, automatically)</a></>}</p>
+    </div>
+    <div className="cmd-mini">
+      <MiniTile v={p.loaded} l="Contacts loaded" />
+      <MiniTile v={p.not_yet_contacted} l="Not yet contacted" />
+      <MiniTile v={p.enrolled_today} l="New families today" tone={p.enrolled_today ? 'green' : ''} />
+      <MiniTile v={`${p.first_touches_today.delivered}/${p.first_touches_today.sent}`} l="First texts delivered today" />
+      <MiniTile v={`${p.later_touches_today.delivered}/${p.later_touches_today.sent}`} l="Follow-up texts delivered today" />
+      <MiniTile v={p.in_outreach} l="Families in outreach" />
+      <MiniTile v={p.replies_today} l="Replies today" />
+      <MiniTile v={p.ai_conversations} l="AI conversations" />
+      <MiniTile v={p.appointments_offered} l="Offered times" />
+      <MiniTile v={p.appointments_confirmed} l="Appointments confirmed" tone={p.appointments_confirmed ? 'green' : ''} />
+      <MiniTile v={p.email_holds} l="Email held (texts still go)" />
+      <MiniTile v={p.not_textable + p.on_hold_for_review} l="Can't text / on review" n={`${p.not_textable} not a cell · ${p.on_hold_for_review} on hold`} />
+      <MiniTile v={p.failed_today.count} l="Failed today" tone={p.failed_today.count ? 'red' : ''} />
+    </div>
+    {reasons.length > 0 && <div className="cmd-card cmd-list">{reasons.map(([k, v]) => (
+      <div key={k} className="cmd-failrow"><span>{k}</span><b>{v}</b></div>))}</div>}
   </>
 }
 
@@ -639,6 +672,7 @@ function TodayActivity({ live, engagement, open }) {
       <MiniTile v={A?.opted_out ?? '-'} l="Opted out" a="all time" />
       <MiniTile v={live?.ob?.failed || 0} l="Failed or bounced" tone={live?.ob?.failed ? 'red' : ''} a={A && `${A.failed} all time`} />
     </div>
+    {live?.pl && <Pipeline p={live.pl} />}
     {live?.st?.outcomes && <>
       <SectionHead title="Appointments (last 30 days)" />
       <div className="cmd-mini">

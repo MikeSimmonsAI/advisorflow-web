@@ -182,3 +182,16 @@ def test_sci_texts_carry_no_links_unless_switched_on(program, sample_advisor, mo
     assert sms_programs.content_allowance(db, lead)["allow_links"] is False
     monkeypatch.setenv("SCI_SMS_LINKS", "on")
     assert sms_programs.content_allowance(db, lead)["allow_links"] is True
+
+
+def test_pipeline_counts_real_families_only(program, sample_advisor, client):
+    db, org = program["db"], program["org"]
+    a = _lead_for(db, org, sample_advisor, "L001")
+    t = _lead_for(db, org, sample_advisor, "L002", phone="2145550102", first="Test", email="t@example.com")
+    t.is_test = True
+    db.commit()
+    r = client.get("/program/command/pipeline", headers=_h(db, program["admin"]))
+    assert r.status_code == 200, r.text
+    p = r.json()
+    assert p["loaded"] == 1 and p["not_yet_contacted"] == 1 and "daily_batch" in p
+    assert set(p["first_touches_today"]) == {"sent", "delivered", "failed"}

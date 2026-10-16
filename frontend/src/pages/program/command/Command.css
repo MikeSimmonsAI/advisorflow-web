@@ -200,3 +200,6 @@ body:has(.cmd)::before { display: none; }
 .cmd-replyto.bad { background: #fde8e8; color: var(--c-red); }
 .cmd-send { flex-wrap: wrap; }
 .cmd-send button { min-height: 44px; }
+.cmd-pipe p { margin: 0; font-weight: 600; font-size: 14px; }
+.cmd-pipe p.ok { color: var(--c-green); } .cmd-pipe p.warn { color: var(--c-amber); }
+.cmd-failrow { display: flex; justify-content: space-between; padding: 8px 12px; font-size: 14px; }
