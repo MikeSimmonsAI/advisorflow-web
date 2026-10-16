@@ -11,13 +11,15 @@
    existing endpoints: /sms/send, /email/send/{id}, /work/leads/{id}/notes,
    /program/responses/{id}/mark, /program/command/schedule, /assign.
    Route: /program/command */
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../../api/client'
 import EngagementGauge, { useEngagement } from '../EngagementGauge'
 import SelfCheck from '../SelfCheck'
 import VoicemailPlayer from '../../../components/telephony/VoicemailPlayer'
 import { Journey, MetricDrill, PerformanceHome } from './Performance'
-import { Home, ScreenTabs, SideNav, TopBar, useHomeData } from './Dashboard'
+import { Home, ScreenTabs, TopBar, useHomeData } from './Dashboard'
+import { LIVE_SCREENS, MobileNav, SideNav } from './SciNav'
 import './Dashboard.css'
 import './Command.css'
 import './Performance.css'
@@ -84,7 +86,31 @@ const Icon = ({ n, s = 18 }) => (
 )
 
 export default function Command() {
-  const [tab, setTab] = useState('home')
+  // EVERY SCREEN HAS A URL (Oct 16 navigation repair): ?s= screen, ?f= family,
+  // ?v= family view, ?m= metric drill. Refresh, Back/Forward, a shared link and
+  // the side menu all land on the same screen; nothing lives only in memory.
+  const [sp] = useSearchParams()
+  const navigate = useNavigate()
+  const where = useLocation()
+  const tab = LIVE_SCREENS.has(sp.get('s')) ? sp.get('s') : 'home'
+  const family = sp.get('f') || null
+  const familyView = sp.get('v') === 'journey' ? 'journey' : 'conversation'
+  const mRaw = sp.get('m')
+  const drill = useMemo(() => { try { return mRaw ? JSON.parse(mRaw) : null } catch { return null } }, [mRaw])
+  /** Move to another SCI Live screen as a real history entry. */
+  const nav = useCallback((patch, replace = false) => {
+    const next = new URLSearchParams(where.search)
+    Object.entries(patch).forEach(([k, v]) => {
+      if (v === null || v === undefined || v === '') next.delete(k)
+      else next.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v))
+    })
+    const qs = next.toString()
+    navigate({ pathname: '/program/live', search: qs ? `?${qs}` : '' }, { replace })
+  }, [navigate, where.search])
+  const setTab = k => nav({ s: k === 'home' ? null : k, f: null, v: null, m: null })
+  const setDrill = spec => nav({ m: spec || null, f: null, v: null })
+  /** Back inside the app when there is history, otherwise to the given screen. */
+  const back = fallback => (window.history.state?.idx > 0 ? navigate(-1) : nav(fallback, true))
   const [loc, setLoc] = useState('')
   const [q, setQ] = useState('')
   const [d, setD] = useState(null)
@@ -92,16 +118,13 @@ export default function Command() {
   const [at, setAt] = useState(null)
   const engagement = useEngagement()
   const [err, setErr] = useState('')
-  const [family, setFamily] = useState(null)       // lead id
-  const [familyView, setFamilyView] = useState('conversation')
   const [range, setRange] = useState({ preset: 'today' })
-  const [drill, setDrill] = useState(null)          // { metric, touch?, channel?, status?, location_id? }
   const [lastFamily, setLastFamily] = useState(null)
   const [inboxSel, setInboxSel] = useState(null)
   const wide = useWide()
   const home = useHomeData()
-  const openFamily = (id, view) => { setFamilyView(view || 'conversation'); setLastFamily(id); setFamily(id) }
-  const scrollTo = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const openFamily = (id, view) => { setLastFamily(id); nav({ f: id, v: view === 'journey' ? 'journey' : null }) }
+  useEffect(() => { if (family) setLastFamily(family) }, [family])
   const [startReply, setStartReply] = useState(false) // opened with Reply: composer open and focused
   const [toast, setToast] = useState('')
   const busy = useRef(false)
@@ -146,7 +169,7 @@ export default function Command() {
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 3500); return () => clearTimeout(t) }, [toast])
 
   const act = async (item, a) => {
-    if (a === 'call') { window.location.href = `tel:${item.phone || ''}`; if (!item.phone) setFamily(item.lead_id); return }
+    if (a === 'call') { window.location.href = `tel:${item.phone || ''}`; if (!item.phone) openFamily(item.lead_id); return }
     if (['reply', 'schedule', 'review', 'note'].includes(a)) {
       setStartReply(a === 'reply')
       if (wide && tab === 'inbox') { setInboxSel(item.lead_id); setLastFamily(item.lead_id) } else openFamily(item.lead_id)
@@ -163,60 +186,53 @@ export default function Command() {
   const screen = family ? (familyView === 'journey' ? 'journey' : 'inbox') : drill ? 'drill'
     : tab === 'home' ? 'home' : tab
   const go = k => {
-    if (k === 'drill') { setFamily(null); setDrill({ metric: 'attempts', range: { preset: 'today' } }); return }
+    if (k === 'drill') { setDrill({ metric: 'attempts', range: { preset: 'today' } }); return }
     if (k === 'journey') {
       const id = lastFamily || inboxSel || d?.inbox?.[0]?.lead_id
-      if (id) { setDrill(null); openFamily(id, 'journey') } else setToast('Open a family first.')
+      if (id) openFamily(id, 'journey'); else setToast('Open a family first.')
       return
     }
-    setFamily(null); setDrill(null)
-    if (k === 'reports') { setTab('home'); setTimeout(() => scrollTo('sl-reports'), 80); return }
-    setTab(k); window.scrollTo(0, 0)
+    setTab(k)
   }
+  // A new screen starts at the top (Back keeps the browser's own restore).
+  const screenKey = `${tab}|${family || ''}|${familyView}|${mRaw || ''}`
+  useEffect(() => { window.scrollTo(0, 0) }, [screenKey])
+  // Clicking the menu item of the screen already open: back to its top.
+  const onSame = () => window.scrollTo({ top: 0, behavior: 'smooth' })
   const frame = (body, cls = '') => (
     <div className="sl-shell">
-      <SideNav screen={screen} go={go} needs={d?.counts?.needs_attention} />
+      <SideNav badges={{ inbox: d?.counts?.needs_attention }} onSame={onSame} />
       <div className="sl-main">
         <TopBar batch={home.a?.daily_batch} />
         <ScreenTabs screen={screen} go={go} />
         <div className={`sl-body ${cls}`}>{body}</div>
         {toast && <div className="cmd-toast" role="status">{toast}</div>}
-        <nav className="cmd-tabs" aria-label="Sections">
-          {[['home', 'home', 'Performance'], ['inbox', 'inbox', 'Inbox'], ['search', 'search', 'Search'], ['appts', 'cal', 'Appointments']].map(([k, ic, lbl]) => (
-            <button key={k} className={screen === k ? 'on' : ''} onClick={() => go(k)}>
-              <span className="cmd-tabicon">{k === 'home' && screen === 'home' ? <Solid n="home" s={22} /> : <Icon n={ic} s={22} />}
-                {k === 'inbox' && d?.counts.needs_attention ? <i>{d.counts.needs_attention}</i> : null}</span>{lbl}
-            </button>))}
-        </nav>
+        <MobileNav badges={{ inbox: d?.counts?.needs_attention }} onSame={onSame} />
       </div>
     </div>
   )
   if (family) {
     return frame(<Family key={family} id={family} view={familyView} startReply={startReply}
-      onBack={() => { setFamily(null); setStartReply(false); load() }} toast={setToast} toastText={null} />)
+      onBack={() => { setStartReply(false); back({ f: null, v: null }); load() }} toast={setToast} toastText={null} />)
   }
   if (drill) {
-    return frame(<MetricDrill key={JSON.stringify(drill)} spec={drill} range={drill.range || range} loc={loc} onBack={() => setDrill(null)} openFamily={openFamily} />, 'wide')
+    return frame(<MetricDrill key={JSON.stringify(drill)} spec={drill} range={drill.range || range} loc={loc} onBack={() => back({ m: null })} openFamily={openFamily} />, 'wide')
   }
-  return frame(<div className={`cmd ${tab === 'home' || (tab === 'inbox' && wide) ? 'cmd-wide' : ''}`}>
+  return frame(<div className={`cmd ${tab === 'home' || tab === 'reports' || (tab === 'inbox' && wide) ? 'cmd-wide' : ''}`}>
       {tab === 'home' && <>
         {err && <p className="cmd-err">{err}</p>}
         <div className="sl-search"><SearchBox q={q} setQ={v => { setQ(v); if (v.trim()) setTab('search') }} /></div>
         {d?.owner_alert && (
-          <a className="cmd-owner" href="/program?tab=health">
+          <Link className="cmd-owner" to="/program?tab=health">
             <Icon n="warn" />
             <span><b>Owner alert</b><br />{d.owner_alert.text}</span>
             <span className="cmd-link">View ›</span>
-          </a>
+          </Link>
         )}
         {(d?.counts?.needs_attention > 0 || (d?.unknown || []).length > 0) && (
           <button className="sl-alert" onClick={() => go('inbox')}><b>{d.counts.needs_attention} famil{d.counts.needs_attention === 1 ? 'y needs' : 'ies need'} a reply</b>
             {(d.unknown || []).length ? <span> · {d.unknown.length} unknown caller{d.unknown.length === 1 ? '' : 's'}</span> : null}<em>Open inbox ›</em></button>)}
         <Home a={home.a} sched={home.sched} openMetric={setDrill} openFamily={openFamily} />
-        <section id="sl-reports" className="sl-reports">
-          <SectionHead title="Performance & reports" />
-          <PerformanceHome range={range} setRange={setRange} loc={loc} setLoc={setLoc} openMetric={setDrill} />
-        </section>
         {d && <div className="cmd-cols">
           <div>
             <Unknown items={d.unknown} toast={setToast} reload={load} />
@@ -240,7 +256,7 @@ export default function Command() {
           </div>
         </div>}
         {d && <p className="cmd-foot">Updates every {Math.round(REFRESH_MS / 1000)} seconds and whenever you come back to this screen{at ? ` · last ${time(at.toISOString())}` : ''}.
-          {' '}<a href="/program">Open the full SCI Program Center</a></p>}
+          {' '}<Link to="/program?tab=dashboard">Open the Program Overview</Link></p>}
       </>}
       {tab === 'inbox' && (wide
         ? <div className="sl-inbox">
@@ -256,7 +272,11 @@ export default function Command() {
         <SearchResults q={q} loc={loc} open={openFamily} />
       </>}
       {tab === 'appts' && <Appointments open={openFamily} />}
-    </div>, tab === 'home' || tab === 'inbox' ? 'wide' : '')
+      {tab === 'reports' && <section id="sl-reports" className="sl-reports">
+        <SectionHead title="Analytics · performance & reports" />
+        <PerformanceHome range={range} setRange={setRange} loc={loc} setLoc={setLoc} openMetric={setDrill} />
+      </section>}
+    </div>, tab === 'home' || tab === 'inbox' || tab === 'reports' ? 'wide' : '')
 }
 
 function useWide() {
@@ -559,7 +579,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         <span className="cmd-more">
           <button onClick={() => setMenu(!menu)} aria-label="More" aria-expanded={menu}><Icon n="more" s={24} /></button>
           {menu && <div className="cmd-menu" onClick={() => setMenu(false)}>
-            <a href={`/leads/${id}`}>Open full family record</a>
+            <Link to={`/program?tab=leads&person=${id}`}>Open full family record</Link>
             {f.response_id && <button onClick={markHandled}>Mark handled</button>}
             {!f.mail_task && <button onClick={() => mailTask(false)}>Add task: mail a printed guide</button>}
             {f.phone && <button onClick={() => { navigator.clipboard?.writeText(f.phone).then(() => toast('Phone copied.')).catch(() => {}) }}>Copy phone number</button>}
@@ -607,7 +627,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
       </section>}
 
       <section className="cmd-card cmd-ctx">
-        <h3><Icon n="person" /> Family context <a className="cmd-edit" href={`/leads/${id}`}>Edit</a></h3>
+        <h3><Icon n="person" /> Family context <Link className="cmd-edit" to={`/program?tab=leads&person=${id}`}>Edit</Link></h3>
         <dl>
           <dt><Icon n="call" />Phone</dt><dd>{fmtPhone(f.phone) || '—'}{f.phone && <a href={`tel:${f.phone}`}>Call</a>}</dd>
           {f.email && <><dt><Icon n="mail" />Email</dt><dd>{f.email}</dd></>}
