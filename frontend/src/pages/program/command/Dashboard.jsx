@@ -4,6 +4,7 @@
    production data and opens the exact records behind it. On a phone the
    side menu and screen tabs give way to the bottom tabs. */
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api, getCurrentUser } from '../../../api/client'
 
 const CT = { timeZone: 'America/Chicago' }
@@ -31,33 +32,9 @@ const Ico = ({ n: name, s = 18 }) => (
   <svg viewBox="0 0 24 24" width={s} height={s} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{P[name]}</svg>
 )
 
-export function SideNav({ screen, go, needs }) {
-  const items = [
-    ['live', 'SCI Live', () => go('home'), screen === 'home' || screen === 'drill'],
-    ['fam', 'Families', () => go('search'), screen === 'search'],
-    ['conv', 'Conversations', () => go('inbox'), screen === 'inbox', needs],
-    ['ai', 'AI Assistant', '/program?tab=responses'],
-    ['cad', 'Outreach Cadence', '/program?tab=campaigns'],
-    ['plus', 'New Intake', '/program?tab=send'],
-    ['appt', 'Appointments', () => go('appts'), screen === 'appts'],
-    ['cal', 'Calendar', '/program?tab=appointments'],
-    ['ana', 'Analytics', () => go('reports')],
-    ['gear', 'Settings', '/program?tab=settings'],
-  ]
-  return (
-    <aside className="sl-side" aria-label="SCI Live menu">
-      <div className="sl-brand"><span className="sl-mark">E</span>EvoSys <em>Pro</em></div>
-      <nav>{items.map(([ic, label, to, on, badge]) => typeof to === 'string'
-        ? <a key={label} href={to}><Ico n={ic} />{label}</a>
-        : <button key={label} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={to}>
-          <Ico n={ic} />{label}{badge ? <i>{badge}</i> : null}</button>)}</nav>
-      <div className="sl-sidebot">
-        <span className="sl-pilot">● PILOT WORKSPACE</span>
-        <p>SCI outreach proof of concept · EvoSys Pro-operated · Not corporate implementation</p>
-      </div>
-    </aside>
-  )
-}
+/* The side menu lives in SciNav.jsx - one menu for SCI Live and the program
+   screens alike. Re-exported here for older imports. */
+export { SideNav } from './SciNav'
 
 export function TopBar({ batch }) {
   const [now, setNow] = useState(new Date())
@@ -152,7 +129,7 @@ export function Home({ a, sched, openMetric, openFamily }) {
       </section>
 
       <section className="sl-card">
-        <h3>Delivery readiness <a className="sl-a" href="/program?tab=send">Open controls →</a></h3>
+        <h3>Delivery readiness <Link className="sl-a" to="/program?tab=send">Open controls →</Link></h3>
         <div className="sl-row"><span>Weekday automatic enrollment</span><em className={`sl-tag ${b.on ? 'green' : 'orange'}`}>{b.on ? `ON · ${b.count} / day` : 'OFF'}</em></div>
         <div className="sl-row"><span>Next automatic batch</span><b>{a.next_batch ? ctDate(a.next_batch, { weekday: 'short', month: 'short', day: 'numeric' }) : '—'}{a.next_batch && b.start ? ` · ${b.start}` : ''}</b></div>
         <div className="sl-row"><span>Quiet hours &amp; STOP / DNC</span><em className="sl-tag green">Gated</em></div>
@@ -183,7 +160,7 @@ export function Home({ a, sched, openMetric, openFamily }) {
           </table>)}
       </section>
       <section className="sl-card">
-        <h3>Sending schedule <a className="sl-a" href="/program?tab=health">Operations log →</a></h3>
+        <h3>Sending schedule <Link className="sl-a" to="/program?tab=health">Operations log →</Link></h3>
         {[
           retest.status !== 'delivered' ? ['9:05 AM', 'Owner-number SMS link retest (Twilio ticket)'] : null,
           sn.first_start ? [clock(new Date(sn.first_start)), `First new-family text · ${ctDate(sn.first_start, { weekday: 'short', month: 'short', day: 'numeric' })}`] : null,

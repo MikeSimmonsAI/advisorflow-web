@@ -23,9 +23,9 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, fetchMyContexts, getCurrentUser, logout, refreshCurrentUser } from '../../api/client'
+import { api, fetchMyContexts, getCurrentUser, refreshCurrentUser } from '../../api/client'
 import { readAuthority } from '../../auth/workspaceAuthority'
-import { Icon, LocationMark, SearchBox, errText, initials, Loading } from './sci/ui'
+import { Icon, SearchBox, errText, Loading } from './sci/ui'
 import Dashboard from './sci/Dashboard'
 import Responses from './sci/Responses'
 import Review from './sci/Review'
@@ -40,7 +40,11 @@ import Leads from './sci/Leads'
 import Appointments from './sci/Appointments'
 import Outbox from './sci/Outbox'
 import Person from './sci/Person'
+import { TopBar } from './command/Dashboard'
+import { MobileNav, NAV, SideNav, TOOLS } from './command/SciNav'
 import './ProgramCenter.css'
+import './command/Dashboard.css'
+import './command/Command.css'
 
 const TABS = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
@@ -57,7 +61,6 @@ const TABS = [
   { key: 'health', label: 'Health', icon: 'health' },
   { key: 'settings', label: 'Settings', icon: 'settings' },
 ]
-const COLLAPSE_KEY = 'sci_nav_collapsed'
 
 /** Open Review on the first queue that has work in it, most urgent first. */
 function firstOpenQueue(att) {
@@ -65,9 +68,6 @@ function firstOpenQueue(att) {
   return order.find(k => (att?.[k] || 0) > 0) || 'all'
 }
 
-function readCollapsed() {
-  try { return localStorage.getItem(COLLAPSE_KEY) === '1' } catch { return false }
-}
 
 export default function ProgramCenter() {
   const [params, setParams] = useSearchParams()
@@ -75,8 +75,7 @@ export default function ProgramCenter() {
   const locationId = params.get('location') || ''
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const [batch, setBatch] = useState(null)
   const [search, setSearch] = useState(params.get('q') || '')
   const [me, setMe] = useState(() => getCurrentUser() || {})
   // The server's answer wins: a workspace admin by membership (Kerry) is a manager
@@ -100,7 +99,6 @@ export default function ProgramCenter() {
     refreshCurrentUser().then(p => { if (alive && p) setMe(m => ({ ...m, ...p })) })
     return () => { alive = false }
   }, [])
-  const userName = me.full_name || [me.first_name, me.last_name].filter(Boolean).join(' ') || me.email || 'Signed in'
 
   /** Change several query parameters at once; empty values are removed. */
   const setMany = useCallback((changes, { push = false } = {}) => {
@@ -113,12 +111,11 @@ export default function ProgramCenter() {
   const setParam = useCallback((key, value) => setMany({ [key]: value }), [setMany])
   const goTab = useCallback((key, extra = {}) => {
     // Tab changes are real history entries so Back/Forward move between screens.
-    setMany({ tab: key === 'dashboard' ? '' : key, queue: '', q: '', person: '', ...extra }, { push: true })
-    setMenuOpen(false)
+    setMany({ tab: key, queue: '', q: '', person: '', ...extra }, { push: true })
     window.scrollTo?.({ top: 0 })
   }, [setMany])
   const openPerson = useCallback(id => {
-    if (id) { setMany({ person: id }, { push: true }); setMenuOpen(false) }
+    if (id) setMany({ person: id }, { push: true })
   }, [setMany])
 
   const load = useCallback(() => {
@@ -140,6 +137,10 @@ export default function ProgramCenter() {
     return () => { alive = false }
   }, [locationId])
   useEffect(() => load(), [load])
+  // The shared top bar's "Automated intake ON/OFF" - one light read.
+  useEffect(() => { api.get('/program/daily-batch').then(setBatch).catch(() => {}) }, [])
+  // Each screen starts at the top; Back keeps the browser's own restore.
+  useEffect(() => { window.scrollTo?.(0, 0) }, [tab, personId])
 
   // Keep the Dashboard current on its own: quietly reload every 60 seconds
   // while it is open and the browser tab is visible. A failed background
@@ -156,135 +157,79 @@ export default function ProgramCenter() {
   }, [tab, personId, locationId])
 
   useEffect(() => {
-    const label = TABS.find(t => t.key === tab)?.label || 'Dashboard'
-    document.title = `${label} · Family Service Center · EvoSys Pro`
+    const label = [...NAV, ...TOOLS].find(t => t[0] === tab)?.[2] || 'Program Overview'
+    document.title = `${label} · SCI · EvoSys Pro`
   }, [tab])
   useEffect(() => { setSearch(params.get('q') || '') }, [params])
-
-  const toggleCollapsed = () => setCollapsed(v => {
-    const n = !v
-    try { localStorage.setItem(COLLAPSE_KEY, n ? '1' : '0') } catch { /* storage blocked */ }
-    return n
-  })
 
   const submitSearch = e => {
     e.preventDefault()
     goTab('leads', { q: search.trim() })
   }
 
+  // ONE SHELL: the same side menu, top bar and phone tabs as SCI Live. The
+  // older sidebar and navy header are gone; their search, location filter,
+  // response bell and campaign status live in the bar above each screen.
+  const badges = data ? {
+    responses: data.attention?.hot_responses || 0,
+    review: (data.attention?.data_review || 0) + (data.attention?.location_review || 0) + (data.attention?.duplicate_review || 0),
+  } : {}
+  const shell = body => (
+    <div className="sl-shell sl-pc">
+      <SideNav badges={badges} onSame={() => window.scrollTo?.({ top: 0, behavior: 'smooth' })} />
+      <div className="sl-main">
+        <TopBar batch={batch} />
+        <div className="sci-app sci-embed">{body}</div>
+        <MobileNav badges={badges} />
+      </div>
+    </div>
+  )
+
   if (err && !data) {
-    return (
-      <div className="sci-app" style={{ display: 'block' }}>
-        <div className="sci-work">
-          <div className="sci-alert" role="alert">{err}</div>
-          <button type="button" className="sci-btn" onClick={load}><Icon name="refresh" />Try again</button>{' '}
-          {!programOnly && <button type="button" className="sci-btn" onClick={() => navigate('/')}><Icon name="back" />Back to main menu</button>}
-        </div>
+    return shell(
+      <div className="sci-work">
+        <div className="sci-alert" role="alert">{err}</div>
+        <button type="button" className="sci-btn" onClick={load}><Icon name="refresh" />Try again</button>{' '}
+        {!programOnly && <button type="button" className="sci-btn" onClick={() => navigate('/')}><Icon name="back" />Back to main menu</button>}
       </div>
     )
   }
-  if (!data) return <div className="sci-app" style={{ display: 'block' }}><Loading label="Loading the Family Service Center…" /></div>
+  if (!data) return shell(<Loading label="Loading…" />)
 
   const prog = data.program
   const att = data.attention
   const realLocations = data.locations.filter(l => !l.is_review_bucket)
   const bucket = data.locations.find(l => l.is_review_bucket)
-  const reviewCount = (att.data_review || 0) + (att.location_review || 0) + (att.duplicate_review || 0)
-  const counts = { responses: att.hot_responses || 0, review: reviewCount }
   const sendingOn = (data.automation?.active_campaign_families || 0) > 0
-  const selLoc = realLocations.find(l => l.location_id === locationId)
-  const workspaceLabel = 'Family Service Center'
 
-  return (
-    <div className={`sci-app${menuOpen ? ' sci-menu-open' : ''}${collapsed ? ' sci-collapsed' : ''}`}>
-      <a className="sci-skip" href="#sci-main">Skip to content</a>
-      <aside className="sci-side" aria-label="Family Service Center navigation">
-        <div className="sci-brand">
-          <div className="sci-brand-word">EvoSys<span>Pro</span></div>
-          <div className="sci-brand-tag">People · Outreach · Appointments · Results</div>
-          <div className="sci-brand-mini" aria-hidden="true">E<span>P</span></div>
-        </div>
-        <nav className="sci-nav" aria-label="Workspace pages">
-          {TABS.map(t => (
-            <button key={t.key} type="button" aria-current={tab === t.key ? 'page' : undefined} onClick={() => goTab(t.key)}
-              title={collapsed ? t.label : undefined}>
-              <Icon name={t.icon} />
-              <span>{t.label}</span>
-              {counts[t.key] > 0 && (
-                <em className={`sci-count${t.key === 'responses' ? ' hot' : ''}`} style={{ fontStyle: 'normal' }}
-                  aria-label={t.key === 'review' ? `${counts[t.key]} records to review` : `${counts[t.key]} new HOT responses`}>
-                  {counts[t.key]}
-                </em>
-              )}
-            </button>
-          ))}
-        </nav>
-        <div className="sci-side-foot">
-          <button type="button" className="sci-collapse-btn" onClick={toggleCollapsed} aria-pressed={collapsed}
-            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}>
-            <Icon name={collapsed ? 'expand' : 'collapse'} /><span>Collapse menu</span>
-          </button>
-          {programOnly ? (
-            <button type="button" className="sci-side-link" onClick={async () => { await logout(); window.location.href = '/login' }} title="Sign out">
-              <Icon name="lock" /><span>Sign out</span>
-            </button>
-          ) : (
-            <button type="button" className="sci-side-link" onClick={() => navigate('/')} title="Back to main menu">
-              <Icon name="back" /><span>Back to main menu</span>
-            </button>
-          )}
-          <div className="sci-scicard" style={{ '--dot': sendingOn ? '#3fc28f' : '#e9a54a' }}
-            title={sendingOn ? `${data.automation.active_campaign_families} campaign(s) switched on` : 'All campaigns off — nothing sends automatically'}>
-            {selLoc ? <LocationMark name={selLoc.name} size={34} /> : <b aria-hidden="true"><Icon name="pin" size={20} /></b>}
-            <span>
-              {selLoc ? selLoc.name : 'Family Service Center'}
-              <small><Icon name="pin" size={11} />{selLoc ? 'Selected location' : `${realLocations.length} locations`}</small>
-              <small><i />{sendingOn ? `${data.automation.active_campaign_families} campaign(s) on` : 'All campaigns off'}</small>
-            </span>
-          </div>
-        </div>
-      </aside>
-      {menuOpen && <button type="button" className="sci-scrim" aria-label="Close menu" onClick={() => setMenuOpen(false)} />}
-
-      <div className="sci-main">
-        <header className="sci-top">
-          <button type="button" className="sci-iconbtn sci-menubtn" aria-label="Open menu" aria-expanded={menuOpen}
-            onClick={() => setMenuOpen(true)}><Icon name="menu" /></button>
-          <div className="sci-top-logo">EvoSys <b>PRO</b></div>
-          <div className="sci-top-spacer" />
-          <form role="search" onSubmit={submitSearch}>
-            <SearchBox id="sci-search" value={search} onChange={setSearch} label="Search contacts or Lead IDs"
-              placeholder="Search contacts, Lead IDs, phone or email…" />
-          </form>
-          <div className="sci-topselect-wrap">
-            <Icon name="pin" />
-            <label htmlFor="sci-location" className="sci-sr">Location filter</label>
-            <select id="sci-location" className="sci-topselect" value={locationId} onChange={e => setParam('location', e.target.value)}>
-              <option value="">All locations ({realLocations.length})</option>
-              {realLocations.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
-              {bucket && <option value={bucket.location_id}>{bucket.name} — not a facility</option>}
-            </select>
-          </div>
-          <button type="button" className="sci-iconbtn" onClick={() => goTab('responses')}
-            aria-label={`${att.hot_responses || 0} new HOT responses. Open Responses`} title="Responses">
-            <Icon name="bell" />
-            {att.hot_responses > 0 && <span className="sci-dot" aria-hidden="true">{att.hot_responses}</span>}
-          </button>
-          <div className="sci-profile" title={me.email ? `Signed in as ${me.email}` : undefined}>
-            <span className="sci-avatar" aria-hidden="true">{initials(userName)}</span>
-            <span className="sci-profile-text">
-              {userName}
-              <small>{workspaceLabel} · {isManager ? 'Workspace manager' : 'Team member'}</small>
-            </span>
-          </div>
-        </header>
-
-        <main className="sci-work" id="sci-main" tabIndex={-1}>
-          <form className="sci-mobile-search" role="search" onSubmit={submitSearch}>
-            <SearchBox id="sci-search-m" value={search} onChange={setSearch} label="Search contacts or Lead IDs" placeholder="Search contacts or Lead IDs…" />
-          </form>
+  return shell(<>
+    <a className="sci-skip" href="#sci-main">Skip to content</a>
+    <div className="sci-embed-bar">
+      <form role="search" onSubmit={submitSearch}>
+        <SearchBox id="sci-search" value={search} onChange={setSearch} label="Search contacts or Lead IDs"
+          placeholder="Search contacts, Lead IDs, phone or email…" />
+      </form>
+      <div className="sci-topselect-wrap">
+        <Icon name="pin" />
+        <label htmlFor="sci-location" className="sci-sr">Location filter</label>
+        <select id="sci-location" className="sci-topselect" value={locationId} onChange={e => setParam('location', e.target.value)}>
+          <option value="">All locations ({realLocations.length})</option>
+          {realLocations.map(l => <option key={l.location_id} value={l.location_id}>{l.name}</option>)}
+          {bucket && <option value={bucket.location_id}>{bucket.name} — not a facility</option>}
+        </select>
+      </div>
+      <span className={`sci-chip ${sendingOn ? 'ok' : 'warn'}`}
+        title={sendingOn ? `${data.automation.active_campaign_families} campaign(s) switched on` : 'All campaigns off — nothing sends automatically'}>
+        {sendingOn ? `${data.automation.active_campaign_families} campaign(s) on` : 'All campaigns off'}</span>
+      <button type="button" className="sci-iconbtn" onClick={() => goTab('responses')}
+        aria-label={`${att.hot_responses || 0} new HOT responses. Open AI Assistant`} title="AI Assistant (responses)">
+        <Icon name="bell" />
+        {att.hot_responses > 0 && <span className="sci-dot" aria-hidden="true">{att.hot_responses}</span>}
+      </button>
+    </div>
+    <main className="sci-work" id="sci-main" tabIndex={-1}>
           {err && <div className="sci-alert" role="alert">{err}</div>}
-          {personId && <Person leadId={personId} isManager={isManager} onBack={() => (window.history.length > 1 ? navigate(-1) : setMany({ person: '' }))} />}
+          {personId && <Person leadId={personId} isManager={isManager} onBack={() => (window.history.state?.idx > 0 ? navigate(-1) : setMany({ person: '', tab }))} />}
           {!personId && tab === 'leads' && <Leads locations={data.locations} locationId={locationId} openPerson={openPerson} initialQuery={params.get('q') || ''} />}
           {!personId && tab === 'appointments' && <Appointments locationId={locationId} openPerson={openPerson} />}
           {!personId && tab === 'outbox' && <Outbox openPerson={openPerson} />}
@@ -303,8 +248,6 @@ export default function ProgramCenter() {
           {!personId && tab === 'health' && <Health goTab={goTab} />}
           {!personId && tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness}
             locations={realLocations} onChange={load} goTab={goTab} automation={data.automation} />}
-        </main>
-      </div>
-    </div>
-  )
+    </main>
+  </>)
 }

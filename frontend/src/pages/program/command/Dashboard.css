@@ -220,3 +220,53 @@ button.sl-tag { cursor: pointer; }
 
 .sl-hero2 .sl-hero2-consent { margin-top: 8px; color: #fff; background: #ffffff14; border-radius: 8px; padding: 6px 10px; display: inline-block; }
 .cmd .tag.r-blocked { background: #fff1e2; color: #b77a37; }
+
+/* ── ONE SCI MENU (Oct 16 navigation repair) ── the same side menu, top bar
+   and phone tabs on SCI Live and on every program screen. */
+@media (min-width: 1100px) {
+  .sl-side { overflow-y: auto; overscroll-behavior: contain; }
+}
+.sl-side nav a, .sl-side nav button { padding: 9px 13px; }
+.sl-navgroup { margin: 14px 13px 6px; font-size: 10.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: #7fa0b8; }
+.sl-side .sl-tools a { padding: 7px 13px; font-size: 12.5px; }
+.sl-sidebot { padding-bottom: 4px; }
+.sl-exit { display: block; margin-top: 10px; background: none; border: 0; padding: 0; color: #cfe2ee; font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
+.sl-exit:hover { color: #fff; }
+/* phone tabs: router links look exactly like the old buttons */
+.cmd-tabs a { flex: 1; max-width: 140px; background: none; border: 0; display: flex; flex-direction: column; align-items: center;
+  gap: 2px; font-size: 12px; color: var(--c-muted); padding: 4px; cursor: pointer; text-decoration: none; font-family: inherit; }
+.cmd-tabs a.on, .cmd-tabs button.on { color: var(--c-navy); font-weight: 700; }
+.cmd-tabs button { font-family: inherit; }
+/* phone "More" sheet: the full menu */
+.sl-sheet { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; justify-content: center; }
+.sl-sheet-scrim { position: absolute; inset: 0; background: #0c203a80; border: 0; cursor: pointer; }
+.sl-sheet-body { position: relative; width: 100%; max-width: 560px; max-height: 82vh; overflow-y: auto; background: linear-gradient(170deg, #0b1e35 5%, #163c58 85%, #144e4c);
+  color: #dcebf3; border-radius: 18px 18px 0 0; padding: 14px 12px calc(18px + env(safe-area-inset-bottom)); }
+.sl-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 8px 10px; color: #fff; font-size: 15px; }
+.sl-sheet-head button { background: none; border: 0; color: #fff; padding: 6px; cursor: pointer; display: inline-flex; }
+.sl-sheet nav { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.sl-sheet nav a { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 10px; font-size: 13.5px; color: #d3e2ee; text-decoration: none; min-width: 0; }
+.sl-sheet nav a.on { background: #e6f7ff15; box-shadow: inset 3px 0 #43d0cd; color: #fff; font-weight: 750; }
+.sl-sheet nav i { margin-left: auto; font-style: normal; color: #43d0cd; font-weight: 700; font-size: 12px; }
+.sl-sheet .sl-navgroup { margin: 14px 12px 6px; }
+.sl-sheet .sl-exit { margin: 14px 12px 0; }
+@media (min-width: 1100px) { .sl-sheet { display: none; } }
+
+/* program screens inside the shell (formerly their own sidebar + navy header) */
+.sci-app.sci-embed { display: block; min-height: 0; min-width: 0; max-width: 100%; flex: 1; }
+.sci-embed-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 22px 0; max-width: 1760px; margin: 0 auto; }
+.sci-embed-bar form { flex: 1 1 260px; min-width: 0; }
+.sci-embed-bar .sci-search { width: 100%; max-width: 520px; background: #fff; }
+.sci-embed-bar .sci-topselect-wrap { background: #fff; border-color: var(--line); color: var(--ink); }
+.sci-embed-bar .sci-topselect-wrap > svg:first-child { color: var(--muted); }
+.sci-app .sci-embed-bar .sci-topselect { height: 36px; border: 0; background: transparent; color: var(--ink); box-shadow: none; font-size: 12.5px; padding: 0 12px 0 0; max-width: 240px; appearance: auto; }
+.sci-embed-bar .sci-iconbtn { margin-left: auto; }
+@media (max-width: 1099px) {
+  .sci-app.sci-embed .sci-work { padding-bottom: 96px; }
+  .sci-embed-bar { padding: 12px 16px 0; }
+}
+@media (max-width: 900px) {
+  .sci-embed-bar form { display: none; }
+  .sci-embed-bar .sci-topselect-wrap { flex: 1; max-width: none; }
+  .sci-app .sci-embed-bar .sci-topselect { max-width: 100%; width: 100%; }
+}

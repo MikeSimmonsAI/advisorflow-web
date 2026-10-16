@@ -6,6 +6,7 @@
    Reads /program/command/analytics, /analytics/records, /analytics/journey.
    Read-only: nothing on these screens sends, enrolls or approves. */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../../api/client'
 
 export const RANGES = [['today', 'Today'], ['7d', '7 Days'], ['30d', '30 Days'], ['all', 'All Time'], ['custom', 'Custom']]
@@ -138,7 +139,7 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric }) {
           <h3>Outreach engine</h3>
           <p className={`pf-batch ${d.daily_batch.on ? 'ok' : 'warn'}`}>{d.daily_batch.on
             ? `Automatic enrollment ON — ${d.daily_batch.count} new families each sending day from ${d.daily_batch.start}, one every ${d.daily_batch.spacing_minutes} min.`
-            : <>Automatic enrollment is OFF — no new families are being added. <a href="/program?tab=send">Turn it on ›</a></>}</p>
+            : <>Automatic enrollment is OFF — no new families are being added. <Link to="/program?tab=send">Turn it on ›</Link></>}</p>
           <div className="pf-snap">
             {[['loaded', 'Families loaded'], ['not_contacted', 'Not yet contacted'], ['in_outreach', 'In active outreach']].map(([k, l]) => (
               <button key={k} onClick={() => open(k)}><b>{n(m[k]?.value)}</b><span>{l}</span></button>))}
@@ -381,7 +382,7 @@ function Record({ i, open }) {
       <div className="pf-rec-links">
         <button onClick={() => open(i.lead_id, 'journey')}>Journey ›</button>
         <button onClick={() => open(i.lead_id, 'conversation')}>Conversation ›</button>
-        <a href={`/leads/${i.lead_id}`}>Family record ›</a>
+        <Link to={`/program?person=${i.lead_id}`}>Family record ›</Link>
       </div>
     </article>
   )

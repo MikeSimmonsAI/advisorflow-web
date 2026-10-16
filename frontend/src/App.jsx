@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { Suspense, useEffect, useState } from 'react'
 import { lazyPage } from './utils/lazyPage'
 import PageBoundary from './components/PageBoundary'
@@ -724,9 +724,20 @@ function WorkspaceRoute() {
 function sciLanding() {
   try {
     const to = new URLSearchParams(window.location.search).get('to')
-    return to === 'live' || to === 'command' ? '/program/live' : '/program'
+    // One SCI shell (Oct 16): every entry opens SCI Live; ?to=center opens the
+    // Program Overview inside the same shell.
+    return to === 'center' ? '/program?tab=dashboard' : '/program/live'
   }
-  catch { return '/program' }
+  catch { return '/program/live' }
+}
+
+/** /program with no screen named opens SCI Live, the first item of the one
+    SCI menu. Any deep link (?tab=, ?person=, ?location=, ?q=) still opens
+    that exact program screen inside the same shell. */
+function ProgramEntry() {
+  const { search } = useLocation()
+  if (!new URLSearchParams(search).toString()) return <Navigate to="/program/live" replace />
+  return <ProgramCenter />
 }
 
 function SciFrontDoor() {
@@ -1276,7 +1287,7 @@ export default function App() {
         <Route path="/workqueue" element={<ProtectedRoute><WorkQueue /></ProtectedRoute>} />
         <Route path="/program/live" element={<ProtectedRoute bare><ProgramLive /></ProtectedRoute>} />
         <Route path="/program/command" element={<Navigate to="/program/live" replace />} />
-        <Route path="/program" element={<ProtectedRoute bare><ProgramCenter /></ProtectedRoute>} />
+        <Route path="/program" element={<ProtectedRoute bare><ProgramEntry /></ProtectedRoute>} />
         <Route path="/auto-send" element={<ProtectedRoute><AutoSendQueue /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute feature="reports" requireAdmin><Reports /></ProtectedRoute>} />
         <Route path="/campaigns" element={<ProtectedRoute feature="campaigns" requireAdmin><CampaignBuilder /></ProtectedRoute>} />
