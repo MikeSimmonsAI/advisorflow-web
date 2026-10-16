@@ -103,3 +103,39 @@ def test_summary_includes_timing_fields(db_session):
     assert "finished_at" in summary
     assert "duration_seconds" in summary
     assert summary["duration_seconds"] >= 0
+
+
+def test_sci_left_to_backend_when_this_job_cannot_send_sci(db_session, monkeypatch):
+    """Oct 16: the cron (no SCI send switches) claimed an SCI family's due
+    first touch, the SCI gate refused it and the family's schedule stopped.
+    Without SCI sending enabled in this process the SCI org is skipped; the
+    backend's own loop runs its touches."""
+    from app.services import sms_programs
+    sci = Organization(name="SCI", slug="sci-test", plan="trial", is_active=True)
+    other = Organization(name="Other", slug="other-test", plan="trial", is_active=True)
+    db_session.add_all([sci, other]); db_session.commit()
+    sci_id, other_id = sci.id, other.id
+    monkeypatch.setenv(sms_programs.PROGRAMS[sms_programs.SCI].org_env, sci_id)
+    monkeypatch.delenv(sms_programs.SCI_SEND_ENV, raising=False)
+    calls = []
+    with _patched_run(db_session), patch("app.jobs.run_cadence_job.run_due_cadences",
+                                         side_effect=lambda db, organization_id: calls.append(organization_id) or
+                                         {"sent": 0, "completed": 0, "errors": 0}):
+        summary = run_for_all_organizations()
+    assert sci_id not in calls and other_id in calls
+    assert "skipped_org" in summary["per_org"]["sci-test"]
+
+
+def test_sci_runs_here_when_sci_sending_is_enabled(db_session, monkeypatch):
+    from app.services import sms_programs
+    sci = Organization(name="SCI", slug="sci-test2", plan="trial", is_active=True)
+    db_session.add(sci); db_session.commit()
+    sci_id = sci.id
+    monkeypatch.setenv(sms_programs.PROGRAMS[sms_programs.SCI].org_env, sci_id)
+    monkeypatch.setenv(sms_programs.SCI_SEND_ENV, "true")
+    calls = []
+    with _patched_run(db_session), patch("app.jobs.run_cadence_job.run_due_cadences",
+                                         side_effect=lambda db, organization_id: calls.append(organization_id) or
+                                         {"sent": 0, "completed": 0, "errors": 0}):
+        run_for_all_organizations()
+    assert sci_id in calls
