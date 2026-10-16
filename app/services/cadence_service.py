@@ -312,6 +312,9 @@ CADENCE_OUTCOMES = (
 # heat death of the universe.
 MAX_ATTEMPTS_PER_TOUCH = 3
 RETRY_BACKOFF = timedelta(hours=1)
+# Refusals that wait on a person (hold / review / campaign off), by their tag.
+REVIEW_WAIT_TAGS = ("ON HOLD:", "DATA REVIEW:", "DUPLICATE REVIEW:", "LOCATION REVIEW:", "CAMPAIGN OFF:")
+REVIEW_RECHECK = timedelta(hours=6)
 
 
 def org_sending_enabled(db: Session, organization_id: Optional[str]) -> bool:
@@ -934,6 +937,20 @@ def run_due_cadences(db: Session, organization_id: str = None,
                     db.commit()
                     stop_cadence_for_lead(db, lead.id, "stopped_no_sms_consent")
                     blocked_count += 1
+                    continue
+                # A PERSON'S DECISION IS NOT A FAILED SEND. On hold, in data /
+                # duplicate / location review, or campaign off: nothing reached a
+                # provider. Oct 16: an on-hold family (Alvin Major) was logged
+                # "failed" every hour, which spent the retry budget and walked
+                # his schedule past touches he never got. Now it is a skip (no
+                # budget spent, the touch is not abandoned) and it is checked
+                # again later; releasing the hold brings the touch due at once.
+                if any(t in str(exc) for t in REVIEW_WAIT_TAGS):
+                    if claim is not None:
+                        claim.outcome = OUTCOME_SKIPPED
+                        claim.reason = str(exc)[:500]
+                    state.next_touch_due_at = now + REVIEW_RECHECK
+                    db.commit()
                     continue
                 too_soon = "TOO_SOON" in str(exc)
                 if claim is not None:

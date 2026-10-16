@@ -394,9 +394,19 @@ const KIND = { imported: 'Imported', approved: 'Approved', hold: 'On hold', cade
 export function Journey({ id }) {
   const [j, setJ] = useState(null)
   const [err, setErr] = useState('')
-  useEffect(() => {
-    api.get(`/program/command/analytics/journey/${id}`).then(setJ).catch(e => setErr(e.message || 'Could not load the journey.'))
-  }, [id])
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  const loadJ = () => api.get(`/program/command/analytics/journey/${id}`).then(setJ).catch(e => setErr(e.message || 'Could not load the journey.'))
+  useEffect(() => { loadJ() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const restart = async () => {
+    setBusy(true); setNote('')
+    try {
+      const r = await api.post('/program/command/restart-texts', { lead_id: id })
+      setNote(`Texts restarted - touch ${r.next_touch} goes out next, inside the family's texting window.`)
+      await loadJ()
+    } catch (e) { setNote(e.message || 'Could not restart texts.') }
+    setBusy(false)
+  }
   if (err) return <p className="cmd-err">{err}</p>
   if (!j) return <p className="cmd-muted">Loading the journey…</p>
   const total = j.steps?.length || 0
@@ -414,7 +424,9 @@ export function Journey({ id }) {
             : <b>{appt.state === 'confirmed' ? 'Visit booked' : 'Nothing scheduled'}</b>}</div>
       </div>
       <div className="jr-cards">
-        <div><small>Current state</small><b className="blue">{j.stage}</b><span>{j.handling === 'human' ? 'A person is handling replies' : 'AI answers replies'}</span></div>
+        <div><small>Current state</small><b className="blue">{j.stage}</b><span>{j.handling === 'human' ? 'A person is handling replies' : 'AI answers replies'}</span>
+          {j.texts_restartable && <button type="button" className="jr-restart" disabled={busy} onClick={restart}>{busy ? 'Restarting…' : 'Restart texts'}</button>}
+          {note && <span className="jr-restart-note">{note}</span>}</div>
         <div><small>Touch progression</small><b>{sentTexts.size} / {total || '—'}</b><span>{j.touches_sent
           ? `${sentTexts.size} text touch${sentTexts.size === 1 ? '' : 'es'} sent${j.touches_sent > sentTexts.size ? ` · plus ${j.touches_sent - sentTexts.size} email${j.touches_sent - sentTexts.size === 1 ? '' : 's'}` : ''}`
           : 'Touch one not yet sent'}</span></div>
@@ -454,7 +466,7 @@ export function Journey({ id }) {
             <div className="sl-row"><span>Appointment calendar</span><b>EvoSys Appointment Booking</b></div>
             <div className="sl-row"><span>Meeting type</span><b>In-person visit (60 min)</b></div>
             <div className="sl-row"><span>Booking outcome</span><em className={`tag ${appt.state === 'confirmed' ? 'r-delivered' : 'r-pending'}`}>{appt.state === 'confirmed' ? 'Confirmed' : appt.state === 'offered' ? 'Offered' : 'Pending'}</em></div>
-            <p className="jr-warn">Booking links stay out of texts until the Twilio link retest clears. An offer of times is not a confirmed appointment.</p>
+            <p className="jr-warn">{j.sms_links_on ? 'Booking links can go in texts.' : 'Booking links stay out of texts for now.'} An offer of times is not a confirmed appointment.</p>
           </div>
         </div>
       </div>

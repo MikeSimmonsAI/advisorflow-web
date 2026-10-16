@@ -714,6 +714,41 @@ def command_handling(body: HandlingIn, db: Session = Depends(get_db), user: User
             "program_mode": ai_setter.mode_of(prog)}
 
 
+class RestartTextsIn(BaseModel):
+    lead_id: str
+
+
+@router.post("/restart-texts")
+def command_restart_texts(body: RestartTextsIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Restart a family's text schedule that was stopped as "no SMS consent".
+    The owner holds a consent form for every SCI family (Oct 16 standing
+    decision); on Oct 16 at 9:03 CT a job without the SCI send switches
+    stopped one family this way by mistake. Managers only. Only that one
+    stopped state is reopened - opt-outs, replies, bookings and holds are
+    never touched - and every send still goes through the SCI gate."""
+    from app.models.models import CadenceState
+    prog = _program(db, user, managers_only=True)
+    lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    if _tr.is_test_record(lead) or not _tr.is_outreach_eligible(lead):
+        raise HTTPException(status_code=409, detail="This family is excluded from outreach.")
+    st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    if st is None or st.status != "stopped_no_sms_consent":
+        raise HTTPException(status_code=409, detail="Only a text schedule stopped for no SMS consent can be restarted here.")
+    now = datetime.utcnow()
+    st.status = "active"
+    st.completed_at = None
+    st.next_touch_due_at = now
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="sci.restart_texts", target_type="lead",
+               target_id=lead.id, details={"from": "stopped_no_sms_consent",
+                                           "next_touch": (st.current_touch_number or 0) + 1})
+    db.commit()
+    return {"lead_id": lead.id, "status": st.status, "next_touch": (st.current_touch_number or 0) + 1,
+            "next_touch_at": now.isoformat() + "Z"}
+
+
 @router.get("/slots")
 def command_slots(lead_id: str, kind: str = "visit", db: Session = Depends(get_db),
                   user: User = Depends(require_tenant_or_observer)):

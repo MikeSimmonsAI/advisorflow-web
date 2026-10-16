@@ -215,3 +215,57 @@ def test_inbox_filters_for_ai_human_and_unread(program, sample_advisor, client):
     assert {"ai", "human", "appointments", "unread"} <= set(r["filter_counts"])
     total = r["filter_counts"]["ai"] + r["filter_counts"]["human"]
     assert total == r["filter_counts"]["all"]
+
+
+def test_restart_texts_reopens_only_a_no_consent_stop(program, sample_advisor, client):
+    """Oct 16: a job without the SCI send switches stopped a family's texts
+    as "no consent". A manager can restart exactly that state, and the
+    family page says it in plain words."""
+    from app.models.models import CadenceState
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Arthur")
+    st = db.query(CadenceState).filter_by(lead_id=lead.id).one()
+    st.status, st.current_touch_number = "stopped_no_sms_consent", 0
+    st.cadence_started_at, st.completed_at = datetime(2026, 10, 16, 2, 57), datetime(2026, 10, 16, 14, 3)
+    db.commit()
+    h = _h(db, program["admin"])
+    j = client.get(f"/program/command/analytics/journey/{lead.id}", headers=h).json()
+    assert j["texts_restartable"] is True and "stopped_no_sms_consent" not in j["stage"]
+    assert j["stage"] == "Texts stopped - no SMS consent on record"
+    r = client.post("/program/command/restart-texts", json={"lead_id": lead.id}, headers=h)
+    assert r.status_code == 200 and r.json()["next_touch"] == 1
+    db.refresh(st)
+    assert st.status == "active" and st.completed_at is None and st.next_touch_due_at is not None
+    # a second try (now active) and any other stopped state are refused
+    assert client.post("/program/command/restart-texts", json={"lead_id": lead.id}, headers=h).status_code == 409
+    st.status = "opted_out"; db.commit()
+    assert client.post("/program/command/restart-texts", json={"lead_id": lead.id}, headers=h).status_code == 409
+
+
+def test_an_on_hold_family_waits_instead_of_failing(program, sample_advisor):
+    """Oct 16: an on-hold family was logged "failed" every hour, spending the
+    retry budget. A hold is a wait: skipped, no budget spent; release makes
+    the touch due again."""
+    from app.models.models import CadenceState, CadenceTouchLog
+    from app.models.program_models import ProgramSourceRecord
+    from app.services import cadence_service as C
+    from app.services.programs import holds
+    db, org = program["db"], program["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Alvin")
+    rec = db.query(ProgramSourceRecord).filter_by(organization_id=org.id, lead_id=lead.id).one()
+    holds.set_hold(db, rec, True, None, reason="location identity review")
+    st = db.query(CadenceState).filter_by(lead_id=lead.id).one()
+    st.next_touch_due_at = datetime.utcnow()
+    db.commit()
+    with patch("app.services.cadence_service.org_sending_enabled", return_value=True), \
+         patch("app.services.entitlements.org_has_feature", return_value=True), \
+         patch("app.services.sms_service.send_sms",
+               side_effect=Exception("Lead x: ON HOLD: this contact was put on hold by a person.")):
+        C.run_due_cadences(db, organization_id=org.id)
+    logs = db.query(CadenceTouchLog).filter_by(lead_id=lead.id).all()
+    assert logs and all(l.outcome == C.OUTCOME_SKIPPED for l in logs)
+    db.refresh(st)
+    assert st.status == "active" and st.next_touch_due_at > datetime.utcnow()
+    holds.set_hold(db, rec, False, None)
+    db.commit(); db.refresh(st)
+    assert st.next_touch_due_at <= datetime.utcnow()
