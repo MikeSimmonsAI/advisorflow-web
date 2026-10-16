@@ -331,7 +331,7 @@ sc("r003", "regression", "Lester",
    ("Would really like to receive guide, any questions coming from the guide I would contact you. Is this possible?",
     "send_guide,mail_guide"),
    ("Can you mail me a printed copy instead", "mail_guide",
-    {"must": [r"(visit|stop by|sit down|in person|go over|bring)"]}))
+    {"must": [r"(visit|stop by|sit down|in person|go over (it|this|that) (with|together)|bring)"]}))
 sc("r004", "regression", "Gerald",
    ("Is this a real person or a robot?", "answer",
     {"must": [r"(assistant|automated)"], "must_not": [r"\bi'?m (a real person|human)\b"]}))

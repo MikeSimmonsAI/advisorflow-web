@@ -68,3 +68,16 @@ def test_validator_rejects_third_person_reply(monkeypatch):
     d = {"action": "answer", "reply": "Kerry Allan would be glad to help with that."}
     probs = ai_setter.validate_decision(d, "thanks", C(), "Kerry Allan")
     assert any("third person" in p for p in probs)
+
+
+def test_validator_requires_an_honest_answer_to_are_you_a_robot(monkeypatch):
+    from app.services.programs import ai_setter
+
+    class C:
+        id = "c"; offered_slots = None; state = "open"
+    monkeypatch.setattr(ai_setter, "_last_ai_text", lambda conv: None)
+    monkeypatch.setattr(ai_setter, "_strip_offered", lambda reply, conv: reply)
+    dodge = {"action": "answer", "reply": "This is Kerry with the family services team. How can I help?"}
+    honest = {"action": "answer", "reply": "Fair question - an automated assistant helps me keep up with messages, and I see every reply."}
+    assert any("automated" in p for p in ai_setter.validate_decision(dodge, "Is this a real person or a robot?", C()))
+    assert ai_setter.validate_decision(honest, "Is this a real person or a robot?", C()) == []
