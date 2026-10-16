@@ -74,6 +74,20 @@ def run_for_all_organizations():
             # org and the slug would be a fresh query on a broken connection.
             org_id, org_slug = org.id, org.slug
             try:
+                # SCI TEXTS ARE SENT ONLY BY A PROCESS THAT CAN SEND THEM. This
+                # cron container does not carry the SCI send switches
+                # (SCI_SMS_SEND_ENABLED, SCI_AUTO_ATTEST_AT_SEND) that the
+                # backend does, so on Oct 16 at 9:03 CT it claimed one SCI
+                # family's due first touch, the SCI gate refused it
+                # (SCI_SMS_DISABLED + NO_SMS_CONSENT) and the family's text
+                # schedule was stopped. The backend's own loop runs every
+                # organization's due touches, SCI included, so here SCI is
+                # left to it whenever this process cannot send SCI texts.
+                from app.services import sms_programs as _smsp
+                if _smsp.is_sci_org(db, org_id) and not _smsp._truthy(_smsp.SCI_SEND_ENV):
+                    overall_summary["per_org"][org_slug] = {
+                        "skipped_org": "SCI touches run in the backend service (SCI sending is not enabled in this job)"}
+                    continue
                 result = run_due_cadences(db, organization_id=org_id)
                 overall_summary["per_org"][org_slug] = result
                 overall_summary["total_sent"] += result["sent"]
