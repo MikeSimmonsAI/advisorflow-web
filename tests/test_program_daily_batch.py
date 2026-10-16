@@ -7,6 +7,7 @@ from app.models.program_models import OutreachProgram
 from app.services.programs import daily_batch, send_approval
 from tests.test_program_load_source import _program
 from tests.test_switch_import_booking import _h
+from tests.test_outreach_program import program  # noqa: F401 (fixture)
 
 # 2026-10-14 is a Wednesday. 15:00 UTC = 10:00 AM Central (CDT).
 WED_10AM = datetime(2026, 10, 14, 15, 0)
@@ -58,3 +59,44 @@ def test_off_or_no_owner_does_nothing(db_session, sample_org, monkeypatch):
     assert daily_batch.run_for(db_session, p, WED_10AM) is None
     p.daily_batch_count, p.daily_batch_by = 5, None
     assert daily_batch.run_for(db_session, p, WED_10AM) is None
+
+
+THU_957PM = datetime(2026, 10, 16, 2, 57)        # Thu Oct 15, 9:57 PM Central
+
+
+def test_no_batch_is_approved_after_hours(db_session, sample_org, monkeypatch):
+    admin = _program(db_session, sample_org)
+    p = _prog(db_session, sample_org)
+    p.daily_batch_count, p.daily_batch_by = 40, admin.id
+    db_session.commit()
+    monkeypatch.setattr(send_approval, "approve", lambda *a, **k: (_ for _ in ()).throw(AssertionError("approved")))
+    assert daily_batch.run_for(db_session, p, THU_957PM) is None
+    assert p.daily_batch_last_date is None                 # Friday's batch still runs at 9:00
+
+
+def test_repace_spreads_an_after_hours_batch_over_the_next_morning(program, sample_advisor, client):
+    from app.models.models import CadenceState
+    from app.models.program_models import ProgramSourceRecord
+    from tests.test_outreach_program import _h as h2, _lead_for
+    db, org, prog = program["db"], program["org"], program["prog"]
+    prog.daily_batch_count, prog.daily_batch_by, prog.daily_batch_spacing = 40, program["admin"].id, 10
+    leads = [_lead_for(db, org, sample_advisor, "L00%d" % i, phone="21455501%02d" % i, first="F%d" % i,
+                       email="f%d@example.com" % i) for i in (1, 2, 3)]
+    when = datetime.utcnow()
+    for l in leads:
+        r = db.query(ProgramSourceRecord).filter_by(lead_id=l.id).one()
+        r.approved_to_send_at, r.scheduled_start_at = when, when
+    db.commit()
+    hh = h2(db, program["admin"])
+    assert client.post("/program/daily-batch/repace", headers=hh,
+                       json={"approved_since": when.isoformat()}).status_code == 422
+    res = client.post("/program/daily-batch/repace", headers=hh,
+                      json={"approved_since": (when.replace(microsecond=0)).isoformat(), "confirm": "REPACE"}).json()
+    assert res["moved"] == 3
+    starts = sorted(datetime.fromisoformat(i["starts_at"][:-1]) for i in res["items"])
+    assert (starts[1] - starts[0]).total_seconds() == 600 and (starts[2] - starts[1]).total_seconds() == 600
+    st = db.query(CadenceState).filter_by(lead_id=leads[0].id).one()
+    db.refresh(st)
+    assert st.next_touch_due_at in starts
+    db.refresh(prog)
+    assert prog.daily_batch_last_date == res["counts_as_batch_for"]

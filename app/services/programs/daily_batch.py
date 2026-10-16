@@ -43,6 +43,11 @@ from app.models.program_models import CampaignFamily, OutreachProgram
 log = logging.getLogger(__name__)
 TZ = "America/Chicago"
 MAX_PER_DAY = 200
+# A day's batch is approved only before this Central time. Switched on (or a
+# server back up) later than this, the batch waits for the next sending day's
+# start - so the day's families are paced through business hours instead of
+# all being held overnight and then going out together when sending opens.
+LATEST_START = time(15, 0)
 
 
 def _local_now(now: Optional[datetime] = None) -> datetime:
@@ -109,6 +114,8 @@ def run_for(db: Session, prog: OutreachProgram, now: Optional[datetime] = None) 
     start_t = _start_time(prog)
     if local.time() < start_t:
         return None
+    if local.time() >= max(LATEST_START, start_t):
+        return None
     user = db.query(User).filter(User.id == prog.daily_batch_by, User.is_active.is_(True)).first()
     if user is None:
         log.warning("daily batch for %s skipped: the person who switched it on is not active", prog.id)
@@ -142,3 +149,67 @@ def run(db: Session, now: Optional[datetime] = None) -> Dict:
             db.rollback()
             log.exception("daily batch failed for program %s", prog.id)
     return out
+
+
+def next_sending_start(prog: OutreachProgram, now: Optional[datetime] = None) -> datetime:
+    """Naive UTC: the next sending day's batch start (today's if still ahead)."""
+    from zoneinfo import ZoneInfo
+    local = _local_now(now)
+    start_t = _start_time(prog)
+    days = prog.daily_batch_days or "12345"
+    d = local.date()
+    for i in range(0, 8):
+        day = d + timedelta(days=i)
+        if str(day.isoweekday()) not in days:
+            continue
+        at = datetime.combine(day, start_t, ZoneInfo(TZ))
+        if at > local:
+            return at.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    return (local + timedelta(days=1)).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def repace(db: Session, prog: OutreachProgram, user: User, approved_since: datetime,
+           now: Optional[datetime] = None) -> Dict:
+    """Move the start times of families the daily batch approved since
+    `approved_since` who have NOT been contacted yet (no text, no email, first
+    touch not sent) to the next sending day: first at start + 2 min, then one
+    every `spacing` minutes. That day's batch is counted as done, so the day
+    gets these families, not twice as many. Only times change: approval,
+    consent, STOP/DNC and every send-time check are untouched."""
+    from zoneinfo import ZoneInfo
+    from app.models.models import CadenceState, EmailMessage, Message
+    from app.models.program_models import ProgramSourceRecord as R
+    first = next_sending_start(prog, now) + timedelta(minutes=2)
+    spacing = max(1, min(240, int(prog.daily_batch_spacing or 8)))
+    recs = (db.query(R).filter(R.organization_id == prog.organization_id, R.lead_id.isnot(None),
+                               R.approved_to_send_at.isnot(None), R.approved_to_send_at >= approved_since)
+            .order_by(R.scheduled_start_at, R.approved_to_send_at).all())
+    by_lead: Dict[str, list] = {}
+    for r in recs:
+        by_lead.setdefault(r.lead_id, []).append(r)
+    moved, kept = [], []
+    for lid, rs in by_lead.items():
+        st = db.query(CadenceState).filter(CadenceState.lead_id == lid).first()
+        texted = db.query(Message.id).filter(Message.lead_id == lid).first() is not None
+        emailed = db.query(EmailMessage.id).filter(EmailMessage.lead_id == lid,
+                                                   EmailMessage.status == "sent").first() is not None
+        if texted or emailed or (st is not None and (st.current_touch_number or 0) > 0):
+            kept.append({"lead_id": lid, "reason": "already contacted"})
+            continue
+        at = first + timedelta(minutes=spacing * len(moved))
+        for r in rs:
+            r.scheduled_start_at = at
+        if st is not None and st.status == "active":
+            st.next_touch_due_at = at
+        moved.append({"lead_id": lid, "starts_at": at.isoformat() + "Z"})
+    day = first.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(TZ)).date().isoformat()
+    if moved:
+        prog.daily_batch_last_date = max(prog.daily_batch_last_date or "", day)
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.daily_batch_repace",
+               target_type="outreach_program", target_id=prog.id,
+               details={"moved": len(moved), "kept": len(kept), "first": first.isoformat(), "day": day})
+    db.commit()
+    return {"moved": len(moved), "kept": kept, "first_start": first.isoformat() + "Z",
+            "last_start": moved[-1]["starts_at"] if moved else None, "counts_as_batch_for": day,
+            "items": moved}
