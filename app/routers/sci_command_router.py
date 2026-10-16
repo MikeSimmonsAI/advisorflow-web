@@ -283,6 +283,86 @@ def _suggest(conv, latest, lead) -> dict:
     return {"title": title[:1].upper() + title[1:], "steps": steps}
 
 
+_ERR = {"30007": "Carrier filtered (link)", "30003": "Phone unreachable", "30005": "Unknown / inactive number",
+        "30006": "Landline or unreachable carrier", "30008": "Unknown carrier error", "21610": "Opted out (STOP)",
+        "30004": "Blocked by recipient"}
+
+
+@router.get("/pipeline")
+def command_pipeline(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """THE OUTREACH OPERATION at a glance, real families only (test records
+    excluded): how many are loaded, not yet contacted, enrolled today, first
+    vs later touches sent and delivered today, holds by channel, failures with
+    reasons, replies, AI conversations, appointments, and the daily batch."""
+    from app.models.models import CadenceState, CadenceTouchLog, EmailMessage
+    from app.services.programs import daily_batch, email_touches
+    prog = _program(db, user, managers_only=False)
+    org = prog.organization_id
+    start = _central_day_start_utc()
+    real = (db.query(Lead.id).join(ProgramSourceRecord, ProgramSourceRecord.lead_id == Lead.id)
+            .filter(Lead.organization_id == org, Lead.is_test.isnot(True),
+                    ProgramSourceRecord.organization_id == org).distinct())
+    real_ids = [i for (i,) in real.all()]
+    texted = {i for (i,) in db.query(Message.lead_id).filter(Message.lead_id.in_(real_ids or ["-"])).distinct()}
+    emailed = {i for (i,) in db.query(EmailMessage.lead_id).filter(EmailMessage.lead_id.in_(real_ids or ["-"]),
+                                                                   EmailMessage.status == "sent").distinct()}
+    states = db.query(CadenceState).filter(CadenceState.lead_id.in_(real_ids or ["-"])).all()
+    logs = (db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id.in_(real_ids or ["-"]),
+                                             CadenceTouchLog.outcome == "sent",
+                                             CadenceTouchLog.attempted_at >= start).all())
+    msg_ids = [l.message_id for l in logs if l.message_id]
+    status = {m.id: (m.delivery_status or m.twilio_status) for m in
+              db.query(Message).filter(Message.id.in_(msg_ids or ["-"])).all()}
+
+    def touches(first):
+        rows = [l for l in logs if (l.touch_number == 1) == first and (l.channel or "sms") == "sms"]
+        return {"sent": len(rows), "delivered": sum(1 for l in rows if status.get(l.message_id) == "delivered"),
+                "failed": sum(1 for l in rows if status.get(l.message_id) in ("failed", "undelivered"))}
+    failed = (db.query(Message).filter(Message.lead_id.in_(real_ids or ["-"]), Message.sent_at >= start,
+                                       (Message.delivery_status.in_(("failed", "undelivered")))
+                                       | (Message.twilio_status.in_(("failed", "undelivered")))).all())
+    reasons: dict = {}
+    for m in failed:
+        k = _ERR.get(m.error_code or "", "Error %s" % (m.error_code or "unknown"))
+        reasons[k] = reasons.get(k, 0) + 1
+    leads = db.query(Lead).filter(Lead.id.in_(real_ids or ["-"])).all()
+    holds_email = sum(1 for l in leads if email_touches.provider_hold_reason(prog, l.email))
+    sms_not_textable = sum(1 for l in leads if (getattr(l, "phone_line_type", None) or "") not in ("mobile", ""))
+    on_hold = (db.query(ProgramSourceRecord.lead_id).filter(ProgramSourceRecord.organization_id == org,
+                                                            ProgramSourceRecord.on_hold.is_(True)).distinct().count())
+    replies_today = (_tr.exclude_test_responses(db.query(ProgramResponse).filter(
+        ProgramResponse.organization_id == org, ProgramResponse.received_at >= start,
+        ProgramResponse.response_class.notin_(("auto_reply",)))).count())
+    ai_convs = (db.query(ProgramConversation).filter(ProgramConversation.organization_id == org,
+                                                     ProgramConversation.is_test.isnot(True),
+                                                     ProgramConversation.ai_turns > 0).count())
+    from app.models.models import BookingLink
+    booked = [b for b in db.query(BookingLink).filter(BookingLink.lead_id.in_(real_ids or ["-"]),
+                                                      BookingLink.status.in_(("booked", "confirmed", "completed")))]
+    offered = (db.query(ProgramConversation).filter(ProgramConversation.organization_id == org,
+                                                    ProgramConversation.is_test.isnot(True),
+                                                    ProgramConversation.offered_at.isnot(None)).count())
+    batch = daily_batch.status(prog)
+    return {
+        "loaded": len(real_ids),
+        "not_yet_contacted": sum(1 for i in real_ids if i not in texted and i not in emailed),
+        "in_outreach": sum(1 for st in states if st.status == "active"),
+        "enrolled_today": sum(1 for st in states if st.cadence_started_at and st.cadence_started_at >= start),
+        "first_touches_today": touches(True),
+        "later_touches_today": touches(False),
+        "email_holds": holds_email,
+        "not_textable": sms_not_textable,
+        "on_hold_for_review": on_hold,
+        "failed_today": {"count": len(failed), "reasons": reasons},
+        "replies_today": replies_today,
+        "ai_conversations": ai_convs,
+        "appointments_offered": offered,
+        "appointments_confirmed": sum(1 for b in booked if getattr(b, "calendar_event_id", None)),
+        "daily_batch": batch,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @router.get("/search")
 def command_search(q: str = Query("", max_length=80), location_id: Optional[str] = None,
                    limit: int = Query(25, le=50), db: Session = Depends(get_db),
