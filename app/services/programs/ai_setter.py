@@ -233,7 +233,23 @@ def _facts(db, prog, lead, conv) -> Dict:
         "guide_sent_by_text": _guide_sent(db, conv),
         "mail_task_open": bool(memory_of(conv).get("mail_request")),
         "followups_sent": conv.followups_sent or 0,
+        "personal_delivery_available": personal_delivery_available(db, lead),
     }
+
+
+def personal_delivery_available(db, lead) -> bool:
+    """May I offer to bring a printed guide to the family personally? Only when
+    the family's location says so (LocationProfile.brand_settings
+    {"personal_delivery": true}); otherwise I invite them in instead."""
+    try:
+        from app.services.programs import identity
+        prof = identity.location_profile_for_lead(db, lead)
+        bs = getattr(prof, "brand_settings", None) if prof is not None else None
+        if isinstance(bs, str):
+            bs = json.loads(bs or "{}")
+        return bool((bs or {}).get("personal_delivery"))
+    except Exception:                                    # noqa: BLE001
+        return False
 
 
 def _offers_made(db, conv) -> int:
@@ -333,9 +349,11 @@ def check_text(text: str, *, allowed_links: List[str], channel: str = "sms") -> 
 
 # ── the AI's decision ────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You write text messages for {contact}, the family-services representative at {location} (a funeral home / cemetery). A family replied to our planning outreach. You are a skilled Family Service Advisor, not a script and not a fulfillment clerk: read what THIS family said, in the context of everything they've said before, and choose the single most helpful next step.
+SYSTEM_PROMPT = """You write as {contact}, the family-services advisor at {location} (a funeral home / cemetery), in {contact}'s own voice. A family replied to our planning outreach. You are a skilled, compassionate, confident Family Service Advisor, not a script, not an answering bot and not a fulfillment clerk: read what THIS family said, in the context of everything they've said before, notice the opportunity in it, and choose the single most helpful next step.
 
-YOUR PRIMARY GOAL is a confirmed IN-PERSON VISIT at {location} - the family sitting down with {contact}, who can answer their questions, explain what applies to their situation and go over their options or existing file. A guide, a mailed copy or a text exchange is a step toward that visit, never the finish line. Work in this order: understand exactly what they said; answer their question or concern directly; give one genuine, specific reason a visit would help THEM (their guide reviewed with them, their questions answered in person, their existing file and contacts checked); invite them in with two real times ({{TIMES}}); when they pick one, book it. Honour a decline, a "just mail it", a timing request or a preferred channel without pressure - never make information conditional on a visit, and never ask the same question twice.
+FIRST PERSON, ALWAYS. Every message goes out signed by {contact}, so write as {contact}: "I", "me", "my", "I'd be glad to". NEVER refer to {contact} by name or in the third person ("{contact} would be glad to help", "{contact} can go over it", "so {contact} can answer") - that reads as two different people. "We" is fine for the team at {location}.
+
+YOUR PRIMARY GOAL is a confirmed IN-PERSON VISIT at {location} - the family sitting down with me, so I can answer their questions, explain what applies to their situation and go over their options or existing file. A guide, a mailed copy or a text exchange is a step toward that visit, never the finish line. Work in this order: understand exactly what they said; answer their question or concern directly; give one genuine, specific reason a visit would help THEM (their guide reviewed with them, their questions answered in person, their existing file and contacts checked); invite them in with two real times ({{TIMES}}); when they pick one, book it. Honour a decline, a "just mail it", a timing request or a preferred channel without pressure - never make information conditional on a visit, and never ask the same question twice.
 
 WORK IN THIS ORDER (fill every part of the JSON):
 1. UNDERSTAND. What do they actually mean, including indirect or casual wording ("maybe after the holidays" = not now, later; "my daughter handles that" = involve the daughter; "ok" after times were offered is NOT a choice)? Their mood? Any questions, worries or objections? Did they change their mind or return to an earlier question? Read FAMILY MEMORY first - never ask for something they already told us.
@@ -344,10 +362,10 @@ WORK IN THIS ORDER (fill every part of the JSON):
 4. COMPOSE the reply: plain, warm, local, 1-3 short sentences, usually ONE purposeful question (never two). No emojis, no sales talk, no signature. Vary your wording - never repeat a sentence we already sent. Use their first name at most occasionally.
 5. CHECK it yourself against the rules below before returning.
 
-ANSWERING QUESTIONS. When APPROVED INFORMATION answers the question, ANSWER IT in plain words first - do not dodge to an appointment. Then, only if it fits naturally, one gentle next step. Questions about price, eligibility for benefits (veterans, insurance), or the details of their own plan/property are for {contact}: acknowledge kindly and offer a short call or visit to go over it ("offer_times"). Never invent facts, numbers, benefits, timelines or anything about their family or plan.
+ANSWERING QUESTIONS. When APPROVED INFORMATION answers the question, ANSWER IT in plain words first - do not dodge to an appointment. Then, only if it fits naturally, one gentle next step. Questions about price, eligibility for benefits (veterans, insurance), or the details of their own plan/property are best gone over with me personally: acknowledge kindly and offer a short call or visit to go over it ("offer_times"). Never invent facts, numbers, benefits, timelines or anything about their family or plan.
 
 MOVING TOWARD AN APPOINTMENT - without pressure:
-- A call or visit is offered when it genuinely helps (they're interested, have questions only {contact} can answer, or asked). Never offer times twice in a row if they didn't engage with the first offer; respond to what they said instead. Never invent urgency.
+- A call or visit is offered when it genuinely helps (they're interested, have questions only I can answer in person, or asked). Never offer times twice in a row if they didn't engage with the first offer; respond to what they said instead. Never invent urgency.
 - To offer times, write the placeholder {{TIMES}} where two times belong ("Would {{TIMES}} work for a short visit?"). That sentence IS your one question - do not ask anything else in the same message. The system fills in two REAL open times. NEVER write a day or clock time yourself (repeating times already offered is fine). If they mentioned when they're free ("afternoons", "next Tuesday"), put it in best_times so times can match.
 - Visit = about an hour (60 minutes) in person; a phone appointment is about 30 minutes. Family members are welcome - if a spouse or adult child should be included, say so warmly.
 - BOOK only when their words clearly pick ONE of the times we offered ("the first one", "Thursday at 10 works") -> slot_choice 1 or 2. If they name a different specific day AND time, use requested_time YYYY-MM-DDTHH:MM (Central); the system checks it. "Friday works" when Friday has more than one possibility, "sure", "ok", "sounds good" -> do NOT book; ask which time.
@@ -356,20 +374,22 @@ MOVING TOWARD AN APPOINTMENT - without pressure:
 HONOUR THEIR TIMING:
 - Busy right now / will get back to us / call me later: acknowledge warmly. If they gave a time to be called -> "callback" with callback_window in their words. If they said "later" with a horizon ("after the holidays", "next month", "in a couple weeks") -> "follow_up_later" with follow_up_date (YYYY-MM-DD, Central) and follow_up_about (what to pick up next time). Otherwise one gentle question about a better time.
 - Not interested (but not STOP): thank them, leave the door open in one sentence -> "close".
-- A person must step in ("handoff") when: they ask for a real person or {contact} directly, are upset or complaining, recently lost someone and are grieving, mention legal issues or disputes, want to change or cancel an existing appointment, or you are genuinely unsure what they need. Reply briefly that {contact} will reach out personally. Do NOT hand off ordinary questions.
-- Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether you are a person, say you're helping {contact} with scheduling and {contact} is glad to talk. Offer to stop if they prefer.
-- Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to come in so {contact} can go over it with them in person and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and {contact} would be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
-- MAILED / printed copy request -> "mail_guide": honour it (a printed guide will be arranged; confirm the address only if it is missing or incomplete - never claim it has been mailed), and in the same message invite them in to go over it with {contact}, with {{TIMES}}. If they have ALREADY said they only want it mailed, just honour that - no invitation.
+- ARRIVING NOW. They say they are on the way, will "run by", "stop in", "come by" today or within a few hours ("I'll run by there in about 15 minutes"): this is a live visit - the best outcome there is. Action "handoff" (the advisor is alerted at once to greet them). Reply warmly in one or two sentences: glad they're coming, and I'll be watching for them / the team will be ready for them. Do not offer {{TIMES}}, do not ask them to pick a time, and never say an appointment is booked or confirmed.
+- A person must step in ("handoff") when: they ask for a real person or ask for me by name, are upset or complaining, recently lost someone and are grieving, mention legal issues or disputes, want to change or cancel an existing appointment, or you are genuinely unsure what they need. Reply briefly that I'll reach out to them personally. Do NOT hand off ordinary questions.
+- Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether this is a real person or automated, be honest: an assistant helps me keep up with messages and scheduling, I see every reply, and I'm glad to talk by phone. Offer to stop if they prefer.
+- Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to sit down with you so you can go over it together and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and I'd be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
+- PRINTED copy / "send me the guide" by mail: a printed-guide request is an opening for a personal meeting - recognise it. If PERSONAL DELIVERY is available (facts_known_for_certain.personal_delivery_available), offer to bring it personally and sit down together: "Absolutely, Lester. I'd be happy to bring that planning guide to you personally so we can sit down and go over the important information together. What's a good day and time for me to stop by?" (action "mail_guide"; no {{TIMES}}; put any day/time they give in best_times). If personal delivery is NOT available: "mail_guide" - honour it (a printed guide will be arranged; confirm the address only if it is missing or incomplete - never claim it has been mailed) and in the same message invite them in so we can go over it together, with {{TIMES}}. If they have ALREADY said they only want it mailed, just honour that - no invitation.
+- UNCLEAR "already got it / them / that": it may mean the guide, their benefits, or arrangements. If FAMILY MEMORY and the conversation don't settle which, ask ONE short, warm clarifying question first (e.g. "Glad to hear it, Ronald - do you mean you already have your veteran benefits paperwork, or the planning guide?") - no {{TIMES}} in that message.
 - Plan with ANOTHER funeral home / cemetery, or "already took care of all that": thank them warmly and respect it - no times, no push. At most one optional sentence that we're here if they ever want anything reviewed ("answer" or "close").
 - Existing plan WITH US / "already have a plan with you" -> invite them in for an in-person FILE REVIEW: going over their existing arrangements, important contact information, family instructions and whether anyone else should be authorised to access their file. Reassuring and personal; never suggest their plan is invalid or that new forms are legally required. Offer {{TIMES}} (ask which kind of review only if it is genuinely unclear).
-- Wants to CHANGE an existing plan (contact person, burial to cremation, wishes): that is exactly what a review with {contact} is for - offer times ("offer_times"); not a hand-off.
+- Wants to CHANGE an existing plan (contact person, burial to cremation, wishes): that is exactly what a review with me is for - offer times ("offer_times"); not a hand-off.
 - "I need to talk to my husband / wife / kids first": NOT a no. Acknowledge warmly, say they're welcome to join, and ask one gentle question (or "follow_up_later" if they give a horizon). Never "close".
-- "Who is this?" / "What is this about?": answer plainly - the family services team at {location}, following up on planning information on behalf of {contact}.
-- If asked whether the guide or a visit costs anything, do not use the words free, complimentary or no cost; say you're glad to send the guide, and {contact} can answer any cost questions.
+- "Who is this?" / "What is this about?": answer plainly - this is {contact} with the family services team at {location}, following up on the planning information they asked about.
+- If asked whether the guide or a visit costs anything, do not use the words free, complimentary or no cost; say you're glad to send the guide and you can answer any cost questions.
 - "wait" only for a closing "ok"/"thanks" after an appointment is confirmed, or a message that needs no reply.
 - "close" ONLY when they clearly decline (not interested, no thanks, all set, already taken care of). A bare "k", "maybe", "idk", "lol" or an emoji is NOT a decline: reply warmly and ask one easy question (e.g. whether they'd like the planning guide).
 - They say they'll come in / want to meet / ask for times: offer times now ("offer_times"), unless times are already on the table - then ask which one.
-- They insist on a price before meeting: don't hand off. Acknowledge it plainly, say {contact} can go over costs by phone, and offer a short phone call ("offer_times" with appointment_kind "phone", or "callback" if they name a time).
+- They insist on a price before meeting: don't hand off. Acknowledge it plainly, say you can go over costs by phone, and offer a short phone call ("offer_times" with appointment_kind "phone", or "callback" if they name a time).
 - Our first text offered the planning guide, so a bare "k" / "ok" / "yes" / thumbs-up to it means yes: "send_guide" and say it's on its way - don't also ask whether they want it.
 
 NEVER: prices, costs, discounts, "free"/"complimentary"/"no cost", guarantees, deadlines, pressure, the parent company's name, links (the system adds approved ones), questions about Social Security numbers or private documents by text, promises a person hasn't made.
@@ -441,7 +461,20 @@ _CLAIM_MAILED = re.compile(r"\b(i'?ve|we'?ve|i have|we have|has been|have been|a
 _CLAIM_GUIDE = re.compile(r"\b(here'?s|here is) (the|your) (planning )?guide\b", re.I)
 
 
-def validate_decision(d: Dict, body: str, conv) -> List[str]:
+def third_person(reply: str, contact: Optional[str]) -> bool:
+    """Does the reply talk about the signer in the third person ("Kerry Allan
+    would be glad to help" - signed Kerry Allan)? "This is Kerry" is fine."""
+    names = [n for n in {(contact or "").strip(), (contact or "").strip().split(" ")[0]} if len(n) >= 3]
+    for n in sorted(names, key=len, reverse=True):
+        for m in re.finditer(r"\b%s\b" % re.escape(n), reply or "", re.I):
+            before = (reply[:m.start()] or "").lower()
+            if re.search(r"(this is|i'?m|i am|it'?s)\s*$", before.rstrip()):
+                continue
+            return True
+    return False
+
+
+def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -> List[str]:
     """Rules the model's answer must meet before anything is sent. Returned
     to the model once as a correction; if they still fail, a person decides."""
     problems: List[str] = []
@@ -474,6 +507,9 @@ def validate_decision(d: Dict, body: str, conv) -> List[str]:
     for pat, why in _BANNED:
         if re.search(pat, reply.lower()):
             problems.append(why)
+    if contact and third_person(reply, contact):
+        problems.append("it talks about %s in the third person - the message is signed by %s, so write in "
+                        "first person (\"I'd be glad to...\")" % (contact, contact))
     last = _last_ai_text(conv)
     if last and reply and _norm(reply) == _norm(last):
         problems.append("it repeats our last message word for word - respond to what they just said")
@@ -764,7 +800,10 @@ def _handoff(db, prog, lead, conv, reason, *, notify: bool):
             from app.models.program_models import ProgramAlert
             from app.services.programs import responses as R
             title = R.alert_title(prog)
-            sms = "%s: A family needs a person. Please check your SCI Responses inbox." % title
+            who0 = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A family"
+            # Say WHO and WHY: "arriving in 15 minutes" must not read like any
+            # other hand-off (Oct 15: Thomas Calloway was on his way in).
+            sms = "%s: %s needs a person - %s. Please check SCI Live." % (title, who0, (reason or "")[:120])
             if getattr(lead, "is_test", False):
                 sms = "TEST - " + sms
             targets = [("primary", "sms", prog.alert_phone), ("primary", "email", prog.alert_email)]
@@ -854,7 +893,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             d = decide(db, prog, lead, conv, resp, actor=actor,
                        note="Your last answer was not valid. Return the JSON with action set to exactly one of: "
                             + ", ".join(ACTIONS) + ".")
-        problems = validate_decision(d, body, conv)
+        problems = validate_decision(d, body, conv, prog.primary_contact_name)
         if problems:
             # ONE chance to fix it, told exactly what was wrong.
             d = decide(db, prog, lead, conv, resp, actor=actor,
@@ -874,11 +913,11 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
     out.update(intent=d.get("intent") or und.get("meaning"), action=action, reason=d.get("reason"),
                objective=d.get("objective"), mood=und.get("mood"))
     merge_memory(conv, d.get("memory_update"))
-    left = validate_decision(d, body, conv)
+    left = validate_decision(d, body, conv, prog.primary_contact_name)
     if left and all("more than one question" in p for p in left) and text:
         text = _one_question(text)                       # deterministic, safe trim
         d["reply"] = text
-        left = validate_decision(d, body, conv)
+        left = validate_decision(d, body, conv, prog.primary_contact_name)
     try:
         confidence = float(d.get("confidence")) if d.get("confidence") not in (None, "") else 1.0
     except (TypeError, ValueError):
@@ -1187,9 +1226,9 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
         conv.followups_sent = (conv.followups_sent or 0) + 1
         try:
             d = decide(db, prog, lead, conv, None, follow_up=reason)
-            if validate_decision(d, "", conv):
+            if validate_decision(d, "", conv, prog.primary_contact_name):
                 d = decide(db, prog, lead, conv, None, follow_up=reason,
-                           note="Fix: %s" % "; ".join(validate_decision(d, "", conv)))
+                           note="Fix: %s" % "; ".join(validate_decision(d, "", conv, prog.primary_contact_name)))
         except Exception as exc:                         # noqa: BLE001
             log.warning("follow-up AI unavailable for lead %s: %s", conv.lead_id, exc)
             db.commit()
@@ -1197,7 +1236,7 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
         action = d.get("action")
         text = (d.get("reply") or "").strip()
         merge_memory(conv, d.get("memory_update"))
-        if action == "wait" or not text or validate_decision(d, "", conv) or action not in (
+        if action == "wait" or not text or validate_decision(d, "", conv, prog.primary_contact_name) or action not in (
                 "answer", "offer_times", "send_guide", "mail_guide", "close"):
             _turn(db, conv, "system", None, action="wait", reason="follow-up not needed: %s" % (d.get("reason") or action))
             db.commit()

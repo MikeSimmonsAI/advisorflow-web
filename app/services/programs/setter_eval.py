@@ -12,15 +12,20 @@ from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.services.programs.setter_eval_scenarios import SCENARIOS
+from app.services.programs.setter_eval_scenarios import REGRESSIONS, SCENARIOS
 
 _FILLED_TIME = re.compile(r"\b(am|pm)\b", re.I)
 
 
-def universal_checks(turn: Dict) -> List[str]:
+def universal_checks(turn: Dict, contact: Optional[str] = None) -> List[str]:
     from app.services.programs import ai_setter
     bad = []
     text = turn.get("reply") or ""
+    # VOICE (Oct 16): every reply is signed by the advisor, so it must speak as
+    # the advisor. The old suite never checked this, which is how 96/100 passed
+    # while live texts said "Kerry Allan would be glad to help" - signed Kerry Allan.
+    if contact and ai_setter.third_person(text, contact):
+        bad.append("speaks about %s in the third person" % contact)
     if text.count("?") > 1:
         bad.append("more than one question")
     for pat, why in ai_setter._BANNED:
@@ -38,8 +43,8 @@ def universal_checks(turn: Dict) -> List[str]:
     return bad
 
 
-def score_turn(exp: Dict, turn: Dict) -> List[str]:
-    bad = universal_checks(turn)
+def score_turn(exp: Dict, turn: Dict, contact: Optional[str] = None) -> List[str]:
+    bad = universal_checks(turn, contact)
     acts = exp.get("acts")
     if acts and turn.get("action") not in acts.split(","):
         bad.append("action %s not in %s" % (turn.get("action"), acts))
@@ -98,7 +103,7 @@ def run_scenario(db: Session, prog, user, scenario: Dict, *, run_tag: str,
                 last = ai_setter._last_ai_text(conv)
                 if res.get("action") == "book" and last:
                     turn["reply"] = last
-            bad = score_turn(exp, turn)
+            bad = score_turn(exp, turn, getattr(prog, "primary_contact_name", None))
             turn["problems"] = bad
             if bad:
                 failures.append({"turn": i + 1, "problems": bad})
@@ -111,4 +116,4 @@ def run_scenario(db: Session, prog, user, scenario: Dict, *, run_tag: str,
 
 
 def scenario(sid: str) -> Optional[Dict]:
-    return next((s for s in SCENARIOS if s["id"] == sid), None)
+    return next((s for s in list(SCENARIOS) + list(REGRESSIONS) if s["id"] == sid), None)

@@ -38,3 +38,33 @@ def test_eval_endpoint_owner_only_and_synthetic(setter, client, monkeypatch):
     assert r.status_code == 200 and out["passed"], out
     from app.models.models import Lead
     assert all(l.is_test and l.phone is None for l in db.query(Lead).filter(Lead.last_name.like("SIM-EVAL-%")))
+
+
+def test_voice_check_catches_third_person_signed_replies():
+    """Oct 16: 'Kerry Allan would be glad to help' went out signed Kerry Allan."""
+    from app.services.programs import ai_setter
+    assert ai_setter.third_person("If you have questions, Kerry Allan would be glad to help.", "Kerry Allan")
+    assert ai_setter.third_person("so Kerry can go over it with you", "Kerry Allan")
+    assert not ai_setter.third_person("Hi Ronald, this is Kerry with Alabama Heritage.", "Kerry Allan")
+    assert not ai_setter.third_person("I'd be glad to go over it with you in person.", "Kerry Allan")
+    assert "speaks about Kerry Allan in the third person" in E.universal_checks(
+        {"reply": "Kerry Allan would be glad to help."}, "Kerry Allan")
+
+
+def test_regression_scenarios_are_separate_and_reachable():
+    from app.services.programs.setter_eval_scenarios import REGRESSIONS
+    ids = {s["id"] for s in REGRESSIONS}
+    assert {"r001", "r002", "r003", "r004"} <= ids and len(SCENARIOS) == 100
+    assert E.scenario("r002")["turns"][0]["acts"] == "handoff"
+
+
+def test_validator_rejects_third_person_reply(monkeypatch):
+    from app.services.programs import ai_setter
+
+    class C:
+        id = "c"; offered_slots = None; state = "open"
+    monkeypatch.setattr(ai_setter, "_last_ai_text", lambda conv: None)
+    monkeypatch.setattr(ai_setter, "_strip_offered", lambda reply, conv: reply)
+    d = {"action": "answer", "reply": "Kerry Allan would be glad to help with that."}
+    probs = ai_setter.validate_decision(d, "thanks", C(), "Kerry Allan")
+    assert any("third person" in p for p in probs)

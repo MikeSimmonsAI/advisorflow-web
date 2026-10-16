@@ -311,3 +311,28 @@ sc("s100", "journey", "Clyde",
 
 SCENARIOS = S
 assert len(SCENARIOS) == 100 and len({s["id"] for s in SCENARIOS}) == 100
+
+# ── REGRESSIONS from live conversations (Oct 15-16) ─────────────────────────
+# Kept apart from the 100 so the long-running score stays comparable. Every
+# turn is also checked for first-person voice by universal_checks.
+S = []
+_TIMES = r"\b(am|pm)\b"
+sc("r001", "regression", "Ronald",
+   # "already got them" after a Veteran Benefits Guide text: unclear - the
+   # benefits or the guide? Clarify; no times thrown at him yet.
+   ("Thanks for replying. I have already got them.", "answer,close", {"must_not": [_TIMES], **NO_BOOK}))
+sc("r002", "regression", "Thomas",
+   # On his way in: a live visit. Alert a person now; no times, no booking claim.
+   ("I am headed out to the store I'll run by there in about 15 minutes..thank you", "handoff",
+    {"must_not": [_TIMES, r"\{TIMES\}"], **NO_BOOK}))
+sc("r003", "regression", "Lester",
+   # Wants the guide; then asks for a printed copy: honour it AND recognise the
+   # opening for a personal meeting.
+   ("Would really like to receive guide, any questions coming from the guide I would contact you. Is this possible?",
+    "send_guide,mail_guide"),
+   ("Can you mail me a printed copy instead", "mail_guide",
+    {"must": [r"(visit|stop by|sit down|in person|go over|bring)"]}))
+sc("r004", "regression", "Gerald",
+   ("Is this a real person or a robot?", "answer",
+    {"must": [r"(assistant|automated)"], "must_not": [r"\bi'?m (a real person|human)\b"]}))
+REGRESSIONS = S
