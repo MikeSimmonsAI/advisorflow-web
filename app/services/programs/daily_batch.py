@@ -78,8 +78,14 @@ def pick(db: Session, prog: OutreachProgram, n: int) -> List[str]:
     # never fills its quota with families the send gate would refuse.
     from app.services import sms_programs, wholesale_sms
     if sms_programs.is_sci_org(db, prog.organization_id):
-        ok = sms_programs.consented_numbers(db, prog.organization_id)
-        pool = [r for r in pool if wholesale_sms.normalize_e164(r.get("phone")) in ok]
+        if sms_programs.auto_attest_at_send() and sms_programs.owner_holds_records():
+            # The owner's consent is filed at first send for every contact
+            # (SCI_AUTO_ATTEST_AT_SEND=on): only opted-out numbers are out.
+            gone = sms_programs.opted_out_numbers(db, prog.organization_id)
+            pool = [r for r in pool if wholesale_sms.normalize_e164(r.get("phone")) not in gone]
+        else:
+            ok = sms_programs.consented_numbers(db, prog.organization_id)
+            pool = [r for r in pool if wholesale_sms.normalize_e164(r.get("phone")) in ok]
     by_loc: Dict[str, list] = {}
     for r in pool:
         by_loc.setdefault(r["location_id"] or "", []).append(r["lead_id"])
