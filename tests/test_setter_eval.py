@@ -147,3 +147,10 @@ def test_guide_request_is_not_a_mail_request_and_plots_are_not_a_close(monkeypat
     close = {"action": "close", "reply": "Thank you for letting me know - we're here if you ever need anything."}
     assert any("not WHERE" in p for p in ai_setter.validate_decision(close, "We already have plots", C()))
     assert not any("not WHERE" in p for p in ai_setter.validate_decision(close, "We have a plan with another funeral home", C()))
+
+
+def test_day_part_preference_is_read():
+    """s002: 'I'll come in. Mornings are better' re-asked about a 1 PM time."""
+    assert ai_setter.day_part("I'll come in. Mornings are better") == "morning"
+    assert ai_setter.day_part("anytime after lunch is fine") == "afternoon"
+    assert ai_setter.day_part("the first one works") is None

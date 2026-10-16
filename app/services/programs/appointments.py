@@ -58,7 +58,8 @@ def program_advisor(db: Session, prog):
 
 
 def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
-                    now_central: Optional[datetime] = None, kind: str = VISIT) -> Tuple[List[datetime], Optional[str]]:
+                    now_central: Optional[datetime] = None, kind: str = VISIT,
+                    part: Optional[str] = None) -> Tuple[List[datetime], Optional[str]]:
     """Up to `want` genuine open times (naive Central), spread over different
     days when possible. ([], reason) when nothing can honestly be offered."""
     from app.routers.calendar_router import compute_day_slots
@@ -78,6 +79,10 @@ def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
         if res.get("calendar_error"):
             return [], "the calendar cannot be read right now"
         slots = [datetime.fromisoformat(x) for x in res.get("slots") or []]
+        if part == "morning":                     # the family said mornings are better
+            slots = [s for s in slots if s.hour < 12]
+        elif part == "afternoon":
+            slots = [s for s in slots if s.hour >= 12]
         if not slots:
             continue
         # one morning-ish and one afternoon-ish option across two days
