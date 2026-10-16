@@ -19,9 +19,16 @@ def _fresh_ledger():
     SA._CACHE.clear()
 
 
+def _today_at():
+    """A moment safely inside today (Central), whatever the clock says."""
+    start = SA.window("today")["start"]
+    now = datetime.utcnow()
+    return max(start + timedelta(seconds=1), min(now - timedelta(minutes=30), now - timedelta(seconds=1)))
+
+
 def _touch(db, lead, n, *, status="delivered", code=None, at=None, outcome="sent"):
     st = db.query(CadenceState).filter_by(lead_id=lead.id).one()
-    at = at or datetime.utcnow() - timedelta(minutes=30)
+    at = at or _today_at()
     m = Message(lead_id=lead.id, sender_id=lead.assigned_to_id, body="Touch %s for %s" % (n, lead.first_name),
                 twilio_sid="SM%s%s" % (lead.id[:6], n), twilio_status=status, delivery_status=status,
                 error_code=code, sent_at=at, send_source="cadence")
@@ -163,3 +170,27 @@ def test_a_burst_of_screens_builds_the_snapshot_once(monkeypatch):
     for t in ts:
         t.join()
     assert built == ["org-1"]
+
+
+def test_dashboard_overview_numbers_open_their_records(program, sample_advisor, client):
+    from app.models.program_models import ProgramSourceRecord
+    db, a, b, t = _seed(program, sample_advisor)
+    rec = db.query(ProgramSourceRecord).filter_by(lead_id=b.id).one()
+    rec.approved_to_send_at = datetime.utcnow()
+    db.commit()
+    SA._CACHE.clear()
+    h = _h(db, program["admin"])
+    o = client.get("/program/command/analytics?range=today", headers=h).json()["overview"]
+    for p in o["pipeline"]:
+        d = client.get("/program/command/analytics/records?metric=%s&range=all" % p["key"], headers=h).json()
+        assert d["count"] == p["value"], p
+    pipe = {p["key"]: p["value"] for p in o["pipeline"]}
+    assert pipe["loaded"] == 2 and pipe["approved"] == 1 and o["approved_today"] == 1
+    for row in o["today"]:
+        q = "metric=%s&range=today" % row["metric"]
+        for k in ("touch", "channel"):
+            if row.get(k):
+                q += "&%s=%s" % (k, row[k].replace("+", "%2B"))
+        d = client.get("/program/command/analytics/records?" + q, headers=h).json()
+        assert d["count"] == row["value"], row
+    assert {r["key"]: r["value"] for r in o["today"]}["followup"] == 1

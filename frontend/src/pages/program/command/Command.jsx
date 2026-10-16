@@ -17,6 +17,8 @@ import EngagementGauge, { useEngagement } from '../EngagementGauge'
 import SelfCheck from '../SelfCheck'
 import VoicemailPlayer from '../../../components/telephony/VoicemailPlayer'
 import { Journey, MetricDrill, PerformanceHome } from './Performance'
+import { Home, ScreenTabs, SideNav, TopBar, useHomeData } from './Dashboard'
+import './Dashboard.css'
 import './Command.css'
 import './Performance.css'
 
@@ -94,7 +96,12 @@ export default function Command() {
   const [familyView, setFamilyView] = useState('conversation')
   const [range, setRange] = useState({ preset: 'today' })
   const [drill, setDrill] = useState(null)          // { metric, touch?, channel?, status?, location_id? }
-  const openFamily = (id, view) => { setFamilyView(view || 'conversation'); setFamily(id) }
+  const [lastFamily, setLastFamily] = useState(null)
+  const [inboxSel, setInboxSel] = useState(null)
+  const wide = useWide()
+  const home = useHomeData()
+  const openFamily = (id, view) => { setFamilyView(view || 'conversation'); setLastFamily(id); setFamily(id) }
+  const scrollTo = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   const [startReply, setStartReply] = useState(false) // opened with Reply: composer open and focused
   const [toast, setToast] = useState('')
   const busy = useRef(false)
@@ -140,7 +147,11 @@ export default function Command() {
 
   const act = async (item, a) => {
     if (a === 'call') { window.location.href = `tel:${item.phone || ''}`; if (!item.phone) setFamily(item.lead_id); return }
-    if (['reply', 'schedule', 'review', 'note'].includes(a)) { setStartReply(a === 'reply'); setFamily(item.lead_id); return }
+    if (['reply', 'schedule', 'review', 'note'].includes(a)) {
+      setStartReply(a === 'reply')
+      if (wide && tab === 'inbox') { setInboxSel(item.lead_id); setLastFamily(item.lead_id) } else openFamily(item.lead_id)
+      return
+    }
     const state = a === 'close' || a === 'dismiss' ? 'closed' : 'opened'
     try {
       await api.post(`/program/responses/${item.response_id}/mark`, { state })
@@ -149,29 +160,48 @@ export default function Command() {
     } catch (e) { setToast(e.message || 'Could not update.') }
   }
 
+  const screen = family ? (familyView === 'journey' ? 'journey' : 'inbox') : drill ? 'drill'
+    : tab === 'home' ? 'home' : tab
+  const go = k => {
+    if (k === 'drill') { setFamily(null); setDrill({ metric: 'attempts', range: { preset: 'today' } }); return }
+    if (k === 'journey') {
+      const id = lastFamily || inboxSel || d?.inbox?.[0]?.lead_id
+      if (id) { setDrill(null); openFamily(id, 'journey') } else setToast('Open a family first.')
+      return
+    }
+    setFamily(null); setDrill(null)
+    if (k === 'reports') { setTab('home'); setTimeout(() => scrollTo('sl-reports'), 80); return }
+    setTab(k); window.scrollTo(0, 0)
+  }
+  const frame = (body, cls = '') => (
+    <div className="sl-shell">
+      <SideNav screen={screen} go={go} needs={d?.counts?.needs_attention} />
+      <div className="sl-main">
+        <TopBar batch={home.a?.daily_batch} />
+        <ScreenTabs screen={screen} go={go} />
+        <div className={`sl-body ${cls}`}>{body}</div>
+        {toast && <div className="cmd-toast" role="status">{toast}</div>}
+        <nav className="cmd-tabs" aria-label="Sections">
+          {[['home', 'home', 'Performance'], ['inbox', 'inbox', 'Inbox'], ['search', 'search', 'Search'], ['appts', 'cal', 'Appointments']].map(([k, ic, lbl]) => (
+            <button key={k} className={screen === k ? 'on' : ''} onClick={() => go(k)}>
+              <span className="cmd-tabicon">{k === 'home' && screen === 'home' ? <Solid n="home" s={22} /> : <Icon n={ic} s={22} />}
+                {k === 'inbox' && d?.counts.needs_attention ? <i>{d.counts.needs_attention}</i> : null}</span>{lbl}
+            </button>))}
+        </nav>
+      </div>
+    </div>
+  )
   if (family) {
-    return <Family id={family} view={familyView} startReply={startReply} onBack={() => { setFamily(null); setStartReply(false); load() }} toast={setToast} toastText={toast} />
+    return frame(<Family key={family} id={family} view={familyView} startReply={startReply}
+      onBack={() => { setFamily(null); setStartReply(false); load() }} toast={setToast} toastText={null} />)
   }
   if (drill) {
-    return <MetricDrill spec={drill} range={range} loc={loc} onBack={() => setDrill(null)} openFamily={openFamily} />
+    return frame(<MetricDrill key={JSON.stringify(drill)} spec={drill} range={drill.range || range} loc={loc} onBack={() => setDrill(null)} openFamily={openFamily} />, 'wide')
   }
-  const inbox = d?.inbox || []
-  return (
-    <div className={`cmd ${tab === 'home' ? 'cmd-wide' : ''}`}>
+  return frame(<div className={`cmd ${tab === 'home' || (tab === 'inbox' && wide) ? 'cmd-wide' : ''}`}>
       {tab === 'home' && <>
-        <header className="cmd-top">
-          <div>
-            <h1>SCI Live</h1>
-            <p className="cmd-sub">EvoSys Pro outreach for SCI{d ? ` · ${d.locations.length} locations · updated ${ago(d.updated_at)}` : ''}</p>
-          </div>
-        </header>
-        <SearchBox q={q} setQ={v => { setQ(v); if (v.trim()) setTab('search') }} />
         {err && <p className="cmd-err">{err}</p>}
-        {d && <div className="cmd-attn">
-          <button className={d.counts.needs_attention ? 'hot' : ''} onClick={() => setTab('inbox')}><Solid n="alert" s={20} /><span><b>{d.counts.needs_attention}</b> need a reply</span></button>
-          <button onClick={() => setTab('inbox')}><Solid n="chat" s={20} /><span><b>{(d.unknown || []).length}</b> unknown caller{(d.unknown || []).length === 1 ? '' : 's'}</span></button>
-          <button onClick={() => setTab('appts')}><Solid n="cal" s={20} /><span><b>{d.counts.visits_booked}</b> upcoming visit{d.counts.visits_booked === 1 ? '' : 's'}</span></button>
-        </div>}
+        <div className="sl-search"><SearchBox q={q} setQ={v => { setQ(v); if (v.trim()) setTab('search') }} /></div>
         {d?.owner_alert && (
           <a className="cmd-owner" href="/program?tab=health">
             <Icon n="warn" />
@@ -179,15 +209,17 @@ export default function Command() {
             <span className="cmd-link">View ›</span>
           </a>
         )}
-        <SectionHead title="Performance" />
-        <PerformanceHome range={range} setRange={setRange} loc={loc} setLoc={setLoc} openMetric={setDrill} />
+        {(d?.counts?.needs_attention > 0 || (d?.unknown || []).length > 0) && (
+          <button className="sl-alert" onClick={() => go('inbox')}><b>{d.counts.needs_attention} famil{d.counts.needs_attention === 1 ? 'y needs' : 'ies need'} a reply</b>
+            {(d.unknown || []).length ? <span> · {d.unknown.length} unknown caller{d.unknown.length === 1 ? '' : 's'}</span> : null}<em>Open inbox ›</em></button>)}
+        <Home a={home.a} sched={home.sched} openMetric={setDrill} openFamily={openFamily} />
+        <section id="sl-reports" className="sl-reports">
+          <SectionHead title="Performance & reports" />
+          <PerformanceHome range={range} setRange={setRange} loc={loc} setLoc={setLoc} openMetric={setDrill} />
+        </section>
         {d && <div className="cmd-cols">
           <div>
             <Unknown items={d.unknown} toast={setToast} reload={load} />
-            <SectionHead title="Priority inbox" onAll={() => setTab('inbox')} />
-            <Inbox items={inbox.slice(0, 4)} act={act} open={openFamily} />
-          </div>
-          <div>
             <SectionHead title="Today's upcoming actions" onAll={() => setTab('inbox')} />
             <div className="cmd-card cmd-actions">
               <button onClick={() => setTab('inbox')}><Icon n="reply" />
@@ -202,29 +234,42 @@ export default function Command() {
                   <span><b>Mail a printed guide · {t.name}</b><br />
                     <small>{t.note || 'Confirm the address, mail it, then mark it done'}</small></span>›</button>))}
             </div>
+          </div>
+          <div>
             <TodayActivity live={live} engagement={engagement} open={openFamily} />
           </div>
         </div>}
         {d && <p className="cmd-foot">Updates every {Math.round(REFRESH_MS / 1000)} seconds and whenever you come back to this screen{at ? ` · last ${time(at.toISOString())}` : ''}.
           {' '}<a href="/program">Open the full SCI Program Center</a></p>}
       </>}
-      {tab === 'inbox' && <InboxTab loc={loc} act={act} open={openFamily} />}
+      {tab === 'inbox' && (wide
+        ? <div className="sl-inbox">
+          <div className="sl-inbox-list"><InboxTab loc={loc} act={act} open={id => { setStartReply(false); setInboxSel(id); setLastFamily(id) }} selected={inboxSel} /></div>
+          <div className="sl-inbox-pane">{inboxSel
+            ? <Family key={inboxSel} id={inboxSel} embedded startReply={startReply} onBack={() => setInboxSel(null)} toast={setToast} toastText={null} />
+            : <p className="sl-pick">Choose a conversation on the left. The family's messages, context, handling and scheduling open here.</p>}</div>
+        </div>
+        : <InboxTab loc={loc} act={act} open={openFamily} />)}
       {tab === 'search' && <>
         <header className="cmd-top"><h1>Search</h1></header>
         <SearchBox q={q} setQ={setQ} autoFocus />
         <SearchResults q={q} loc={loc} open={openFamily} />
       </>}
       {tab === 'appts' && <Appointments open={openFamily} />}
-      {toast && <div className="cmd-toast" role="status">{toast}</div>}
-      <nav className="cmd-tabs" aria-label="Sections">
-        {[['home', 'home', 'Performance'], ['inbox', 'inbox', 'Inbox'], ['search', 'search', 'Search'], ['appts', 'cal', 'Appointments']].map(([k, ic, lbl]) => (
-          <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
-            <span className="cmd-tabicon">{k === 'home' && tab === 'home' ? <Solid n="home" s={22} /> : <Icon n={ic} s={22} />}
-              {k === 'inbox' && d?.counts.needs_attention ? <i>{d.counts.needs_attention}</i> : null}</span>{lbl}
-          </button>))}
-      </nav>
-    </div>
-  )
+    </div>, tab === 'home' || tab === 'inbox' ? 'wide' : '')
+}
+
+function useWide() {
+  const q = '(min-width: 1100px)'
+  const [w, setW] = useState(() => typeof window !== 'undefined' && window.matchMedia?.(q).matches)
+  useEffect(() => {
+    const m = window.matchMedia?.(q)
+    if (!m) return
+    const f = () => setW(m.matches)
+    m.addEventListener?.('change', f)
+    return () => m.removeEventListener?.('change', f)
+  }, [])
+  return !!w
 }
 
 // Every SCI family, not only those who replied. The newest query always wins:
@@ -259,9 +304,10 @@ function SearchResults({ q, loc, open }) {
 
 // ONE inbox for texts and emails, with its own filters. Reads the same
 // endpoint as Home; "Handled" brings back what was answered or closed.
-const FILTERS = [['all', 'All'], ['needs_reply', 'Needs reply'], ['text', 'Text'], ['email', 'Email'], ['handled', 'Handled']]
+const FILTERS = [['all', 'All'], ['needs_reply', 'Needs reply'], ['unread', 'Unread'], ['ai', 'AI handling'], ['human', 'Human attention'],
+  ['appointments', 'Appointments'], ['text', 'Text'], ['email', 'Email'], ['handled', 'Handled']]
 
-function InboxTab({ loc, act, open }) {
+function InboxTab({ loc, act, open, selected }) {
   const [flt, setFlt] = useState('all')
   const [r, setR] = useState(null)
   const seq = useRef(0)
@@ -284,9 +330,9 @@ function InboxTab({ loc, act, open }) {
         <button key={k} role="tab" aria-selected={flt === k} className={flt === k ? 'on' : ''} onClick={() => setFlt(k)}>
           {l}{k !== 'handled' && c[k] !== undefined ? <i>{c[k]}</i> : null}</button>))}
     </div>
-    {r && flt !== 'handled' && <Unknown items={(r.unknown || []).filter(u => flt === 'all' || flt === 'needs_reply' || (flt === 'email' ? u.channel_label === 'EMAIL' : u.channel_label !== 'EMAIL'))} reload={load} />}
+    {r && flt !== 'handled' && <Unknown items={(r.unknown || []).filter(u => ['all', 'needs_reply', 'unread', 'human'].includes(flt) || (flt === 'email' && u.channel_label === 'EMAIL') || (flt === 'text' && u.channel_label !== 'EMAIL'))} reload={load} />}
     {r === null ? <p className="cmd-muted">Loading…</p>
-      : <Inbox items={r.inbox} act={act} open={open} empty={flt === 'handled' ? 'Nothing handled in the last two weeks.' : 'Nobody is waiting. Nice work.'} />}
+      : <Inbox items={r.inbox} act={act} open={open} selected={selected} empty={flt === 'handled' ? 'Nothing handled in the last two weeks.' : 'Nobody is waiting. Nice work.'} />}
   </>
 }
 
@@ -349,13 +395,13 @@ const ACT = {
   close: ['check', 'Close'], snooze: ['clock', 'Snooze'], review: ['note', 'Review', true], dismiss: ['x', 'Dismiss'],
 }
 
-function Inbox({ items, act, open, empty }) {
+function Inbox({ items, act, open, empty, selected }) {
   if (!items.length) return <p className="cmd-card cmd-muted pad">{empty || 'Nobody is waiting right now.'}</p>
   return items.map(i => {
     const email = i.channel === 'email'
     const title = email && (i.sender_name || i.sender_email) ? (i.sender_name || i.sender_email) : i.name
     return (
-      <article key={i.lead_id} className="cmd-card cmd-item">
+      <article key={i.lead_id} className={`cmd-card cmd-item ${selected === i.lead_id ? 'sel' : ''}`}>
         <button className="cmd-item-main" onClick={() => open(i.lead_id)}>
           <span className={`dot ${i.class}`} />
           <span className="cmd-item-text">
@@ -400,7 +446,7 @@ function Appointments({ open }) {
   </>
 }
 
-function Family({ id, view: view0, startReply, onBack, toast, toastText }) {
+function Family({ id, view: view0, startReply, onBack, toast, toastText, embedded }) {
   const [view, setView] = useState(view0 || 'conversation')
   const [f, setF] = useState(null)
   const [err, setErr] = useState('')
@@ -505,7 +551,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText }) {
     : mode === 'email' ? !!(f?.reply_to?.channel === 'email' && f.reply_to.threadable) : true
   if (!f) return <div className="cmd"><button className="cmd-back" onClick={onBack}><Icon n="back" /> Back</button>{err ? <p className="cmd-err">{err}</p> : <p className="cmd-muted">Loading…</p>}</div>
   return (
-    <div className="cmd cmd-family">
+    <div className={`cmd cmd-family ${embedded ? 'embedded' : ''}`}>
       <header className="cmd-fhead">
         <button className="cmd-back" onClick={onBack} aria-label="Back"><Icon n="back" s={24} /></button>
         <div><h1>{f.name}{f.is_test && <em className="badge low"> Test</em>}{f.is_demo && <em className="badge low"> Demo</em>}</h1><p className="cmd-sub">{f.location || 'Location not set'}</p></div>

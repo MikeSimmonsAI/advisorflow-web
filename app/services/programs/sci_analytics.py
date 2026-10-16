@@ -48,7 +48,7 @@ ERR = {"30007": "Carrier filtered (link)", "30003": "Phone unreachable", "30005"
        "30006": "Landline or unreachable carrier", "30008": "Unknown carrier error", "21610": "Opted out (STOP)",
        "30004": "Blocked by recipient", "21614": "Not a mobile number", "21211": "Invalid number"}
 
-PRESETS = ("today", "7d", "30d", "all", "custom")
+PRESETS = ("today", "24h", "7d", "30d", "all", "custom")
 
 
 # ── time ────────────────────────────────────────────────────────────────────
@@ -82,6 +82,10 @@ def window(preset: str = "today", start: Optional[str] = None, end: Optional[str
         label = d0.strftime("%b %-d") + ("" if d0 == d1 else " – " + d1.strftime("%b %-d, %Y"))
     elif p == "all":
         d0, d1, label = None, today, "All time"
+    elif p == "24h":
+        s24 = now - timedelta(hours=24)
+        return {"preset": p, "start": s24, "end": now + timedelta(seconds=1),
+                "start_date": ct_day(s24).isoformat(), "end_date": today.isoformat(), "label": "Last 24 hours"}
     else:
         days = {"today": 1, "7d": 7, "30d": 30}[p]
         d0, d1 = today - timedelta(days=days - 1), today
@@ -138,7 +142,7 @@ class Ledger:
         # whole original spreadsheet line, which made this the slowest step.
         R_ = ProgramSourceRecord
         recs = (db.query(R_.lead_id, R_.location_id, R_.campaign_family, R_.created_at, R_.approved_to_send_at,
-                         R_.on_hold, R_.hold_reason)
+                         R_.on_hold, R_.hold_reason, R_.scheduled_start_at)
                 .filter(R_.organization_id == org_id, R_.lead_id.isnot(None),
                         ~R_.source_lead_id.like("TEST-BOOKING-%"))
                 .order_by(R_.created_at).all())
@@ -162,7 +166,11 @@ class Ledger:
                 "campaign": (r.campaign_family or "").replace("_", " ").title() or None,
                 "imported_at": r.created_at, "approved_at": r.approved_to_send_at,
                 "on_hold": bool(r.on_hold), "hold_reason": r.hold_reason,
+                "campaign_key": r.campaign_family, "starts_at": r.scheduled_start_at,
             }
+        from app.models.program_models import CampaignFamily
+        self.active_campaigns = {k for (k,) in db.query(CampaignFamily.key).filter(
+            CampaignFamily.organization_id == org_id, CampaignFamily.is_active.is_(True)).all()}
         ids = list(self.families) or ["-"]
         lap("families")
 
@@ -387,8 +395,27 @@ METRICS = {
     "loaded": ("Families loaded", "family", "Every real SCI family imported (snapshot, not date-filtered)."),
     "not_contacted": ("Not yet contacted", "family", "Loaded families who have never received a text or email (snapshot)."),
     "in_outreach": ("In active outreach", "family", "Families whose follow-up schedule is running now (snapshot)."),
+    "approved": ("Approved for outreach", "family", "Families approved to receive outreach (by a person or the daily batch)."),
+    "scheduled_new": ("New families scheduled", "family",
+                      "Approved and not contacted yet - their first text is scheduled (next time shown)."),
+    "awaiting_approval": ("Ready, not yet approved", "family",
+                          "Never contacted, cell phone, active campaign, nothing on hold - the daily batch picks from these."),
+    "excluded": ("Can't be texted automatically", "family",
+                 "Not approved and not textable by the schedule: not a cell phone, on hold, campaign switched off, or opted out."),
 }
-SNAPSHOT = ("loaded", "not_contacted", "in_outreach")
+SNAPSHOT = ("loaded", "not_contacted", "in_outreach", "approved", "scheduled_new", "awaiting_approval", "excluded")
+
+
+def _excluded_reason(L: "Ledger", fam: Dict) -> Optional[str]:
+    if fam["dnc"]:
+        return "Opted out / Do Not Contact"
+    if fam["on_hold"]:
+        return "On hold: %s" % (fam["hold_reason"] or "review")
+    if (fam["line_type"] or "") != "mobile":
+        return "Not a cell phone (%s)" % (fam["line_type"] or "line type unknown")
+    if fam["campaign_key"] not in L.active_campaigns:
+        return "Campaign switched off (%s)" % (fam["campaign"] or "none")
+    return None
 
 
 def _filters_ok(row: Dict, f: Dict) -> bool:
@@ -396,7 +423,10 @@ def _filters_ok(row: Dict, f: Dict) -> bool:
         return False
     if f.get("channel") and row.get("channel") is not None and row.get("channel") != f["channel"]:
         return False
-    if f.get("touch") and touch_bucket(row.get("touch")) != f["touch"]:
+    if f.get("touch") in ("2+", "3+"):
+        if (row.get("touch") or 0) < int(f["touch"][0]):
+            return False
+    elif f.get("touch") and touch_bucket(row.get("touch")) != f["touch"]:
         return False
     if f.get("status") and row.get("result") != f["status"]:
         return False
@@ -459,6 +489,21 @@ def rows(L: Ledger, metric: str, w: Dict, f: Optional[Dict] = None) -> List[Dict
                 continue
             if metric == "in_outreach" and not (st is not None and st.status == "active"):
                 continue
+            contacted = lid in L.contacted_ever
+            note = None
+            if metric == "approved" and not fam["approved_at"]:
+                continue
+            if metric == "scheduled_new":
+                if not fam["approved_at"] or contacted:
+                    continue
+                note = "First text scheduled %s" % (fam["starts_at"].isoformat() + "Z" if fam["starts_at"] else "when sending opens")
+            if metric in ("awaiting_approval", "excluded"):
+                if fam["approved_at"] or contacted:
+                    continue
+                why = _excluded_reason(L, fam)
+                if (metric == "excluded") != (why is not None):
+                    continue
+                note = why or "Ready for the next daily batch"
             last = (L.attempts_by_lead.get(lid) or [None])[-1]
             out.append({"kind": "family", "lead_id": lid, "at": (last or {}).get("at") or fam["imported_at"],
                         "touch": (last or {}).get("touch"), "channel": (last or {}).get("channel"),
@@ -467,7 +512,9 @@ def rows(L: Ledger, metric: str, w: Dict, f: Optional[Dict] = None) -> List[Dict
                                                              else "Not contacted yet"),
                         "count": len(L.attempts_by_lead.get(lid, ())), "count_label": "attempts",
                         "location_id": fam["location_id"],
-                        "next_touch_at": st.next_touch_due_at if st is not None else None})
+                        "next_touch_at": (fam["starts_at"] if metric == "scheduled_new"
+                                          else (st.next_touch_due_at if st is not None else None)),
+                        **({"text": note} if note else {})})
         return out
     raise KeyError(metric)
 
@@ -779,8 +826,32 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
         stage = "In outreach · touch %s" % (st.current_touch_number or 1)
     elif st is not None:
         stage = "Outreach %s" % (st.status or "")
+    from app.services.cadence_service import _get_org_cadence_schedule
+    try:
+        steps = [{"touch": t["touch_number"], "day": t["day_offset"], "channel": t.get("channel") or "sms"}
+                 for t in _get_org_cadence_schedule(db, org_id)]
+    except Exception:                                     # noqa: BLE001
+        steps = []
+    from app.models.models import User
+    adv = db.query(User).filter(User.id == lead.assigned_to_id).first() if lead.assigned_to_id else None
+    from app.models.program_models import LocationProfile
+    loc = (db.query(LocationProfile.official_name).filter(LocationProfile.organization_id == org_id,
+                                                         LocationProfile.location_id == rec.location_id).scalar()
+           if rec is not None and rec.location_id else None)
+    sent_touches = sorted({e["touch"] for e in ev if e["kind"] == "touch" and e.get("channel") != "email"
+                           and e.get("result") != "failed" and e.get("touch")})
+    booking = next((e for e in reversed(ev) if e["kind"] == "booked"), None)
+    offered = next((e for e in reversed(ev) if e["kind"] == "offer"), None)
     return {
         "lead_id": lead.id,
+        "name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title(),
+        "location": loc, "advisor": (adv.full_name or adv.email) if adv else None,
+        "campaign": (rec.campaign_family or "").replace("_", " ").title() if rec is not None else None,
+        "steps": steps, "texts_sent_touches": sent_touches,
+        "next_touch_number": ((st.current_touch_number or 0) + 1) if (st is not None and st.status == "active") else None,
+        "appointment": {"state": "confirmed" if booking else ("offered" if offered else "none"),
+                        "detail": (booking or offered or {}).get("detail")},
+        "opted_out": stage == "Opted out",
         "stage": stage,
         "touches_sent": touches_sent,
         "current_touch": st.current_touch_number if st is not None else None,
@@ -790,3 +861,72 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
         "handling": ("human" if (conv is not None and conv.state in ("human", "stopped")) else "ai"),
         "events": ev,
     }
+
+
+def overview(L: Ledger, db: Session, location_id: Optional[str] = None) -> Dict:
+    """The dashboard's fixed panels (always "now" / "today"): pipeline,
+    today's activity, cadence steps. Every number is a metric + filter, so the
+    screen opens its exact records."""
+    f = {"location_id": location_id} if location_id else {}
+    today, allw, d24, wk = window("today"), window("all"), window("24h"), window("7d")
+    c = lambda m, w=allw, **x: count(L, m, w, dict(f, **x))          # noqa: E731
+    approved_rows = rows(L, "approved", allw, f)
+    approved_today = sum(1 for lid in {r["lead_id"] for r in approved_rows}
+                         if L.families[lid]["approved_at"] and _in(L.families[lid]["approved_at"], today))
+    sched = [L.families[r["lead_id"]]["starts_at"] for r in rows(L, "scheduled_new", allw, f)
+             if L.families[r["lead_id"]]["starts_at"]]
+    from app.services.cadence_service import _get_org_cadence_schedule
+    try:
+        steps = _get_org_cadence_schedule(db, L.org)
+    except Exception:                                     # noqa: BLE001
+        steps = []
+    at_step: Dict[int, int] = defaultdict(int)
+    for lid, st in L.states.items():
+        if st.status == "active" and lid in L.families and (not location_id or L.families[lid]["location_id"] == location_id):
+            at_step[int(st.current_touch_number or 0)] += 1
+    return {
+        "pipeline": [{"key": k, "label": lbl, "value": c(k)} for k, lbl in (
+            ("loaded", "Total imported"), ("approved", "Approved"), ("in_outreach", "In cadence"),
+            ("awaiting_approval", "Ready, not approved"), ("excluded", "Excluded"))],
+        "approved_today": approved_today,
+        "scheduled_new": {"value": c("scheduled_new"), "first_start": _iso(min(sched)) if sched else None,
+                          "last_start": _iso(max(sched)) if sched else None},
+        "replies_24h": {"value": count(L, "replies", d24, f), "repliers": count(L, "repliers", d24, f)},
+        "appointments_7d": count(L, "appointments", wk, f),
+        "today": [
+            {"key": "first", "label": "First touches sent", "metric": "attempts", "touch": "1",
+             "value": c("attempts", today, touch="1")},
+            {"key": "followup", "label": "Follow-up touches sent", "metric": "attempts", "touch": "2+",
+             "value": c("attempts", today, touch="2+")},
+            {"key": "email", "label": "Emails sent", "metric": "attempts", "channel": "email",
+             "value": c("attempts", today, channel="email")},
+            {"key": "replies", "label": "Replies received", "metric": "replies", "value": c("replies", today)},
+            {"key": "offers", "label": "Appointments offered", "metric": "offers", "value": c("offers", today)},
+            {"key": "appts", "label": "Appointments confirmed", "metric": "appointments",
+             "value": c("appointments", today)},
+        ],
+        "cadence": [{"touch": t["touch_number"], "day": t["day_offset"], "channel": t.get("channel") or "sms",
+                     "label": {1: "First contact", 2: "Follow up"}.get(t["touch_number"],
+                                                                       "Follow up %d" % (t["touch_number"] - 1)),
+                     "families_past": at_step.get(t["touch_number"], 0)} for t in steps],
+        "cadence_waiting": at_step.get(0, 0),
+    }
+
+
+def streams(L: Ledger, location_id: Optional[str] = None) -> Dict:
+    """NEW family first touches vs EXISTING family follow-ups, separately:
+    the most recent Central day each stream actually sent on, and what."""
+    def last_day(pred):
+        days = [ct_day(a["at"]) for a in L.attempts if a["at"] and pred(a)
+                and (not location_id or a["location_id"] == location_id)]
+        if not days:
+            return None
+        d = max(days)
+        rows_ = [a for a in L.attempts if a["at"] and pred(a) and ct_day(a["at"]) == d
+                 and (not location_id or a["location_id"] == location_id)]
+        return {"date": d.isoformat(), "sent": len(rows_),
+                "delivered": sum(1 for a in rows_ if a["result"] in ("delivered", "opened")),
+                "failed": sum(1 for a in rows_ if a["result"] == "failed"),
+                "touch2": sum(1 for a in rows_ if a["touch"] == 2),
+                "touch3plus": sum(1 for a in rows_ if a["touch"] >= 3)}
+    return {"new": last_day(lambda a: a["touch"] == 1), "existing": last_day(lambda a: a["touch"] >= 2)}

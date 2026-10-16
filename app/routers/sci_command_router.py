@@ -88,7 +88,8 @@ def _actions(r, conv) -> list:
 
 
 _NEEDS_REPLY = ("new", "opened")
-FILTERS = ("all", "needs_reply", "text", "email", "handled")
+_APPT_STATES = ("offered", "booked", "callback_requested")
+FILTERS = ("all", "needs_reply", "text", "email", "handled", "unread", "ai", "human", "appointments")
 
 
 def _sender(db, r, lead) -> dict:
@@ -149,6 +150,9 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
     convs = {c.lead_id: c for c in db.query(ProgramConversation)
              .filter(ProgramConversation.lead_id.in_(list(newest))).order_by(ProgramConversation.created_at).all()} \
         if newest else {}
+    _adv_ids = {l.assigned_to_id for l in leads.values() if l.assigned_to_id}
+    advisors = {u.id: (u.full_name or u.email) for u in db.query(User).filter(User.id.in_(list(_adv_ids)))} \
+        if _adv_ids else {}
     needle = (q or "").strip().lower()
     items = []
     for lid, r in newest.items():
@@ -173,7 +177,8 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                       "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
                       "sla_breached": bool(r.response_class == "hot" and r.handling_status == "new"
                                            and r.sla_due_at and r.sla_due_at <= datetime.utcnow()),
-                      "setter_state": conv.state if conv else None, "actions": _actions(r, conv)})
+                      "setter_state": conv.state if conv else None, "actions": _actions(r, conv),
+                      "advisor": advisors.get(getattr(lead, "assigned_to_id", None))})
     items.sort(key=lambda i: (not i["sla_breached"], _RANK.get(i["class"], 5),
                               -(datetime.fromisoformat(i["received_at"][:-1]).timestamp() if i["received_at"] else 0)))
     needs = sum(1 for i in items if i["class"] in ("hot", "active", "bad_data", "wrong_person") and not i["is_test"])
@@ -182,13 +187,22 @@ def command_home(location_id: Optional[str] = None, q: Optional[str] = None, lim
                                         and i["class"] != "auto_reply"),
                      "text": sum(1 for i in items if i["channel"] != "email"),
                      "email": sum(1 for i in items if i["channel"] == "email"),
-                     "unread": sum(1 for i in items if i["handling_status"] == "new")}
+                     "unread": sum(1 for i in items if i["handling_status"] == "new"),
+                     "ai": sum(1 for i in items if i["owner"] == "ai"),
+                     "human": sum(1 for i in items if i["owner"] == "human"),
+                     "appointments": sum(1 for i in items if i["setter_state"] in _APPT_STATES)}
     if flt == "needs_reply":
         items = [i for i in items if i["handling_status"] in _NEEDS_REPLY and i["class"] != "auto_reply"]
     elif flt == "text":
         items = [i for i in items if i["channel"] != "email"]
     elif flt == "email":
         items = [i for i in items if i["channel"] == "email"]
+    elif flt == "unread":
+        items = [i for i in items if i["handling_status"] == "new"]
+    elif flt in ("ai", "human"):
+        items = [i for i in items if i["owner"] == flt]
+    elif flt == "appointments":
+        items = [i for i in items if i["setter_state"] in _APPT_STATES]
 
     org_leads = db.query(Lead.id).filter(Lead.organization_id == org, Lead.is_test.isnot(True))
     booked = (db.query(BookingLink).filter(BookingLink.lead_id.in_(org_leads),
@@ -879,12 +893,49 @@ def command_mail_task(body: MailTaskIn, db: Session = Depends(get_db), user: Use
 # ── SCI LIVE PERFORMANCE (Oct 15 redesign) ──────────────────────────────────
 # Every number comes from one ledger (app/services/programs/sci_analytics.py)
 # and every drill-down returns exactly the rows that number counts.
-_TOUCHES = ("1", "2", "3", "4+")
+_TOUCHES = ("1", "2", "3", "4+", "2+", "3+")
 
 
 def _analytics_window(range_: str, start: Optional[str], end: Optional[str]):
     from app.services.programs import sci_analytics as SA
     return SA.window(range_, start, end)
+
+
+def _next_batch(prog) -> Optional[str]:
+    """The next sending day (Central date) the daily batch will add families."""
+    from datetime import date as _date
+    from app.services.programs import daily_batch
+    if not prog.daily_batch_count:
+        return None
+    local = daily_batch._local_now()
+    d = local.date()
+    if prog.daily_batch_last_date:
+        try:
+            d = max(d, _date.fromisoformat(prog.daily_batch_last_date) + timedelta(days=1))
+        except ValueError:
+            pass
+    elif local.time() >= daily_batch.LATEST_START:
+        d = d + timedelta(days=1)
+    for i in range(8):
+        day = d + timedelta(days=i)
+        if str(day.isoweekday()) in (prog.daily_batch_days or "12345"):
+            return day.isoformat()
+    return None
+
+
+def _link_retest(db, prog) -> dict:
+    """The owner-number booking-link retest (Twilio ticket): the latest text
+    with a link to the owner's own test contact, and what the carrier said."""
+    owner = (db.query(Lead).filter(Lead.organization_id == prog.organization_id, Lead.is_test.is_(True),
+                                   Lead.last_name == _tr.OWNER_TEST_LAST_NAME).first())
+    if owner is None:
+        return {"status": "no owner test contact"}
+    m = (db.query(Message).filter(Message.lead_id == owner.id, Message.body.ilike("%http%"))
+         .order_by(Message.sent_at.desc()).first())
+    if m is None:
+        return {"status": "not run"}
+    return {"status": (m.delivery_status or m.twilio_status or "sent"), "at": m.sent_at.isoformat() + "Z" if m.sent_at else None,
+            "error_code": m.error_code}
 
 
 @router.get("/analytics")
@@ -899,6 +950,10 @@ def command_analytics(range_: str = Query("today", alias="range"), start: Option
     L = SA.ledger(db, prog.organization_id)
     out = SA.summary(L, _analytics_window(range_, start, end), location_id or None, daily_batch.status(prog))
     out["daily_batch"] = daily_batch.status(prog)
+    out["overview"] = SA.overview(L, db, location_id or None)
+    out["streams"] = SA.streams(L, location_id or None)
+    out["next_batch"] = _next_batch(prog)
+    out["link_retest"] = _link_retest(db, prog)
     out["data_as_of"] = L.built_at.isoformat() + "Z"
     out["timing_ms"] = L.timing
     out["locations_all"] = [{"id": k, "name": v} for k, v in sorted(L.locs.items(), key=lambda kv: kv[1] or "")]
@@ -917,7 +972,7 @@ def command_analytics_records(metric: str, range_: str = Query("today", alias="r
     if metric not in SA.METRICS:
         raise HTTPException(status_code=400, detail="Unknown metric.")
     if touch and touch not in _TOUCHES:
-        raise HTTPException(status_code=400, detail="Touch must be 1, 2, 3 or 4+.")
+        raise HTTPException(status_code=400, detail="Touch must be 1, 2, 3, 4+ or 2+.")
     if channel and channel not in ("sms", "email", "voicemail"):
         raise HTTPException(status_code=400, detail="Channel must be sms, email or voicemail.")
     prog = _program(db, user, managers_only=False)

@@ -273,6 +273,8 @@ function Projection({ p }) {
 const STATUS = [['', 'Any result'], ['delivered', 'Delivered'], ['opened', 'Opened (email)'], ['failed', 'Failed'], ['pending', 'Awaiting result']]
 export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily }) {
   const [range, setRange] = useState(range0)
+  const [metric, setMetric] = useState(spec.metric)
+  const [sum, setSum] = useState(null)
   const [loc, setLoc] = useState(spec.location_id ?? loc0 ?? '')
   const [touch, setTouch] = useState(spec.touch || '')
   const [channel, setChannel] = useState(spec.channel || '')
@@ -283,12 +285,16 @@ export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily
   const seq = useRef(0)
   const q = useMemo(() => {
     const p = rangeQuery(range, loc)
-    p.set('metric', spec.metric)
+    p.set('metric', metric)
     if (touch) p.set('touch', touch)
     if (channel) p.set('channel', channel)
     if (status) p.set('status', status)
     return p.toString()
-  }, [range, loc, touch, channel, status, spec.metric])
+  }, [range, loc, touch, channel, status, metric])
+  const sq = rangeQuery(range, loc).toString()
+  useEffect(() => { api.get(`/program/command/analytics?${sq}`).then(setSum).catch(() => {}) }, [sq])
+  const seg = (m, t = '', c = '') => { setMetric(m); setTouch(t); setChannel(c); setStatus('') }
+  const segOn = (m, t = '', c = '') => metric === m && touch === t && channel === c
   useEffect(() => {
     const k = ++seq.current
     setShown(50)
@@ -304,7 +310,13 @@ export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily
         <button className="cmd-back" onClick={onBack} aria-label="Back"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M15 5l-7 7 7 7" /></svg></button>
         <div><h1>{r?.label || 'Records'}</h1><p className="cmd-sub">{r?.help}</p></div>
       </header>
+      <div className="dr-segs" role="tablist" aria-label="View">
+        {[['All outbound', 'attempts'], ['New families', 'new_families'], ['Follow-ups', 'attempts', '2+'], ['SMS', 'attempts', '', 'sms'],
+          ['Email', 'attempts', '', 'email'], ['Replies', 'replies'], ['Appointments', 'appointments']].map(([l, m, t, c]) => (
+          <button key={l} className={segOn(m, t, c) ? 'on' : ''} onClick={() => seg(m, t, c)}>{l}</button>))}
+      </div>
       {r && !r.snapshot && <RangeBar range={range} setRange={setRange} />}
+      {sum && <DrillSummary s={sum} pick={t => seg('attempts', t)} pickQueue={() => seg('scheduled_new')} />}
       <div className="pf-dfilters">
         <select className="pf-select" value={loc} onChange={e => setLoc(e.target.value)} aria-label="Location">
           <option value="">All locations</option>
@@ -316,7 +328,7 @@ export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily
             {r.row_kind === 'reply' && <option value="voicemail">Voicemail</option>}
           </select>
           <div className="pf-seg small" role="tablist" aria-label="Touch">
-            {[['', 'Any touch'], ['1', '1st'], ['2', '2nd'], ['3', '3rd'], ['4+', '4th+']].map(([k, l]) => (
+            {[['', 'Any touch'], ['1', '1st'], ['2', '2nd'], ['3', '3rd'], ['4+', '4th+'], ['3+', '3rd+'], ['2+', 'All follow-ups']].map(([k, l]) => (
               <button key={k} className={touch === k ? 'on' : ''} onClick={() => setTouch(k)}>{l}</button>))}
           </div>
           {attemptish && <select className="pf-select" value={status} onChange={e => setStatus(e.target.value)} aria-label="Status">
@@ -329,7 +341,18 @@ export function MetricDrill({ spec, range: range0, loc: loc0, onBack, openFamily
           {r.row_kind !== 'family' && <> · {n(r.families)} {r.families === 1 ? 'family' : 'families'}</>}
           <span>{r.snapshot ? 'Right now' : r.window.label}</span></div>
         {!r.items.length ? <p className="cmd-card cmd-muted pad">No records match these filters.</p>
-          : <div className="pf-records">{r.items.slice(0, shown).map(i => <Record key={`${i.kind}-${i.id || i.lead_id}`} i={i} open={openFamily} />)}</div>}
+          : <>
+            <div className="dr-tablewrap"><table className="dr-table">
+              <thead><tr><th>Family</th><th>Location</th><th>Touch</th><th>Channel</th><th>When (CT)</th><th>Result</th><th>Message / reason</th></tr></thead>
+              <tbody>{r.items.slice(0, shown).map(i => (
+                <tr key={`${i.kind}-${i.id || i.lead_id}`} onClick={() => openFamily(i.lead_id, 'journey')}>
+                  <td><b>{i.name}</b></td><td>{i.location || '—'}</td><td>{i.touch ? ordinal(i.touch) : '—'}</td>
+                  <td>{CHANNEL[i.channel] || '—'}</td><td>{fmtWhen(i.next_touch_at && r.metric === 'scheduled_new' ? i.next_touch_at : i.at)}</td>
+                  <td>{i.result ? <em className={`tag r-${i.result}`}>{RESULT[i.result] || i.result.replace(/_/g, ' ')}</em> : '—'}</td>
+                  <td className={i.error ? 'err' : ''}>{i.error ? `Reason: ${i.error}` : i.text}</td></tr>))}</tbody>
+            </table></div>
+            <div className="pf-records">{r.items.slice(0, shown).map(i => <Record key={`${i.kind}-${i.id || i.lead_id}`} i={i} open={openFamily} />)}</div>
+          </>}
         {r.items.length > shown && <button className="pf-more" onClick={() => setShown(shown + 100)}>Show {Math.min(100, r.items.length - shown)} more of {n(r.items.length)}</button>}
         {r.truncated && <p className="cmd-muted small">Showing the newest {n(r.items.length)}. Narrow the filters to see older records.</p>}
       </>}
@@ -375,30 +398,89 @@ export function Journey({ id }) {
   }, [id])
   if (err) return <p className="cmd-err">{err}</p>
   if (!j) return <p className="cmd-muted">Loading the journey…</p>
+  const total = j.steps?.length || 0
+  const sentTexts = new Set(j.texts_sent_touches || [])
+  const nextTouch = j.next_touch_number
+  const appt = j.appointment || {}
+  const nextStep = (j.steps || []).find(s => s.touch === nextTouch)
   return (
     <section className="pf-journey" aria-label="Family journey">
-      <div className="pf-jstats">
-        <div><span>Stage</span><b>{j.stage}</b></div>
-        <div><span>Touches sent</span><b>{j.touches_sent}</b></div>
-        <div><span>Replies</span><b>{j.replies}</b></div>
-        <div><span>Next touch due</span><b>{j.next_touch_at ? fmtWhen(j.next_touch_at) : '—'}</b></div>
-        <div><span>Handling</span><b>{j.handling === 'human' ? 'Human' : 'AI'}</b></div>
+      <div className="jr-banner">
+        <div><b>{j.name}</b><span>{[j.location, j.advisor ? `Advisor ${j.advisor}` : null, j.campaign, 'Program: SCI Live'].filter(Boolean).join(' · ')}</span></div>
+        <div className="jr-next"><small>Next scheduled action</small>
+          {j.opted_out ? <b>None - opted out</b> : j.next_touch_at
+            ? <><b>{fmtWhen(j.next_touch_at)} CT</b><span>Touch {nextTouch}{nextStep ? ` · ${nextStep.channel === 'email' ? 'Email' : 'Text'}` : ''} · scheduled</span></>
+            : <b>{appt.state === 'confirmed' ? 'Visit booked' : 'Nothing scheduled'}</b>}</div>
       </div>
-      <ol className="pf-timeline">
-        {[...j.events].reverse().map((e, k) => (
-          <li key={k} className={`k-${e.kind} ${e.result === 'failed' ? 'fail' : ''}`}>
-            <span className="pf-tdot" aria-hidden="true" />
-            <div>
-              <p className="pf-thead"><b>{e.title}</b><small>{fmtWhen(e.at)}</small></p>
-              <p className="pf-ttags"><em className="tag">{KIND[e.kind] || e.kind}</em>
-                {e.channel && <em className={`tag ${e.channel}`}>{CHANNEL[e.channel] || e.channel}</em>}
-                {e.result && ['delivered', 'opened', 'failed', 'pending'].includes(e.result) && <em className={`tag r-${e.result}`}>{RESULT[e.result]}</em>}</p>
-              {e.detail && <p className="pf-tdetail">{e.detail}</p>}
-              {e.error && <p className="pf-rec-err">Reason: {e.error}</p>}
-            </div>
-          </li>))}
-        {!j.events.length && <li><div><p className="cmd-muted">Nothing recorded yet.</p></div></li>}
-      </ol>
+      <div className="jr-cards">
+        <div><small>Current state</small><b className="blue">{j.stage}</b><span>{j.handling === 'human' ? 'A person is handling replies' : 'AI answers replies'}</span></div>
+        <div><small>Touch progression</small><b>{j.touches_sent} / {total || '—'}</b><span>{j.touches_sent ? `${j.touches_sent} sent (texts + emails)` : 'Touch one not yet sent'}</span></div>
+        <div><small>Conversation</small><b>{j.replies ? `${j.replies} repl${j.replies === 1 ? 'y' : 'ies'}` : 'Not started'}</b><span>{j.replies ? 'Family has written back' : 'Awaiting first reply'}</span></div>
+        <div><small>Appointment</small><b className={appt.state === 'confirmed' ? 'green' : ''}>{appt.state === 'confirmed' ? 'Booked' : appt.state === 'offered' ? 'Times offered' : 'Not booked'}</b>
+          <span>{appt.detail || 'Calendar times available'}</span></div>
+      </div>
+      <div className="jr-split">
+        <div className="jr-card">
+          <h3>Contact &amp; qualification trail <small>oldest at the bottom</small></h3>
+          <ol className="pf-timeline">
+            {[...j.events].reverse().map((e, k) => (
+              <li key={k} className={`k-${e.kind} ${e.result === 'failed' ? 'fail' : ''}`}>
+                <span className="pf-tdot" aria-hidden="true" />
+                <div>
+                  <p className="pf-thead"><b>{e.title}</b><small>{fmtWhen(e.at)}</small></p>
+                  <p className="pf-ttags"><em className="tag">{KIND[e.kind] || e.kind}</em>
+                    {e.channel && <em className={`tag ${e.channel}`}>{CHANNEL[e.channel] || e.channel}</em>}
+                    {e.result && ['delivered', 'opened', 'failed', 'pending'].includes(e.result) && <em className={`tag r-${e.result}`}>{RESULT[e.result]}</em>}</p>
+                  {e.detail && <p className="pf-tdetail">{e.detail}</p>}
+                  {e.error && <p className="pf-rec-err">Reason: {e.error}</p>}
+                </div>
+              </li>))}
+            {!j.events.length && <li><div><p className="cmd-muted">Nothing recorded yet.</p></div></li>}
+          </ol>
+        </div>
+        <div className="jr-side">
+          <div className="jr-card">
+            <h3>{total}-touch cadence timeline</h3>
+            <div className="jr-steps">{(j.steps || []).map(s => (
+              <span key={s.touch} className={sentTexts.has(s.touch) ? 'done' : s.touch === nextTouch ? 'next' : ''}>
+                <b>{s.touch}</b><small>Day {s.day + 1}</small></span>))}</div>
+            <p className="jr-note"><b>Smart pause:</b> a family reply, STOP request, scheduled visit, or human handling changes the next touch automatically.</p>
+          </div>
+          <div className="jr-card">
+            <h3>Appointment conversion</h3>
+            <div className="sl-row"><span>Appointment calendar</span><b>EvoSys Appointment Booking</b></div>
+            <div className="sl-row"><span>Meeting type</span><b>In-person visit (60 min)</b></div>
+            <div className="sl-row"><span>Booking outcome</span><em className={`tag ${appt.state === 'confirmed' ? 'r-delivered' : 'r-pending'}`}>{appt.state === 'confirmed' ? 'Confirmed' : appt.state === 'offered' ? 'Offered' : 'Pending'}</em></div>
+            <p className="jr-warn">Booking links stay out of texts until the Twilio link retest clears. An offer of times is not a confirmed appointment.</p>
+          </div>
+        </div>
+      </div>
     </section>
   )
+}
+
+const ordinal = t => `${t}${({ 1: 'st', 2: 'nd', 3: 'rd' })[t] || 'th'}`
+
+function DrillSummary({ s, pick, pickQueue }) {
+  const t = Object.fromEntries((s.touches || []).map(x => [x.touch, x]))
+  const sn = s.overview?.scheduled_new || {}
+  const third = (t['3']?.attempts || 0) + (t['4+']?.attempts || 0)
+  const bars = [['1st touch', t['1']?.attempts || 0, '1'], ['2nd touch', t['2']?.attempts || 0, '2'],
+    ['3rd+ touch', third, '3+'], ['Next batch*', sn.value || 0, null]]
+  const max = Math.max(1, ...bars.map(b => b[1]))
+  return <>
+    <div className="dr-cards">
+      <button onClick={() => pick('1')}><small>First touches · {s.window.label}</small><b>{n(t['1']?.attempts || 0)}</b><span>{t['1']?.attempts ? `${n(t['1'].delivered)} delivered` : 'None sent in this period'}</span></button>
+      <button onClick={() => pick('2')}><small>Second touches · {s.window.label}</small><b>{n(t['2']?.attempts || 0)}</b><span>Follow-up cadence</span></button>
+      <button onClick={() => pick('3+')}><small>Third+ touches · {s.window.label}</small><b>{n(third)}</b><span>Follow-up cadence</span></button>
+      <button onClick={pickQueue}><small>Next first-touch batch</small><b className="blue">{n(sn.value || 0)}</b>
+        <span>{sn.first_start ? `${fmtWhen(sn.first_start)} – ${new Date(sn.last_start).toLocaleTimeString([], { ...CT, hour: 'numeric', minute: '2-digit' })} CT` : 'Nothing queued'}</span></button>
+    </div>
+    <div className="dr-chart" aria-label="Touch distribution">
+      {bars.map(([l, v, k], i) => (
+        <button key={l} onClick={() => (k ? pick(k) : pickQueue())} title={`${l}: ${v}`}>
+          <b>{n(v)}</b><span className={`c${i}`} style={{ height: `${Math.max(v ? 6 : 2, (100 * v) / max)}%` }} /><small>{l}</small></button>))}
+      <p>* Scheduled, not sent - it belongs to the next sending day. Sent counts are attempts handed to the provider; delivery comes from Twilio callbacks.</p>
+    </div>
+  </>
 }

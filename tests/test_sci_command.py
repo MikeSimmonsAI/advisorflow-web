@@ -202,3 +202,16 @@ def test_inbound_window_audit_is_owner_only(program, sample_advisor, client):
     r = client.get("/program/audit/inbound-window?start=2026-10-16T01:35:00&end=2026-10-16T01:55:00",
                    headers=_h(db, program["admin"]))
     assert r.status_code == 403
+
+
+def test_inbox_filters_for_ai_human_and_unread(program, sample_advisor, client):
+    db, org = program["db"], program["org"]
+    hot = _lead_for(db, org, sample_advisor, "L001", first="Lester")
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        R.on_inbound(db, hot, "Can I schedule a visit this week?", "sms")
+    h = _h(db, program["admin"])
+    r = client.get("/program/command?filter=unread", headers=h).json()
+    assert r["filter"] == "unread" and [i["name"] for i in r["inbox"]] == ["Lester Testcase"]
+    assert {"ai", "human", "appointments", "unread"} <= set(r["filter_counts"])
+    total = r["filter_counts"]["ai"] + r["filter_counts"]["human"]
+    assert total == r["filter_counts"]["all"]
