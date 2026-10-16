@@ -45,3 +45,13 @@ def test_an_inactive_number_keeps_the_schedule(db_session, sample_org, sample_ad
     lead = _lead(db_session, sample_org, sample_advisor, phone="12145552504")
     _sent(db_session, lead, sample_advisor, 30, "undelivered", "30005")
     assert cs._unreachable_reason(db_session, lead) is None
+
+
+def test_an_undelivered_text_does_not_start_the_spacing_clock(db_session, sample_org, sample_advisor):
+    """Oct 16: a carrier-blocked text (30007) held its own resend two days."""
+    from app.services.programs import spacing
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145552505")
+    _sent(db_session, lead, sample_advisor, 70, "delivered", None)
+    _sent(db_session, lead, sample_advisor, 20, "undelivered", "30007")
+    last = spacing.last_text_at(db_session, lead.id)
+    assert last == (AT - timedelta(hours=70)).replace(tzinfo=None)
