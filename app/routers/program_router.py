@@ -2402,6 +2402,61 @@ def audit_failed_texts(days: int = Query(30, ge=1, le=120), db: Session = Depend
             "with_link": sum(1 for i in items if i["has_link"]), "items": items}
 
 
+@router.get("/audit/inbound-window")
+def audit_inbound_window(start: str, end: str, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    """OWNER ONLY, READ-ONLY. Asks Twilio for every inbound text and call to
+    the SCI line between start and end (ISO, UTC) and says whether each one
+    reached the app; also lists Twilio's own webhook-failure alerts in that
+    window. Used to check for replies missed during an outage. Sends nothing,
+    changes nothing."""
+    from app.models.models import Reply
+    from app.models.program_models import ProgramUnmatchedReply
+    from app.services import sms_programs as _sci
+    if getattr(user, "role", None) != "god_admin":
+        raise HTTPException(status_code=403, detail="Owner only.")
+    try:
+        t0 = datetime.fromisoformat(start.replace("Z", "")).replace(tzinfo=None)
+        t1 = datetime.fromisoformat(end.replace("Z", "")).replace(tzinfo=None)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="start / end must be ISO times (UTC).")
+    if t1 <= t0 or (t1 - t0) > timedelta(hours=6):
+        raise HTTPException(status_code=422, detail="A window of up to 6 hours.")
+    _program(db, user)
+    client, line = _sci.sci_sender()
+    from datetime import timezone as _tz
+    a, b = t0.replace(tzinfo=_tz.utc), t1.replace(tzinfo=_tz.utc)
+    texts = []
+    for m in client.messages.list(to=line, date_sent_after=a, date_sent_before=b, limit=200):
+        if not (m.direction or "").startswith("inbound"):
+            continue
+        in_app = (db.query(Reply.id).filter(Reply.twilio_sid == m.sid).first() is not None
+                  or db.query(ProgramUnmatchedReply.id)
+                  .filter(ProgramUnmatchedReply.mailbox_message_id == "sms:%s" % m.sid).first() is not None)
+        texts.append({"sid": m.sid, "from_last4": (m.from_ or "")[-4:],
+                      "at_utc": m.date_sent.isoformat() if m.date_sent else None,
+                      "body": m.body, "in_app": in_app})
+    calls = []
+    try:
+        for c in client.calls.list(to=line, start_time_after=a, start_time_before=b, limit=100):
+            calls.append({"sid": c.sid, "from_last4": (c.from_ or "")[-4:], "status": c.status,
+                          "at_utc": c.start_time.isoformat() if c.start_time else None,
+                          "duration": c.duration})
+    except Exception as exc:                              # noqa: BLE001
+        calls = [{"error": str(exc)[:200]}]
+    alerts = []
+    try:
+        for al in client.monitor.v1.alerts.list(start_date=a, end_date=b, limit=200):
+            alerts.append({"code": al.error_code, "at_utc": al.date_created.isoformat() if al.date_created else None,
+                           "url": (al.request_url or "")[:200], "resource": al.resource_sid,
+                           "text": (al.alert_text or "")[:300]})
+    except Exception as exc:                              # noqa: BLE001
+        alerts = [{"error": str(exc)[:200]}]
+    return {"line_last4": line[-4:], "start": t0.isoformat(), "end": t1.isoformat(),
+            "inbound_texts": texts, "missing_from_app": [t for t in texts if not t["in_app"]],
+            "calls": calls, "twilio_alerts": alerts}
+
+
 @router.get("/audit/lead/{lead_id}")
 def audit_lead(lead_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     """READ-ONLY send history for one family: cadence state, every touch
