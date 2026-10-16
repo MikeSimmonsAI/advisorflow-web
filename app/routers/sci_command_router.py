@@ -896,9 +896,11 @@ def command_analytics(range_: str = Query("today", alias="range"), start: Option
     clearly separate projections. Real families only."""
     from app.services.programs import daily_batch, sci_analytics as SA
     prog = _program(db, user, managers_only=False)
-    L = SA.Ledger(db, prog.organization_id)
+    L = SA.ledger(db, prog.organization_id)
     out = SA.summary(L, _analytics_window(range_, start, end), location_id or None, daily_batch.status(prog))
     out["daily_batch"] = daily_batch.status(prog)
+    out["data_as_of"] = L.built_at.isoformat() + "Z"
+    out["timing_ms"] = L.timing
     out["locations_all"] = [{"id": k, "name": v} for k, v in sorted(L.locs.items(), key=lambda kv: kv[1] or "")]
     return out
 
@@ -919,7 +921,7 @@ def command_analytics_records(metric: str, range_: str = Query("today", alias="r
     if channel and channel not in ("sms", "email", "voicemail"):
         raise HTTPException(status_code=400, detail="Channel must be sms, email or voicemail.")
     prog = _program(db, user, managers_only=False)
-    L = SA.Ledger(db, prog.organization_id)
+    L = SA.ledger(db, prog.organization_id)
     w = _analytics_window(range_, start, end)
     f = {k: v for k, v in (("location_id", location_id), ("channel", channel), ("touch", touch),
                            ("status", status)) if v}
@@ -929,7 +931,7 @@ def command_analytics_records(metric: str, range_: str = Query("today", alias="r
     return {"metric": metric, "label": label, "help": help_, "row_kind": kind, "snapshot": metric in SA.SNAPSHOT,
             "window": {k: w[k] for k in ("preset", "label", "start_date", "end_date")}, "filters": f,
             "count": len(rows), "families": len({r["lead_id"] for r in rows}),
-            "items": items, "truncated": truncated,
+            "items": items, "truncated": truncated, "data_as_of": L.built_at.isoformat() + "Z",
             "locations_all": [{"id": k, "name": v} for k, v in sorted(L.locs.items(), key=lambda kv: kv[1] or "")]}
 
 
