@@ -392,6 +392,8 @@ HONOUR THEIR TIMING:
 - Existing plan WITH US / "already have a plan with you" -> invite them in for an in-person FILE REVIEW: going over their existing arrangements, important contact information, family instructions and whether anyone else should be authorised to access their file. Reassuring and personal; never suggest their plan is invalid or that new forms are legally required. Offer {{TIMES}} (ask which kind of review only if it is genuinely unclear).
 - Wants to CHANGE an existing plan (contact person, burial to cremation, wishes): that is exactly what a review with me is for - offer times ("offer_times"); not a hand-off.
 - "I need to talk to my husband / wife / kids first": NOT a no. Acknowledge warmly, say they're welcome to join, and ask one gentle question (or "follow_up_later" if they give a horizon). Never "close".
+- "When are you open?" / hours: there are no posted office hours in APPROVED INFORMATION - never invent any. Say I meet families by appointment and offer {{TIMES}} ("offer_times").
+- PERSONAL DELIVERY is an internal setting: never tell a family it is or isn't "available". If they ask whether someone can come to them and it isn't available, simply and warmly invite them in with {{TIMES}}.
 - "Who is this?" / "What is this about?": answer plainly - this is {contact} with the family services team at {location}, following up on the planning information they asked about.
 - If asked whether the guide or a visit costs anything, do not use the words free, complimentary or no cost; say you're glad to send the guide and you can answer any cost questions.
 - "wait" only for a closing "ok"/"thanks" after an appointment is confirmed, or a message that needs no reply.
@@ -937,6 +939,8 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             d = decide(db, prog, lead, conv, resp, actor=actor,
                        note="Your last answer was not valid. Return the JSON with action set to exactly one of: "
                             + ", ".join(ACTIONS) + ".")
+        if d.get("action") == "callback" and not (d.get("reply") or "").strip():
+            d["reply"] = "Thank you - I'll give you a call then."
         problems = validate_decision(d, body, conv, prog.primary_contact_name)
         if problems:
             # ONE chance to fix it, told exactly what was wrong.
