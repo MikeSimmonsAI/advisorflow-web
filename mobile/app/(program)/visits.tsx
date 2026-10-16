@@ -9,7 +9,7 @@ export default function ProgramVisits() {
   const query = useScopedQuery(['program', 'upcoming-visits'], program.visits, { refetchInterval: 60000 });
   const items = query.data?.items ?? [];
   return <Page refresh={refresh} refreshing={query.isRefetching}>
-    <Heading title="Upcoming visits" subtitle="Confirmed bookings from the SCI program. No estimates." />
+    <Heading title="Upcoming visits" subtitle="Calendar bookings from the authorized program. No estimates." />
     {query.isPending && !query.data ? <State busy title="Checking the appointment calendar" /> : null}
     {query.isError ? <State title="Visits not available for this account"
       detail="This list requires the program's manager-level access. Your other program information remains available." retry={refresh} /> : null}
