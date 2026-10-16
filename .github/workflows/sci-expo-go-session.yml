@@ -32,8 +32,24 @@ jobs:
           CI: '1'
           EXPO_PUBLIC_API_URL: https://advisorflow-backend.onrender.com
           GH_TOKEN: ${{ github.token }}
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           set -uo pipefail
+          # Since September 2026 iOS Expo Go rejects projects whose server
+          # isn't signed into the SAME Expo user as the phone. A tunnel alone
+          # is not proof that the iPhone can load it.
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "EXPO_TOKEN is not configured in GitHub Actions." >> "$GITHUB_STEP_SUMMARY"
+            echo "Cannot issue a usable physical-iPhone Expo Go link." >> "$GITHUB_STEP_SUMMARY"
+            echo "Add an access token for the same Expo account used on the iPhone, then re-run." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          account=$(npx expo whoami 2>/dev/null | tail -1 || true)
+          if [ -z "$account" ] || echo "$account" | grep -Eiq 'not logged in|anonymous|error'; then
+            echo "Expo authentication failed: no preview link generated." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "Expo CLI signed in as: $account" >> "$GITHUB_STEP_SUMMARY"
           npx expo start --go --tunnel --clear --port 8081 > /tmp/sci-expo.log 2>&1 &
           server=$!
           url=''
