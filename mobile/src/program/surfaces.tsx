@@ -83,7 +83,7 @@ export const styles = StyleSheet.create({
   subtitle: { fontSize: 14, lineHeight: 21, color: muted },
   small: { fontSize: 12, lineHeight: 17, color: muted },
   section: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginTop: 3 },
-  sectionTitle: { fontSize: 17, fontWeight: '750', color: ink },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: ink },
   panel: { backgroundColor: white, borderColor: '#E4EBF3', borderWidth: 1,
     borderRadius: 18, padding: 16, gap: 12 },
   metric: { minWidth: '46%', flexGrow: 1, backgroundColor: '#FFFFFF', padding: 16,
