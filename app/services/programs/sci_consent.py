@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 STATUSES = ("opted_in", "opted_out", "no_record")
+_STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "OPT OUT", "REVOKE"}
 METHOD_WORDS = {
     "owner_attested": "Your consent forms (recorded at first text)",
     "owner_attested_import": "Your consent forms (recorded at first text)",
@@ -72,11 +73,14 @@ def families(db: Session, org_id: str) -> List[Dict]:
         if stop is not None or withdrawn or (e164 and e164 in suppressed) or (l.status or "").lower() == "dnc":
             w = sorted(withdrawn, key=lambda r: r.opted_out_at or r.updated_at or datetime.min)
             when = (stop.received_at if stop is not None else None) or (w[-1].opted_out_at if w else None)
-            how = ("Replied STOP" if stop is not None or (w and (w[-1].opt_out_source or "") == "reply_stop")
+            said = (getattr(stop, "body_excerpt", None) or "").strip()
+            how = (("Replied STOP" if said.upper().strip(" .!") in _STOP_WORDS or not said else "Asked to stop texts")
+                   if stop is not None
+                   else "Replied STOP" if (w and (w[-1].opt_out_source or "") == "reply_stop")
                    else "Marked do-not-contact" if (l.status or "").lower() == "dnc"
                    else "On the do-not-text list" if e164 in suppressed else "Consent withdrawn")
             row.update(status="opted_out", how=how, at=_iso(when),
-                       words=(getattr(stop, "body_excerpt", None) or (w[-1].opt_out_keyword if w else None)))
+                       words=(said or (w[-1].opt_out_keyword if w else None)))
         elif good:
             g = max(good, key=lambda r: r.consented_at or datetime.min)
             row.update(status="opted_in", how=METHOD_WORDS.get(g.consent_method) or (
