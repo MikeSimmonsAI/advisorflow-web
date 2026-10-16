@@ -708,6 +708,9 @@ def choice_evidence(body: str, slot: datetime, index: Optional[int]) -> bool:
 _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
+_WANTS_PHONE = re.compile(r"\b(phone call|by phone|over the phone|call me|a call\b|phone instead)", re.I)
+
+
 def day_part(body: str) -> Optional[str]:
     """'morning' / 'afternoon' when the family said which part of the day suits them."""
     low = (body or "").lower()
@@ -1023,6 +1026,12 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 slot = picked[0]
         if slot is None and action == "offer_times":
             pass
+        elif slot is None and choices and _WANTS_PHONE.search(body or "") and (conv.appointment_kind or A.VISIT) != A.PHONE:
+            # "ok let's do a phone call" while in-person times are on the table:
+            # switch to phone times, don't re-ask about the visit times (s094).
+            conv.appointment_kind = A.PHONE
+            action = "offer_times"
+            text = "Of course - would {TIMES} work for a short call?"
         elif slot is None and choices and day_part(body) and not all(
                 (c.hour < 12) == (day_part(body) == "morning") for c in choices):
             # "Mornings are better" while an afternoon time is on the table:
