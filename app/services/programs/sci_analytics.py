@@ -724,6 +724,24 @@ def present(L: Ledger, rows_: List[Dict], limit: int = 1000) -> Tuple[List[Dict]
 
 
 # ── one family's complete recorded history ──────────────────────────────────
+# Plain words for a stopped text schedule - never the raw status code.
+CADENCE_STATUS_WORDS = {
+    "stopped_no_sms_consent": "Texts stopped - no SMS consent on record",
+    "completed": "Outreach complete - all touches sent",
+    "cancelled": "Outreach cancelled",
+    "paused": "Outreach paused",
+    "replied": "Outreach stopped - family replied",
+    "booked": "Outreach stopped - appointment booked",
+    "dnc": "Outreach stopped - do not contact",
+    "opted_out": "Outreach stopped - family opted out",
+}
+
+
+def cadence_words(status: Optional[str]) -> str:
+    s = (status or "").strip()
+    return CADENCE_STATUS_WORDS.get(s) or ("Outreach " + s.replace("_", " ")).strip()
+
+
 def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
     """Imported → approved → every attempt (with delivery result) → replies →
     AI / human actions → offers → bookings, plus the cadence stage and the
@@ -756,7 +774,7 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
     if st is not None:
         add(st.cadence_started_at, "cadence", "Outreach schedule started")
         if st.completed_at:
-            add(st.completed_at, "cadence", "Outreach schedule finished", st.status)
+            add(st.completed_at, "cadence", "Outreach schedule finished", cadence_words(st.status))
     logs = (db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id == lead.id)
             .order_by(CadenceTouchLog.created_at).all())
     msg_ids = {l.message_id for l in logs if l.message_id}
@@ -873,7 +891,7 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
     elif st is not None and st.status == "active":
         stage = "In outreach · touch %s" % (st.current_touch_number or 1)
     elif st is not None:
-        stage = "Outreach %s" % (st.status or "")
+        stage = cadence_words(st.status)
     from app.services.cadence_service import _get_org_cadence_schedule
     try:
         steps = [{"touch": t["touch_number"], "day": t["day_offset"], "channel": t.get("channel") or "sms"}
@@ -907,8 +925,20 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
         "next_touch_at": _iso(st.next_touch_due_at) if (st is not None and st.status == "active") else None,
         "replies": replies,
         "handling": ("human" if (conv is not None and conv.state in ("human", "stopped")) else "ai"),
+        # The owner holds a consent form for every SCI family, so a schedule
+        # stopped for "no consent" can be restarted from the family page.
+        "texts_restartable": bool(st is not None and st.status == "stopped_no_sms_consent"),
+        "sms_links_on": _links_on(),
         "events": ev,
     }
+
+
+def _links_on() -> bool:
+    try:
+        from app.services import sms_programs
+        return sms_programs.sms_links_enabled()
+    except Exception:                                     # noqa: BLE001
+        return False
 
 
 def overview(L: Ledger, db: Session, location_id: Optional[str] = None) -> Dict:

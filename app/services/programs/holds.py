@@ -97,4 +97,11 @@ def set_hold(db: Session, rec: ProgramSourceRecord, on_hold: bool, actor_id: Opt
     else:
         rec.on_hold = False
         rec.hold_reason = "released %s" % now.strftime("%Y-%m-%d %H:%M UTC")
+        # Released: the family's waiting touch is due now (the cadence loop
+        # still applies the contact window, spacing and every send gate).
+        if rec.lead_id:
+            from app.models.models import CadenceState
+            st = db.query(CadenceState).filter(CadenceState.lead_id == rec.lead_id).first()
+            if st is not None and st.status == "active" and st.next_touch_due_at and st.next_touch_due_at > now:
+                st.next_touch_due_at = now
     return rec
