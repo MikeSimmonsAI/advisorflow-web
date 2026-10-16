@@ -401,7 +401,11 @@ def content_allowance(db, lead) -> Dict[str, bool]:
     # texts as 30007 on Oct 15 (Twilio ticket #29953372), including 12
     # cadence touch-3 texts at 23:11 UTC. Every SCI text - cadence, AI,
     # manual - passes through here, so this is the one switch.
-    return {"allow_links": bool(f["links"]) and sms_links_enabled(), "allow_phone": f["phone"]}
+    from app.services.test_records import is_owner_test_lead
+    # The ONE exception: the owner's own live-test number, so the Twilio
+    # ticket retest really carries a link. Families stay link-free.
+    links_on = sms_links_enabled() or is_owner_test_lead(lead)
+    return {"allow_links": bool(f["links"]) and links_on, "allow_phone": f["phone"]}
 
 
 def sci_sender():
