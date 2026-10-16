@@ -1,0 +1,57 @@
+# Temporary Expo Go tunnel for the SCI read-only phone pilot.
+# The tunnel is ephemeral, does not publish a store app, and requires SCI login.
+name: SCI Expo Go temporary session
+on:
+  push:
+    branches: [chatgpt/sci-expo-go-pilot-20261016]
+    paths: ['.github/workflows/sci-expo-go-session.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  expo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install Expo dependencies and tunnel helper
+        run: |
+          npm ci --include=dev
+          npm install --no-save --legacy-peer-deps @expo/ngrok@4.1.0
+      - name: Start SCI Expo Go tunnel and publish link
+        env:
+          CI: '1'
+          EXPO_PUBLIC_API_URL: https://advisorflow-backend.onrender.com
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          npx expo start --tunnel --clear --port 8081 > /tmp/sci-expo.log 2>&1 &
+          server=$!
+          url=''
+          for i in $(seq 1 90); do
+            url=$(grep -Eo 'exp://[^[:space:]]+' /tmp/sci-expo.log | head -1 | sed 's/[][()<>;,]*$//' || true)
+            if [ -n "$url" ]; then break; fi
+            if ! kill -0 "$server" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          cat /tmp/sci-expo.log
+          if [ -z "$url" ]; then
+            echo "No usable Expo tunnel link was produced." >&2
+            kill "$server" 2>/dev/null || true
+            exit 1
+          fi
+          echo "### SCI Expo Go temporary preview" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url" >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment 227 --body "Temporary SCI Expo Go preview (requires an authorized SCI login; GitHub-hosted tunnel runs for about 20 minutes): \`$url\`. This is Expo Go, not a standalone installed app. The link expires when the preview job ends."
+          # Maintain the Metro server only for a short, bounded live test window.
+          sleep 1200
+          kill "$server" 2>/dev/null || true
