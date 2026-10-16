@@ -418,10 +418,17 @@ def _touch_gap(schedule, touch_number: int) -> timedelta:
 
 
 def _last_sent_at(db: Session, state):
-    from sqlalchemy import func as _f
+    """The last touch of this schedule that went out - not counting a text the
+    carrier then refused or could not deliver (it never reached the family)."""
+    from sqlalchemy import func as _f, or_ as _or
+    from app.models.models import Message
     return (db.query(_f.max(CadenceTouchLog.attempted_at))
+            .outerjoin(Message, Message.id == CadenceTouchLog.message_id)
             .filter(CadenceTouchLog.cadence_state_id == state.id,
-                    CadenceTouchLog.outcome == OUTCOME_SENT).scalar())
+                    CadenceTouchLog.outcome == OUTCOME_SENT,
+                    _or(Message.id.is_(None),
+                        _f.coalesce(_f.lower(Message.delivery_status), "").notin_(("undelivered", "failed"))))
+            .scalar())
 
 
 def _spacing_hold_until(db: Session, state, lead, schedule, touch_number: int, now):

@@ -39,9 +39,16 @@ def _naive(d):
 
 
 def last_text_at(db: Session, lead_id: str) -> Optional[datetime]:
-    """When the last text actually went to this family, by any path."""
+    """When the last text actually went to this family, by any path.
+
+    A text the carrier refused or could not deliver (undelivered / failed) never
+    reached the family, so it does not start the spacing clock (Oct 16: a
+    carrier-blocked text 3 held its own resend for two more days)."""
     from app.models.models import Message
-    return _naive(db.query(func.max(Message.sent_at)).filter(Message.lead_id == lead_id).scalar())
+    return _naive(db.query(func.max(Message.sent_at)).filter(
+        Message.lead_id == lead_id,
+        func.coalesce(func.lower(Message.delivery_status), "").notin_(("undelivered", "failed")),
+    ).scalar())
 
 
 def family_replied_since(db: Session, lead_id: str, since: datetime) -> bool:
