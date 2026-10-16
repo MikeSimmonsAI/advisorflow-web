@@ -62,7 +62,7 @@ export function ScreenTabs({ screen, go }) {
     <span className="sl-tabs-note">Live production data · Central Time</span></div>
 }
 
-export function Home({ a, sched, openMetric, openFamily }) {
+export function Home({ a, sched, consent, openMetric, openFamily }) {
   if (!a) return <p className="cmd-muted">Loading live numbers…</p>
   const o = a.overview || {}
   const pipe = Object.fromEntries((o.pipeline || []).map(p => [p.key, p.value]))
@@ -133,6 +133,8 @@ export function Home({ a, sched, openMetric, openFamily }) {
         <div className="sl-row"><span>Weekday automatic enrollment</span><em className={`sl-tag ${b.on ? 'green' : 'orange'}`}>{b.on ? `ON · ${b.count} / day` : 'OFF'}</em></div>
         <div className="sl-row"><span>Next automatic batch</span><b>{a.next_batch ? ctDate(a.next_batch, { weekday: 'short', month: 'short', day: 'numeric' }) : '—'}{a.next_batch && b.start ? ` · ${b.start}` : ''}</b></div>
         <div className="sl-row"><span>Quiet hours &amp; STOP / DNC</span><em className="sl-tag green">Gated</em></div>
+        <Link className="sl-row cs-link" to="/program/live?s=consent&c=opted_in"><span>Families opted in</span><b>{consent ? n(consent.opted_in) : '…'}</b></Link>
+        <Link className="sl-row cs-link" to="/program/live?s=consent&c=opted_out"><span>Families opted out</span><b>{consent ? n(consent.opted_out) : '…'}</b></Link>
         <button className="sl-row" onClick={() => go(sn.no_consent ? 'scheduled_no_consent' : 'scheduled_sms_ready')}><span>SMS consent of record (queued families)</span>
           <em className={`sl-tag ${sn.value && sn.sms_ready === sn.value ? 'green' : 'red'}`}>{n(sn.sms_ready)} of {n(sn.value)}</em></button>
         <button className="sl-row" onClick={() => openMetric({ metric: 'consent_blocked', range: { preset: 'today' } })}><span>Texts blocked today - no consent</span>
@@ -175,8 +177,10 @@ export function Home({ a, sched, openMetric, openFamily }) {
 export function useHomeData() {
   const [a, setA] = useState(null)
   const [sched, setSched] = useState(null)
+  const [consent, setConsent] = useState(null)
   useEffect(() => {
     const go = () => {
+      api.get('/program/command/consent?limit=1').then(r => setConsent(r.counts)).catch(() => {})
       api.get('/program/command/analytics?range=today').then(setA).catch(() => {})
       api.get('/program/command/analytics/records?metric=scheduled_new&range=all&limit=100').then(setSched).catch(() => {})
     }
@@ -184,5 +188,5 @@ export function useHomeData() {
     const t = setInterval(() => { if (document.visibilityState === 'visible') go() }, 60000)
     return () => clearInterval(t)
   }, [])
-  return { a, sched }
+  return { a, sched, consent }
 }

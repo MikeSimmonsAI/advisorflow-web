@@ -56,6 +56,7 @@ export const NAV = [
   ['appts', 'appt', 'Appointments', '/program/live?s=appts'],
   ['appointments', 'cal', 'Calendar', '/program?tab=appointments', 'Appointments'],
   ['reports', 'ana', 'Analytics', '/program/live?s=reports'],
+  ['consent', 'review', 'Opt-ins & Opt-outs', '/program/live?s=consent'],
   ['settings', 'gear', 'Settings', '/program?tab=settings'],
 ]
 export const TOOLS = [
@@ -69,7 +70,7 @@ export const TOOLS = [
   ['health', 'pulse', 'Health', '/program?tab=health'],
 ]
 const PC_TABS = new Set([...NAV, ...TOOLS].filter(i => i[3].startsWith('/program?')).map(i => i[0]))
-export const LIVE_SCREENS = new Set(['search', 'inbox', 'appts', 'reports'])
+export const LIVE_SCREENS = new Set(['search', 'inbox', 'appts', 'reports', 'consent'])
 
 /** Which menu item the current URL belongs to. */
 export function activeKey(loc) {

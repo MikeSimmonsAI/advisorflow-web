@@ -20,6 +20,7 @@ import VoicemailPlayer from '../../../components/telephony/VoicemailPlayer'
 import { Journey, MetricDrill, PerformanceHome, ResendBar } from './Performance'
 import { Home, ScreenTabs, TopBar, useHomeData } from './Dashboard'
 import { LIVE_SCREENS, MobileNav, SideNav } from './SciNav'
+import Consent from './Consent'
 import './Dashboard.css'
 import './Command.css'
 import './Performance.css'
@@ -201,7 +202,7 @@ export default function Command() {
   // their own), so coming back here never leaves "Settings" in the title.
   useEffect(() => {
     const name = family ? (familyView === 'journey' ? 'Family Journey' : 'Conversation') : drill ? 'Metric Drill-down'
-      : { search: 'Families', inbox: 'Conversations', appts: 'Appointments', reports: 'Analytics' }[tab] || 'SCI Live'
+      : { search: 'Families', inbox: 'Conversations', appts: 'Appointments', reports: 'Analytics', consent: 'Opt-ins & Opt-outs' }[tab] || 'SCI Live'
     document.title = `${name} · SCI · EvoSys Pro`
   }, [tab, family, familyView, drill])
   // Clicking the menu item of the screen already open: back to its top.
@@ -239,7 +240,7 @@ export default function Command() {
         {(d?.counts?.needs_attention > 0 || (d?.unknown || []).length > 0) && (
           <button className="sl-alert" onClick={() => go('inbox')}><b>{d.counts.needs_attention} famil{d.counts.needs_attention === 1 ? 'y needs' : 'ies need'} a reply</b>
             {(d.unknown || []).length ? <span> · {d.unknown.length} unknown caller{d.unknown.length === 1 ? '' : 's'}</span> : null}<em>Open inbox ›</em></button>)}
-        <Home a={home.a} sched={home.sched} openMetric={setDrill} openFamily={openFamily} />
+        <Home a={home.a} sched={home.sched} consent={home.consent} openMetric={setDrill} openFamily={openFamily} />
         {d && <div className="cmd-cols">
           <div>
             <Unknown items={d.unknown} toast={setToast} reload={load} />
@@ -279,11 +280,12 @@ export default function Command() {
         <SearchResults q={q} loc={loc} open={openFamily} />
       </>}
       {tab === 'appts' && <Appointments open={openFamily} />}
+      {tab === 'consent' && <Consent />}
       {tab === 'reports' && <section id="sl-reports" className="sl-reports">
         <SectionHead title="Analytics · performance & reports" />
         <PerformanceHome range={range} setRange={setRange} loc={loc} setLoc={setLoc} openMetric={setDrill} />
       </section>}
-    </div>, tab === 'home' || tab === 'inbox' || tab === 'reports' ? 'wide' : '')
+    </div>, tab === 'home' || tab === 'inbox' || tab === 'reports' || tab === 'consent' ? 'wide' : '')
 }
 
 function useWide() {

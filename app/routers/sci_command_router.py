@@ -714,6 +714,16 @@ def command_handling(body: HandlingIn, db: Session = Depends(get_db), user: User
             "program_mode": ai_setter.mode_of(prog)}
 
 
+@router.get("/consent")
+def command_consent(status: Optional[str] = None, q: Optional[str] = None, location_id: Optional[str] = None,
+                    limit: int = Query(500, ge=1, le=2000),
+                    db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Opt-ins & opt-outs: every real family's texting status, read only."""
+    from app.services.programs import sci_consent
+    prog = _program(db, user, managers_only=False)
+    return sci_consent.listing(db, prog.organization_id, status=status, q=q, location_id=location_id, limit=limit)
+
+
 class RestartTextsIn(BaseModel):
     lead_id: str
     from_touch: Optional[int] = None     # 1 = start the texts over; default: the next touch
