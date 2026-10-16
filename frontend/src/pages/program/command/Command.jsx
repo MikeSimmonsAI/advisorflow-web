@@ -197,6 +197,13 @@ export default function Command() {
   // A new screen starts at the top (Back keeps the browser's own restore).
   const screenKey = `${tab}|${family || ''}|${familyView}|${mRaw || ''}`
   useEffect(() => { window.scrollTo(0, 0) }, [screenKey])
+  // The browser tab names the screen that is open (the program screens set
+  // their own), so coming back here never leaves "Settings" in the title.
+  useEffect(() => {
+    const name = family ? (familyView === 'journey' ? 'Family Journey' : 'Conversation') : drill ? 'Metric Drill-down'
+      : { search: 'Families', inbox: 'Conversations', appts: 'Appointments', reports: 'Analytics' }[tab] || 'SCI Live'
+    document.title = `${name} · SCI · EvoSys Pro`
+  }, [tab, family, familyView, drill])
   // Clicking the menu item of the screen already open: back to its top.
   const onSame = () => window.scrollTo({ top: 0, behavior: 'smooth' })
   const frame = (body, cls = '') => (
