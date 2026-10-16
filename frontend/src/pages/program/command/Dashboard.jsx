@@ -121,7 +121,7 @@ export function Home({ a, sched, openMetric, openFamily }) {
         <small>{n((pipe.approved || 0) - (sn.value || 0))} earlier + {n(sn.value)} queued</small></button>
       <button className="sl-metric" onClick={() => go('scheduled_new')}><span>New families queued</span><b className="blue">{n(sn.value)}</b>
         <small>{firstToday ? `${firstToday} first touches sent today` : 'No first touches sent yet today'}</small></button>
-      <button className="sl-metric" onClick={() => go('in_outreach')}><span>Active follow-up cadence</span><b>{n(pipe.in_outreach)}</b><small>Previously enrolled families</small></button>
+      <button className="sl-metric" onClick={() => go('in_followup')}><span>Active follow-up cadence</span><b>{n(o.in_followup)}</b><small>Previously contacted families</small></button>
       <button className="sl-metric" onClick={() => openMetric({ metric: 'appointments', range: { preset: 'all' } })}><span>Confirmed new appointments</span>
         <b className="green">{a.metrics?.appointments?.all_time ? n(a.metrics.appointments.all_time) : <i className="sl-dash-line" />}</b>
         <small>{a.metrics?.appointments?.all_time ? 'On the booking calendar' : 'Await verified booking result'}</small></button>

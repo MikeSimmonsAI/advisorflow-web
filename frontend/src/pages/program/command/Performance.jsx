@@ -414,7 +414,9 @@ export function Journey({ id }) {
       </div>
       <div className="jr-cards">
         <div><small>Current state</small><b className="blue">{j.stage}</b><span>{j.handling === 'human' ? 'A person is handling replies' : 'AI answers replies'}</span></div>
-        <div><small>Touch progression</small><b>{j.touches_sent} / {total || '—'}</b><span>{j.touches_sent ? `${j.touches_sent} sent (texts + emails)` : 'Touch one not yet sent'}</span></div>
+        <div><small>Touch progression</small><b>{sentTexts.size} / {total || '—'}</b><span>{j.touches_sent
+          ? `${sentTexts.size} text touch${sentTexts.size === 1 ? '' : 'es'} sent${j.touches_sent > sentTexts.size ? ` · plus ${j.touches_sent - sentTexts.size} email${j.touches_sent - sentTexts.size === 1 ? '' : 's'}` : ''}`
+          : 'Touch one not yet sent'}</span></div>
         <div><small>Conversation</small><b>{j.replies ? `${j.replies} repl${j.replies === 1 ? 'y' : 'ies'}` : 'Not started'}</b><span>{j.replies ? 'Family has written back' : 'Awaiting first reply'}</span></div>
         <div><small>Appointment</small><b className={appt.state === 'confirmed' ? 'green' : ''}>{appt.state === 'confirmed' ? 'Booked' : appt.state === 'offered' ? 'Times offered' : 'Not booked'}</b>
           <span>{appt.detail || 'Calendar times available'}</span></div>
@@ -479,7 +481,7 @@ function DrillSummary({ s, pick, pickQueue }) {
     <div className="dr-chart" aria-label="Touch distribution">
       {bars.map(([l, v, k], i) => (
         <button key={l} onClick={() => (k ? pick(k) : pickQueue())} title={`${l}: ${v}`}>
-          <b>{n(v)}</b><span className={`c${i}`} style={{ height: `${Math.max(v ? 6 : 2, (100 * v) / max)}%` }} /><small>{l}</small></button>))}
+          <b>{n(v)}</b><span className="dr-col"><span className={`c${i}`} style={{ height: `${Math.max(v ? 6 : 2, (100 * v) / max)}%` }} /></span><small>{l}</small></button>))}
       <p>* Scheduled, not sent - it belongs to the next sending day. Sent counts are attempts handed to the provider; delivery comes from Twilio callbacks.</p>
     </div>
   </>
