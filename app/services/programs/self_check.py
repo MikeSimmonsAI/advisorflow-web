@@ -35,24 +35,17 @@ def _check(key, title, problems: List[str], ok_text: str, bad_text: str) -> Dict
 
 
 def texts_too_close(db: Session, org_id: str, now: datetime) -> Dict:
-    from app.models.models import Lead, Message
-    since = now - timedelta(hours=24)
-    rows = (db.query(Message.lead_id, Message.sent_at).join(Lead, Lead.id == Message.lead_id)
-            .filter(Lead.organization_id == org_id, Lead.is_test.isnot(True),
-                    Message.sent_at >= since - TOO_CLOSE).order_by(Message.sent_at).all())
-    by: Dict[str, list] = {}
-    for lid, at in rows:
-        by.setdefault(lid, []).append(at)
-    bad = []
-    for lid, ts in by.items():
-        for a, b in zip(ts, ts[1:]):
-            if b >= since and b - a < TOO_CLOSE:
-                bad.append(lid)
-                break
-    names = [_name(l) for l in db.query(Lead).filter(Lead.id.in_(bad)).all()] if bad else []
+    """Uses spacing.violations - the SAME rule the sending side enforces - so a
+    reply to a family who wrote back, a person's own text, an appointment
+    confirmation, or a resend after a text the carrier refused (30007) is never
+    reported as two texts too close (Oct 16: 13 false findings)."""
+    from app.models.models import Lead
+    from app.services.programs import spacing
+    bad = spacing.violations(db, org_id, now - timedelta(hours=24))
+    names = sorted(_name(l) for l in db.query(Lead).filter(Lead.id.in_(bad)).all()) if bad else []
     return _check("texts_too_close", "Texts spaced as planned", names,
-                  "No one got two texts less than 20 hours apart in the last day.",
-                  "%d people got two texts less than 20 hours apart in the last day.")
+                  "No one got two unsolicited texts less than 20 hours apart in the last day.",
+                  "%d people got two unsolicited texts less than 20 hours apart in the last day.")
 
 
 def texts_overdue(db: Session, org_id: str, now: datetime) -> Dict:

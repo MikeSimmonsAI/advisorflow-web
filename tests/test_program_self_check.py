@@ -58,3 +58,52 @@ def test_got_it_hides_a_problem_until_it_changes(client, db_session, sample_org)
     db_session.commit()
     c3 = {x["key"]: x for x in client.get("/program/self-check", headers=h).json()["checks"]}["texts_too_close"]
     assert c3["acknowledged"] is False
+
+
+# ── Oct 16: 13 false "texts too close" findings ───────────────────────────────
+def _fam(db, org, admin, first):
+    l = Lead(organization_id=org.id, first_name=first, last_name="T", status="sent", assigned_to_id=admin.id)
+    db.add(l); db.commit()
+    return l
+
+
+def _txt(db, lead, admin, hours_ago, now, *, status="delivered", source="cadence", sid=None):
+    db.add(Message(lead_id=lead.id, sender_id=admin.id, body="x", twilio_sid=sid or "S%s%s" % (lead.first_name, hours_ago),
+                   sent_at=now - timedelta(hours=hours_ago), delivery_status=status, send_source=source))
+    db.commit()
+
+
+def test_resend_after_a_carrier_refused_text_is_not_too_close(db_session, sample_org):
+    """10 families: text 3 undelivered (30007), resent the next day."""
+    admin = _program(db_session, sample_org)
+    now = datetime.utcnow()
+    l = _fam(db_session, sample_org, admin, "Paula")
+    _txt(db_session, l, admin, 70, now)                         # text 2, delivered
+    _txt(db_session, l, admin, 19, now, status="undelivered")   # text 3, carrier refused
+    _txt(db_session, l, admin, 1, now)                          # text 3 resent
+    assert sc.texts_too_close(db_session, sample_org.id, now)["ok"] is True
+
+
+def test_answering_a_family_who_wrote_back_is_not_too_close(db_session, sample_org):
+    """Ronald Eller (AI reply) / Thomas Calloway (a person's reply)."""
+    from app.models.program_models import ProgramResponse
+    admin = _program(db_session, sample_org)
+    now = datetime.utcnow()
+    for first, src in (("Ronald", "sci_appointment_setter"), ("Thomas", "manual")):
+        l = _fam(db_session, sample_org, admin, first)
+        _txt(db_session, l, admin, 5, now)
+        db_session.add(ProgramResponse(organization_id=sample_org.id, lead_id=l.id, body_excerpt="yes please", channel="sms",
+                                       response_class="interested", received_at=now - timedelta(hours=3)))
+        db_session.commit()
+        _txt(db_session, l, admin, 2, now, source=src)
+    assert sc.texts_too_close(db_session, sample_org.id, now)["ok"] is True
+
+
+def test_a_real_premature_cadence_text_is_still_caught(db_session, sample_org):
+    admin = _program(db_session, sample_org)
+    now = datetime.utcnow()
+    l = _fam(db_session, sample_org, admin, "Edna")
+    _txt(db_session, l, admin, 5, now)
+    _txt(db_session, l, admin, 2, now)
+    c = sc.texts_too_close(db_session, sample_org.id, now)
+    assert c["ok"] is False and c["people"] == ["Edna T"]
