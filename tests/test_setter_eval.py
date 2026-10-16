@@ -154,3 +154,10 @@ def test_day_part_preference_is_read():
     assert ai_setter.day_part("I'll come in. Mornings are better") == "morning"
     assert ai_setter.day_part("anytime after lunch is fine") == "afternoon"
     assert ai_setter.day_part("the first one works") is None
+
+
+def test_phone_request_is_recognised():
+    """s094: 'ok lets do a phone call' got re-asked about the in-person times."""
+    assert ai_setter._WANTS_PHONE.search("ok lets do a phone call")
+    assert ai_setter._WANTS_PHONE.search("can we do it over the phone")
+    assert not ai_setter._WANTS_PHONE.search("the first one works")
