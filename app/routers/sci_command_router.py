@@ -874,3 +874,71 @@ def command_mail_task(body: MailTaskIn, db: Session = Depends(get_db), user: Use
                         delivered=True, reason="mail_guide_done" if body.done else "mail_guide", message=msg))
     db.commit()
     return {"ok": True, "mail_task": _mail_task_of(conv)}
+
+
+# ── SCI LIVE PERFORMANCE (Oct 15 redesign) ──────────────────────────────────
+# Every number comes from one ledger (app/services/programs/sci_analytics.py)
+# and every drill-down returns exactly the rows that number counts.
+_TOUCHES = ("1", "2", "3", "4+")
+
+
+def _analytics_window(range_: str, start: Optional[str], end: Optional[str]):
+    from app.services.programs import sci_analytics as SA
+    return SA.window(range_, start, end)
+
+
+@router.get("/analytics")
+def command_analytics(range_: str = Query("today", alias="range"), start: Optional[str] = None,
+                      end: Optional[str] = None, location_id: Optional[str] = None,
+                      db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Performance Home: recorded totals for the period (and all time), touch
+    analytics, funnel, failure reasons, location performance, trend and the
+    clearly separate projections. Real families only."""
+    from app.services.programs import daily_batch, sci_analytics as SA
+    prog = _program(db, user, managers_only=False)
+    L = SA.Ledger(db, prog.organization_id)
+    out = SA.summary(L, _analytics_window(range_, start, end), location_id or None, daily_batch.status(prog))
+    out["daily_batch"] = daily_batch.status(prog)
+    out["locations_all"] = [{"id": k, "name": v} for k, v in sorted(L.locs.items(), key=lambda kv: kv[1] or "")]
+    return out
+
+
+@router.get("/analytics/records")
+def command_analytics_records(metric: str, range_: str = Query("today", alias="range"), start: Optional[str] = None,
+                              end: Optional[str] = None, location_id: Optional[str] = None,
+                              channel: Optional[str] = None, touch: Optional[str] = None,
+                              status: Optional[str] = None, limit: int = Query(1000, le=5000),
+                              db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """Metric drill-down: the exact records behind a number, with the same
+    filters. `count` is the full number; `items` the newest `limit` rows."""
+    from app.services.programs import sci_analytics as SA
+    if metric not in SA.METRICS:
+        raise HTTPException(status_code=400, detail="Unknown metric.")
+    if touch and touch not in _TOUCHES:
+        raise HTTPException(status_code=400, detail="Touch must be 1, 2, 3 or 4+.")
+    if channel and channel not in ("sms", "email", "voicemail"):
+        raise HTTPException(status_code=400, detail="Channel must be sms, email or voicemail.")
+    prog = _program(db, user, managers_only=False)
+    L = SA.Ledger(db, prog.organization_id)
+    w = _analytics_window(range_, start, end)
+    f = {k: v for k, v in (("location_id", location_id), ("channel", channel), ("touch", touch),
+                           ("status", status)) if v}
+    rows = SA.rows(L, metric, w, f)
+    items, truncated = SA.present(L, rows, limit)
+    label, kind, help_ = SA.METRICS[metric]
+    return {"metric": metric, "label": label, "help": help_, "row_kind": kind, "snapshot": metric in SA.SNAPSHOT,
+            "window": {k: w[k] for k in ("preset", "label", "start_date", "end_date")}, "filters": f,
+            "count": len(rows), "families": len({r["lead_id"] for r in rows}),
+            "items": items, "truncated": truncated,
+            "locations_all": [{"id": k, "name": v} for k, v in sorted(L.locs.items(), key=lambda kv: kv[1] or "")]}
+
+
+@router.get("/analytics/journey/{lead_id}")
+def command_journey(lead_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
+    """A family's complete recorded history, oldest first."""
+    from app.services.programs import sci_analytics as SA
+    prog = _program(db, user, managers_only=False)
+    j = SA.journey(db, prog.organization_id, lead_id)
+    if j is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    return j
