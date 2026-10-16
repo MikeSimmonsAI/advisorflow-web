@@ -378,7 +378,7 @@ HONOUR THEIR TIMING:
 - A person must step in ("handoff") when: they ask for a real person or ask for me by name, are upset or complaining, recently lost someone and are grieving, mention legal issues or disputes, want to change or cancel an existing appointment, or you are genuinely unsure what they need. Reply briefly that I'll reach out to them personally. Do NOT hand off ordinary questions.
 - Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether this is a real person, a robot, AI or automated, ANSWER THAT QUESTION HONESTLY in the first sentence - never dodge it: say an automated assistant helps me keep up with messages and scheduling, that I see every reply, and that I'm glad to talk by phone. Offer to stop if they prefer.
 - Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to sit down with you so you can go over it together and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and I'd be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
-- PRINTED copy / "send me the guide" by mail: a printed-guide request is an opening for a personal meeting - recognise it. If PERSONAL DELIVERY is available (facts_known_for_certain.personal_delivery_available), offer to bring it personally and sit down together: "Absolutely, Lester. I'd be happy to bring that planning guide to you personally so we can sit down and go over the important information together. What's a good day and time for me to stop by?" (action "mail_guide"; no {{TIMES}}; put any day/time they give in best_times). If personal delivery is NOT available: "mail_guide" - honour it (a printed guide will be arranged; confirm the address only if it is missing or incomplete - never claim it has been mailed) and in the same message invite them in so we can go over it together, with {{TIMES}}. If times were already offered and they asked for the mail copy instead, do NOT offer times again - honour the mail request and add ONE soft, personal sentence that you'd be glad to sit down and go over it with them once they've had a look (no {{TIMES}}, no question needed). If they have ALREADY said they only want it mailed and nothing else, just honour that.
+- PRINTED / PAPER / MAILED copy (they say printed, paper, hard copy, mail it, to my house/address - NOT a plain "send me the guide", which is "send_guide" by text): a printed-guide request is an opening for a personal meeting - recognise it. If PERSONAL DELIVERY is available (facts_known_for_certain.personal_delivery_available), offer to bring it personally and sit down together: "Absolutely, Lester. I'd be happy to bring that planning guide to you personally so we can sit down and go over the important information together. What's a good day and time for me to stop by?" (action "mail_guide"; no {{TIMES}}; put any day/time they give in best_times). If personal delivery is NOT available: "mail_guide" - honour it (a printed guide will be arranged; confirm the address only if it is missing or incomplete - never claim it has been mailed) and in the same message invite them in so we can go over it together, with {{TIMES}}. If times were already offered and they asked for the mail copy instead, do NOT offer times again - honour the mail request and add ONE soft, personal sentence that you'd be glad to sit down and go over it with them once they've had a look (no {{TIMES}}, no question needed). If they have ALREADY said they only want it mailed and nothing else, just honour that.
 - UNCLEAR "already got it / them / that": it may mean the guide, their benefits, or arrangements. If FAMILY MEMORY and the conversation don't settle which, ask ONE short, warm clarifying question first (e.g. "Glad to hear it, Ronald - do you mean you already have your veteran benefits paperwork, or the planning guide?") - no {{TIMES}} in that message.
 - Plan with ANOTHER funeral home / cemetery, or "already took care of all that": thank them warmly and respect it - no times, no push. At most one optional sentence that we're here if they ever want anything reviewed ("answer" or "close").
 - Existing plan WITH US / "already have a plan with you" -> invite them in for an in-person FILE REVIEW: going over their existing arrangements, important contact information, family instructions and whether anyone else should be authorised to access their file. Reassuring and personal; never suggest their plan is invalid or that new forms are legally required. Offer {{TIMES}} (ask which kind of review only if it is genuinely unclear).
@@ -488,7 +488,7 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
         problems.append("it asks more than one question - ask exactly one")
     if action not in ("book", "callback", "follow_up_later") and _CLOCK.search(_strip_offered(reply, conv)):
         problems.append("it writes a clock time itself - use {TIMES} so the system offers real open times")
-    if action == "offer_times" and "{TIMES}" not in reply:
+    if action == "offer_times" and "{TIMES}" not in reply and not A.offered(conv):
         problems.append("action offer_times needs the {TIMES} placeholder in the reply (and no other question)")
     if action != "book" and _CLAIM_BOOKED.search(reply):
         problems.append("it says an appointment is set or confirmed - only the system confirms bookings")
@@ -510,6 +510,12 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
     if _ASKS_IF_HUMAN.search(body or "") and not re.search(r"\b(assistant|automated|automation|\bai\b)", reply, re.I):
         problems.append("they asked whether this is a real person or automated - say plainly that an automated "
                         "assistant helps me with messages and scheduling, and that I see every reply")
+    if (action == "mail_guide" and not _PERSONAL_STEP.search(reply)
+            and not re.search(r"\baddress\b", reply, re.I)     # still collecting where to mail it
+            and not _MAIL_ONLY.search(body or "") and not _DECLINE.search(body or "")):
+        problems.append("a printed-guide request is an opening for a personal meeting - keep honouring the mail "
+                        "request and add ONE soft sentence that I'd be glad to sit down and go over it with them "
+                        "(or, if personal delivery is available, offer to bring it by); no new times")
     if contact and third_person(reply, contact):
         problems.append("it talks about %s in the third person - the message is signed by %s, so write in "
                         "first person (\"I'd be glad to...\")" % (contact, contact))
@@ -519,6 +525,10 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
     return problems
 
 
+_PERSONAL_STEP = re.compile(r"(sit down|go over (it|this|that|the guide)? ?(with you|together)|in person|stop by|"
+                            r"bring (it|the guide|that)|come (in|by)|visit)", re.I)
+_MAIL_ONLY = re.compile(r"\b((just|only) (mail|send)|mail (it )?only|don'?t (want|need) (to )?(meet|visit|come|talk)|"
+                        r"no (visit|meeting|calls?)|not (looking|wanting) to meet)", re.I)
 _ASKS_IF_HUMAN = re.compile(r"\b(robot|a bot|bot\b|\bai\b|automated|auto.?reply|real person|a real human|"
                             r"are you (a )?(human|person|real|computer|machine)|is this (a )?(person|human|real|computer))", re.I)
 _EXISTING_PLAN = re.compile(r"\b(already (have|got|bought|took care)|have a plan|prearrang|bought (plots?|"
@@ -526,7 +536,8 @@ _EXISTING_PLAN = re.compile(r"\b(already (have|got|bought|took care)|have a plan
 _SENTENCE = re.compile(r"[^.!?]+[.!?]*")
 _ASKS_IF_WANTS_GUIDE = re.compile(r"would you like (me to send |to receive |to get |to have )?(you )?(the |our |a )?"
                                   r"(copy of (the |our )?)?(planning )?guide", re.I)
-_DECLINE = re.compile(r"\b(not interested|no thanks|no thank you|all set|we'?re (all )?set|already (have|took care|"
+_DECLINE = re.compile(r"\b((have|has|got) (a|our) plan (with|at) (another|a different|other)|another funeral home|"
+                      r"(plan|arrangements|plot|plots) (elsewhere|somewhere else)|not interested|no thanks|no thank you|all set|we'?re (all )?set|already (have|took care|"
                       r"handled|done)|(is|are|been|already) (all )?taken care of|already (made|has|have) (arrangements|plans)|don'?t (want|need)|not (right )?now|not at this time|no longer|pass\b|"
                       r"changed my mind|leave me alone|not for me|nope|no$)", re.I)
 
