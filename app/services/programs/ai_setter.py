@@ -706,6 +706,16 @@ def choice_evidence(body: str, slot: datetime, index: Optional[int]) -> bool:
 _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
+def day_part(body: str) -> Optional[str]:
+    """'morning' / 'afternoon' when the family said which part of the day suits them."""
+    low = (body or "").lower()
+    if re.search(r"\b(morning|mornings|early|before (noon|lunch)|\bam\b)", low):
+        return "morning"
+    if re.search(r"\b(afternoon|afternoons|after (noon|lunch)|later in the day|\bpm\b|evening)", low):
+        return "afternoon"
+    return None
+
+
 def day_named(body: str, today) -> Optional[object]:
     """The next date for a weekday the family named ("Can you do Friday?")."""
     t = (body or "").lower()
@@ -1009,6 +1019,12 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 slot = picked[0]
         if slot is None and action == "offer_times":
             pass
+        elif slot is None and choices and day_part(body) and not all(
+                (c.hour < 12) == (day_part(body) == "morning") for c in choices):
+            # "Mornings are better" while an afternoon time is on the table:
+            # offer times that fit what they said, not the same two again (s002).
+            action = "offer_times"
+            text = "Of course - would {TIMES} work for you?"
         elif slot is None and choices:
             # Never book on a guess: ask which of the offered times suits them.
             action = "answer"
@@ -1073,6 +1089,8 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             preferred_day = day_named(body, A._today_central().date())
         if preferred_day is not None:
             slots, why = A.slots_on_day(db, prog, preferred_day, kind=conv.appointment_kind or A.VISIT)
+        if not slots and day_part(body):
+            slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT, part=day_part(body))
         if not slots:
             slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
         if not slots:
