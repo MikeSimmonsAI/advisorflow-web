@@ -398,7 +398,6 @@ export function Journey({ id }) {
   const [note, setNote] = useState('')
   const loadJ = () => api.get(`/program/command/analytics/journey/${id}`).then(setJ).catch(e => setErr(e.message || 'Could not load the journey.'))
   useEffect(() => { loadJ() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
-  const [fromTouch, setFromTouch] = useState('')
   const restart = async (from) => {
     setBusy(true); setNote('')
     try {
@@ -427,13 +426,7 @@ export function Journey({ id }) {
       <div className="jr-cards">
         <div><small>Current state</small><b className="blue">{j.stage}</b><span>{j.handling === 'human' ? 'A person is handling replies' : 'AI answers replies'}</span>
           {j.texts_restartable && <button type="button" className="jr-restart" disabled={busy} onClick={() => restart()}>{busy ? 'Restarting…' : 'Restart texts'}</button>}
-          {j.can_resend && <span className="jr-resend">
-            <select aria-label="Resend from text" value={fromTouch} onChange={e => setFromTouch(e.target.value)} disabled={busy}>
-              <option value="">Resend from text…</option>
-              {(j.steps || []).filter(s => s.channel !== 'email').map(s => <option key={s.touch} value={s.touch}>Text {s.touch}</option>)}
-            </select>
-            <button type="button" className="jr-restart" disabled={busy || !fromTouch} onClick={() => restart(fromTouch)}>{busy ? 'Working…' : 'Go'}</button>
-          </span>}
+
           {note && <span className="jr-restart-note">{note}</span>}</div>
         <div><small>Touch progression</small><b>{sentTexts.size} / {total || '—'}</b><span>{j.touches_sent
           ? `${sentTexts.size} text touch${sentTexts.size === 1 ? '' : 'es'} sent${j.touches_sent > sentTexts.size ? ` · plus ${j.touches_sent - sentTexts.size} email${j.touches_sent - sentTexts.size === 1 ? '' : 's'}` : ''}`
@@ -506,4 +499,47 @@ function DrillSummary({ s, pick, pickQueue }) {
       <p>* Scheduled, not sent - it belongs to the next sending day. Sent counts are attempts handed to the provider; delivery comes from Twilio callbacks.</p>
     </div>
   </>
+}
+
+
+/** RESEND TEXTS - a plain bar under Call / Reply on every family page (both
+    tabs). Pick the text to start from, confirm, done. For families whose
+    texts never reached them (carrier block, hold, system error). Hidden for
+    opt-outs, replies, bookings and do-not-contact; the server checks again. */
+export function ResendBar({ id, onDone }) {
+  const [j, setJ] = useState(null)
+  const [pick, setPick] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const load = () => api.get(`/program/command/analytics/journey/${id}`).then(setJ).catch(() => setJ(null))
+  useEffect(() => { load() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!j || !j.can_resend) return null
+  const texts = (j.steps || []).filter(s => s.channel !== 'email')
+  // Orange when the family's latest text did not reach them; plain otherwise.
+  const lastText = [...(j.events || [])].reverse().find(e => e.kind === 'touch' && e.channel !== 'email')
+  const missed = lastText && lastText.result === 'failed'
+  const go = async () => {
+    setBusy(true); setMsg('')
+    try {
+      const r = await api.post('/program/command/restart-texts', { lead_id: id, from_touch: pick })
+      setMsg(`Done. Text ${r.next_touch} goes out next, inside the family's texting window.`)
+      setPick(null); await load(); onDone?.()
+    } catch (e) { setMsg(e.message || 'Could not resend.') }
+    setBusy(false)
+  }
+  return (
+    <section className={`rs-bar${missed ? ' missed' : ''}`} aria-label="Resend texts">
+      <div className="rs-head"><b>Resend texts</b>{missed && <em>Their last text did not reach them.</em>}
+        <span>Next up: {j.next_touch_number ? `text ${j.next_touch_number}` : 'nothing scheduled'}. Pick where to start again:</span></div>
+      <div className="rs-picks">{texts.map(s => (
+        <button key={s.touch} type="button" className={pick === s.touch ? 'on' : ''} disabled={busy}
+          onClick={() => { setPick(s.touch); setMsg('') }}>Text {s.touch}</button>))}</div>
+      {pick && <div className="rs-confirm">
+        <span>Start this family over at <b>text {pick}</b>? It goes out on the next pass (within about 5 minutes, in their texting window).</span>
+        <button type="button" className="rs-yes" disabled={busy} onClick={go}>{busy ? 'Working…' : `Yes, resend from text ${pick}`}</button>
+        <button type="button" disabled={busy} onClick={() => setPick(null)}>Cancel</button>
+      </div>}
+      {msg && <p className="rs-msg">{msg}</p>}
+    </section>
+  )
 }
