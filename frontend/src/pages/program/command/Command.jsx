@@ -226,7 +226,7 @@ export default function Command() {
   if (drill) {
     return frame(<MetricDrill key={JSON.stringify(drill)} spec={drill} range={drill.range || range} loc={loc} onBack={() => back({ m: null })} openFamily={openFamily} />, 'wide')
   }
-  return frame(<div className={`cmd ${tab === 'home' || tab === 'reports' || (tab === 'inbox' && wide) ? 'cmd-wide' : ''}`}>
+  return frame(<div className={`cmd ${tab === 'home' || tab === 'reports' || tab === 'consent' || (tab === 'inbox' && wide) ? 'cmd-wide' : ''}`}>
       {tab === 'home' && <>
         {err && <p className="cmd-err">{err}</p>}
         <div className="sl-search"><SearchBox q={q} setQ={v => { setQ(v); if (v.trim()) setTab('search') }} /></div>
