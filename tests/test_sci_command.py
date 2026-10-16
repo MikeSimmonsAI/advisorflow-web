@@ -259,6 +259,7 @@ def test_an_on_hold_family_waits_instead_of_failing(program, sample_advisor):
     db.commit()
     with patch("app.services.cadence_service.org_sending_enabled", return_value=True), \
          patch("app.services.entitlements.org_has_feature", return_value=True), \
+         patch("app.services.contact_hours.check", return_value={"permitted": True, "reason": ""}), \
          patch("app.services.sms_service.send_sms",
                side_effect=Exception("Lead x: ON HOLD: this contact was put on hold by a person.")):
         C.run_due_cadences(db, organization_id=org.id)
@@ -291,3 +292,32 @@ def test_start_over_from_text_1_resends_even_a_touch_sent_before(program, sample
     db.refresh(st)
     assert st.current_touch_number == 0 and st.status == "active"
     assert C._already_sent(db, st, 1) is False      # the old run is history
+
+
+def test_consent_screen_lists_opted_in_opted_out_and_no_record(program, sample_advisor, client):
+    """Oct 16: the owner had no screen showing who opted in / out."""
+    from app.models.program_models import ProgramResponse
+    from app.services import sms_programs, wholesale_sms
+    db, org = program["db"], program["org"]
+    a = _lead_for(db, org, sample_advisor, "L001", phone="2145550201", first="Ina")
+    b = _lead_for(db, org, sample_advisor, "L002", phone="2145550202", first="Otto", email="o@example.com")
+    c = _lead_for(db, org, sample_advisor, "L003", phone="2145550203", first="Nora", email="n@example.com")
+    p = sms_programs.PROGRAMS[sms_programs.SCI]
+    wholesale_sms.record_consent(
+        db, org.id, phone_raw=a.phone,
+        disclosure_text=sms_programs._owner_attestation_text("Mike Simmons", "forms"),
+        disclosure_version=sms_programs.ATTESTED_VERSION, form_version=None,
+        source_url=sms_programs.ATTESTED_SOURCE, ip=None, user_agent=None, lead=None,
+        program=p.consent_program, form_id=sms_programs.ATTESTED_FORM_ID,
+        consent_method=sms_programs.METHOD_OWNER_ATTESTED)
+    db.add(ProgramResponse(organization_id=org.id, lead_id=b.id, channel="sms", response_class="opt_out",
+                           body_excerpt="STOP", received_at=datetime(2026, 10, 16, 15, 0)))
+    db.commit()
+    r = client.get("/program/command/consent", headers=_h(db, program["admin"])).json()
+    by = {i["name"].split()[0]: i for i in r["items"]}
+    assert by["Otto"]["status"] == "opted_out" and by["Otto"]["how"] == "Replied STOP" and by["Otto"]["words"] == "STOP"
+    assert by["Nora"]["status"] == "no_record"
+    assert by["Ina"]["status"] == "opted_in" and "consent forms" in by["Ina"]["how"]
+    assert r["counts"]["opted_out"] == 1
+    only_out = client.get("/program/command/consent?status=opted_out", headers=_h(db, program["admin"])).json()
+    assert [i["name"].split()[0] for i in only_out["items"]] == ["Otto"]
