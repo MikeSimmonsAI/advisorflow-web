@@ -22,7 +22,8 @@ WHO IS PICKED
 The same people "Pick 25 for me" ticks: never approved, never texted or
 emailed, status new, a confirmed cell phone, in a campaign that is switched
 on, nothing blocking them - one per location in turn so a day is spread
-across locations.
+across locations. For SCI, ALSO an SMS consent of record for the number
+(Oct 16): a family the send gate would refuse is never picked.
 
 WHEN
 ----
@@ -72,6 +73,13 @@ def pick(db: Session, prog: OutreachProgram, n: int) -> List[str]:
     pool = [r for r in rows if not r["approved"] and not r["blocked"] and r["line_type"] == "mobile"
             and r["campaign_key"] in active and not r["last_text_at"] and not r["last_email_at"]
             and r["status"] == "new"]
+    # TEXTABLE MEANS CONSENT OF RECORD (Oct 16). The batch texts, so it only
+    # picks families whose number already has a usable SCI SMS consent; it
+    # never fills its quota with families the send gate would refuse.
+    from app.services import sms_programs, wholesale_sms
+    if sms_programs.is_sci_org(db, prog.organization_id):
+        ok = sms_programs.consented_numbers(db, prog.organization_id)
+        pool = [r for r in pool if wholesale_sms.normalize_e164(r.get("phone")) in ok]
     by_loc: Dict[str, list] = {}
     for r in pool:
         by_loc.setdefault(r["location_id"] or "", []).append(r["lead_id"])

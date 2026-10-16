@@ -207,3 +207,30 @@ def test_follow_up_cadence_counts_only_contacted_families(program, sample_adviso
     assert pipe["in_outreach"] == 2 and o["in_followup"] == 1
     d = client.get("/program/command/analytics/records?metric=in_followup&range=all", headers=h).json()
     assert d["count"] == 1 and [i["name"] for i in d["items"]] == ["Marion Testcase"]
+
+
+def test_queued_families_split_by_sms_consent_and_blocks_are_not_failures(program, sample_advisor, client, monkeypatch):
+    from app.models.program_models import ProgramSourceRecord
+    from app.services import sms_programs
+    db, org = program["db"], program["org"]
+    q1 = _lead_for(db, org, sample_advisor, "L001", first="Consented")
+    q2 = _lead_for(db, org, sample_advisor, "L002", phone="2145550102", first="Nocon", email="n@example.com")
+    for l in (q1, q2):
+        r = db.query(ProgramSourceRecord).filter_by(lead_id=l.id).one()
+        r.approved_to_send_at, r.scheduled_start_at = datetime.utcnow(), datetime.utcnow() + timedelta(hours=9)
+    st = db.query(CadenceState).filter_by(lead_id=q2.id).one()
+    db.add(CadenceTouchLog(cadence_state_id=st.id, lead_id=q2.id, organization_id=org.id, touch_number=1,
+                           attempt_seq=1, channel="sms", outcome="blocked",
+                           reason="SMS not sent - NO_SMS_CONSENT", created_at=_today_at()))
+    db.commit()
+    monkeypatch.setattr(sms_programs, "consented_numbers", lambda db_, org_: {"+12145550101"})
+    SA._CACHE.clear()
+    h = _h(db, program["admin"])
+    a = client.get("/program/command/analytics?range=today", headers=h).json()
+    sn = a["overview"]["scheduled_new"]
+    assert sn["value"] == 2 and sn["sms_ready"] == 1 and sn["no_consent"] == 1   # a block is not a contact
+    today = {r["key"]: r["value"] for r in a["overview"]["today"]}
+    assert today["blocked"] == 1 and today["first"] == 0
+    assert a["metrics"]["failed"]["value"] == 0 and a["metrics"]["attempts"]["value"] == 0
+    d = client.get("/program/command/analytics/records?metric=consent_blocked&range=today", headers=h).json()
+    assert d["count"] == 1 and d["items"][0]["name"] == "Nocon Testcase"

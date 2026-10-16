@@ -920,6 +920,21 @@ def run_due_cadences(db: Session, organization_id: str = None,
                 db.rollback()
                 claim = db.query(CadenceTouchLog).filter(
                     CadenceTouchLog.id == claim.id).first()
+                # NO CONSENT IS NOT A FAILED SEND. A text the SCI gate refused
+                # for the FAMILY's own reason (no SMS consent of record, opted
+                # out, suppressed, unusable number) never reached a provider:
+                # it is recorded as blocked, and this family's text schedule
+                # stops - retrying cannot create consent. Emails are separate.
+                _codes = list(getattr(exc, "reasons", None) or [])
+                from app.services import sms_programs as _smsp
+                if exc.__class__.__name__ == "SciSmsBlocked" and any(c in _smsp.CONSENT_BLOCKS for c in _codes):
+                    if claim is not None:
+                        claim.outcome = OUTCOME_BLOCKED
+                        claim.reason = ("SMS not sent - %s" % ",".join(_codes))[:500]
+                    db.commit()
+                    stop_cadence_for_lead(db, lead.id, "stopped_no_sms_consent")
+                    blocked_count += 1
+                    continue
                 too_soon = "TOO_SOON" in str(exc)
                 if claim is not None:
                     is_guard = exc.__class__.__name__ == "DemoBoundaryViolation"

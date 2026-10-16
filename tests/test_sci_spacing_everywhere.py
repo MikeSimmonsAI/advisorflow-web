@@ -130,3 +130,35 @@ def test_oct13_replay_touch2_never_lands_hours_after_a_late_touch1(db_session, s
     assert len(sends) == 1 and tw.messages.create.call_count == 1
     db_session.refresh(state)
     assert state.next_touch_due_at >= AT + timedelta(hours=20)
+
+
+def test_no_sms_consent_is_a_block_and_stops_the_text_schedule(db_session, sample_org, sample_advisor, monkeypatch):
+    """Oct 16: a text the SCI gate refuses for the family's own reason (no
+    consent of record) is BLOCKED - never a failed attempt, never retried -
+    and that family's text schedule stops."""
+    from app.services import sms_service
+    _sending_on(monkeypatch)
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145552403")
+    state = _due(db_session, lead)
+    with patch("app.services.sms_service.send_sms",
+               side_effect=sms_service.SciSmsBlocked(["NO_SMS_CONSENT"])), \
+         patch("app.services.cadence_service._spacing_hold_until", return_value=None):
+        r = cs.run_due_cadences(db_session, now=AT)
+    logs = _logs(db_session, lead)
+    assert [l.outcome for l in logs] == [cs.OUTCOME_BLOCKED] and "NO_SMS_CONSENT" in logs[0].reason
+    assert cs._failed_attempts(db_session, state, 1) == 0 and r["sent"] == 0
+    db_session.refresh(state)
+    assert state.status == "stopped_no_sms_consent"
+
+
+def test_a_system_wide_refusal_still_retries(db_session, sample_org, sample_advisor, monkeypatch):
+    from app.services import sms_service
+    _sending_on(monkeypatch)
+    lead = _lead(db_session, sample_org, sample_advisor, phone="12145552404")
+    state = _due(db_session, lead)
+    with patch("app.services.sms_service.send_sms",
+               side_effect=sms_service.SciSmsBlocked(["SCI_SMS_DISABLED"])), \
+         patch("app.services.cadence_service._spacing_hold_until", return_value=None):
+        cs.run_due_cadences(db_session, now=AT)
+    db_session.refresh(state)
+    assert state.status == "active"
