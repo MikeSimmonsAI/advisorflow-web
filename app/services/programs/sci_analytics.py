@@ -133,26 +133,31 @@ class Ledger:
         self.locs = {p.location_id: p.official_name for p in db.query(LocationProfile)
                      .filter(LocationProfile.organization_id == org_id,
                              LocationProfile.is_review_bucket.isnot(True)).all()}
-        recs = (db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org_id,
-                                                     ProgramSourceRecord.lead_id.isnot(None),
-                                                     ~ProgramSourceRecord.source_lead_id.like("TEST-BOOKING-%"))
-                .order_by(ProgramSourceRecord.created_at).all())
+        # Only the columns this screen needs: an import row also carries the
+        # whole original spreadsheet line, which made this the slowest step.
+        R_ = ProgramSourceRecord
+        recs = (db.query(R_.lead_id, R_.location_id, R_.campaign_family, R_.created_at, R_.approved_to_send_at,
+                         R_.on_hold, R_.hold_reason)
+                .filter(R_.organization_id == org_id, R_.lead_id.isnot(None),
+                        ~R_.source_lead_id.like("TEST-BOOKING-%"))
+                .order_by(R_.created_at).all())
         rec_by = {}
         for r in recs:
             rec_by.setdefault(r.lead_id, r)
-        leads = (db.query(Lead).filter(Lead.organization_id == org_id, Lead.is_test.isnot(True),
-                                       Lead.id.in_(list(rec_by) or ["-"])).all())
+        leads = (db.query(Lead.id, Lead.first_name, Lead.last_name, Lead.phone, Lead.email, Lead.status,
+                          Lead.phone_line_type, Lead.source)
+                 .filter(Lead.organization_id == org_id, Lead.is_test.isnot(True)).all())
         self.families: Dict[str, Dict] = {}
         for l in leads:
-            if getattr(l, "source", None) == DEMO_SOURCE:
+            r = rec_by.get(l.id)
+            if r is None or l.source == DEMO_SOURCE:
                 continue
-            r = rec_by[l.id]
             self.families[l.id] = {
                 "lead_id": l.id,
                 "name": ("%s %s" % (l.first_name or "", l.last_name or "")).strip().title() or "Family",
                 "location_id": r.location_id, "location": self.locs.get(r.location_id),
                 "phone": l.phone, "email": l.email, "dnc": (l.status or "") == "dnc",
-                "line_type": getattr(l, "phone_line_type", None),
+                "line_type": l.phone_line_type,
                 "campaign": (r.campaign_family or "").replace("_", " ").title() or None,
                 "imported_at": r.created_at, "approved_at": r.approved_to_send_at,
                 "on_hold": bool(r.on_hold), "hold_reason": r.hold_reason,
