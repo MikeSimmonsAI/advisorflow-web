@@ -518,6 +518,7 @@ export function ResendBar({ id, onDone }) {
   // Orange when the family's latest text did not reach them; plain otherwise.
   const lastText = [...(j.events || [])].reverse().find(e => e.kind === 'touch' && e.channel !== 'email')
   const missed = lastText && lastText.result === 'failed'
+  const missedTouch = missed ? lastText.touch : null
   const go = async () => {
     setBusy(true); setMsg('')
     try {
@@ -529,11 +530,11 @@ export function ResendBar({ id, onDone }) {
   }
   return (
     <section className={`rs-bar${missed ? ' missed' : ''}`} aria-label="Resend texts">
-      <div className="rs-head"><b>Resend texts</b>{missed && <em>Their last text did not reach them.</em>}
-        <span>Next up: {j.next_touch_number ? `text ${j.next_touch_number}` : 'nothing scheduled'}. Pick where to start again:</span></div>
+      <div className="rs-head"><b>Resend texts</b>{missed && <em>Text {missedTouch} did not reach them.</em>}
+        <span>Pick the text this family should get next (usually the one that did not reach them):</span></div>
       <div className="rs-picks">{texts.map(s => (
         <button key={s.touch} type="button" className={pick === s.touch ? 'on' : ''} disabled={busy}
-          onClick={() => { setPick(s.touch); setMsg('') }}>Text {s.touch}</button>))}</div>
+          onClick={() => { setPick(s.touch); setMsg('') }}>Text {s.touch}{s.touch === missedTouch ? ' (missed)' : ''}</button>))}</div>
       {pick && <div className="rs-confirm">
         <span>Start this family over at <b>text {pick}</b>? It goes out on the next pass (within about 5 minutes, in their texting window).</span>
         <button type="button" className="rs-yes" disabled={busy} onClick={go}>{busy ? 'Working…' : `Yes, resend from text ${pick}`}</button>
