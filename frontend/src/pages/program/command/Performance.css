@@ -216,3 +216,6 @@
 .jr-restart { margin-top: 8px; align-self: flex-start; background: #152f4f; color: #fff; border: 0; border-radius: 8px; padding: 7px 12px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
 .jr-restart:disabled { opacity: .6; cursor: default; }
 .jr-restart-note { display: block; margin-top: 6px; font-size: 12px; color: #0d8b6f; }
+.jr-resend { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.jr-resend select { font: inherit; font-size: 12.5px; padding: 6px 8px; border: 1px solid #d5deea; border-radius: 8px; background: #fff; max-width: 100%; }
+.jr-resend .jr-restart { margin-top: 0; }

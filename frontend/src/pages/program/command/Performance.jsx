@@ -398,11 +398,12 @@ export function Journey({ id }) {
   const [note, setNote] = useState('')
   const loadJ = () => api.get(`/program/command/analytics/journey/${id}`).then(setJ).catch(e => setErr(e.message || 'Could not load the journey.'))
   useEffect(() => { loadJ() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
-  const restart = async () => {
+  const [fromTouch, setFromTouch] = useState('')
+  const restart = async (from) => {
     setBusy(true); setNote('')
     try {
-      const r = await api.post('/program/command/restart-texts', { lead_id: id })
-      setNote(`Texts restarted - touch ${r.next_touch} goes out next, inside the family's texting window.`)
+      const r = await api.post('/program/command/restart-texts', from ? { lead_id: id, from_touch: Number(from) } : { lead_id: id })
+      setNote(`Done - text ${r.next_touch} goes out next, inside the family's texting window (20 hours after their last text at the earliest).`)
       await loadJ()
     } catch (e) { setNote(e.message || 'Could not restart texts.') }
     setBusy(false)
@@ -425,7 +426,14 @@ export function Journey({ id }) {
       </div>
       <div className="jr-cards">
         <div><small>Current state</small><b className="blue">{j.stage}</b><span>{j.handling === 'human' ? 'A person is handling replies' : 'AI answers replies'}</span>
-          {j.texts_restartable && <button type="button" className="jr-restart" disabled={busy} onClick={restart}>{busy ? 'Restarting…' : 'Restart texts'}</button>}
+          {j.texts_restartable && <button type="button" className="jr-restart" disabled={busy} onClick={() => restart()}>{busy ? 'Restarting…' : 'Restart texts'}</button>}
+          {j.can_resend && <span className="jr-resend">
+            <select aria-label="Resend from text" value={fromTouch} onChange={e => setFromTouch(e.target.value)} disabled={busy}>
+              <option value="">Resend from text…</option>
+              {(j.steps || []).filter(s => s.channel !== 'email').map(s => <option key={s.touch} value={s.touch}>Text {s.touch}</option>)}
+            </select>
+            <button type="button" className="jr-restart" disabled={busy || !fromTouch} onClick={() => restart(fromTouch)}>{busy ? 'Working…' : 'Go'}</button>
+          </span>}
           {note && <span className="jr-restart-note">{note}</span>}</div>
         <div><small>Touch progression</small><b>{sentTexts.size} / {total || '—'}</b><span>{j.touches_sent
           ? `${sentTexts.size} text touch${sentTexts.size === 1 ? '' : 'es'} sent${j.touches_sent > sentTexts.size ? ` · plus ${j.touches_sent - sentTexts.size} email${j.touches_sent - sentTexts.size === 1 ? '' : 's'}` : ''}`

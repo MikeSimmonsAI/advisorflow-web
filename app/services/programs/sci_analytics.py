@@ -930,6 +930,12 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
         # stopped for "no consent" can be restarted from the family page.
         "texts_restartable": bool(st is not None and st.status in ("stopped_no_sms_consent", "stopped_bad_number")),
         "sms_links_on": _links_on(),
+        # "Resend from text..." - a schedule a restart may reopen (never an
+        # opt-out, reply, booking or do-not-contact; the server checks again).
+        "can_resend": bool(st is not None and (st.status or "") not in (
+            "opted_out", "stopped_opted_out", "dnc", "stopped_dnc", "replied", "stopped_replied",
+            "booked", "stopped_booked", "cancelled")
+            and (lead.status or "").lower() not in ("dnc", "replied", "booked", "hot") and stage != "Opted out"),
         "events": ev,
     }
 
