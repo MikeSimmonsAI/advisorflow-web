@@ -1674,6 +1674,27 @@ def set_daily_batch(body: DailyBatchIn, db: Session = Depends(get_db), user: Use
     return daily_batch.status(prog)
 
 
+class RepaceIn(BaseModel):
+    approved_since: str
+    confirm: Optional[str] = None
+
+
+@router.post("/daily-batch/repace")
+def repace_daily_batch(body: RepaceIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Spread a batch that was approved after hours across the next sending
+    day (confirm "REPACE"). Changes start times only."""
+    from app.services.programs import daily_batch
+    prog = _program(db, user)
+    _require_manager(db, user)
+    if (body.confirm or "").strip().upper() != "REPACE":
+        raise HTTPException(status_code=422, detail="Confirm with REPACE.")
+    try:
+        since = datetime.fromisoformat(body.approved_since.replace("Z", "")).replace(tzinfo=None)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="approved_since must be an ISO time (UTC).")
+    return daily_batch.repace(db, prog, user, since)
+
+
 @router.post("/send/unapprove")
 def send_unapprove(body: PickIn, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     """Take approval back: no more automated messages to these contacts."""
