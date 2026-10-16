@@ -141,8 +141,8 @@ def test_oscar_callback_request_hands_to_person(setter, sample_advisor):
     db, org = setter["db"], setter["org"]
     lead = _lead_for(db, org, sample_advisor, "L001", first="Oscar")
     fake = _Fake([
-        _d("answer", "Of course, Oscar. Call whenever it suits you. Or if it's easier, I can have Kerry call you - what time is good?"),
-        _d("callback", "Perfect, Kerry will call you tomorrow afternoon.", callback_window="tomorrow afternoon"),
+        _d("answer", "Of course, Oscar. Call whenever it suits you. Or if it's easier, I can call you - what time is good?"),
+        _d("callback", "Perfect, I'll call you tomorrow afternoon.", callback_window="tomorrow afternoon"),
     ])
     _run(db, lead, "I'll call you", fake)
     resp, conv = _run(db, lead, "Tomorrow afternoon is fine, have her call me", fake)
@@ -337,7 +337,7 @@ def test_two_questions_are_rewritten_to_one(setter, sample_advisor):
 def test_a_malformed_ai_answer_gets_one_correction(setter, sample_advisor):
     db, org = setter["db"], setter["org"]
     lead = _lead_for(db, org, sample_advisor, "L001", first="Oscar")
-    fake = _Fake([_d(""), _d("answer", "Of course, Oscar - call whenever suits you. Would you like Kerry to call you instead?")])
+    fake = _Fake([_d(""), _d("answer", "Of course, Oscar - call whenever suits you. Would you like me to call you instead?")])
     resp, conv = _run(db, lead, "I'll call you", fake)
     assert len(fake.calls) == 2 and conv.state == "ai_active" and resp.suggested_reply.startswith("Of course")
 
