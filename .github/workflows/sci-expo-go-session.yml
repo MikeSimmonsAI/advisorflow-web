@@ -34,12 +34,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
-          npx expo start --tunnel --clear --port 8081 > /tmp/sci-expo.log 2>&1 &
+          npx expo start --go --tunnel --clear --port 8081 > /tmp/sci-expo.log 2>&1 &
           server=$!
           url=''
-          for i in $(seq 1 90); do
-            url=$(grep -Eo 'exp://[^[:space:]]+' /tmp/sci-expo.log | head -1 | sed 's/[][()<>;,]*$//' || true)
-            if [ -n "$url" ]; then break; fi
+          # Noninteractive Expo intentionally prints "localhost" instead of
+          # the public QR URL. The active ngrok tunnel's local API is the source.
+          for i in $(seq 1 75); do
+            host=$(curl -fsS --max-time 2 http://127.0.0.1:4040/api/tunnels 2>/dev/null \
+              | node -e 'let data="";process.stdin.on("data",x=>data+=x);process.stdin.on("end",()=>{try{const list=JSON.parse(data).tunnels||[];const t=list.find(x=>(x.public_url||"").startsWith("https://"));if(t)process.stdout.write(new URL(t.public_url).host)}catch{}})' || true)
+            if [ -n "$host" ]; then url="exp://$host"; break; fi
+            # Fallback: Expo's iOS manifest includes the public launch hostname.
+            manifest=$(curl -fsS --max-time 2 -H 'expo-platform: ios' http://127.0.0.1:8081/ 2>/dev/null \
+              | node -e 'let d="";process.stdin.on("data",x=>d+=x);process.stdin.on("end",()=>{try{const p=JSON.parse(d);const u=p.launchAsset?.url||"";if(u.includes("exp.direct"))process.stdout.write(new URL(u).host)}catch{}})' || true)
+            if [ -n "$manifest" ]; then url="exp://$manifest"; break; fi
             if ! kill -0 "$server" 2>/dev/null; then break; fi
             sleep 2
           done
