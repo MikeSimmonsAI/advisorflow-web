@@ -16,7 +16,9 @@ import { api } from '../../../api/client'
 import EngagementGauge, { useEngagement } from '../EngagementGauge'
 import SelfCheck from '../SelfCheck'
 import VoicemailPlayer from '../../../components/telephony/VoicemailPlayer'
+import { Journey, MetricDrill, PerformanceHome } from './Performance'
 import './Command.css'
+import './Performance.css'
 
 const REFRESH_MS = 45000
 const time = iso => (iso ? new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '')
@@ -89,6 +91,10 @@ export default function Command() {
   const engagement = useEngagement()
   const [err, setErr] = useState('')
   const [family, setFamily] = useState(null)       // lead id
+  const [familyView, setFamilyView] = useState('conversation')
+  const [range, setRange] = useState({ preset: 'today' })
+  const [drill, setDrill] = useState(null)          // { metric, touch?, channel?, status?, location_id? }
+  const openFamily = (id, view) => { setFamilyView(view || 'conversation'); setFamily(id) }
   const [startReply, setStartReply] = useState(false) // opened with Reply: composer open and focused
   const [toast, setToast] = useState('')
   const busy = useRef(false)
@@ -144,72 +150,74 @@ export default function Command() {
   }
 
   if (family) {
-    return <Family id={family} startReply={startReply} onBack={() => { setFamily(null); setStartReply(false); load() }} toast={setToast} toastText={toast} />
+    return <Family id={family} view={familyView} startReply={startReply} onBack={() => { setFamily(null); setStartReply(false); load() }} toast={setToast} toastText={toast} />
+  }
+  if (drill) {
+    return <MetricDrill spec={drill} range={range} loc={loc} onBack={() => setDrill(null)} openFamily={openFamily} />
   }
   const inbox = d?.inbox || []
   return (
-    <div className="cmd">
+    <div className={`cmd ${tab === 'home' ? 'cmd-wide' : ''}`}>
       {tab === 'home' && <>
         <header className="cmd-top">
           <div>
-            <h1>SCI Command</h1>
-            <p className="cmd-sub">{d ? `${d.locations.length} locations · updated ${ago(d.updated_at)}` : 'Loading…'}</p>
+            <h1>SCI Live</h1>
+            <p className="cmd-sub">EvoSys Pro outreach for SCI{d ? ` · ${d.locations.length} locations · updated ${ago(d.updated_at)}` : ''}</p>
           </div>
-          <span className="cmd-loc-wrap">
-            <select className="cmd-loc" value={loc} onChange={e => setLoc(e.target.value)} aria-label="Location">
-              <option value="">All locations</option>
-              {(d?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select><Icon n="down" s={16} />
-          </span>
         </header>
         <SearchBox q={q} setQ={v => { setQ(v); if (v.trim()) setTab('search') }} />
         {err && <p className="cmd-err">{err}</p>}
-        {d && <>
-          <div className="cmd-tiles">
-            <Tile icon="alert" tone="red" label="Needs attention" v={d.counts.needs_attention} onClick={() => setTab('inbox')} />
-            <Tile icon="chat" tone="green" label="Replies today" v={d.counts.replies_today} onClick={() => setTab('inbox')} />
-            <Tile icon="cal" tone="blue" label="Visits booked" v={d.counts.visits_booked} onClick={() => setTab('appts')} />
-            <Tile icon="people" tone="teal" label="Contacted today" v={d.counts.contacted_today} onClick={() => setTab('inbox')} />
+        {d && <div className="cmd-attn">
+          <button className={d.counts.needs_attention ? 'hot' : ''} onClick={() => setTab('inbox')}><Solid n="alert" s={20} /><span><b>{d.counts.needs_attention}</b> need a reply</span></button>
+          <button onClick={() => setTab('inbox')}><Solid n="chat" s={20} /><span><b>{(d.unknown || []).length}</b> unknown caller{(d.unknown || []).length === 1 ? '' : 's'}</span></button>
+          <button onClick={() => setTab('appts')}><Solid n="cal" s={20} /><span><b>{d.counts.visits_booked}</b> upcoming visit{d.counts.visits_booked === 1 ? '' : 's'}</span></button>
+        </div>}
+        {d?.owner_alert && (
+          <a className="cmd-owner" href="/program?tab=health">
+            <Icon n="warn" />
+            <span><b>Owner alert</b><br />{d.owner_alert.text}</span>
+            <span className="cmd-link">View ›</span>
+          </a>
+        )}
+        <SectionHead title="Performance" />
+        <PerformanceHome range={range} setRange={setRange} loc={loc} setLoc={setLoc} openMetric={setDrill} />
+        {d && <div className="cmd-cols">
+          <div>
+            <Unknown items={d.unknown} toast={setToast} reload={load} />
+            <SectionHead title="Priority inbox" onAll={() => setTab('inbox')} />
+            <Inbox items={inbox.slice(0, 4)} act={act} open={openFamily} />
           </div>
-          {d.owner_alert && (
-            <a className="cmd-owner" href="/program?tab=health">
-              <Icon n="warn" />
-              <span><b>Owner alert</b><br />{d.owner_alert.text}</span>
-              <span className="cmd-link">View ›</span>
-            </a>
-          )}
-          <Unknown items={d.unknown} toast={setToast} reload={load} />
-          <SectionHead title="Priority inbox" onAll={() => setTab('inbox')} />
-          <Inbox items={inbox.slice(0, 5)} act={act} open={setFamily} />
-          <SectionHead title="Today's upcoming actions" onAll={() => setTab('inbox')} />
-          <div className="cmd-card cmd-actions">
-            <button onClick={() => setTab('inbox')}><Icon n="reply" />
-              <span><b>Follow up with {d.upcoming.follow_up} families</b><br />
-                <small>Includes {d.upcoming.new} new and {d.upcoming.review} needing review
-                  {d.upcoming.callbacks ? ` · ${d.upcoming.callbacks} callbacks` : ''}</small></span>›</button>
-            <button onClick={() => setTab('appts')}><Icon n="cal" />
-              <span><b>{d.upcoming.visits_booked ? `${d.upcoming.visits_booked} appointment${d.upcoming.visits_booked === 1 ? '' : 's'} booked` : 'No appointments scheduled'}</b><br />
-                <small>{d.upcoming.visits_booked ? 'See who is coming in' : 'Get in touch to book a visit today'}</small></span>›</button>
-            {(d.tasks || []).map(t => (
-              <button key={`${t.kind}-${t.lead_id}`} onClick={() => setFamily(t.lead_id)}><Icon n="mail" />
-                <span><b>Mail a printed guide · {t.name}</b><br />
-                  <small>{t.note || 'Confirm the address, mail it, then mark it done'}</small></span>›</button>))}
+          <div>
+            <SectionHead title="Today's upcoming actions" onAll={() => setTab('inbox')} />
+            <div className="cmd-card cmd-actions">
+              <button onClick={() => setTab('inbox')}><Icon n="reply" />
+                <span><b>Follow up with {d.upcoming.follow_up} families</b><br />
+                  <small>Includes {d.upcoming.new} new and {d.upcoming.review} needing review
+                    {d.upcoming.callbacks ? ` · ${d.upcoming.callbacks} callbacks` : ''}</small></span>›</button>
+              <button onClick={() => setTab('appts')}><Icon n="cal" />
+                <span><b>{d.upcoming.visits_booked ? `${d.upcoming.visits_booked} appointment${d.upcoming.visits_booked === 1 ? '' : 's'} booked` : 'No appointments scheduled'}</b><br />
+                  <small>{d.upcoming.visits_booked ? 'See who is coming in' : 'Get in touch to book a visit today'}</small></span>›</button>
+              {(d.tasks || []).map(t => (
+                <button key={`${t.kind}-${t.lead_id}`} onClick={() => openFamily(t.lead_id)}><Icon n="mail" />
+                  <span><b>Mail a printed guide · {t.name}</b><br />
+                    <small>{t.note || 'Confirm the address, mail it, then mark it done'}</small></span>›</button>))}
+            </div>
+            <TodayActivity live={live} engagement={engagement} open={openFamily} />
           </div>
-          <TodayActivity live={live} engagement={engagement} open={setFamily} />
-          <p className="cmd-foot">Updates every {Math.round(REFRESH_MS / 1000)} seconds and whenever you come back to this screen{at ? ` · last ${time(at.toISOString())}` : ''}.
-            {' '}<a href="/program">Open the full SCI Program Center</a></p>
-        </>}
+        </div>}
+        {d && <p className="cmd-foot">Updates every {Math.round(REFRESH_MS / 1000)} seconds and whenever you come back to this screen{at ? ` · last ${time(at.toISOString())}` : ''}.
+          {' '}<a href="/program">Open the full SCI Program Center</a></p>}
       </>}
-      {tab === 'inbox' && <InboxTab loc={loc} act={act} open={setFamily} />}
+      {tab === 'inbox' && <InboxTab loc={loc} act={act} open={openFamily} />}
       {tab === 'search' && <>
         <header className="cmd-top"><h1>Search</h1></header>
         <SearchBox q={q} setQ={setQ} autoFocus />
-        <SearchResults q={q} loc={loc} open={setFamily} />
+        <SearchResults q={q} loc={loc} open={openFamily} />
       </>}
-      {tab === 'appts' && <Appointments open={setFamily} />}
+      {tab === 'appts' && <Appointments open={openFamily} />}
       {toast && <div className="cmd-toast" role="status">{toast}</div>}
       <nav className="cmd-tabs" aria-label="Sections">
-        {[['home', 'home', 'Home'], ['inbox', 'inbox', 'Inbox'], ['search', 'search', 'Search'], ['appts', 'cal', 'Appointments']].map(([k, ic, lbl]) => (
+        {[['home', 'home', 'Performance'], ['inbox', 'inbox', 'Inbox'], ['search', 'search', 'Search'], ['appts', 'cal', 'Appointments']].map(([k, ic, lbl]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
             <span className="cmd-tabicon">{k === 'home' && tab === 'home' ? <Solid n="home" s={22} /> : <Icon n={ic} s={22} />}
               {k === 'inbox' && d?.counts.needs_attention ? <i>{d.counts.needs_attention}</i> : null}</span>{lbl}
@@ -303,7 +311,7 @@ function Unknown({ items, toast, reload }) {
               <em className={`chan ${u.channel_label === 'EMAIL' ? 'email' : 'text'}`}>{u.channel_label}</em></b>
             <small>Not matched to a family{u.location ? ` · ${u.location}` : ''}</small>
             {u.subject && <small className="cmd-subjline">{u.subject}</small>}
-            <span>{u.summary}</span>
+            <span className="cmd-summary">{u.summary}</span>
             {u.audio_path && <VoicemailPlayer path={u.audio_path} label={`Play voicemail${u.duration ? ` (${u.duration}s)` : ''}`} />}
           </span>
           <span className="cmd-item-meta"><small>{time(u.received_at)}</small></span>
@@ -313,38 +321,6 @@ function Unknown({ items, toast, reload }) {
           <button onClick={() => handled(u)}><Icon n="check" />Handled</button>
         </div>
       </article>))}
-  </>
-}
-
-// THE OUTREACH OPERATION: are new families entering, and are existing ones
-// progressing? Real families only.
-function Pipeline({ p }) {
-  const b = p.daily_batch || {}
-  const reasons = Object.entries(p.failed_today?.reasons || {})
-  return <>
-    <SectionHead title="Outreach pipeline" />
-    <div className="cmd-card cmd-pipe">
-      <p className={b.on ? 'ok' : 'warn'}>{b.on
-        ? `Automatic enrollment ON - ${b.count} new families each sending day, starting ${b.start}, one every ${b.spacing_minutes} min.${b.last_date ? ` Last batch: ${b.last_date}.` : ''}`
-        : <>Automatic enrollment is OFF - no new families are being added. <a href="/program?tab=send">Turn it on (Choose &amp; Send › Every day, automatically)</a></>}</p>
-    </div>
-    <div className="cmd-mini">
-      <MiniTile v={p.loaded} l="Contacts loaded" />
-      <MiniTile v={p.not_yet_contacted} l="Not yet contacted" />
-      <MiniTile v={p.enrolled_today} l="New families today" tone={p.enrolled_today ? 'green' : ''} />
-      <MiniTile v={`${p.first_touches_today.delivered}/${p.first_touches_today.sent}`} l="First texts delivered today" />
-      <MiniTile v={`${p.later_touches_today.delivered}/${p.later_touches_today.sent}`} l="Follow-up texts delivered today" />
-      <MiniTile v={p.in_outreach} l="Families in outreach" />
-      <MiniTile v={p.replies_today} l="Replies today" />
-      <MiniTile v={p.ai_conversations} l="AI conversations" />
-      <MiniTile v={p.appointments_offered} l="Offered times" />
-      <MiniTile v={p.appointments_confirmed} l="Appointments confirmed" tone={p.appointments_confirmed ? 'green' : ''} />
-      <MiniTile v={p.email_holds} l="Email held (texts still go)" />
-      <MiniTile v={p.not_textable + p.on_hold_for_review} l="Can't text / on review" n={`${p.not_textable} not a cell · ${p.on_hold_for_review} on hold`} />
-      <MiniTile v={p.failed_today.count} l="Failed today" tone={p.failed_today.count ? 'red' : ''} />
-    </div>
-    {reasons.length > 0 && <div className="cmd-card cmd-list">{reasons.map(([k, v]) => (
-      <div key={k} className="cmd-failrow"><span>{k}</span><b>{v}</b></div>))}</div>}
   </>
 }
 
@@ -375,32 +351,37 @@ const ACT = {
 
 function Inbox({ items, act, open, empty }) {
   if (!items.length) return <p className="cmd-card cmd-muted pad">{empty || 'Nobody is waiting right now.'}</p>
-  return items.map(i => (
-    <article key={i.lead_id} className="cmd-card cmd-item">
-      <button className="cmd-item-main" onClick={() => open(i.lead_id)}>
-        <span className={`dot ${i.class}`} />
-        <span className="cmd-item-text">
-          <b>{i.channel === 'email' && (i.sender_name || i.sender_email) ? (i.sender_name || i.sender_email) : i.name}
-            <em className={`chan ${i.channel === 'email' ? 'email' : 'text'}`}>{i.channel_label || (i.channel === 'email' ? 'EMAIL' : 'TEXT')}</em>
-            {i.owner === 'human' && <em className="chan human">PERSON</em>}
-            {i.is_test && <em className="chan human">TEST</em>}</b>
-          {i.channel === 'email'
-            ? <small className="cmd-from">{i.sender_email}{i.sender_email && ' · '}Family: {i.name}{i.location ? ` · ${i.location}` : ''}</small>
-            : <small>{i.location || 'Location not set'}</small>}
-          {i.channel === 'email' && i.subject && <small className="cmd-subjline">{i.subject}</small>}
-          <span>{i.summary}</span>
-        </span>
-        <span className="cmd-item-meta"><em className={`badge ${BADGE[i.badge] || 'low'}`}>{i.badge}</em>
-          <small>{time(i.received_at)}</small>›</span>
-      </button>
-      <div className="cmd-btns">
-        {i.actions.map(a => {
-          const [ic, lbl, primary] = ACT[a]
-          return <button key={a} className={primary ? 'primary' : ''} onClick={() => act(i, a)}><Icon n={ic} />{lbl}</button>
-        })}
-      </div>
-    </article>
-  ))
+  return items.map(i => {
+    const email = i.channel === 'email'
+    const title = email && (i.sender_name || i.sender_email) ? (i.sender_name || i.sender_email) : i.name
+    return (
+      <article key={i.lead_id} className="cmd-card cmd-item">
+        <button className="cmd-item-main" onClick={() => open(i.lead_id)}>
+          <span className={`dot ${i.class}`} />
+          <span className="cmd-item-text">
+            <span className="cmd-row1"><b className="cmd-name">{title}</b><small className="cmd-time">{when(i.received_at)}</small></span>
+            <span className="cmd-row2">
+              <em className={`chan ${email ? 'email' : 'text'}`}>{i.channel_label || (email ? 'EMAIL' : 'TEXT')}</em>
+              <em className={`chan ${i.owner === 'human' ? 'human' : 'ai'}`}>{i.owner === 'human' ? 'PERSON' : 'AI'}</em>
+              {i.is_test && <em className="chan human">TEST</em>}
+              <em className={`badge ${BADGE[i.badge] || 'low'}`}>{i.badge}</em>
+            </span>
+            {email && i.sender_email && <small className="cmd-from" title={i.sender_email}>{i.sender_email}</small>}
+            <small className="cmd-locline">{email ? `Family: ${i.name}${i.location ? ` · ${i.location}` : ''}` : (i.location || 'Location not set')}</small>
+            {email && i.subject && <small className="cmd-subjline">{i.subject}</small>}
+            <span className="cmd-summary">{i.summary}</span>
+          </span>
+          <span className="cmd-chev" aria-hidden="true">›</span>
+        </button>
+        <div className="cmd-btns">
+          {i.actions.map(a => {
+            const [ic, lbl, primary] = ACT[a]
+            return <button key={a} className={primary ? 'primary' : ''} onClick={() => act(i, a)}><Icon n={ic} />{lbl}</button>
+          })}
+        </div>
+      </article>
+    )
+  })
 }
 
 function Appointments({ open }) {
@@ -419,7 +400,8 @@ function Appointments({ open }) {
   </>
 }
 
-function Family({ id, startReply, onBack, toast, toastText }) {
+function Family({ id, view: view0, startReply, onBack, toast, toastText }) {
+  const [view, setView] = useState(view0 || 'conversation')
   const [f, setF] = useState(null)
   const [err, setErr] = useState('')
   const [mode, setMode] = useState('note')
@@ -456,7 +438,7 @@ function Family({ id, startReply, onBack, toast, toastText }) {
   useEffect(() => { if (f?.status === 'new' && f.response_id) api.post(`/program/responses/${f.response_id}/viewed`, {}).catch(() => {}) }, [f?.response_id, f?.status])
 
   const replyMode = () => (f?.reply_to?.channel === 'email' ? 'email' : 'text')
-  const focusComposer = m => { setMode(m); if (m !== 'note' && f?.suggested_reply && !text) setText(f.suggested_reply); setTimeout(() => composer.current?.focus(), 50) }
+  const focusComposer = m => { setView('conversation'); setMode(m); if (m !== 'note' && f?.suggested_reply && !text) setText(f.suggested_reply); setTimeout(() => composer.current?.focus(), 50) }
   // then: 'human' (Send) or 'ai' (Send & let AI continue). One send key per
   // composed message, so a double tap, a retry or a refresh never sends twice.
   const send = async then => {
@@ -545,7 +527,12 @@ function Family({ id, startReply, onBack, toast, toastText }) {
         <button onClick={() => focusComposer('note')}><Icon n="note" s={22} />Add Note</button>
       </div>
 
-      {!f.is_demo && <section className="cmd-card cmd-handling" aria-label="Conversation handling">
+      <div className="cmd-seg two cmd-fview" role="tablist" aria-label="View">
+        <button role="tab" aria-selected={view === 'conversation'} className={view === 'conversation' ? 'on' : ''} onClick={() => setView('conversation')}>Conversation</button>
+        <button role="tab" aria-selected={view === 'journey'} className={view === 'journey' ? 'on' : ''} onClick={() => setView('journey')}>Journey</button>
+      </div>
+      {view === 'journey' && <Journey id={id} />}
+      {view === 'conversation' && !f.is_demo && <section className="cmd-card cmd-handling" aria-label="Conversation handling">
         <h3><Icon n="person" /> Conversation handling</h3>
         <div className="cmd-seg two">
           <button className={f.handling?.owner === 'ai' ? 'on' : ''} disabled={busy || f.handling?.opted_out} onClick={() => f.handling?.owner !== 'ai' && setOwner('ai')}>
@@ -561,7 +548,7 @@ function Family({ id, startReply, onBack, toast, toastText }) {
         </p>
       </section>}
 
-      <section className="cmd-thread" aria-label="Conversation">
+      {view === 'conversation' && <section className="cmd-thread" aria-label="Conversation">
         {f.thread.length ? f.thread.map((t, k) => (<Fragment key={k}>
           {(k === 0 || dayLabel(f.thread[k - 1].at || '') !== dayLabel(t.at || '')) && t.at && <div className="cmd-day">{dayLabel(t.at)}</div>}
           <div className={`bubble ${t.who}`}>
@@ -571,7 +558,7 @@ function Family({ id, startReply, onBack, toast, toastText }) {
             {t.audio_path && <VoicemailPlayer path={t.audio_path} label={`Play voicemail${t.duration ? ` (${t.duration}s)` : ''}`} />}
             <small>{time(t.at)}{t.channel === 'email' ? ' · EMAIL' : t.channel === 'voicemail' ? ' · VOICEMAIL' : ' · TEXT'}{t.source === 'sci_appointment_setter' ? ' · AI' : ''}{t.delivery === 'simulated' && t.who === 'us' ? ' · simulated' : ''}{t.who === 'us' && ['failed', 'undelivered', 'bounced'].includes(t.delivery) ? ` · NOT SENT${t.error ? `: ${t.error}` : ''}` : ''}{t.who === 'ai' ? ` · AI ${t.delivery === 'draft' ? 'draft' : t.delivery}` : ''}</small>
           </div></Fragment>)) : <p className="cmd-muted">No messages yet.</p>}
-      </section>
+      </section>}
 
       <section className="cmd-card cmd-ctx">
         <h3><Icon n="person" /> Family context <a className="cmd-edit" href={`/leads/${id}`}>Edit</a></h3>
@@ -654,36 +641,10 @@ const titled = s => (s || '').toLowerCase().replace(/\b\w/g, c => c.toUpperCase(
 
 function TodayActivity({ live, engagement, open }) {
   const sent = live?.ob?.sent || []
-  const texts = sent.filter(s => s.channel === 'text')
-  const delivered = texts.filter(s => s.status === 'delivered').length
-  const emails = sent.filter(s => s.channel === 'email').length
-  const opens = sent.filter(s => s.channel === 'email' && s.status === 'opened').length
-  const people = new Set(sent.map(s => s.lead_id || s.name)).size
-  const A = engagement?.all
   const upcoming = (live?.ob?.upcoming || []).slice(0, 5)
   return <>
-    <SectionHead title="Today's activity" />
+    <SectionHead title="System & sending" />
     <SelfCheck compact />
-    <div className="cmd-mini">
-      <MiniTile v={people} l="People contacted" n={live?.ob?.coming_up ? `${live.ob.coming_up} more today` : 'Done for today'} a={A && `${A.contacted} all time`} />
-      <MiniTile v={`${delivered}/${texts.length}`} l="Texts delivered" a={A && `${A.texts_delivered}/${A.texts_sent} all time`} />
-      <MiniTile v={live?.ba?.opened_people ?? 0} l="Opened booking page" n="Last 24 hours" a={A && `${A.opened_booking} all time`} />
-      <MiniTile v={emails} l="Emails sent" n={opens ? `${opens} opened` : null} a={A && `${A.emails_sent} all time`} />
-      <MiniTile v={A?.opted_out ?? '-'} l="Opted out" a="all time" />
-      <MiniTile v={live?.ob?.failed || 0} l="Failed or bounced" tone={live?.ob?.failed ? 'red' : ''} a={A && `${A.failed} all time`} />
-    </div>
-    {live?.pl && <Pipeline p={live.pl} />}
-    {live?.st?.outcomes && <>
-      <SectionHead title="Appointments (last 30 days)" />
-      <div className="cmd-mini">
-        <MiniTile v={live.st.outcomes.appointments_offered} l="Offered real times" />
-        <MiniTile v={live.st.outcomes.appointments_accepted} l="Accepted" />
-        <MiniTile v={live.st.outcomes.confirmed_on_google_calendar} l="On the calendar" tone={live.st.outcomes.confirmed_on_google_calendar ? 'green' : ''} />
-        <MiniTile v={live.st.outcomes.visits_completed} l="Visits completed" />
-        <MiniTile v={live.st.outcomes.information_only_fulfilled} l="Info only, sent" />
-        <MiniTile v={live.st.outcomes.declines + live.st.outcomes.opt_outs} l="Declined or opted out" />
-      </div>
-    </>}
     <div className="cmd-card cmd-eng"><EngagementGauge data={engagement} compact /></div>
     <SectionHead title="Next up" />
     {upcoming.length ? <div className="cmd-card cmd-list">{upcoming.map((u, i) => (
@@ -699,8 +660,4 @@ function TodayActivity({ live, engagement, open }) {
       </button>))}</div>
       : <p className="cmd-card cmd-muted pad">Nothing sent yet today.</p>}
   </>
-}
-
-function MiniTile({ v, l, n, a, tone }) {
-  return <div className={`cmd-mtile ${tone || ''}`}><b>{v}</b><span>{l}</span>{n && <small>{n}</small>}{a && <i>{a}</i>}</div>
 }
