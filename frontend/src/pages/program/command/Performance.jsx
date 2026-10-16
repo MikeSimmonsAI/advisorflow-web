@@ -182,28 +182,32 @@ function Trend({ t }) {
   const [hover, setHover] = useState(null)
   const vals = t.series[s] || []
   const max = Math.max(1, ...vals)
-  const W = 600, H = 150, pad = 20
-  const bw = vals.length ? (W - pad) / vals.length : 0
+  const W = 600, H = 150
+  const bw = vals.length ? W / vals.length : 0
   const total = vals.reduce((a, b) => a + b, 0)
   return <>
     <div className="pf-tabs">{SERIES.map(([k, l]) => <button key={k} className={s === k ? 'on' : ''} onClick={() => setS(k)}>{l}</button>)}</div>
     <div className="pf-chart" onMouseLeave={() => setHover(null)}>
-      <svg viewBox={`0 0 ${W} ${H + 22}`} role="img" aria-label={`${SERIES.find(x => x[0] === s)[1]} per ${t.step_days === 7 ? 'week' : 'day'}`}>
-        {[0.5, 1].map(f => <line key={f} x1={pad} x2={W} y1={H - f * (H - 10)} y2={H - f * (H - 10)} className="pf-grid-l" />)}
-        <text x={0} y={14} className="pf-ax">{max}</text>
-        <line x1={pad} x2={W} y1={H} y2={H} className="pf-base" />
-        {vals.map((v, i) => {
-          const h = (v / max) * (H - 10)
-          const x = pad + i * bw + Math.max(1, bw * 0.15)
-          const w = Math.max(2, bw * 0.7)
-          return <g key={i} onMouseEnter={() => setHover(i)} onClick={() => setHover(i)}>
-            <rect x={pad + i * bw} y={0} width={bw} height={H} fill="transparent" />
-            {v > 0 && <rect x={x} y={H - h} width={w} height={h} rx={Math.min(4, w / 2)} className={`pf-bar ${hover === i ? 'hi' : ''}`} />}
-          </g>
-        })}
-        {t.labels.map((l, i) => (i === 0 || i === t.labels.length - 1 || (t.labels.length <= 8)) &&
-          <text key={l} x={pad + i * bw + bw / 2} y={H + 16} textAnchor="middle" className="pf-ax">{fmtDay(l)}</text>)}
-      </svg>
+      <div className="pf-plot">
+        <span className="pf-ymax">{max}</span>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img"
+             aria-label={`${SERIES.find(x => x[0] === s)[1]} per ${t.step_days === 7 ? 'week' : 'day'}`}>
+          {[0.5, 1].map(f => <line key={f} x1={0} x2={W} y1={H - f * (H - 10)} y2={H - f * (H - 10)} className="pf-grid-l" vectorEffect="non-scaling-stroke" />)}
+          <line x1={0} x2={W} y1={H} y2={H} className="pf-base" vectorEffect="non-scaling-stroke" />
+          {vals.map((v, i) => {
+            const h = (v / max) * (H - 10)
+            const x = i * bw + Math.max(1, bw * 0.15)
+            const w = Math.max(2, bw * 0.7)
+            return <g key={i} onMouseEnter={() => setHover(i)} onClick={() => setHover(i)}>
+              <rect x={i * bw} y={0} width={bw} height={H} fill="transparent" />
+              {v > 0 && <rect x={x} y={H - h} width={w} height={h} className={`pf-bar ${hover === i ? 'hi' : ''}`} />}
+            </g>
+          })}
+        </svg>
+      </div>
+      <div className="pf-xlab">{t.labels.length ? <><span>{fmtDay(t.labels[0])}</span>
+        {t.labels.length > 2 && <span>{fmtDay(t.labels[Math.floor(t.labels.length / 2)])}</span>}
+        {t.labels.length > 1 && <span>{fmtDay(t.labels[t.labels.length - 1])}</span>}</> : null}</div>
       <p className="pf-tip">{hover !== null
         ? <><b>{n(vals[hover])}</b> {SERIES.find(x => x[0] === s)[1].toLowerCase()} · {t.step_days === 7 ? 'week of ' : ''}{fmtDay(t.labels[hover])}</>
         : <><b>{n(total)}</b> {SERIES.find(x => x[0] === s)[1].toLowerCase()} in the chart · tap a bar for its {t.step_days === 7 ? 'week' : 'day'}</>}</p>
@@ -362,7 +366,7 @@ function Record({ i, open }) {
 
 /* ── Family journey ───────────────────────────────────────────────────────── */
 const KIND = { imported: 'Imported', approved: 'Approved', hold: 'On hold', cadence: 'Schedule', touch: 'Outreach',
-  skipped: 'Skipped', reply: 'Reply', opt_out: 'Opt-out', ai: 'AI', staff: 'Staff', offer: 'Offer', handling: 'Handling', booked: 'Appointment' }
+  skipped: 'Not sent', message: 'Message', reply: 'Reply', opt_out: 'Opt-out', ai: 'AI', staff: 'Staff', offer: 'Offer', handling: 'Handling', booked: 'Appointment' }
 export function Journey({ id }) {
   const [j, setJ] = useState(null)
   const [err, setErr] = useState('')

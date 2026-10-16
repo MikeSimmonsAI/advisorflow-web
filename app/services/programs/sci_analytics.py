@@ -37,6 +37,7 @@ UTC = ZoneInfo("UTC")
 
 # Attempt outcomes in the cadence log that mean a send was really tried.
 ATTEMPT_OUTCOMES = ("sent", "failed", "provider_failed")
+EMAIL_ATTEMPTS = ("sent", "failed", "unknown")          # program_email_touches: really tried
 DELIVERED = ("delivered", "read", "opened", "clicked")
 FAILED = ("failed", "undelivered", "bounced", "provider_failed")
 NOT_GENUINE_REPLY = ("auto_reply", "opt_out")
@@ -119,7 +120,16 @@ class Ledger:
                                                ProgramSourceRecord)
         from app.services import send_source as ss
         from app.services.sci_staging_demo import DEMO_SOURCE
+        import time as _t
         self.org = org_id
+        self.built_at = datetime.utcnow()
+        self.timing: Dict[str, int] = {}
+        _t0 = [_t.perf_counter()]
+
+        def lap(name):
+            now_ = _t.perf_counter()
+            self.timing[name] = int((now_ - _t0[0]) * 1000)
+            _t0[0] = now_
         self.locs = {p.location_id: p.official_name for p in db.query(LocationProfile)
                      .filter(LocationProfile.organization_id == org_id,
                              LocationProfile.is_review_bucket.isnot(True)).all()}
@@ -148,8 +158,10 @@ class Ledger:
                 "on_hold": bool(r.on_hold), "hold_reason": r.hold_reason,
             }
         ids = list(self.families) or ["-"]
+        lap("families")
 
         self.states = {s.lead_id: s for s in db.query(CadenceState).filter(CadenceState.lead_id.in_(ids)).all()}
+        lap("states")
 
         # outreach attempts (the cadence log)
         logs = (db.query(CadenceTouchLog).filter(CadenceTouchLog.lead_id.in_(ids),
@@ -195,7 +207,34 @@ class Ledger:
                 "channel": ch, "at": at, "result": result, "error": err, "text": (body or "")[:400],
                 "location_id": f.get("location_id"),
             })
+        # outreach EMAILS are recorded in their own table (program_email_touches)
+        from app.models.program_models import ProgramEmailTouch
+        etouch = (db.query(ProgramEmailTouch).filter(ProgramEmailTouch.organization_id == org_id,
+                                                     ProgramEmailTouch.lead_id.in_(ids),
+                                                     ProgramEmailTouch.status.in_(EMAIL_ATTEMPTS)).all())
+        ems2 = {e.id: e for e in db.query(EmailMessage).filter(
+            EmailMessage.id.in_([t.email_message_id for t in etouch if t.email_message_id] or ["-"])).all()}
+        for t in etouch:
+            e = ems2.get(t.email_message_id)
+            st = (e.status if e else "") or ""
+            if t.status == "failed" or st in FAILED:
+                result, err = "failed", (getattr(e, "error", None) if e else None) or t.reason or "Not sent"
+            elif t.status == "unknown":
+                result, err = "pending", None
+            elif e is not None and e.opened_at:
+                result, err = "opened", None
+            else:
+                result, err = "delivered", None
+            f = self.families.get(t.lead_id) or {}
+            self.attempts.append({
+                "kind": "attempt", "id": t.id, "lead_id": t.lead_id, "touch": t.touch_number or 0,
+                "channel": "email", "at": t.attempted_at or t.created_at, "result": result, "error": err,
+                "text": ((e.subject + " — ") if (e is not None and e.subject) else "Email touch %s" % t.touch_number)[:400],
+                "location_id": f.get("location_id"), "email_message_id": t.email_message_id,
+            })
+        self.attempts.sort(key=lambda a: a["at"] or datetime.min)
         self.attempts_by_lead: Dict[str, List[Dict]] = defaultdict(list)
+        lap("attempts")
         for a in self.attempts:
             self.attempts_by_lead[a["lead_id"]].append(a)
 
@@ -223,6 +262,7 @@ class Ledger:
             elif r.response_class not in NOT_GENUINE_REPLY:
                 self.replies.append(row)
         self.opted_out_ids = {o["lead_id"] for o in self.opt_outs} | {i for i, f in self.families.items() if f["dnc"]}
+        lap("replies")
 
         # AI and staff messages in conversations (not outreach touches)
         self.ai_msgs, self.staff_msgs = [], []
@@ -247,6 +287,7 @@ class Ledger:
             (self.ai_msgs if e.send_source == ss.SCI_SETTER else self.staff_msgs).append(row)
 
         # appointment offers (two real calendar times offered)
+        lap("messages")
         from app.services.programs import appointments as A
         self.convs = {}
         for c in (db.query(ProgramConversation).filter(ProgramConversation.lead_id.in_(ids),
@@ -267,6 +308,7 @@ class Ledger:
                                 "location_id": self.families[lid]["location_id"]})
 
         # confirmed appointments: on the calendar, real family, not opted out
+        lap("offers")
         self.bookings = []
         for b in (db.query(BookingLink).filter(BookingLink.lead_id.in_(ids), BookingLink.status.in_(BOOKED),
                                                BookingLink.booked_time.isnot(None),
@@ -282,10 +324,27 @@ class Ledger:
                                   "result": b.status, "touch": touch_before(b.lead_id, at),
                                   "location_id": self.families[b.lead_id]["location_id"]})
 
+        lap("bookings")
         ever_texted = {i for (i,) in db.query(Message.lead_id).filter(Message.lead_id.in_(ids)).distinct()}
         ever_emailed = {i for (i,) in db.query(EmailMessage.lead_id).filter(EmailMessage.lead_id.in_(ids),
                                                                             EmailMessage.status == "sent").distinct()}
         self.contacted_ever = ever_texted | ever_emailed | set(self.attempts_by_lead)
+        lap("contacted")
+
+
+_CACHE: Dict[str, "Ledger"] = {}
+CACHE_SECONDS = 30
+
+
+def ledger(db: Session, org_id: str, fresh: bool = False) -> "Ledger":
+    """The ledger, rebuilt at most every 30 seconds per workspace so the home
+    screen, its four ranges and every drill-down read the SAME snapshot (the
+    counts then match by construction, even while new replies arrive)."""
+    L = _CACHE.get(org_id)
+    if fresh or L is None or (datetime.utcnow() - L.built_at).total_seconds() > CACHE_SECONDS:
+        L = Ledger(db, org_id)
+        _CACHE[org_id] = L
+    return L
 
 
 # ── metrics ─────────────────────────────────────────────────────────────────
@@ -616,19 +675,41 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
         elif l.outcome in ("skipped", "suppressed", "refused", "exhausted", "cancelled"):
             add(at, "skipped", "Touch %s · %s not sent" % (l.touch_number, ch), l.reason, touch=l.touch_number,
                 result=l.outcome)
+    from app.models.program_models import ProgramEmailTouch
+    for t in (db.query(ProgramEmailTouch).filter(ProgramEmailTouch.lead_id == lead.id,
+                                                 ProgramEmailTouch.organization_id == org_id).all()):
+        e = ems.get(t.email_message_id)
+        at = t.attempted_at or t.created_at
+        if t.status in EMAIL_ATTEMPTS:
+            s_ = (e.status if e else "") or ""
+            res = ("failed" if (t.status == "failed" or s_ in FAILED) else "pending" if t.status == "unknown"
+                   else "opened" if (e and e.opened_at) else "delivered")
+            if t.status == "sent":
+                touches_sent += 1
+            if t.email_message_id:
+                em_ids.add(t.email_message_id)
+            add(at, "touch", "Email touch %s" % t.touch_number,
+                ((e.subject + " — ") if (e and e.subject) else "") + (_er.plain_text(e.body_html or "")[:600] if e else ""),
+                touch=t.touch_number, channel="email", result=res,
+                error=((getattr(e, "error", None) if e else None) or t.reason) if res == "failed" else None)
+        elif t.status in ("blocked", "retry"):
+            add(at, "skipped", "Email touch %s not sent" % t.touch_number, t.reason, touch=t.touch_number,
+                result=t.status)
     for m in msgs.values():
         if m.id in msg_ids:
             continue
         s = m.delivery_status or m.twilio_status or ""
-        who = "AI reply" if m.send_source == ss.SCI_SETTER else ("Staff text" if m.send_source == ss.MANUAL else "Text")
-        add(m.sent_at, "ai" if m.send_source == ss.SCI_SETTER else "staff", who, m.body, channel="sms",
+        who, kind = {ss.SCI_SETTER: ("AI reply (text)", "ai"), ss.MANUAL: ("Staff text", "staff")}.get(
+            m.send_source, ("Text", "message"))
+        add(m.sent_at, kind, who, m.body, channel="sms",
             result="failed" if s in FAILED else ("delivered" if s in DELIVERED else "pending"),
             error=(ERR.get(str(m.error_code or ""), m.error_message) if s in FAILED else None))
     for e in ems.values():
         if e.id in em_ids:
             continue
-        who = "AI email" if e.send_source == ss.SCI_SETTER else ("Staff email" if e.send_source == ss.MANUAL else "Email")
-        add(e.sent_at, "ai" if e.send_source == ss.SCI_SETTER else "staff", who,
+        who, kind = {ss.SCI_SETTER: ("AI reply (email)", "ai"), ss.MANUAL: ("Staff email", "staff")}.get(
+            e.send_source, ("Email", "message"))
+        add(e.sent_at, kind, who,
             ((e.subject + " — ") if e.subject else "") + _er.plain_text(e.body_html or "")[:600], channel="email",
             result="failed" if (e.status or "") in FAILED else ("opened" if e.opened_at else "delivered"),
             error=getattr(e, "error", None) if (e.status or "") in FAILED else None)

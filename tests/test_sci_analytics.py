@@ -6,7 +6,17 @@ from unittest.mock import patch
 
 from app.models.models import BookingLink, CadenceState, CadenceTouchLog, Message
 from app.services.programs import responses as R
+import pytest
+
+from app.services.programs import sci_analytics as SA
 from tests.test_outreach_program import _h, _lead_for, program  # noqa: F401 (fixture)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_ledger():
+    SA._CACHE.clear()
+    yield
+    SA._CACHE.clear()
 
 
 def _touch(db, lead, n, *, status="delivered", code=None, at=None, outcome="sent"):
@@ -81,6 +91,7 @@ def test_opted_out_and_test_bookings_are_not_appointment_results(program, sample
                            calendar_event_id="ev-%s" % lead.id[:6], created_at=datetime.utcnow()))
     b.status = "dnc"
     db.commit()
+    SA._CACHE.clear()
     s = client.get("/program/command/analytics?range=today", headers=_h(db, program["admin"])).json()
     assert s["metrics"]["appointments"]["value"] == 1                    # only Lester
 
@@ -101,3 +112,35 @@ def test_drill_down_rejects_unknown_filters(program, sample_advisor, client):
     h = _h(db, program["admin"])
     assert client.get("/program/command/analytics/records?metric=nope", headers=h).status_code == 400
     assert client.get("/program/command/analytics/records?metric=attempts&touch=9", headers=h).status_code == 400
+
+
+def test_home_and_drill_down_read_one_snapshot(program, sample_advisor, client):
+    db, a, b, t = _seed(program, sample_advisor)
+    h = _h(db, program["admin"])
+    s = client.get("/program/command/analytics?range=today", headers=h).json()
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        R.on_inbound(db, b, "Yes, please call me", "sms")          # arrives between the two screens
+    d = client.get("/program/command/analytics/records?metric=replies&range=today", headers=h).json()
+    assert d["count"] == s["metrics"]["replies"]["value"] and d["data_as_of"] == s["data_as_of"]
+
+
+def test_outreach_emails_count_as_attempts(program, sample_advisor, client):
+    from app.models.models import EmailMessage
+    from app.models.program_models import ProgramEmailTouch
+    db, a, b, t = _seed(program, sample_advisor)
+    e = EmailMessage(lead_id=b.id, sender_id=sample_advisor.id, subject="A planning guide for you",
+                     body_html="<p>Hi</p>", status="sent", send_source="cadence", sent_at=datetime.utcnow())
+    db.add(e)
+    db.flush()
+    db.add(ProgramEmailTouch(organization_id=b.organization_id, lead_id=b.id, touch_number=1, status="sent",
+                             email_message_id=e.id, attempted_at=datetime.utcnow()))
+    db.add(ProgramEmailTouch(organization_id=a.organization_id, lead_id=a.id, touch_number=1, status="blocked",
+                             reason="provider hold", attempted_at=datetime.utcnow()))
+    db.commit()
+    h = _h(db, program["admin"])
+    s = client.get("/program/command/analytics?range=7d", headers=h).json()
+    assert s["metrics"]["attempts"]["value"] == 4                     # blocked is not an attempt
+    d = client.get("/program/command/analytics/records?metric=attempts&range=7d&channel=email", headers=h).json()
+    assert d["count"] == 1 and d["items"][0]["name"] == "Marion Testcase" and d["items"][0]["result"] == "delivered"
+    j = client.get("/program/command/analytics/journey/%s" % a.id, headers=h).json()
+    assert any(ev["kind"] == "skipped" and ev["detail"] == "provider hold" for ev in j["events"])
