@@ -29,8 +29,9 @@ On a development computer with Node.js:
 1. Check out the pilot branch and run `cd mobile`.
 2. Run `npm ci --include=dev`.
 3. Start `npx expo start --tunnel --clear` (requires internet access).
-4. Install **Expo Go** on the test phone, then scan the QR shown by Metro.
-5. Sign in using an **existing authorized SCI workspace account**. The preview
+4. **Physical iPhone requirement (Expo SDK 57, September 2026):** the Expo CLI process **and** Expo Go on the iPhone must be authenticated as the **same Expo account**. A tunnel can deliver HTTP 200 manifests and still be refused by the iOS client if either login is missing. For GitHub Actions, configure the repository's encrypted `EXPO_TOKEN` secret (generated in the Expo project's account settings); sign in to that exact Expo user inside the iPhone Expo Go app. Never put this token in a source file, PR comment, or chat. A GH runner with no token MUST NOT advertise its QR as a working iPhone preview.
+5. Scan the authorized QR shown by Metro or open its authenticated Expo Go link.
+6. Sign in using an **existing authorized SCI workspace account**. The preview
    uses the verified EvoSys backend URL; override `EXPO_PUBLIC_API_URL`
    during start if testing against staging instead.
 
