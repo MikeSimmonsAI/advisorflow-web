@@ -17,7 +17,7 @@ export default function ProgramHome() {
   return <Page refresh={refresh} refreshing={home.isRefetching || pipeline.isRefetching}>
     <Heading title="Your day, at a glance" subtitle={exp.label + ' · Live outreach overview'} />
     {home.isPending && !overview ? <State busy title="Preparing your briefing" /> : null}
-    {home.isError ? <State title="We couldn't load SCI Live" detail="Your data hasn't been replaced with estimates." retry={refresh} /> : null}
+    {home.isError ? <State title="We couldn't load the program" detail="Your data hasn't been replaced with estimates." retry={refresh} /> : null}
     {overview ? <>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         <Metric tone="strong" label="Needs attention" value={count(overview.counts?.needs_attention)} />
