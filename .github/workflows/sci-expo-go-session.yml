@@ -1,0 +1,80 @@
+# Temporary Expo Go tunnel for the SCI read-only phone pilot.
+# The tunnel is ephemeral, does not publish a store app, and requires SCI login.
+name: SCI Expo Go temporary session
+on:
+  push:
+    branches: [chatgpt/sci-expo-go-pilot-20261016]
+    paths: ['.github/workflows/sci-expo-go-session.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  expo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install Expo dependencies and tunnel helper
+        run: |
+          npm ci --include=dev
+          npm install --no-save --legacy-peer-deps @expo/ngrok@4.1.0
+      - name: Start SCI Expo Go tunnel and publish link
+        env:
+          CI: '1'
+          EXPO_PUBLIC_API_URL: https://advisorflow-backend.onrender.com
+          GH_TOKEN: ${{ github.token }}
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -uo pipefail
+          # Since September 2026 iOS Expo Go rejects projects whose server
+          # isn't signed into the SAME Expo user as the phone. A tunnel alone
+          # is not proof that the iPhone can load it.
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "EXPO_TOKEN is not configured in GitHub Actions." >> "$GITHUB_STEP_SUMMARY"
+            echo "Cannot issue a usable physical-iPhone Expo Go link." >> "$GITHUB_STEP_SUMMARY"
+            echo "Add an access token for the same Expo account used on the iPhone, then re-run." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          account=$(npx expo whoami 2>/dev/null | tail -1 || true)
+          if [ -z "$account" ] || echo "$account" | grep -Eiq 'not logged in|anonymous|error'; then
+            echo "Expo authentication failed: no preview link generated." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "Expo CLI signed in as: $account" >> "$GITHUB_STEP_SUMMARY"
+          npx expo start --go --tunnel --clear --port 8081 > /tmp/sci-expo.log 2>&1 &
+          server=$!
+          url=''
+          # Noninteractive Expo intentionally prints "localhost" instead of
+          # the public QR URL. The active ngrok tunnel's local API is the source.
+          for i in $(seq 1 75); do
+            host=$(curl -fsS --max-time 2 http://127.0.0.1:4040/api/tunnels 2>/dev/null \
+              | node -e 'let data="";process.stdin.on("data",x=>data+=x);process.stdin.on("end",()=>{try{const list=JSON.parse(data).tunnels||[];const t=list.find(x=>(x.public_url||"").startsWith("https://"));if(t)process.stdout.write(new URL(t.public_url).host)}catch{}})' || true)
+            if [ -n "$host" ]; then url="exp://$host"; break; fi
+            # Fallback: Expo's iOS manifest includes the public launch hostname.
+            manifest=$(curl -fsS --max-time 2 -H 'expo-platform: ios' http://127.0.0.1:8081/ 2>/dev/null \
+              | node -e 'let d="";process.stdin.on("data",x=>d+=x);process.stdin.on("end",()=>{try{const p=JSON.parse(d);const u=p.launchAsset?.url||"";if(u.includes("exp.direct"))process.stdout.write(new URL(u).host)}catch{}})' || true)
+            if [ -n "$manifest" ]; then url="exp://$manifest"; break; fi
+            if ! kill -0 "$server" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          cat /tmp/sci-expo.log
+          if [ -z "$url" ]; then
+            echo "No usable Expo tunnel link was produced." >&2
+            kill "$server" 2>/dev/null || true
+            exit 1
+          fi
+          echo "### SCI Expo Go temporary preview" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url" >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment 227 --body "Temporary SCI Expo Go preview (requires an authorized SCI login; GitHub-hosted tunnel runs for about 20 minutes): \`$url\`. This is Expo Go, not a standalone installed app. The link expires when the preview job ends."
+          # Maintain the Metro server only for a short, bounded live test window.
+          sleep 1200
+          kill "$server" 2>/dev/null || true

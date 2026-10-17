@@ -27,6 +27,8 @@ import { palette, type as typography } from '../theme/tokens';
 const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   'my-day': 'sunny-outline',
   home: 'home-outline',
+  inbox: 'chatbubbles-outline',
+  visits: 'calendar-outline',
   leads: 'people-outline',
   calendar: 'calendar-outline',
   compensation: 'cash-outline',
@@ -43,6 +45,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 export function ExperienceTabs({ kind }: { kind: ExperienceKind }) {
   const { active } = useExperience();
+  const isProgram = kind === 'program';
 
   // No experience settled yet, or the person switched away from this group.
   // Sending them to `/` lets the index screen redirect to whatever is active
@@ -53,21 +56,21 @@ export function ExperienceTabs({ kind }: { kind: ExperienceKind }) {
   return (
     <Tabs
       screenOptions={{
-        headerStyle: { backgroundColor: palette.ground },
-        headerTintColor: palette.text,
+        headerStyle: { backgroundColor: isProgram ? '#F5F8FC' : palette.ground },
+        headerTintColor: isProgram ? '#183453' : palette.text,
         headerShadowVisible: false,
-        headerTitleStyle: { color: palette.text, ...typography.heading },
+        headerTitleStyle: { color: isProgram ? '#183453' : palette.text, ...typography.heading },
         tabBarStyle: {
-          backgroundColor: palette.surfaceRaised,
-          borderTopColor: palette.border,
+          backgroundColor: isProgram ? '#FFFFFF' : palette.surfaceRaised,
+          borderTopColor: isProgram ? '#E2EAF4' : palette.border,
           height: 84,
           paddingTop: 6,
           paddingBottom: 24,
         },
-        tabBarActiveTintColor: palette.accentSoft,
-        tabBarInactiveTintColor: palette.textFaint,
+        tabBarActiveTintColor: isProgram ? '#1668AD' : palette.accentSoft,
+        tabBarInactiveTintColor: isProgram ? '#75889D' : palette.textFaint,
         tabBarLabelStyle: { ...typography.micro, textTransform: 'none' },
-        sceneStyle: { backgroundColor: palette.ground },
+        sceneStyle: { backgroundColor: isProgram ? '#F5F8FC' : palette.ground },
       }}
     >
       {TABS[kind].map((tab) => (

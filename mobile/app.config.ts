@@ -19,17 +19,18 @@ import type { ExpoConfig } from 'expo/config';
  * the link handling in `src/deeplinks.ts`.
  */
 
-const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+// The verified EvoSys backend; local development may override via EXPO_PUBLIC_API_URL.
+const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL ?? 'https://advisorflow-backend.onrender.com';
 
 const config: ExpoConfig = {
   name: 'EvoSys Pro',
   slug: 'evosyspro-mobile',
-  version: '1.0.0',
+  version: '1.0.1',
   orientation: 'portrait',
   scheme: 'evosyspro',
   // No `newArchEnabled`: the New Architecture is the default and the only
   // option in SDK 57, and the key no longer exists in the config type.
-  userInterfaceStyle: 'dark',
+  userInterfaceStyle: 'automatic',
   // The splash screen moved out of app config in SDK 57 and belongs to the
   // expo-splash-screen plugin. Left unset rather than guessed: the ground
   // colour is already in the theme tokens, and an asset that does not exist
@@ -54,6 +55,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: 'live.evosyspro.mobile',
+    versionCode: 2,
     adaptiveIcon: { backgroundColor: '#040812' },
     intentFilters: [
       {
@@ -89,9 +91,10 @@ const config: ExpoConfig = {
     ],
     'expo-notifications',
   ],
+  owner: 'evosysproceo2026',
   extra: {
     apiBaseUrl,
-    eas: { projectId: process.env.EAS_PROJECT_ID ?? undefined },
+    eas: { projectId: process.env.EAS_PROJECT_ID ?? '945a731d-5d02-471a-96d5-610f18ad4a4e' },
   },
   experiments: { typedRoutes: false },
 };
