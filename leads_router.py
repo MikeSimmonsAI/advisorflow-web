@@ -377,14 +377,9 @@ def get_lead_timeline(lead_id: str, db: Session = Depends(get_db), current_user:
             "timestamp": m.sent_at,
             "status": m.twilio_status,
         })
+    from app.services.reply_timeline import inbound_reply_event
     for r in replies:
-        events.append({
-            "type": "inbound",
-            "channel": "sms",
-            "body": r.body,
-            "timestamp": r.received_at,
-            "is_hot": r.is_hot,
-        })
+        events.append(inbound_reply_event(r))
     for e in email_messages:
         events.append({
             "type": "outbound",

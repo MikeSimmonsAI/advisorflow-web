@@ -806,3 +806,152 @@ def add_move_task(move_id: str, payload: MoveTask, request: Request,
     db.commit()
     return {"id": t.id, "title": t.title, "status": t.status, "due_at": _iso(t.due_at),
             "lead_id": t.lead_id}
+
+
+# ── CHARIOT ENROLLMENTS: submit (switched off until authorized) and the
+#    reconciliation queue a person works. See services/chariot_enrollment. ──
+
+class EnrollIn(BaseModel):
+    fields: Dict[str, Any]
+    plan_snapshot: Optional[Dict[str, Any]] = None
+
+
+class ReconcileIn(BaseModel):
+    outcome: str
+    note: str
+
+
+def _lead_in_scope(db, user, request, lead_id) -> Lead:
+    org_id = _org_id(db, user, request)
+    lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org_id).first()
+    if lead is None:
+        raise HTTPException(404, "Lead not found")
+    return lead
+
+
+# The Atlantis website's "How can we help?" answers, in the words classify reads.
+_SITE_REQUEST_HINTS = {
+    "compare electricity options": "rate review",
+    "analyze my current bill": "bill",
+    "i'm moving": "move",
+    "commercial energy procurement": "commercial",
+    "partner / referral program": "partner",
+}
+
+
+def _classification(lead: Lead) -> str:
+    from app.services import energy_enrollment as ee
+    cf = _cf(getattr(lead, "custom_fields", None))
+    req = str(cf.get("request_type") or "").strip()
+    hint = _SITE_REQUEST_HINTS.get(req.lower(), req)
+    source = getattr(lead, "source_detail", None)
+    if hint == "partner":
+        source = "partner referral"
+    return ee.classify(premise_type=cf.get("premise_type") or cf.get("service_type"),
+                       source_detail=source, tier=getattr(lead, "tier", None),
+                       intent_hint=hint)
+
+
+@router.get("/enrollments")
+def enrollment_queue(request: Request, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user)):
+    """Chariot submissions waiting for a person to confirm what happened."""
+    from app.services import chariot_enrollment as ce
+    from app.services.providers import chariot
+    org_id = _org_id(db, user, request)
+    rows = ce.queue(db, org_id)
+    names = {}
+    ids = [r.lead_id for r in rows if r.lead_id]
+    if ids:
+        for l in db.query(Lead).filter(Lead.id.in_(ids)).all():
+            names[l.id] = _name(l.first_name, l.last_name)
+    return {"submissions_enabled": chariot.transactions_armed(),
+            "items": [dict(ce.row_out(r), name=names.get(r.lead_id)) for r in rows]}
+
+
+@router.post("/leads/{lead_id}/enroll", dependencies=[Depends(require_not_observation)])
+def enroll_lead(lead_id: str, body: EnrollIn, request: Request, db: Session = Depends(get_db),
+                user: User = Depends(require_tenant_user)):
+    """Residential Chariot enrollment. Refused while submissions are switched
+    off, for a business, or while an earlier attempt is unresolved."""
+    from app.services import chariot_enrollment as ce
+    from app.services import energy_enrollment as ee
+    if not _is_manager(db, user, request):
+        raise HTTPException(403, "Only a workspace manager can submit an enrollment.")
+    lead = _lead_in_scope(db, user, request, lead_id)
+    try:
+        row = ce.submit_enrollment(db, organization_id=lead.organization_id, lead=lead,
+                                   actor_user_id=user.id, classification=_classification(lead),
+                                   fields=body.fields, plan_snapshot=body.plan_snapshot)
+    except (ce.SubmissionRefused, ee.EnrollmentNotReady) as exc:
+        raise HTTPException(409, str(exc))
+    log_action(db, lead.organization_id, user.id, "energy.enrollment_submitted", "lead", lead.id,
+               details={"transaction_id": row.id, "status": row.normalized_status})
+    return ce.row_out(row)
+
+
+@router.post("/enrollments/{tx_id}/reconcile", dependencies=[Depends(require_not_observation)])
+def reconcile_enrollment(tx_id: str, body: ReconcileIn, request: Request,
+                         db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """A person records what they verified. "enrolled" marks the customer
+    contract_signed so renewal tracking picks them up."""
+    from app.models.provider_transaction_models import ProviderTransaction
+    from app.services import chariot_enrollment as ce
+    if not _is_manager(db, user, request):
+        raise HTTPException(403, "Only a workspace manager can close an enrollment.")
+    org_id = _org_id(db, user, request)
+    row = db.query(ProviderTransaction).filter(ProviderTransaction.id == tx_id,
+                                               ProviderTransaction.organization_id == org_id).first()
+    if row is None:
+        raise HTTPException(404, "Submission not found")
+    if row.resolved_at is not None:
+        raise HTTPException(409, "Already closed.")
+    try:
+        ce.reconcile(db, row, user_id=user.id, outcome=body.outcome, note=body.note)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    if body.outcome == ce.OUTCOME_ENROLLED and row.lead_id:
+        lead = db.query(Lead).filter(Lead.id == row.lead_id, Lead.organization_id == org_id).first()
+        if lead is not None:
+            lead.tier = ENROLLED_TIER
+            db.commit()
+    log_action(db, org_id, user.id, "energy.enrollment_reconciled", "provider_transaction", row.id,
+               details={"outcome": body.outcome})
+    return ce.row_out(row)
+
+
+# ── SUPPLIERS: what each can really do, and the advisor's manual handoff ─────
+
+class HandoffIn(BaseModel):
+    supplier: str
+    note: str = ""
+    follow_up_days: int = 2
+
+
+@router.get("/suppliers")
+def supplier_catalog(user: User = Depends(require_tenant_user)):
+    from app.services import energy_suppliers
+    return {"suppliers": energy_suppliers.catalog()}
+
+
+@router.post("/leads/{lead_id}/handoff", dependencies=[Depends(require_not_observation)])
+def supplier_handoff(lead_id: str, body: HandoffIn, request: Request, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_user)):
+    """Record a hand-off to a supplier and open a follow-up task. Sends nothing."""
+    from app.services import energy_suppliers
+    lead = _lead_in_scope(db, user, request, lead_id)
+    if not lead_scope.is_manager_here(user, db, request) and lead.assigned_to_id not in (None, user.id):
+        raise HTTPException(403, "This customer belongs to another advisor.")
+    if body.supplier == "chariot":
+        cls = _classification(lead)
+        from app.services import energy_enrollment as ee
+        if not ee.may_submit_to_provider(cls):
+            raise HTTPException(409, "Chariot is residential only; this customer is %s." % cls.replace("_", " "))
+    try:
+        out = energy_suppliers.record_handoff(db, lead=lead, actor_user_id=user.id, supplier=body.supplier,
+                                              note=body.note, follow_up_days=body.follow_up_days)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    log_action(db, lead.organization_id, user.id, "energy.supplier_handoff", "lead", lead.id,
+               details={"supplier": body.supplier})
+    return out

@@ -1024,6 +1024,12 @@ def category_filter(q, category: Optional[str]):
     """Apply one Analyze-screen category to a staged-row query."""
     if not category or category == "all":
         return q
+    # "a+b" = rows in BOTH categories (e.g. past customers waiting for review:
+    # "status:needs_review+record_class:previous_customer").
+    if "+" in category:
+        for part in category.split("+"):
+            q = category_filter(q, part.strip())
+        return q
     kind, _, val = category.partition(":")
     R = ImportStagedRow
     usable_email = R.email_status.in_(E.USABLE_EMAIL_STATUSES)

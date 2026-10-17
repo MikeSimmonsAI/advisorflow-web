@@ -628,6 +628,7 @@ function ClassifyStep({ batch, reload, onDone, onNext }) {
 
 const REVIEW_TABS = [
   ['status:needs_review', 'Needs review', 'review'],
+  ['status:needs_review+record_class:previous_customer', 'Past customers to review', null],
   ['status:duplicate', 'Duplicates in file', 'duplicate'],
   ['status:existing_match', 'Existing records', 'existing_matches'],
   ['status:blocked', 'Blocked', 'blocked'],
@@ -645,7 +646,7 @@ function ReviewStep({ batch, reload, catalog, onNext, initialTab }) {
   const [tick, setTick] = useState(0)
   const [msg, setMsg] = useState('')
   const counts = batch.analysis?.status || {}
-  const cnt = key => counts[key.split(':')[1]] ?? 0
+  const cnt = key => (key.includes('+') ? '' : (counts[key.split(':')[1]] ?? 0))
   async function bulk(body, label) {
     if (!window.confirm(`${label} — apply to every row in “${REVIEW_TABS.find(t => t[0] === tab)[1]}”?`)) return
     try {
@@ -666,7 +667,7 @@ function ReviewStep({ batch, reload, catalog, onNext, initialTab }) {
         ))}
       </div>
       <div className="ic-bulk">
-        {tab === 'status:needs_review' && <>
+        {tab.startsWith('status:needs_review') && <>
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ duplicate_resolution: 'keep_separate' }, 'Keep possible duplicates as separate records')}>Keep all separate</button>
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ approve: true }, 'Approve')}>Approve all</button>
           <button className="btn btn--secondary btn--sm" onClick={() => bulk({ skip: true }, 'Skip')}>Skip all</button></>}
