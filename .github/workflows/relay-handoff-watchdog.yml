@@ -21,7 +21,7 @@ jobs:
     env:
       RELAY_ISSUE: "1"
       RELAY_AUTHORIZED_ACTORS: MikeSimmonsAI
-      RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev'
+      RELAY_ALLOWED_BRANCHES: 'sci-program,wholesale-nightly,platform-dev,feature/sci-appointment-recovery,feature/wholesale-development,feature/atlantis-development,feature/platform-command-center'
       RELAY_STATUS_ACTORS: ${{ vars.RELAY_STATUS_ACTORS || 'github-actions[bot],claude[bot]' }}
       HANDOFF_STALE_MINUTES: "10"
       # Never re-wake ChatGPT on a run older than 6h, nor more than twice per run,
