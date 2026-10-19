@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "sci-resume-safe-screen-proof-20261019-1900",
-  "parent_run_id": "lanes-e2e-20261019-1855b",
-  "project": "SCI \u2014 resume stalled redesign screen proof",
-  "status": "COMPLETED",
+  "relay_run_id": "sci-home-visit-staging-proof-20261019-1912",
+  "parent_run_id": "sci-resume-safe-screen-proof-20261019-1900",
+  "project": "SCI \u2014 home-visit staging and nine-screen closure proof",
+  "status": "BLOCKED",
   "branch": "sci-program",
-  "actions_run_id": "39344375364",
-  "timestamp_ct": "2026-10-19 18:57 CT",
+  "actions_run_id": "39344802784",
+  "timestamp_ct": "2026-10-19 18:59 CT",
   "issue": 1,
-  "status_comment_id": 6279993133
+  "status_comment_id": 6280022378
 }
