@@ -229,36 +229,23 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
 
 
 def notify_team_booked(db: Session, prog, lead, slot: datetime, kind: str) -> None:
-    """A booking is a family response: the whole team hears about it (plain
-    wording carriers deliver; the details are in the email and the app)."""
-    from app.models.program_models import ProgramAlert
+    """A booking is a family response: the whole team hears about it - once.
+    ONE REPLY, ONE ALERT (Oct 19): booked during a family's reply, it becomes
+    that reply's single page; otherwise one page per family and time."""
+    from app.services.programs import alert_ledger as L
     from app.services.programs import responses as R
-    title = R.alert_title(prog)
-    sms = "%s: A family booked an appointment. Please check your SCI Appointments." % title
-    who = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A family"
-    email = "%s booked a %s for %s." % (who, LABELS.get(kind, "visit").lower(), describe(slot))
-    targets = [("primary", "sms", prog.alert_phone), ("primary", "email", prog.alert_email)]
-    for m in R._managers(prog):
-        if (m.get("role") or "").lower() == "team":
-            if m.get("phone"):
-                targets.append(("team", "sms", m["phone"]))
-            if m.get("email"):
-                targets.append(("team", "email", m["email"]))
+    what = LABELS.get(kind, "visit").lower()
+    if L.defer({"type": "booked", "when": describe(slot), "what": "a %s" % what}):
+        return
     from app.services.sci_staging_demo import is_demo_lead
     test = bool(getattr(lead, "is_test", False)) or is_demo_lead(lead)
-    if test:
-        targets = []                    # a synthetic contact never pages the team
-    for aud, ch, to in targets:
-        ok, why = R.staff_alert_gate(to, ch, aud, bool(prog.staff_sms_alerts_enabled))
-        rc: Dict = {}
-        text = ("TEST - " + sms) if (test and ch == "sms") else (sms if ch == "sms" else
-                                                                  ("TEST ONLY - " if test else "") + email)
-        if ok:
-            ok, why = R._deliver_staff_alert(db, prog, ch, to, text, kind="booked", receipt=rc)
-        db.add(R.sms_alert_record(ProgramAlert(organization_id=prog.organization_id, kind="booked",
-                                               audience=aud, channel=ch, recipient=to, delivered=bool(ok),
-                                               reason=why, message=text[:2000]), rc))
-
+    who = L.first_last(lead)
+    sms = L.sms_line("booked", who, detail="booked a %s for %s" % (what, describe(slot)),
+                     link=L.family_link(lead.id), test=test)
+    email = "%s booked a %s for %s." % (who, what, describe(slot))
+    L.page(db, prog, lead_id=lead.id, key="booked:%s:%s" % (lead.id, slot.strftime("%Y%m%d%H%M")), kind="booked",
+           sms_text=sms, subject="%s - Appointment booked: %s" % (R.alert_title(prog), who),
+           html="<p>%s</p>" % email, test=test, audit_message=email)
 
 def offered(conv) -> List[datetime]:
     try:

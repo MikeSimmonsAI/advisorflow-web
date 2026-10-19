@@ -846,31 +846,21 @@ def _handoff(db, prog, lead, conv, reason, *, notify: bool):
         notify = False                  # a synthetic contact never pages the team
     if notify:
         try:
-            from app.models.program_models import ProgramAlert
+            from app.services.programs import alert_ledger as L
+            # ONE REPLY, ONE ALERT (Oct 19): during a family's reply the
+            # hand-off is folded into that reply's single page.
+            if L.defer({"type": "handoff", "reason": (reason or "")[:250]}):
+                return
             from app.services.programs import responses as R
-            title = R.alert_title(prog)
-            who0 = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A family"
-            # Say WHO and WHY: "arriving in 15 minutes" must not read like any
-            # other hand-off (Oct 15: Thomas Calloway was on his way in).
-            sms = "%s: %s needs a person - %s. Please check SCI Live." % (title, who0, (reason or "")[:120])
-            if getattr(lead, "is_test", False):
-                sms = "TEST - " + sms
-            targets = [("primary", "sms", prog.alert_phone), ("primary", "email", prog.alert_email)]
-            for m in R._managers(prog):
-                if (m.get("role") or "").lower() == "team":
-                    targets += [("team", "sms", m.get("phone")), ("team", "email", m.get("email"))]
-            who = ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip().title() or "A family"
-            for aud, ch, to in targets:
-                if not to:
-                    continue
-                ok, why = R.staff_alert_gate(to, ch, aud, bool(prog.staff_sms_alerts_enabled))
-                text = sms if ch == "sms" else "%s needs a person: %s" % (who, reason)
-                rc: Dict = {}
-                if ok:
-                    ok, why = R._deliver_staff_alert(db, prog, ch, to, text, kind="handoff", receipt=rc)
-                db.add(R.sms_alert_record(ProgramAlert(organization_id=prog.organization_id, kind="handoff",
-                                                       audience=aud, channel=ch, recipient=to, delivered=bool(ok),
-                                                       reason=why, message=text[:2000]), rc))
+            import html as _html
+            who = L.first_last(lead)
+            sms = L.sms_line("handoff", who, detail="needs a person - %s" % (reason or ""),
+                             link=L.family_link(lead.id))
+            subject = "%s - %s needs a person" % (R.alert_title(prog), who)
+            body = "<p>%s needs a person: %s</p>" % (_html.escape(who), _html.escape(reason or ""))
+            L.page(db, prog, lead_id=lead.id, key="handoff:%s:%s" % (conv.id, datetime.utcnow().strftime("%Y%m%d%H%M")),
+                   kind="handoff", sms_text=sms, subject=subject, html=body, management=True,
+                   audit_message="%s needs a person: %s" % (who, reason))
         except Exception:                                # noqa: BLE001
             log.exception("handoff alert failed for lead %s", lead.id)
 
