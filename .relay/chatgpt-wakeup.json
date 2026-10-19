@@ -1,11 +1,11 @@
 {
-  "relay_run_id": "lanes-e2e-20261019-1855b",
-  "parent_run_id": "",
-  "project": "Development lanes - relay end-to-end test",
+  "relay_run_id": "sci-resume-safe-screen-proof-20261019-1900",
+  "parent_run_id": "lanes-e2e-20261019-1855b",
+  "project": "SCI \u2014 resume stalled redesign screen proof",
   "status": "COMPLETED",
-  "branch": "platform-dev",
-  "actions_run_id": "39344070921",
-  "timestamp_ct": "2026-10-19 18:51 CT",
+  "branch": "sci-program",
+  "actions_run_id": "39344375364",
+  "timestamp_ct": "2026-10-19 18:57 CT",
   "issue": 1,
-  "status_comment_id": 6279924065
+  "status_comment_id": 6279993133
 }
