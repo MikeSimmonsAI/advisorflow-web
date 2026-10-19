@@ -430,6 +430,16 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
         if _refusal:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
 
+    # ── SPECTATOR FENCE (Oct 19) ─────────────────────────────────────────────
+    # A view-only login (every workspace membership "spectator") may read, never
+    # write - refused here for EVERY route, so no endpoint can forget to check.
+    if user.role in ("advisor", "viewer"):
+        from app.services import spectator as _spec
+        _refusal = _spec.refusal(db, user, request.url.path, request.method)
+        if _refusal:
+            _log.info("spectator write refused user=%s %s %s", user.id, request.method, request.url.path)
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
+
     return user
 
 

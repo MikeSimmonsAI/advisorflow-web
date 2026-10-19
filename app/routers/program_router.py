@@ -57,13 +57,23 @@ def _program(db: Session, user: User, managers_only: bool = True) -> OutreachPro
     prog = identity.program_for_org(db, _org_id(db, user))
     if prog is None:
         raise HTTPException(status_code=404, detail="This workspace has no outreach program.")
-    if managers_only and not lead_scope.is_manager_here(user, db):
+    if managers_only and not _sees_program(db, user, prog.organization_id):
         raise HTTPException(status_code=403, detail="Admin access required.")
     return prog
 
 
+def _sees_program(db: Session, user: User, org_id: Optional[str] = None) -> bool:
+    """Managers work the program; a SPECTATOR of this workspace reads it too.
+    A spectator's writes never get this far - deps.get_current_user refuses
+    them for every route (services/spectator.py)."""
+    if lead_scope.is_manager_here(user, db):
+        return True
+    from app.services import spectator as _spec
+    return _spec.holds_spectator_seat(db, user, org_id or _org_id(db, user)) and _spec.is_spectator(db, user)
+
+
 def _require_manager(db: Session, user: User) -> None:
-    if not lead_scope.is_manager_here(user, db):
+    if not _sees_program(db, user):
         raise HTTPException(status_code=403, detail="Admin access required.")
 
 
@@ -179,7 +189,7 @@ def _program_json(db: Session, prog: OutreachProgram) -> dict:
 def program_status(db: Session = Depends(get_db), user: User = Depends(require_tenant_or_observer)):
     """Whether this workspace runs a program - a 200 either way, for the nav."""
     prog = identity.program_for_org(db, lead_scope.active_workspace_org_id(user, db) or user.organization_id)
-    manager = bool(prog) and lead_scope.is_manager_here(user, db)
+    manager = bool(prog) and _sees_program(db, user, prog.organization_id)
     return {"active": prog is not None and manager, "name": prog.name if prog else None}
 
 
@@ -701,7 +711,7 @@ def dashboard(location_id: Optional[str] = Query(None), db: Session = Depends(ge
         "reporting": _reporting(db, recs, resps, prog),
         "readiness": readiness(db, prog),
         "readiness_test": _readiness_summary(org_id, db),
-        "viewer_is_manager": lead_scope.is_manager_here(user, db),
+        "viewer_is_manager": _sees_program(db, user),
     }
 
 

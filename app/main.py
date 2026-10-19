@@ -1761,6 +1761,14 @@ async def _program_sla_loop():
                     db = SessionLocal()
                     try:
                         out = {"realerted": len(program_responses.sla_sweep(db))}
+                        # Staff alerts that failed to send: retried on their
+                        # own row, once claimed (alert_ledger.retry_failed).
+                        try:
+                            from app.services.programs import alert_ledger as _al
+                            out["alert_retries"] = _al.retry_failed(db)
+                        except Exception:                # noqa: BLE001
+                            db.rollback()
+                            _logger.exception("alert retry pass failed")
                         # SCI STAGING ONLY: refresh the made-up demo families once per
                         # Central day so "today" always has replies. A no-op
                         # (fails closed) anywhere but the SCI staging database.

@@ -573,6 +573,8 @@ def simulate(case: str, db: Session = Depends(get_db), god: User = Depends(requi
             realerted = R.sla_sweep(db)
         return {"class": r.response_class, "realerted": len(realerted),
                 "alert_kinds": sorted({a.kind for a in db.query(ProgramAlert).filter(ProgramAlert.response_id == r.id)})}
+    if case == "alert_ledger":
+        return _alert_ledger_check(db, org, prog)
     if case == "sms_round_trip":
         return _sms_round_trip(db, org, prog, prof)
     if case == "pool_round_trip":
@@ -583,6 +585,102 @@ def simulate(case: str, db: Session = Depends(get_db), god: User = Depends(requi
                         "toll_free_round_trip, unknown_sender, wrong_alias, duplicate_inbound, duplicate_outbound, missing_location, "
                         "held_contact, flyer_missing, resend_temporary_failure, mailbox_temporary_failure, "
                         "bounce, sla_escalation")
+
+
+def _alert_ledger_check(db, org, prog):
+    """ONE REPLY, ONE ALERT on the staging POSTGRES database (Oct 19): the real
+    inbound path (process_inbound_sms -> on_inbound -> alert ledger) with the
+    provider calls captured, never sent. Exercises the migration (new columns
+    + partial unique index), the per-family advisory lock and the unique claim
+    under true concurrency (two sessions, two threads, same message id)."""
+    import threading
+    from app.deps import SessionLocal
+    from app.models.models import Reply
+    from app.routers.sms_router import process_inbound_sms
+    from app.services.programs import alert_ledger as L
+    phone = "+12055550177"
+    lead = db.query(Lead).filter(Lead.organization_id == org.id, Lead.email == "sim.ledger@example.com").first()
+    if lead is None:
+        lead = Lead(organization_id=org.id, first_name="Sim", last_name="Ledger", email="sim.ledger@example.com",
+                    phone=phone, status="sent", is_test=True)
+        db.add(lead)
+        db.commit()
+    tag = uuid.uuid4().hex[:8]
+    sent, lock = [], threading.Lock()
+    fail_once = {"armed": False}
+
+    def deliver(db_, prog_, channel, to, message, **kw):
+        with lock:
+            if fail_once["armed"] and channel == "sms":
+                fail_once["armed"] = False
+                return False, "simulated provider failure"
+            sent.append({"channel": channel, "to": to, "kind": kw.get("kind"),
+                         "text": ((kw.get("content") or {}).get("sms") if channel == "sms"
+                                  else (kw.get("content") or {}).get("subject"))})
+        if kw.get("receipt") is not None:
+            kw["receipt"].update(sid="SMsim%s" % uuid.uuid4().hex[:8], status="queued")
+        return True, None
+    targets = [("primary", "sms", "+15550001111"), ("primary", "email", "ledger-check@example.com")]
+    cls = {"classification": "neutral", "confidence": "high", "reasoning": "staging check"}
+    out = {}
+    with mock.patch.object(L, "coalesce_minutes", L.coalesce_minutes), mock.patch("app.services.programs.responses._deliver_staff_alert", side_effect=deliver), \
+         mock.patch.object(L, "staff_targets", return_value=targets), \
+         mock.patch("app.services.programs.reply_rules.staff_alert_gate", return_value=(True, None)), \
+         mock.patch("app.services.reply_classification_service.classify_reply", return_value=cls), \
+         mock.patch("app.services.programs.ai_setter.on_family_reply", return_value=None):
+        # 1+2: one message delivered three times
+        sid = "SMledgerA%s" % tag
+        for _ in range(3):
+            process_inbound_sms(db, org_id=org.id, advisor=None, From=phone,
+                                Body="Can we meet Thursday afternoon? (%s)" % tag, MessageSid=sid)
+        out["three_deliveries"] = {"replies": db.query(Reply).filter(Reply.twilio_sid == sid).count(),
+                                   "pages": list(sent)}
+        # 3: the same NEW message processed by two workers at the same instant
+        sid2 = "SMledgerB%s" % tag
+        L.coalesce_minutes = lambda: 0                     # isolate the claim from coalescing (restored on exit)
+        start = threading.Barrier(2)
+
+        def worker():
+            s2 = SessionLocal()
+            try:
+                start.wait()
+                process_inbound_sms(s2, org_id=org.id, advisor=None, From=phone,
+                                    Body="Is Saturday open too? (%s)" % tag, MessageSid=sid2)
+            finally:
+                s2.close()
+        before = len(sent)
+        ts = [threading.Thread(target=worker) for _ in range(2)]
+        [t.start() for t in ts]
+        [t.join(60) for t in ts]
+        out["concurrent_same_message"] = {"replies": db.query(Reply).filter(Reply.twilio_sid == sid2).count(),
+                                          "pages": sent[before:]}
+        # 5: a second, distinct message inside the window -> kept, not re-paged
+        L.coalesce_minutes = lambda: L.DEFAULT_COALESCE_MINUTES
+        before = len(sent)
+        process_inbound_sms(db, org_id=org.id, advisor=None, From=phone,
+                            Body="Thanks, talk soon (%s)" % tag, MessageSid="SMledgerC%s" % tag)
+        out["second_message_in_window"] = {"pages": sent[before:],
+                                           "states": [a.send_state for a in db.query(ProgramAlert).filter(
+                                               ProgramAlert.dedupe_key.like("reply:%"),
+                                               ProgramAlert.lead_id == lead.id).order_by(ProgramAlert.created_at)]}
+        # 4: a failed page, retried on its own row
+        fail_once["armed"] = True
+        before = len(sent)
+        rows = L.page(db, prog, lead_id=lead.id, key="stagingcheck:%s" % tag, kind="booked", sms_text="t",
+                      subject="s", html="h", coalesce=False)
+        db.commit()
+        first = [(r.channel, r.send_state, r.attempts) for r in rows]
+        for r in rows:
+            r.last_attempt_at = datetime.utcnow() - timedelta(minutes=5)
+        db.commit()
+        n = L.retry_failed(db)
+        again = [(r.channel, r.send_state, r.attempts) for r in db.query(ProgramAlert).filter(
+            ProgramAlert.dedupe_key == "stagingcheck:%s" % tag)]
+        out["retry"] = {"first_try": first, "retried": n, "after": again, "pages": sent[before:]}
+    from sqlalchemy import text as _t
+    out["unique_index_present"] = bool(db.execute(_t(
+        "SELECT 1 FROM pg_indexes WHERE indexname = 'uq_program_alerts_dedupe'")).fetchone())
+    return out
 
 
 def _sms_round_trip(db, org, prog, prof):

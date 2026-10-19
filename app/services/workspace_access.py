@@ -87,7 +87,9 @@ _MEMBERSHIP_MEMO = "_workspace_memberships_memo"
 # org_admin - but not the workspace's user administration or its organization
 # settings / integration credentials (deps.require_org_admin). Granted to an
 # EXISTING login through God -> Manage Access; never creates a user.
-WORKSPACE_ROLES = ("org_admin", "advisor", "viewer", "super_admin", "manager")
+# "spectator" (2026-10-19): sees the workspace like a manager, changes nothing -
+# every write is refused centrally (services/spectator.py, deps.get_current_user).
+WORKSPACE_ROLES = ("org_admin", "advisor", "viewer", "super_admin", "manager", "spectator")
 DEFAULT_WORKSPACE_ROLE = "advisor"
 
 # The header a client uses to say which workspace it is currently in. It is a

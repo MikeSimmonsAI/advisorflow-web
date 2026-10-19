@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { fetchMyContexts, logout } from '../../../api/client'
+import { readAuthority } from '../../../auth/workspaceAuthority'
 
 const P = {
   live: <><rect x="3" y="3" width="7" height="8" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="15" width="7" height="6" rx="1" /></>,
@@ -125,6 +126,7 @@ export function SideNav({ badges = {}, onSame }) {
       <div className="sl-navgroup">Program tools</div>
       <nav aria-label="Program tools" className="sl-tools">{TOOLS.map(i => <Item key={i[0]} item={i} on={cur === i[0]} badge={badges[i[0]]} onClick={click(i[0])} />)}</nav>
       <div className="sl-sidebot">
+        {readAuthority().role === 'spectator' && <span className="sl-pilot sl-viewonly">● VIEW ONLY · nothing can be changed or sent</span>}
         <span className="sl-pilot">● PILOT WORKSPACE</span>
         <p>SCI outreach proof of concept · EvoSys Pro-operated · Not corporate implementation</p>
         <ExitLink />
@@ -153,7 +155,7 @@ export function MobileNav({ badges = {}, onSame }) {
     {open && <div className="sl-sheet" role="dialog" aria-modal="true" aria-label="SCI menu">
       <button type="button" className="sl-sheet-scrim" aria-label="Close menu" onClick={() => setOpen(false)} />
       <div className="sl-sheet-body">
-        <div className="sl-sheet-head"><b>SCI menu</b>
+        <div className="sl-sheet-head"><b>SCI menu{readAuthority().role === 'spectator' ? ' · view only' : ''}</b>
           <button type="button" aria-label="Close menu" onClick={() => setOpen(false)}><NavIco n="x" /></button></div>
         <nav aria-label="SCI screens">{NAV.map(i => <Item key={i[0]} item={i} on={cur === i[0]} badge={badges[i[0]]} onClick={click(i[0])} />)}</nav>
         <div className="sl-navgroup">Program tools</div>
