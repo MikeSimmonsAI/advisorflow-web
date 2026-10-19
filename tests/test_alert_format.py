@@ -32,8 +32,11 @@ def test_email_reply_alert_has_header_both_contacts_email_first(program, sample_
         C.return_value.messages.create.side_effect = fake_create
         responses.on_inbound(db, lead, "Yes I will get back with you", "email")
     sms = [b for c, to, b in sent if c == "sms"]
-    plain = "EvoSys Pro SCI POC: A new family response needs attention. Please check your SCI Responses inbox."
-    assert sms and all(b == plain for b in sms)          # nothing the carriers block
+    # Oct 19: the text says what happened - type, name, their words, location -
+    # with no phone number, email or link, in one segment.
+    assert sms and all(b.startswith('SCI Reply | Ollie Testcase: "Yes I will get back with you"') for b in sms)
+    assert all("larry@example.com" not in b and "555" not in b and len(b) <= 160 for b in sms)
+    assert len(sms) == 2                                  # owner + Kerry, once each
     assert {to for c, to, b in sent} >= {"+18435550000", "owner@example.com", "+14105550100"}
     em = [b for c, to, b in sent if c == "email"][0]
     assert em.startswith("EvoSys Pro SCI POC - New reply from") and "(Email)" in em.split("\n")[0]
@@ -148,8 +151,7 @@ def test_synthetic_contact_alerts_are_marked_test(program, sample_advisor):
     db.add(resp)
     db.commit()
     c = responses.alert_content(db, prog, resp, "active")
-    assert c["sms"] == ("TEST - EvoSys Pro SCI POC: A new family response needs attention. "
-                        "Please check your SCI Responses inbox.")
+    assert c["sms"].startswith("TEST SCI Reply | ") and '"What does the guide include?"' in c["sms"]
     assert c["subject"].startswith("TEST - EvoSys Pro SCI POC")
     assert "TEST ONLY - not a real family" in c["html"]
     lead.is_test = False

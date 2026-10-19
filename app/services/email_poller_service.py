@@ -310,8 +310,15 @@ def poll_inbox_for_replies(db: Session, advisor_id: str) -> dict:
             except Exception:
                 pass
 
-            # Fire alert email if reply is hot
-            if reply.is_hot:
+            # Fire alert email if reply is hot - except for a location
+            # outreach program family: the program already alerted this reply
+            # once (safe_on_inbound above); this would be a second email.
+            try:
+                from app.services.programs import identity as _pid
+                _program_org = _pid.program_for_org(db, lead.organization_id) is not None
+            except Exception:                                   # noqa: BLE001
+                _program_org = False
+            if reply.is_hot and not _program_org:
                 try:
                     _send_hot_reply_alert(advisor, lead, body_text, db)
                 except Exception as he:
