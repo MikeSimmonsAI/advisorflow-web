@@ -149,7 +149,7 @@ import AIHub from './pages/AIHub'
 import Availability from './pages/Availability'
 import { Unauthorized, NotFound, VerificationUnavailable } from './pages/AccessState'
 import { decideSciDoor, shouldLandInSci, SCI_ORG_NAME } from './auth/sciDoor'
-import { workspaceProgramDestination } from './auth/workspaceProgramDoor'
+import { workspaceProgramDestination, productWorkspaceDestination } from './auth/workspaceProgramDoor'
 import CRMIntegration from './pages/CRMIntegration'
 import CRM from './pages/CRM'
 import TierDefinitions from './pages/TierDefinitions'
@@ -703,9 +703,8 @@ function WorkspaceRoute() {
       typeof window !== 'undefined' ? window.location.search : ''
     ).get('product')
     if (requestedProduct) {
-      const product = (ctx?.product_contexts || []).find(p =>
-        p.key === requestedProduct && p.organization_id === organizationId)
-      if (product) return <Navigate to={product.path} replace />
+      const path = productWorkspaceDestination(ctx, organizationId, requestedProduct)
+      if (path) return <Navigate to={path} replace />
       return <Navigate to="/workspaces" replace />
     }
     // ProtectedRoute already wraps its children in Layout + ContextBanner; the
