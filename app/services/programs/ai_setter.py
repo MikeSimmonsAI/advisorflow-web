@@ -505,10 +505,10 @@ ALT_HOME, ALT_PHONE, ALT_GUIDE, ALT_NONE = "home_visit", "phone", "guide", "none
 # in" / "stop over", which is a family coming in (Oct 19 overnight: the bare word
 # made an arriving family look like an opt-out). A real STOP is caught earlier by
 # the opt-out rules and never reaches the setter at all.
-_HARD_NO = re.compile(r"(^\s*stop\s*[.!]*\s*$|\bstop (texting|messaging|contacting|calling|emailing|sending|"
-                      r"bothering|it)\b|\b(unsubscribe|not interested|no thanks|no thank you|don'?t (text|contact|call|"
-                      r"message|email|bother)|do not (text|contact|call)|remove me|take me off|leave me alone|"
-                      r"wrong (number|person)|not for me|lose my number|quit (texting|messaging))\b)", re.I)
+_HARD_NO = re.compile(r"(\bstop\b(?!\s+(by|in|over|at|out|on)\b)|\b(unsubscribe|not interested|no thanks|no thank you|"
+                      r"don'?t (text|contact|call|message|email|bother)|do not (text|contact|call|message|email)|"
+                      r"remove me|take me off|leave me alone|wrong (number|person)|not for me|lose my number|"
+                      r"quit (texting|messaging))\b)", re.I)
 _BARE_NO = re.compile(r"^\s*(no+|nope|nah|no sir|no ma'?am|no,? i can'?t|i can'?t|can'?t|not really|negative)"
                       r"\s*[.!]*\s*$", re.I)
 _CANT_GET_THERE = re.compile(r"(can'?t (get|make it|drive|come)( (there|in|out|by|over))?\b|no (ride|transportation|car)\b|"

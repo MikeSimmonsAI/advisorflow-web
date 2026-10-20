@@ -230,3 +230,11 @@ def test_family_stopping_by_gets_times_not_a_goodbye(setter, sample_advisor):
     _, conv = _run(db, lead, "I can stop by this week", fake)
     assert len(fake.calls) == 1                                              # no "they said stop" correction
     assert _last_ai(db, conv).action == "offer_times" and conv.state != "closed"
+
+
+@pytest.mark.parametrize("body", ["Please stop", "Stop please", "pls stop", "STOP NOW", "Stop. Thank you",
+                                  "stop this", "stop these texts", "Stop the messages"])
+def test_polite_stops_are_still_stops(body):
+    # Independent review: these are not opt-outs to the reply rules, so the
+    # setter itself must still read them as a stop.
+    assert S.what_was_declined(body, INVITE, False) == S.DECLINED_STOP
