@@ -50,7 +50,7 @@ export default function Responses({ locationId, onChange, navigate }) {
 
   const view = r => {
     setSel({ kind: 'response', item: r })
-    api.post(`/program/responses/${r.id}/viewed`, {}).catch(() => { /* viewing never fails the screen */ })
+    api.post(`/program/responses/${r.id}/viewed`, {}).then(() => { load(); onChange() }).catch(() => { /* keep inbox usable on failed viewed receipt */ })
   }
   const mark = async (r, state) => {
     try {
@@ -72,13 +72,13 @@ export default function Responses({ locationId, onChange, navigate }) {
   const unkList = unknown.filter(u => hit(u.from, u.subject, u.body, u.alias))
   const all = rows || []
   const newCount = all.filter(r => r.status === 'new').length
-  const hotCount = all.filter(r => r.class === 'hot' && r.status !== 'closed').length
+  const hotCount = all.filter(r => r.class === 'hot' && ['new', 'opened', 'active'].includes(r.status)).length
   const activeCount = all.filter(r => r.status === 'active').length
   const slaCount = all.filter(r => r.sla_breached).length
   const followCount = all.filter(r => ['opened', 'active'].includes(r.status)).length
   const handledCount = all.filter(r => ['responded', 'closed'].includes(r.status)).length
   const queueOptions = [
-    ['attention', 'Needs attention', all.filter(r => r.status !== 'closed').length, 'open', 'attention'],
+    ['attention', 'Needs attention', all.filter(r => ['new', 'opened', 'active'].includes(r.status)).length, 'open', 'attention'],
     ['new', 'New / unread', newCount, 'open', 'attention'],
     ['hot', 'HOT', hotCount, 'open', 'attention'],
     ['followup', 'Follow-up', followCount, 'open', 'attention'],
