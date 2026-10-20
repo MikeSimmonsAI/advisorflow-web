@@ -11,12 +11,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { LeadPicker } from './MoveConcierge'
+import HandoffOutcomes from './HandoffOutcomes'
 import './energy.css'
 
 export default function Suppliers() {
   const [sups, setSups] = useState(null)
   const [err, setErr] = useState('')
+  const [tick, setTick] = useState(0)
   const load = useCallback(() => {
+    setTick(t => t + 1)
     api.get('/energy-ops/suppliers').then(d => setSups(d.suppliers)).catch(e => setErr(e.message || 'Could not load suppliers'))
   }, [])
   useEffect(() => { load() }, [load])
@@ -33,6 +36,8 @@ export default function Suppliers() {
       <div className="eo-banner">A quote is not an enrollment. A customer is only enrolled once the supplier confirms it.</div>
 
       <Handoff suppliers={sups || []} onDone={load} />
+
+      <HandoffOutcomes suppliers={sups || []} refreshKey={tick} />
 
       <h2 className="eo-sec">What each supplier can do</h2>
       <div className="eo-panel">
@@ -68,7 +73,12 @@ function Handoff({ suppliers, onDone }) {
     if (!lead || !supplier) { setMsg('Pick a customer and a supplier.'); return }
     setBusy(true); setMsg('')
     api.post(`/energy-ops/leads/${lead.id}/handoff`, { supplier, note })
-      .then(() => { setMsg('Recorded. A follow-up task was added to confirm the outcome.'); setNote(''); onDone() })
+      .then(r => {
+        setMsg(r.duplicate
+          ? 'This customer already has an open hand-off to that supplier - nothing new was recorded. Record its outcome below.'
+          : 'Recorded. A follow-up task was added to confirm the outcome.')
+        setNote(''); onDone()
+      })
       .catch(e => setMsg(e.message || 'Could not record the hand-off'))
       .finally(() => setBusy(false))
   }
