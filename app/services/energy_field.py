@@ -68,7 +68,10 @@ def _details(entry) -> Dict[str, Any]:
 
 
 def _find_person(db, org_id, phone, email):
-    from sqlalchemy import or_
+    """Anyone in this workspace with this phone or email (case-insensitive).
+    Used only to avoid duplicates - what the REP may see is decided by
+    `visible` in record_visit, never by this lookup."""
+    from sqlalchemy import func, or_
     from app.models.models import Lead
     from app.services.dedup_service import normalize_phone
     conds = []
@@ -80,13 +83,17 @@ def _find_person(db, org_id, phone, email):
             conds.append(Lead.phone == digits)
     e = (email or "").strip().lower()
     if e:
-        conds.append(Lead.email == e)
+        conds.append(func.lower(Lead.email) == e)
     if not conds:
         return None
     return db.query(Lead).filter(Lead.organization_id == org_id, or_(*conds)).first()
 
 
-def record_visit(db, *, org, rep, data: Dict[str, Any]) -> Dict[str, Any]:
+def record_visit(db, *, org, rep, data: Dict[str, Any], visible=None) -> Dict[str, Any]:
+    """`visible(lead_id) -> bool` says whether the rep may see that lead (the
+    router passes the rep's lead scope). A match the rep may not see is never
+    revealed (no id, no "existing customer" result) and never changed by the
+    rep - its owner gets an internal task instead."""
     from app.models.models import Lead, Notification, NotificationType, User
     from app.models.work_models import LeadTask
     from app.routers.audit_log_router import log_action
@@ -103,12 +110,20 @@ def record_visit(db, *, org, rep, data: Dict[str, Any]) -> Dict[str, Any]:
     email = str(data.get("email") or "").strip().lower()[:200]
     now = datetime.utcnow()
 
-    # same rep, same address, same outcome, within the window -> the earlier visit
+    who = _norm(phone and "".join(ch for ch in phone if ch.isdigit())[-10:]) or _norm(email)
+    # same rep, same address, same outcome (and, for a referral, the same
+    # resident) within the window -> the earlier visit, not counted twice
     for e in _visits_q(db, org.id, since=now - DUP_WINDOW, rep_id=rep.id).all():
         d = _details(e)
-        if d.get("outcome") == outcome and _norm(d.get("address")) == _norm(address):
+        if d.get("outcome") == outcome and _norm(d.get("address")) == _norm(address) \
+                and (outcome not in LEAD_OUTCOMES or d.get("who") == who):
             return {"visit_id": e.id, "duplicate": True, "lead_id": d.get("lead_id"),
                     "result": d.get("result")}
+
+    def _owner_task(lead, title, detail):
+        db.add(LeadTask(organization_id=org.id, lead_id=lead.id, title=title, details=detail,
+                        due_at=now + timedelta(hours=24), status="open", source=TASK_SOURCE,
+                        assigned_to_id=lead.assigned_to_id, created_by_id=rep.id))
 
     lead_id, result = None, "recorded"
     if outcome in LEAD_OUTCOMES:
@@ -120,8 +135,14 @@ def record_visit(db, *, org, rep, data: Dict[str, Any]) -> Dict[str, Any]:
         if commercial and not str(data.get("company") or "").strip():
             raise ValueError("A business referral needs the business name.")
         existing = _find_person(db, org.id, phone, email)
-        if existing is not None:
+        if existing is not None and (visible is None or visible(existing.id)):
             lead_id, result = existing.id, "existing_customer"
+        elif existing is not None:
+            # someone else's customer: tell its owner, reveal nothing to the rep
+            _owner_task(existing, "Field rep reported interest",
+                        "%s recorded '%s' at a door for this customer. Review and follow up."
+                        % (rep.full_name or rep.email, outcome))
+            result = "forwarded_to_owner"
         else:
             from app.services import lead_capacity, master_contacts
             lead_capacity.require_capacity_user_initiated(db, org, adding=1)
@@ -172,14 +193,20 @@ def record_visit(db, *, org, rep, data: Dict[str, Any]) -> Dict[str, Any]:
             lead_id, result = lead.id, "new_referral"
     elif outcome == "do_not_contact" and (phone or email):
         existing = _find_person(db, org.id, phone, email)
-        if existing is not None:
+        if existing is not None and (visible is None or visible(existing.id)):
             existing.status = "dnc"
             lead_id, result = existing.id, "marked_dnc"
+        elif existing is not None:
+            # a rep cannot change someone else's customer; the owner reviews it
+            _owner_task(existing, "Review do-not-contact request from the field",
+                        "%s recorded that this person asked not to be contacted. Review and set DNC."
+                        % (rep.full_name or rep.email))
+            result = "forwarded_to_owner"
 
     entry = log_action(db, org.id, rep.id, action=ACTION, target_type="lead" if lead_id else "door",
                        target_id=lead_id or _norm(address)[:120],
                        details={"outcome": outcome, "address": address, "zip_code": zip_code or None,
-                                "lead_id": lead_id, "result": result,
+                                "lead_id": lead_id, "result": result, "who": who or None,
                                 "door_hanger": bool(data.get("door_hanger_left")) or outcome == "door_hanger_left"},
                        commit=False)
     db.commit()
@@ -217,6 +244,8 @@ def summary(db, *, org_id, days: int, rep_id: Optional[str] = None) -> Dict[str,
         uid = cf.get("field_rep_id")
         if not uid or (rep_id and uid != rep_id):
             continue
+        if str(cf.get("field_referred_at") or "") < since.strftime("%Y-%m-%dT%H:%M:%SZ"):
+            continue                                       # same window as the visits
         r = row(uid)
         r["referrals_worked"] += 1 if (l.tier or "") not in ("", "new_inquiry", "web_lead") else 0
         r["handed_to_supplier"] += 1 if cf.get("supplier_handoffs") else 0

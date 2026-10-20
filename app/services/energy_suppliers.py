@@ -120,21 +120,24 @@ def _stamp(now) -> str:
 def _lock(db: Session, lead):
     """Row-lock the lead for the read-modify-write of its custom fields, so two
     simultaneous clicks cannot both see "no open hand-off" (Postgres; a no-op
-    on SQLite, where writes are serialised anyway)."""
+    on SQLite, where writes are serialised anyway).
+
+    Sessions run with autoflush off, and populate_existing() reloads the row,
+    so pending edits are flushed first - otherwise they would be thrown away.
+    Errors propagate: a failed lock must not silently become an unlocked write."""
     from app.models.models import Lead
-    try:
-        locked = (db.query(Lead).filter(Lead.id == lead.id)
-                  .with_for_update().populate_existing().first())
-        return locked or lead
-    except Exception:                                   # noqa: BLE001
-        return lead
+    db.flush()
+    locked = (db.query(Lead).filter(Lead.id == lead.id)
+              .with_for_update().populate_existing().first())
+    return locked or lead
 
 
 def handoffs(lead) -> List[Dict[str, Any]]:
     """This lead's hand-offs, oldest first, with older entries normalised
     (entries written before outcomes existed have no id/status)."""
     out = []
-    for i, h in enumerate(_load_cf(lead).get("supplier_handoffs") or []):
+    raw = _load_cf(lead).get("supplier_handoffs")
+    for i, h in enumerate(raw if isinstance(raw, list) else []):
         if not isinstance(h, dict):
             continue
         h = dict(h)
@@ -182,7 +185,8 @@ def record_handoff(db: Session, *, lead, actor_user_id: Optional[str], supplier:
     entry = {"id": uuid.uuid4().hex[:12], "supplier": supplier, "at": _stamp(now),
              "by": actor_user_id, "note": (note or "").strip()[:500],
              "status": OUTCOME_REFERRED, "history": []}
-    cf["supplier_handoffs"] = (cf.get("supplier_handoffs") or []) + [entry]
+    prior = cf.get("supplier_handoffs")
+    cf["supplier_handoffs"] = (prior if isinstance(prior, list) else []) + [entry]
     lead.custom_fields = json.dumps(cf)
     task = LeadTask(organization_id=lead.organization_id, lead_id=lead.id,
                     title="Confirm outcome with %s" % sup["name"],
@@ -210,7 +214,8 @@ def record_outcome(db: Session, *, lead, actor_user_id: Optional[str], handoff_i
         raise ValueError("Say how you know (who told you, or where the supplier confirmed it).")
     lead = _lock(db, lead)
     cf = _load_cf(lead)
-    raw = list(cf.get("supplier_handoffs") or [])
+    raw = cf.get("supplier_handoffs")
+    raw = list(raw) if isinstance(raw, list) else []
     # Positions in the stored list (handoffs() skips non-dict junk, so its
     # indexes would not line up with `raw`).
     positions = [i for i, x in enumerate(raw) if isinstance(x, dict)]

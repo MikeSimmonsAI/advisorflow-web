@@ -164,3 +164,16 @@ def test_only_commercial_records_and_only_this_workspace(client, w):
     assert client.post("/energy-ops/leads/%s/commercial/stage" % biz.id, headers=fh,
                        json={"stage": "lost", "reason": "x"}).status_code == 404
     assert _stage(client, w, biz, "teleported").status_code == 422
+
+
+def test_a_repeated_site_fills_in_the_missing_meter(client, w):
+    lead = _biz(client, w)
+    url = "/energy-ops/leads/%s/commercial/locations" % lead.id
+    a = client.post(url, headers=w["h"], json={"address": "300 Oak St, Dallas"}).json()
+    b = client.post(url, headers=w["h"], json={"address": "300 oak st dallas", "meter_id": "1044372000999",
+                                                "utility": "Oncor"}).json()
+    assert b["duplicate"] is True and sorted(b["filled"]) == ["meter_id", "utility"]
+    assert b["location"]["id"] == a["location"]["id"] and b["location"]["meter_id"] == "1044372000999"
+    v = client.get("/energy-ops/leads/%s/commercial" % lead.id, headers=w["h"]).json()
+    assert v["location_count"] == 1
+    assert v["locations"][0]["meter_id"] == "1044372000999"

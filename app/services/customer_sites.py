@@ -408,13 +408,27 @@ def is_reserved_test_email(email) -> bool:
 
 def _flag_reserved_test_address(db: Session, *, result: Dict[str, Any],
                                 organization: Organization, payload: Dict[str, Any]) -> None:
-    if result.get("action") != "created" or not result.get("lead_id"):
-        return
-    if not is_reserved_test_email(payload.get("email")):
+    if not result.get("lead_id"):
         return
     from app.models.models import Lead
+    reserved = is_reserved_test_email(payload.get("email"))
+    if result.get("action") == "created":
+        if not reserved:
+            return
+        lead = db.query(Lead).filter(Lead.id == result["lead_id"],
+                                     Lead.organization_id == organization.id).first()
+        if lead is not None:
+            lead.is_test = True
+            lead.test_note = lead.test_note or "Website request from a reserved test address"
+            result["is_test"] = True
+        return
+    # A record first created by a test address that now hears from a real
+    # address is a real person: stop hiding it from follow-up and reports.
+    if reserved or not (payload.get("email") or "").strip():
+        return
     lead = db.query(Lead).filter(Lead.id == result["lead_id"],
                                  Lead.organization_id == organization.id).first()
-    if lead is not None:
-        lead.is_test = True
-        result["is_test"] = True
+    if lead is not None and lead.is_test and (lead.test_note or "").startswith("Website request from a reserved test address"):
+        lead.is_test = False
+        lead.test_note = "Test flag cleared: later website request from a real address"
+        result["is_test_cleared"] = True

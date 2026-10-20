@@ -230,7 +230,16 @@ def add_location(lead, data: Dict[str, Any]) -> Dict[str, Any]:
     locs = [l for l in (c.get("locations") or []) if isinstance(l, dict)]
     dup = next((l for l in locs if _same_site(l, loc)), None)
     if dup is not None:
-        return {"location": dup, "duplicate": True, **view(lead)}
+        # Same site again: keep what is recorded, but fill any blanks the new
+        # entry supplies (e.g. the meter id arrives after the address).
+        filled = [k for k, v in loc.items() if v not in (None, "") and dup.get(k) in (None, "")]
+        for k in filled:
+            dup[k] = loc[k]
+        if filled:
+            c["locations"] = locs
+            cf["commercial"] = c
+            lead.custom_fields = json.dumps(cf)
+        return {"location": dup, "duplicate": True, "filled": filled, **view(lead)}
     loc["id"] = uuid.uuid4().hex[:10]
     loc.setdefault("quote_status", "not_requested")
     locs.append(loc)

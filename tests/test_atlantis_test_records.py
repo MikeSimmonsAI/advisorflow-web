@@ -73,3 +73,25 @@ def test_an_existing_real_person_is_not_turned_into_a_test_record(client, site):
     _post(client, slug, email="dana@example.com", phone="(214) 555-0123")
     leads = db.query(Lead).filter_by(organization_id=org.id).all()
     assert len(leads) == 1 and leads[0].is_test is False
+
+
+def test_a_test_record_that_hears_from_a_real_address_is_unflagged(client, site):
+    db, org, slug = site
+    _post(client, slug, email="qa@example.com", phone="(214) 555-0155")
+    lead = db.query(Lead).filter_by(organization_id=org.id).one()
+    assert lead.is_test is True
+    _post(client, slug, email="real.person@gmail.com", phone="(214) 555-0155")
+    db.refresh(lead)
+    assert db.query(Lead).filter_by(organization_id=org.id).count() == 1
+    assert lead.is_test is False and "cleared" in (lead.test_note or "")
+
+
+def test_a_manually_flagged_test_record_stays_flagged(client, site):
+    db, org, slug = site
+    _post(client, slug, email="ops@gmail.com", phone="(214) 555-0156")
+    lead = db.query(Lead).filter_by(organization_id=org.id).one()
+    lead.is_test, lead.test_note = True, "Marked by the owner"
+    db.commit()
+    _post(client, slug, email="ops@gmail.com", phone="(214) 555-0156")
+    db.refresh(lead)
+    assert lead.is_test is True and lead.test_note == "Marked by the owner"

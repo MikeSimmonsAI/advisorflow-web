@@ -714,38 +714,27 @@ def _safe_json(raw):
         return raw
 
 
+def _move_tasks_ok(db, user, request, m) -> bool:
+    """Move tasks live on the LEAD and are not tied to one move. Touch them only
+    when the caller may read that lead (as get_move requires) and no OTHER open
+    move shares the lead - otherwise its tasks could be someone else's work."""
+    try:
+        lead_scope.load_lead_in_scope(db, user, m.lead_id, request)
+    except HTTPException:
+        return False
+    other = (db.query(EnergyMoveRequest.id)
+             .filter(EnergyMoveRequest.organization_id == m.organization_id,
+                     EnergyMoveRequest.lead_id == m.lead_id, EnergyMoveRequest.id != m.id,
+                     EnergyMoveRequest.status.in_(OPEN_MOVE_STATUSES)).first())
+    return other is None
+
+
 @router.patch("/moves/{move_id}", dependencies=[Depends(require_not_observation)])
 def update_move(move_id: str, payload: MoveUpdate, request: Request,
                 db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     m = _load_move(db, user, request, move_id)
     sent = payload.model_fields_set
     changed: Dict[str, Any] = {}
-    if "status" in sent and payload.status is not None and payload.status != m.status:
-        if payload.status not in MOVE_STATUSES:
-            raise HTTPException(400, detail={"message": "Unknown status",
-                                             "valid_statuses": list(MOVE_STATUSES)})
-        if payload.status == "completed":
-            pending = [i.get("label") for i in (json.loads(m.checklist) if m.checklist else [])
-                       if not i.get("done")]
-            if pending:
-                # An arranged service is not an active one: "completed" needs
-                # every item ticked, including "Confirm with customer that
-                # services are active".
-                raise HTTPException(409, detail={"message": "Tick every checklist item before completing this move.",
-                                                 "pending": pending})
-        changed["status"] = {"from": m.status, "to": payload.status}
-        m.status = payload.status
-        m.completed_at = _now() if payload.status == "completed" else None
-        if payload.status == "cancelled" and m.lead_id:
-            n = 0
-            for t in (db.query(LeadTask).filter(LeadTask.organization_id == m.organization_id,
-                                                LeadTask.lead_id == m.lead_id,
-                                                LeadTask.source == "move_concierge",
-                                                LeadTask.status == "open").all()):
-                t.status = "cancelled"
-                t.completed_at = _now()
-                n += 1
-            changed["tasks_cancelled"] = n
     for f in ("move_date", "from_address", "to_address", "notes"):
         if f in sent and getattr(payload, f) != getattr(m, f):
             changed[f] = True
@@ -767,6 +756,32 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
             m.services = json.dumps(services)
             m.checklist = json.dumps(checklist)
             changed["services"] = {"from": old, "to": services}
+    if "status" in sent and payload.status is not None and payload.status != m.status:
+        if payload.status not in MOVE_STATUSES:
+            raise HTTPException(400, detail={"message": "Unknown status",
+                                             "valid_statuses": list(MOVE_STATUSES)})
+        if payload.status == "completed":
+            pending = [i.get("label") for i in (json.loads(m.checklist) if m.checklist else [])
+                       if not i.get("done")]
+            if pending:
+                # An arranged service is not an active one: "completed" needs
+                # every item ticked, including "Confirm with customer that
+                # services are active".
+                raise HTTPException(409, detail={"message": "Tick every checklist item before completing this move.",
+                                                 "pending": pending})
+        changed["status"] = {"from": m.status, "to": payload.status}
+        m.status = payload.status
+        m.completed_at = _now() if payload.status == "completed" else None
+        if payload.status == "cancelled" and m.lead_id and _move_tasks_ok(db, user, request, m):
+            n = 0
+            for t in (db.query(LeadTask).filter(LeadTask.organization_id == m.organization_id,
+                                                LeadTask.lead_id == m.lead_id,
+                                                LeadTask.source == "move_concierge",
+                                                LeadTask.status == "open").all()):
+                t.status = "cancelled"
+                t.completed_at = _now()
+                n += 1
+            changed["tasks_cancelled"] = n
     if "assign_to" in sent:
         org_id = m.organization_id
         if payload.assign_to and payload.assign_to != m.assigned_to_id:
@@ -779,7 +794,7 @@ def update_move(move_id: str, payload: MoveUpdate, request: Request,
             changed["assigned"] = {"from": m.assigned_to_id, "to": None}
             m.assigned_to_id = None
     tasks_to_review = []
-    if "move_date" in changed and m.move_date and m.lead_id:
+    if "move_date" in changed and m.move_date and m.lead_id and _move_tasks_ok(db, user, request, m):
         cutoff = datetime(m.move_date.year, m.move_date.month, m.move_date.day) + timedelta(days=1)
         tasks_to_review = [{"id": t.id, "title": t.title, "due_at": _iso(t.due_at)} for t in (
             db.query(LeadTask).filter(LeadTask.organization_id == m.organization_id,
@@ -811,6 +826,8 @@ def toggle_checklist(move_id: str, payload: ChecklistToggle, request: Request,
     item = next((i for i in checklist if i.get("key") == payload.key), None)
     if item is None:
         raise HTTPException(404, "Checklist item not found")
+    if m.status in ("completed", "cancelled") and bool(item.get("done")) != payload.done:
+        raise HTTPException(409, "This move is %s. Reopen it before changing the checklist." % m.status)
     if bool(item.get("done")) != payload.done:
         item["done"] = payload.done
         item["done_at"] = _iso(_now()) if payload.done else None
@@ -975,7 +992,8 @@ def update_qualification(lead_id: str, body: QualificationIn, request: Request,
     """Record what the advisor learned (supplier, contract end, usage, bill
     lines typed from the customer's bill, ...). Sends nothing."""
     from app.services import energy_qualification as eq
-    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
     try:
         changed = eq.apply_update(lead, body.fields, body.bill)
     except ValueError as exc:
@@ -996,7 +1014,8 @@ def request_missing_info(lead_id: str, request: Request, db: Session = Depends(g
     """ONE open internal task listing what is still missing. Asking again
     updates that task instead of adding another. Nothing goes to the customer."""
     from app.services import energy_qualification as eq
-    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
     q = eq.qualify(lead)
     labels = [f["label"] for f in q["fields"] if f["key"] in q["missing"] and f["key"] != "owner"]
     if not labels:
@@ -1063,7 +1082,8 @@ def commercial_stage(lead_id: str, body: CommercialStageIn, request: Request,
                      db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     """Move a commercial opportunity. Won only after supplier confirmation;
     never marks enrollment; nothing is sent to anyone."""
-    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
     out = _commercial_call(lambda ec: ec.set_stage(
         db, lead, stage=body.stage, actor_id=user.id, note=body.note, reason=body.reason,
         revisit_on=body.revisit_on, expected_decision_date=body.expected_decision_date,
@@ -1077,7 +1097,8 @@ def commercial_stage(lead_id: str, body: CommercialStageIn, request: Request,
 @router.post("/leads/{lead_id}/commercial/locations", dependencies=[Depends(require_not_observation)])
 def commercial_add_location(lead_id: str, body: CommercialLocationIn, request: Request,
                             db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
-    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
     out = _commercial_call(lambda ec: ec.add_location(lead, body.model_dump(exclude_none=True)))
     if not out.get("duplicate"):
         log_action(db, lead.organization_id, user.id, action="energy.commercial_location_added",
@@ -1091,7 +1112,8 @@ def commercial_add_location(lead_id: str, body: CommercialLocationIn, request: R
               dependencies=[Depends(require_not_observation)])
 def commercial_update_location(lead_id: str, loc_id: str, body: CommercialLocationIn, request: Request,
                                db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
-    lead = lead_scope.load_lead_in_scope(db, user, lead_id, request)
+    from app.services.energy_suppliers import _lock
+    lead = _lock(db, lead_scope.load_lead_in_scope(db, user, lead_id, request))
     out = _commercial_call(lambda ec: ec.update_location(lead, loc_id, body.model_dump(exclude_unset=True)))
     log_action(db, lead.organization_id, user.id, action="energy.commercial_location_updated",
                target_type="lead", target_id=lead.id, details={"location_id": loc_id}, commit=False)
@@ -1127,7 +1149,10 @@ def record_field_visit(body: FieldVisitIn, request: Request, db: Session = Depen
     org_id = _org_id(db, user, request)
     org = db.query(Organization).filter(Organization.id == org_id).first()
     try:
-        return energy_field.record_visit(db, org=org, rep=user, data=body.model_dump())
+        def visible(lead_id):
+            return (lead_scope.authorized_lead_query(db, user, Lead.id, request=request)
+                    .filter(Lead.id == lead_id).first() is not None)
+        return energy_field.record_visit(db, org=org, rep=user, data=body.model_dump(), visible=visible)
     except ValueError as exc:
         db.rollback()
         raise HTTPException(422, str(exc))

@@ -95,11 +95,17 @@ def test_field_referral_reaches_the_advisor_queue_credited_to_the_rep(client, w)
     rr = client.get("/rate-requests/", headers=_h(w, w["mgr"]), params={"status": "new"})
     if rr.status_code == 200:                      # mounted in this app build
         assert lead.id in {i["id"] for i in rr.json()["items"]}
-    # the same resident again -> linked, not duplicated
+    # the same resident again, from a rep who cannot see that lead: no duplicate,
+    # no id revealed - the owner gets a task instead
     again = _visit(client, w, w["rep2"], outcome="interested", phone="817-555-0102",
                    permission_to_contact=True, address="10 Elm St").json()
-    assert again["result"] == "existing_customer" and again["lead_id"] == lead.id
+    assert again["result"] == "forwarded_to_owner" and not again.get("lead_id")
     assert db.query(Lead).filter_by(organization_id=w["org"].id).count() == 1
+    assert db.query(LeadTask).filter_by(lead_id=lead.id, title="Field rep reported interest").count() == 1
+    # a manager who can see it is linked to it
+    seen = _visit(client, w, w["mgr"], outcome="interested", phone="817 555 0102",
+                  permission_to_contact=True, address="10 Elm Street").json()
+    assert seen["result"] == "existing_customer" and seen["lead_id"] == lead.id
     assert db.query(Message).count() == 0 and db.query(EmailMessage).count() == 0
 
 
@@ -118,9 +124,38 @@ def test_do_not_contact_at_the_door_marks_the_known_person(client, w):
     db = w["db"]
     lid = _visit(client, w, w["rep"], outcome="interested", phone="(817) 555-0120",
                  permission_to_contact=True).json()["lead_id"]
+    # a rep who cannot see the lead cannot change it: the owner reviews it
     r = _visit(client, w, w["rep2"], outcome="do_not_contact", phone="817.555.0120", address="99 Pine St").json()
+    assert r["result"] == "forwarded_to_owner" and not r.get("lead_id")
+    assert db.query(Lead).get(lid).status != "dnc"
+    assert db.query(LeadTask).filter_by(lead_id=lid, title="Review do-not-contact request from the field").count() == 1
+    r = _visit(client, w, w["mgr"], outcome="do_not_contact", phone="817.555.0120", address="98 Pine St").json()
     assert r["result"] == "marked_dnc" and r["lead_id"] == lid
     assert db.query(Lead).get(lid).status == "dnc"
+
+
+def test_other_workspace_people_are_never_matched(client, w):
+    db = w["db"]
+    stranger = Lead(organization_id=w["other"].organization_id, first_name="Ex", last_name="Ternal",
+                    phone="(817) 555-0190", email="ext@gmail.com", status="new")
+    db.add(stranger)
+    db.commit()
+    r = _visit(client, w, w["mgr"], outcome="do_not_contact", phone="817-555-0190").json()
+    assert r["result"] != "marked_dnc" and r.get("lead_id") in (None, "")
+    assert db.query(Lead).get(stranger.id).status == "new"
+
+
+def test_two_residents_at_one_address_are_two_referrals(client, w):
+    db = w["db"]
+    a = _visit(client, w, w["rep"], outcome="interested", phone="(817) 555-0141", first_name="Unit",
+               last_name="One", permission_to_contact=True, address="500 Tower Apts").json()
+    b = _visit(client, w, w["rep"], outcome="interested", phone="(817) 555-0142", first_name="Unit",
+               last_name="Two", permission_to_contact=True, address="500 Tower Apts").json()
+    assert a["result"] == b["result"] == "new_referral" and a["lead_id"] != b["lead_id"]
+    assert db.query(Lead).filter_by(organization_id=w["org"].id).count() == 2
+    c = _visit(client, w, w["rep"], outcome="interested", phone="817-555-0142", first_name="Unit",
+               last_name="Two", permission_to_contact=True, address="500 tower apts").json()
+    assert c["duplicate"] is True
 
 
 def test_manager_sees_every_rep_reps_see_themselves_others_see_nothing(client, w):

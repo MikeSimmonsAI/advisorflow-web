@@ -136,3 +136,47 @@ def test_cancelled_move_leaves_the_work_queues(client, w):
     # the website follow-up task is not a move task and stays with the lead
     lead = w["db"].query(Lead).filter_by(organization_id=w["org"].id).one()
     assert w["db"].query(LeadTask).filter_by(lead_id=lead.id, source="website", status="open").count() == 1
+
+
+def _tick_all(client, w, m):
+    row = client.get("/energy-ops/moves/%s" % m.id, headers=w["h"]).json()
+    for i in row["checklist"]:
+        if not i["done"]:
+            _tick(client, w, m.id, i["key"])
+
+
+def test_completed_move_checklist_is_frozen(client, w):
+    _move_form(client, w)
+    m = _the_move(w)
+    _tick_all(client, w, m)
+    assert client.patch("/energy-ops/moves/%s" % m.id, headers=w["h"],
+                        json={"status": "completed"}).status_code == 200
+    r = client.post("/energy-ops/moves/%s/checklist" % m.id, headers=w["h"],
+                    json={"key": "svc_internet", "done": False})
+    assert r.status_code == 409
+
+
+def test_adding_a_service_in_the_same_change_blocks_completion(client, w):
+    _move_form(client, w)
+    m = _the_move(w)
+    _tick_all(client, w, m)
+    r = client.patch("/energy-ops/moves/%s" % m.id, headers=w["h"],
+                     json={"services": ["electricity_start", "internet", "other"], "status": "completed"})
+    assert r.status_code == 409, r.text
+    w["db"].refresh(m)
+    assert m.status != "completed"
+
+
+def test_cancelling_one_move_leaves_another_open_moves_tasks(client, w):
+    _move_form(client, w)
+    m = _the_move(w)
+    db = w["db"]
+    twin = EnergyMoveRequest(organization_id=m.organization_id, lead_id=m.lead_id, status=m.status,
+                             move_date=m.move_date, checklist=m.checklist)
+    db.add(twin)
+    db.commit()
+    t = client.post("/energy-ops/moves/%s/tasks" % m.id, headers=w["h"],
+                    json={"title": "Call about TV", "due_at": "2026-11-10T15:00:00"}).json()
+    r = client.patch("/energy-ops/moves/%s" % m.id, headers=w["h"], json={"status": "cancelled"}).json()
+    assert r["status"] == "cancelled" and not r.get("tasks_cancelled")
+    assert db.query(LeadTask).get(t["id"]).status == "open"

@@ -161,6 +161,9 @@ def handle(db: Session, *, site, organization, result: Dict[str, Any],
     done["request_kind"] = kind
 
     def _queue():
+        nonlocal lead
+        from app.services.energy_suppliers import _lock
+        lead = _lock(db, lead)
         if (lead.tier or "") in ("", "web_lead"):
             lead.tier = "new_inquiry"
         cf = _cf(lead)

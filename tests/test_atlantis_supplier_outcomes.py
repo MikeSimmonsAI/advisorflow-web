@@ -169,3 +169,14 @@ def test_hand_offs_written_before_outcomes_existed_still_work(client, w):
     db.refresh(lead)
     stored = json.loads(lead.custom_fields)["supplier_handoffs"]
     assert stored[0]["status"] == "not_completed" and stored[1] == "junk"
+
+
+def test_damaged_handoff_field_does_not_break_the_lead(client, w):
+    db = w["db"]
+    lead = _lead(db, w["org"], owner=w["admin"], cf={"supplier_handoffs": "garbled"})
+    assert client.get("/energy-ops/leads/%s/handoffs" % lead.id,
+                      headers=_h(db, w["admin"])).status_code == 200
+    r = _handoff(client, w, lead)
+    assert r.status_code == 200, r.text
+    db.refresh(lead)
+    assert len(json.loads(lead.custom_fields)["supplier_handoffs"]) == 1
