@@ -63,3 +63,18 @@
 .eo-btn--sm { padding: 3px 10px; font-size: 12px; }
 .eo-picker-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
 .eo-picker-field .eo-picked { color: var(--text-primary, #0f172a); font-size: 13px; }
+
+/* Phase 2: hand-off outcomes, intake panel, field desk */
+.eo-tabs { display: flex; gap: 6px; margin: 0 0 8px; }
+.eo-inline { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.eo-inline select, .eo-inline input { min-width: 0; max-width: 100%; }
+.eo-inline input { flex: 1 1 140px; }
+.eo-kpi--warn .eo-kpi-n { color: #b45309; }
+.eo-intake { margin-bottom: 16px; padding: 12px; }
+@media (max-width: 640px) { .eo-inline > * { flex: 1 1 100%; } }
+
+/* Lead page energy panel (follow-up PR) */
+.eo-leadpanel { margin-top: 12px; display: grid; gap: 12px; }
+.eo-leadpanel .eo-panel { padding: 12px; }
+.eo-list { margin: 4px 0 8px; padding-left: 18px; }
+.eo-list li { margin: 2px 0; }

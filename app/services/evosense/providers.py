@@ -395,7 +395,7 @@ class TarrantTaxRollSource(PublicRecordSource):
     public_url = "https://www.tarrantcountytx.gov/en/tax/property-tax/tarrant-county-tax-roll.html"
     refresh = "Published daily"
     freshness_days = 30
-    adapter_version = "tarrant_tax_roll/2"
+    adapter_version = "tarrant_tax_roll/3"
 
     def search(self, capability, query):
         from app.services.evosense.sources.tarrant import TarrantTaxRollReader
