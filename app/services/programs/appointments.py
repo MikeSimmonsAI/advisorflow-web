@@ -199,7 +199,9 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
     # An existing booking for this family is never doubled.
     existing = (db.query(BookingLink)
                 .filter(BookingLink.lead_id == lead.id, BookingLink.user_id == advisor.id,
-                        BookingLink.status.in_(("booked", "confirmed"))).first())
+                        BookingLink.status.in_(("booked", "confirmed")),
+                        # a visit that already happened is history, not a booking to move
+                        BookingLink.booked_time >= _today_central().replace(tzinfo=None)).first())
     if existing is not None and existing.booked_time:
         same = existing.booked_time.replace(tzinfo=None) == slot
         return {"ok": same, "status": "confirmed" if same else "already_booked",
@@ -232,6 +234,10 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
         else:
             asyncio.run(booking_confirmed_webhook(_InternalRequest(payload), db))
     except Exception as exc:                             # noqa: BLE001
+        if getattr(exc, "status_code", None) == 409:
+            # The booking path's own re-check lost a race for this time.
+            db.rollback()
+            return {"ok": False, "status": "taken", "reason": "that time is no longer open"}
         log.exception("setter booking failed for lead %s", lead.id)
         db.rollback()
         return {"ok": False, "status": "error", "reason": str(exc)[:200]}

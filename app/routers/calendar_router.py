@@ -377,12 +377,18 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                 db.query(User).filter(User.id == advisor.id).with_for_update().first()
             except Exception:                            # noqa: BLE001
                 pass
-            _res = compute_day_slots(db, advisor, _prog_slot.date(), program_visit=True,
-                                     minutes=int(getattr(booking, "appt_duration", None) or 60))
+            # The length the offer used: the setter sends it; the booking page
+            # offers 60-minute visits (its own link may carry another type's length).
+            try:
+                _mins = int(body.get("duration_minutes") or 60)
+            except (TypeError, ValueError):
+                _mins = 60
+            _res = compute_day_slots(db, advisor, _prog_slot.date(), program_visit=True, minutes=_mins)
             if _prog_slot.strftime("%Y-%m-%dT%H:%M:00") not in set(_res.get("slots") or []):
                 logger.warning("booking-confirmed: booking=%s slot %s is not open - refusing", booking.id, slot_display)
                 raise HTTPException(status_code=409, detail="That time is no longer available. Please pick another time.")
             booking.booked_time = _prog_slot
+            booking.appt_duration = _mins
         booking.status = "booked"
         from app.services.programs import booking_events as _be
         _be.add_pending(db, booking, lead, _be.BOOKED, slot_display)

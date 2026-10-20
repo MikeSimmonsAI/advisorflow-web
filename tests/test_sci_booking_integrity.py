@@ -240,3 +240,17 @@ def test_slots_around_dst_change(real, sample_advisor):
     assert slots, why
     for s in slots:
         assert s.weekday() < 5 and 9 <= s.hour <= 16 and s.minute == 0 and s > now_c, s
+
+
+# --- independent-review follow-ups (Oct 20) -------------------------------
+@pytest.mark.parametrize("text,hour,day,picked", [
+    ("Tuesday at 2 is not a problem", 14, 27, True),
+    ("Tuesday is not bad at all", 14, 27, True),
+    ("Monday at 10 is fine but not Tuesday", 10, 26, True),
+    ("Monday at 10 is fine but not Tuesday", 14, 27, False),
+    ("10 won't work but 2 will", 14, 27, True),
+    ("Monday doesn't work for me, sorry", 10, 26, False),
+    ("Monday at 10, can't wait", 10, 26, True),
+])
+def test_negation_only_when_it_turns_that_time_down(text, hour, day, picked):
+    assert ai_setter.choice_evidence(text, datetime(2026, 10, day, hour), None) is picked

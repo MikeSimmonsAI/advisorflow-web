@@ -871,9 +871,13 @@ _ORD = {0: r"\b(first|1st|earlier|former|either|whichever|option (1|one)|#1)\b",
         1: r"\b(second|2nd|later|latter|option (2|two)|#2)\b"}
 
 
-_NEG_AFTER = re.compile(r"^[^.,;!?]{0,20}?\b(doesn'?t|does not|won'?t|will not|isn'?t|is not|not|can'?t|cannot|"
-                        r"no good|bad|busy)\b")
-_NEG_BEFORE = re.compile(r"\b(not|no|can'?t|cannot|won'?t|couldn'?t|except|but not)\b[^.,;!?]{0,12}$")
+# A turn-down attached to the day/hour itself ("Monday doesn't work", "10 is
+# bad"), not one later in the sentence ("Monday works but not Tuesday") and
+# not a reassurance ("not a problem", "not bad", "can't wait").
+_NEG_AFTER = re.compile(r"^\s*(at \S+\s*|is\s+|would\s+|will\s+|just\s+|really\s+)*"
+                        r"(doesn'?t|does not|won'?t|will not|isn'?t|is not|not|can'?t|cannot|no good|bad|busy)\b"
+                        r"(?!\s+(a |an |be a |too )?(problem|issue|bad|wait))")
+_NEG_BEFORE = re.compile(r"\b(not|no|can'?t|cannot|won'?t|couldn'?t|except)\b(?:(?!\b(but|and|or)\b)[^.,;!?]){0,12}$")
 
 
 def _picked(pattern: str, t: str) -> bool:
