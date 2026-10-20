@@ -22,7 +22,7 @@ Nothing in production has been changed. Every step below that writes needs Mike'
 
 Scope = tax-roll observations stored by `tarrant_tax_roll/2` with a raw line of 770+ characters.
 
-### Dry run on a read-only copy of the affected production rows (00:30 CT)
+### Dry run on a read-only copy of the affected production rows (00:17 CT)
 | | |
 |---|---|
 | Scope | 1,017 observations / 1,017 properties |
