@@ -407,6 +407,7 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
             "organization_id": org.id,
             "organization_name": org.name,
             "organization_slug": org.slug,
+            "industry": (org.industry or "").strip().lower(),
             "role": m.role,
             "path": "/workspace/%s" % org.id,
             "is_program": org.id in program_orgs,
@@ -419,6 +420,30 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
 
     platform = [c for c in contexts if c["type"] == "platform"]
     workspaces = [c for c in contexts if c["type"] == "workspace"]
+
+    # PRODUCT DESTINATIONS ARE NOT CUSTOMER MEMBERSHIPS. The Wholesale tile
+    # appears only for an active named product seat *and* an independently
+    # authorized workspace to host it. It never grants cross-tenant entry.
+    product_contexts: List[Dict[str, Any]] = []
+    try:
+        from app.models.sales_models import SCOPE_PRODUCT
+        from app.services.product_access import WHOLESALE
+        named_wholesale = (db.query(Membership.id).filter(
+            Membership.user_id == user.id,
+            Membership.scope_type == SCOPE_PRODUCT,
+            Membership.scope_id == WHOLESALE,
+            Membership.is_active.is_(True)).first() is not None)
+        host = next((w for w in workspaces
+                     if w["organization_id"] == user.organization_id), None)
+        # Wholesale product currently operates from EvoSys's internal org.
+        # Never silently run it against a customer such as SCI or Roofing.
+        if named_wholesale and host and host["organization_slug"] == "evo-integrated-solutions-llc":
+            product_contexts.append({
+                "type": "product", "key": WHOLESALE, "label": "Wholesale Operations",
+                "organization_id": host["organization_id"], "path": "/wholesale/evosense",
+            })
+    except Exception:
+        _log.warning("could not resolve product launcher for %s", user.id, exc_info=True)
 
     # ── where login should land ──
     #
@@ -511,6 +536,7 @@ def authorized_contexts(db: Session, user: User) -> Dict[str, Any]:
         "platform_contexts": platform,
         "executive_contexts": executive,
         "workspace_contexts": workspaces,
+        "product_contexts": product_contexts,
         # Only program workspaces and nothing else (no back office, no
         # executive suite, not god): this login sees the program suite only.
         "program_only": bool(workspaces) and all(w.get("is_program") for w in workspaces)
