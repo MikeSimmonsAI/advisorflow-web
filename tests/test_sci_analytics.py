@@ -234,3 +234,43 @@ def test_queued_families_split_by_sms_consent_and_blocks_are_not_failures(progra
     assert a["metrics"]["failed"]["value"] == 0 and a["metrics"]["attempts"]["value"] == 0
     d = client.get("/program/command/analytics/records?metric=consent_blocked&range=today", headers=h).json()
     assert d["count"] == 1 and d["items"][0]["name"] == "Nocon Testcase"
+
+
+def test_meaningful_engagement_includes_stop_without_double_counting(program, sample_advisor, client):
+    """An opt-out is a real response, not a conversion or a new sales meeting."""
+    db, a, b, t = _seed(program, sample_advisor)
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        R.on_inbound(db, b, "STOP", "sms")
+    SA._CACHE.clear()
+    h = _h(db, program["admin"])
+    result = client.get("/program/command/analytics?range=7d", headers=h).json()
+    assert result["metrics"]["replies"]["value"] == 1
+    assert result["metrics"]["opt_outs"]["value"] == 1
+    assert result["metrics"]["responses_total"]["value"] == 2
+    assert result["metrics"]["engaged_families"]["value"] == 2
+    assert result["rates"]["opt_out_share"] == 50.0
+    assert result["rates"]["engagement_rate"] == 100.0
+    assert result["rates"]["engaged_contacted"] == 2
+    assert result["rates"]["engagement_denominator"] == 2
+    assert result["rates"]["booked_after_offer_rate"] is None
+    by = {v["touch"]: v for v in result["touches"]}
+    assert by["1"]["engagement_rate"] == 50.0
+    assert by["2"]["engagement_rate"] == 100.0
+    assert by["1"]["opt_out_share"] == 100.0
+    assert by["3"]["engagement_rate"] is None  # not falsely 0%
+    for metric in ("engaged_families", "responses_total"):
+        drill = client.get("/program/command/analytics/records?metric=%s&range=7d" % metric,
+                           headers=h).json()
+        assert drill["count"] == result["metrics"][metric]["value"]
+
+
+def test_engagement_rate_only_uses_families_contacted_in_same_window(program, sample_advisor, client):
+    """A late response from an earlier attempt is activity, not a new touched cohort."""
+    db, a, b, t = _seed(program, sample_advisor)
+    # Both a and b were contacted within seven days; only b was touched at 1
+    # today and a was touched at 2. Percentages remain bounded and attributable.
+    result = client.get("/program/command/analytics?range=today",
+                        headers=_h(db, program["admin"])).json()
+    assert result["metrics"]["responses_total"]["value"] >= 1
+    assert 0 <= result["rates"]["engagement_rate"] <= 100
+    assert result["rates"]["opt_out_share"] == 0.0
